@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DEFAULT_RELEASE_NOTES_PROMPT,
+  DEFAULT_SMOKE_TEST_PROMPT,
+  ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_BACKENDS,
+  ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_MODELS,
   COMMANDCODE_DEFAULT_MAGIC_PROMPT_BACKENDS,
   COMMANDCODE_DEFAULT_MAGIC_PROMPT_MODELS,
-  DEFAULT_FINAL_REVIEW_PROMPT,
   DEFAULT_INVESTIGATE_ADVISORY_PROMPT,
   DEFAULT_INVESTIGATE_ISSUE_PROMPT,
   DEFAULT_INVESTIGATE_LINEAR_ISSUE_PROMPT,
@@ -21,14 +24,40 @@ import {
   resolveMagicPromptProvider,
 } from './preferences'
 
+describe('default release notes prompt', () => {
+  it('requires a v-prefixed version title without an app/version body heading', () => {
+    expect(DEFAULT_RELEASE_NOTES_PROMPT).toContain(
+      'prefix the release version with `v`'
+    )
+    expect(DEFAULT_RELEASE_NOTES_PROMPT).toContain('`v0.1.74`')
+    expect(DEFAULT_RELEASE_NOTES_PROMPT).toContain(
+      'Do not repeat the app name or release version at the top'
+    )
+  })
+})
+
 describe('magic prompt preference resolvers', () => {
+  it('provides configurable smoke test defaults', () => {
+    expect(defaultPreferences.magic_prompts.smoke_test).toBeNull()
+    expect(defaultPreferences.magic_prompt_models.smoke_test_model).toBe(
+      'claude-opus-4-8[1m]'
+    )
+    expect(defaultPreferences.magic_prompt_modes.smoke_test_mode).toBe('yolo')
+    expect(DEFAULT_SMOKE_TEST_PROMPT).toContain('{worktree_id}')
+    expect(DEFAULT_SMOKE_TEST_PROMPT).not.toContain('{source_session_id}')
+    expect(DEFAULT_SMOKE_TEST_PROMPT).toContain('current branch')
+    expect(DEFAULT_SMOKE_TEST_PROMPT).toContain('changed files and diff')
+    expect(DEFAULT_SMOKE_TEST_PROMPT).toContain('get_run_environments')
+    expect(DEFAULT_SMOKE_TEST_PROMPT).toContain('start_run_environment')
+    expect(DEFAULT_SMOKE_TEST_PROMPT).toContain(
+      'Wait for the environment to become ready and stable'
+    )
+    expect(DEFAULT_SMOKE_TEST_PROMPT).toContain(
+      'Discover and prepare the prerequisites for realistic testing'
+    )
+  })
+
   it('defines an audit-only final review prompt with tabular output', () => {
-    expect(DEFAULT_FINAL_REVIEW_PROMPT).toContain('Do not modify')
-    expect(DEFAULT_FINAL_REVIEW_PROMPT).toContain('regressions')
-    expect(DEFAULT_FINAL_REVIEW_PROMPT).toContain('consolidat')
-    expect(DEFAULT_FINAL_REVIEW_PROMPT).toContain('Fixes #')
-    expect(DEFAULT_FINAL_REVIEW_PROMPT).toContain('Markdown table')
-    expect(defaultPreferences.magic_prompt_modes.final_review_mode).toBe('yolo')
     expect(defaultPreferences.magic_prompt_modes.code_review_fix_mode).toBe(
       'plan'
     )
@@ -58,6 +87,10 @@ describe('magic prompt preference resolvers', () => {
     expect(defaultPreferences.kimi_cli_source).toBe('jean')
   })
 
+  it('uses Jean-managed Antigravity CLI by default', () => {
+    expect(defaultPreferences.antigravity_cli_source).toBe('jean')
+  })
+
   it('provides magic prompt defaults for Pi', () => {
     expect(PI_DEFAULT_MAGIC_PROMPT_BACKENDS.investigate_issue_backend).toBe(
       'pi'
@@ -81,7 +114,7 @@ describe('magic prompt preference resolvers', () => {
       'grok'
     )
     expect(GROK_DEFAULT_MAGIC_PROMPT_MODELS.investigate_issue_model).toBe(
-      'grok/grok-4.5'
+      'grok/grok-4.6'
     )
     expect(GROK_DEFAULT_MAGIC_PROMPT_MODES.investigate_issue_mode).toBe('yolo')
     expect(GROK_DEFAULT_MAGIC_PROMPT_MODES.investigate_pr_mode).toBe('yolo')
@@ -102,8 +135,7 @@ describe('magic prompt preference resolvers', () => {
     )
     // Non-investigation chat modes keep shared defaults
     expect(GROK_DEFAULT_MAGIC_PROMPT_MODES.review_comments_mode).toBe('plan')
-    expect(GROK_DEFAULT_MAGIC_PROMPT_MODES.final_review_mode).toBe('yolo')
-    expect(defaultPreferences.selected_grok_model).toBe('grok/grok-4.5')
+    expect(defaultPreferences.selected_grok_model).toBe('grok/grok-4.6')
     expect(defaultPreferences.default_grok_reasoning_effort).toBe('high')
   })
 
@@ -119,6 +151,18 @@ describe('magic prompt preference resolvers', () => {
   it('provides magic prompt defaults for Kimi Code', () => {
     expect(KIMI_DEFAULT_MAGIC_PROMPT_BACKENDS.investigate_issue_backend).toBe(
       'kimi'
+    )
+  })
+
+  it('provides magic prompt defaults for Antigravity', () => {
+    expect(
+      ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_BACKENDS.investigate_issue_backend
+    ).toBe('antigravity')
+    expect(
+      ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_MODELS.investigate_issue_model
+    ).toBe('antigravity/auto')
+    expect(defaultPreferences.selected_antigravity_model).toBe(
+      'antigravity/auto'
     )
   })
 
@@ -153,6 +197,15 @@ describe('magic prompt preference resolvers', () => {
     expect(DEFAULT_INVESTIGATE_SENTRY_ISSUE_PROMPT).not.toContain(
       yoloConditional
     )
+  })
+
+  it('keeps fixing and pushing workflow failures until the pushed commit is green', () => {
+    const prompt = DEFAULT_INVESTIGATE_WORKFLOW_RUN_PROMPT.toLowerCase()
+
+    expect(prompt).toContain('commit and push')
+    expect(prompt).toContain('newly pushed commit')
+    expect(prompt).toContain('periodically')
+    expect(prompt).toContain('until the latest pushed commit is green')
   })
 
   it('keeps automatic recaps on by default', () => {

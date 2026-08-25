@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@/test/test-utils'
 import { ChatInput } from './ChatInput'
 import { invoke } from '@/lib/transport'
+import type * as EnvironmentModule from '@/lib/environment'
 import { useUIStore } from '@/store/ui-store'
 import {
   appendPromptMetadataToPlainText,
@@ -12,8 +13,9 @@ import {
 
 const processAttachmentFile = vi.fn()
 const invokeMock = invoke as unknown as ReturnType<typeof vi.fn>
-const { mobileState, slashPopoverMock } = vi.hoisted(() => ({
+const { mobileState, nativeState, slashPopoverMock } = vi.hoisted(() => ({
   mobileState: { value: false },
+  nativeState: { value: false },
   slashPopoverMock: vi.fn(() => null),
 }))
 
@@ -30,6 +32,11 @@ const storeState = {
 
 vi.mock('@/hooks/use-mobile', () => ({
   useIsMobile: () => mobileState.value,
+}))
+
+vi.mock('@/lib/environment', async importOriginal => ({
+  ...(await importOriginal<typeof EnvironmentModule>()),
+  isNativeApp: () => nativeState.value,
 }))
 
 vi.mock('./attachment-processing', () => ({
@@ -79,6 +86,7 @@ describe('ChatInput attachments', () => {
 
   beforeEach(() => {
     mobileState.value = false
+    nativeState.value = false
     useUIStore.setState({ zenMode: false })
     processAttachmentFile.mockReset()
     invokeMock.mockReset()
@@ -243,7 +251,7 @@ describe('ChatInput attachments', () => {
 
     const textarea = renderInput()
 
-    expect(textarea).toHaveClass('h-10', 'max-h-10')
+    expect(textarea).toHaveClass('h-12', 'max-h-12')
     expect(textarea).not.toHaveClass('max-h-[50vh]')
   })
 
@@ -252,7 +260,7 @@ describe('ChatInput attachments', () => {
 
     const textarea = renderInput()
 
-    expect(textarea).toHaveClass('h-10', 'max-h-10')
+    expect(textarea).toHaveClass('h-12', 'max-h-12')
     expect(textarea).not.toHaveClass('max-h-[50vh]')
     expect(screen.queryByText('to focus')).not.toBeInTheDocument()
   })
@@ -405,6 +413,41 @@ describe('ChatInput attachments', () => {
     expect(textarea.value).toBe('caption text')
   })
 
+  it('uses clipboard files when iOS omits the image from clipboard items', async () => {
+    const textarea = renderInput()
+    const image = new File(['png'], 'image.png', { type: 'image/png' })
+    processAttachmentFile.mockResolvedValue(undefined)
+
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        getData: () => '',
+        items: [],
+        files: [image],
+      },
+    })
+
+    await waitFor(() => {
+      expect(processAttachmentFile).toHaveBeenCalledWith(image, 'session-1')
+    })
+    expect(invokeMock).not.toHaveBeenCalledWith('read_clipboard_image')
+  })
+
+  it('does not request the desktop clipboard for an empty web paste', async () => {
+    const textarea = renderInput()
+
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        getData: () => '',
+        items: [],
+        files: [],
+      },
+    })
+
+    await waitFor(() => {
+      expect(invokeMock).not.toHaveBeenCalledWith('read_clipboard_image')
+    })
+  })
+
   it('saves large text as an attachment when pasted with an image', async () => {
     const textarea = renderInput()
     const image = new File(['png'], 'clip.png', { type: 'image/png' })
@@ -522,6 +565,26 @@ describe('ChatInput IME composition (issue #584)', () => {
       forceSteer: true,
     })
     expect(onSteerModifierChange).toHaveBeenCalledWith(true)
+  })
+
+  it('submits as a steer when Command+Enter is held', () => {
+    const { textarea, onSubmit } = renderWithSubmit({
+      isSending: true,
+      selectedBackend: 'codex',
+    })
+    textarea.value = 'steer this'
+    fireEvent.change(textarea, { target: { value: 'steer this' } })
+
+    fireEvent.keyDown(textarea, {
+      key: 'Enter',
+      code: 'Enter',
+      keyCode: 13,
+      metaKey: true,
+    })
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.anything(), {
+      forceSteer: true,
+    })
   })
 
   it('does not submit when Enter confirms IME composition (isComposing)', () => {

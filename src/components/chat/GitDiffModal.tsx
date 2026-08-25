@@ -607,6 +607,10 @@ export function GitDiffModal({
           key: `${patchIndex}-${fileIndex}`,
           additions,
           deletions,
+          isBinary:
+            diff?.files?.find(backendFile =>
+              [fileDiff.name, fileDiff.prevName].includes(backendFile.path)
+            )?.is_binary ?? false,
         }
       })
     )
@@ -640,6 +644,7 @@ export function GitDiffModal({
             key: `backend-${backendFile.path}`,
             additions: backendFile.additions,
             deletions: backendFile.deletions,
+            isBinary: backendFile.is_binary,
           })
         }
       }
@@ -1518,6 +1523,8 @@ export function GitDiffModal({
                               key={selectedFile.key}
                               fileDiff={selectedFile.fileDiff}
                               fileName={selectedFile.fileName}
+                              rootPath={diffRequest?.worktreePath}
+                              isBinary={selectedFile.isBinary}
                               annotations={getAnnotationsForFile(
                                 selectedFile.fileName
                               )}
@@ -1724,6 +1731,8 @@ export function GitDiffModal({
                                 key={selectedFile.key}
                                 fileDiff={selectedFile.fileDiff}
                                 fileName={selectedFile.fileName}
+                                rootPath={diffRequest?.worktreePath}
+                                isBinary={selectedFile.isBinary}
                                 annotations={getAnnotationsForFile(
                                   selectedFile.fileName
                                 )}

@@ -175,7 +175,7 @@ describe('useGitOperations conflict resolution', () => {
   })
 
   it('sends detected conflicts immediately in yolo mode instead of drafting them', async () => {
-    const { result, sendMessage } = renderGitOperations()
+    const { result, sendMessage, queryClient } = renderGitOperations()
 
     await act(async () => {
       await result.current.handleResolveConflicts()
@@ -187,6 +187,15 @@ describe('useGitOperations conflict resolution', () => {
     expect(useChatStore.getState().executionModes['conflict-session']).toBe(
       'yolo'
     )
+    expect(
+      queryClient
+        .getQueryData<{ sessions: Session[] }>([
+          'chat',
+          'sessions',
+          'wt-1',
+        ])
+        ?.sessions.map(session => session.id)
+    ).toContain('conflict-session')
     expect(sendMessage.mutate).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: 'conflict-session',
@@ -204,49 +213,6 @@ describe('useGitOperations conflict resolution', () => {
       'I have merge conflicts that need to be resolved.'
     )
     expect(sentArgs?.message).toContain('Resolve and finish.')
-  })
-
-  it('starts a dedicated Final review session with the configured audit prompt', async () => {
-    const { result, sendMessage } = renderGitOperations({
-      magic_prompts: {
-        final_review: 'Audit this change and return tables only.',
-      },
-      magic_prompt_backends: { final_review_backend: 'codex' },
-      magic_prompt_models: { final_review_model: 'gpt-5.5' },
-      magic_prompt_efforts: { final_review_effort: 'high' },
-      magic_prompt_modes: { final_review_mode: 'plan' },
-    })
-
-    await act(async () => {
-      await result.current.handleFinalReview()
-    })
-
-    expect(mocks.invoke).toHaveBeenCalledWith(
-      'create_session',
-      expect.objectContaining({
-        worktreeId: 'wt-1',
-        worktreePath: '/repo/worktree',
-        name: 'Final review',
-        backend: 'codex',
-      })
-    )
-    expect(sendMessage.mutate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sessionId: 'conflict-session',
-        message: 'Audit this change and return tables only.',
-        model: 'gpt-5.5',
-        effortLevel: 'high',
-        executionMode: 'plan',
-        backend: 'codex',
-      }),
-      expect.any(Object)
-    )
-    expect(mocks.invoke).toHaveBeenCalledWith('update_session_state', {
-      worktreeId: 'wt-1',
-      worktreePath: '/repo/worktree',
-      sessionId: 'conflict-session',
-      selectedExecutionMode: 'plan',
-    })
   })
 
   it('opens an already-linked PR instead of creating a new one', async () => {

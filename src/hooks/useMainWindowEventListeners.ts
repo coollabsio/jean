@@ -40,11 +40,49 @@ const PLAN_DIALOG_APPROVAL_ACTIONS = new Set<KeybindingAction>([
   'approve_plan_worktree_yolo',
 ])
 
+interface RunEnvironmentStartedEvent {
+  worktreeId: string
+  terminalId: string
+  command: string
+}
+
+export function handleRunEnvironmentStarted(
+  payload: RunEnvironmentStartedEvent
+): void {
+  const terminalStore = useTerminalStore.getState()
+  terminalStore.registerStartedRun(
+    payload.worktreeId,
+    payload.terminalId,
+    payload.command
+  )
+
+  const uiState = useUIStore.getState()
+  if (
+    uiState.sessionChatModalOpen &&
+    uiState.sessionChatModalWorktreeId === payload.worktreeId
+  ) {
+    terminalStore.setModalTerminalOpen(payload.worktreeId, true)
+  }
+}
+
 export function shouldLetPlanDialogHandleAction(
   action: KeybindingAction,
   planDialogOpen: boolean
 ): boolean {
   return planDialogOpen && PLAN_DIALOG_APPROVAL_ACTIONS.has(action)
+}
+
+export function shouldLetChatInputHandleAction(
+  action: KeybindingAction,
+  target: EventTarget | null,
+  planDialogOpen: boolean
+): boolean {
+  return (
+    action === 'approve_plan' &&
+    !planDialogOpen &&
+    target instanceof Element &&
+    target.closest('[data-chat-input]') !== null
+  )
 }
 
 export function findKeybindingAction(
@@ -430,25 +468,21 @@ function executeKeybindingAction(
 
       const resolvedWorktreePath = targetWorktreePath
 
-      // Fetch run scripts - use fetchQuery to handle uncached dashboard worktrees
+      // Always read jean.json from disk. A cached copy stays stale after
+      // the branch is updated from latest or Settings saves a new command.
       ;(async () => {
-        let runScripts = queryClient.getQueryData<string[]>([
-          'run-scripts',
-          resolvedWorktreePath,
-        ])
-
-        if (runScripts === undefined) {
-          try {
-            runScripts = await queryClient.fetchQuery<string[]>({
-              queryKey: ['run-scripts', resolvedWorktreePath],
-              queryFn: () =>
-                invoke<string[]>('get_run_scripts', {
-                  worktreePath: resolvedWorktreePath,
-                }),
-            })
-          } catch {
-            runScripts = []
-          }
+        let runScripts: string[] = []
+        try {
+          runScripts = await queryClient.fetchQuery<string[]>({
+            queryKey: ['run-scripts', resolvedWorktreePath],
+            queryFn: () =>
+              invoke<string[]>('get_run_scripts', {
+                worktreePath: resolvedWorktreePath,
+              }),
+            staleTime: 0,
+          })
+        } catch {
+          runScripts = []
         }
 
         const firstScript = runScripts?.[0]
@@ -795,6 +829,21 @@ export function useMainWindowEventListeners() {
       const keybindings = keybindingsRef.current
       const matchedAction = findKeybindingAction(shortcut, keybindings)
 
+      // Cmd/Ctrl+Enter is also the chat input's explicit steer shortcut. The
+      // global approve-plan binding runs in capture phase, so it must yield or
+      // the textarea never receives Enter. A visible plan dialog still owns
+      // the same shortcut.
+      if (
+        matchedAction &&
+        shouldLetChatInputHandleAction(
+          matchedAction,
+          e.target,
+          useUIStore.getState().planDialogOpen
+        )
+      ) {
+        return
+      }
+
       // OS key-repeat must not re-fire one-shot actions (issue #56: holding
       // Ctrl/Cmd+W cascade-closed every terminal/session under the cursor).
       // Consume the event so the browser does not handle the repeated shortcut.
@@ -976,6 +1025,10 @@ export function useMainWindowEventListeners() {
     const setupMenuListeners = async () => {
       logger.debug('Setting up menu event listeners')
       const unlisteners = await Promise.all([
+        listen<RunEnvironmentStartedEvent>(
+          'run-environment:started',
+          event => handleRunEnvironmentStarted(event.payload)
+        ),
         listen<{ sessionId: string }>('terminal:working', event => {
           const sessionId = event.payload?.sessionId
           if (!sessionId) return

@@ -107,6 +107,7 @@ describe('useUIStatePersistence — terminal restore on web refresh', () => {
       inputDrafts: {},
       pendingImages: {},
       pendingTextFiles: {},
+      dismissedSetupScripts: {},
     })
   })
 
@@ -157,6 +158,29 @@ describe('useUIStatePersistence — terminal restore on web refresh', () => {
 
     await waitFor(() => {
       expect(useUIStore.getState().zenMode).toBe(true)
+    })
+  })
+
+  it('restores dismissed setup scripts after a reload', async () => {
+    mockUseUIState.mockReturnValue({
+      data: buildUiState({ dismissed_setup_scripts: ['worktree-1'] }),
+      isSuccess: true,
+    })
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    })
+
+    renderHook(() => useUIStatePersistence(), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await waitFor(() => {
+      expect(useChatStore.getState().dismissedSetupScripts).toEqual({
+        'worktree-1': true,
+      })
     })
   })
 

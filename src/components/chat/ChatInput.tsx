@@ -55,6 +55,7 @@ import {
 } from './message-content-utils'
 import { isModKeyEvent } from '@/types/keybindings'
 import { isSteerCapableBackend } from '@/lib/backend-auto-steer'
+import { isNativeApp } from '@/lib/environment'
 
 /** Threshold for saving pasted text as file (2000 chars) */
 const TEXT_PASTE_THRESHOLD = 2000
@@ -67,10 +68,7 @@ interface ChatInputProps {
   executionMode: ExecutionMode
   canSwitchBackendWithTab?: boolean
   focusChatShortcut: string
-  onSubmit: (
-    e: React.FormEvent,
-    options?: { forceSteer?: boolean }
-  ) => void
+  onSubmit: (e: React.FormEvent, options?: { forceSteer?: boolean }) => void
   onCancel: () => void
   onSwitchBackendWithTab?: () => void
   onCommandExecute?: (command: ClaudeCommand) => void
@@ -517,7 +515,7 @@ export const ChatInput = memo(function ChatInput({
       const forceSteer =
         isSending &&
         isSteerCapableBackend(selectedBackend) &&
-        isModKeyEvent(e)
+        (e.metaKey || e.ctrlKey)
       onSteerModifierChange?.(forceSteer)
 
       // When file mention popover is open, handle navigation
@@ -879,8 +877,7 @@ export const ChatInput = memo(function ChatInput({
         return
       }
 
-      const items = e.clipboardData?.items
-      if (!items) return
+      const items = e.clipboardData?.items ?? []
 
       // First, check for image items in the clipboard
       const imageFiles: File[] = []
@@ -893,6 +890,14 @@ export const ChatInput = memo(function ChatInput({
         const file = item.getAsFile()
         if (!file) continue
         imageFiles.push(file)
+      }
+      // iOS can expose an image copied from the share sheet through `files`
+      // while leaving `items` empty.
+      for (const file of Array.from(e.clipboardData?.files ?? [])) {
+        if (file.type.startsWith('image/') && !imageFiles.includes(file)) {
+          e.preventDefault()
+          imageFiles.push(file)
+        }
       }
       const hasImage = imageFiles.length > 0
       // Independent per-image save; process in parallel
@@ -918,7 +923,7 @@ export const ChatInput = memo(function ChatInput({
       // Native clipboard fallback (Linux/WebKitGTK doesn't expose image items via Web API)
       const clipboardText = plainText
       const clipboardHtml = e.clipboardData?.getData('text/html')
-      if (!clipboardText && !clipboardHtml) {
+      if (isNativeApp() && !clipboardText && !clipboardHtml) {
         e.preventDefault()
         const placeholderId = `clipboard-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
         const { addPendingImage, updatePendingImage, removePendingImage } =
@@ -1283,7 +1288,7 @@ export const ChatInput = memo(function ChatInput({
         disabled={false}
         className={cn(
           'min-h-[40px] w-full resize-none overflow-x-hidden overflow-y-auto border-0 dark:bg-transparent p-0 font-mono text-base placeholder:text-sm shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 md:text-sm',
-          zenMode ? 'h-10 max-h-10' : 'max-h-[50vh]'
+          zenMode ? 'h-12 max-h-12' : 'max-h-[50vh]'
         )}
         rows={1}
         autoFocus={!isMobile}

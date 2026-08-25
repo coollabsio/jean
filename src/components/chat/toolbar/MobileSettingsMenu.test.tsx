@@ -33,7 +33,9 @@ vi.mock('@/services/projects', async importOriginal => {
     ...actual,
     useWorktree: useWorktreeMock as unknown as typeof actual.useWorktree,
     useProjects: () => ({
-      data: [{ id: 'project-1', path: '/repo', name: 'app', default_branch: 'main' }],
+      data: [
+        { id: 'project-1', path: '/repo', name: 'app', default_branch: 'main' },
+      ],
     }),
     usePorts: usePortsMock as unknown as typeof actual.usePorts,
   }
@@ -105,12 +107,14 @@ const baseProps = {
   loadedSecurityContexts: [],
   loadedAdvisoryContexts: [],
   loadedLinearContexts: [],
+  loadedSentryContexts: [],
   attachedSavedContexts: [],
   handleViewIssue: vi.fn(),
   handleViewPR: vi.fn(),
   handleViewSecurityAlert: vi.fn(),
   handleViewAdvisory: vi.fn(),
   handleViewLinear: vi.fn(),
+  handleViewSentry: vi.fn(),
   handleViewSavedContext: vi.fn(),
   availableMcpServers: [],
   enabledMcpServers: [],
@@ -436,9 +440,7 @@ describe('MobileSettingsMenu', () => {
       ],
     })
 
-    render(
-      <MobileSettingsMenu {...baseProps} worktreeId="worktree-1" />
-    )
+    render(<MobileSettingsMenu {...baseProps} worktreeId="worktree-1" />)
 
     await user.click(screen.getByRole('button', { name: /settings/i }))
 

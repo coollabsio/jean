@@ -19,6 +19,7 @@ import {
   DEFAULT_INVESTIGATE_SENTRY_ISSUE_PROMPT,
   DEFAULT_PARALLEL_EXECUTION_PROMPT,
   DEFAULT_MAGIC_PROMPT_MODES,
+  DEFAULT_SMOKE_TEST_PROMPT,
   resolveMagicPromptBackend,
   resolveMagicPromptProvider,
 } from '@/types/preferences'
@@ -378,7 +379,7 @@ export function useInvestigateHandlers({
             content: string
           }[]
         >('get_sentry_issue_context_contents', {
-          sessionId: activeWorktreeId,
+          sessionId: activeSessionId ?? activeWorktreeId,
           worktreeId: activeWorktreeId,
           projectId: worktreeProjectId ?? '',
         })
@@ -483,6 +484,7 @@ export function useInvestigateHandlers({
         investigateBackend === 'pi' ||
         investigateBackend === 'grok' ||
         investigateBackend === 'kimi' ||
+        investigateBackend === 'antigravity' ||
         investigateUseAdaptive
       const investigateThinkingLevel = usesEffortBackend
         ? undefined
@@ -737,6 +739,7 @@ export function useInvestigateHandlers({
         investigateBackend === 'pi' ||
         investigateBackend === 'grok' ||
         investigateBackend === 'kimi' ||
+        investigateBackend === 'antigravity' ||
         investigateUseAdaptive
       const investigateThinkingLevel = usesEffortBackend
         ? undefined
@@ -1117,9 +1120,133 @@ export function useInvestigateHandlers({
     ]
   )
 
+  const handleSmokeTest = useCallback(async () => {
+    const worktreeId = activeWorktreeIdRef.current
+    const worktreePath = activeWorktreePathRef.current
+    if (!worktreeId || !worktreePath) return
+
+    let session: Session
+    try {
+      session = await createSession.mutateAsync({ worktreeId, worktreePath })
+    } catch (error) {
+      console.error('[SMOKE-TEST] Failed to create session:', error)
+      toast.error(`Failed to create smoke test session: ${error}`)
+      return
+    }
+    const sessionId = session.id
+
+    const promptTemplate =
+      preferences?.magic_prompts?.smoke_test?.trim() ||
+      DEFAULT_SMOKE_TEST_PROMPT
+    const prompt = promptTemplate.replaceAll('{worktree_id}', worktreeId)
+    const model =
+      preferences?.magic_prompt_models?.smoke_test_model ??
+      selectedModelRef.current
+    const provider = resolveMagicPromptProvider(
+      preferences?.magic_prompt_providers,
+      'smoke_test_provider',
+      preferences?.default_provider
+    )
+    const backend =
+      resolveMagicPromptBackend(
+        preferences?.magic_prompt_backends,
+        'smoke_test_backend',
+        defaultBackend
+      ) ?? resolveBackend(model)
+    const mode =
+      preferences?.magic_prompt_modes?.smoke_test_mode ??
+      DEFAULT_MAGIC_PROMPT_MODES.smoke_test_mode
+    const effort = preferences?.magic_prompt_efforts?.smoke_test_effort as
+      | EffortLevel
+      | null
+      | undefined
+    const { customProfileName } = resolveCustomProfile(model, provider)
+    const store = useChatStore.getState()
+
+    if (activeSessionId) {
+      store.copySessionSettings(activeSessionId, sessionId)
+    }
+    store.setActiveSession(worktreeId, sessionId)
+
+    store.setLastSentMessage(sessionId, prompt)
+    store.setError(sessionId, null)
+    store.addSendingSession(sessionId)
+    store.setSelectedBackend(sessionId, backend)
+    store.setSelectedModel(sessionId, model)
+    store.setSelectedProvider(sessionId, provider)
+    store.setExecutionMode(sessionId, mode)
+    store.setExecutingMode(sessionId, mode)
+    if (effort) store.setEffortLevel(sessionId, effort)
+
+    setSessionBackend.mutate({
+      sessionId,
+      worktreeId,
+      worktreePath,
+      backend,
+    })
+    setSessionModel.mutate({ sessionId, worktreeId, worktreePath, model })
+    setSessionProvider.mutate({
+      sessionId,
+      worktreeId,
+      worktreePath,
+      provider,
+    })
+    primeSessionSelection(sessionId, backend, model, provider)
+    queryClient.invalidateQueries({
+      queryKey: chatQueryKeys.sessions(worktreeId),
+    })
+
+    sendMessage.mutate(
+      {
+        sessionId,
+        worktreeId,
+        worktreePath,
+        message: prompt,
+        model,
+        executionMode: mode,
+        thinkingLevel: effort ? undefined : selectedThinkingLevelRef.current,
+        effortLevel: effort ?? undefined,
+        mcpConfig: buildMcpConfigJson(
+          mcpServersDataRef.current ?? [],
+          enabledMcpServersRef.current,
+          backend
+        ),
+        customProfileName,
+        parallelExecutionPrompt: preferences?.parallel_execution_prompt_enabled
+          ? (preferences.magic_prompts?.parallel_execution ??
+            DEFAULT_PARALLEL_EXECUTION_PROMPT)
+          : undefined,
+        chromeEnabled: preferences?.chrome_enabled ?? false,
+        aiLanguage: preferences?.ai_language,
+        backend,
+      },
+      { onSettled: () => inputRef.current?.focus() }
+    )
+  }, [
+    activeSessionId,
+    activeWorktreeIdRef,
+    activeWorktreePathRef,
+    defaultBackend,
+    createSession,
+    enabledMcpServersRef,
+    inputRef,
+    mcpServersDataRef,
+    preferences,
+    primeSessionSelection,
+    queryClient,
+    resolveCustomProfile,
+    selectedModelRef,
+    selectedThinkingLevelRef,
+    sendMessage,
+    setSessionBackend,
+    setSessionModel,
+    setSessionProvider,
+  ])
+
   return {
     handleInvestigate,
     handleInvestigateWorkflowRun,
     handleReviewComments,
+    handleSmokeTest,
   }
 }

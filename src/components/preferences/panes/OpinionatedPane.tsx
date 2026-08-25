@@ -43,6 +43,9 @@ const PLUGINS: PluginDefinition[] = [
     backends: ['Claude', 'Codex', 'OpenCode', 'Cursor', 'all CLIs'],
     usage: [
       {
+        note: "On Linux and macOS, installs through RTK's documented curl installer into ~/.local/bin.",
+      },
+      {
         note: 'Runs transparently — once installed, use your normal CLI commands (git, npm, docker, cargo, etc.) and RTK auto-rewrites them to token-optimized versions.',
       },
       {
@@ -77,7 +80,7 @@ const PLUGINS: PluginDefinition[] = [
     ],
     usage: [
       {
-        note: "Installs through Caveman's unified installer where supported, then mirrors skills into each backend's CLI path (including ~/.grok/skills for Grok) plus Jean-global mirrors.",
+        note: "On Linux and macOS, installs through Caveman's documented curl installer. Jean then mirrors skills into each backend's CLI path (including ~/.grok/skills for Grok) plus Jean-global mirrors.",
       },
       {
         note: 'Claude and OpenCode can auto-activate. Codex and Cursor expose skills for per-session activation with /caveman; Cursor also gets an always-on rule when the installer can write one.',

@@ -41,6 +41,7 @@ import './App.css'
 import MainWindow from './components/layout/MainWindow'
 import { ThemeProvider } from './components/ThemeProvider'
 import ErrorBoundary from './components/ErrorBoundary'
+import { shouldSurfaceGlobalError } from '@/lib/global-error-utils'
 import { useClaudeCliStatus, useClaudeCliAuth } from './services/claude-cli'
 import {
   useCodexCliStatus,
@@ -106,28 +107,13 @@ import {
 import { RemoteConnectionRecovery } from './components/remote/RemoteConnectionRecovery'
 import { getStartupOnboardingAction } from './lib/startup-onboarding'
 import { dismissTransientUi } from './lib/dismiss-transient-ui'
+import { JeanLoadingScreen } from './components/shared/JeanLoadingScreen'
 
 interface AutoFixStoppedEvent {
   projectId: string
   projectName: string
   backend: string
   error: string
-}
-
-function WebLoadingScreen({ label }: { label: string }) {
-  return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-background">
-      <p
-        role="status"
-        className="whitespace-nowrap text-[16px] leading-[26px] text-muted-foreground"
-        style={{
-          fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
-        }}
-      >
-        {label}
-      </p>
-    </div>
-  )
 }
 
 function handleWsAuthTokenSubmit(token: string) {
@@ -286,6 +272,17 @@ function App() {
               break
           }
         })
+
+        // Jean-managed Codex 0.147+ needs a sibling code-mode host. Older Jean
+        // versions did not install it, so repair only that missing helper after
+        // updating Jean instead of downloading the full Codex CLI again.
+        try {
+          await invoke('install_missing_codex_code_mode_host')
+        } catch (codexError) {
+          logger.warn('Failed to install missing Codex code-mode host', {
+            error: codexError,
+          })
+        }
 
         // Package is on disk; app must relaunch. Clear the download handle and
         // record ready state so further UI actions relaunch instead of re-downloading.
@@ -801,6 +798,7 @@ function App() {
         stack: reason instanceof Error ? reason.stack : undefined,
       })
       if (
+        shouldSurfaceGlobalError(message) &&
         !isAlreadySurfacedAuthError(message) &&
         !isTransientTransportError(message)
       ) {
@@ -817,6 +815,7 @@ function App() {
         filename: event.filename,
       })
       if (
+        shouldSurfaceGlobalError(message) &&
         !isAlreadySurfacedAuthError(message) &&
         !isTransientTransportError(message)
       ) {
@@ -1640,7 +1639,7 @@ function App() {
   if (isPreloading || blockOnWs) {
     return (
       <>
-        <WebLoadingScreen label="Loading Jean..." />
+        <JeanLoadingScreen />
         {webBackend && <WsAuthErrorOverlay />}
         {isNativeApp() && <QuitConfirmationDialog />}
       </>

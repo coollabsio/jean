@@ -1,12 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor } from '@/test/test-utils'
+import { fireEvent, render, screen, waitFor } from '@/test/test-utils'
 import { StandaloneTerminalSurface } from './StandaloneTerminalSurface'
 
-const { initTerminal, fit, focus, isNativeApp } = vi.hoisted(() => ({
+const {
+  initTerminal,
+  fit,
+  focus,
+  isNativeApp,
+  readFromClipboard,
+  writeTerminalInput,
+} = vi.hoisted(() => ({
   initTerminal: vi.fn().mockResolvedValue(undefined),
   fit: vi.fn(),
   focus: vi.fn(),
   isNativeApp: vi.fn(() => false),
+  readFromClipboard: vi.fn(),
+  writeTerminalInput: vi.fn(),
 }))
 
 vi.mock('@/hooks/useTerminal', () => ({
@@ -30,8 +39,13 @@ vi.mock('@/hooks/use-mobile', () => ({
 }))
 
 vi.mock('@/lib/terminal-instances', () => ({
-  writeTerminalInput: vi.fn(),
+  writeTerminalInput,
   focusTerminal: vi.fn(),
+}))
+
+vi.mock('@/lib/clipboard', () => ({
+  readFromClipboard,
+  normalizeClipboardForTerminal: (text: string) => text.replace(/\r\n?/g, '\n'),
 }))
 
 let mockContentRect = { width: 640, height: 360 }
@@ -110,6 +124,32 @@ describe('StandaloneTerminalSurface', () => {
     )
 
     expect(screen.queryByTestId('terminal-extra-keys-bar')).toBeNull()
+  })
+
+  it('pastes clipboard text into native desktop login terminals', async () => {
+    isNativeApp.mockReturnValue(true)
+    readFromClipboard.mockResolvedValue('login-code\r\n')
+
+    render(
+      <StandaloneTerminalSurface
+        terminalId="login-term-paste"
+        command="claude"
+        commandArgs={['login']}
+      />
+    )
+
+    fireEvent.keyDown(screen.getByTestId('standalone-terminal-surface'), {
+      key: 'v',
+      code: 'KeyV',
+      ctrlKey: true,
+    })
+
+    await waitFor(() =>
+      expect(writeTerminalInput).toHaveBeenCalledWith(
+        'login-term-paste',
+        'login-code\n'
+      )
+    )
   })
 
   it('does not start the login PTY while the container is still tiny (issue #624)', async () => {

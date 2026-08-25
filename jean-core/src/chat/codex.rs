@@ -4944,6 +4944,7 @@ pub fn parse_codex_run_to_message(
         cancelled: run.cancelled,
         plan_approved: false,
         model: None,
+        backend: None,
         execution_mode: None,
         thinking_level: None,
         effort_level: None,
@@ -5085,12 +5086,15 @@ pub fn execute_one_shot_codex(
         );
 
         // User-facing error: detect common patterns and provide actionable hints
-        let user_msg = if stderr.contains("AuthRequired") || stderr.contains("invalid_token") {
+        let failure_detail = one_shot_failure_detail(&stderr, &stdout).unwrap_or_default();
+        let user_msg = if failure_detail.contains("AuthRequired")
+            || failure_detail.contains("invalid_token")
+        {
             "Codex CLI failed: an MCP server requires authentication. \
                  Check your Codex MCP server configuration."
                 .to_string()
         } else {
-            let trimmed = stderr.trim();
+            let trimmed = failure_detail.trim();
             if trimmed.len() > 200 {
                 let end = trimmed
                     .char_indices()
@@ -5116,6 +5120,21 @@ pub fn execute_one_shot_codex(
     log::trace!("Codex one-shot stdout length: {} bytes", stdout.len());
 
     extract_codex_structured_output(&stdout)
+}
+
+fn one_shot_failure_detail(stderr: &str, stdout: &str) -> Option<String> {
+    let stderr = stderr.trim();
+    if !stderr.is_empty() {
+        return Some(stderr.to_string());
+    }
+
+    stdout.lines().rev().find_map(|line| {
+        let event: serde_json::Value = serde_json::from_str(line).ok()?;
+        if event.get("type").and_then(|value| value.as_str()) != Some("turn.failed") {
+            return None;
+        }
+        extract_codex_error_message(&event)
+    })
 }
 
 fn wait_for_child_output(
@@ -6078,6 +6097,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
 
@@ -6136,6 +6156,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
 
@@ -6191,6 +6212,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
 
@@ -6251,6 +6273,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
 
@@ -6313,6 +6336,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
 
@@ -6385,6 +6409,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
 
@@ -6505,6 +6530,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
 
@@ -6563,6 +6589,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
 
@@ -6626,6 +6653,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
 
@@ -6670,6 +6698,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
 
@@ -6828,6 +6857,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
 
@@ -6904,4 +6934,29 @@ fn extract_codex_structured_output(output: &str) -> Result<String, String> {
     }
 
     structured_output.ok_or_else(|| "No structured output found in Codex response".to_string())
+}
+
+#[cfg(test)]
+mod one_shot_failure_tests {
+    use super::*;
+
+    #[test]
+    fn reads_turn_failure_from_jsonl_stdout_when_stderr_is_empty() {
+        let stdout = r#"{"type":"turn.failed","error":{"message":"Model is not available"}}"#;
+
+        assert_eq!(
+            one_shot_failure_detail("", stdout).as_deref(),
+            Some("Model is not available")
+        );
+    }
+
+    #[test]
+    fn prefers_stderr_over_jsonl_stdout() {
+        let stdout = r#"{"type":"turn.failed","error":{"message":"stdout detail"}}"#;
+
+        assert_eq!(
+            one_shot_failure_detail("stderr detail", stdout).as_deref(),
+            Some("stderr detail")
+        );
+    }
 }

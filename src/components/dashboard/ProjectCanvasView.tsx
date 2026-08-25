@@ -391,6 +391,20 @@ interface FlatCard {
   isPending?: boolean
 }
 
+interface CanvasHighlight {
+  worktreeId: string
+  sessionId?: string
+}
+
+export function getCanvasHighlight(
+  item: Pick<FlatCard, 'worktreeId' | 'card'>
+): CanvasHighlight {
+  return {
+    worktreeId: item.worktreeId,
+    sessionId: item.card?.session.id,
+  }
+}
+
 type ActiveStatus =
   | 'waiting'
   | 'planning'
@@ -582,7 +596,13 @@ function WorktreeSectionHeader({
           )
           triggerImmediateGitPoll()
           fetchWorktreesStatus(projectId)
-          if (result.fellBack) {
+          if (result.permissionDenied) {
+            opToast.error('Push failed', {
+              duration: Infinity,
+              description:
+                result.output.trim() || 'The remote rejected the push.',
+            })
+          } else if (result.fellBack) {
             opToast.warning(
               'Could not push to PR branch, pushed to new branch instead'
             )
@@ -1266,6 +1286,8 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
   const worktreeSections: WorktreeSection[] = useMemo(() => {
     const result: WorktreeSection[] = []
     const latestActivityByWorktreeId = new Map<string, number>()
+    const normalizedSearchQuery = searchQuery.trim().toLowerCase()
+    const hasSearchQuery = normalizedSearchQuery.length > 0
 
     // Add pending worktrees first
     const sortedPending = [...pendingWorktrees].sort(
@@ -1273,26 +1295,32 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
     )
     for (const worktree of sortedPending) {
       if (!matchesCanvasFilterTab(worktree, activeFilterTab)) continue
+      if (
+        hasSearchQuery &&
+        !getCanvasWorktreeSearchTerms(worktree).some(term =>
+          term.includes(normalizedSearchQuery)
+        )
+      ) {
+        continue
+      }
       latestActivityByWorktreeId.set(worktree.id, worktree.created_at)
       // Include pending worktrees even without sessions - show setup card
       result.push({ worktree, cards: [], isPending: true })
     }
 
     const readySections: WorktreeSection[] = []
-    const normalizedSearchQuery = searchQuery.toLowerCase()
-    const hasSearchQuery = normalizedSearchQuery.trim().length > 0
     for (const worktree of readyWorktrees) {
       if (!matchesCanvasFilterTab(worktree, activeFilterTab)) continue
       const sessionData = sessionsByWorktreeId.get(worktree.id)
       const sessions = sessionData?.sessions ?? []
-
-      // Filter sessions based on search query (includes labels). Worktree
-      // metadata is normalized once per worktree, not once per session.
       const worktreeMatchesSearch =
-        hasSearchQuery &&
+        !hasSearchQuery ||
         getCanvasWorktreeSearchTerms(worktree).some(term =>
           term.includes(normalizedSearchQuery)
         )
+
+      // Filter sessions based on search query (includes labels). Worktree
+      // metadata is normalized once per worktree, not once per session.
       const filteredSessions = hasSearchQuery
         ? sessions.filter(session => {
             return (
@@ -1330,8 +1358,11 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
 
       latestActivityByWorktreeId.set(worktree.id, latestActivityAt)
 
-      // Keep the base branch available for starting its first session.
-      if (shouldShowCanvasWorktreeSection(worktree, grouped.length)) {
+      // Keep every worktree available, including those without a session yet.
+      if (
+        shouldShowCanvasWorktreeSection(worktree) &&
+        (!hasSearchQuery || worktreeMatchesSearch || grouped.length > 0)
+      ) {
         readySections.push({ worktree, cards: grouped })
       }
     }
@@ -1688,10 +1719,7 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
   }, [projectId])
   const searchInputRef = useRef<HTMLInputElement>(null)
   // Track highlighted card to survive reordering
-  const highlightedCardRef = useRef<{
-    worktreeId: string
-    sessionId: string
-  } | null>(null)
+  const highlightedCardRef = useRef<CanvasHighlight | null>(null)
   const suppressNextRestoreAutoOpenRef = useRef(false)
 
   // Worktree close confirmation (CMD+W on canvas)
@@ -1890,12 +1918,8 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
   const handleSelectedIndexChange = useCallback(
     (index: number | null) => {
       setSelectedIndex(index)
-      if (index !== null && flatCards[index]?.card) {
-        highlightedCardRef.current = {
-          worktreeId: flatCards[index].worktreeId,
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          sessionId: flatCards[index].card!.session.id,
-        }
+      if (index !== null && flatCards[index]) {
+        highlightedCardRef.current = getCanvasHighlight(flatCards[index])
       }
     },
     [flatCards]
@@ -3814,6 +3838,11 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
         worktreePath={selectedWorktreeModal?.worktreePath ?? ''}
         isOpen={!!selectedWorktreeModal}
         onClose={() => setSelectedWorktreeModal(null)}
+        onRequestCloseWorktree={() => {
+          if (selectedWorktreeModal) {
+            closeWorktreeDirectly(selectedWorktreeModal.worktreeId)
+          }
+        }}
       />
 
       {/* Git Diff Modal (CMD+G on canvas) */}

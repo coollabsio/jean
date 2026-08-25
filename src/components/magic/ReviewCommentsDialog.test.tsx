@@ -205,7 +205,7 @@ describe('ReviewCommentsDialog', () => {
     expect(secondRow).toHaveAttribute('data-active', 'false')
   })
 
-  it('uses cmd+enter to send selected comments to chat', async () => {
+  it('uses cmd+enter to send selected comments separately', async () => {
     const user = userEvent.setup()
     const magicCommand = vi.fn()
     window.addEventListener('magic-command', magicCommand)
@@ -224,12 +224,10 @@ describe('ReviewCommentsDialog', () => {
         command: 'review-comments',
         executionMode: 'yolo',
       })
-      expect(detail.prompt).toContain('Please fix this')
-      expect(detail.prompt).toContain('Second comment body')
-      expect(detail.prompt).toContain('resolveReviewThread')
-      expect(detail.prompt).toContain('coderabbitai')
-      expect(detail.prompt).toContain('implemented and verified')
-      expect(detail.prompts).toBeUndefined()
+      expect(detail.prompts).toHaveLength(2)
+      expect(detail.prompts[0]).toContain('Please fix this')
+      expect(detail.prompts[1]).toContain('Second comment body')
+      expect(detail.prompt).toBeUndefined()
     } finally {
       window.removeEventListener('magic-command', magicCommand)
     }
@@ -260,7 +258,7 @@ describe('ReviewCommentsDialog', () => {
     }
   })
 
-  it('uses shift+cmd+enter to send selected comments separately', async () => {
+  it('uses shift+cmd+enter to send selected comments to chat', async () => {
     const user = userEvent.setup()
     const magicCommand = vi.fn()
     window.addEventListener('magic-command', magicCommand)
@@ -279,10 +277,12 @@ describe('ReviewCommentsDialog', () => {
         command: 'review-comments',
         executionMode: 'yolo',
       })
-      expect(detail.prompts).toHaveLength(2)
-      expect(detail.prompts[0]).toContain('Please fix this')
-      expect(detail.prompts[1]).toContain('Second comment body')
-      expect(detail.prompt).toBeUndefined()
+      expect(detail.prompt).toContain('Please fix this')
+      expect(detail.prompt).toContain('Second comment body')
+      expect(detail.prompt).toContain('resolveReviewThread')
+      expect(detail.prompt).toContain('coderabbitai')
+      expect(detail.prompt).toContain('implemented and verified')
+      expect(detail.prompts).toBeUndefined()
     } finally {
       window.removeEventListener('magic-command', magicCommand)
     }
@@ -292,6 +292,13 @@ describe('ReviewCommentsDialog', () => {
     render(<ReviewCommentsDialog />)
 
     await screen.findByRole('button', { name: /send to chat/i })
+
+    expect(
+      screen.getAllByRole('button', { name: /send (to chat|separately)/i })
+    ).toEqual([
+      screen.getByRole('button', { name: /send to chat/i }),
+      screen.getByRole('button', { name: /send separately/i }),
+    ])
 
     expect(
       screen.queryByRole('button', { name: /cancel/i })

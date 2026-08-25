@@ -74,6 +74,27 @@ AI reviews shares one Code Review session, and `review_results` stores the
 backend/model results together so the review panel can switch between them;
 entries are created with a running status so the dropdown can show loading
 state before each result arrives.
+
+### Client and Server Preference Ownership
+
+Preferences use a strict ownership boundary. Display, input, notification, and
+native-application choices are client-local and persist in the versioned
+`jean-client-preferences-v1` browser storage record. Workflow and operational
+configuration—including favorites, AI defaults, Magic Prompts, Git behavior,
+providers, MCP, CLI sources, integrations, and Web Access—is instance-wide on
+the selected Jean service.
+
+`usePreferences()` temporarily overlays client values onto the legacy server
+response so existing consumers remain compatible. `usePatchPreferences()`
+partitions updates: client keys never cross the backend transport, while server
+keys continue to use backend persistence. New code can use
+`useClientPreferences()` directly.
+
+Servers expose `get_server_preferences`, `update_server_preferences`, and
+`get_server_capabilities`. Server preference responses omit client fields and
+redact secrets to configured flags. Updates use an opaque revision string to
+detect concurrent edits. Capabilities provide the server-owned Magic Prompt
+catalog/defaults; the React UI retains bundled fallbacks for older servers.
 Duplicate pairs are rejected while running. Job progress emits
 `review-job:updated`.
 
@@ -204,7 +225,7 @@ Additional systems (no dedicated docs yet):
 - **Background Tasks** - Git/PR polling with focus-aware intervals (`src-tauri/src/background_tasks/`); Auto Fix issue polling/planning/yolo handoff and scheduler active-hours window via `chrono` local time with midnight-crossing support (`src-tauri/src/auto_fix/`)
 - **HTTP Server** - Tauri-free Axum server + WebSocket from `jean-core`; `src-server` provides the standalone Tokio adapter. See [server-architecture.md](./server-architecture.md).
 - **Diagnostics** - CPU/memory monitoring panel (`src-tauri/src/diagnostics/`)
-- **MCP** - Model Context Protocol server integration with per-project overrides (`src/services/mcp.ts`). First-party **Jean MCP** (`jean-core/src/jean_mcp_core.rs`) exposes project/worktree/session tools, usage + session model controls (`get_usage`, `set_session_model`), plus the ship loop: `create_commit`, `push_worktree`, `detect_open_pr`, `create_pull_request`, `merge_pull_request`, `run_review` (thin wrappers over existing project commands).
+- **MCP** - Model Context Protocol server integration with per-project overrides (`src/services/mcp.ts`). First-party **Jean MCP** (`jean-core/src/jean_mcp_core.rs`) exposes project/worktree/session tools, usage + session model controls (`get_usage`, `set_session_model`), Run-command / panel-command dev environments (`get_run_environments`: running state, worktree/base session, startup command, ports, URL), plus the ship loop: `create_commit`, `push_worktree`, `detect_open_pr`, `create_pull_request`, `merge_pull_request`, `run_review` (thin wrappers over existing project commands).
 - **Model Catalog** - CDN-driven model lists and reasoning capabilities with bundled offline fallback ([model-catalog.md](./model-catalog.md))
 - **CLI Management** - Claude CLI, Codex CLI, Cursor CLI, OpenCode, PI, Command Code, Grok, Kimi Code, and gh CLI installation/versioning (backend-specific modules under `src-tauri/src/`)
 
@@ -553,3 +574,26 @@ When opening a URL in the system browser, use `crate::platform::open_url_in_brow
 re-exported as `jean_core::open_url_in_browser`). On Windows it runs `cmd /c start` through
 `silent_command()` so the intermediary console never flashes. Do not call raw
 `Command::new("cmd")` with `/c start`.
+
+## Antigravity CLI backend
+
+Jean integrates Google's native `agy` executable through its documented headless interface. Interactive turns use `agy -p --output-format stream-json`; structured one-shot operations use `--output-format json --json-schema`. Jean maps Plan to `--mode plan`, Build to `--mode accept-edits`, and Yolo to `--mode accept-edits --dangerously-skip-permissions`.
+
+Antigravity conversation IDs are stored in `antigravity_session_id`. Follow-up turns resume with `--conversation`. Jean stores the NDJSON output in its run log, maps text, thinking, tool, result, and usage events to the common chat model, and cancels by stopping the registered process tree.
+
+Tool steps use the documented nested `tool_info` object. Subagent steps use `subagent_info` and are normalized into Jean's agent activity model. Terminal result states are authoritative: error and waiting states fail the turn, while canceled and interrupted states are stored as cancellations. Jean can also discover the latest workspace conversation from `~/.gemini/antigravity-cli/cache/last_conversations.json`.
+
+Antigravity MCP servers come from project `.agents/mcp_config.json` and user `~/.gemini/config/mcp_config.json`. Antigravity CLI owns authentication and secrets in the operating system keyring; Jean does not copy OAuth tokens.
+
+Headless mode has no interactive approval surface. Plan is read-only and sandboxed. Build runs in Antigravity's native terminal sandbox and auto-approves tools so a default `request-review` policy does not soft-deny required commands. Yolo explicitly auto-approves without the sandbox. Jean queues follow-up messages because the headless interface does not expose in-turn steering.
+
+Magic Prompts pass Jean's contract to Antigravity's native `--json-schema` option and read `structured_output` from the final JSON envelope.
+
+Current official references:
+
+- https://antigravity.google/docs/cli/install
+- https://antigravity.google/docs/cli/headless
+- https://antigravity.google/docs/cli/conversations
+- https://antigravity.google/docs/cli/permissions
+- https://antigravity.google/docs/cli/mcp
+- https://antigravity.google/docs/cli/gcli-migration

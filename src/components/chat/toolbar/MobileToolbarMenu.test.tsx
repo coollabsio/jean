@@ -53,9 +53,7 @@ describe('MobileToolbarMenu', () => {
 
     expect(screen.getByText('Save Context')).toBeInTheDocument()
     expect(screen.getByText('Commit & Push')).toBeInTheDocument()
-    expect(
-      screen.getByRole('menuitem', { name: /sync/i })
-    ).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: /sync/i })).toBeInTheDocument()
     expect(screen.getByText('Pull')).toBeInTheDocument()
     expect(screen.getByText('Push')).toBeInTheDocument()
     expect(screen.getByText('Review')).toBeInTheDocument()
@@ -153,6 +151,43 @@ describe('MobileToolbarMenu', () => {
     dispatchSpy.mockRestore()
   })
 
+  it('enables Issue for a loaded Sentry context and dispatches the Sentry investigation type', async () => {
+    const user = userEvent.setup()
+    const dispatchSpy = vi.spyOn(window, 'dispatchEvent')
+    render(
+      <MobileToolbarMenu
+        isDisabled={false}
+        hasOpenPr={false}
+        hasIssueContexts={false}
+        hasSentryContexts={true}
+        hasPrContexts={false}
+        onSaveContext={vi.fn()}
+        onLoadContext={vi.fn()}
+        onCommit={vi.fn()}
+        onCommitAndPush={vi.fn()}
+        onRevertLastCommit={vi.fn()}
+        onOpenPr={vi.fn()}
+        onReview={vi.fn()}
+        onMerge={vi.fn()}
+        onMergePr={vi.fn()}
+        handleSyncClick={vi.fn()}
+        handlePullClick={vi.fn()}
+        handlePushClick={vi.fn()}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: /more actions/i }))
+    await user.click(screen.getByText('Issue'))
+
+    expect(dispatchSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'magic-command',
+        detail: { command: 'investigate', type: 'sentry-issue' },
+      })
+    )
+    dispatchSpy.mockRestore()
+  })
+
   it('shows fork session in the context section and dispatches the magic command', async () => {
     const user = userEvent.setup()
     const dispatchSpy = vi.spyOn(window, 'dispatchEvent')
@@ -185,6 +220,44 @@ describe('MobileToolbarMenu', () => {
       expect.objectContaining({
         type: 'magic-command',
         detail: { command: 'fork-session' },
+      })
+    )
+
+    dispatchSpy.mockRestore()
+  })
+
+  it('shows smoke test and dispatches the magic command', async () => {
+    const user = userEvent.setup()
+    const dispatchSpy = vi.spyOn(window, 'dispatchEvent')
+
+    render(
+      <MobileToolbarMenu
+        isDisabled={false}
+        hasOpenPr={false}
+        hasIssueContexts={false}
+        hasPrContexts={false}
+        onSaveContext={vi.fn()}
+        onLoadContext={vi.fn()}
+        onCommit={vi.fn()}
+        onCommitAndPush={vi.fn()}
+        onRevertLastCommit={vi.fn()}
+        onOpenPr={vi.fn()}
+        onReview={vi.fn()}
+        onMerge={vi.fn()}
+        onMergePr={vi.fn()}
+        handleSyncClick={vi.fn()}
+        handlePullClick={vi.fn()}
+        handlePushClick={vi.fn()}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: /more actions/i }))
+    await user.click(screen.getByText('Smoke Test'))
+
+    expect(dispatchSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'magic-command',
+        detail: { command: 'smoke-test' },
       })
     )
 

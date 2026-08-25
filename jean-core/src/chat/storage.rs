@@ -783,6 +783,7 @@ pub fn load_sessions(
                 commandcode_session_id: None,
                 grok_session_id: None,
                 kimi_session_id: None,
+                antigravity_session_id: None,
                 selected_model: None,
                 selected_thinking_level: None,
                 selected_effort_level: None,
@@ -888,6 +889,7 @@ where
                 commandcode_session_id: None,
                 grok_session_id: None,
                 kimi_session_id: None,
+                antigravity_session_id: None,
                 selected_model: None,
                 selected_thinking_level: None,
                 selected_effort_level: None,
@@ -1002,6 +1004,85 @@ pub fn get_sessions_path(app: &AppHandle, worktree_id: &str) -> Result<PathBuf, 
 /// Load sessions by worktree_id only (for cleanup when worktree path may not exist)
 pub fn load_sessions_by_id(app: &AppHandle, worktree_id: &str) -> Result<WorktreeSessions, String> {
     load_sessions(app, "", worktree_id)
+}
+
+fn move_session_between_indexes(
+    source: &mut WorktreeIndex,
+    target: &mut WorktreeIndex,
+    metadata: &mut SessionMetadata,
+    session_id: &str,
+) -> Result<(), String> {
+    if source.worktree_id == target.worktree_id {
+        return Err("Source and target worktrees are the same".to_string());
+    }
+    if target
+        .sessions
+        .iter()
+        .any(|session| session.id == session_id)
+    {
+        return Err(format!(
+            "Session {session_id} already exists in target worktree"
+        ));
+    }
+    let source_position = source
+        .sessions
+        .iter()
+        .position(|session| session.id == session_id)
+        .ok_or_else(|| format!("Session {session_id} not found in source worktree"))?;
+
+    let mut entry = source.sessions.remove(source_position);
+    entry.order = target.sessions.len() as u32;
+    metadata.worktree_id = target.worktree_id.clone();
+    metadata.order = entry.order;
+    target.active_session_id = Some(session_id.to_string());
+    target.sessions.push(entry);
+
+    if source.active_session_id.as_deref() == Some(session_id) {
+        source.active_session_id = source.sessions.first().map(|session| session.id.clone());
+    }
+
+    Ok(())
+}
+
+/// Move an existing session to another worktree without changing its identity or data files.
+pub fn move_session(
+    app: &AppHandle,
+    source_worktree_id: &str,
+    target_worktree_id: &str,
+    session_id: &str,
+) -> Result<(), String> {
+    if source_worktree_id == target_worktree_id {
+        return Err("Source and target worktrees are the same".to_string());
+    }
+
+    let (first_id, second_id) = if source_worktree_id < target_worktree_id {
+        (source_worktree_id, target_worktree_id)
+    } else {
+        (target_worktree_id, source_worktree_id)
+    };
+    let first_lock = get_index_lock(first_id);
+    let second_lock = get_index_lock(second_id);
+    let _first_guard = first_lock.lock().unwrap();
+    let _second_guard = second_lock.lock().unwrap();
+    let metadata_lock = get_metadata_lock(session_id);
+    let _metadata_guard = metadata_lock.lock().unwrap();
+
+    let mut source = load_index_internal(app, source_worktree_id)?;
+    let mut target = load_index_internal(app, target_worktree_id)?;
+    let mut metadata = load_metadata_internal(app, session_id)?
+        .ok_or_else(|| format!("Session {session_id} not found"))?;
+    if metadata.worktree_id != source_worktree_id {
+        return Err(format!(
+            "Session {session_id} belongs to worktree {}, not {source_worktree_id}",
+            metadata.worktree_id
+        ));
+    }
+
+    move_session_between_indexes(&mut source, &mut target, &mut metadata, session_id)?;
+    save_index_internal(app, &source)?;
+    save_index_internal(app, &target)?;
+    save_metadata_internal(app, &metadata)?;
+    Ok(())
 }
 
 /// Get the path for a closed base session's preserved index file
@@ -1178,6 +1259,116 @@ pub fn save_saved_contexts_metadata(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn move_session_between_indexes_reassigns_complete_session() {
+        let moved_entry = SessionIndexEntry {
+            id: "session-move".to_string(),
+            name: "Investigate bug".to_string(),
+            order: 4,
+            message_count: 12,
+            archived_at: None,
+        };
+        let remaining_entry = SessionIndexEntry {
+            id: "session-stays".to_string(),
+            name: "Other work".to_string(),
+            order: 1,
+            message_count: 3,
+            archived_at: None,
+        };
+        let mut source = WorktreeIndex {
+            worktree_id: "source".to_string(),
+            active_session_id: Some(moved_entry.id.clone()),
+            sessions: vec![moved_entry.clone(), remaining_entry.clone()],
+            version: 1,
+            branch_naming_completed: true,
+        };
+        let target_existing = SessionIndexEntry {
+            id: "target-existing".to_string(),
+            name: "Existing".to_string(),
+            order: 0,
+            message_count: 0,
+            archived_at: None,
+        };
+        let mut target = WorktreeIndex {
+            worktree_id: "target".to_string(),
+            active_session_id: Some(target_existing.id.clone()),
+            sessions: vec![target_existing],
+            version: 1,
+            branch_naming_completed: true,
+        };
+        let mut metadata = SessionMetadata::new(
+            moved_entry.id.clone(),
+            source.worktree_id.clone(),
+            moved_entry.name.clone(),
+            moved_entry.order,
+        );
+        metadata.claude_session_id = Some("claude-resume-id".to_string());
+
+        move_session_between_indexes(&mut source, &mut target, &mut metadata, "session-move")
+            .expect("move session");
+
+        assert_eq!(source.sessions.len(), 1);
+        assert_eq!(source.sessions[0].id, remaining_entry.id);
+        assert_eq!(source.active_session_id.as_deref(), Some("session-stays"));
+        assert_eq!(target.active_session_id.as_deref(), Some("session-move"));
+        assert_eq!(target.sessions.len(), 2);
+        assert_eq!(target.sessions[1].id, "session-move");
+        assert_eq!(target.sessions[1].order, 1);
+        assert_eq!(metadata.worktree_id, "target");
+        assert_eq!(metadata.order, 1);
+        assert_eq!(
+            metadata.claude_session_id.as_deref(),
+            Some("claude-resume-id")
+        );
+    }
+
+    #[test]
+    fn move_session_between_indexes_rejects_invalid_moves_without_mutation() {
+        let entry = SessionIndexEntry {
+            id: "session-1".to_string(),
+            name: "Session 1".to_string(),
+            order: 0,
+            message_count: 0,
+            archived_at: None,
+        };
+        let source = WorktreeIndex {
+            worktree_id: "source".to_string(),
+            active_session_id: Some(entry.id.clone()),
+            sessions: vec![entry.clone()],
+            version: 1,
+            branch_naming_completed: true,
+        };
+        let target = WorktreeIndex {
+            worktree_id: "target".to_string(),
+            active_session_id: Some(entry.id.clone()),
+            sessions: vec![entry],
+            version: 1,
+            branch_naming_completed: true,
+        };
+        let metadata = SessionMetadata::new(
+            "session-1".to_string(),
+            "source".to_string(),
+            "Session 1".to_string(),
+            0,
+        );
+        let mut actual_source = source.clone();
+        let mut actual_target = target.clone();
+        let mut actual_metadata = metadata.clone();
+
+        let error = move_session_between_indexes(
+            &mut actual_source,
+            &mut actual_target,
+            &mut actual_metadata,
+            "session-1",
+        )
+        .unwrap_err();
+
+        assert!(error.contains("already exists"));
+        assert_eq!(actual_source.sessions.len(), source.sessions.len());
+        assert_eq!(actual_target.sessions.len(), target.sessions.len());
+        assert_eq!(actual_metadata.worktree_id, metadata.worktree_id);
+    }
 
     #[test]
     fn test_sanitize_filename() {

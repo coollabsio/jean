@@ -38,12 +38,19 @@ import { cn } from '@/lib/utils'
 import { isNativeApp } from '@/lib/environment'
 import { useIsMobile } from '@/hooks/use-mobile'
 
+/** Optional reviewer identity so fix sessions use the same backend/model. */
+export interface ReviewFixOptions {
+  backend?: string
+  model?: string
+}
+
 interface ReviewResultsPanelProps {
   sessionId: string
   isReviewing?: boolean
   onSendFix?: (
     message: string | string[],
-    executionMode: 'plan' | 'yolo'
+    executionMode: 'plan' | 'yolo',
+    options?: ReviewFixOptions
   ) => void
 }
 
@@ -391,6 +398,14 @@ export function ReviewResultsPanel({
     )
   }, [sortedFindings, selected])
 
+  const reviewFixOptions = useMemo((): ReviewFixOptions | undefined => {
+    if (!selectedReviewEntry) return undefined
+    return {
+      backend: selectedReviewEntry.backend,
+      model: selectedReviewEntry.model,
+    }
+  }, [selectedReviewEntry])
+
   const handleSendToChat = useCallback(() => {
     if (!onSendFix) return
     const selectedFindings = getSelectedFindings()
@@ -401,12 +416,19 @@ export function ReviewResultsPanel({
       markSelectedFixed(selectedFindings.map(f => f.originalIndex))
       onSendFix(
         formatCombinedFindingsMessage(selectedFindings),
-        fixExecutionMode
+        fixExecutionMode,
+        reviewFixOptions
       )
     } finally {
       setIsSending(false)
     }
-  }, [fixExecutionMode, getSelectedFindings, markSelectedFixed, onSendFix])
+  }, [
+    fixExecutionMode,
+    getSelectedFindings,
+    markSelectedFixed,
+    onSendFix,
+    reviewFixOptions,
+  ])
 
   const handleSendSeparately = useCallback(() => {
     if (!onSendFix) return
@@ -418,12 +440,19 @@ export function ReviewResultsPanel({
       markSelectedFixed(selectedFindings.map(f => f.originalIndex))
       onSendFix(
         selectedFindings.map(({ finding }) => formatFindingMessage(finding)),
-        fixExecutionMode
+        fixExecutionMode,
+        reviewFixOptions
       )
     } finally {
       setIsSending(false)
     }
-  }, [fixExecutionMode, getSelectedFindings, markSelectedFixed, onSendFix])
+  }, [
+    fixExecutionMode,
+    getSelectedFindings,
+    markSelectedFixed,
+    onSendFix,
+    reviewFixOptions,
+  ])
 
   const handlePanelKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
@@ -433,8 +462,8 @@ export function ReviewResultsPanel({
         event.key === 'Enter' && (event.metaKey || event.ctrlKey)
       if (sendShortcut) {
         event.preventDefault()
-        if (event.shiftKey) handleSendSeparately()
-        else handleSendToChat()
+        if (event.shiftKey) handleSendToChat()
+        else handleSendSeparately()
         return
       }
 
@@ -798,14 +827,14 @@ export function ReviewResultsPanel({
               variant="outline"
               size="sm"
               disabled={selectedCount === 0 || isSending || !onSendFix}
-              onClick={handleSendSeparately}
+              onClick={handleSendToChat}
             >
               {isSending ? (
                 <Loader2 className="mr-1.5 size-3.5 animate-spin" />
               ) : (
-                <MessagesSquare className="mr-1.5 size-3.5" />
+                <MessageSquare className="mr-1.5 size-3.5" />
               )}
-              Send Separately ({selectedCount})
+              Send to Chat ({selectedCount})
               {showKeyboardHints && (
                 <KbdGroup className="ml-1.5">
                   <Kbd className="h-4 min-w-4 px-1 text-[10px]">⇧</Kbd>
@@ -816,14 +845,14 @@ export function ReviewResultsPanel({
             <Button
               size="sm"
               disabled={selectedCount === 0 || isSending || !onSendFix}
-              onClick={handleSendToChat}
+              onClick={handleSendSeparately}
             >
               {isSending ? (
                 <Loader2 className="mr-1.5 size-3.5 animate-spin" />
               ) : (
-                <MessageSquare className="mr-1.5 size-3.5" />
+                <MessagesSquare className="mr-1.5 size-3.5" />
               )}
-              Send to Chat ({selectedCount})
+              Send Separately ({selectedCount})
               {showKeyboardHints && (
                 <KbdGroup className="ml-1.5">
                   <Kbd className="h-4 min-w-4 px-1 text-[10px]">⌘</Kbd>

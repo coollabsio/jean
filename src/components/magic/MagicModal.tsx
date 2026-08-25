@@ -20,6 +20,7 @@ import {
   Link2,
   ShieldAlert,
   Loader2,
+  FlaskConical,
 } from 'lucide-react'
 import {
   Dialog,
@@ -58,9 +59,11 @@ import {
   useLoadedAdvisoryContexts,
 } from '@/services/github'
 import { usePreferences } from '@/services/preferences'
+import { useLoadedSentryContexts } from '@/services/sentry'
 import { useAvailableOpencodeModels } from '@/services/opencode-cli'
 import { useAvailableGrokModels } from '@/services/grok-cli'
 import { useAvailableKimiModels } from '@/services/kimi-cli'
+import { useAvailableAntigravityModels } from '@/services/antigravity-cli'
 import { startCommitJob } from '@/services/commit-jobs'
 import { invoke, listen } from '@/lib/transport'
 import { dismissibleToast } from '@/lib/dismissible-toast'
@@ -89,9 +92,6 @@ import type {
 import type { Session } from '@/types/chat'
 import {
   type CliBackend,
-  DEFAULT_FINAL_REVIEW_PROMPT,
-  DEFAULT_MAGIC_PROMPT_MODES,
-  DEFAULT_PARALLEL_EXECUTION_PROMPT,
   DEFAULT_RESOLVE_CONFLICTS_PROMPT,
   PREDEFINED_CLI_PROFILES,
   resolveMagicPromptBackend,
@@ -101,6 +101,7 @@ import { useRemotePicker } from '@/hooks/useRemotePicker'
 import { useInstalledBackends } from '@/hooks/useInstalledBackends'
 import { chatQueryKeys, refreshWorktreeSessionsCaches } from '@/services/chat'
 import {
+  clearWorktreePr,
   linkWorktreePr,
   saveWorktreePr,
   projectsQueryKeys,
@@ -110,6 +111,7 @@ import {
   CODEX_MODEL_OPTIONS,
   OPENCODE_MODEL_OPTIONS,
   GROK_MODEL_OPTIONS,
+  ANTIGRAVITY_MODEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
 import { formatOpencodeModelLabel } from '@/components/chat/toolbar/toolbar-utils'
 import {
@@ -122,7 +124,6 @@ import {
   resolveCodeReviewConfigs,
   startCodeReviewsSequentially,
 } from '@/lib/code-review-configs'
-import { resolveDefaultModelForBackend } from '@/lib/session-defaults'
 import { resolveMcpConfigForSend } from '@/services/mcp'
 
 type MagicOption =
@@ -149,6 +150,7 @@ type MagicOption =
   | 'merge-pr'
   | 'review-comments'
   | 'revert-last-commit'
+  | 'smoke-test'
 
 interface TriggerCodeRabbitPrReviewResponse {
   pr_number: number
@@ -174,10 +176,14 @@ const CANVAS_ALLOWED_OPTIONS = new Set<MagicOption>([
   'merge-pr',
   'resolve-conflicts',
   'linked-projects',
+  'smoke-test',
 ])
 
 /** Canvas options that navigate to worktree chat and dispatch a magic-command event */
-const CANVAS_NAVIGATE_AND_DISPATCH_OPTIONS = new Set<MagicOption>(['merge'])
+const CANVAS_NAVIGATE_AND_DISPATCH_OPTIONS = new Set<MagicOption>([
+  'merge',
+  'smoke-test',
+])
 
 /** Git-only actions should not depend on a mounted ChatWindow event listener. */
 const DIRECT_MAGIC_GIT_OPTIONS = new Set<MagicOption>([
@@ -205,7 +211,7 @@ interface MagicColumns {
   all: MagicSection[]
 }
 
-type InvestigateType = 'issue' | 'pr' | 'advisory'
+type InvestigateType = 'issue' | 'pr' | 'advisory' | 'sentry-issue'
 type InvestigateSelectionMode = 'settings-default' | 'custom'
 type ResolveSelectionMode = 'settings-default' | 'custom'
 
@@ -213,18 +219,21 @@ const INVESTIGATE_MODEL_KEYS = {
   issue: 'investigate_issue_model',
   pr: 'investigate_pr_model',
   advisory: 'investigate_advisory_model',
+  'sentry-issue': 'investigate_sentry_issue_model',
 } as const
 
 const INVESTIGATE_PROVIDER_KEYS = {
   issue: 'investigate_issue_provider',
   pr: 'investigate_pr_provider',
   advisory: 'investigate_advisory_provider',
+  'sentry-issue': 'investigate_sentry_issue_provider',
 } as const
 
 const INVESTIGATE_BACKEND_KEYS = {
   issue: 'investigate_issue_backend',
   pr: 'investigate_pr_backend',
   advisory: 'investigate_advisory_backend',
+  'sentry-issue': 'investigate_sentry_issue_backend',
 } as const
 
 const RESOLVE_CONFLICTS_MODEL_KEY = 'resolve_conflicts_model'
@@ -304,6 +313,12 @@ function buildMagicColumns(hasOpenPr: boolean): MagicColumns {
   ]
 
   const right: MagicSection[] = [
+    {
+      header: 'Test',
+      options: [
+        { id: 'smoke-test', label: 'Smoke Test', icon: FlaskConical, key: 'X' },
+      ],
+    },
     {
       header: 'Pull Request',
       options: [
@@ -406,6 +421,7 @@ const KEY_TO_OPTION: Record<string, MagicOption> = {
   y: 'investigate-advisory',
   n: 'merge-pr',
   z: 'revert-last-commit',
+  x: 'smoke-test',
 }
 
 export function MagicModal() {
@@ -446,6 +462,7 @@ export function MagicModal() {
   )
   const [isDetectingLinkPr, setIsDetectingLinkPr] = useState(false)
   const [isLinkingPr, setIsLinkingPr] = useState(false)
+  const [isUnlinkingPr, setIsUnlinkingPr] = useState(false)
   const [resolveSelectionMode, setResolveSelectionMode] =
     useState<ResolveSelectionMode>('settings-default')
   const [customResolveBackend, setCustomResolveBackend] =
@@ -473,7 +490,13 @@ export function MagicModal() {
     activeSessionId ?? selectedWorktreeId,
     selectedWorktreeId
   )
+  const { data: sentryContexts } = useLoadedSentryContexts(
+    activeSessionId ?? selectedWorktreeId,
+    selectedWorktreeId,
+    worktree?.project_id ?? null
+  )
   const hasIssueContexts = (issueContexts?.length ?? 0) > 0
+  const hasSentryContexts = (sentryContexts?.length ?? 0) > 0
   const hasPrContexts = (prContexts?.length ?? 0) > 0
   const hasAdvisoryContexts = (advisoryContexts?.length ?? 0) > 0
 
@@ -491,6 +514,9 @@ export function MagicModal() {
   })
   const { data: availableKimiModels } = useAvailableKimiModels({
     enabled: installedBackends.includes('kimi'),
+  })
+  const { data: availableAntigravityModels } = useAvailableAntigravityModels({
+    enabled: installedBackends.includes('antigravity'),
   })
   const { data: modelCatalog } = useModelCatalog()
 
@@ -558,6 +584,15 @@ export function MagicModal() {
       label: model.label,
     }))
   }, [availableKimiModels])
+  const antigravityModelOptions = useMemo(() => {
+    if (!availableAntigravityModels?.length) {
+      return ANTIGRAVITY_MODEL_OPTIONS
+    }
+    return availableAntigravityModels.map(model => ({
+      value: `antigravity/${model.id}`,
+      label: model.label || model.id,
+    }))
+  }, [availableAntigravityModels])
 
   const claudeModelOptions = useMemo(
     () =>
@@ -595,9 +630,12 @@ export function MagicModal() {
                 'commandcode/default')
               : backend === 'kimi'
                 ? (preferences?.selected_kimi_model ?? 'kimi/default')
-                : backend === 'grok'
-                  ? (preferences?.selected_grok_model ?? 'grok/grok-4.5')
-                  : (preferences?.selected_model ?? 'sonnet'))
+              : backend === 'grok'
+                  ? (preferences?.selected_grok_model ?? 'grok/grok-4.6')
+                  : backend === 'antigravity'
+                    ? (preferences?.selected_antigravity_model ??
+                      'antigravity/auto')
+                    : (preferences?.selected_model ?? 'sonnet'))
     const provider = resolveMagicPromptProvider(
       preferences?.magic_prompt_providers,
       providerKey,
@@ -628,9 +666,12 @@ export function MagicModal() {
                 'commandcode/default')
               : backend === 'kimi'
                 ? (preferences?.selected_kimi_model ?? 'kimi/default')
-                : backend === 'grok'
-                  ? (preferences?.selected_grok_model ?? 'grok/grok-4.5')
-                  : (preferences?.selected_model ?? 'sonnet'))
+              : backend === 'grok'
+                  ? (preferences?.selected_grok_model ?? 'grok/grok-4.6')
+                  : backend === 'antigravity'
+                    ? (preferences?.selected_antigravity_model ??
+                      'antigravity/auto')
+                    : (preferences?.selected_model ?? 'sonnet'))
     const provider = resolveMagicPromptProvider(
       preferences?.magic_prompt_providers,
       RESOLVE_CONFLICTS_PROVIDER_KEY,
@@ -686,281 +727,6 @@ export function MagicModal() {
       ? resolveDefaults.provider
       : null
 
-  /**
-   * Resolve the worktree to run a new prompt session in.
-   * Prefer store snapshots over React Query so prompt sessions still work when
-   * useWorktree() has not loaded yet (common right after opening Magic).
-   */
-  const resolvePromptSessionWorktree = useCallback(async (): Promise<{
-    worktreeId: string
-    worktreePath: string
-    projectId: string | null
-  } | null> => {
-    const projectsState = useProjectsStore.getState()
-    const chatState = useChatStore.getState()
-    const uiState = useUIStore.getState()
-
-    const worktreeId =
-      selectedWorktreeId ??
-      projectsState.selectedWorktreeId ??
-      chatState.activeWorktreeId ??
-      uiState.sessionChatModalWorktreeId
-
-    if (!worktreeId) return null
-
-    let worktreePath: string | null | undefined =
-      (worktree?.id === worktreeId ? worktree.path : null) ??
-      chatState.getWorktreePath(worktreeId) ??
-      (chatState.activeWorktreeId === worktreeId
-        ? chatState.activeWorktreePath
-        : null)
-
-    let projectId: string | null =
-      (worktree?.id === worktreeId ? worktree.project_id : null) ??
-      projectsState.selectedProjectId ??
-      selectedProjectId ??
-      null
-
-    if (!worktreePath) {
-      try {
-        const fetched = await invoke<{
-          id: string
-          path: string
-          project_id?: string
-        } | null>('get_worktree', { worktreeId })
-        if (fetched?.path) {
-          worktreePath = fetched.path
-          projectId = fetched.project_id ?? projectId
-          chatState.registerWorktreePath(worktreeId, fetched.path)
-        }
-      } catch {
-        // Fall through to null — caller shows a clear error toast
-      }
-    }
-
-    if (!worktreePath) return null
-
-    return { worktreeId, worktreePath, projectId }
-  }, [selectedProjectId, selectedWorktreeId, worktree])
-
-  const startPromptSession = useCallback(
-    async ({
-      sessionName,
-      backendKey,
-      modelKey,
-      providerKey,
-      modeKey,
-      effortKey,
-      prompt,
-      errorLabel,
-    }: {
-      sessionName: string
-      backendKey: 'final_review_backend'
-      modelKey: 'final_review_model'
-      providerKey: 'final_review_provider'
-      modeKey: 'final_review_mode'
-      effortKey: 'final_review_effort'
-      prompt: string
-      errorLabel: string
-    }) => {
-      const resolved = await resolvePromptSessionWorktree()
-      if (!resolved) {
-        toast.error(`Failed to start ${errorLabel}: No worktree selected`)
-        notify('No worktree selected', undefined, { type: 'error' })
-        return
-      }
-
-      const { worktreeId, worktreePath } = resolved
-
-      const defaultBackend =
-        project?.default_backend ?? preferences?.default_backend ?? 'claude'
-      const backend = (resolveMagicPromptBackend(
-        preferences?.magic_prompt_backends,
-        backendKey,
-        defaultBackend
-      ) ?? defaultBackend) as CliBackend
-      const backendDefaultModel = resolveDefaultModelForBackend(
-        backend,
-        preferences
-      )
-      const configuredModel = preferences?.magic_prompt_models?.[modelKey]
-      // Avoid mismatched pairs like Grok backend + Claude Opus model (common for
-      // newly-added magic prompts before prefs migration runs).
-      const model = (() => {
-        if (!configuredModel) return backendDefaultModel
-        const matchesBackend =
-          backend === 'claude'
-            ? !configuredModel.includes('/') &&
-              !configuredModel.startsWith('gpt-')
-            : backend === 'codex'
-              ? configuredModel.includes('codex') ||
-                configuredModel.startsWith('gpt-')
-              : backend === 'opencode'
-                ? configuredModel.startsWith('opencode/')
-                : backend === 'cursor'
-                  ? configuredModel.startsWith('cursor/')
-                  : backend === 'pi'
-                    ? configuredModel.startsWith('pi/')
-                    : backend === 'commandcode'
-                      ? configuredModel.startsWith('commandcode/')
-                      : backend === 'grok'
-                        ? configuredModel.startsWith('grok/')
-                        : backend === 'kimi'
-                          ? configuredModel.startsWith('kimi/')
-                          : true
-        return matchesBackend ? configuredModel : backendDefaultModel
-      })()
-      const provider =
-        backend === 'claude'
-          ? resolveMagicPromptProvider(
-              preferences?.magic_prompt_providers,
-              providerKey,
-              preferences?.default_provider
-            )
-          : null
-      const executionMode =
-        preferences?.magic_prompt_modes?.[modeKey] ??
-        DEFAULT_MAGIC_PROMPT_MODES[modeKey]
-
-      const loadingToastId = toast.loading(`Starting ${errorLabel}...`)
-
-      try {
-        // Resolve MCP the same way ChatWindow does so Jean MCP and other
-        // enabled servers are available on the first prompt-session turn.
-        const { mcpConfig, enabledServers } = await resolveMcpConfigForSend({
-          worktreePath,
-          backend,
-          projectEnabled: project?.enabled_mcp_servers,
-          globalEnabled: preferences?.default_enabled_mcp_servers,
-          knownServers:
-            project?.known_mcp_servers ?? preferences?.known_mcp_servers,
-        })
-
-        const session = await invoke<Session>('create_session', {
-          worktreeId,
-          worktreePath,
-          name: sessionName,
-          backend: backend !== 'claude' ? backend : undefined,
-        })
-        const store = useChatStore.getState()
-
-        store.registerWorktreePath(worktreeId, worktreePath)
-        store.setSelectedBackend(session.id, backend)
-        store.setSelectedModel(session.id, model)
-        store.setSelectedProvider(session.id, provider)
-        store.setActiveSession(worktreeId, session.id)
-        store.setExecutionMode(session.id, executionMode)
-        store.setExecutingMode(session.id, executionMode)
-        store.setLastSentMessage(session.id, prompt)
-        store.setError(session.id, null)
-        store.clearInputDraft(session.id)
-        store.setEnabledMcpServers(session.id, enabledServers)
-
-        // Prefer open-session-modal so the new session tab is selected even
-        // when a worktree chat modal is already open.
-        window.dispatchEvent(
-          new CustomEvent('open-session-modal', {
-            detail: {
-              sessionId: session.id,
-              worktreeId,
-              worktreePath,
-            },
-          })
-        )
-        window.dispatchEvent(
-          new CustomEvent('open-worktree-modal', {
-            detail: {
-              worktreeId,
-              worktreePath,
-            },
-          })
-        )
-
-        await Promise.all([
-          invoke('set_session_backend', {
-            worktreeId,
-            worktreePath,
-            sessionId: session.id,
-            backend,
-          }),
-          invoke('set_session_model', {
-            worktreeId,
-            worktreePath,
-            sessionId: session.id,
-            model,
-          }),
-          invoke('set_session_provider', {
-            worktreeId,
-            worktreePath,
-            sessionId: session.id,
-            provider,
-          }),
-          invoke('update_session_state', {
-            worktreeId,
-            worktreePath,
-            sessionId: session.id,
-            selectedExecutionMode: executionMode,
-            enabledMcpServers: enabledServers,
-          }),
-        ])
-
-        await invoke('send_chat_message', {
-          sessionId: session.id,
-          worktreeId,
-          worktreePath,
-          message: prompt,
-          model,
-          executionMode,
-          effortLevel:
-            preferences?.magic_prompt_efforts?.[effortKey] ?? undefined,
-          parallelExecutionPrompt:
-            preferences?.parallel_execution_prompt_enabled
-              ? (preferences.magic_prompts?.parallel_execution ??
-                DEFAULT_PARALLEL_EXECUTION_PROMPT)
-              : undefined,
-          backend: backend !== 'claude' ? backend : undefined,
-          customProfileName:
-            provider && provider !== '__anthropic__' ? provider : undefined,
-          chromeEnabled: preferences?.chrome_enabled ?? false,
-          aiLanguage: preferences?.ai_language,
-          mcpConfig,
-        })
-
-        queryClient.invalidateQueries({
-          queryKey: chatQueryKeys.sessions(worktreeId),
-        })
-        toast.success(`${sessionName} started`, { id: loadingToastId })
-      } catch (error) {
-        toast.error(`Failed to start ${errorLabel}: ${error}`, {
-          id: loadingToastId,
-        })
-      }
-    },
-    [
-      preferences,
-      project?.default_backend,
-      project?.enabled_mcp_servers,
-      project?.known_mcp_servers,
-      queryClient,
-      resolvePromptSessionWorktree,
-    ]
-  )
-
-  const startFinalReview = useCallback(async () => {
-    const prompt =
-      preferences?.magic_prompts?.final_review ?? DEFAULT_FINAL_REVIEW_PROMPT
-    await startPromptSession({
-      sessionName: 'Final review',
-      backendKey: 'final_review_backend',
-      modelKey: 'final_review_model',
-      providerKey: 'final_review_provider',
-      modeKey: 'final_review_mode',
-      effortKey: 'final_review_effort',
-      prompt,
-      errorLabel: 'final review',
-    })
-  }, [preferences?.magic_prompts?.final_review, startPromptSession])
-
   const investigateClaudeModelOptions = useMemo(
     () => getClaudeModelOptionsForProvider(investigateClaudeProvider),
     [getClaudeModelOptionsForProvider, investigateClaudeProvider]
@@ -981,11 +747,14 @@ export function MagicModal() {
           return grokModelOptions
         case 'kimi':
           return kimiModelOptions
+        case 'antigravity':
+          return antigravityModelOptions
         default:
           return investigateClaudeModelOptions
       }
     },
     [
+      antigravityModelOptions,
       grokModelOptions,
       investigateClaudeModelOptions,
       kimiModelOptions,
@@ -1020,6 +789,8 @@ export function MagicModal() {
         return 'Grok'
       case 'kimi':
         return 'Kimi Code'
+      case 'antigravity':
+        return 'Antigravity'
       default:
         return 'Claude'
     }
@@ -1067,11 +838,14 @@ export function MagicModal() {
           return grokModelOptions
         case 'kimi':
           return kimiModelOptions
+        case 'antigravity':
+          return antigravityModelOptions
         default:
           return resolveClaudeModelOptions
       }
     },
     [
+      antigravityModelOptions,
       grokModelOptions,
       kimiModelOptions,
       opencodeModelOptions,
@@ -1362,6 +1136,9 @@ export function MagicModal() {
                 opToast.error(
                   `No permission to push to PR #${worktree.pr_number}. Create a separate PR instead.`,
                   {
+                    duration: Infinity,
+                    description:
+                      result.output.trim() || 'The remote rejected the push.',
                     action: {
                       label: toastActionLabel('Open PR'),
                       onClick: () => executeGitDirectly('open-pr'),
@@ -2332,6 +2109,35 @@ ${resolveInstructions}`
     worktree?.project_id,
   ])
 
+  const handleUnlinkPr = useCallback(async () => {
+    if (!selectedWorktreeId || !worktree || !hasOpenPr) return
+
+    const prNumber = worktree.pr_number
+    setIsUnlinkingPr(true)
+    setLinkPrError(null)
+    try {
+      await clearWorktreePr(selectedWorktreeId)
+      queryClient.invalidateQueries({
+        queryKey: projectsQueryKeys.worktrees(worktree.project_id),
+      })
+      queryClient.invalidateQueries({
+        queryKey: [...projectsQueryKeys.all, 'worktree', selectedWorktreeId],
+      })
+      triggerImmediateGitPoll()
+      if (worktree.project_id) fetchWorktreesStatus(worktree.project_id)
+
+      toast.success(prNumber ? `Unlinked PR #${prNumber}` : 'Unlinked PR')
+      setLinkPrDialogOpen(false)
+      setLinkPrNumber('')
+    } catch (error) {
+      const message = `Failed to unlink PR: ${error}`
+      setLinkPrError(message)
+      toast.error(message)
+    } finally {
+      setIsUnlinkingPr(false)
+    }
+  }, [hasOpenPr, queryClient, selectedWorktreeId, worktree])
+
   const confirmRevertLastCommit = useCallback(() => {
     setRevertConfirmOpen(false)
     setMagicModalOpen(false)
@@ -2440,13 +2246,15 @@ ${resolveInstructions}`
       ) {
         const type: InvestigateType =
           option === 'investigate-issue'
-            ? 'issue'
+            ? hasIssueContexts
+              ? 'issue'
+              : 'sentry-issue'
             : option === 'investigate-pr'
               ? 'pr'
               : 'advisory'
         const hasContexts =
-          type === 'issue'
-            ? hasIssueContexts
+          type === 'issue' || type === 'sentry-issue'
+            ? hasIssueContexts || hasSentryContexts
             : type === 'pr'
               ? hasPrContexts
               : hasAdvisoryContexts
@@ -2626,7 +2434,6 @@ ${resolveInstructions}`
         open={reviewMethodDialogOpen}
         onOpenChange={setReviewMethodDialogOpen}
         onAiReview={() => executeGitDirectly('review', undefined, 'ai')}
-        onFinalReview={startFinalReview}
         onCodeRabbitCliReview={() =>
           executeGitDirectly('review', undefined, 'coderabbit-cli')
         }
@@ -2697,7 +2504,8 @@ ${resolveInstructions}`
                           (isOnCanvas &&
                             !CANVAS_ALLOWED_OPTIONS.has(option.id)) ||
                           (option.id === 'investigate-issue' &&
-                            !hasIssueContexts) ||
+                            !hasIssueContexts &&
+                            !hasSentryContexts) ||
                           (option.id === 'investigate-pr' && !hasPrContexts) ||
                           (option.id === 'investigate-advisory' &&
                             !hasAdvisoryContexts) ||
@@ -2769,7 +2577,7 @@ ${resolveInstructions}`
                     handleLinkPrSubmit()
                   }
                 }}
-                disabled={isDetectingLinkPr}
+                disabled={isDetectingLinkPr || isUnlinkingPr}
                 autoFocus
               />
               {isDetectingLinkPr && (
@@ -2792,24 +2600,37 @@ ${resolveInstructions}`
               </p>
             </div>
 
-            <div className="flex justify-end gap-2">
-              <Button
-                variant="outline"
-                onClick={() => setLinkPrDialogOpen(false)}
-                disabled={isLinkingPr || isDetectingLinkPr}
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleLinkPrSubmit}
-                disabled={isLinkingPr || isDetectingLinkPr}
-              >
-                {isDetectingLinkPr
-                  ? 'Checking…'
-                  : isLinkingPr
-                    ? 'Linking…'
-                    : 'Link PR'}
-              </Button>
+            <div className="flex justify-between gap-2">
+              <div>
+                {hasOpenPr && (
+                  <Button
+                    variant="destructive"
+                    onClick={handleUnlinkPr}
+                    disabled={isLinkingPr || isDetectingLinkPr || isUnlinkingPr}
+                  >
+                    {isUnlinkingPr ? 'Unlinking…' : 'Unlink PR'}
+                  </Button>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setLinkPrDialogOpen(false)}
+                  disabled={isLinkingPr || isDetectingLinkPr || isUnlinkingPr}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleLinkPrSubmit}
+                  disabled={isLinkingPr || isDetectingLinkPr || isUnlinkingPr}
+                >
+                  {isDetectingLinkPr
+                    ? 'Checking…'
+                    : isLinkingPr
+                      ? 'Linking…'
+                      : 'Link PR'}
+                </Button>
+              </div>
             </div>
           </div>
         </DialogContent>
@@ -2836,7 +2657,9 @@ ${resolveInstructions}`
                 ? 'PR'
                 : investigateType === 'advisory'
                   ? 'Advisory'
-                  : 'Issue'}
+                  : investigateType === 'sentry-issue'
+                    ? 'Sentry Issue'
+                    : 'Issue'}
             </DialogTitle>
           </DialogHeader>
 
@@ -2920,6 +2743,7 @@ ${resolveInstructions}`
                               'opencode',
                               'grok',
                               'kimi',
+                              'antigravity',
                             ].includes(backend)
                           ).length <= 1
                         }
@@ -2945,6 +2769,11 @@ ${resolveInstructions}`
                         {installedBackends.includes('kimi') && (
                           <SelectItem value="kimi">
                             <BackendLabel backend="kimi" />
+                          </SelectItem>
+                        )}
+                        {installedBackends.includes('antigravity') && (
+                          <SelectItem value="antigravity">
+                            <BackendLabel backend="antigravity" />
                           </SelectItem>
                         )}
                       </SelectContent>
@@ -3084,6 +2913,7 @@ ${resolveInstructions}`
                               'opencode',
                               'grok',
                               'kimi',
+                              'antigravity',
                             ].includes(backend)
                           ).length <= 1
                         }
@@ -3109,6 +2939,11 @@ ${resolveInstructions}`
                         {installedBackends.includes('kimi') && (
                           <SelectItem value="kimi">
                             <BackendLabel backend="kimi" />
+                          </SelectItem>
+                        )}
+                        {installedBackends.includes('antigravity') && (
+                          <SelectItem value="antigravity">
+                            <BackendLabel backend="antigravity" />
                           </SelectItem>
                         )}
                       </SelectContent>

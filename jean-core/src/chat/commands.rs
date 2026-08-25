@@ -64,7 +64,14 @@ const CODEX_DEFAULT_NOT_PLAN_MODE_PROMPT: &str = "\
 
 - Do NOT create git worktrees manually (`git worktree add`, Superpowers `using-git-worktrees`, or similar) unless the user explicitly asks for a new worktree.
 - If a new worktree is explicitly required, use Jean's worktree features through Jean MCP/tools, not raw git worktree commands.
-- If already in a Jean worktree or base/main workspace, continue in the current workspace.";
+- If already in a Jean worktree or base/main workspace, continue in the current workspace.
+
+## Jean Run Environment
+
+- When you need to test a running app (UI, HTTP, browser, smoke, e2e), call Jean MCP `get_run_environments` first (pass this worktreeId when known).
+- If an environment is running, test against its `url`, port, and startup command. Do not guess localhost ports or start a second dev server when Jean already has one.
+- If nothing is running and verification needs a live server, say so and use the returned/startup command rather than inventing a different command or port.
+- In how-to-test notes, include the exact URL/port you used.";
 const CODEX_DEFAULT_PLAN_MODE_PROMPT: &str = "\
 ## Plan Mode
 
@@ -286,6 +293,7 @@ pub(crate) fn resolve_default_backend(app: &AppHandle, worktree_id: Option<&str>
         "commandcode" => Backend::Commandcode,
         "grok" => Backend::Grok,
         "kimi" => Backend::Kimi,
+        "antigravity" => Backend::Antigravity,
         _ => Backend::Claude,
     };
 
@@ -308,6 +316,7 @@ pub(crate) fn resolve_default_backend(app: &AppHandle, worktree_id: Option<&str>
                         "commandcode" => Backend::Commandcode,
                         "grok" => Backend::Grok,
                         "kimi" => Backend::Kimi,
+                        "antigravity" => Backend::Antigravity,
                         "claude" => Backend::Claude,
                         _ => resolved,
                     };
@@ -334,6 +343,7 @@ pub(crate) fn resolve_magic_prompt_backend(
             "commandcode" => return Backend::Commandcode,
             "grok" => return Backend::Grok,
             "kimi" => return Backend::Kimi,
+            "antigravity" => return Backend::Antigravity,
             "codex" => return Backend::Codex,
             "claude" => return Backend::Claude,
             _ => {}
@@ -355,6 +365,8 @@ fn infer_backend_from_model(model: &str, fallback: Backend) -> Backend {
         Backend::Grok
     } else if model.starts_with("kimi/") {
         Backend::Kimi
+    } else if model.starts_with("antigravity/") {
+        Backend::Antigravity
     } else if crate::is_codex_model(model) {
         Backend::Codex
     } else {
@@ -422,6 +434,7 @@ fn default_model_for_backend(
         Backend::Commandcode => &preferences.selected_commandcode_model,
         Backend::Grok => &preferences.selected_grok_model,
         Backend::Kimi => &preferences.selected_kimi_model,
+        Backend::Antigravity => &preferences.selected_antigravity_model,
         Backend::Claude => &preferences.selected_model,
     };
 
@@ -473,6 +486,7 @@ fn build_kimi_system_prompt(
     worktree_id: &str,
     ai_language: Option<&str>,
     parallel_prompt: Option<&str>,
+    include_recap: bool,
 ) -> Option<String> {
     let mut parts = Vec::new();
     if let Some(language) = ai_language.map(str::trim).filter(|value| !value.is_empty()) {
@@ -530,7 +544,7 @@ fn build_kimi_system_prompt(
             gh_binary.display()
         ));
     }
-    if super::should_add_recap_instruction(app) {
+    if super::should_include_recap_instruction(app, include_recap) {
         parts.push(super::RECAP_INSTRUCTION.to_string());
     }
     (!parts.is_empty()).then(|| parts.join("\n\n"))
@@ -1006,6 +1020,7 @@ pub async fn create_session(
         Some("commandcode") => Backend::Commandcode,
         Some("grok") => Backend::Grok,
         Some("kimi") => Backend::Kimi,
+        Some("antigravity") => Backend::Antigravity,
         Some("claude") => Backend::Claude,
         _ => {
             // No explicit backend — check project default, then global preference
@@ -1025,6 +1040,8 @@ pub async fn create_session(
                     resolved = Backend::Grok;
                 } else if prefs.default_backend == "kimi" {
                     resolved = Backend::Kimi;
+                } else if prefs.default_backend == "antigravity" {
+                    resolved = Backend::Antigravity;
                 }
             }
             // Check project-level override
@@ -1047,6 +1064,7 @@ pub async fn create_session(
                             "commandcode" => Backend::Commandcode,
                             "grok" => Backend::Grok,
                             "kimi" => Backend::Kimi,
+                            "antigravity" => Backend::Antigravity,
                             "claude" => Backend::Claude,
                             _ => resolved,
                         };
@@ -1227,6 +1245,7 @@ async fn drain_backend_queue(
             request.chrome_enabled,
             request.custom_profile_name,
             request.backend,
+            None,
         )
         .await
         {
@@ -1935,6 +1954,14 @@ fn is_pending_blocking_tool_call(tc: &crate::chat::types::ToolCall) -> bool {
         tc.name.as_str(),
         "AskUserQuestion" | "ExitPlanMode" | "CodexPlan" | "question"
     ) && !is_unavailable_tool_error(tc.output.as_deref())
+}
+
+fn is_pending_blocking_tool_call_for_mode(
+    tc: &crate::chat::types::ToolCall,
+    execution_mode: Option<&str>,
+) -> bool {
+    is_pending_question_tool_call(tc)
+        || (execution_mode != Some("yolo") && is_pending_plan_tool_call(tc))
 }
 
 fn is_pending_question_tool_call(tc: &crate::chat::types::ToolCall) -> bool {
@@ -2764,6 +2791,7 @@ fn persist_salvaged_resume_id(session: &mut Session, backend: &Backend, sid: &st
         Backend::Commandcode => session.commandcode_session_id = Some(sid.to_string()),
         Backend::Grok => session.grok_session_id = Some(sid.to_string()),
         Backend::Kimi => session.kimi_session_id = Some(sid.to_string()),
+        Backend::Antigravity => session.antigravity_session_id = Some(sid.to_string()),
     }
 }
 
@@ -2795,6 +2823,7 @@ pub async fn send_chat_message(
     chrome_enabled: Option<bool>,
     custom_profile_name: Option<String>,
     backend: Option<String>,
+    include_recap: Option<bool>,
 ) -> Result<ChatMessage, String> {
     log::info!("[SendChat] ENTRY session={session_id} worktree={worktree_id} model={model:?} execution_mode={execution_mode:?}");
     log::trace!("Sending chat message for session: {session_id}, worktree: {worktree_id}, model: {model:?}, execution_mode: {execution_mode:?}, thinking: {thinking_level:?}, effort: {effort_level:?}, allowed_tools: {allowed_tools:?}");
@@ -3052,6 +3081,7 @@ pub async fn send_chat_message(
         Some("commandcode") => Backend::Commandcode,
         Some("grok") => Backend::Grok,
         Some("kimi") => Backend::Kimi,
+        Some("antigravity") => Backend::Antigravity,
         Some("claude") => Backend::Claude,
         _ => session_backend.clone(),
     };
@@ -3125,6 +3155,9 @@ pub async fn send_chat_message(
     let kimi_session_id = sessions
         .find_session(&session_id)
         .and_then(|s| s.kimi_session_id.clone());
+    let antigravity_session_id = sessions
+        .find_session(&session_id)
+        .and_then(|s| s.antigravity_session_id.clone());
     // Command Code has no native resume id; a non-empty sentinel marks that a
     // prior Command Code turn completed in this worktree, so the next run can
     // pass `-c` (cwd-scoped continue) to resume the conversation.
@@ -3270,6 +3303,12 @@ pub async fn send_chat_message(
     } else {
         kimi_session_id
     };
+    let antigravity_session_id = if clear_target_resume && effective_backend == Backend::Antigravity
+    {
+        None
+    } else {
+        antigravity_session_id
+    };
 
     // Cursor CLI doesn't support thinking/effort levels
     let run_thinking_level = if matches!(
@@ -3405,6 +3444,7 @@ pub async fn send_chat_message(
                     Backend::Commandcode => {}
                     Backend::Grok => {}
                     Backend::Kimi => {}
+                    Backend::Antigravity => {}
                 }
             }
         }
@@ -3457,6 +3497,7 @@ pub async fn send_chat_message(
     let thread_pi_session_id = pi_session_id.clone();
     let thread_grok_session_id = grok_session_id.clone();
     let thread_kimi_session_id = kimi_session_id.clone();
+    let thread_antigravity_session_id = antigravity_session_id.clone();
     let thread_commandcode_resume_id = commandcode_resume_id.clone();
     let thread_model = model.clone();
     let thread_execution_mode = execution_mode.clone();
@@ -3495,6 +3536,7 @@ pub async fn send_chat_message(
     };
     let thread_message = message_for_backend.clone();
     let thread_backend = effective_backend.clone();
+    let thread_include_recap = include_recap.unwrap_or(true);
     let thread_codex_search = codex_search_enabled;
     let thread_codex_multi_agent = codex_multi_agent_enabled;
     let thread_codex_max_threads = codex_max_agent_threads;
@@ -3575,6 +3617,7 @@ pub async fn send_chat_message(
                         thread_mcp_config.as_deref(),
                         chrome,
                         thread_custom_profile.as_deref(),
+                        thread_include_recap,
                         Some(make_pid_callback()),
                     ) {
                         Ok((pid, response)) => {
@@ -3832,7 +3875,7 @@ pub async fn send_chat_message(
                     }
 
                     // End-of-turn recap instruction (compact view surfaces this block)
-                    if super::should_add_recap_instruction(&thread_app) {
+                    if super::should_include_recap_instruction(&thread_app, thread_include_recap) {
                         system_prompt_parts.push(super::RECAP_INSTRUCTION.to_string());
                     }
 
@@ -4245,7 +4288,7 @@ pub async fn send_chat_message(
                     }
 
                     // End-of-turn recap instruction (compact view surfaces this block)
-                    if super::should_add_recap_instruction(&thread_app) {
+                    if super::should_include_recap_instruction(&thread_app, thread_include_recap) {
                         system_prompt_parts.push(super::RECAP_INSTRUCTION.to_string());
                     }
 
@@ -4595,7 +4638,7 @@ pub async fn send_chat_message(
                     }
 
                     // End-of-turn recap instruction (compact view surfaces this block)
-                    if super::should_add_recap_instruction(&thread_app) {
+                    if super::should_include_recap_instruction(&thread_app, thread_include_recap) {
                         parts.push(super::RECAP_INSTRUCTION.to_string());
                     }
 
@@ -4646,6 +4689,7 @@ pub async fn send_chat_message(
                         &thread_app,
                         &thread_session_id,
                         &thread_worktree_id,
+                        thread_include_recap,
                     );
                 match super::commandcode::execute_commandcode_headless(
                     &thread_app,
@@ -4778,7 +4822,7 @@ pub async fn send_chat_message(
                         }
                     }
 
-                    if super::should_add_recap_instruction(&thread_app) {
+                    if super::should_include_recap_instruction(&thread_app, thread_include_recap) {
                         parts.push(super::RECAP_INSTRUCTION.to_string());
                     }
 
@@ -4921,7 +4965,7 @@ pub async fn send_chat_message(
                         }
                     }
 
-                    if super::should_add_recap_instruction(&thread_app) {
+                    if super::should_include_recap_instruction(&thread_app, thread_include_recap) {
                         parts.push(super::RECAP_INSTRUCTION.to_string());
                     }
 
@@ -4989,6 +5033,7 @@ pub async fn send_chat_message(
                     &thread_worktree_id,
                     thread_ai_language.as_deref(),
                     thread_parallel_prompt.as_deref(),
+                    thread_include_recap,
                 );
                 let effort = thread_effort_level
                     .as_ref()
@@ -5019,6 +5064,50 @@ pub async fn send_chat_message(
                             error_emitted: false,
                             usage: response.usage,
                             backend: Backend::Kimi,
+                        },
+                    )),
+                    Err(error) => Err(error),
+                }
+            }
+            Backend::Antigravity => {
+                let system_prompt = build_kimi_system_prompt(
+                    &thread_app,
+                    &thread_worktree_id,
+                    thread_ai_language.as_deref(),
+                    thread_parallel_prompt.as_deref(),
+                    thread_include_recap,
+                );
+                let effort = thread_effort_level
+                    .as_ref()
+                    .and_then(|value| value.effort_value());
+                match super::antigravity::execute_antigravity(
+                    super::antigravity::AntigravityExecutionOptions {
+                        app: &thread_app,
+                        jean_session_id: &thread_session_id,
+                        worktree_id: &thread_worktree_id,
+                        working_dir: std::path::Path::new(&thread_working_dir),
+                        output_file: &thread_output_file,
+                        existing_antigravity_session_id: thread_antigravity_session_id.as_deref(),
+                        model: thread_model.as_deref(),
+                        execution_mode: thread_execution_mode.as_deref(),
+                        effort_level: effort,
+                        message: &thread_message,
+                        system_prompt: system_prompt.as_deref(),
+                        pid_callback: Some(make_pid_callback()),
+                    },
+                ) {
+                    Ok(response) => Ok((
+                        0,
+                        UnifiedResponse {
+                            content: response.content,
+                            resume_id: response.session_id,
+                            tool_calls: response.tool_calls,
+                            content_blocks: response.content_blocks,
+                            cancelled: response.cancelled,
+                            waiting_for_plan: false,
+                            error_emitted: false,
+                            usage: response.usage,
+                            backend: Backend::Antigravity,
                         },
                     )),
                     Err(error) => Err(error),
@@ -5331,6 +5420,7 @@ pub async fn send_chat_message(
             cancelled: true,
             plan_approved: false,
             model: None,
+            backend: None,
             execution_mode: None,
             thinking_level: None,
             effort_level: None,
@@ -5388,6 +5478,9 @@ pub async fn send_chat_message(
                         Backend::Kimi => {
                             session.kimi_session_id = Some(resume_id_for_log.clone());
                         }
+                        Backend::Antigravity => {
+                            session.antigravity_session_id = Some(resume_id_for_log.clone());
+                        }
                     }
                 }
                 // Remove user message (undo send) - allows frontend to restore to input field
@@ -5422,6 +5515,7 @@ pub async fn send_chat_message(
             cancelled: true,
             plan_approved: false,
             model: None,
+            backend: None,
             execution_mode: None,
             thinking_level: None,
             effort_level: None,
@@ -5436,7 +5530,7 @@ pub async fn send_chat_message(
     let has_blocking_tool = unified_response
         .tool_calls
         .iter()
-        .any(is_pending_blocking_tool_call);
+        .any(|tool| is_pending_blocking_tool_call_for_mode(tool, execution_mode.as_deref()));
     let has_question_tool = unified_response
         .tool_calls
         .iter()
@@ -5469,6 +5563,7 @@ pub async fn send_chat_message(
         cancelled: unified_response.cancelled,
         plan_approved: false,
         model: None,
+        backend: None,
         execution_mode: None,
         thinking_level: None,
         effort_level: None,
@@ -5536,6 +5631,9 @@ pub async fn send_chat_message(
                     }
                     Backend::Kimi => {
                         session.kimi_session_id = Some(resume_id_for_log.clone());
+                    }
+                    Backend::Antigravity => {
+                        session.antigravity_session_id = Some(resume_id_for_log.clone());
                     }
                 }
             }
@@ -5642,6 +5740,7 @@ pub async fn clear_session_history(
             session.commandcode_session_id = None;
             session.grok_session_id = None;
             session.kimi_session_id = None;
+            session.antigravity_session_id = None;
             session.selected_model = selected_model;
             session.selected_thinking_level = selected_thinking_level;
             session.selected_effort_level = selected_effort_level;
@@ -5761,6 +5860,7 @@ pub async fn set_session_backend(
                 "commandcode" => super::types::Backend::Commandcode,
                 "grok" => super::types::Backend::Grok,
                 "kimi" => super::types::Backend::Kimi,
+                "antigravity" => super::types::Backend::Antigravity,
                 _ => super::types::Backend::Claude,
             };
             log::trace!("Backend selection saved");
@@ -7624,6 +7724,19 @@ fn execute_summarization_claude(
             .map_err(|e| format!("Failed to parse Kimi summarization response: {e}"));
     }
 
+    if backend == super::types::Backend::Antigravity {
+        log::trace!("Executing one-shot Antigravity summarization");
+        let json_str = super::antigravity::execute_one_shot_antigravity(
+            app,
+            prompt,
+            model_str,
+            Some(CONTEXT_SUMMARY_SCHEMA),
+            working_dir,
+        )?;
+        return serde_json::from_str(&json_str)
+            .map_err(|e| format!("Failed to parse Antigravity summarization response: {e}"));
+    }
+
     let cli_path = resolve_cli_binary(app);
     if !cli_path.exists() {
         return Err("Claude CLI not installed".to_string());
@@ -8011,6 +8124,7 @@ pub async fn get_session_debug_info(
         commandcode_session_id: None,
         grok_session_id,
         kimi_session_id: session.and_then(|s| s.kimi_session_id.clone()),
+        antigravity_session_id: session.and_then(|s| s.antigravity_session_id.clone()),
         claude_jsonl_file,
         run_log_files,
         total_usage,
@@ -8267,6 +8381,87 @@ pub async fn resume_session(
                         })
                     {
                         log::warn!("Failed to persist recovered Pi session id: {e}");
+                    }
+                }
+            });
+            continue;
+        }
+
+        // === Antigravity detached headless resume path ===
+        if run.backend == Some(Backend::Antigravity) {
+            let Some(pid) = run.pid else { continue };
+            if !crate::platform::is_process_alive(pid) {
+                continue;
+            }
+            let output_file = session_dir.join(format!("{run_id}.jsonl"));
+            if let Some(metadata_run) = metadata.find_run_mut(&run_id) {
+                metadata_run.status = RunStatus::Running;
+            }
+            save_metadata(&app, &metadata)?;
+            if !super::registry::register_detached_process(session_id.clone(), pid) {
+                return Ok(ResumeSessionResponse {
+                    resumed: false,
+                    run_count: 0,
+                });
+            }
+            let app_clone = app.clone();
+            let session_id_clone = session_id.clone();
+            let worktree_id_clone = worktree_id.clone();
+            let run_id_clone = run_id.clone();
+            let execution_mode = run.execution_mode.clone();
+            tauri::async_runtime::spawn(async move {
+                let response = super::antigravity::tail_antigravity_output(
+                    &app_clone,
+                    &session_id_clone,
+                    &worktree_id_clone,
+                    &output_file,
+                    pid,
+                );
+                super::registry::unregister_process(&session_id_clone);
+                match response {
+                    Ok(response) => {
+                        let response = super::antigravity::finish_antigravity_response(
+                            &app_clone,
+                            &session_id_clone,
+                            &worktree_id_clone,
+                            execution_mode.as_deref(),
+                            response,
+                        );
+                        if let Ok(mut writer) =
+                            RunLogWriter::resume(&app_clone, &session_id_clone, &run_id_clone)
+                        {
+                            let assistant_message_id = uuid::Uuid::new_v4().to_string();
+                            let _ = writer.complete(
+                                &assistant_message_id,
+                                None,
+                                response.usage.clone(),
+                            );
+                        }
+                        if !response.session_id.is_empty() {
+                            let _ = with_existing_metadata_mut(
+                                &app_clone,
+                                &session_id_clone,
+                                |metadata| {
+                                    metadata.antigravity_session_id =
+                                        Some(response.session_id.clone());
+                                    if let Some(run) = metadata.find_run_mut(&run_id_clone) {
+                                        run.antigravity_session_id =
+                                            Some(response.session_id.clone());
+                                        run.usage = response.usage.clone();
+                                    }
+                                },
+                            );
+                        }
+                    }
+                    Err(error) => {
+                        log::error!(
+                            "Resume Antigravity tail failed for run {run_id_clone}: {error}"
+                        );
+                        if let Ok(mut writer) =
+                            RunLogWriter::resume(&app_clone, &session_id_clone, &run_id_clone)
+                        {
+                            let _ = writer.crash();
+                        }
                     }
                 }
             });
@@ -8708,6 +8903,7 @@ pub struct McpHealthResult {
 /// - Cursor:   ~/.cursor/mcp.json (user) + <worktree>/.cursor/mcp.json (project)
 /// - Kimi:     ~/.kimi-code/mcp.json (user) + <worktree>/.kimi-code/mcp.json (project)
 /// - Grok:     ~/.grok/config.toml + project .grok/config.toml (+ Claude/Cursor/.mcp.json compat)
+/// - Antigravity: ~/.gemini/config/mcp_config.json + <worktree>/.agents/mcp_config.json
 pub async fn get_mcp_servers(
     backend: Option<String>,
     worktree_path: Option<String>,
@@ -8718,6 +8914,7 @@ pub async fn get_mcp_servers(
         Some("opencode") => crate::opencode_cli::mcp::get_mcp_servers(wt),
         Some("cursor") => crate::cursor_cli::mcp::get_mcp_servers(wt),
         Some("kimi") => crate::kimi_cli::mcp::get_mcp_servers(wt),
+        Some("antigravity") => crate::antigravity_cli::mcp::get_mcp_servers(wt),
         Some("grok") => crate::grok_cli::mcp::get_mcp_servers(wt),
         _ => crate::claude_cli::mcp::get_mcp_servers(wt),
     };
@@ -8775,6 +8972,7 @@ fn parse_mcp_list_output(output: &str) -> std::collections::HashMap<String, McpH
 /// - OpenCode: `opencode mcp list` (text output)
 /// - Cursor:   `cursor-agent mcp list` (text output)
 /// - Grok:     `grok mcp doctor --json`
+/// - Antigravity: configured servers (the headless CLI has no MCP health command)
 pub async fn check_mcp_health(
     app: AppHandle,
     backend: Option<String>,
@@ -8790,6 +8988,7 @@ pub async fn check_mcp_health(
                 .map(|server| (server.name, McpHealthStatus::Unknown))
                 .collect(),
         }),
+        Some("antigravity") => check_mcp_health_antigravity(&app, worktree_path.as_deref()),
         Some("grok") => {
             let path = worktree_path.as_deref().map(std::path::Path::new);
             let statuses = crate::grok_cli::mcp::check_mcp_health(&app, path)?;
@@ -8797,6 +8996,26 @@ pub async fn check_mcp_health(
         }
         _ => check_mcp_health_claude(&app),
     }
+}
+
+fn check_mcp_health_antigravity(
+    _app: &AppHandle,
+    worktree_path: Option<&str>,
+) -> Result<McpHealthResult, String> {
+    let statuses = crate::antigravity_cli::mcp::get_mcp_servers(worktree_path)
+        .into_iter()
+        .map(|server| {
+            (
+                server.name,
+                if server.disabled {
+                    McpHealthStatus::Disabled
+                } else {
+                    McpHealthStatus::Unknown
+                },
+            )
+        })
+        .collect();
+    Ok(McpHealthResult { statuses })
 }
 
 fn check_mcp_health_claude(app: &AppHandle) -> Result<McpHealthResult, String> {
@@ -8938,9 +9157,7 @@ pub fn approve_codex_command(
 /// commands often only allow `accept` + `cancel`). Jean still lets the user
 /// promote the session to YOLO; the frontend then sends `decision: "accept"`
 /// plus `promoteToYolo: true` so residual prompts are auto-accepted (#626).
-pub(crate) fn prepare_codex_command_approval_response(
-    response: &mut serde_json::Value,
-) -> bool {
+pub(crate) fn prepare_codex_command_approval_response(response: &mut serde_json::Value) -> bool {
     let promote_to_yolo = response
         .as_object_mut()
         .and_then(|obj| {
@@ -9118,6 +9335,28 @@ pub async fn remove_queued_message(
 /// Update a specific queued message's text by its `id` field.
 /// Returns `false` when the message is no longer queued.
 /// Holds the metadata lock across the entire read-modify-write to prevent TOCTOU races.
+fn update_queued_message_text(
+    queued_messages: &mut [serde_json::Value],
+    message_id: &str,
+    message: &str,
+) -> bool {
+    let Some(queued) = queued_messages
+        .iter_mut()
+        .find(|queued| queued.get("id").and_then(|value| value.as_str()) == Some(message_id))
+    else {
+        return false;
+    };
+
+    let Some(queued) = queued.as_object_mut() else {
+        return false;
+    };
+    queued.insert(
+        "message".to_string(),
+        serde_json::Value::String(message.to_string()),
+    );
+    true
+}
+
 pub async fn update_queued_message(
     app: AppHandle,
     _worktree_id: String,
@@ -9127,25 +9366,9 @@ pub async fn update_queued_message(
     message: String,
 ) -> Result<bool, String> {
     let (updated, queue) = with_existing_metadata_mut(&app, &session_id, |metadata| {
-        let Some(idx) = metadata
-            .queued_messages
-            .iter()
-            .position(|m| m.get("id").and_then(|v| v.as_str()) == Some(message_id.as_str()))
-        else {
-            return (false, metadata.queued_messages.clone());
-        };
-
-        if queued_message_supports_any_steering(&metadata.queued_messages[idx]) {
-            return (false, metadata.queued_messages.clone());
-        }
-
-        let queued = &mut metadata.queued_messages[idx];
-        if let Some(obj) = queued.as_object_mut() {
-            obj.insert("message".to_string(), serde_json::Value::String(message));
-            return (true, metadata.queued_messages.clone());
-        }
-
-        (false, metadata.queued_messages.clone())
+        let updated =
+            update_queued_message_text(&mut metadata.queued_messages, &message_id, &message);
+        (updated, metadata.queued_messages.clone())
     })?;
 
     if updated {
@@ -10159,10 +10382,7 @@ mod tests {
 
     #[tokio::test]
     async fn read_file_base64_encodes_bytes_outside_project_roots() {
-        let dir = std::env::temp_dir().join(format!(
-            "jean-read-file-base64-{}",
-            Uuid::new_v4()
-        ));
+        let dir = std::env::temp_dir().join(format!("jean-read-file-base64-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("login.png");
         // Minimal valid-looking PNG header bytes (not a full image)
@@ -10188,7 +10408,10 @@ mod tests {
         assert!(prepare_codex_command_approval_response(&mut response));
         // Jean-only flag must be stripped before forwarding to Codex.
         assert!(response.get("promoteToYolo").is_none());
-        assert_eq!(response.get("decision").and_then(|d| d.as_str()), Some("accept"));
+        assert_eq!(
+            response.get("decision").and_then(|d| d.as_str()),
+            Some("accept")
+        );
     }
 
     #[test]
@@ -10307,6 +10530,20 @@ mod tests {
         };
 
         assert!(!is_pending_blocking_tool_call(&tool));
+    }
+
+    #[test]
+    fn yolo_exit_plan_mode_is_not_pending_approval() {
+        let tool = ToolCall {
+            id: "toolu_exit_plan".to_string(),
+            name: "ExitPlanMode".to_string(),
+            input: serde_json::json!({}),
+            output: None,
+            parent_tool_use_id: None,
+        };
+
+        assert!(!is_pending_blocking_tool_call_for_mode(&tool, Some("yolo")));
+        assert!(is_pending_blocking_tool_call_for_mode(&tool, Some("build")));
     }
 
     #[test]
@@ -10505,6 +10742,18 @@ mod tests {
             &grok_with_image,
             "grok"
         ));
+    }
+
+    #[test]
+    fn queued_message_text_edit_updates_steerable_backends() {
+        let mut queue = vec![serde_json::json!({
+            "id": "m1",
+            "message": "original",
+            "backend": "codex",
+        })];
+
+        assert!(update_queued_message_text(&mut queue, "m1", "edited"));
+        assert_eq!(queue[0]["message"], "edited");
     }
 
     #[test]
@@ -10725,6 +10974,9 @@ mod tests {
         assert!(build_prompt.contains("Jean Worktree Policy"));
         assert!(build_prompt.contains("Do NOT create git worktrees manually"));
         assert!(build_prompt.contains("Jean MCP/tools"));
+        assert!(build_prompt.contains("Jean Run Environment"));
+        assert!(build_prompt.contains("get_run_environments"));
+        assert!(build_prompt.contains("test against its `url`, port, and startup command"));
         assert!(build_prompt.contains("VERY IMPORTANT: Keep Code Simple"));
         assert!(build_prompt.contains("Always implement the simplest maintainable solution"));
         assert!(build_prompt.contains("Clickable References"));
@@ -10735,6 +10987,8 @@ mod tests {
         assert!(!yolo_prompt.contains("<proposed_plan>"));
         assert!(!yolo_prompt.contains("CodexPlan"));
         assert!(yolo_prompt.contains("## Not Plan Mode"));
+        assert!(yolo_prompt.contains("Jean Run Environment"));
+        assert!(yolo_prompt.contains("get_run_environments"));
         assert!(yolo_prompt.contains("VERY IMPORTANT: Keep Code Simple"));
         assert!(yolo_prompt.contains("Clickable References"));
     }

@@ -10,6 +10,9 @@ let preferencesMock = { ...defaultPreferences }
 let availableGrokModelsMock:
   | { id: string; label: string; isDefault: boolean }[]
   | undefined
+let availableAntigravityModelsMock:
+  | { id: string; label: string; isDefault?: boolean }[]
+  | undefined
 
 vi.mock('@/services/preferences', () => ({
   usePreferences: () => ({
@@ -25,7 +28,6 @@ vi.mock('@/services/preferences', () => ({
         investigate_sentry_issue_mode: 'plan',
         code_review_fix_mode: 'plan',
         review_comments_mode: 'plan',
-        final_review_mode: 'yolo',
         resolve_conflicts_mode: 'yolo',
       },
     },
@@ -55,6 +57,12 @@ vi.mock('@/services/pi-cli', () => ({
 
 vi.mock('@/services/grok-cli', () => ({
   useAvailableGrokModels: () => ({ data: availableGrokModelsMock }),
+}))
+
+vi.mock('@/services/antigravity-cli', () => ({
+  useAvailableAntigravityModels: () => ({
+    data: availableAntigravityModelsMock,
+  }),
 }))
 
 vi.mock('@/services/model-catalog', () => ({
@@ -101,6 +109,7 @@ beforeEach(() => {
   installedBackendsMock = ['claude', 'codex']
   preferencesMock = { ...defaultPreferences }
   availableGrokModelsMock = undefined
+  availableAntigravityModelsMock = undefined
   globalThis.ResizeObserver = ResizeObserverMock as never
   HTMLElement.prototype.scrollIntoView = vi.fn()
   HTMLElement.prototype.hasPointerCapture = vi.fn()
@@ -108,6 +117,22 @@ beforeEach(() => {
 })
 
 describe('MagicPromptsPane', () => {
+  it('provides smoke test prompt, backend, model, and mode settings', async () => {
+    const user = userEvent.setup()
+    render(<MagicPromptsPane />)
+
+    await user.click(screen.getByRole('button', { name: 'Smoke Test' }))
+
+    expect(
+      (screen.getByRole('textbox') as HTMLTextAreaElement).value
+    ).toContain('start the development server')
+    expect(screen.getByRole('combobox', { name: 'Backend' })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Model' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('combobox', { name: 'Default mode' })
+    ).toBeInTheDocument()
+  })
+
   it('lets chat-style magic prompts choose plan or yolo as their default mode', async () => {
     const user = userEvent.setup()
     render(<MagicPromptsPane />)
@@ -152,24 +177,6 @@ describe('MagicPromptsPane', () => {
     expect(screen.getByText('{sentryContext}')).toBeInTheDocument()
   })
 
-  it('provides dedicated Final Review settings', async () => {
-    const user = userEvent.setup()
-    render(<MagicPromptsPane />)
-
-    await user.click(screen.getByRole('button', { name: 'Final Review' }))
-
-    expect(
-      screen.getByRole('combobox', { name: 'Backend' })
-    ).toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: 'Model' })).toBeInTheDocument()
-    expect(
-      screen.getByRole('combobox', { name: 'Default mode' })
-    ).toHaveTextContent('Yolo')
-    expect(
-      screen.getByDisplayValue(/final pre-merge audit/i)
-    ).toBeInTheDocument()
-  })
-
   it('uses the catalog Claude models for magic prompt model choices', async () => {
     const user = userEvent.setup()
     render(<MagicPromptsPane />)
@@ -191,6 +198,28 @@ describe('MagicPromptsPane', () => {
       screen.getByRole('option', { name: 'Command Code' })
     ).toBeInTheDocument()
     expect(screen.getByRole('option', { name: 'Grok' })).toBeInTheDocument()
+  })
+
+  it('lets magic prompts choose the Antigravity backend when installed', async () => {
+    installedBackendsMock = ['claude', 'antigravity']
+    const user = userEvent.setup()
+    render(<MagicPromptsPane />)
+
+    await user.click(screen.getByRole('combobox', { name: 'Backend' }))
+
+    expect(
+      screen.getByRole('option', { name: /Antigravity/ })
+    ).toBeInTheDocument()
+  })
+
+  it('hides the Antigravity backend option when not installed', async () => {
+    installedBackendsMock = ['claude', 'codex']
+    const user = userEvent.setup()
+    render(<MagicPromptsPane />)
+
+    await user.click(screen.getByRole('combobox', { name: 'Backend' }))
+
+    expect(screen.queryByRole('option', { name: /Antigravity/ })).toBeNull()
   })
 
   it('lists Codex second in the magic prompt backend menu', async () => {
@@ -237,6 +266,34 @@ describe('MagicPromptsPane', () => {
 
     expect(
       screen.getByRole('option', { name: /Grok 4\.5/ })
+    ).toBeInTheDocument()
+    expect(screen.queryByText('No models found.')).toBeNull()
+  })
+
+  it('shows the available Antigravity models when Antigravity is selected', async () => {
+    installedBackendsMock = ['claude', 'antigravity']
+    availableAntigravityModelsMock = [
+      { id: 'auto', label: 'Auto', isDefault: true },
+      { id: 'gemini-3.1-pro-high', label: 'Gemini 3.1 Pro (High)' },
+    ]
+    preferencesMock = {
+      ...defaultPreferences,
+      magic_prompt_backends: {
+        ...defaultPreferences.magic_prompt_backends,
+        investigate_issue_backend: 'antigravity',
+      },
+      magic_prompt_models: {
+        ...defaultPreferences.magic_prompt_models,
+        investigate_issue_model: 'antigravity/auto',
+      },
+    }
+    const user = userEvent.setup()
+    render(<MagicPromptsPane />)
+
+    await user.click(screen.getByRole('combobox', { name: 'Model' }))
+
+    expect(
+      screen.getByRole('option', { name: /Gemini 3\.1 Pro/ })
     ).toBeInTheDocument()
     expect(screen.queryByText('No models found.')).toBeNull()
   })
@@ -443,7 +500,7 @@ describe('MagicPromptsPane', () => {
     expect(mutateMock).toHaveBeenCalledWith(
       expect.objectContaining({
         magic_prompt_models: expect.objectContaining({
-          investigate_issue_model: 'grok/grok-4.5',
+          investigate_issue_model: 'grok/grok-4.6',
         }),
         magic_prompt_backends: expect.objectContaining({
           investigate_issue_backend: 'grok',
@@ -459,6 +516,37 @@ describe('MagicPromptsPane', () => {
           code_review_fix_mode: 'plan',
           review_comments_mode: 'plan',
         }),
+      })
+    )
+  })
+
+  it('applies Antigravity defaults from the preset menu', async () => {
+    installedBackendsMock = ['claude', 'codex', 'antigravity']
+    const user = userEvent.setup()
+    render(<MagicPromptsPane />)
+
+    await user.click(screen.getByRole('button', { name: 'Apply preset' }))
+    await user.click(
+      screen.getByRole('menuitem', { name: 'Antigravity Defaults' })
+    )
+
+    expect(mutateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        magic_prompt_models: expect.objectContaining({
+          investigate_issue_model: 'antigravity/auto',
+        }),
+        magic_prompt_backends: expect.objectContaining({
+          investigate_issue_backend: 'antigravity',
+        }),
+        magic_prompt_efforts: expect.objectContaining({
+          investigate_issue_effort: 'adaptive',
+        }),
+        magic_code_review_configs: [
+          expect.objectContaining({
+            backend: 'antigravity',
+            model: 'antigravity/auto',
+          }),
+        ],
       })
     )
   })

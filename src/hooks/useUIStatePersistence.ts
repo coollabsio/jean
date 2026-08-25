@@ -131,6 +131,7 @@ export function useUIStatePersistence() {
       inputDrafts,
       pendingImages,
       pendingTextFiles,
+      dismissedSetupScripts,
       reviewSidebarVisible,
       lastOpenedPerProject,
     } = useChatStore.getState()
@@ -209,6 +210,7 @@ export function useUIStatePersistence() {
       input_drafts: inputDrafts,
       pending_images: serializePendingImages(pendingImages),
       pending_text_files: serializePendingTextFiles(pendingTextFiles),
+      dismissed_setup_scripts: Object.keys(dismissedSetupScripts),
       // Review sidebar visibility
       review_sidebar_visible: reviewSidebarVisible,
       // Modal terminal drawer state
@@ -429,6 +431,16 @@ export function useUIStatePersistence() {
         count: Object.keys(inputDrafts).length,
       })
       useChatStore.setState({ inputDrafts })
+    }
+
+    const dismissedSetupScripts = Object.fromEntries(
+      (uiState.dismissed_setup_scripts ?? []).map(worktreeId => [
+        worktreeId,
+        true,
+      ])
+    )
+    if (Object.keys(dismissedSetupScripts).length > 0) {
+      useChatStore.setState({ dismissedSetupScripts })
     }
 
     // Restore unsent image attachments (files already on disk)
@@ -1063,6 +1075,8 @@ export function useUIStatePersistence() {
     let prevInputDrafts = useChatStore.getState().inputDrafts
     let prevPendingImages = useChatStore.getState().pendingImages
     let prevPendingTextFiles = useChatStore.getState().pendingTextFiles
+    let prevDismissedSetupScripts =
+      useChatStore.getState().dismissedSetupScripts
     let prevReviewSidebarVisible = useChatStore.getState().reviewSidebarVisible
     let prevLastOpenedPerProject = useChatStore.getState().lastOpenedPerProject
     let prevTerminalInstances = useTerminalStore.getState().terminals
@@ -1184,6 +1198,8 @@ export function useUIStatePersistence() {
       const pendingImagesChanged = state.pendingImages !== prevPendingImages
       const pendingTextFilesChanged =
         state.pendingTextFiles !== prevPendingTextFiles
+      const dismissedSetupScriptsChanged =
+        state.dismissedSetupScripts !== prevDismissedSetupScripts
       const reviewSidebarChanged =
         state.reviewSidebarVisible !== prevReviewSidebarVisible
       const lastOpenedChanged =
@@ -1195,6 +1211,7 @@ export function useUIStatePersistence() {
         inputDraftsChanged ||
         pendingImagesChanged ||
         pendingTextFilesChanged ||
+        dismissedSetupScriptsChanged ||
         reviewSidebarChanged ||
         lastOpenedChanged
       ) {
@@ -1205,6 +1222,7 @@ export function useUIStatePersistence() {
         prevInputDrafts = state.inputDrafts
         prevPendingImages = state.pendingImages
         prevPendingTextFiles = state.pendingTextFiles
+        prevDismissedSetupScripts = state.dismissedSetupScripts
         prevReviewSidebarVisible = state.reviewSidebarVisible
         prevLastOpenedPerProject = state.lastOpenedPerProject
         const currentState = getCurrentUIState()

@@ -131,6 +131,16 @@ pub async fn dispatch_command(
             let result = crate::load_preferences(app.clone()).await?;
             to_value(result)
         }
+        "get_server_preferences" => to_value(crate::get_server_preferences(app.clone()).await?),
+        "update_server_preferences" => {
+            let patch: Value = from_field(&args, "patch")?;
+            let expected_revision: String = field(&args, "expectedRevision", "expected_revision")?;
+            let result =
+                crate::update_server_preferences(app.clone(), patch, expected_revision).await?;
+            emit_cache_invalidation(app, &["preferences", "server-preferences"]);
+            to_value(result)
+        }
+        "get_server_capabilities" => to_value(crate::get_server_capabilities().await?),
         "save_preferences" => {
             let preferences = from_field(&args, "preferences")?;
             crate::save_preferences(app.clone(), preferences).await?;
@@ -1376,6 +1386,7 @@ pub async fn dispatch_command(
             let custom_profile_name: Option<String> =
                 field_opt(&args, "customProfileName", "custom_profile_name")?;
             let backend: Option<String> = field_opt(&args, "backend", "backend")?;
+            let include_recap: Option<bool> = field_opt(&args, "includeRecap", "include_recap")?;
             let result = crate::chat::send_chat_message(
                 app.clone(),
                 session_id,
@@ -1393,6 +1404,7 @@ pub async fn dispatch_command(
                 chrome_enabled,
                 custom_profile_name,
                 backend,
+                include_recap,
             )
             .await?;
             to_value(result)
@@ -2083,7 +2095,7 @@ pub async fn dispatch_command(
         }
         "get_run_scripts" => {
             let parsed = parse_worktree_path_args(&args)?;
-            let result = crate::terminal::get_run_scripts(parsed.worktree_path).await;
+            let result = crate::terminal::get_run_scripts(app.clone(), parsed.worktree_path).await;
             to_value(result)
         }
         "get_package_scripts" => {
@@ -2093,11 +2105,18 @@ pub async fn dispatch_command(
         }
         "get_ports" => {
             let parsed = parse_worktree_path_args(&args)?;
-            let result = crate::terminal::get_ports(parsed.worktree_path).await;
+            let result = crate::terminal::get_ports(app.clone(), parsed.worktree_path).await;
             to_value(result)
         }
         "get_terminal_listening_ports" => {
             let result = crate::terminal::get_terminal_listening_ports().await;
+            to_value(result)
+        }
+        "get_run_environments" => {
+            let worktree_id: Option<String> = field_opt(&args, "worktreeId", "worktree_id")?;
+            let project_id: Option<String> = field_opt(&args, "projectId", "project_id")?;
+            let result =
+                crate::terminal::get_run_environments(app.clone(), worktree_id, project_id).await?;
             to_value(result)
         }
 
@@ -2497,6 +2516,7 @@ pub async fn dispatch_command(
             let result = crate::cursor_cli::get_cursor_install_command(app.clone()).await?;
             to_value(result)
         }
+        "check_system_prerequisites" => to_value(crate::check_system_prerequisites()),
         "check_grok_cli_installed" => {
             let result = crate::grok_cli::check_grok_cli_installed(app.clone()).await?;
             to_value(result)
@@ -2579,6 +2599,48 @@ pub async fn dispatch_command(
         }
         "login_kimi_cli_device" => {
             crate::kimi_cli::login_kimi_cli_device(app.clone()).await?;
+            Ok(Value::Null)
+        }
+        "check_antigravity_cli_installed" => {
+            to_value(crate::antigravity_cli::check_antigravity_cli_installed(app.clone()).await?)
+        }
+        "detect_antigravity_in_path" => {
+            to_value(crate::antigravity_cli::detect_antigravity_in_path(app.clone()).await?)
+        }
+        "check_antigravity_cli_auth" => {
+            to_value(crate::antigravity_cli::check_antigravity_cli_auth(app.clone()).await?)
+        }
+        "list_antigravity_models" => {
+            to_value(crate::antigravity_cli::list_antigravity_models(app.clone()).await?)
+        }
+        "get_available_antigravity_versions" => {
+            to_value(crate::antigravity_cli::get_available_antigravity_versions(app.clone()).await?)
+        }
+        "check_antigravity_cli_version_exists" => {
+            let version: String = from_field(&args, "version")?;
+            to_value(
+                crate::antigravity_cli::check_antigravity_cli_version_exists(app.clone(), version)
+                    .await?,
+            )
+        }
+        "get_antigravity_install_command" => {
+            to_value(crate::antigravity_cli::get_antigravity_install_command(app.clone()).await?)
+        }
+        "install_antigravity_cli" => {
+            let version: Option<String> = from_field_opt(&args, "version")?;
+            crate::antigravity_cli::install_antigravity_cli(app.clone(), version).await?;
+            Ok(Value::Null)
+        }
+        "uninstall_antigravity_cli" => {
+            crate::antigravity_cli::uninstall_antigravity_cli(app.clone()).await?;
+            Ok(Value::Null)
+        }
+        "update_antigravity_cli" => {
+            crate::antigravity_cli::update_antigravity_cli(app.clone()).await?;
+            Ok(Value::Null)
+        }
+        "login_antigravity_cli_device" => {
+            crate::antigravity_cli::login_antigravity_cli_device(app.clone()).await?;
             Ok(Value::Null)
         }
         "check_pi_cli_installed" => {
@@ -2772,7 +2834,8 @@ pub async fn dispatch_command(
         }
         "install_agent_browser_mcp" => {
             let backends: Option<Vec<String>> = from_field_opt(&args, "backends")?;
-            let result = crate::agent_browser::install_agent_browser_mcp(app.clone(), backends).await?;
+            let result =
+                crate::agent_browser::install_agent_browser_mcp(app.clone(), backends).await?;
             emit_cache_invalidation(app, &["mcp", "agent-browser", "preferences"]);
             to_value(result)
         }
@@ -2822,6 +2885,11 @@ pub async fn dispatch_command(
             let version: Option<String> = from_field_opt(&args, "version")?;
             crate::codex_cli::install_codex_cli(app.clone(), version).await?;
             Ok(Value::Null)
+        }
+        "install_missing_codex_code_mode_host" => {
+            let installed =
+                crate::codex_cli::install_missing_codex_code_mode_host(app.clone()).await?;
+            to_value(installed)
         }
         "uninstall_codex_cli" => {
             crate::codex_cli::uninstall_codex_cli(app.clone()).await?;
@@ -3592,6 +3660,32 @@ pub async fn dispatch_command(
             )
             .await?;
             to_value(result)
+        }
+        "load_sentry_issue_context" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let issue_id: String = field(&args, "issueId", "issue_id")?;
+            let result = crate::projects::load_sentry_issue_context(
+                app.clone(),
+                session_id,
+                project_id,
+                issue_id,
+            )
+            .await?;
+            to_value(result)
+        }
+        "remove_sentry_issue_context" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let issue_id: String = field(&args, "issueId", "issue_id")?;
+            crate::projects::remove_sentry_issue_context(
+                app.clone(),
+                session_id,
+                project_id,
+                issue_id,
+            )
+            .await?;
+            Ok(Value::Null)
         }
         "remove_linear_issue_context" => {
             let session_id: String = field(&args, "sessionId", "session_id")?;

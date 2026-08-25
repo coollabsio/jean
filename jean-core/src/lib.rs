@@ -32,10 +32,12 @@ pub use runtime::*;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod agent_browser;
+mod antigravity_cli;
 mod auto_fix;
 mod background_tasks;
 mod chat;
@@ -58,11 +60,13 @@ mod opencode_server;
 mod opinionated;
 mod pi_cli;
 mod platform;
+mod prerequisites;
 mod projects;
 mod server_update;
 mod terminal;
 mod version;
 
+pub use prerequisites::*;
 pub use version::{app_version, set_app_version};
 
 // Desktop-only open helpers (native Tauri commands delegate here so editor
@@ -213,6 +217,8 @@ pub struct AppPreferences {
     pub compact_chat_view_enabled: bool, // Collapse intermediate tool calls into single ticker line
     #[serde(default = "default_auto_recaps_enabled")]
     pub auto_recaps_enabled: bool, // Ask agents to end multi-step turns with a recap block
+    #[serde(default = "default_keep_ai_servers_warm")]
+    pub keep_ai_servers_warm: bool, // Keep Codex/OpenCode servers alive briefly after a request
     #[serde(default)]
     pub magic_prompts: MagicPrompts, // Customizable prompts for AI-powered features
     #[serde(default)]
@@ -332,6 +338,8 @@ pub struct AppPreferences {
     pub selected_grok_model: String, // Default Grok model
     #[serde(default = "default_kimi_model")]
     pub selected_kimi_model: String, // Default Kimi Code model
+    #[serde(default = "default_antigravity_model", alias = "selected_gemini_model")]
+    pub selected_antigravity_model: String, // Default Antigravity CLI model
     #[serde(default = "default_codex_reasoning_effort")]
     pub default_codex_reasoning_effort: String, // Codex reasoning effort: low, medium, high, xhigh
     #[serde(default = "default_codex_model_verbosity")]
@@ -352,6 +360,8 @@ pub struct AppPreferences {
     pub grok_auto_steer_enabled: bool, // Steer prompts into a running Grok turn instead of queueing (default: true)
     #[serde(default)]
     pub kimi_auto_steer_enabled: bool,
+    #[serde(default, alias = "gemini_auto_steer_enabled")]
+    pub antigravity_auto_steer_enabled: bool,
     #[serde(default = "default_codex_max_agent_threads")]
     pub codex_max_agent_threads: u32, // Max concurrent agent threads (1-8)
     #[serde(default = "default_restore_last_session")]
@@ -388,6 +398,8 @@ pub struct AppPreferences {
     pub grok_cli_source: String, // Grok CLI source: "jean" (managed) or "path" (system PATH)
     #[serde(default = "default_cli_source")]
     pub kimi_cli_source: String, // Kimi Code CLI source: "jean" (managed) or "path" (system PATH)
+    #[serde(default = "default_cli_source", alias = "gemini_cli_source")]
+    pub antigravity_cli_source: String, // Antigravity CLI source: "jean" (managed) or "path" (system PATH)
     #[serde(default = "default_cli_source")]
     pub gh_cli_source: String, // GitHub CLI source: "jean" (managed) or "path" (system PATH)
     #[serde(default)]
@@ -660,6 +672,10 @@ fn default_auto_recaps_enabled() -> bool {
     true // Enabled by default
 }
 
+fn default_keep_ai_servers_warm() -> bool {
+    true // Enabled by default to make follow-up requests start faster
+}
+
 fn default_chrome_enabled() -> bool {
     true // Enabled by default
 }
@@ -780,11 +796,15 @@ fn default_commandcode_model() -> String {
 }
 
 fn default_grok_model() -> String {
-    "grok/grok-4.5".to_string()
+    "grok/grok-4.6".to_string()
 }
 
 fn default_kimi_model() -> String {
     "kimi/default".to_string()
+}
+
+fn default_antigravity_model() -> String {
+    "antigravity/auto".to_string()
 }
 
 fn default_grok_cli_source() -> String {
@@ -871,16 +891,37 @@ fn resolve_http_server_bind_host(prefs: &AppPreferences) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        default_global_system_prompt, default_model, parse_cli_args_from,
-        resolve_headless_bind_host, resolve_headless_token_required, resolve_http_server_bind_host,
-        validate_headless_security, AppPreferences,
+        default_global_system_prompt, default_model, migrate_smoke_test_preferences,
+        parse_cli_args_from, resolve_headless_bind_host, resolve_headless_token_required,
+        resolve_http_server_bind_host, server_preferences_value, validate_headless_security,
+        AppPreferences,
     };
     use serde_json::json;
+
+    #[test]
+    fn server_preferences_exclude_client_fields_and_redact_secrets() {
+        let mut preferences = AppPreferences::default();
+        preferences.theme = "dark".to_string();
+        preferences.favorite_models = vec!["codex:gpt-5.6-sol".to_string()];
+        preferences.linear_api_key = Some("secret".to_string());
+        preferences.http_server_token = Some("token".to_string());
+
+        let value = server_preferences_value(&preferences).unwrap();
+
+        assert!(value.get("theme").is_none());
+        assert_eq!(value["favorite_models"], json!(["codex:gpt-5.6-sol"]));
+        assert!(value.get("linear_api_key").is_none());
+        assert_eq!(value["linear_api_key_configured"], json!(true));
+        assert!(value.get("http_server_token").is_none());
+        assert_eq!(value["http_server_token_configured"], json!(true));
+    }
 
     #[test]
     fn default_global_system_prompt_prefers_interactive_plan_questions() {
         let prompt = default_global_system_prompt();
 
+        assert!(prompt
+            .contains("Always use ASD-STE100 Simplified Technical English when you talk to me."));
         assert!(prompt.contains("backend-native interactive question UI"));
         assert!(prompt.contains("Codex request_user_input"));
         assert!(prompt
@@ -895,6 +936,9 @@ mod tests {
         assert!(prompt.contains("Jean Worktree Policy"));
         assert!(prompt.contains("Do NOT create git worktrees manually"));
         assert!(prompt.contains("Jean MCP/tools"));
+        assert!(prompt.contains("Jean Run Environment"));
+        assert!(prompt.contains("get_run_environments"));
+        assert!(prompt.contains("test against its `url`, port, and startup command"));
         assert!(prompt.contains("VERY IMPORTANT: Keep Code Simple"));
         assert!(prompt.contains("Always implement the simplest maintainable solution"));
         assert!(prompt.contains("Clickable References"));
@@ -1339,6 +1383,26 @@ mod tests {
         );
         assert_eq!(prefs.magic_prompt_modes.final_review_mode, "yolo");
     }
+
+    #[test]
+    fn missing_smoke_test_settings_follow_the_existing_codex_default() {
+        let mut prefs = AppPreferences {
+            default_backend: "codex".to_string(),
+            selected_codex_model: "gpt-5.6-terra".to_string(),
+            ..Default::default()
+        };
+        let raw = json!({
+            "magic_prompt_models": {},
+            "magic_prompt_backends": {}
+        });
+
+        assert!(migrate_smoke_test_preferences(&mut prefs, &raw));
+        assert_eq!(
+            prefs.magic_prompt_backends.smoke_test_backend.as_deref(),
+            Some("codex")
+        );
+        assert_eq!(prefs.magic_prompt_models.smoke_test_model, "gpt-5.6-terra");
+    }
 }
 
 fn default_removal_behavior() -> String {
@@ -1366,6 +1430,8 @@ fn default_auto_archive_on_pr_merged() -> bool {
 /// Some(text) = user customization (preserved across updates).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MagicPrompts {
+    #[serde(default)]
+    pub smoke_test: Option<String>,
     #[serde(default)]
     pub investigate_issue: Option<String>,
     #[serde(default)]
@@ -1417,23 +1483,69 @@ Investigate the loaded GitHub {issueWord} ({issueRefs})
 <instructions>
 
 1. Read the issue context file(s) to understand the full problem description and comments
-2. Analyze the problem: expected vs actual behavior, error messages, reproduction steps
-3. Explore the codebase to find relevant code
-4. Identify root cause and constraints
-5. Check for regression if this is a bug fix
-6. Propose solution with specific files, risks, and test cases
+2. Analyze the problem:
+   - What is the expected vs actual behavior?
+   - Are there error messages, stack traces, or reproduction steps?
+3. Explore the codebase to find relevant code:
+   - Search for files/functions mentioned in the {issueWord}
+   - Read source files to understand current implementation
+   - Trace the affected code path
+4. Identify root cause:
+   - Where does the bug originate OR where should the feature be implemented?
+   - What constraints/edge cases need handling?
+   - Any related issues or tech debt?
+5. Check for regression:
+   - If this is a bug fix, determine if this is a regression
+   - Look at git history or related code to understand if the feature previously worked
+   - Identify what change may have caused the regression
+6. Propose solution:
+   - Clear explanation of needed changes
+   - Specific files to modify
+   - Potential risks/trade-offs
+   - Test cases to verify
 
 </instructions>
 
 
 <guidelines>
 
-- Be thorough but focused
+- Be thorough but focused - investigate deeply without getting sidetracked
 - Ask clarifying questions if requirements are unclear
 - If multiple solutions exist, explain trade-offs
 - Reference specific file paths and line numbers
 
 </guidelines>"#
+        .to_string()
+}
+
+pub(crate) fn default_smoke_test_prompt() -> String {
+    r#"Smoke test the feature or fix in worktree {worktree_id}.
+
+1. Inspect worktree {worktree_id}: resolve its path, current branch, git status, changed files and diff. Treat the actual worktree changes as the source of truth for identifying the feature or fix, its intended behavior, and what must be tested. Read relevant repository documentation, tasks, issues, commits, and code when needed. Confirm that the branch and worktree match the code under test.
+2. Use the changed code and surrounding implementation to determine the expected behavior, affected interfaces, risks, and realistic success and failure scenarios. Do not require a source chat session to understand or test the worktree.
+3. Call the Jean MCP get_run_environments tool for the current worktree before starting a server.
+   - Reuse an existing environment when available.
+   - Do not guess a port or start a duplicate server.
+   - If no environment is running, call the Jean MCP start_run_environment tool for the current worktree. This starts the command configured in jean.json. Do not invent or launch a separate command.
+4. When needed, start the development server and confirm it is serving the current worktree and branch rather than another checkout or stale build. Wait for the environment to become ready and stable before running any real end-to-end tests: poll its detected URL, health endpoint, ports, or logs as appropriate until startup has completed and repeated checks succeed. If it does not stabilize within a reasonable timeout, capture the startup failure and do not run misleading end-to-end checks against it.
+5. Discover and prepare the prerequisites for realistic testing. Infer what is needed from the worktree changes, repository documentation, configuration, environment templates, test fixtures, available Jean context, and the running application's API, MCP, and UI. This can include authentication, accounts, permissions, database records, files, external-service substitutes, and related resources. Locate and use safe credentials or documented local/test authentication already available to the environment without printing secrets. Create temporary prerequisite data when permitted. Do not declare a prerequisite unavailable until you have actively looked for a supported way to obtain or create it.
+6. Run relevant automated tests and record their results.
+7. Test every applicable interface, including API or HTTP endpoints, MCP tools, desktop or web UI, and mobile UI when available.
+8. Exercise the main success path, important edge cases, validation errors, asynchronous completion, and failure recovery. Poll long-running operations through their real success or failure state instead of stopping after submission.
+9. You may create, update, and delete clearly identifiable temporary resources to test the behavior fully. Do not modify or delete existing user resources. Clean up all temporary resources and report any cleanup failure.
+10. Recheck the final application state after cleanup.
+
+Report:
+- Worktree ID, path, and branch tested
+- Development-server command, URL, and port
+- Automated tests and results
+- Each interface and scenario tested
+- Expected and actual behavior
+- Failures, logs, console errors, and skipped checks
+- Temporary resources created and cleanup result
+- Final verdict: passed, partially passed, or failed
+
+Do not claim the smoke test passed when an applicable interface or critical scenario could not be tested. Explain every skipped check."#
         .to_string()
 }
 
@@ -1448,9 +1560,18 @@ Investigate the loaded GitHub {prWord} ({prRefs})
 <instructions>
 
 1. Read the PR context file(s) to understand the full description, reviews, and comments
-2. Understand what the PR is trying to accomplish and branch info (head → base)
-3. Explore the codebase to understand the context
-4. Analyze if the implementation matches the PR description
+2. Understand the changes:
+   - What is the PR trying to accomplish?
+   - What branches are involved (head → base)?
+   - Are there any review comments or requested changes?
+3. Explore the codebase to understand the context:
+   - Check out the PR branch if needed
+   - Read the files being modified
+   - Understand the current implementation
+4. Analyze the approach:
+   - Does the implementation match the PR description?
+   - Are there any concerns raised in reviews?
+   - What feedback has been given?
 5. Security review - check the changes for:
    - Malicious or obfuscated code (eval, encoded strings, hidden network calls, data exfiltration)
    - Suspicious dependency additions or version changes (typosquatting, hijacked packages)
@@ -1459,15 +1580,21 @@ Investigate the loaded GitHub {prWord} ({prRefs})
    - Unsafe deserialization, command injection, SQL injection, XSS
    - Weakened auth/permissions (removed checks, broadened access, disabled validation)
    - Suspicious file system or environment variable access
-6. Identify action items from reviewer feedback
-7. Propose next steps to get the PR merged
+6. Identify action items:
+   - What changes are requested by reviewers?
+   - Are there any failing checks or tests?
+   - What needs to be done to get this PR merged?
+7. Propose next steps:
+   - Address reviewer feedback
+   - Specific files to modify
+   - Test cases to add or update
 
 </instructions>
 
 
 <guidelines>
 
-- Be thorough but focused
+- Be thorough but focused - investigate deeply without getting sidetracked
 - Pay attention to reviewer feedback and requested changes
 - Flag any security concerns prominently, even minor ones
 - If multiple approaches exist, explain trade-offs
@@ -1663,21 +1790,64 @@ After resolving each file's conflicts, stage it with `git add`. Then run the app
 }
 
 fn default_investigate_workflow_run_prompt() -> String {
-    r#"Investigate the failed GitHub Actions workflow run for "{workflowName}" on branch `{branch}`.
+    r#"<task>
 
-**Context:**
+Investigate the failed GitHub Actions workflow run for "{workflowName}" on branch `{branch}`
+
+</task>
+
+
+<context>
+
 - Workflow: {workflowName}
 - Commit/PR: {displayTitle}
 - Branch: {branch}
 - Run URL: {runUrl}
 
-**Instructions:**
+</context>
+
+
+<instructions>
+
 1. Use the GitHub CLI to fetch the workflow run logs: `gh run view {runId} --log-failed`
 2. Read the error output carefully to identify the failure cause
 3. Explore the relevant code in the codebase to understand the context
 4. Determine if this is a code issue, configuration issue, or flaky test
-5. Propose a fix with specific files and changes needed"#
+5. Implement the fix and run the relevant local checks
+6. Commit and push the changes
+7. Periodically monitor CI for the newly pushed commit until it completes
+8. If CI fails, inspect the new failure logs, fix the issue, run local checks, commit, push, and monitor the newest commit
+9. Repeat until the latest pushed commit is green
+
+</instructions>
+
+
+<guidelines>
+
+- Be thorough but focused on the failure
+- If the error is in CI config (.github/workflows), explain the fix
+- If the error is in code, reference specific file paths and line numbers
+- If it's a flaky test, suggest how to make it more reliable
+- If progress is blocked by infrastructure, permissions, or a non-actionable external failure, stop and report the blocker clearly
+
+</guidelines>"#
         .to_string()
+}
+
+#[cfg(test)]
+mod investigate_workflow_prompt_tests {
+    use super::default_investigate_workflow_run_prompt;
+
+    #[test]
+    fn workflow_investigation_keeps_fixing_pushed_commits_until_ci_is_green() {
+        let prompt = default_investigate_workflow_run_prompt();
+        let normalized = prompt.to_lowercase();
+
+        assert!(normalized.contains("commit and push"));
+        assert!(normalized.contains("newly pushed commit"));
+        assert!(normalized.contains("periodically"));
+        assert!(normalized.contains("until the latest pushed commit is green"));
+    }
 }
 
 fn default_investigate_security_alert_prompt() -> String {
@@ -1883,7 +2053,8 @@ fn default_release_notes_prompt() -> String {
 
 ## Instructions
 
-- Write a concise release title.
+- Use only the release version as the release title and prefix the release version with `v` (for example, `v0.1.74`); do not add the app name, other words, or a second `v` if the version already has one.
+- Do not repeat the app name or release version at the top of the release notes body; start directly with the release content or first category heading.
 - Group changes into categories: Features, Fixes, Improvements, Breaking Changes (only include categories that have entries).
 - Explicitly use the merged pull request metadata above as the primary source, then use commits as fallback context.
 - Inspect PR titles, PR bodies, and PR commit messages for GitHub closing keywords: close/closes/closed, fix/fixes/fixed, resolve/resolves/resolved.
@@ -1972,14 +2143,16 @@ When specifying subagent_type for Task tool calls, always use the fully qualifie
 }
 
 fn default_global_system_prompt() -> String {
-    r#"### 1. Planning Guidance
+    r#"Always use ASD-STE100 Simplified Technical English when you talk to me.
+
+### 1. Planning Guidance
 - For non-trivial tasks (3+ steps or architectural decisions), prefer planning before implementation when the current execution mode has not already authorized execution.
 - If something goes sideways, STOP and re-plan immediately - don't keep pushing
 - Use plan mode for verification steps when the current execution mode is plan; in build/yolo, verify directly after implementing.
 - Write detailed specs upfront to reduce ambiguity
 - Keep plans concise but complete enough for zero-context handoff (YOLO/Build in a new worktree must not require re-scanning the repo). Prefer short wording over thin checklists.
 - When the current execution mode is plan, use the backend's native plan tool/UI call when available (Claude ExitPlanMode, Codex `<proposed_plan>` / collaboration Plan mode, Cursor/OpenCode equivalent), not plain text only.
-- For unresolved questions while planning, prefer the backend-native interactive question UI instead of plain text when available: Claude AskUserQuestion, Codex request_user_input, OpenCode question.
+- For unresolved questions while planning, prefer the backend-native interactive question UI instead of plain text when available: Claude AskUserQuestion, Codex request_user_input, OpenCode question. If no such interactive question tool is present in your current tool set (headless/`--print` runs may omit Claude AskUserQuestion), do NOT skip the question and do NOT dead-end on a tool search — instead ask inline as a short numbered list of options (1, 2, 3...) and tell the user to reply with a number.
 - For Codex specifically, when the current execution mode is plan: do not write plan files or code; when the plan is ready wrap it in `<proposed_plan>...</proposed_plan>` so Jean can show the approval UI. Do not use the `update_plan` checklist tool in plan mode.
 - Every Codex response that contains or revises a plan while the current execution mode is plan must use a complete `<proposed_plan>` block (or a native plan item); do not provide plain-text-only plans, and do not attempt file writes.
 - Use a plain-text Unresolved Questions section only for non-actionable notes or when the backend cannot ask interactively.
@@ -2007,6 +2180,7 @@ fn default_global_system_prompt() -> String {
 - Diff behavior between main and your changes when relevant
 - Ask yourself: "Would a staff engineer approve this?"
 - Run tests, check logs, demonstrate correctness
+- Before UI, HTTP, browser, or end-to-end verification, call Jean MCP `get_run_environments` and test against the returned url/port/command when a Run environment is available.
 
 ### 6. Demand Elegance (Balanced)
 - For non-trivial changes: pause and ask "is there a more elegant way?"
@@ -2035,10 +2209,21 @@ fn default_global_system_prompt() -> String {
 - **No Laziness**: Find root causes. No temporary fixes. Senior developer standards.
 - **Minimal Impact**: Changes should only touch what's necessary. Avoid introducing bugs.
 
+## GitHub Issue and Discussion Discovery
+- After making changes and before the final response, search the current repository's existing GitHub issues and discussions for items completely fixed by the changes, related items, and similar reports or discussions.
+- Include the results in both the main response and the `## Recap`, with clickable links when available, and label each item as fully fixed, related, or similar. If no matches are found or the search is unavailable, say so explicitly.
+- Do not claim an issue is fixed unless the changes fully satisfy it. Do not close or update issues or discussions unless the user explicitly asks.
+
 ## Jean Worktree Policy
 - Do NOT create git worktrees manually (`git worktree add`, Superpowers `using-git-worktrees`, or similar) unless the user explicitly asks for a new worktree.
 - If a new worktree is explicitly required, use Jean's worktree features through Jean MCP/tools, not raw git worktree commands.
 - If already in a Jean worktree or base/main workspace, continue in the current workspace.
+
+## Jean Run Environment
+- When you need to test a running app (UI, HTTP, browser, smoke, e2e), call Jean MCP `get_run_environments` first (pass this worktreeId when known).
+- If an environment is running, test against its `url`, port, and startup command. Do not guess localhost ports or start a second dev server when Jean already has one.
+- If nothing is running and verification needs a live server, say so and use the returned/startup command rather than inventing a different command or port.
+- In how-to-test notes, include the exact URL/port you used.
 
 ## Important!
 
@@ -2065,6 +2250,8 @@ Read the Jean-local history carefully, reconstruct the task state, and answer th
 /// Per-prompt model overrides for magic prompts
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MagicPromptModels {
+    #[serde(default = "default_model")]
+    pub smoke_test_model: String,
     #[serde(default = "default_model")]
     pub investigate_issue_model: String,
     #[serde(default = "default_model")]
@@ -2118,6 +2305,7 @@ fn default_sonnet_model() -> String {
 impl Default for MagicPromptModels {
     fn default() -> Self {
         Self {
+            smoke_test_model: default_model(),
             investigate_issue_model: default_model(),
             investigate_pr_model: default_model(),
             investigate_workflow_run_model: default_model(),
@@ -2144,7 +2332,8 @@ impl MagicPromptModels {
     /// default models are untouched. Returns true if any field changed.
     fn migrate_legacy_defaults(&mut self) -> bool {
         let new_opus = default_model();
-        let opus_fields: [&mut String; 12] = [
+        let opus_fields: [&mut String; 13] = [
+            &mut self.smoke_test_model,
             &mut self.investigate_issue_model,
             &mut self.investigate_pr_model,
             &mut self.investigate_workflow_run_model,
@@ -2188,13 +2377,19 @@ pub fn is_pi_model(model: &str) -> bool {
 }
 
 /// Returns true if the given model string identifies a Grok model.
-/// Grok model IDs are prefixed with "grok/" (e.g. "grok/grok-4.5").
+/// Grok model IDs are prefixed with "grok/" (e.g. "grok/grok-4.6").
 pub fn is_grok_model(model: &str) -> bool {
     model.starts_with("grok/")
 }
 
 pub fn is_kimi_model(model: &str) -> bool {
     model.starts_with("kimi/")
+}
+
+/// Returns true if the given model string identifies an Antigravity model.
+/// Antigravity model IDs are prefixed with "antigravity/" (e.g. "antigravity/auto").
+pub fn is_antigravity_model(model: &str) -> bool {
+    model.starts_with("antigravity/")
 }
 
 /// Returns true if the given model string identifies a Codex model.
@@ -2210,6 +2405,8 @@ pub fn is_codex_model(model: &str) -> bool {
 /// Per-prompt provider overrides for magic prompts (None = use global default_provider)
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MagicPromptProviders {
+    #[serde(default)]
+    pub smoke_test_provider: Option<String>,
     #[serde(default)]
     pub investigate_issue_provider: Option<String>,
     #[serde(default)]
@@ -2248,6 +2445,8 @@ pub struct MagicPromptProviders {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MagicPromptBackends {
     #[serde(default)]
+    pub smoke_test_backend: Option<String>,
+    #[serde(default)]
     pub investigate_issue_backend: Option<String>,
     #[serde(default)]
     pub investigate_pr_backend: Option<String>,
@@ -2284,6 +2483,8 @@ pub struct MagicPromptBackends {
 /// Per-prompt reasoning effort overrides for magic prompts (None = use model default)
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MagicPromptReasoningEfforts {
+    #[serde(default)]
+    pub smoke_test_effort: Option<String>,
     #[serde(default)]
     pub investigate_issue_effort: Option<String>,
     #[serde(default)]
@@ -2329,6 +2530,8 @@ fn default_magic_prompt_yolo_mode() -> String {
 /// Per-prompt execution mode overrides for magic prompts that send chat turns
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MagicPromptModes {
+    #[serde(default = "default_magic_prompt_yolo_mode")]
+    pub smoke_test_mode: String,
     #[serde(default = "default_magic_prompt_plan_mode")]
     pub investigate_issue_mode: String,
     #[serde(default = "default_magic_prompt_plan_mode")]
@@ -2357,6 +2560,7 @@ pub struct MagicPromptModes {
 impl Default for MagicPromptModes {
     fn default() -> Self {
         Self {
+            smoke_test_mode: default_magic_prompt_yolo_mode(),
             investigate_issue_mode: default_magic_prompt_plan_mode(),
             investigate_pr_mode: default_magic_prompt_plan_mode(),
             investigate_workflow_run_mode: default_magic_prompt_yolo_mode(),
@@ -2381,6 +2585,7 @@ fn magic_prompt_model_matches_backend(model: &str, backend: &str) -> bool {
         "commandcode" => model.starts_with("commandcode/"),
         "grok" => is_grok_model(model),
         "kimi" => is_kimi_model(model),
+        "antigravity" => is_antigravity_model(model),
         "claude" => {
             !is_codex_model(model)
                 && !is_opencode_model(model)
@@ -2388,6 +2593,7 @@ fn magic_prompt_model_matches_backend(model: &str, backend: &str) -> bool {
                 && !is_pi_model(model)
                 && !is_grok_model(model)
                 && !is_kimi_model(model)
+                && !is_antigravity_model(model)
                 && !model.starts_with("commandcode/")
         }
         _ => true,
@@ -2403,6 +2609,7 @@ fn selected_model_for_backend(preferences: &AppPreferences, backend: &str) -> St
         "commandcode" => preferences.selected_commandcode_model.clone(),
         "grok" => preferences.selected_grok_model.clone(),
         "kimi" => preferences.selected_kimi_model.clone(),
+        "antigravity" => preferences.selected_antigravity_model.clone(),
         _ => preferences.selected_model.clone(),
     }
 }
@@ -2433,12 +2640,44 @@ fn migrate_final_review_preferences(
     true
 }
 
+fn migrate_smoke_test_preferences(
+    preferences: &mut AppPreferences,
+    raw_preferences: &Value,
+) -> bool {
+    let raw_models = raw_preferences
+        .get("magic_prompt_models")
+        .and_then(Value::as_object);
+    let raw_backends = raw_preferences
+        .get("magic_prompt_backends")
+        .and_then(Value::as_object);
+    let backend_missing =
+        raw_backends.is_none_or(|backends| !backends.contains_key("smoke_test_backend"));
+    let model_missing = raw_models.is_none_or(|models| !models.contains_key("smoke_test_model"));
+
+    if backend_missing {
+        preferences.magic_prompt_backends.smoke_test_backend =
+            Some(preferences.default_backend.clone());
+    }
+    if model_missing {
+        let backend = preferences
+            .magic_prompt_backends
+            .smoke_test_backend
+            .as_deref()
+            .unwrap_or(&preferences.default_backend);
+        preferences.magic_prompt_models.smoke_test_model =
+            selected_model_for_backend(preferences, backend);
+    }
+
+    backend_missing || model_missing
+}
+
 impl MagicPrompts {
     /// Migrate prompts that match the current default to None.
     /// This ensures users who never customized a prompt get auto-updated defaults.
     fn migrate_defaults(&mut self) {
         type DefaultEntry<'a> = (fn() -> String, &'a mut Option<String>);
-        let defaults: [DefaultEntry; 18] = [
+        let defaults: [DefaultEntry; 19] = [
+            (default_smoke_test_prompt, &mut self.smoke_test),
             (
                 default_investigate_issue_prompt,
                 &mut self.investigate_issue,
@@ -2535,6 +2774,7 @@ impl Default for AppPreferences {
             parallel_execution_prompt_enabled: default_parallel_execution_prompt_enabled(),
             compact_chat_view_enabled: default_compact_chat_view_enabled(),
             auto_recaps_enabled: default_auto_recaps_enabled(),
+            keep_ai_servers_warm: default_keep_ai_servers_warm(),
             magic_prompts: MagicPrompts::default(),
             magic_prompt_models: MagicPromptModels::default(),
             magic_code_review_configs: Vec::new(),
@@ -2595,6 +2835,7 @@ impl Default for AppPreferences {
             selected_commandcode_model: default_commandcode_model(),
             selected_grok_model: default_grok_model(),
             selected_kimi_model: default_kimi_model(),
+            selected_antigravity_model: default_antigravity_model(),
             default_codex_reasoning_effort: default_codex_reasoning_effort(),
             default_codex_model_verbosity: default_codex_model_verbosity(),
             default_grok_reasoning_effort: default_grok_reasoning_effort(),
@@ -2605,6 +2846,7 @@ impl Default for AppPreferences {
             pi_auto_steer_enabled: default_pi_auto_steer(),
             grok_auto_steer_enabled: default_grok_auto_steer(),
             kimi_auto_steer_enabled: false,
+            antigravity_auto_steer_enabled: false,
             codex_max_agent_threads: default_codex_max_agent_threads(),
             restore_last_session: true,
             close_original_on_clear_context: true,
@@ -2623,6 +2865,7 @@ impl Default for AppPreferences {
             opencode_cli_source: default_cli_source(),
             grok_cli_source: default_grok_cli_source(),
             kimi_cli_source: default_cli_source(),
+            antigravity_cli_source: default_cli_source(),
             gh_cli_source: default_cli_source(),
             wsl_mode_chosen: false,
             wsl_enabled: false,
@@ -2709,6 +2952,10 @@ pub struct UIState {
     /// Unsent large-text paste attachments per session (files already on disk)
     #[serde(default)]
     pub pending_text_files: std::collections::HashMap<String, Vec<PendingTextFileDraft>>,
+
+    /// Worktree IDs whose setup-script status card was dismissed
+    #[serde(default)]
+    pub dismissed_setup_scripts: Vec<String>,
 
     /// Whether the review sidebar is visible
     #[serde(default)]
@@ -2910,6 +3157,7 @@ impl Default for UIState {
             input_drafts: std::collections::HashMap::new(),
             pending_images: std::collections::HashMap::new(),
             pending_text_files: std::collections::HashMap::new(),
+            dismissed_setup_scripts: Vec::new(),
             review_sidebar_visible: None,
             modal_terminal_open: std::collections::HashMap::new(),
             modal_terminal_dock_mode: None,
@@ -2972,6 +3220,7 @@ pub fn load_preferences_sync(app: &AppHandle) -> Result<AppPreferences, String> 
     let mut preferences: AppPreferences = serde_json::from_value(raw_preferences.clone())
         .map_err(|e| format!("Failed to parse preferences: {e}"))?;
     migrate_final_review_preferences(&mut preferences, &raw_preferences);
+    migrate_smoke_test_preferences(&mut preferences, &raw_preferences);
     normalize_parallel_execution_preferences(&mut preferences);
     maybe_auto_select_system_cli_preferences(app, &mut preferences, Some(&raw_preferences));
     Ok(preferences)
@@ -3015,6 +3264,7 @@ async fn load_preferences(app: AppHandle) -> Result<AppPreferences, String> {
     // Migrate legacy default Claude model names to the 1M variants where
     // available so hidden non-1M defaults do not render blank in settings.
     let mut needs_resave = migrate_final_review_preferences(&mut preferences, &raw_preferences);
+    needs_resave |= migrate_smoke_test_preferences(&mut preferences, &raw_preferences);
     if let Some(new_model) = migrate_default_claude_model(&preferences.selected_model) {
         preferences.selected_model = new_model.to_string();
         needs_resave = true;
@@ -3177,6 +3427,162 @@ async fn patch_preferences(app: AppHandle, patch: Value) -> Result<(), String> {
     let merged: AppPreferences =
         serde_json::from_value(current_json).map_err(|e| format!("Merge error: {e}"))?;
     save_preferences(app, merged).await
+}
+
+const SERVER_PREFERENCES_SCHEMA_VERSION: u32 = 1;
+
+const CLIENT_ONLY_PREFERENCE_KEYS: &[&str] = &[
+    "theme",
+    "terminal",
+    "terminal_renderer",
+    "terminal_font",
+    "terminal_font_size",
+    "editor",
+    "open_in",
+    "ui_font_size",
+    "chat_font_size",
+    "ui_font",
+    "chat_font",
+    "font_weight",
+    "keybindings",
+    "syntax_theme_dark",
+    "syntax_theme_light",
+    "compact_chat_view_enabled",
+    "file_edit_mode",
+    "waiting_sound",
+    "review_sound",
+    "web_access_sounds_enabled",
+    "desktop_notifications_enabled",
+    "debug_mode_enabled",
+    "has_seen_feature_tour",
+    "has_seen_external_display_zoom_tip",
+    "zoom_level",
+    "mobile_zoom_level",
+    "sync_zoom_levels",
+    "confirm_session_close",
+    "expand_tool_calls_by_default",
+    "window_vibrancy",
+    "finished_session_animation_enabled",
+    "terminal_background",
+    "terminal_background_custom",
+];
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerPreferencesEnvelope {
+    pub schema_version: u32,
+    pub revision: String,
+    pub preferences: Value,
+}
+
+fn preferences_revision(value: &Value) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    value.to_string().hash(&mut hasher);
+    hasher.finish()
+}
+
+fn server_preferences_value(preferences: &AppPreferences) -> Result<Value, String> {
+    let mut value =
+        serde_json::to_value(preferences).map_err(|e| format!("Serialize error: {e}"))?;
+    let object = value
+        .as_object_mut()
+        .ok_or("Preferences must be an object")?;
+    for key in CLIENT_ONLY_PREFERENCE_KEYS {
+        object.remove(*key);
+    }
+    for key in ["linear_api_key", "sentry_auth_token", "http_server_token"] {
+        let configured = object
+            .get(key)
+            .is_some_and(|value| value.as_str().is_some_and(|secret| !secret.is_empty()));
+        object.remove(key);
+        object.insert(format!("{key}_configured"), Value::Bool(configured));
+    }
+    Ok(value)
+}
+
+pub async fn get_server_preferences(app: AppHandle) -> Result<ServerPreferencesEnvelope, String> {
+    let preferences = load_preferences(app).await?;
+    let value = server_preferences_value(&preferences)?;
+    Ok(ServerPreferencesEnvelope {
+        schema_version: SERVER_PREFERENCES_SCHEMA_VERSION,
+        revision: preferences_revision(&value).to_string(),
+        preferences: value,
+    })
+}
+
+pub async fn update_server_preferences(
+    app: AppHandle,
+    patch: Value,
+    expected_revision: String,
+) -> Result<ServerPreferencesEnvelope, String> {
+    let current = get_server_preferences(app.clone()).await?;
+    if current.revision != expected_revision {
+        return Err("Server preferences changed; reload settings and try again".to_string());
+    }
+    let patch_object = patch
+        .as_object()
+        .ok_or("Preference patch must be an object")?;
+    if let Some(key) = patch_object
+        .keys()
+        .find(|key| CLIENT_ONLY_PREFERENCE_KEYS.contains(&key.as_str()))
+    {
+        return Err(format!("'{key}' is a client-only preference"));
+    }
+    patch_preferences(app.clone(), patch).await?;
+    get_server_preferences(app).await
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MagicPromptCapability {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub default_prompt: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerCapabilitiesEnvelope {
+    pub schema_version: u32,
+    pub app_version: String,
+    pub magic_prompts: Vec<MagicPromptCapability>,
+}
+
+pub async fn get_server_capabilities() -> Result<ServerCapabilitiesEnvelope, String> {
+    let prompts = [
+        ("smoke_test", "Smoke test", default_smoke_test_prompt()),
+        ("investigate_issue", "Investigate issue", default_investigate_issue_prompt()),
+        ("investigate_pr", "Investigate pull request", default_investigate_pr_prompt()),
+        ("pr_content", "Pull request content", default_pr_content_prompt()),
+        ("commit_message", "Commit message", default_commit_message_prompt()),
+        ("code_review", "Code review", default_code_review_prompt()),
+        ("final_review", "Final review", "Perform a final, audit-only review before merge. Report only actionable, high-confidence findings introduced by the current changes.".to_string()),
+        ("context_summary", "Context summary", default_context_summary_prompt()),
+        ("resolve_conflicts", "Resolve conflicts", default_resolve_conflicts_prompt()),
+        ("investigate_workflow_run", "Investigate workflow run", default_investigate_workflow_run_prompt()),
+        ("release_notes", "Release notes", default_release_notes_prompt()),
+        ("session_naming", "Session naming", default_session_naming_prompt()),
+        ("parallel_execution", "Parallel execution", default_parallel_execution_prompt()),
+        ("global_system_prompt", "Global system prompt", default_global_system_prompt()),
+        ("provider_switch_handoff", "Provider switch handoff", default_provider_switch_handoff_prompt()),
+        ("investigate_security_alert", "Investigate security alert", default_investigate_security_alert_prompt()),
+        ("investigate_advisory", "Investigate advisory", default_investigate_advisory_prompt()),
+        ("investigate_linear_issue", "Investigate Linear issue", default_investigate_linear_issue_prompt()),
+        ("investigate_sentry_issue", "Investigate Sentry issue", default_investigate_sentry_issue_prompt()),
+        ("review_comments", "Review comments", default_review_comments_prompt()),
+    ];
+    Ok(ServerCapabilitiesEnvelope {
+        schema_version: 1,
+        app_version: app_version().to_string(),
+        magic_prompts: prompts
+            .into_iter()
+            .map(|(id, label, default_prompt)| MagicPromptCapability {
+                id,
+                label,
+                default_prompt,
+            })
+            .collect(),
+    })
 }
 
 async fn set_window_vibrancy(_app: AppHandle, _enabled: bool) -> Result<(), String> {
@@ -4185,7 +4591,6 @@ pub async fn run_server() -> Result<(), String> {
         chat::kimi::run_kimi_acp_host_from_args()?;
         return Ok(());
     }
-
     async_runtime::set(tokio::runtime::Handle::current());
     platform::raise_fd_limit();
     #[cfg(target_os = "linux")]

@@ -143,9 +143,18 @@ export function getCanvasFilterTabCount(
     .length
 }
 
-export function shouldShowCanvasWorktreeSection(
+export function matchesCanvasWorktreeSearch(
   worktree: Worktree,
-  sessionCount: number
+  searchQuery: string
 ): boolean {
-  return isBaseSession(worktree) || sessionCount > 0
+  const query = searchQuery.trim().toLowerCase()
+  if (!query) return true
+
+  return getCanvasWorktreeSearchTerms(worktree).some(term =>
+    term.includes(query)
+  )
+}
+
+export function shouldShowCanvasWorktreeSection(worktree: Worktree): boolean {
+  return worktree.status !== 'deleting'
 }

@@ -1,6 +1,6 @@
 [package]
 name = "jean-core"
-version = "0.1.71"
+version = "0.1.73"
 edition = "2021"
 
 [dependencies]
@@ -29,6 +29,11 @@ tower-http = { version = "0.6", features = ["cors", "fs", "compression-br", "com
 tokio = { version = "1", features = ["sync", "macros", "net", "io-util", "fs", "rt-multi-thread", "time", "signal"] }
 futures-util = "0.3"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+# zune-core 0.5.2 made warn!/error! expand to empty tokens (not expressions).
+# That breaks zune-jpeg 0.5.x call sites like `else { warn!(...) }` without `;`.
+# https://github.com/etemesi254/zune-image/issues/423
+# jean-core is clippy'd without a Cargo.lock, so pin the transitive dep.
+zune-core = "=0.5.1"
 if-addrs = "0.13"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 rust-embed = { version = "8", features = ["debug-embed"] }

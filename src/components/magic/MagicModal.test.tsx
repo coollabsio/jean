@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import userEvent from '@testing-library/user-event'
-import { fireEvent, render, screen, waitFor } from '@/test/test-utils'
+import { render, screen, waitFor } from '@/test/test-utils'
 import { MagicModal } from './MagicModal'
 
 const mocks = vi.hoisted(() => {
@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => {
   return {
     setMagicModalOpen: vi.fn(),
     selectWorktree: vi.fn(),
+    setActiveWorktree: vi.fn(),
+    setPendingMagicCommand: vi.fn(),
     invokeMock: vi.fn(),
     invalidateQueries: vi.fn(),
     triggerImmediateGitPoll: vi.fn(),
@@ -124,8 +126,8 @@ vi.mock('@/store/chat-store', () => ({
         worktreePaths: mocks.worktreePaths as Record<string, string>,
         setWorktreeLoading: vi.fn(),
         clearWorktreeLoading: vi.fn(),
-        setActiveWorktree: vi.fn(),
-        setPendingMagicCommand: vi.fn(),
+        setActiveWorktree: mocks.setActiveWorktree,
+        setPendingMagicCommand: mocks.setPendingMagicCommand,
         registerWorktreePath: mocks.registerWorktreePath,
         getWorktreePath: (worktreeId: string) =>
           mocks.worktreePaths[worktreeId],
@@ -168,6 +170,8 @@ vi.mock('@/services/projects', () => ({
       worktreePath,
       prNumber,
     }),
+  clearWorktreePr: (worktreeId: string) =>
+    mocks.invokeMock('clear_worktree_pr', { worktreeId }),
   projectsQueryKeys: {
     worktrees: (projectId: string) => ['projects', projectId, 'worktrees'],
     all: ['projects'],
@@ -187,21 +191,16 @@ vi.mock('@/services/preferences', () => ({
       selected_model: 'claude-opus-4-8[1m]',
       selected_codex_model: 'gpt-5.5',
       magic_prompt_models: {
-        final_review_model: 'gpt-5.5',
       },
       magic_prompt_efforts: {
-        final_review_effort: 'high',
       },
       magic_prompt_modes: {
-        final_review_mode: 'plan',
       },
       magic_prompts: {
         resolve_conflicts: 'Resolve and finish.',
-        final_review: 'Run the custom final audit and return tables.',
       },
       magic_prompt_backends: {
         resolve_conflicts_backend: 'codex',
-        final_review_backend: 'codex',
       },
     },
   }),
@@ -259,18 +258,7 @@ vi.mock('sonner', () => ({
 }))
 
 vi.mock('@/components/chat/ReviewMethodModal', () => ({
-  ReviewMethodModal: ({
-    open,
-    onFinalReview,
-  }: {
-    open: boolean
-    onFinalReview: () => void
-  }) =>
-    open ? (
-      <button data-testid="final-review-choice" onClick={onFinalReview}>
-        Final review
-      </button>
-    ) : null,
+  ReviewMethodModal: () => null,
 }))
 
 describe('MagicModal manual PR link', () => {
@@ -367,6 +355,27 @@ describe('MagicModal manual PR link', () => {
     )
   })
 
+  it('shows an unlink action for a linked PR and clears the link', async () => {
+    const user = userEvent.setup()
+    mocks.worktree.pr_number = 9822
+    mocks.worktree.pr_url = 'https://github.com/o/r/pull/9822'
+
+    render(<MagicModal />)
+
+    await user.click(screen.getByRole('button', { name: /link pr/i }))
+    await user.click(screen.getByRole('button', { name: /unlink pr/i }))
+
+    await waitFor(() => {
+      expect(mocks.invokeMock).toHaveBeenCalledWith('clear_worktree_pr', {
+        worktreeId: 'wt-1',
+      })
+    })
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['projects', 'project-1', 'worktrees'],
+    })
+    expect(mocks.toastSuccess).toHaveBeenCalledWith('Unlinked PR #9822')
+  })
+
   it('sends resolve conflicts immediately in yolo from the direct canvas dialog', async () => {
     const user = userEvent.setup()
     mocks.invokeMock.mockImplementation((command: string) => {
@@ -424,56 +433,6 @@ describe('MagicModal manual PR link', () => {
     expect(mocks.setExecutionMode).toHaveBeenCalledWith(
       'conflict-session',
       'yolo'
-    )
-  })
-
-  it('starts Final review as a normal plan-mode session with dedicated settings', async () => {
-    const user = userEvent.setup()
-    mocks.invokeMock.mockImplementation((command: string) => {
-      if (command === 'create_session') {
-        return Promise.resolve({
-          id: 'final-review-session',
-          name: 'Final review',
-          order: 1,
-          created_at: 1,
-          updated_at: 1,
-          messages: [],
-          backend: 'codex',
-        })
-      }
-      if (command === 'send_chat_message') {
-        return Promise.resolve({ id: 'message-1' })
-      }
-      return Promise.resolve(undefined)
-    })
-
-    render(<MagicModal />)
-
-    await user.click(screen.getByRole('button', { name: /^review/i }))
-    fireEvent.click(screen.getByTestId('final-review-choice'))
-
-    await waitFor(() => {
-      expect(mocks.invokeMock).toHaveBeenCalledWith(
-        'send_chat_message',
-        expect.objectContaining({
-          sessionId: 'final-review-session',
-          worktreeId: 'wt-1',
-          worktreePath: '/repo/worktree',
-          message: 'Run the custom final audit and return tables.',
-          model: 'gpt-5.5',
-          effortLevel: 'high',
-          executionMode: 'plan',
-          backend: 'codex',
-        })
-      )
-    })
-    expect(mocks.setActiveSession).toHaveBeenCalledWith(
-      'wt-1',
-      'final-review-session'
-    )
-    expect(mocks.setExecutionMode).toHaveBeenCalledWith(
-      'final-review-session',
-      'plan'
     )
   })
 
@@ -643,6 +602,31 @@ describe('MagicModal manual PR link', () => {
     expect(
       screen.getByRole('button', { name: /inject session/i })
     ).toBeInTheDocument()
+  })
+
+  it('shows the smoke test magic command', () => {
+    render(<MagicModal />)
+
+    expect(
+      screen.getByRole('button', { name: /smoke test/i })
+    ).toBeInTheDocument()
+  })
+
+  it('allows smoke test from the worktree canvas without an existing session', async () => {
+    const user = userEvent.setup()
+    render(<MagicModal />)
+
+    const smokeTest = screen.getByRole('button', { name: /smoke test/i })
+    expect(smokeTest).toBeEnabled()
+    await user.click(smokeTest)
+
+    expect(mocks.setActiveWorktree).toHaveBeenCalledWith(
+      'wt-1',
+      '/repo/worktree'
+    )
+    expect(mocks.setPendingMagicCommand).toHaveBeenCalledWith({
+      command: 'smoke-test',
+    })
   })
 
   it('starts commit and push actions directly with loading notifications when chat is active', async () => {

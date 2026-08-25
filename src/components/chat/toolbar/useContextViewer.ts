@@ -9,6 +9,7 @@ import type {
   LoadedAdvisoryContext,
 } from '@/types/github'
 import type { LoadedLinearIssueContext } from '@/types/linear'
+import type { SentryIssueContext } from '@/types/sentry'
 import {
   getIssueContextContent,
   getPRContextContent,
@@ -174,6 +175,14 @@ export function useContextViewer({
     [activeSessionId, worktreeId, projectId]
   )
 
+  const handleViewSentry = useCallback((ctx: SentryIssueContext) => {
+    setViewingContext({
+      type: 'sentry',
+      title: `${ctx.shortId}: ${ctx.title}`,
+      content: ctx.content,
+    })
+  }, [])
+
   return {
     viewingContext,
     setViewingContext,
@@ -183,5 +192,6 @@ export function useContextViewer({
     handleViewSecurityAlert,
     handleViewAdvisory,
     handleViewLinear,
+    handleViewSentry,
   }
 }

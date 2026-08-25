@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useEffectEvent } from 'react'
-import { Bot, Loader2, Rabbit, ShieldCheck } from 'lucide-react'
+import { Bot, Loader2, Rabbit } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -17,7 +17,6 @@ interface ReviewMethodModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onAiReview: () => void
-  onFinalReview: () => void
   onCodeRabbitCliReview: () => void
   onCodeRabbitPrReview: () => void
   codeRabbitPrAvailable: boolean
@@ -27,7 +26,6 @@ export function ReviewMethodModal({
   open,
   onOpenChange,
   onAiReview,
-  onFinalReview,
   onCodeRabbitCliReview,
   onCodeRabbitPrReview,
   codeRabbitPrAvailable,
@@ -60,21 +58,14 @@ export function ReviewMethodModal({
       return
     }
 
-    if (event.key === '2') {
-      event.preventDefault()
-      event.stopPropagation()
-      choose(onFinalReview)
-      return
-    }
-
-    if (event.key === '3' && codeRabbitReady && !isLoading) {
+    if (event.key === '2' && codeRabbitReady && !isLoading) {
       event.preventDefault()
       event.stopPropagation()
       choose(onCodeRabbitCliReview)
       return
     }
 
-    if (event.key === '4' && codeRabbitPrAvailable) {
+    if (event.key === '3' && codeRabbitPrAvailable) {
       event.preventDefault()
       event.stopPropagation()
       choose(onCodeRabbitPrReview)
@@ -109,14 +100,6 @@ export function ReviewMethodModal({
             badge="Default"
             shortcut={keyboardShortcutsEnabled ? '1' : undefined}
             onClick={() => choose(onAiReview)}
-          />
-
-          <ReviewChoice
-            icon={<ShieldCheck className="size-4" />}
-            title="Final review"
-            subtitle="Read-only merge-readiness audit in a new session"
-            shortcut={keyboardShortcutsEnabled ? '2' : undefined}
-            onClick={() => choose(onFinalReview)}
           />
 
           <CodeRabbitChoice
@@ -197,7 +180,7 @@ function CodeRabbitChoice({
         >
           CLI
           {showShortcuts && (
-            <Kbd className="h-4 min-w-4 px-1 text-[10px]">3</Kbd>
+            <Kbd className="h-4 min-w-4 px-1 text-[10px]">2</Kbd>
           )}
         </button>
         <button
@@ -213,7 +196,7 @@ function CodeRabbitChoice({
         >
           PR
           {showShortcuts && (
-            <Kbd className="h-4 min-w-4 px-1 text-[10px]">4</Kbd>
+            <Kbd className="h-4 min-w-4 px-1 text-[10px]">3</Kbd>
           )}
         </button>
       </span>

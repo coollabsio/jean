@@ -388,6 +388,19 @@ fn generate_names(app: &AppHandle, request: &NamingRequest) -> Result<NamingOutp
     if backend == super::types::Backend::Kimi {
         return generate_names_kimi(app, &prompt, &request.model, request);
     }
+    if backend == super::types::Backend::Antigravity {
+        let text = super::antigravity::execute_one_shot_antigravity(
+            app,
+            &prompt,
+            &request.model,
+            Some(NAMING_SCHEMA),
+            Some(std::path::Path::new(&request.worktree_path)),
+        )?;
+        let json = extract_json_object(&text)
+            .ok_or_else(|| "No JSON object found in Antigravity naming response".to_string())?;
+        return serde_json::from_str(json)
+            .map_err(|error| format!("Failed to parse Antigravity naming JSON: {error}"));
+    }
 
     let cli_path = resolve_cli_binary(app);
     if !cli_path.exists() {

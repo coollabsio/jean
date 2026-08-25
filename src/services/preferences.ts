@@ -9,6 +9,12 @@ import {
   normalizeCodexModel,
 } from '@/types/preferences'
 import { DEFAULT_KEYBINDINGS, type KeybindingsMap } from '@/types/keybindings'
+import type { ServerPreferencesEnvelope } from '@/types/server-preferences'
+import {
+  readClientPreferences,
+  splitClientPreferencePatch,
+  updateClientPreferences,
+} from '@/lib/client-preferences'
 
 // Old default keybindings that have been changed - used for migration
 // When a default changes, add the old value here so stored prefs get updated
@@ -55,6 +61,33 @@ export const preferencesQueryKeys = {
   preferences: () => [...preferencesQueryKeys.all] as const,
 }
 
+export function useServerPreferences() {
+  return useQuery({
+    queryKey: ['server-preferences'],
+    queryFn: () => invoke<ServerPreferencesEnvelope>('get_server_preferences'),
+    enabled: hasBackendTransport(),
+    staleTime: 1000 * 60 * 5,
+    retry: false,
+  })
+}
+
+export function useUpdateServerPreferences() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ patch, expectedRevision }: {
+      patch: Partial<AppPreferences>
+      expectedRevision: string
+    }) => invoke<ServerPreferencesEnvelope>('update_server_preferences', {
+      patch,
+      expectedRevision,
+    }),
+    onSuccess: envelope => {
+      queryClient.setQueryData(['server-preferences'], envelope)
+      queryClient.invalidateQueries({ queryKey: preferencesQueryKeys.all })
+    },
+  })
+}
+
 // TanStack Query hooks following the architectural patterns
 export function usePreferences() {
   return useQuery({
@@ -79,7 +112,7 @@ export function usePreferences() {
         for (const [key, value] of Object.entries(merged)) {
           if (validKeys.has(key)) keybindings[key] = value
         }
-        return {
+        const normalized = {
           ...preferences,
           selected_model: normalizeClaudeModel(preferences.selected_model, {
             // Keep opus/sonnet/haiku when a custom CLI provider is the default
@@ -91,6 +124,7 @@ export function usePreferences() {
           ),
           keybindings,
         }
+        return { ...normalized, ...readClientPreferences(normalized) }
       } catch (error) {
         // Return defaults if preferences file doesn't exist yet
         logger.warn('Failed to load preferences, using defaults', { error })
@@ -111,17 +145,22 @@ export function usePatchPreferences() {
 
   return useMutation({
     mutationFn: async (patch: Partial<AppPreferences>) => {
+      const [clientPatch, serverPatch] = splitClientPreferencePatch(patch)
+      if (Object.keys(clientPatch).length > 0) {
+        updateClientPreferences(clientPatch)
+      }
+      if (Object.keys(serverPatch).length === 0) return
       if (!isTauri()) {
         logger.debug(
           'Not in Tauri context, preferences not persisted to disk',
-          { patch }
+          { patch: serverPatch }
         )
         return
       }
 
       try {
-        logger.debug('Patching preferences on backend', { patch })
-        await invoke('patch_preferences', { patch })
+        logger.debug('Patching preferences on backend', { patch: serverPatch })
+        await invoke('patch_preferences', { patch: serverPatch })
         logger.info('Preferences patched successfully')
       } catch (error) {
         const message =
@@ -149,6 +188,8 @@ export function useSavePreferences() {
 
   return useMutation({
     mutationFn: async (preferences: AppPreferences) => {
+      const [clientPreferences] = splitClientPreferencePatch(preferences)
+      updateClientPreferences(clientPreferences)
       // Skip persistence when running outside Tauri (e.g., bun run dev in browser)
       if (!isTauri()) {
         logger.debug(

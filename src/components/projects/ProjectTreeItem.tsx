@@ -256,9 +256,17 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
       pickRemoteOrRun(async remote => {
         const opToast = dismissibleToast.loading('Pushing changes...')
         try {
-          await gitPush(project.path, undefined, remote)
+          const result = await gitPush(project.path, undefined, remote)
           fetchWorktreesStatus(project.id)
-          opToast.success('Changes pushed')
+          if (result.permissionDenied) {
+            opToast.error('Push failed', {
+              duration: Infinity,
+              description:
+                result.output.trim() || 'The remote rejected the push.',
+            })
+          } else {
+            opToast.success('Changes pushed')
+          }
         } catch (error) {
           opToast.error(`Push failed: ${error}`)
         }

@@ -105,7 +105,8 @@ function truncateAgentPrompt(prompt: string): string {
 
 export function extractCodexAgents(
   toolCalls: ToolCall[],
-  isSending: boolean
+  isSending: boolean,
+  parentTurnCancelled = false
 ): CodexAgent[] {
   const agents = new Map<string, CodexAgent>()
 
@@ -155,15 +156,19 @@ export function extractCodexAgents(
     }
   }
 
-  // Never invent a terminal "completed" state just because the parent stream
-  // ended. Unresolved in_progress agents become "interrupted" so the widget
-  // does not show a green completion treatment for cancelled/abandoned work.
+  // Codex sub_agent_activity has no "completed" kind. A normal parent turn end
+  // is therefore the terminal completion signal for agents that still have a
+  // running state. Keep cancellation distinct so abandoned work is not green.
   return Array.from(agents.values()).map(agent => {
     if (isSending || agent.status !== 'in_progress') return agent
     return {
       ...agent,
-      status: 'interrupted' as const,
-      message: agent.message ?? 'Interrupted before completion',
+      status: parentTurnCancelled
+        ? ('interrupted' as const)
+        : ('completed' as const),
+      message: parentTurnCancelled
+        ? (agent.message ?? 'Interrupted before completion')
+        : agent.message,
     }
   })
 }
@@ -258,21 +263,23 @@ export function useActiveTodosAndAgents({
     if (!activeSessionId)
       return { agents: [], sourceMessageId: null, isFromStreaming: false }
 
-    const toolCalls =
-      isSending && currentToolCalls.length > 0
-        ? currentToolCalls
-        : (lastAssistantMessage?.tool_calls ?? [])
+    // A new turn starts with no tool calls. Do not reuse the previous turn's
+    // agents in that gap, or their persisted running state appears active again.
+    const toolCalls = isSending
+      ? currentToolCalls
+      : (lastAssistantMessage?.tool_calls ?? [])
 
-    const agents = extractCodexAgents(toolCalls, isSending)
+    const agents = extractCodexAgents(
+      toolCalls,
+      isSending,
+      lastAssistantMessage?.cancelled === true
+    )
 
-    const sourceId =
-      isSending && currentToolCalls.length > 0
-        ? null
-        : (lastAssistantMessage?.id ?? null)
+    const sourceId = isSending ? null : (lastAssistantMessage?.id ?? null)
     return {
       agents,
       sourceMessageId: sourceId,
-      isFromStreaming: isSending && currentToolCalls.length > 0,
+      isFromStreaming: isSending && agents.length > 0,
     }
   }, [activeSessionId, isSending, currentToolCalls, lastAssistantMessage])
 

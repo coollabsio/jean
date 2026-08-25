@@ -13,6 +13,7 @@ const BACKEND_LABELS: Record<string, string> = {
   pi: 'PI',
   grok: 'Grok',
   kimi: 'Kimi Code',
+  antigravity: 'Antigravity CLI',
 }
 
 function formatBackendLabel(backend: string): string {
@@ -42,6 +43,7 @@ export function resolveApprovalLabel(
         selected_pi_model?: string | null
         selected_grok_model?: string | null
         selected_kimi_model?: string | null
+        selected_antigravity_model?: string | null
         default_backend?: string | null
       }
     | undefined,
@@ -77,10 +79,13 @@ export function resolveApprovalLabel(
               ? (preferences.selected_pi_model ?? 'pi/sonnet')
               : resolvedBackend === 'grok'
                 ? (preferences.selected_grok_model ??
-                  'grok/grok-4.5')
+                  'grok/grok-4.6')
                 : resolvedBackend === 'kimi'
                   ? (preferences.selected_kimi_model ?? 'kimi/default')
-                  : (preferences.selected_model ?? null)
+                  : resolvedBackend === 'antigravity'
+                    ? (preferences.selected_antigravity_model ??
+                      'antigravity/auto')
+                    : (preferences.selected_model ?? null)
   const resolvedModel = model ?? backendDefaultModel
   if (!resolvedModel && !resolvedBackend) return null
   const modelLabel = resolvedModel ? getMessageModelLabel(resolvedModel) : null

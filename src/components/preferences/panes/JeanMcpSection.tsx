@@ -60,6 +60,7 @@ const INSTALLABLE_BACKENDS = [
   'cursor',
   'grok',
   'kimi',
+  'antigravity',
 ] as const satisfies readonly CliBackend[]
 
 const BACKEND_LABELS: Record<(typeof INSTALLABLE_BACKENDS)[number], string> = {
@@ -69,6 +70,7 @@ const BACKEND_LABELS: Record<(typeof INSTALLABLE_BACKENDS)[number], string> = {
   cursor: 'Cursor',
   grok: 'Grok',
   kimi: 'Kimi',
+  antigravity: 'Antigravity',
 }
 
 interface SnippetTarget {
@@ -194,6 +196,12 @@ export const JeanMcpSection: React.FC = () => {
         path: '~/.config/opencode/opencode.json',
         content: snippet?.opencodeJson ?? null,
       },
+      {
+        id: 'antigravity',
+        label: 'Antigravity',
+        path: '~/.gemini/config/mcp_config.json',
+        content: snippet?.claude ?? null,
+      },
     ],
     [snippet]
   )
@@ -236,7 +244,7 @@ export const JeanMcpSection: React.FC = () => {
       if (installableBackends.length === 0) {
         setTemporaryInstallState(
           'error',
-          'Install a supported CLI first (Claude, Codex, Cursor, Grok, Kimi, or OpenCode)'
+          'Install a supported CLI first (Claude, Codex, Cursor, Grok, Kimi, Antigravity, or OpenCode)'
         )
         return
       }

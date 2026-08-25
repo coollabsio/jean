@@ -635,6 +635,7 @@ pub async fn check_pi_cli_version_exists(_app: AppHandle, version: String) -> Re
 }
 
 pub async fn install_pi_cli(app: AppHandle, version: Option<String>) -> Result<(), String> {
+    crate::prerequisites::require_npm("PI CLI")?;
     let dir = get_cli_dir(&app)?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create PI CLI dir: {e}"))?;
     let package = match version {

@@ -148,11 +148,18 @@ fn semver_parts(version: &str) -> Vec<u32> {
 }
 
 fn fallback_models() -> Vec<GrokModelInfo> {
-    vec![GrokModelInfo {
-        id: "grok-4.5".to_string(),
-        label: "Grok 4.5".to_string(),
-        is_default: true,
-    }]
+    vec![
+        GrokModelInfo {
+            id: "grok-4.6".to_string(),
+            label: "Grok 4.6".to_string(),
+            is_default: true,
+        },
+        GrokModelInfo {
+            id: "grok-4.5".to_string(),
+            label: "Grok 4.5".to_string(),
+            is_default: false,
+        },
+    ]
 }
 
 fn format_model_label(id: &str) -> String {
@@ -662,6 +669,7 @@ pub async fn get_grok_install_command(app: AppHandle) -> Result<GrokInstallComma
 }
 
 pub async fn install_grok_cli(app: AppHandle, version: Option<String>) -> Result<(), String> {
+    crate::prerequisites::require_npm("Grok CLI")?;
     let cli_dir = ensure_cli_dir(&app)?;
     let package = grok_package(version.as_deref());
     let output = silent_command("npm")
@@ -1469,5 +1477,15 @@ Available models:
         assert_eq!(models[0].id, "grok-4.5");
         assert_eq!(models[0].label, "Grok 4.5");
         assert!(models[0].is_default);
+    }
+
+    #[test]
+    fn fallback_models_default_to_grok_4_6() {
+        let models = fallback_models();
+        assert_eq!(models[0].id, "grok-4.6");
+        assert_eq!(models[0].label, "Grok 4.6");
+        assert!(models[0].is_default);
+        assert_eq!(models[1].id, "grok-4.5");
+        assert!(!models[1].is_default);
     }
 }

@@ -73,6 +73,8 @@ export function SendCancelButton({
 
       return (
         <div className="flex items-center">
+          {cancelButton}
+          <div className="h-4 w-px shrink-0 bg-border/50" />
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -88,8 +90,6 @@ export function SendCancelButton({
             </TooltipTrigger>
             <TooltipContent>{actionTooltip}</TooltipContent>
           </Tooltip>
-          <div className="h-4 w-px shrink-0 bg-border/50" />
-          {cancelButton}
         </div>
       )
     }

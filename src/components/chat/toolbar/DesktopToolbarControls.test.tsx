@@ -64,6 +64,7 @@ function renderDesktopToolbarControls(
     loadedSecurityContexts: [],
     loadedAdvisoryContexts: [],
     loadedLinearContexts: [],
+    loadedSentryContexts: [],
     attachedSavedContexts: [],
     providerDropdownOpen: false,
     thinkingDropdownOpen: false,
@@ -90,6 +91,7 @@ function renderDesktopToolbarControls(
     handleViewSecurityAlert: vi.fn(),
     handleViewAdvisory: vi.fn(),
     handleViewLinear: vi.fn(),
+    handleViewSentry: vi.fn(),
     handleViewSavedContext: vi.fn(),
   }
 
@@ -97,6 +99,27 @@ function renderDesktopToolbarControls(
 }
 
 describe('DesktopToolbarControls', () => {
+  it('shows loaded Sentry issues in the context dropdown', async () => {
+    const user = userEvent.setup()
+    const handleViewSentry = vi.fn()
+    renderDesktopToolbarControls({
+      loadedSentryContexts: [
+        {
+          id: '123',
+          shortId: 'COOLIFY-BXB',
+          title: 'Backup failed',
+          permalink: 'https://sentry.io/issues/123',
+          content: '# Sentry context',
+        },
+      ],
+      handleViewSentry,
+    })
+
+    await user.click(screen.getByRole('button', { name: /loaded contexts/i }))
+    await user.click(await screen.findByText(/COOLIFY-BXB/))
+    expect(handleViewSentry).toHaveBeenCalledTimes(1)
+  })
+
   it.each([
     ['plan', 'Plan'],
     ['build', 'Build'],
@@ -281,6 +304,25 @@ describe('DesktopToolbarControls', () => {
     expect(screen.queryByText('Megathink')).not.toBeInTheDocument()
     expect(screen.queryByText('Max')).not.toBeInTheDocument()
     expect(screen.queryByText('Ultracode')).not.toBeInTheDocument()
+  })
+
+  it('shows only native Antigravity effort options', () => {
+    renderDesktopToolbarControls({
+      isCodex: false,
+      selectedBackend: 'antigravity',
+      selectedModel: 'antigravity/auto',
+      selectedEffortLevel: 'medium',
+      selectedThinkingLevel: 'megathink',
+      thinkingDropdownOpen: true,
+    })
+
+    for (const name of ['Adaptive/Default', 'Low', 'Medium', 'High']) {
+      expect(
+        screen.getByRole('menuitemradio', { name: new RegExp(name, 'i') })
+      ).toBeInTheDocument()
+    }
+    expect(screen.queryByText('Megathink')).not.toBeInTheDocument()
+    expect(screen.queryByText('xHigh')).not.toBeInTheDocument()
   })
 
   it('calls effort change handler when selecting an effort on desktop', async () => {

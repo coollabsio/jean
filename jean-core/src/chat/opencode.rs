@@ -23,6 +23,28 @@ struct ChunkEvent {
     run_id: Option<String>,
 }
 
+#[cfg(test)]
+mod one_shot_structured_output_tests {
+    use super::*;
+
+    #[test]
+    fn detects_provider_rejection_of_structured_output_in_thinking_mode() {
+        let error = "[invalid_request_error] Thinking mode does not support this tool_choice";
+
+        assert!(should_retry_structured_output_as_text(error));
+        assert!(!should_retry_structured_output_as_text("quota exceeded"));
+    }
+
+    #[test]
+    fn text_fallback_prompt_requires_json_matching_the_schema() {
+        let prompt = structured_output_text_prompt("Generate a PR", r#"{"type":"object"}"#);
+
+        assert!(prompt.contains("Generate a PR"));
+        assert!(prompt.contains(r#"{"type":"object"}"#));
+        assert!(prompt.contains("Return only the JSON object"));
+    }
+}
+
 #[derive(serde::Serialize, Clone)]
 struct ToolUseEvent {
     session_id: String,
@@ -1449,6 +1471,16 @@ fn variant_for_effort(reasoning_effort: Option<&str>) -> Option<&'static str> {
     }
 }
 
+fn should_retry_structured_output_as_text(error: &str) -> bool {
+    error.contains("Thinking mode does not support this tool_choice")
+}
+
+fn structured_output_text_prompt(prompt: &str, schema: &str) -> String {
+    format!(
+        "{prompt}\n\nReturn only the JSON object matching this schema. Do not use markdown fences:\n{schema}"
+    )
+}
+
 /// Build the OpenCode `parts` array by resolving file annotations in the prompt.
 ///
 /// - Image annotations → base64-encoded file parts
@@ -2564,11 +2596,9 @@ fn handle_opencode_permission_asked(
         }
     };
 
-    let Some(mut request) = parse_opencode_permission_request(
-        event_type,
-        properties,
-        Some(working_dir.clone()),
-    ) else {
+    let Some(mut request) =
+        parse_opencode_permission_request(event_type, properties, Some(working_dir.clone()))
+    else {
         log::warn!("OpenCode permission.asked could not be parsed: {properties}");
         return;
     };
@@ -3551,12 +3581,12 @@ fn one_shot_opencode_blocking(
         ));
     }
 
-    let response_json: serde_json::Value = response
+    let mut response_json: serde_json::Value = response
         .json()
         .map_err(|e| format!("Failed to parse OpenCode response: {e}"))?;
 
     // When using json_schema format, the structured output is in info.structured
-    if json_schema.is_some() {
+    if let Some(json_schema) = json_schema {
         if let Some(structured) = response_json.get("info").and_then(|i| i.get("structured")) {
             if !structured.is_null() {
                 return Ok(structured.to_string());
@@ -3573,7 +3603,39 @@ fn one_shot_opencode_blocking(
                 .and_then(|d| d.get("message"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("Structured output failed");
-            return Err(format!("OpenCode {error_name}: {error_msg}"));
+            let error = format!("OpenCode {error_name}: {error_msg}");
+            if should_retry_structured_output_as_text(&error) {
+                log::warn!(
+                    "OpenCode provider rejected structured output with thinking enabled; retrying as strict JSON text"
+                );
+                payload
+                    .as_object_mut()
+                    .expect("OpenCode payload is an object")
+                    .remove("format");
+                payload["parts"] = prepare_opencode_parts(&structured_output_text_prompt(
+                    prompt,
+                    &json_schema.to_string(),
+                ));
+                let fallback_response =
+                    client
+                        .post(&msg_url)
+                        .query(&query)
+                        .json(&payload)
+                        .send()
+                        .map_err(|e| format!("Failed to retry OpenCode message: {e}"))?;
+                if !fallback_response.status().is_success() {
+                    let status = fallback_response.status();
+                    let body = fallback_response.text().unwrap_or_default();
+                    return Err(format!(
+                        "OpenCode one-shot fallback failed: status={status}, body={body}"
+                    ));
+                }
+                response_json = fallback_response
+                    .json()
+                    .map_err(|e| format!("Failed to parse OpenCode fallback response: {e}"))?;
+            } else {
+                return Err(error);
+            }
         }
     }
 
@@ -3657,15 +3719,13 @@ pub fn respond_opencode_permission(
 
     let query = [("directory", working_dir.to_string())];
     let mut body = serde_json::json!({ "reply": reply });
-    if let Some(msg) = message
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
+    if let Some(msg) = message.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         body["message"] = serde_json::Value::String(msg.to_string());
     }
 
-    let is_v2 = api_version.map(|v| v.eq_ignore_ascii_case("v2")).unwrap_or(false);
+    let is_v2 = api_version
+        .map(|v| v.eq_ignore_ascii_case("v2"))
+        .unwrap_or(false);
     let reply_url = if is_v2 {
         let session_id = opencode_session_id
             .map(str::trim)
@@ -3703,7 +3763,9 @@ pub fn respond_opencode_permission(
                 .query(&query)
                 .json(&body)
                 .send()
-                .map_err(|e| format!("Failed to reply to OpenCode permission (v1 fallback): {e}"))?;
+                .map_err(|e| {
+                    format!("Failed to reply to OpenCode permission (v1 fallback): {e}")
+                })?;
             if !fallback_resp.status().is_success() {
                 let status = fallback_resp.status();
                 let resp_body = fallback_resp.text().unwrap_or_default();
@@ -4460,12 +4522,9 @@ mod tests {
             "save": ["/var/tmp/*"],
             "source": { "type": "tool", "messageID": "m2", "callID": "c2" }
         });
-        let req = parse_opencode_permission_request(
-            "permission.v2.asked",
-            &v2,
-            Some("/proj".into()),
-        )
-        .expect("v2 parse");
+        let req =
+            parse_opencode_permission_request("permission.v2.asked", &v2, Some("/proj".into()))
+                .expect("v2 parse");
         assert_eq!(req.permission, "external_directory");
         assert_eq!(req.patterns, vec!["/var/tmp/*"]);
         assert_eq!(req.always, vec!["/var/tmp/*"]);

@@ -76,7 +76,7 @@ export function resolveSessionDebugDetails(params: {
               ? (preferences?.selected_commandcode_model ??
                 'commandcode/default')
               : finalBackend === 'grok'
-                ? (preferences?.selected_grok_model ?? 'grok/grok-4.5')
+                ? (preferences?.selected_grok_model ?? 'grok/grok-4.6')
                 : finalBackend === 'kimi'
                   ? (preferences?.selected_kimi_model ?? 'kimi/default')
                   : (preferences?.selected_model ?? 'claude-opus-4-8[1m]')

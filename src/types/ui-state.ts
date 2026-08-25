@@ -88,6 +88,8 @@ export interface UIState {
    * Content is optional in persistence; restore re-reads from disk when missing.
    */
   pending_text_files?: Record<string, PendingTextFileDraft[]>
+  /** Worktrees whose setup-script status card was dismissed */
+  dismissed_setup_scripts?: string[]
   /** Whether the review sidebar is visible */
   review_sidebar_visible?: boolean
   /** Modal terminal drawer open state per worktree */
@@ -171,6 +173,7 @@ export const defaultUIState: UIState = {
   input_drafts: {},
   pending_images: {},
   pending_text_files: {},
+  dismissed_setup_scripts: [],
   modal_terminal_open: {},
   modal_terminal_dock_mode: 'floating',
   modal_terminal_width: 400,

@@ -1048,7 +1048,7 @@ describe('useStreamingEvents cancellation sanitization', () => {
     )
   })
 
-  it('hydrates persisted cancelled assistant output when no streaming state remains', async () => {
+  it('hydrates persisted cancelled output without clearing a newer input draft', async () => {
     const queryClient = createQueryClient()
     const wrapper = createWrapper(queryClient)
 
@@ -1151,7 +1151,7 @@ describe('useStreamingEvents cancellation sanitization', () => {
       lastSentMessages: {
         'session-1': 'cancel this after output persisted',
       },
-      inputDrafts: { 'session-1': '' },
+      inputDrafts: { 'session-1': 'keep this draft' },
     })
 
     renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
@@ -1198,7 +1198,9 @@ describe('useStreamingEvents cancellation sanitization', () => {
       expect(session?.messages[3]?.cancelled).toBe(true)
     })
 
-    expect(useChatStore.getState().inputDrafts['session-1']).toBeUndefined()
+    expect(useChatStore.getState().inputDrafts['session-1']).toBe(
+      'keep this draft'
+    )
   })
 
   it('ignores late chunks from a cancelled run after the same session starts a new run', async () => {

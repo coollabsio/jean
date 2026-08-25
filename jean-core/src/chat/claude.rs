@@ -19,6 +19,8 @@ use crate::projects::storage::load_projects_data;
 
 /// Default global system prompt (must match DEFAULT_GLOBAL_SYSTEM_PROMPT in preferences.ts)
 const DEFAULT_GLOBAL_SYSTEM_PROMPT: &str = "\
+Always use ASD-STE100 Simplified Technical English when you talk to me.\n\
+\n\
 ### 1. Planning Guidance\n\
 - For non-trivial tasks (3+ steps or architectural decisions), prefer planning before implementation when the current execution mode has not already authorized execution.\n\
 - If something goes sideways, STOP and re-plan immediately - don't keep pushing\n\
@@ -54,6 +56,7 @@ const DEFAULT_GLOBAL_SYSTEM_PROMPT: &str = "\
 - Diff behavior between main and your changes when relevant\n\
 - Ask yourself: \"Would a staff engineer approve this?\"\n\
 - Run tests, check logs, demonstrate correctness\n\
+- Before UI, HTTP, browser, or end-to-end verification, call Jean MCP `get_run_environments` and test against the returned url/port/command when a Run environment is available.\n\
 \n\
 ### 6. Demand Elegance (Balanced)\n\
 - For non-trivial changes: pause and ask \"is there a more elegant way?\"\n\
@@ -91,6 +94,12 @@ const DEFAULT_GLOBAL_SYSTEM_PROMPT: &str = "\
 - Do NOT create git worktrees manually (`git worktree add`, Superpowers `using-git-worktrees`, or similar) unless the user explicitly asks for a new worktree.\n\
 - If a new worktree is explicitly required, use Jean's worktree features through Jean MCP/tools, not raw git worktree commands.\n\
 - If already in a Jean worktree or base/main workspace, continue in the current workspace.\n\
+\n\
+## Jean Run Environment\n\
+- When you need to test a running app (UI, HTTP, browser, smoke, e2e), call Jean MCP `get_run_environments` first (pass this worktreeId when known).\n\
+- If an environment is running, test against its `url`, port, and startup command. Do not guess localhost ports or start a second dev server when Jean already has one.\n\
+- If nothing is running and verification needs a live server, say so and use the returned/startup command rather than inventing a different command or port.\n\
+- In how-to-test notes, include the exact URL/port you used.\n\
 \n\
 ## Important!\n\
 \n\
@@ -182,7 +191,7 @@ pub struct ErrorEvent {
 pub struct CancelledEvent {
     pub session_id: String,
     pub worktree_id: String, // Kept for backward compatibility
-    pub undo_send: bool, // True only when the prompt never started (restore to input)
+    pub undo_send: bool,     // True only when the prompt never started (restore to input)
     pub emitted_at_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
@@ -391,6 +400,34 @@ fn split_fast_model(model: &str) -> (&str, bool) {
     }
 }
 
+fn claude_permission_mode(execution_mode: Option<&str>, running_as_root: bool) -> &'static str {
+    match execution_mode.unwrap_or("plan") {
+        "build" => "acceptEdits",
+        // Claude Code rejects bypassPermissions when the process runs as root.
+        // Fall back to its most permissive supported mode so server installs
+        // can still start a Claude turn instead of producing no chat output.
+        "yolo" if running_as_root => "acceptEdits",
+        "yolo" => "bypassPermissions",
+        _ => "plan",
+    }
+}
+
+fn claude_allows_all_bash(execution_mode: Option<&str>) -> bool {
+    execution_mode == Some("yolo")
+}
+
+fn is_running_as_root() -> bool {
+    #[cfg(unix)]
+    {
+        // SAFETY: geteuid has no preconditions and does not mutate memory.
+        unsafe { libc::geteuid() == 0 }
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
+}
+
 /// Build CLI arguments for Claude CLI.
 ///
 /// Returns a tuple of (args, env_vars) where env_vars are (key, value) pairs.
@@ -410,6 +447,7 @@ fn build_claude_args(
     mcp_config: Option<&str>,
     chrome_enabled: bool,
     custom_profile_name: Option<&str>,
+    include_recap: bool,
 ) -> (Vec<String>, Vec<(String, String)>) {
     let mut args = Vec::new();
     let mut env_vars = Vec::new();
@@ -495,11 +533,8 @@ fn build_claude_args(
     };
 
     // Permission mode
-    let perm_mode = match execution_mode.unwrap_or("plan") {
-        "build" => "acceptEdits",
-        "yolo" => "bypassPermissions",
-        _ => "plan",
-    };
+    let running_as_root = is_running_as_root();
+    let perm_mode = claude_permission_mode(execution_mode, running_as_root);
     args.push("--permission-mode".to_string());
     args.push(perm_mode.to_string());
 
@@ -592,6 +627,12 @@ fn build_claude_args(
     }
 
     // Allowed tools
+    // Make unrestricted shell access explicit for every YOLO session. This is
+    // also required when root uses the acceptEdits compatibility fallback.
+    if claude_allows_all_bash(execution_mode) {
+        args.push("--allowedTools".to_string());
+        args.push("Bash(*)".to_string());
+    }
     if let Some(tools) = allowed_tools {
         for tool in tools {
             args.push("--allowedTools".to_string());
@@ -721,8 +762,9 @@ fn build_claude_args(
         }
     }
 
-    // End-of-turn recap instruction (compact view surfaces this block)
-    if super::should_add_recap_instruction(app) {
+    // End-of-turn recap instruction (compact view surfaces this block).
+    // Magic release notes skip this — the recap would cover the actual notes.
+    if super::should_include_recap_instruction(app, include_recap) {
         system_prompt_parts.push(super::RECAP_INSTRUCTION.to_string());
     }
 
@@ -1136,6 +1178,7 @@ pub fn execute_claude_detached(
     mcp_config: Option<&str>,
     chrome_enabled: bool,
     custom_profile_name: Option<&str>,
+    include_recap: bool,
     pid_callback: Option<Box<dyn FnOnce(u32) + Send>>,
 ) -> Result<(u32, ClaudeResponse), String> {
     use super::detached::spawn_detached_claude;
@@ -1180,6 +1223,7 @@ pub fn execute_claude_detached(
         mcp_config,
         chrome_enabled,
         custom_profile_name,
+        include_recap,
     );
 
     // Log the full Claude CLI command for debugging
@@ -2602,6 +2646,22 @@ mod tests {
     }
 
     #[test]
+    fn yolo_uses_accept_edits_when_running_as_root() {
+        assert_eq!(claude_permission_mode(Some("yolo"), true), "acceptEdits");
+        assert!(claude_allows_all_bash(Some("yolo")));
+    }
+
+    #[test]
+    fn yolo_uses_bypass_permissions_for_non_root_users() {
+        assert_eq!(
+            claude_permission_mode(Some("yolo"), false),
+            "bypassPermissions"
+        );
+        assert!(claude_allows_all_bash(Some("yolo")));
+        assert!(!claude_allows_all_bash(Some("build")));
+    }
+
+    #[test]
     fn custom_profile_env_vars_reads_string_env_entries() {
         let settings = r#"{
             "env": {
@@ -2623,6 +2683,8 @@ mod tests {
 
     #[test]
     fn default_global_system_prompt_prefers_interactive_plan_questions() {
+        assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT
+            .contains("Always use ASD-STE100 Simplified Technical English when you talk to me."));
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("backend-native interactive question UI"));
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("Claude AskUserQuestion"));
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("Codex request_user_input"));
@@ -2634,6 +2696,10 @@ mod tests {
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("Jean Worktree Policy"));
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("Do NOT create git worktrees manually"));
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("Jean MCP/tools"));
+        assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("Jean Run Environment"));
+        assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("get_run_environments"));
+        assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT
+            .contains("test against its `url`, port, and startup command"));
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("VERY IMPORTANT: Keep Code Simple"));
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT
             .contains("Always implement the simplest maintainable solution"));

@@ -70,6 +70,7 @@ function renderChatToolbar(props: Partial<ChatToolbarProps> = {}) {
     loadedSecurityContexts: [],
     loadedAdvisoryContexts: [],
     loadedLinearContexts: [],
+    loadedSentryContexts: [],
     attachedSavedContexts: [],
     onOpenMagicModal: vi.fn(),
     onSaveContext: vi.fn(),

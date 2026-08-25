@@ -13,8 +13,10 @@ import {
   closeActiveTerminalTabForShortcut,
   findKeybindingAction,
   getTerminalShortcutWorktreeId,
+  handleRunEnvironmentStarted,
   isPlainSessionTerminalFocused,
   shouldAllowKeybindingThroughOpenOverlay,
+  shouldLetChatInputHandleAction,
   shouldLetPlanDialogHandleAction,
   switchActiveTerminalTabByIndexForShortcut,
   useWindowKeyboardFocusRestore,
@@ -27,6 +29,26 @@ import type {
   Session,
   WorktreeSessions,
 } from '@/types/chat'
+
+describe('shouldLetChatInputHandleAction', () => {
+  it('lets Cmd/Ctrl+Enter reach the chat input when no plan dialog is open', () => {
+    const input = document.createElement('textarea')
+    input.setAttribute('data-chat-input', '')
+
+    expect(shouldLetChatInputHandleAction('approve_plan', input, false)).toBe(
+      true
+    )
+  })
+
+  it('keeps plan approval handling when the plan dialog is open', () => {
+    const input = document.createElement('textarea')
+    input.setAttribute('data-chat-input', '')
+
+    expect(shouldLetChatInputHandleAction('approve_plan', input, true)).toBe(
+      false
+    )
+  })
+})
 
 const { mockInvoke, mockListen, mockDisposeTerminal, mockEnvironment } =
   vi.hoisted(() => ({
@@ -211,6 +233,23 @@ describe('useMainWindowEventListeners terminal shortcuts', () => {
       sessionTerminalIds: {},
       newSessionModeTarget: null,
     })
+  })
+
+  it('shows an MCP-started run in the active worktree modal', () => {
+    useUIStore.setState({
+      sessionChatModalOpen: true,
+      sessionChatModalWorktreeId: 'worktree-1',
+    })
+
+    handleRunEnvironmentStarted({
+      worktreeId: 'worktree-1',
+      terminalId: 'run-from-mcp',
+      command: 'bun run dev',
+    })
+
+    const state = useTerminalStore.getState()
+    expect(state.terminals['worktree-1']?.[0]?.id).toBe('run-from-mcp')
+    expect(state.modalTerminalOpen['worktree-1']).toBe(true)
   })
 
   it('maps Option+Cmd arrow shortcuts to medium chat scroll actions', () => {

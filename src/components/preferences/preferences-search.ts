@@ -78,6 +78,15 @@ const paneEntries: PreferenceSearchEntry[] = [
     anchorId: 'pref-pane-kimi',
   },
   {
+    id: 'pane-antigravity',
+    pane: 'antigravity',
+    paneTitle: 'Antigravity',
+    type: 'pane',
+    title: 'Antigravity Settings',
+    keywords: ['antigravity', 'agy', 'google', 'gemini', 'antigravity model'],
+    anchorId: 'pref-pane-antigravity',
+  },
+  {
     id: 'pane-github',
     pane: 'github',
     paneTitle: 'GitHub CLI',
@@ -438,6 +447,32 @@ const sectionEntries: PreferenceSearchEntry[] = [
     ],
     anchorId: 'pref-kimi-section-settings',
     fallbackAnchorId: 'pref-pane-kimi',
+  },
+  {
+    id: 'antigravity-cli',
+    pane: 'antigravity',
+    paneTitle: 'Antigravity',
+    type: 'section',
+    title: 'Antigravity CLI',
+    sectionTitle: 'CLI source',
+    keywords: [
+      'antigravity',
+      'install antigravity',
+      'antigravity login',
+      'antigravity source',
+      'agy',
+    ],
+    fallbackAnchorId: 'pref-pane-antigravity',
+  },
+  {
+    id: 'antigravity-settings',
+    pane: 'antigravity',
+    paneTitle: 'Antigravity',
+    type: 'section',
+    title: 'Antigravity Model',
+    sectionTitle: 'Default model',
+    keywords: ['antigravity model', 'gemini model', 'antigravity effort'],
+    fallbackAnchorId: 'pref-pane-antigravity',
   },
   {
     id: 'github-cli',
@@ -815,6 +850,7 @@ const nativeOnlySectionIds = new Set([
   'cursor-cli',
   'pi-cli',
   'kimi-cli',
+  'antigravity-cli',
   'github-cli',
   'general-troubleshooting',
   'web-access-server',
@@ -851,6 +887,12 @@ const magicPromptDefinitions: {
   description: string
   keywords: string[]
 }[] = [
+  {
+    key: 'smoke_test',
+    title: 'Smoke Test Prompt',
+    description: 'Test the current work through available interfaces.',
+    keywords: ['smoke test prompt', 'test current feature'],
+  },
   {
     key: 'investigate_issue',
     title: 'Investigate Issue Prompt',
@@ -898,12 +940,6 @@ const magicPromptDefinitions: {
     title: 'Code Review Prompt',
     description: 'Review code changes with structured findings.',
     keywords: ['code review prompt'],
-  },
-  {
-    key: 'final_review',
-    title: 'Final Review Prompt',
-    description: 'Audit merge readiness in a new session.',
-    keywords: ['final review prompt', 'pre-merge audit', 'merge readiness'],
   },
   {
     key: 'review_comments',
