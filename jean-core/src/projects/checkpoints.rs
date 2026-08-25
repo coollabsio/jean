@@ -159,9 +159,7 @@ fn save_store(app: &AppHandle, worktree_id: &str, store: &CheckpointStore) -> Re
     let path = store_path(app, worktree_id)?;
     let json = serde_json::to_string_pretty(store)
         .map_err(|e| format!("Failed to serialize checkpoints: {e}"))?;
-    let tmp = path.with_extension(format!("{}.tmp", Uuid::new_v4()));
-    fs::write(&tmp, json).map_err(|e| format!("Failed to write checkpoints: {e}"))?;
-    fs::rename(&tmp, &path).map_err(|e| format!("Failed to finalize checkpoints: {e}"))?;
+    crate::platform::write_file_atomically(&path, json.as_bytes())?;
     Ok(())
 }
 
