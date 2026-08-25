@@ -596,8 +596,7 @@ export function MagicModal() {
               : backend === 'kimi'
                 ? (preferences?.selected_kimi_model ?? 'kimi/default')
                 : backend === 'grok'
-                  ? (preferences?.selected_grok_model ??
-                    'grok/grok-4.5')
+                  ? (preferences?.selected_grok_model ?? 'grok/grok-4.5')
                   : (preferences?.selected_model ?? 'sonnet'))
     const provider = resolveMagicPromptProvider(
       preferences?.magic_prompt_providers,
@@ -630,8 +629,7 @@ export function MagicModal() {
               : backend === 'kimi'
                 ? (preferences?.selected_kimi_model ?? 'kimi/default')
                 : backend === 'grok'
-                  ? (preferences?.selected_grok_model ??
-                    'grok/grok-4.5')
+                  ? (preferences?.selected_grok_model ?? 'grok/grok-4.5')
                   : (preferences?.selected_model ?? 'sonnet'))
     const provider = resolveMagicPromptProvider(
       preferences?.magic_prompt_providers,
@@ -1776,7 +1774,8 @@ ${resolveInstructions}`
               (resolvedBackend === 'codex'
                 ? (preferences?.selected_codex_model ?? 'gpt-5.6-sol')
                 : resolvedBackend === 'opencode'
-                  ? (preferences?.selected_opencode_model ?? 'opencode/gpt-5.6-sol')
+                  ? (preferences?.selected_opencode_model ??
+                    'opencode/gpt-5.6-sol')
                   : resolvedBackend === 'cursor'
                     ? (preferences?.selected_cursor_model ?? 'cursor/auto')
                     : (preferences?.selected_model ?? 'sonnet'))
@@ -2131,6 +2130,9 @@ ${resolveInstructions}`
                       })
                       queryClient.invalidateQueries({
                         queryKey: ['all-sessions'],
+                      })
+                      queryClient.invalidateQueries({
+                        queryKey: chatQueryKeys.unreadSessionCount(),
                       })
                     })
                     toast.dismiss(toastId)

@@ -57,6 +57,38 @@ export interface GitStatusEvent {
   worktree_ahead_count: number
   /** Commits in HEAD not yet pushed to origin/current_branch */
   unpushed_count: number
+  /** True when the backend bootstrap coordinator owns cache persistence. */
+  cache_persisted?: boolean
+}
+
+/**
+ * Compare status fields that affect the UI and persisted cache.
+ *
+ * `checked_at` is deliberately excluded: the poller emits a fresh timestamp
+ * even when the repository state is unchanged, and treating that as a change
+ * would trigger React notifications and a projects.json write every poll.
+ */
+export function areGitStatusValuesEqual(
+  left: GitStatusEvent,
+  right: GitStatusEvent
+): boolean {
+  return (
+    left.worktree_id === right.worktree_id &&
+    left.current_branch === right.current_branch &&
+    left.base_branch === right.base_branch &&
+    left.base_remote === right.base_remote &&
+    left.behind_count === right.behind_count &&
+    left.ahead_count === right.ahead_count &&
+    left.has_updates === right.has_updates &&
+    left.uncommitted_added === right.uncommitted_added &&
+    left.uncommitted_removed === right.uncommitted_removed &&
+    left.branch_diff_added === right.branch_diff_added &&
+    left.branch_diff_removed === right.branch_diff_removed &&
+    left.base_branch_ahead_count === right.base_branch_ahead_count &&
+    left.base_branch_behind_count === right.base_branch_behind_count &&
+    left.worktree_ahead_count === right.worktree_ahead_count &&
+    left.unpushed_count === right.unpushed_count
+  )
 }
 
 /**
@@ -702,11 +734,16 @@ export function useGitStatusEvents(
           gitStatusQueryKeys.worktree(status.worktree_id)
         )
 
-        // Update the query cache
-        queryClient.setQueryData(
-          gitStatusQueryKeys.worktree(status.worktree_id),
-          status
-        )
+        const statusChanged =
+          !existingStatus || !areGitStatusValuesEqual(existingStatus, status)
+
+        // Avoid notifying every status subscriber when only checked_at changed.
+        if (statusChanged && !status.cache_persisted) {
+          queryClient.setQueryData(
+            gitStatusQueryKeys.worktree(status.worktree_id),
+            status
+          )
+        }
         if (
           !existingStatus ||
           existingStatus.current_branch !== status.current_branch
@@ -748,23 +785,26 @@ export function useGitStatusEvents(
           }
         }
 
-        // Persist to worktree cached status (fire and forget)
-        updateWorktreeCachedStatus(
-          status.worktree_id,
-          status.current_branch,
-          null, // pr_status - handled by pr-status service
-          null, // check_status - handled by pr-status service
-          status.behind_count,
-          status.ahead_count,
-          status.uncommitted_added,
-          status.uncommitted_removed,
-          status.branch_diff_added,
-          status.branch_diff_removed,
-          status.base_branch_ahead_count,
-          status.base_branch_behind_count,
-          status.worktree_ahead_count,
-          status.unpushed_count
-        ).catch(console.error)
+        // Persist only meaningful changes (fire and forget). The backend also
+        // guards its full-file write for races with other status listeners.
+        if (statusChanged) {
+          updateWorktreeCachedStatus(
+            status.worktree_id,
+            status.current_branch,
+            null, // pr_status - handled by pr-status service
+            null, // check_status - handled by pr-status service
+            status.behind_count,
+            status.ahead_count,
+            status.uncommitted_added,
+            status.uncommitted_removed,
+            status.branch_diff_added,
+            status.branch_diff_removed,
+            status.base_branch_ahead_count,
+            status.base_branch_behind_count,
+            status.worktree_ahead_count,
+            status.unpushed_count
+          ).catch(console.error)
+        }
 
         // Call the optional callback
         onStatusUpdate?.(status)
@@ -845,6 +885,7 @@ export function useGitStatus(worktreeId: string | null) {
     queryFn: () => null as GitStatusEvent | null, // Status comes from events, not fetching
     enabled: !!worktreeId,
     staleTime: Infinity, // Never refetch automatically; data comes from events
+    gcTime: 1000 * 60 * 2,
   })
 }
 

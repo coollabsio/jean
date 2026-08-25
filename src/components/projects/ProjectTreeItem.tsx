@@ -52,9 +52,9 @@ interface ProjectTreeItemProps {
  * Projects with worktrees expand/collapse only — never clear session selection.
  * Empty projects still open the project canvas.
  */
-export function resolveProjectRowClickAction(hasWorktrees: boolean):
-  | 'toggle-expand'
-  | 'open-canvas' {
+export function resolveProjectRowClickAction(
+  hasWorktrees: boolean
+): 'toggle-expand' | 'open-canvas' {
   return hasWorktrees ? 'toggle-expand' : 'open-canvas'
 }
 
@@ -69,10 +69,16 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
     toggleProjectExpanded,
     openProjectSettings,
   } = useProjectsStore()
-  const { data: worktrees = [] } = useWorktrees(project.id)
+  const isProjectExpanded = expandedProjectIds.has(project.id)
+  const shouldLoadWorktrees =
+    isProjectExpanded || selectedProjectId === project.id
+  const { data: worktrees = [] } = useWorktrees(project.id, {
+    enabled: shouldLoadWorktrees,
+  })
   const { data: appDataDir = '' } = useAppDataDir()
-  const hasWorktrees = worktrees.length > 0
-  const isExpanded = hasWorktrees && expandedProjectIds.has(project.id)
+  const hasWorktrees =
+    worktrees.length > 0 || (project.worktree_count ?? 0) > 0
+  const isExpanded = hasWorktrees && isProjectExpanded
   const setNewWorktreeModalOpen = useUIStore(
     state => state.setNewWorktreeModalOpen
   )
@@ -339,7 +345,9 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
               {hasWorktrees && (
                 <button
                   type="button"
-                  aria-label={isExpanded ? 'Collapse project' : 'Expand project'}
+                  aria-label={
+                    isExpanded ? 'Collapse project' : 'Expand project'
+                  }
                   className={cn(
                     'flex size-4 shrink-0 items-center justify-center rounded transition-opacity hover:bg-accent-foreground/10',
                     isMobile

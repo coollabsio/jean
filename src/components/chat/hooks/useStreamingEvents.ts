@@ -348,10 +348,14 @@ export default function useStreamingEvents({
       .then(entries => {
         const store = useChatStore.getState()
         for (const entry of entries) {
-          store.setScheduledWakeup(entry.wakeup.tool_call_id, {
-            ...entry.wakeup,
-            status: 'pending',
-          })
+          store.setScheduledWakeup(
+            entry.wakeup.tool_call_id,
+            {
+              ...entry.wakeup,
+              status: 'pending',
+            },
+            entry.session_id
+          )
         }
       })
       .catch(err => {
@@ -1672,6 +1676,9 @@ export default function useStreamingEvents({
       queryClient.invalidateQueries({
         queryKey: chatQueryKeys.sessions(worktreeId),
       })
+      queryClient.invalidateQueries({
+        queryKey: chatQueryKeys.unreadSessionCount(),
+      })
       queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
       // Invalidate individual session so cross-client viewers get the
       // complete conversation (user message + assistant response).
@@ -1821,6 +1828,9 @@ export default function useStreamingEvents({
           queryKey: chatQueryKeys.sessions(sessionWorktreeId),
         })
       }
+      queryClient.invalidateQueries({
+        queryKey: chatQueryKeys.unreadSessionCount(),
+      })
       queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
     })
 
@@ -2138,6 +2148,9 @@ export default function useStreamingEvents({
               })
             }
           }
+          queryClient.invalidateQueries({
+            queryKey: chatQueryKeys.unreadSessionCount(),
+          })
           queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
         }
 
@@ -2201,11 +2214,15 @@ export default function useStreamingEvents({
     const unlistenWakeupScheduled = listen<WakeupScheduledEvent>(
       'chat:wakeup_scheduled',
       event => {
-        const { wakeup } = event.payload
-        useChatStore.getState().setScheduledWakeup(wakeup.tool_call_id, {
-          ...wakeup,
-          status: 'pending',
-        })
+        const { session_id, wakeup } = event.payload
+        useChatStore.getState().setScheduledWakeup(
+          wakeup.tool_call_id,
+          {
+            ...wakeup,
+            status: 'pending',
+          },
+          session_id
+        )
       }
     )
 
@@ -2295,12 +2312,7 @@ export default function useStreamingEvents({
         case 'thinkingLevel':
           store.setThinkingLevel(
             session_id,
-            value as
-              | 'off'
-              | 'adaptive'
-              | 'think'
-              | 'megathink'
-              | 'ultrathink'
+            value as 'off' | 'adaptive' | 'think' | 'megathink' | 'ultrathink'
           )
           break
         case 'effortLevel':
@@ -2352,6 +2364,9 @@ export default function useStreamingEvents({
       })
       queryClient.invalidateQueries({
         queryKey: ['all-sessions'],
+      })
+      queryClient.invalidateQueries({
+        queryKey: chatQueryKeys.unreadSessionCount(),
       })
     })
 

@@ -17,7 +17,7 @@ import { Kbd } from '@/components/ui/kbd'
 import { cn } from '@/lib/utils'
 import { invoke } from '@/lib/transport'
 import { useQueryClient } from '@tanstack/react-query'
-import { useAllSessions } from '@/services/chat'
+import { chatQueryKeys, useAllSessions } from '@/services/chat'
 import { usePreferences } from '@/services/preferences'
 import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
@@ -171,6 +171,9 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
   // Invalidate cache each time popover opens
   useEffect(() => {
     if (open) {
+      queryClient.invalidateQueries({
+        queryKey: chatQueryKeys.unreadSessionCount(),
+      })
       queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
       setFocusedIndex(0)
       // Snapshot fallback: if popover was opened via command palette / external
@@ -184,8 +187,12 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
 
   // Invalidate when any session is opened (so the count stays fresh)
   useEffect(() => {
-    const handler = () =>
+    const handler = () => {
+      queryClient.invalidateQueries({
+        queryKey: chatQueryKeys.unreadSessionCount(),
+      })
       queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
+    }
     window.addEventListener('session-opened', handler)
     return () => window.removeEventListener('session-opened', handler)
   }, [queryClient])
@@ -282,6 +289,9 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
       } catch {
         // Cache invalidation below will reconcile optimistic state.
       } finally {
+        queryClient.invalidateQueries({
+          queryKey: chatQueryKeys.unreadSessionCount(),
+        })
         queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
         window.dispatchEvent(
           new CustomEvent('session-opened', { detail: { sessionIds: ids } })

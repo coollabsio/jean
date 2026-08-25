@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildNativeClientSessionInput,
   computeSessionCardData,
+  createSessionCardDataCache,
   getEffectiveSessionWaiting,
   getResumeArgs,
   isDedicatedEmptyCodeReviewSession,
@@ -215,6 +216,35 @@ describe('computeSessionCardData', () => {
       ...overrides,
     }
   }
+
+  it('reuses a card when unrelated session state changes', () => {
+    const session = createBaseSession()
+    const cache = createSessionCardDataCache()
+    const storeState = createBaseStoreState()
+
+    const first = cache(session, storeState)
+    const unchanged = cache(session, {
+      ...storeState,
+      sendingSessionIds: { 'other-session': true },
+    })
+
+    expect(unchanged).toBe(first)
+  })
+
+  it('recomputes a card when its session state changes', () => {
+    const session = createBaseSession()
+    const cache = createSessionCardDataCache()
+    const storeState = createBaseStoreState()
+
+    const first = cache(session, storeState)
+    const changed = cache(session, {
+      ...storeState,
+      sendingSessionIds: { [session.id]: true },
+    })
+
+    expect(changed).not.toBe(first)
+    expect(changed.isSending).toBe(true)
+  })
 
   it('keeps streaming codex plans in planning status until the run actually pauses', () => {
     const session = createBaseSession()

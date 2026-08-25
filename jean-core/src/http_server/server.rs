@@ -567,9 +567,11 @@ async fn init_handler(
         selected_project_id_for_init(params.selected_project.as_deref(), ui_state.as_ref());
 
     // Validate the selected project exists and is a real project (not a folder).
-    let selected_project = selected_project_id
-        .as_deref()
-        .and_then(|id| projects.iter().find(|p| p.id == id && !p.is_folder));
+    let selected_project = selected_project_id.as_deref().and_then(|id| {
+        projects
+            .iter()
+            .find(|p| p.project.id == id && !p.project.is_folder)
+    });
 
     // Fetch worktrees first (cheap JSON read), then overlap session lists with
     // windowed active-session messages so /api/init is one parallel disk phase.
@@ -579,7 +581,7 @@ async fn init_handler(
         SessionsByWorktree,
         std::collections::HashMap<String, crate::chat::types::Session>,
     ) = if let Some(project) = selected_project {
-        let project_id = project.id.clone();
+        let project_id = project.project.id.clone();
         let worktrees = crate::projects::list_worktrees(state.app.clone(), project_id.clone())
             .await
             .unwrap_or_default();

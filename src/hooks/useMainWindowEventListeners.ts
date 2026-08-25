@@ -92,8 +92,8 @@ export function allowsKeybindingRepeat(action: KeybindingAction): boolean {
  * Apply backend `cache:invalidate` keys to the React Query client.
  * Shared by the debounced multi-client sync listener.
  *
- * `sessions` also invalidates `['all-sessions']` (finished/unread bell) which
- * is intentionally outside `chatQueryKeys.all` (`['chat']`).
+ * `sessions` also invalidates the finished/unread badge and popover queries,
+ * which are intentionally outside the normal per-worktree cache.
  */
 export function applyCacheInvalidationKeys(
   queryClient: QueryClient,
@@ -108,6 +108,9 @@ export function applyCacheInvalidationKeys(
         // UnreadBell / useUnreadCount read from this separate key.
         queryClient.invalidateQueries({
           queryKey: ['all-sessions'],
+        })
+        queryClient.invalidateQueries({
+          queryKey: chatQueryKeys.unreadSessionCount(),
         })
         break
       case 'projects':

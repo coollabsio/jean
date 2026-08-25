@@ -709,7 +709,7 @@ pub async fn dispatch_command(
             let worktree_ahead_count: Option<u32> =
                 field_opt(&args, "worktreeAheadCount", "worktree_ahead_count")?;
             let unpushed_count: Option<u32> = field_opt(&args, "unpushedCount", "unpushed_count")?;
-            crate::projects::update_worktree_cached_status(
+            let changed = crate::projects::update_worktree_cached_status(
                 app.clone(),
                 worktree_id,
                 branch,
@@ -727,7 +727,9 @@ pub async fn dispatch_command(
                 unpushed_count,
             )
             .await?;
-            emit_cache_invalidation(app, &["projects"]);
+            if changed {
+                emit_cache_invalidation(app, &["projects"]);
+            }
             Ok(Value::Null)
         }
         "list_worktree_files" => {
@@ -1104,6 +1106,10 @@ pub async fn dispatch_command(
         }
         "list_all_sessions" => {
             let result = crate::chat::list_all_sessions(app.clone()).await?;
+            to_value(result)
+        }
+        "get_unread_session_count" => {
+            let result = crate::chat::get_unread_session_count(app.clone()).await?;
             to_value(result)
         }
         "start_background_investigation" => {

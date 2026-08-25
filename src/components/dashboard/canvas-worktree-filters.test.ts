@@ -3,6 +3,7 @@ import type { Worktree } from '@/types/projects'
 import {
   CANVAS_FILTER_TABS,
   getCanvasFilterTabCount,
+  getCanvasWorktreeSearchTerms,
   matchesCanvasFilterTab,
   shouldShowCanvasWorktreeSection,
 } from './canvas-worktree-filters'
@@ -65,5 +66,31 @@ describe('canvas worktree filters', () => {
 
     expect(shouldShowCanvasWorktreeSection(base, 0)).toBe(true)
     expect(shouldShowCanvasWorktreeSection(regular, 0)).toBe(false)
+  })
+
+  it('normalizes searchable worktree metadata once per worktree', () => {
+    const terms = getCanvasWorktreeSearchTerms(
+      worktree({
+        name: 'Feature/Search',
+        branch: 'Feature/Search',
+        labels: [{ name: 'Needs Review', color: '#fff' }],
+        pr_number: 42,
+        issue_number: 7,
+        linear_issue_identifier: 'ENG-123',
+        security_alert_number: 9,
+        advisory_ghsa_id: 'GHSA-AbCd',
+      })
+    )
+
+    expect(terms).toEqual([
+      'feature/search',
+      'feature/search',
+      'needs review',
+      '42',
+      '7',
+      'eng-123',
+      '9',
+      'ghsa-abcd',
+    ])
   })
 })

@@ -59,4 +59,22 @@ describe('isUnreadSession', () => {
       )
     ).toBe(true)
   })
+
+  it('treats pending OpenCode permissions as unread', () => {
+    expect(
+      isUnreadSession(
+        session({
+          pending_opencode_permission_requests: [
+            {
+              request_id: 'permission-1',
+              opencode_session_id: 'opencode-session-1',
+              permission: 'file_read',
+              patterns: ['src/**'],
+              always: [],
+            },
+          ],
+        })
+      )
+    ).toBe(true)
+  })
 })

@@ -673,8 +673,7 @@ export function useGitOperations({
       await performGitPull({
         worktreeId: activeWorktreeId,
         worktreePath: activeWorktreePath,
-        baseBranch:
-          worktree?.base_branch ?? project?.default_branch ?? 'main',
+        baseBranch: worktree?.base_branch ?? project?.default_branch ?? 'main',
         branchLabel: worktree?.branch,
         remote: remote ?? worktree?.base_remote,
         onMergeConflict: () => {
@@ -1078,6 +1077,9 @@ export function useGitOperations({
             ).finally(() => {
               queryClient.invalidateQueries({
                 queryKey: chatQueryKeys.sessions(activeWorktreeId),
+              })
+              queryClient.invalidateQueries({
+                queryKey: chatQueryKeys.unreadSessionCount(),
               })
               queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
             })

@@ -18,3 +18,10 @@ export const queryClient = new QueryClient({
     },
   },
 })
+
+// Git status is event-backed and can be emitted for worktrees that are no
+// longer mounted. Use a shorter cache horizon so switching projects does not
+// retain every historical status entry for the global query default lifetime.
+queryClient.setQueryDefaults(['git-status'], {
+  gcTime: 1000 * 60 * 2,
+})

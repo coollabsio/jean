@@ -44,3 +44,44 @@ macOS/Linux get tar.gz from GitHub. Windows keeps npm fallback (no Windows binar
 - `flate2` — already in Cargo.toml
 - `tar` — already in Cargo.toml
 - No new dependencies needed
+
+## CPU/RAM Optimization
+
+### Phase 1 — Project and session retention
+
+- [x] Add lightweight worktree counts and base-session flags to the project list response
+- [x] Load full worktrees only for expanded or selected projects
+- [x] Keep session-list bootstrap limited to the selected project canvas
+- [x] Remove the redundant startup session prefetch
+- [x] Keep inactive worktree/session query caches short-lived (2 minutes)
+
+### Phase 2 — Unread-session scanning
+
+- [x] Add a count-only unread-session backend command
+- [x] Load full unread-session data only while the unread popover is open
+- [x] Invalidate the count query on session state changes
+
+### Phase 3 — Backend CPU and I/O
+
+- [x] Make unread/session summaries index-based and avoid duplicate metadata reads
+- [x] Bound project bootstrap concurrency
+- [x] Coalesce overlapping Git-status refreshes
+- [x] Batch cached Git-status writes
+- [x] Reduce global polling to recently active, dirty, or PR worktrees
+
+### Phase 4 — Rendering and long-lived runtime state
+
+- [ ] Virtualize large project-canvas lists
+- [x] Add browser content-visibility containment for off-screen canvas sections
+- [x] Cache canvas card derivation by session-specific state
+- [x] Add an LRU/memory cap for detached terminals
+- [x] Bound terminal scrollback
+- [x] Dispose long-idle running renderers safely
+- [x] Verify all session-keyed Zustand state is removed when sessions close
+- [x] Gate off-screen canvas Git-status and terminal subscriptions
+
+### Verification
+
+- [x] Add focused tests for lazy loading, unread-count invalidation, and Git sweep filtering
+- [ ] Measure idle CPU/RAM and query counts with many projects
+- [ ] Run `bun run check:all`

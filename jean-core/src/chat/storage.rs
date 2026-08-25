@@ -241,6 +241,32 @@ where
     Ok(result)
 }
 
+/// Keep the index's unread summary synchronized with a metadata write.
+///
+/// Metadata is the authoritative session store, so this helper only updates an
+/// existing index entry. Legacy or partially-created indexes are repaired by
+/// the unread-count command when it encounters a missing summary.
+pub fn update_session_index_unread_summary(
+    app: &AppHandle,
+    metadata: &SessionMetadata,
+) -> Result<(), String> {
+    let summary = metadata.to_unread_summary();
+    let lock = get_index_lock(&metadata.worktree_id);
+    let _guard = lock.lock().unwrap();
+
+    let mut index = load_index_internal(app, &metadata.worktree_id)?;
+    let Some(entry) = index.find_session_mut(&metadata.id) else {
+        return Ok(());
+    };
+
+    if entry.unread_summary.as_ref() == Some(&summary) {
+        return Ok(());
+    }
+
+    entry.unread_summary = Some(summary);
+    save_index_internal(app, &index)
+}
+
 // ============================================================================
 // Metadata Operations (SessionMetadata)
 // ============================================================================
@@ -298,9 +324,12 @@ pub fn load_metadata(app: &AppHandle, session_id: &str) -> Result<Option<Session
 
 /// Save session metadata (with locking for thread safety)
 pub fn save_metadata(app: &AppHandle, metadata: &SessionMetadata) -> Result<(), String> {
-    let lock = get_metadata_lock(&metadata.id);
-    let _guard = lock.lock().unwrap();
-    save_metadata_internal(app, metadata)
+    {
+        let lock = get_metadata_lock(&metadata.id);
+        let _guard = lock.lock().unwrap();
+        save_metadata_internal(app, metadata)?;
+    }
+    update_session_index_unread_summary(app, metadata)
 }
 
 /// Atomically load, modify, and save an existing session's metadata.
@@ -314,14 +343,21 @@ pub fn with_existing_metadata_mut<F, T>(
 where
     F: FnOnce(&mut SessionMetadata) -> T,
 {
-    let lock = get_metadata_lock(session_id);
-    let _guard = lock.lock().unwrap();
+    let (result, previous_summary, metadata) = {
+        let lock = get_metadata_lock(session_id);
+        let _guard = lock.lock().unwrap();
 
-    let mut metadata = load_metadata_internal(app, session_id)?
-        .ok_or_else(|| format!("Session {session_id} not found"))?;
+        let mut metadata = load_metadata_internal(app, session_id)?
+            .ok_or_else(|| format!("Session {session_id} not found"))?;
+        let previous_summary = metadata.to_unread_summary();
+        let result = f(&mut metadata);
+        save_metadata_internal(app, &metadata)?;
+        (result, previous_summary, metadata)
+    };
 
-    let result = f(&mut metadata);
-    save_metadata_internal(app, &metadata)?;
+    if previous_summary != metadata.to_unread_summary() {
+        update_session_index_unread_summary(app, &metadata)?;
+    }
 
     Ok(result)
 }
@@ -339,20 +375,31 @@ pub fn with_metadata_mut<F, T>(
 where
     F: FnOnce(&mut SessionMetadata) -> Result<T, String>,
 {
-    let lock = get_metadata_lock(session_id);
-    let _guard = lock.lock().unwrap();
+    let (result, previous_summary, metadata) = {
+        let lock = get_metadata_lock(session_id);
+        let _guard = lock.lock().unwrap();
 
-    let mut metadata = load_metadata_internal(app, session_id)?.unwrap_or_else(|| {
-        SessionMetadata::new(
-            session_id.to_string(),
-            worktree_id.to_string(),
-            session_name.to_string(),
-            order,
-        )
-    });
+        let existing_metadata = load_metadata_internal(app, session_id)?;
+        let previous_summary = existing_metadata
+            .as_ref()
+            .map(SessionMetadata::to_unread_summary);
+        let mut metadata = existing_metadata.unwrap_or_else(|| {
+            SessionMetadata::new(
+                session_id.to_string(),
+                worktree_id.to_string(),
+                session_name.to_string(),
+                order,
+            )
+        });
 
-    let result = f(&mut metadata)?;
-    save_metadata_internal(app, &metadata)?;
+        let result = f(&mut metadata)?;
+        save_metadata_internal(app, &metadata)?;
+        (result, previous_summary, metadata)
+    };
+
+    if previous_summary.as_ref() != Some(&metadata.to_unread_summary()) {
+        update_session_index_unread_summary(app, &metadata)?;
+    }
 
     Ok(result)
 }
@@ -910,22 +957,12 @@ where
 
     for session in &sessions.sessions {
         session_ids_in_use.insert(session.id.clone());
+        let updated_entry = SessionIndexEntry::from_session(session);
 
         if let Some(entry) = index.find_session_mut(&session.id) {
-            // Update existing entry
-            entry.name = session.name.clone();
-            entry.order = session.order;
-            entry.archived_at = session.archived_at;
-            entry.message_count = session.message_count.unwrap_or(0);
+            *entry = updated_entry;
         } else {
-            // Add new entry
-            index.sessions.push(SessionIndexEntry {
-                id: session.id.clone(),
-                name: session.name.clone(),
-                order: session.order,
-                message_count: session.message_count.unwrap_or(0),
-                archived_at: session.archived_at,
-            });
+            index.sessions.push(updated_entry);
         }
     }
 
@@ -1222,6 +1259,7 @@ mod tests {
             order: 1,
             message_count: 0,
             archived_at: None,
+            unread_summary: None,
         });
         assert_eq!(index.sessions.len(), 2);
         assert_eq!(index.next_session_number(), 3);

@@ -49,6 +49,8 @@ describe('ChatStore', () => {
       executionModes: {},
       thinkingLevels: {},
       selectedModels: {},
+      scheduledWakeups: {},
+      scheduledWakeupSessionIds: {},
       answeredQuestions: {},
       submittedAnswers: {},
       errors: {},
@@ -1238,6 +1240,221 @@ describe('ChatStore', () => {
       expect(store.isWaitingForInput('session-1')).toBe(false)
       expect(store.isQuestionAnswered('session-1', 'q1')).toBe(false)
       expect(store.isFindingFixed('session-1', 'finding-1')).toBe(false)
+    })
+
+    it('removes all session-keyed records while preserving other sessions', () => {
+      const targetSessionId = 'session-1'
+      const retainedSessionId = 'session-2'
+      const sessionScopedKeys = [
+        'reviewResults',
+        'fixedReviewFindings',
+        'fixedFindings',
+        'tableCheckedRows',
+        'sendingSessionIds',
+        'sendStartedAt',
+        'completedDurations',
+        'userInitiatedSessionIds',
+        'waitingForInputSessionIds',
+        'streamingContents',
+        'activeToolCalls',
+        'streamingContentBlocks',
+        'streamingReplayContentBlocks',
+        'streamingThinkingContent',
+        'inputDrafts',
+        'executionModes',
+        'thinkingLevels',
+        'effortLevels',
+        'selectedBackends',
+        'selectedModels',
+        'selectedProviders',
+        'enabledMcpServers',
+        'answeredQuestions',
+        'submittedAnswers',
+        'errors',
+        'lastSentMessages',
+        'lastSentAttachments',
+        'pendingImages',
+        'pendingFiles',
+        'pendingSkills',
+        'pendingTextFiles',
+        'activeTodos',
+        'streamingPlanApprovals',
+        'messageQueues',
+        'executingModes',
+        'approvedTools',
+        'pendingPermissionDenials',
+        'pendingCodexCommandApprovalRequests',
+        'pendingCodexPermissionRequests',
+        'pendingOpencodePermissionRequests',
+        'pendingCodexUserInputRequests',
+        'pendingCodexMcpElicitationRequests',
+        'pendingCodexDynamicToolCallRequests',
+        'deniedMessageContext',
+        'lastCompaction',
+        'compactingSessions',
+        'reviewingSessions',
+        'sessionStatusOverrides',
+        'planFilePaths',
+        'pendingPlanMessageIds',
+        'savingContext',
+        'skippedQuestionSessions',
+        'sessionLabels',
+        'codexGoals',
+      ] as const
+
+      for (const key of sessionScopedKeys) {
+        useChatStore.setState({
+          [key]: {
+            [targetSessionId]: 'target-value',
+            [retainedSessionId]: 'retained-value',
+          },
+        } as unknown as Parameters<typeof useChatStore.setState>[0])
+      }
+
+      useChatStore.setState({
+        activeSessionIds: {
+          'worktree-1': targetSessionId,
+          'worktree-2': retainedSessionId,
+        },
+        sessionWorktreeMap: {
+          [targetSessionId]: 'worktree-1',
+          [retainedSessionId]: 'worktree-2',
+        },
+        lastOpenedPerProject: {
+          project1: { worktreeId: 'worktree-1', sessionId: targetSessionId },
+          project2: {
+            worktreeId: 'worktree-2',
+            sessionId: retainedSessionId,
+          },
+        },
+      })
+
+      const wakeup = {
+        fire_at_unix: 100,
+        scheduled_at_unix: 50,
+        delay_seconds: 50,
+        prompt: 'follow up',
+        reason: 'test',
+        tool_call_id: 'tool-target',
+        status: 'pending' as const,
+      }
+      const retainedWakeup = { ...wakeup, tool_call_id: 'tool-retained' }
+      useChatStore
+        .getState()
+        .setScheduledWakeup('tool-target', wakeup, targetSessionId)
+      useChatStore
+        .getState()
+        .setScheduledWakeup(
+          'tool-retained',
+          retainedWakeup,
+          retainedSessionId
+        )
+
+      useChatStore
+        .getState()
+        .clearSessionState(targetSessionId, { removeReferences: true })
+
+      const state = useChatStore.getState()
+      for (const key of sessionScopedKeys) {
+        const record = state[key] as unknown as Record<string, unknown>
+        expect(record[targetSessionId]).toBeUndefined()
+        expect(record[retainedSessionId]).toBe('retained-value')
+      }
+      expect(state.activeSessionIds).toEqual({ 'worktree-2': retainedSessionId })
+      expect(state.sessionWorktreeMap).toEqual({
+        [retainedSessionId]: 'worktree-2',
+      })
+      expect(state.lastOpenedPerProject).toEqual({
+        project2: {
+          worktreeId: 'worktree-2',
+          sessionId: retainedSessionId,
+        },
+      })
+      expect(state.scheduledWakeups['tool-target']).toBeUndefined()
+      expect(state.scheduledWakeupSessionIds['tool-target']).toBeUndefined()
+      expect(state.scheduledWakeups['tool-retained']).toEqual(retainedWakeup)
+
+      const stateAfterCleanup = useChatStore.getState()
+      useChatStore
+        .getState()
+        .clearSessionState(targetSessionId, { removeReferences: true })
+      expect(useChatStore.getState()).toBe(stateAfterCleanup)
+    })
+
+    it('keeps active references when only chat history is cleared', () => {
+      useChatStore.setState({
+        activeSessionIds: { 'worktree-1': 'session-1' },
+        sessionWorktreeMap: { 'session-1': 'worktree-1' },
+        inputDrafts: { 'session-1': 'clear this draft' },
+      })
+
+      useChatStore.getState().clearSessionState('session-1')
+
+      const state = useChatStore.getState()
+      expect(state.activeSessionIds).toEqual({ 'worktree-1': 'session-1' })
+      expect(state.sessionWorktreeMap).toEqual({
+        'session-1': 'worktree-1',
+      })
+      expect(state.inputDrafts).toEqual({})
+    })
+
+    it('clears session and worktree records together when a worktree is removed', () => {
+      useChatStore.setState({
+        activeWorktreeId: 'worktree-1',
+        activeWorktreePath: '/tmp/worktree-1',
+        lastActiveWorktreeId: 'worktree-1',
+        worktreePaths: {
+          'worktree-1': '/tmp/worktree-1',
+          'worktree-2': '/tmp/worktree-2',
+        },
+        setupScriptResults: {
+          'worktree-1': 'stale' as never,
+          'worktree-2': 'retained' as never,
+        },
+        worktreeLoadingOperations: {
+          'worktree-1': 'review',
+          'worktree-2': 'pull',
+        },
+        activeSessionIds: {
+          'worktree-1': 'session-1',
+          'worktree-2': 'session-2',
+        },
+        sessionWorktreeMap: {
+          'session-1': 'worktree-1',
+          'session-2': 'worktree-2',
+        },
+        inputDrafts: {
+          'session-1': 'drop me',
+          'session-2': 'keep me',
+        },
+        lastOpenedPerProject: {
+          project1: { worktreeId: 'worktree-1', sessionId: 'session-1' },
+          project2: { worktreeId: 'worktree-2', sessionId: 'session-2' },
+        },
+      })
+
+      const removedSessionIds = useChatStore
+        .getState()
+        .clearWorktreeState('worktree-1')
+      const state = useChatStore.getState()
+
+      expect(removedSessionIds).toEqual(['session-1'])
+      expect(state.activeWorktreeId).toBeNull()
+      expect(state.activeWorktreePath).toBeNull()
+      expect(state.lastActiveWorktreeId).toBeNull()
+      expect(state.worktreePaths).toEqual({ 'worktree-2': '/tmp/worktree-2' })
+      expect(state.setupScriptResults).toEqual({
+        'worktree-2': 'retained',
+      })
+      expect(state.worktreeLoadingOperations).toEqual({
+        'worktree-2': 'pull',
+      })
+      expect(state.activeSessionIds).toEqual({ 'worktree-2': 'session-2' })
+      expect(state.sessionWorktreeMap).toEqual({ 'session-2': 'worktree-2' })
+      expect(state.inputDrafts).toEqual({ 'session-2': 'keep me' })
+      expect(state.lastOpenedPerProject).toEqual({
+        project2: { worktreeId: 'worktree-2', sessionId: 'session-2' },
+      })
     })
   })
 

@@ -109,6 +109,32 @@ export function matchesCanvasFilterTab(
   }
 }
 
+/**
+ * Return the lower-cased worktree fields that the canvas search indexes.
+ *
+ * Keep each field as a separate term so a query cannot match across two
+ * unrelated fields after they are joined. The canvas evaluates these terms
+ * once per worktree instead of rebuilding/normalizing them for every session.
+ */
+export function getCanvasWorktreeSearchTerms(worktree: Worktree): string[] {
+  const values = [
+    worktree.name,
+    worktree.branch,
+    ...getWorktreeLabels(worktree).map(label => label.name),
+    worktree.pr_number != null ? worktree.pr_number.toString() : null,
+    worktree.issue_number != null ? worktree.issue_number.toString() : null,
+    worktree.linear_issue_identifier ?? null,
+    worktree.security_alert_number != null
+      ? worktree.security_alert_number.toString()
+      : null,
+    worktree.advisory_ghsa_id ?? null,
+  ]
+
+  return values
+    .filter((value): value is string => value != null && value.length > 0)
+    .map(value => value.toLowerCase())
+}
+
 export function getCanvasFilterTabCount(
   worktrees: Worktree[],
   tab: CanvasPredefinedFilterTab

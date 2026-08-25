@@ -557,10 +557,7 @@ describe('dialog overlay keybinding passthrough', () => {
       useUIStore.setState({ sessionChatModalOpen: true })
 
       expect(
-        shouldAllowKeybindingThroughOpenOverlay(
-          action,
-          useUIStore.getState()
-        )
+        shouldAllowKeybindingThroughOpenOverlay(action, useUIStore.getState())
       ).toBe(true)
     }
   )
@@ -651,6 +648,9 @@ describe('applyCacheInvalidationKeys', () => {
     })
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ['all-sessions'],
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: chatQueryKeys.unreadSessionCount(),
     })
   })
 

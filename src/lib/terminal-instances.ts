@@ -5,7 +5,8 @@
  * Terminals persist across component mount/unmount cycles, preserving
  * buffer content, cursor position, and running processes.
  *
- * Only disposed when user explicitly closes the terminal.
+ * Normally disposed when user explicitly closes the terminal. Detached,
+ * non-running renderers may also be evicted by the bounded memory policy.
  */
 
 import { Terminal as XtermTerminal } from '@xterm/xterm'
@@ -74,12 +75,19 @@ interface PersistentTerminal {
   readyForOutput: boolean // Ghostty Web needs one settled paint before writes
   outputReadyPromise: Promise<void> | null
   pendingOutput: string[]
+  /** Renderer was evicted while its PTY continued running. */
+  rendererEvicted: boolean
+  /** Bounded output received while an evicted renderer is being rehydrated. */
+  detachedOutput: string
+  detachedOutputTruncated: boolean
   lastAppearance: TerminalAppearance | null
   appearanceLoadVersion: number
   appearanceResizeTimer: ReturnType<typeof setTimeout> | null
   touchScrollCleanup: (() => void) | null
   compositionGuardCleanup: (() => void) | null
   onStopped?: (exitCode: number | null, signal: string | null) => void
+  /** Last time the renderer was detached; used for the detached LRU. */
+  lastDetachedAt: number
 }
 
 // Module-level Map - persists across React mount/unmount cycles
@@ -97,6 +105,7 @@ const pendingOnStopped = new Map<
 
 let ghosttyWebReady: Promise<void> | null = null
 let preferencesSubscriptionRegistered = false
+let detachedRendererTrimTimer: ReturnType<typeof setTimeout> | null = null
 
 const terminalFontFamilyMap: Record<TerminalFont, string> = {
   'jetbrains-mono':
@@ -447,6 +456,9 @@ function ensureWakeHandler(): void {
       }
       const inst = instances.get(terminalId)
       if (!inst?.terminal) {
+        if (inst?.rendererEvicted) {
+          appendDetachedOutput(inst, buffer.data)
+        }
         outputBuffers.delete(terminalId)
         continue
       }
@@ -706,7 +718,13 @@ export function writeTerminalInput(terminalId: string, data: string): void {
 }
 
 function queueTerminalOutput(instance: PersistentTerminal, data: string): void {
-  if (!instance.terminal) return
+  if (!data) return
+  if (!instance.terminal) {
+    if (instance.rendererEvicted) {
+      appendDetachedOutput(instance, data)
+    }
+    return
+  }
   if (instance.renderer === 'ghostty-web' && !instance.readyForOutput) {
     instance.pendingOutput.push(data)
     return
@@ -753,6 +771,7 @@ async function createTerminalForRenderer(
   const appearance = await getLoadedTerminalAppearance()
   const terminalOptions = {
     cursorBlink: true,
+    scrollback: TERMINAL_SCROLLBACK_LINES,
     fontSize: appearance.fontSize,
     fontFamily: appearance.fontFamily,
     fontWeight: 400,
@@ -862,6 +881,7 @@ function ensureTerminalBackendListeners(): Promise<void> {
         useTerminalStore
           .getState()
           .setTerminalRunning(event.payload.terminal_id, true)
+        trimDetachedTerminalRenderers()
       }),
       listen<TerminalStoppedEvent>('terminal:stopped', event => {
         handleTerminalStopped(event.payload)
@@ -976,8 +996,198 @@ export function applyThemeToAllTerminals(): void {
   }
 }
 
-// TODO: Add memory cap for detached terminals (e.g., 20 max)
-// For now, typical usage won't hit memory limits
+/** Maximum detached, non-running renderer instances retained in memory. */
+export const MAX_DETACHED_TERMINAL_INSTANCES = 20
+/** Bound per-terminal renderer history so long-running shells stay compact. */
+export const TERMINAL_SCROLLBACK_LINES = 2_000
+/** Evict a detached running renderer after this idle period. */
+export const RUNNING_RENDERER_IDLE_MS = 5 * 60 * 1000
+/** Bound output retained while an evicted renderer is rehydrated. */
+export const DETACHED_OUTPUT_BUFFER_CHARS = 512 * 1024
+
+function appendDetachedOutput(
+  instance: PersistentTerminal,
+  data: string
+): void {
+  if (!data) return
+
+  if (data.length >= DETACHED_OUTPUT_BUFFER_CHARS) {
+    instance.detachedOutput = data.slice(-DETACHED_OUTPUT_BUFFER_CHARS)
+    instance.detachedOutputTruncated = true
+    return
+  }
+
+  const availableChars = DETACHED_OUTPUT_BUFFER_CHARS - data.length
+  if (instance.detachedOutput.length > availableChars) {
+    instance.detachedOutput = instance.detachedOutput.slice(-availableChars)
+    instance.detachedOutputTruncated = true
+  }
+  instance.detachedOutput += data
+}
+
+function clearDetachedOutput(instance: PersistentTerminal): void {
+  instance.detachedOutput = ''
+  instance.detachedOutputTruncated = false
+}
+
+function snapshotTerminalBuffer(instance: PersistentTerminal): string {
+  const terminal = instance.terminal
+  if (!terminal) return ''
+
+  try {
+    // Both renderers expose the xterm-compatible buffer API at runtime, but
+    // their published TypeScript declarations do not share that interface.
+    const snapshotTerminal = terminal as unknown as {
+      rows: number
+      buffer: {
+        active: {
+          viewportY: number
+          length: number
+          getLine(row: number):
+            | { translateToString(trimRight?: boolean): string }
+            | undefined
+        }
+      }
+    }
+    const buffer = snapshotTerminal.buffer.active
+    const firstVisibleRow = Math.max(0, buffer.viewportY)
+    const lastVisibleRow = Math.min(
+      buffer.length,
+      firstVisibleRow + snapshotTerminal.rows
+    )
+    const lines: string[] = []
+
+    for (let row = firstVisibleRow; row < lastVisibleRow; row += 1) {
+      lines.push(buffer.getLine(row)?.translateToString(true) ?? '')
+    }
+
+    return lines.join('\r\n')
+  } catch {
+    // Renderer-specific buffer APIs should never prevent PTY cleanup.
+    return ''
+  }
+}
+
+function restoreDetachedOutput(instance: PersistentTerminal): void {
+  if (!instance.rendererEvicted) return
+
+  const bufferedOutput = instance.detachedOutput
+  const wasTruncated = instance.detachedOutputTruncated
+  clearDetachedOutput(instance)
+  instance.rendererEvicted = false
+
+  if (!bufferedOutput && !wasTruncated) return
+
+  const truncationMarker = wasTruncated
+    ? '\r\n\x1b[90m[Earlier terminal output was truncated while idle]\x1b[0m\r\n'
+    : ''
+  queueTerminalOutput(
+    instance,
+    `\x1b[2J\x1b[H${truncationMarker}${bufferedOutput}`
+  )
+}
+
+function scheduleDetachedRendererTrim(): void {
+  if (detachedRendererTrimTimer) return
+
+  const runningTerminals = useTerminalStore.getState().runningTerminals
+  const nextExpiry = [...instances.values()]
+    .filter(instance => instance.terminal)
+    .filter(instance => !instance.hostElement?.isConnected)
+    .filter(instance => runningTerminals.has(instance.terminalId))
+    .filter(instance => instance.lastDetachedAt > 0)
+    .map(instance => instance.lastDetachedAt + RUNNING_RENDERER_IDLE_MS)
+    .sort((left, right) => left - right)[0]
+
+  if (nextExpiry == null) return
+
+  detachedRendererTrimTimer = setTimeout(() => {
+    detachedRendererTrimTimer = null
+    trimDetachedTerminalRenderers()
+  }, Math.max(1_000, nextExpiry - Date.now()))
+}
+
+function disposeDetachedRenderer(
+  instance: PersistentTerminal,
+  preserveRunningPty = false
+): void {
+  const keepPty = preserveRunningPty && instance.initialized
+  const bufferedFrame = outputBuffers.get(instance.terminalId)?.data
+  if (keepPty) {
+    clearDetachedOutput(instance)
+    appendDetachedOutput(instance, snapshotTerminalBuffer(instance))
+    if (bufferedFrame) appendDetachedOutput(instance, bufferedFrame)
+    for (const pendingOutput of instance.pendingOutput) {
+      appendDetachedOutput(instance, pendingOutput)
+    }
+  } else {
+    clearDetachedOutput(instance)
+  }
+
+  discardTerminalInput(instance.terminalId)
+  outputBuffers.delete(instance.terminalId)
+  instance.pendingOutput = []
+  instance.readyForOutput = false
+  instance.outputReadyPromise = null
+  instance.appearanceLoadVersion += 1
+  if (instance.appearanceResizeTimer) {
+    clearTimeout(instance.appearanceResizeTimer)
+    instance.appearanceResizeTimer = null
+  }
+  instance.touchScrollCleanup?.()
+  instance.touchScrollCleanup = null
+  instance.compositionGuardCleanup?.()
+  instance.compositionGuardCleanup = null
+  instance.terminal?.dispose()
+  instance.hostElement?.remove()
+
+  // Keep the logical terminal entry so the store can reattach it later. A
+  // running PTY stays initialized; a stopped terminal follows the existing
+  // replay/start path on its next attach.
+  instance.terminal = null
+  instance.fitAddon = null
+  instance.hostElement = null
+  instance.opened = false
+  instance.initialized = keepPty
+  instance.replayRequested = false
+  instance.rendererEvicted = keepPty
+  instance.lastAppearance = null
+  instance.lastDetachedAt = 0
+}
+
+function trimDetachedTerminalRenderers(protectedTerminalId?: string): void {
+  const now = Date.now()
+  const runningTerminals = useTerminalStore.getState().runningTerminals
+  const candidates = [...instances.values()]
+    .filter(instance => instance.terminal)
+    .filter(instance => instance.terminalId !== protectedTerminalId)
+    .filter(instance => !runningTerminals.has(instance.terminalId))
+    .filter(instance => !instance.hostElement?.isConnected)
+    .sort((left, right) => left.lastDetachedAt - right.lastDetachedAt)
+
+  const excess = candidates.length - MAX_DETACHED_TERMINAL_INSTANCES
+  for (const instance of excess > 0 ? candidates.slice(0, excess) : []) {
+    disposeDetachedRenderer(instance)
+  }
+
+  const idleRunningCandidates = [...instances.values()]
+    .filter(instance => instance.terminal)
+    .filter(instance => instance.terminalId !== protectedTerminalId)
+    .filter(instance => runningTerminals.has(instance.terminalId))
+    .filter(instance => !instance.hostElement?.isConnected)
+    .filter(
+      instance =>
+        instance.lastDetachedAt > 0 &&
+        now - instance.lastDetachedAt >= RUNNING_RENDERER_IDLE_MS
+    )
+    .sort((left, right) => left.lastDetachedAt - right.lastDetachedAt)
+
+  for (const instance of idleRunningCandidates) {
+    disposeDetachedRenderer(instance, true)
+  }
+
+  scheduleDetachedRendererTrim()
+}
 
 /**
  * Get existing terminal instance or create a new one.
@@ -1036,11 +1246,15 @@ export function getOrCreateTerminal(
     readyForOutput: renderer !== 'ghostty-web',
     outputReadyPromise: renderer === 'ghostty-web' ? null : Promise.resolve(),
     pendingOutput: [],
+    rendererEvicted: false,
+    detachedOutput: '',
+    detachedOutputTruncated: false,
     lastAppearance: null,
     appearanceLoadVersion: 0,
     appearanceResizeTimer: null,
     touchScrollCleanup: null,
     compositionGuardCleanup: null,
+    lastDetachedAt: Date.now(),
   }
 
   // Apply any pending onStopped callback registered before creation
@@ -1051,6 +1265,7 @@ export function getOrCreateTerminal(
   }
 
   instances.set(terminalId, instance)
+  trimDetachedTerminalRenderers(terminalId)
   return instance
 }
 
@@ -1104,6 +1319,7 @@ export async function attachToContainer(
     }
     container.replaceChildren(hostElement)
   }
+  instance.lastDetachedAt = 0
 
   const wasOpened = instance.opened
   if (!wasOpened) {
@@ -1126,10 +1342,12 @@ export async function attachToContainer(
         data => xterm.input(data, true)
       )
     }
-    if (!instance.initialized) {
+    if (!instance.initialized || instance.rendererEvicted) {
       // A brand-new visible terminal should never show stale renderer/DOM
-      // contents from a previously attached terminal. Do not clear when a PTY
-      // was started headlessly: its buffered output is real session output.
+      // contents from a previously attached terminal. An evicted renderer
+      // also needs a clean surface before its bounded output is restored.
+      // Do not clear when a PTY was started headlessly: its buffered output
+      // is real session output.
       clearFreshTerminalDisplay(instance)
     }
     void scheduleGhosttyOutputReady(instance)
@@ -1155,6 +1373,10 @@ export async function attachToContainer(
     )
 
     if (!(await waitForTerminalReady(terminalId, instance))) return
+
+    // A long-idle running PTY may have had its renderer evicted to release
+    // xterm/Ghostty memory. Restore the bounded live output before resizing.
+    restoreDetachedOutput(instance)
 
     if (!instance.initialized) {
       // First time - check if PTY already exists (reattaching after app restart)
@@ -1297,6 +1519,8 @@ export function detachFromContainer(terminalId: string): void {
   if (hostElement?.parentNode) {
     hostElement.parentNode.removeChild(hostElement)
   }
+  instance.lastDetachedAt = Date.now()
+  trimDetachedTerminalRenderers()
 }
 
 /**
@@ -1351,6 +1575,8 @@ export async function disposeTerminal(terminalId: string): Promise<void> {
   discardTerminalInput(terminalId)
   outputBuffers.delete(terminalId)
   instance.pendingOutput = []
+  clearDetachedOutput(instance)
+  instance.rendererEvicted = false
   instance.readyForOutput = false
   instance.outputReadyPromise = null
   pendingOnStopped.delete(terminalId)

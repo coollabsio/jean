@@ -48,12 +48,6 @@ vi.mock('@pierre/diffs/react', () => ({
   EditProvider: ({ children }: { children: ReactNode }) => children,
 }))
 
-vi.mock('@pierre/diffs/edit', () => ({
-  Editor: class Editor {
-    constructor() {}
-  },
-}))
-
 const patch = `Index: src/example.ts
 ===================================================================
 --- src/example.ts
