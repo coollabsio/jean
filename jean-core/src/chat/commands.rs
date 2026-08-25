@@ -6126,11 +6126,7 @@ fn save_image_to_disk(
     let filename = format!("image-{timestamp}-{short_uuid}.{ext}");
     let file_path = images_dir.join(&filename);
 
-    let temp_path = file_path.with_extension("tmp");
-    std::fs::write(&temp_path, data).map_err(|e| format!("Failed to write image file: {e}"))?;
-
-    std::fs::rename(&temp_path, &file_path)
-        .map_err(|e| format!("Failed to finalize image file: {e}"))?;
+    crate::platform::write_file_atomically(&file_path, data)?;
 
     let path_str = file_path
         .to_str()
@@ -6314,12 +6310,7 @@ pub async fn save_pasted_text(
     let filename = pasted_text_filename(filename.as_deref());
     let file_path = pastes_dir.join(&filename);
 
-    // Write file atomically (temp file + rename)
-    let temp_path = file_path.with_extension("tmp");
-    std::fs::write(&temp_path, &content).map_err(|e| format!("Failed to write text file: {e}"))?;
-
-    std::fs::rename(&temp_path, &file_path)
-        .map_err(|e| format!("Failed to finalize text file: {e}"))?;
+    crate::platform::write_file_atomically(&file_path, content.as_bytes())?;
 
     let path_str = file_path
         .to_str()
@@ -6428,12 +6419,7 @@ pub async fn update_pasted_text(
         return Err("Invalid path: must be within allowed directories".to_string());
     }
 
-    // Write file atomically (temp file + rename)
-    let temp_path = file_path.with_extension("tmp");
-    std::fs::write(&temp_path, &content).map_err(|e| format!("Failed to write text file: {e}"))?;
-
-    std::fs::rename(&temp_path, &file_path)
-        .map_err(|e| format!("Failed to finalize text file: {e}"))?;
+    crate::platform::write_file_atomically(&file_path, content.as_bytes())?;
 
     log::trace!("Text file updated: {path}");
     Ok(size)
@@ -7095,13 +7081,7 @@ pub async fn save_context_file(
 
     let file_path = contexts_dir.join(&filename);
 
-    // Write content atomically (temp file + rename)
-    let temp_path = file_path.with_extension("tmp");
-    std::fs::write(&temp_path, &content)
-        .map_err(|e| format!("Failed to write context file: {e}"))?;
-
-    std::fs::rename(&temp_path, &file_path)
-        .map_err(|e| format!("Failed to finalize context file: {e}"))?;
+    crate::platform::write_file_atomically(&file_path, content.as_bytes())?;
 
     let path_str = file_path
         .to_str()
@@ -7760,13 +7740,7 @@ pub async fn generate_context_from_session(
             (new_filename, new_path, false)
         };
 
-    // Write content atomically
-    let temp_path = file_path.with_extension("tmp");
-    std::fs::write(&temp_path, &summary)
-        .map_err(|e| format!("Failed to write context file: {e}"))?;
-
-    std::fs::rename(&temp_path, &file_path)
-        .map_err(|e| format!("Failed to finalize context file: {e}"))?;
+    crate::platform::write_file_atomically(&file_path, summary.as_bytes())?;
 
     // Update session mapping in metadata
     metadata

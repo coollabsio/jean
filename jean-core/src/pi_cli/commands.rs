@@ -312,12 +312,7 @@ fn write_pi_models_json(value: &serde_json::Value) -> Result<(), String> {
     }
     let pretty = serde_json::to_string_pretty(value)
         .map_err(|e| format!("Failed to serialize models.json: {e}"))?;
-    let temp = path.with_extension("tmp");
-    std::fs::write(&temp, pretty).map_err(|e| format!("Failed to write models.json: {e}"))?;
-    std::fs::rename(&temp, &path).map_err(|e| {
-        let _ = std::fs::remove_file(&temp);
-        format!("Failed to finalize models.json: {e}")
-    })?;
+    crate::platform::write_file_atomically(&path, pretty.as_bytes())?;
     Ok(())
 }
 

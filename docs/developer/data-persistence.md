@@ -111,24 +111,13 @@ async fn save_preferences(app: AppHandle, preferences: AppPreferences) -> Result
     let json_content = serde_json::to_string_pretty(&preferences)
         .map_err(|e| format!("Failed to serialize preferences: {e}"))?;
 
-    // Write to temporary file with UUID for safety, then rename (atomic operation)
-    let temp_path = prefs_path.with_file_name(format!(
-        "{}.{}.tmp",
-        prefs_path.file_name().unwrap().to_string_lossy(),
-        uuid::Uuid::new_v4()
-    ));
-
-    std::fs::write(&temp_path, json_content)
-        .map_err(|e| format!("Failed to write preferences file: {e}"))?;
-
-    std::fs::rename(&temp_path, &prefs_path)
-        .map_err(|e| format!("Failed to finalize preferences file: {e}"))?;
+    crate::platform::write_file_atomically(&prefs_path, json_content.as_bytes())?;
 
     Ok(())
 }
 ```
 
-**Note:** Using UUID in temp filenames (instead of just `.tmp`) prevents conflicts when multiple writes happen concurrently.
+`write_file_atomically` creates a unique sibling temp file, flushes it, and replaces the destination. It uses the native Windows replacement APIs because `std::fs::rename` cannot overwrite an existing file on Windows; using `std::fs::rename` directly causes every save after the first one to fail.
 
 ### Loading with Defaults
 
@@ -215,14 +204,7 @@ async fn save_emergency_data(
     let json_content = serde_json::to_string_pretty(&data)
         .map_err(|e| format!("Failed to serialize emergency data: {e}"))?;
 
-    // Atomic write pattern
-    let temp_path = file_path.with_extension("tmp");
-
-    std::fs::write(&temp_path, json_content)
-        .map_err(|e| format!("Failed to write emergency data file: {e}"))?;
-
-    std::fs::rename(&temp_path, &file_path)
-        .map_err(|e| format!("Failed to finalize emergency data file: {e}"))?;
+    crate::platform::write_file_atomically(&file_path, json_content.as_bytes())?;
 
     Ok(())
 }

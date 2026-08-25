@@ -3134,21 +3134,12 @@ async fn save_preferences(app: AppHandle, preferences: AppPreferences) -> Result
         format!("Failed to serialize preferences: {e}")
     })?;
 
-    // Write to a temporary file first, then rename (atomic operation)
-    // Use unique temp file to avoid race conditions with concurrent saves
-    let temp_path = prefs_path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
-
-    std::fs::write(&temp_path, json_content).map_err(|e| {
-        log::error!("Failed to write preferences file: {e}");
-        format!("Failed to write preferences file: {e}")
-    })?;
-
-    std::fs::rename(&temp_path, &prefs_path).map_err(|e| {
-        // Clean up temp file on rename failure
-        let _ = std::fs::remove_file(&temp_path);
-        log::error!("Failed to finalize preferences file: {e}");
-        format!("Failed to finalize preferences file: {e}")
-    })?;
+    crate::platform::write_file_atomically(&prefs_path, json_content.as_bytes()).map_err(
+        |error| {
+            log::error!("Failed to save preferences file: {error}");
+            error
+        },
+    )?;
 
     log::trace!("Successfully saved preferences to {prefs_path:?}");
 
@@ -3195,13 +3186,7 @@ async fn save_cli_profile(name: String, settings_json: String) -> Result<String,
         std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {e}"))?;
     }
 
-    // Atomic write via temp file
-    let temp = path.with_extension("tmp");
-    std::fs::write(&temp, &settings_json).map_err(|e| format!("Failed to write: {e}"))?;
-    std::fs::rename(&temp, &path).map_err(|e| {
-        let _ = std::fs::remove_file(&temp);
-        format!("Failed to finalize: {e}")
-    })?;
+    crate::platform::write_file_atomically(&path, settings_json.as_bytes())?;
 
     let path_str = path.to_string_lossy().to_string();
     log::trace!("Saved CLI profile '{name}' to {path_str}");
@@ -3262,21 +3247,12 @@ async fn save_ui_state(app: AppHandle, ui_state: UIState) -> Result<(), String> 
         format!("Failed to serialize UI state: {e}")
     })?;
 
-    // Write to a temporary file first, then rename (atomic operation)
-    // Use unique temp file to avoid race conditions with concurrent saves
-    let temp_path = state_path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
-
-    std::fs::write(&temp_path, json_content).map_err(|e| {
-        log::error!("Failed to write UI state file: {e}");
-        format!("Failed to write UI state file: {e}")
-    })?;
-
-    std::fs::rename(&temp_path, &state_path).map_err(|e| {
-        // Clean up temp file on rename failure
-        let _ = std::fs::remove_file(&temp_path);
-        log::error!("Failed to finalize UI state file: {e}");
-        format!("Failed to finalize UI state file: {e}")
-    })?;
+    crate::platform::write_file_atomically(&state_path, json_content.as_bytes()).map_err(
+        |error| {
+            log::error!("Failed to save UI state file: {error}");
+            error
+        },
+    )?;
 
     log::trace!("Saved UI state to {state_path:?}");
     Ok(())
@@ -3327,18 +3303,12 @@ async fn save_emergency_data(app: AppHandle, filename: String, data: Value) -> R
         format!("Failed to serialize data: {e}")
     })?;
 
-    // Write to a temporary file first, then rename (atomic operation)
-    let temp_path = file_path.with_extension("tmp");
-
-    std::fs::write(&temp_path, json_content).map_err(|e| {
-        log::error!("Failed to write emergency data file: {e}");
-        format!("Failed to write data file: {e}")
-    })?;
-
-    std::fs::rename(&temp_path, &file_path).map_err(|e| {
-        log::error!("Failed to finalize emergency data file: {e}");
-        format!("Failed to finalize data file: {e}")
-    })?;
+    crate::platform::write_file_atomically(&file_path, json_content.as_bytes()).map_err(
+        |error| {
+            log::error!("Failed to save emergency data file: {error}");
+            error
+        },
+    )?;
 
     log::trace!("Successfully saved emergency data to {file_path:?}");
     Ok(())

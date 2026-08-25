@@ -68,22 +68,37 @@ function serializePendingTextFiles(
 function debounce<T extends (...args: Parameters<T>) => void>(
   fn: T,
   delay: number
-): T & { cancel: () => void } {
+): T & { cancel: () => void; flush: () => void } {
   let timeoutId: ReturnType<typeof setTimeout> | null = null
+  let pendingArgs: Parameters<T> | null = null
 
   const debounced = ((...args: Parameters<T>) => {
-    if (timeoutId) clearTimeout(timeoutId)
+    if (timeoutId !== null) clearTimeout(timeoutId)
+    pendingArgs = args
     timeoutId = setTimeout(() => {
-      fn(...args)
       timeoutId = null
+      const argsToApply = pendingArgs
+      pendingArgs = null
+      if (argsToApply) fn(...(argsToApply as Parameters<T>))
     }, delay)
-  }) as T & { cancel: () => void }
+  }) as T & { cancel: () => void; flush: () => void }
 
   debounced.cancel = () => {
-    if (timeoutId) {
+    if (timeoutId !== null) {
       clearTimeout(timeoutId)
       timeoutId = null
     }
+    pendingArgs = null
+  }
+
+  debounced.flush = () => {
+    if (timeoutId === null || pendingArgs === null) return
+
+    clearTimeout(timeoutId)
+    timeoutId = null
+    const argsToApply = pendingArgs
+    pendingArgs = null
+    fn(...(argsToApply as Parameters<T>))
   }
 
   return debounced
@@ -114,9 +129,27 @@ export function useUIStatePersistence() {
     }, 500)
 
     return () => {
+      debouncedSaveRef.current?.flush()
       debouncedSaveRef.current?.cancel()
     }
   }, [saveUIState])
+
+  // The last active session is part of the debounced UI-state snapshot. Flush
+  // it when the native window is closing so a recent session switch is not
+  // lost before the next 500ms timer fires.
+  useEffect(() => {
+    const flushPendingSave = () => {
+      debouncedSaveRef.current?.flush()
+    }
+
+    window.addEventListener('beforeunload', flushPendingSave)
+    window.addEventListener('pagehide', flushPendingSave)
+
+    return () => {
+      window.removeEventListener('beforeunload', flushPendingSave)
+      window.removeEventListener('pagehide', flushPendingSave)
+    }
+  }, [])
 
   // Helper to get current UI state from stores
   // NOTE: Durable session-specific state is stored in Session files. Unsent
@@ -1316,6 +1349,7 @@ export function useUIStatePersistence() {
       unsubChat()
       unsubTerminal()
       unsubBrowser()
+      debouncedSaveRef.current?.flush()
       debouncedSaveRef.current?.cancel()
       logger.debug('UI state persistence subscriptions cleaned up')
     }
