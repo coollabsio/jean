@@ -547,6 +547,7 @@ async fn init_handler(
     response["serverPlatform"] = Value::String(crate::server_platform_name().to_string());
     response["nativeOpenAllowed"] = Value::Bool(crate::platform::native_open_allowed());
 
+    let projects_load_failed = projects_result.is_err();
     let projects = match projects_result {
         Ok(projects) => projects,
         Err(e) => {
@@ -795,9 +796,13 @@ async fn init_handler(
         }
     }
 
-    // Serialize projects (always included)
-    if let Ok(val) = serde_json::to_value(&projects) {
-        response["projects"] = val;
+    // Do not serialize a failed project load as an empty list. Omitting the key
+    // lets the frontend run its normal list_projects query and surface the
+    // storage error instead of presenting data corruption as an empty account.
+    if !projects_load_failed {
+        if let Ok(val) = serde_json::to_value(&projects) {
+            response["projects"] = val;
+        }
     }
 
     // Only emit worktrees/sessions keys when we actually have data.

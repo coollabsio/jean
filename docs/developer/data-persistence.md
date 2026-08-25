@@ -130,6 +130,25 @@ async fn save_preferences(app: AppHandle, preferences: AppPreferences) -> Result
 
 **Note:** Using UUID in temp filenames (instead of just `.tmp`) prevents conflicts when multiple writes happen concurrently.
 
+### Durable Writes and Recovery for Critical Data
+
+For user data where losing the file can make the application appear empty, an atomic
+rename alone is not sufficient: the temporary file must be flushed before it becomes
+the live file. The project registry (`projects.json`) uses the stronger pattern in
+`jean-core/src/projects/storage.rs`:
+
+- Write to a unique sibling temporary file with `create_new`.
+- Call `sync_all` before atomically replacing the destination; also sync the parent
+  directory on Unix and use write-through replacement on Windows.
+- Keep three rotating backups (`projects.json.bak`, `.bak.1`, and `.bak.2`).
+- If the primary JSON is invalid, validate backups and leftover temporary files,
+  preserve the corrupt primary, and restore the first valid candidate.
+- If recovery is impossible, return an error. Never convert a failed read into an
+  empty collection in the UI or an API response.
+
+Use this pattern for other critical persisted data instead of silently falling back
+to defaults after a parse failure.
+
 ### Loading with Defaults
 
 ```rust
@@ -562,7 +581,7 @@ function migrateKeybindings(
 
 ## Best Practices
 
-1. **Use atomic writes**: Always write to temp file then rename
+1. **Use durable atomic writes**: Flush the temp file before replacing the destination, and sync the parent directory where supported
 2. **Validate inputs**: Check filenames and data before writing
 3. **Handle defaults**: Provide sensible defaults when files don't exist
 4. **Log operations**: Log all file operations for debugging
