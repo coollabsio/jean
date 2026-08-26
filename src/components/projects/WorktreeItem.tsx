@@ -12,6 +12,7 @@ import {
   GitBranch,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { getLabelTextColor } from '@/lib/label-colors'
 import { dismissibleToast } from '@/lib/dismissible-toast'
 import { isBaseSession, type Worktree } from '@/types/projects'
 import { useProjectsStore } from '@/store/projects-store'
@@ -910,11 +911,22 @@ export function WorktreeItem({
                         className="h-1.5 w-1.5 shrink-0"
                       />
                       <span
-                        className="truncate text-xs"
+                        className="flex-1 truncate min-w-0 text-xs"
                         title={`${config.label}: ${card.session.name || 'Untitled'}`}
                       >
                         {card.session.name || 'Untitled'}
                       </span>
+                      {card.label && (
+                        <span
+                          className="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide"
+                          style={{
+                            backgroundColor: card.label.color,
+                            color: getLabelTextColor(card.label.color),
+                          }}
+                        >
+                          {card.label.name}
+                        </span>
+                      )}
                     </button>
                   )
                 })}

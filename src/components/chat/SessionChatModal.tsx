@@ -29,6 +29,7 @@ import {
 } from 'lucide-react'
 import { ModalCloseButton } from '@/components/ui/modal-close-button'
 import { cn } from '@/lib/utils'
+import { getLabelTextColor } from '@/lib/label-colors'
 import { dismissibleToast } from '@/lib/dismissible-toast'
 import { Button } from '@/components/ui/button'
 import {
@@ -1397,8 +1398,7 @@ export function SessionChatModal({
                     const isActive = session.id === currentSessionId
                     const status = card.status
                     const config = statusConfig[status]
-                    const chatState = useChatStore.getState()
-                    const sessionLabel = chatState.sessionLabels[session.id]
+                    const sessionLabel = card.label
                     const resumeCommand = getResumeCommand(session)
                     return (
                       <ContextMenu key={session.id}>
@@ -1465,6 +1465,20 @@ export function SessionChatModal({
                                 </TooltipContent>
                               </Tooltip>
                             )}
+                            {renamingSessionId !== session.id &&
+                              sessionLabel && (
+                                <span
+                                  className="shrink-0 max-w-20 truncate rounded px-1 py-px text-[9px] font-medium uppercase tracking-wide"
+                                  style={{
+                                    backgroundColor: sessionLabel.color,
+                                    color: getLabelTextColor(
+                                      sessionLabel.color
+                                    ),
+                                  }}
+                                >
+                                  {sessionLabel.name}
+                                </span>
+                              )}
                             {renamingSessionId !== session.id && (
                               <DismissButton
                                 tooltip={'Remove session'}
