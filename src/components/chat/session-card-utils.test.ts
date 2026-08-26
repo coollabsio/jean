@@ -395,6 +395,61 @@ describe('computeSessionCardData', () => {
     expect(card.status).toBe('input_required')
   })
 
+  it('applies a paused override to an idle session', () => {
+    const storeState = createBaseStoreState({
+      sessionStatusOverrides: { 'session-1': 'paused' },
+    })
+
+    const card = computeSessionCardData(createBaseSession(), storeState)
+
+    expect(card.automaticStatus).toBe('idle')
+    expect(card.statusOverride).toBe('paused')
+    expect(card.status).toBe('paused')
+  })
+
+  it('reads a persisted paused override straight off the session', () => {
+    const session = createBaseSession({ status_override: 'paused' })
+
+    const card = computeSessionCardData(session, createBaseStoreState())
+
+    expect(card.statusOverride).toBe('paused')
+    expect(card.status).toBe('paused')
+  })
+
+  it('does not let a paused override hide live waiting status', () => {
+    const session = createBaseSession({
+      waiting_for_input: true,
+      waiting_for_input_type: 'question',
+      last_run_status: 'completed',
+      last_run_execution_mode: 'plan',
+    })
+    const storeState = createBaseStoreState({
+      sessionStatusOverrides: { 'session-1': 'paused' },
+      waitingForInputSessionIds: { 'session-1': true },
+    })
+
+    const card = computeSessionCardData(session, storeState)
+
+    expect(card.automaticStatus).toBe('input_required')
+    expect(card.statusOverride).toBe('paused')
+    expect(card.status).toBe('input_required')
+  })
+
+  it('paused wins over a review-ready automatic status', () => {
+    const session = createBaseSession({
+      last_run_status: 'completed',
+      review_results: { findings: [] } as never,
+    })
+    const storeState = createBaseStoreState({
+      sessionStatusOverrides: { 'session-1': 'paused' },
+    })
+
+    const card = computeSessionCardData(session, storeState)
+
+    expect(card.automaticStatus).toBe('review')
+    expect(card.status).toBe('paused')
+  })
+
   it('can force idle even when automatic status is completed', () => {
     const session = createBaseSession({
       last_run_status: 'completed',

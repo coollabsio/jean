@@ -350,6 +350,11 @@ interface ChatUIState {
   ) => void
   getSessionStatusOverride: (sessionId: string) => ManualSessionStatus | null
 
+  // Actions - Paused status management (persisted) — thin wrapper over the
+  // 'paused' status override
+  setSessionPaused: (sessionId: string, paused: boolean) => void
+  isSessionPaused: (sessionId: string) => boolean
+
   // Actions - Session label management (persisted)
   setSessionLabel: (sessionId: string, label: LabelData | null) => void
 
@@ -1066,7 +1071,14 @@ export const useChatStore = create<ChatUIState>()(
                   [sessionId]: true,
                 }
               }
-              // Clear waiting so review takes visual priority (legacy behavior)
+            } else if (sessionId in reviewingSessions) {
+              const { [sessionId]: _, ...rest } = reviewingSessions
+              reviewingSessions = rest
+            }
+
+            // Review and paused both park a session out of the live flow, so
+            // clear waiting state to let the override take visual priority.
+            if (status === 'review' || status === 'paused') {
               if (sessionId in waitingForInputSessionIds) {
                 const { [sessionId]: _w, ...restW } = waitingForInputSessionIds
                 waitingForInputSessionIds = restW
@@ -1075,9 +1087,6 @@ export const useChatStore = create<ChatUIState>()(
                 const { [sessionId]: _p, ...restP } = pendingPlanMessageIds
                 pendingPlanMessageIds = restP
               }
-            } else if (sessionId in reviewingSessions) {
-              const { [sessionId]: _, ...rest } = reviewingSessions
-              reviewingSessions = rest
             }
 
             return {
@@ -1093,6 +1102,21 @@ export const useChatStore = create<ChatUIState>()(
 
       getSessionStatusOverride: sessionId =>
         get().sessionStatusOverrides[sessionId] ?? null,
+
+      // Paused status management (persisted) — thin wrapper over the
+      // 'paused' status override, mirroring setSessionReviewing. Unpausing only
+      // clears the override when paused is actually the active one.
+      setSessionPaused: (sessionId, paused) => {
+        const { getSessionStatusOverride, setSessionStatusOverride } = get()
+        if (paused) {
+          setSessionStatusOverride(sessionId, 'paused')
+        } else if (getSessionStatusOverride(sessionId) === 'paused') {
+          setSessionStatusOverride(sessionId, null)
+        }
+      },
+
+      isSessionPaused: sessionId =>
+        get().sessionStatusOverrides[sessionId] === 'paused',
 
       // Session label management (persisted)
       setSessionLabel: (sessionId, label) =>

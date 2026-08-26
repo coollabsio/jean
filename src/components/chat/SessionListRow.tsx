@@ -3,7 +3,9 @@ import {
   Archive,
   Copy,
   FileText,
+  Pause,
   Pencil,
+  Play,
   RefreshCw,
   Shield,
   Tag,
@@ -32,6 +34,7 @@ import {
 import {
   getResumeCommand,
   statusConfig,
+  type ManualSessionStatus,
   type SessionCardProps,
 } from './session-card-utils'
 import { SessionStatusMenu } from './SessionStatusMenu'
@@ -68,7 +71,7 @@ export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
     const handleSetStatusOverride =
       onSetStatusOverride ??
       (onToggleReview
-        ? (status: 'idle' | 'review' | 'completed' | 'cancelled' | null) => {
+        ? (status: ManualSessionStatus | null) => {
             // Fallback for callers that only wire the legacy review toggle
             if (status === 'review') {
               if (card.status !== 'review') onToggleReview()
@@ -282,6 +285,27 @@ export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
               automaticStatus={card.automaticStatus}
               onSetStatusOverride={handleSetStatusOverride}
             />
+          )}
+          {handleSetStatusOverride && (
+            <ContextMenuItem
+              onSelect={() =>
+                handleSetStatusOverride(
+                  card.statusOverride === 'paused' ? null : 'paused'
+                )
+              }
+            >
+              {card.statusOverride === 'paused' ? (
+                <>
+                  <Play className="mr-2 h-4 w-4" />
+                  Unpause
+                </>
+              ) : (
+                <>
+                  <Pause className="mr-2 h-4 w-4" />
+                  Mark as Paused
+                </>
+              )}
+            </ContextMenuItem>
           )}
           <ContextMenuItem onSelect={onArchive}>
             <Archive className="mr-2 h-4 w-4" />

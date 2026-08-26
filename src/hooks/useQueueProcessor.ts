@@ -145,6 +145,8 @@ export function useQueueProcessor(): void {
           store.setError(capturedSessionId, null)
           store.addSendingSession(capturedSessionId)
           store.setSessionReviewing(capturedSessionId, false)
+          // Auto-resume on send: clear paused flag too.
+          store.setSessionPaused(capturedSessionId, false)
           store.setExecutingMode(capturedSessionId, msg.executionMode)
           store.setSelectedModel(capturedSessionId, msg.model)
 

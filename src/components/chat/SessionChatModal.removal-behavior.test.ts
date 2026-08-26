@@ -180,9 +180,15 @@ describe('SessionChatModal removal behavior', () => {
 
     expect(source).toContain('buildNativeClientSessionInput')
     expect(source).toContain('handleOpenInNativeClient')
-    expect(source).toContain('Open in Native Client')
     expect(source).toMatch(
       /reconnectNativeCliSession\(nativeSession, worktreeId, \{[\s\S]*?openModal: false/
     )
+
+    // The menu item itself lives in the shared session context menu.
+    const menuSource = readSource(
+      'src/components/chat/SessionContextMenuItems.tsx'
+    )
+    expect(menuSource).toContain('Open in Native Client')
+    expect(menuSource).toContain('onOpenInNativeClient')
   })
 })

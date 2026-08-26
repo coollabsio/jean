@@ -294,9 +294,16 @@ export interface Session {
   /**
    * User-forced session status. Applied when the session is not in a live
    * automatic state (running, waiting for input, permissions, …).
-   * Values: 'idle' | 'review' | 'completed' | 'cancelled'
+   * Values: 'idle' | 'review' | 'paused' | 'completed' | 'cancelled'
+   * ('paused' parks a session in a manual backlog.)
    */
-  status_override?: 'idle' | 'review' | 'completed' | 'cancelled' | null
+  status_override?:
+    | 'idle'
+    | 'review'
+    | 'paused'
+    | 'completed'
+    | 'cancelled'
+    | null
   /** Whether this session is waiting for user input (AskUserQuestion, ExitPlanMode) */
   waiting_for_input?: boolean
   /** Type of waiting: 'question' for AskUserQuestion, 'plan' for ExitPlanMode */

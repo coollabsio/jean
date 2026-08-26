@@ -1644,6 +1644,21 @@ pub async fn regenerate_session_name(
 
 /// Update session-specific UI state (answered questions, fixed findings, etc.)
 /// All fields are optional - only provided fields are updated
+/// Manual session statuses a client may pin via `status_override`.
+/// Mirrors `MANUAL_SESSION_STATUSES` in `src/components/chat/session-card-utils.tsx`.
+pub const MANUAL_SESSION_STATUSES: [&str; 5] =
+    ["idle", "review", "paused", "completed", "cancelled"];
+
+fn validate_status_override(status: &str) -> Result<(), String> {
+    if MANUAL_SESSION_STATUSES.contains(&status) {
+        return Ok(());
+    }
+    Err(format!(
+        "Invalid status_override '{status}'. Expected {}.",
+        MANUAL_SESSION_STATUSES.join(", ")
+    ))
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn update_session_state(
     app: AppHandle,
@@ -1726,18 +1741,8 @@ pub async fn update_session_state(
                 }
             }
             if let Some(v) = status_override {
-                match &v {
-                    Some(status)
-                        if !matches!(
-                            status.as_str(),
-                            "idle" | "review" | "completed" | "cancelled"
-                        ) =>
-                    {
-                        return Err(format!(
-                            "Invalid status_override '{status}'. Expected idle, review, completed, or cancelled."
-                        ));
-                    }
-                    _ => {}
+                if let Some(status) = &v {
+                    validate_status_override(status)?;
                 }
                 session.status_override = v;
                 // Keep legacy is_reviewing flag aligned with the override
@@ -3033,7 +3038,12 @@ pub async fn send_chat_message(
         if let Some(session) = sessions.find_session_mut(&session_id) {
             session.waiting_for_input = false;
             session.is_reviewing = false;
-            if session.status_override.as_deref() == Some("review") {
+            // Auto-resume on send: sending a message clears a review or paused
+            // override so the session rejoins the live status flow.
+            if matches!(
+                session.status_override.as_deref(),
+                Some("review") | Some("paused")
+            ) {
                 session.status_override = None;
             }
             session.waiting_for_input_type = None;
@@ -10220,6 +10230,25 @@ pub async fn respond_opencode_permission(
 
 #[cfg(test)]
 mod tests {
+    use super::validate_status_override;
+
+    #[test]
+    fn validate_status_override_accepts_every_manual_status() {
+        for status in ["idle", "review", "paused", "completed", "cancelled"] {
+            assert!(
+                validate_status_override(status).is_ok(),
+                "expected {status} to be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_status_override_rejects_unknown_values() {
+        let err = validate_status_override("vibing").unwrap_err();
+        assert!(err.contains("Invalid status_override 'vibing'"));
+        assert!(err.contains("paused"));
+    }
+
     use super::*;
 
     #[test]

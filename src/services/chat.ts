@@ -40,7 +40,11 @@ import { useUIStore } from '@/store/ui-store'
 import { useTerminalStore } from '@/store/terminal-store'
 import { clearSessionScrollState } from '@/components/chat/session-scroll-state'
 import { isNativeTerminalBackend } from '@/lib/native-cli-session'
-import { getResumeArgs } from '@/components/chat/session-card-utils'
+import {
+  getResumeArgs,
+  isManualSessionStatus,
+  type ManualSessionStatus,
+} from '@/components/chat/session-card-utils'
 import {
   bareCommandForBackend,
   isBareCliCommand,
@@ -431,10 +435,7 @@ export async function prefetchSessions(
     // Restore reviewingSessions, status overrides, waitingForInputSessionIds,
     // sessionLabels, reviewResults, fixedFindings, and selected execution modes.
     const reviewingUpdates: Record<string, boolean> = {}
-    const statusOverrideUpdates: Record<
-      string,
-      'idle' | 'review' | 'completed' | 'cancelled'
-    > = {}
+    const statusOverrideUpdates: Record<string, ManualSessionStatus> = {}
     const waitingUpdates: Record<string, boolean> = {}
     const executionModeUpdates: Record<string, ExecutionMode> = {}
     const primarySurfaceUpdates: Record<string, 'chat' | 'terminal'> = {}
@@ -448,12 +449,7 @@ export async function prefetchSessions(
     const fixedFindingsUpdates: Record<string, Set<string>> = {}
     for (const session of sessions.sessions) {
       const override = session.status_override
-      if (
-        override === 'idle' ||
-        override === 'review' ||
-        override === 'completed' ||
-        override === 'cancelled'
-      ) {
+      if (isManualSessionStatus(override)) {
         statusOverrideUpdates[session.id] = override
         if (override === 'review') {
           reviewingUpdates[session.id] = true

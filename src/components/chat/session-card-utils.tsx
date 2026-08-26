@@ -44,6 +44,8 @@ export type SessionStatus =
   | 'waiting'
   | 'plan_approval'
   | 'input_required'
+  | 'review'
+  | 'paused'
   | 'permission'
   | 'command_approval'
   | 'mcp_input'
@@ -59,11 +61,17 @@ export type SessionStatus =
  * input, permissions, …) still win while active; the override applies once the
  * session is idle/terminal so users can pin review/completed/cancelled/idle.
  */
-export type ManualSessionStatus = 'idle' | 'review' | 'completed' | 'cancelled'
+export type ManualSessionStatus =
+  | 'idle'
+  | 'review'
+  | 'paused'
+  | 'completed'
+  | 'cancelled'
 
 export const MANUAL_SESSION_STATUSES: readonly ManualSessionStatus[] = [
   'idle',
   'review',
+  'paused',
   'completed',
   'cancelled',
 ] as const
@@ -74,6 +82,7 @@ export function isManualSessionStatus(
   return (
     value === 'idle' ||
     value === 'review' ||
+    value === 'paused' ||
     value === 'completed' ||
     value === 'cancelled'
   )
@@ -201,6 +210,11 @@ export const statusConfig: Record<
     label: 'Input required',
     indicatorStatus: 'input_required',
     indicatorShape: 'diamond',
+  },
+  paused: {
+    label: 'Paused',
+    // Reuse the gray "idle" indicator color.
+    indicatorStatus: 'idle',
   },
   permission: {
     label: 'Permission required',
@@ -877,7 +891,7 @@ export function buildNativeClientSessionInput(
 // --- Status grouping ---
 
 export interface StatusGroup {
-  key: 'inProgress' | 'waiting' | 'review' | 'idle'
+  key: 'inProgress' | 'waiting' | 'review' | 'paused' | 'idle'
   title: string
   /** Representative status for group header icon/color. */
   indicatorStatus: SessionStatus
@@ -908,6 +922,12 @@ const STATUS_GROUP_ORDER: {
     indicatorStatus: 'review',
     // Keep completed distinct from review-ready within the group via statusConfig labels
     statuses: ['review', 'completed', 'cancelled', 'crashed'],
+  },
+  {
+    key: 'paused',
+    title: 'Paused',
+    indicatorStatus: 'paused',
+    statuses: ['paused'],
   },
   { key: 'idle', title: 'Idle', indicatorStatus: 'idle', statuses: ['idle'] },
 ]
