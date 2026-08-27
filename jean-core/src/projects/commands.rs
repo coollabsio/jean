@@ -13218,7 +13218,9 @@ fn collect_skills_from_dir_inner(
             }
         };
         let path = entry.path();
-        if !file_type.is_dir() || file_type.is_symlink() {
+        let is_linked_directory = file_type.is_symlink()
+            && std::fs::metadata(&path).is_ok_and(|metadata| metadata.is_dir());
+        if !file_type.is_dir() && !is_linked_directory {
             continue;
         }
 
@@ -13232,7 +13234,9 @@ fn collect_skills_from_dir_inner(
             }
         };
         if !is_skill_file {
-            if entry_depth < MAX_SKILL_DIRECTORY_DEPTH {
+            // Follow symlinks only when they directly point at a skill root.
+            // This matches Codex skill installs while avoiding directory cycles.
+            if !is_linked_directory && entry_depth < MAX_SKILL_DIRECTORY_DEPTH {
                 collect_skills_from_dir_inner(&path, skills, entry_depth);
             }
             continue;
@@ -13979,7 +13983,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn skill_discovery_does_not_follow_symlinks() {
+    fn skill_discovery_finds_symlinked_skill_directories_without_following_symlinked_files() {
         use std::os::unix::fs::symlink;
 
         let temp = tempfile::tempdir().expect("temp dir");
@@ -13996,7 +14000,34 @@ mod tests {
 
         let skills = collect_test_skills(&root);
 
-        assert!(skills.is_empty());
+        assert_eq!(skills.len(), 1);
+        assert_eq!(
+            skills
+                .get("linked-directory")
+                .and_then(|skill| skill.description.as_deref()),
+            Some("Outside")
+        );
+        assert_eq!(
+            skills
+                .get("linked-directory")
+                .map(|skill| std::path::PathBuf::from(&skill.path)),
+            Some(root.join("linked-directory/SKILL.md"))
+        );
+        assert!(!skills.contains_key("linked-file-skill"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn skill_discovery_does_not_follow_symlinked_category_cycles() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path().join("skills");
+        let category = root.join("category");
+        std::fs::create_dir_all(&category).expect("category dir");
+        symlink(&root, category.join("cycle")).expect("category cycle");
+
+        assert!(collect_test_skills(&root).is_empty());
     }
 
     fn run_test_git(repo: &Path, args: &[&str]) {
