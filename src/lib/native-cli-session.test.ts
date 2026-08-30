@@ -65,6 +65,22 @@ describe('buildNativeResumeArgs', () => {
       'opencode-session',
     ])
   })
+
+  it('replaces PI creation IDs with a resumable session selector', () => {
+    expect(
+      buildNativeResumeArgs('pi', 'pi-session', [
+        '--model',
+        'openai-codex/gpt-5.4',
+        '--session-id',
+        'initial-session',
+      ])
+    ).toEqual([
+      '--model',
+      'openai-codex/gpt-5.4',
+      '--session',
+      'pi-session',
+    ])
+  })
 })
 
 describe('getNativeTerminalResumeLaunch', () => {
@@ -95,6 +111,22 @@ describe('getNativeTerminalResumeLaunch', () => {
     expect(getNativeTerminalResumeLaunch(legacy)).toEqual({
       command: '/usr/local/bin/codex',
       args: ['resume', 'legacy-thread'],
+    })
+  })
+
+  it('builds a typed PI resume launch', () => {
+    expect(
+      getNativeTerminalResumeLaunch(
+        session({
+          backend: 'pi',
+          terminal_command: '/usr/local/bin/pi',
+          terminal_command_args: ['--session-id', 'pi-session'],
+          pi_session_id: 'pi-session',
+        })
+      )
+    ).toEqual({
+      command: '/usr/local/bin/pi',
+      args: ['--session', 'pi-session'],
     })
   })
 

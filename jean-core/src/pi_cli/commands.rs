@@ -115,6 +115,13 @@ fn parse_pi_models(stdout: &[u8], stderr: &[u8]) -> Vec<PiModelInfo> {
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .filter_map(|line| {
+            let lower = line.to_ascii_lowercase();
+            if lower.starts_with("warning:")
+                || lower.starts_with("error:")
+                || lower.starts_with("no models ")
+            {
+                return None;
+            }
             let mut parts = line.split_whitespace();
             let provider = parts.next()?;
             let model = parts.next()?;
@@ -147,9 +154,10 @@ mod tests {
     fn parse_pi_models_reads_active_provider_models_from_stderr() {
         let models = parse_pi_models(
             b"",
-            b"provider      model\nopenai-codex  gpt-5.4\nopenai-codex  gpt-5.5\n",
+            b"Warning: No models match pattern \"legacy/*\"\nprovider      model\nopenai-codex  gpt-5.4\nopenai-codex  gpt-5.5\n",
         );
 
+        assert_eq!(models.len(), 2);
         assert_eq!(models[0].id, "openai-codex/gpt-5.4");
         assert_eq!(models[0].label, "GPT 5.4 (OpenAI Codex)");
         assert!(models[0].is_default);

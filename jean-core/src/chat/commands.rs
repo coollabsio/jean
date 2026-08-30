@@ -4636,7 +4636,12 @@ pub async fn send_chat_message(
                 }
             }
             Backend::Pi => {
-                let pi_system_prompt: Option<String> = {
+                let pi_agent_owns_policy = crate::load_preferences_sync(&thread_app)
+                    .map(|prefs| prefs.pi_agent_owns_policy)
+                    .unwrap_or(false);
+                let pi_system_prompt: Option<String> = if pi_agent_owns_policy {
+                    None
+                } else {
                     use crate::projects::storage::load_projects_data;
 
                     let mut parts: Vec<String> = Vec::new();
@@ -4756,6 +4761,7 @@ pub async fn send_chat_message(
                     thread_effort_level.as_ref(),
                     &thread_message,
                     pi_system_prompt.as_deref(),
+                    pi_agent_owns_policy,
                     Some(make_pid_callback()),
                 ) {
                     Ok(response) => Ok((
