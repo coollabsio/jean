@@ -748,6 +748,7 @@ pub async fn add_project(
         sentry_auth_token: None,
         sentry_organization_slug: None,
         sentry_project_slug: None,
+        sentry_base_url: None,
         linked_project_ids: Vec::new(),
         auto_fix_settings: None,
     };
@@ -908,6 +909,7 @@ pub async fn init_project(
         sentry_auth_token: None,
         sentry_organization_slug: None,
         sentry_project_slug: None,
+        sentry_base_url: None,
         linked_project_ids: Vec::new(),
         auto_fix_settings: None,
     };
@@ -966,6 +968,7 @@ pub async fn clone_project(
         sentry_auth_token: None,
         sentry_organization_slug: None,
         sentry_project_slug: None,
+        sentry_base_url: None,
         linked_project_ids: Vec::new(),
         auto_fix_settings: None,
     };
@@ -5881,16 +5884,20 @@ pub async fn update_project_settings(
         let token = token.trim().to_string();
         log::trace!("Updating Sentry auth token ({} chars)", token.len());
         project.sentry_auth_token = if token.is_empty() { None } else { Some(token) };
+        // Region host is derived from the org; drop any cached value so it re-resolves.
+        project.sentry_base_url = None;
     }
 
     if let Some(slug) = sentry_organization_slug {
         let slug = slug.trim().to_string();
         project.sentry_organization_slug = if slug.is_empty() { None } else { Some(slug) };
+        project.sentry_base_url = None;
     }
 
     if let Some(slug) = sentry_project_slug {
         let slug = slug.trim().to_string();
         project.sentry_project_slug = if slug.is_empty() { None } else { Some(slug) };
+        project.sentry_base_url = None;
     }
 
     if let Some(settings) = auto_fix_settings {
@@ -12600,6 +12607,7 @@ pub async fn create_folder(
         sentry_auth_token: None,
         sentry_organization_slug: None,
         sentry_project_slug: None,
+        sentry_base_url: None,
         linked_project_ids: Vec::new(),
         auto_fix_settings: None,
     };
@@ -14793,6 +14801,7 @@ mod tests {
             sentry_auth_token: None,
             sentry_organization_slug: None,
             sentry_project_slug: None,
+            sentry_base_url: None,
             linked_project_ids: Vec::new(),
             auto_fix_settings: None,
         };

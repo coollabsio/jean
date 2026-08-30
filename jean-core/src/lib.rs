@@ -3343,6 +3343,27 @@ async fn save_preferences(app: AppHandle, preferences: AppPreferences) -> Result
     let mut preferences = preferences;
     normalize_parallel_execution_preferences(&mut preferences);
 
+    // Keep per-project Sentry region caches consistent with the global token:
+    // a global set/change/remove invalidates the cached region host on projects that
+    // inherit it (no per-project token), mirroring the per-project settings path.
+    if let Ok(old_prefs) = load_preferences(app.clone()).await {
+        if old_prefs.sentry_auth_token.as_deref() != preferences.sentry_auth_token.as_deref() {
+            if let Ok(mut data) = crate::projects::storage::load_projects_data(&app) {
+                let mut changed = false;
+                for project in &mut data.projects {
+                    if project.sentry_auth_token.is_none() && project.sentry_base_url.is_some() {
+                        project.sentry_base_url = None;
+                        changed = true;
+                    }
+                }
+                if changed {
+                    log::trace!("Global Sentry token changed; clearing inherited region caches");
+                    let _ = crate::projects::storage::save_projects_data(&app, &data);
+                }
+            }
+        }
+    }
+
     // Validate theme value
     validate_theme(&preferences.theme)?;
 
