@@ -58,8 +58,8 @@ function renderTab(
       creatingFromNumber={null}
       stackingFromPR={null}
       searchInputRef={searchInputRef}
-      onGhLogin={vi.fn()}
-      isGhInstalled={true}
+      onLogin={vi.fn()}
+      isCliInstalled={true}
       {...overrides}
     />
   )
@@ -90,5 +90,52 @@ describe('GitHubPRsTab multi-select', () => {
       | GitHubPullRequest[]
       | undefined
     expect(selected?.map(p => p.number).sort()).toEqual([201, 202])
+  })
+})
+
+describe('GitHubPRsTab GitLab wording + auth errors', () => {
+  const authError = new Error(
+    'GitLab CLI not authenticated. Run glab auth login'
+  )
+
+  it('uses Merge Request wording for a gitlab provider', () => {
+    renderTab({ provider: 'gitlab' })
+
+    // "MR" short form in the include-closed control.
+    expect(
+      screen.getByText(/Include closed\/merged MRs/i)
+    ).toBeInTheDocument()
+  })
+
+  it('uses "merge requests" wording while loading for gitlab', () => {
+    renderTab({ provider: 'gitlab', isLoading: true })
+
+    expect(screen.getByText(/Loading merge requests/i)).toBeInTheDocument()
+  })
+
+  it('renders the GitLab auth error (not GitHub) for a gitlab provider', () => {
+    renderTab({ error: authError, provider: 'gitlab' })
+
+    expect(
+      screen.getByRole('button', { name: /sign in to gitlab/i })
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: /sign in to github/i })
+    ).toBeNull()
+  })
+
+  it('defers the auth-error branch until the provider is resolved', () => {
+    renderTab({
+      error: authError,
+      provider: 'github',
+      providerResolved: false,
+    })
+
+    expect(
+      screen.queryByRole('button', { name: /sign in to github/i })
+    ).toBeNull()
+    expect(
+      screen.queryByRole('button', { name: /sign in to gitlab/i })
+    ).toBeNull()
   })
 })

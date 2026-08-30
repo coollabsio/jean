@@ -2739,6 +2739,36 @@ pub async fn dispatch_command(
             crate::gh_cli::uninstall_gh_cli(app.clone()).await?;
             Ok(Value::Null)
         }
+        "check_glab_cli_installed" => {
+            let result = crate::glab_cli::check_glab_cli_installed(app.clone()).await?;
+            to_value(result)
+        }
+        "detect_glab_in_path" => {
+            let result = crate::glab_cli::detect_glab_in_path(app.clone()).await?;
+            to_value(result)
+        }
+        "check_glab_cli_auth" => {
+            let result = crate::glab_cli::check_glab_cli_auth(app.clone()).await?;
+            to_value(result)
+        }
+        "get_available_glab_versions" => {
+            let result = crate::glab_cli::get_available_glab_versions(app.clone()).await?;
+            to_value(result)
+        }
+        "check_glab_cli_version_exists" => {
+            let version: String = from_field(&args, "version")?;
+            let result = crate::glab_cli::check_glab_cli_version_exists(version).await?;
+            to_value(result)
+        }
+        "install_glab_cli" => {
+            let version: Option<String> = from_field_opt(&args, "version")?;
+            crate::glab_cli::install_glab_cli(app.clone(), version).await?;
+            Ok(Value::Null)
+        }
+        "uninstall_glab_cli" => {
+            crate::glab_cli::uninstall_glab_cli(app.clone()).await?;
+            Ok(Value::Null)
+        }
 
         "check_coderabbit_cli_installed" => {
             let result = crate::coderabbit_cli::check_coderabbit_cli_installed(app.clone()).await?;
@@ -3469,6 +3499,11 @@ pub async fn dispatch_command(
         "get_jean_config" => {
             let project_path: String = field(&args, "projectPath", "project_path")?;
             let result = crate::projects::get_jean_config(project_path).await;
+            to_value(result)
+        }
+        "get_git_provider" => {
+            let project_path: String = field(&args, "projectPath", "project_path")?;
+            let result = crate::projects::get_git_provider(project_path).await?;
             to_value(result)
         }
         "save_jean_config" => {

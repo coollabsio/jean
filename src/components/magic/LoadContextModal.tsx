@@ -23,6 +23,8 @@ import { Markdown } from '@/components/ui/markdown'
 import { cn } from '@/lib/utils'
 import { usePreferences } from '@/services/preferences'
 import { useGhLogin } from '@/hooks/useGhLogin'
+import { useGlabLogin } from '@/hooks/useGlabLogin'
+import { useProjectGitProvider, providerLabels } from '@/services/git-provider'
 import { IssuePreviewModal } from '@/components/worktree/IssuePreviewModal'
 import { githubQueryKeys } from '@/services/github'
 import { linearQueryKeys } from '@/services/linear'
@@ -74,7 +76,27 @@ export function LoadContextModal({
 }: LoadContextModalProps) {
   const queryClient = useQueryClient()
   const { triggerLogin: triggerGhLogin, isGhInstalled } = useGhLogin()
+  const { triggerLogin: triggerGlabLogin, isGlabInstalled } = useGlabLogin()
   const { data: preferences } = usePreferences()
+
+  // Resolve the project's git host provider for provider-aware auth + wording.
+  const { data: providerInfo, isLoading: isProviderLoading } =
+    useProjectGitProvider(worktreePath)
+  const provider = providerInfo?.provider ?? 'github'
+  // Until the provider resolves it defaults to `github`; auth-error UI must wait
+  // for this so a GitLab project never flashes the GitHub sign-in prompt.
+  const providerResolved = !isProviderLoading
+  const labels = providerLabels(provider)
+  const triggerLogin =
+    provider === 'gitlab' ? triggerGlabLogin : triggerGhLogin
+  const isCliInstalled = provider === 'gitlab' ? isGlabInstalled : isGhInstalled
+  // Security (Dependabot/advisories) is GitHub-only; hide it for GitLab.
+  const securityTabEnabled = provider !== 'gitlab'
+  const displayTabs = TABS.filter(
+    tab => tab.id !== 'security' || securityTabEnabled
+  ).map(tab =>
+    tab.id === 'prs' ? { ...tab, label: labels.pullRequestsShort } : tab
+  )
 
   // Navigation state
   const [activeTab, setActiveTab] = useState<TabId>('issues')
@@ -122,6 +144,7 @@ export function LoadContextModal({
   // Keyboard navigation
   const { handleKeyDown } = useLoadContextKeyboard({
     activeTab,
+    securityTabEnabled,
     filteredIssues: data.filteredIssues,
     filteredPRs: data.filteredPRs,
     filteredSecurityAlerts: data.filteredSecurityAlerts,
@@ -280,6 +303,14 @@ export function LoadContextModal({
     setSearchQuery('')
   }, [activeTab])
 
+  // Reset to a safe tab when the current one is hidden (e.g. Security on GitLab).
+  const activeTabAvailable = displayTabs.some(tab => tab.id === activeTab)
+  useEffect(() => {
+    if (!activeTabAvailable) {
+      setActiveTab('issues')
+    }
+  }, [activeTabAvailable])
+
   // Focus edit input when editing starts
   useEffect(() => {
     if (handlers.editingFilename && handlers.editInputRef.current) {
@@ -314,7 +345,7 @@ export function LoadContextModal({
 
         {/* Tabs */}
         <div className="flex overflow-x-auto border-b border-border scrollbar-hide">
-          {TABS.map(tab => (
+          {displayTabs.map(tab => (
             <button
               type="button"
               key={tab.id}
@@ -370,8 +401,10 @@ export function LoadContextModal({
               loadingNumbers={handlers.loadingNumbers}
               removingNumbers={handlers.removingNumbers}
               hasLoadedContexts={data.hasLoadedIssueContexts}
-              onGhLogin={triggerGhLogin}
-              isGhInstalled={isGhInstalled}
+              onLogin={triggerLogin}
+              isCliInstalled={isCliInstalled}
+              provider={provider}
+              providerResolved={providerResolved}
             />
           )}
 
@@ -404,8 +437,10 @@ export function LoadContextModal({
               loadingNumbers={handlers.loadingNumbers}
               removingNumbers={handlers.removingNumbers}
               hasLoadedContexts={data.hasLoadedPRContexts}
-              onGhLogin={triggerGhLogin}
-              isGhInstalled={isGhInstalled}
+              onLogin={triggerLogin}
+              isCliInstalled={isCliInstalled}
+              provider={provider}
+              providerResolved={providerResolved}
             />
           )}
 

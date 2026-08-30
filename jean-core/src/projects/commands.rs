@@ -56,6 +56,7 @@ use crate::gh_cli::config::resolve_gh_binary;
 use crate::http_server::EmitExt;
 use crate::platform::silent_command;
 use crate::platform::wsl_aware_command;
+use crate::projects::provider::{resolve_git_provider, GitProvider};
 
 fn gh_command(gh: &Path, project_path: &str) -> std::process::Command {
     crate::platform::resolved_cli_command(gh, Some(Path::new(project_path)))
@@ -2223,10 +2224,9 @@ pub async fn create_worktree(
                             log::warn!("Background: Failed to create git-context directory: {e}");
                         } else {
                             // Fetch the diff if not already present
-                            let gh = resolve_gh_binary(&app_clone);
                             let ctx_with_diff = if ctx.diff.is_none() {
                                 log::debug!("Background: Fetching diff for PR #{}", ctx.number);
-                                let diff = get_pr_diff(&project_path, ctx.number, &gh).ok();
+                                let diff = get_pr_diff(&app_clone, &project_path, ctx.number).ok();
                                 PullRequestContext {
                                     number: ctx.number,
                                     title: ctx.title.clone(),
@@ -3060,10 +3060,9 @@ pub async fn create_worktree_from_existing_branch(
                             log::warn!("Background: Failed to create git-context directory: {e}");
                         } else {
                             // Fetch the diff if not already present
-                            let gh = resolve_gh_binary(&app_clone);
                             let ctx_with_diff = if ctx.diff.is_none() {
                                 log::debug!("Background: Fetching diff for PR #{}", ctx.number);
-                                let diff = get_pr_diff(&project_path, ctx.number, &gh).ok();
+                                let diff = get_pr_diff(&app_clone, &project_path, ctx.number).ok();
                                 PullRequestContext {
                                     number: ctx.number,
                                     title: ctx.title.clone(),
@@ -3808,12 +3807,7 @@ pub async fn checkout_pr(
                                     submitted_at: r.submitted_at,
                                 })
                                 .collect(),
-                            diff: get_pr_diff(
-                                &project_path,
-                                pr_number,
-                                &resolve_gh_binary(&app_clone),
-                            )
-                            .ok(),
+                            diff: get_pr_diff(&app_clone, &project_path, pr_number).ok(),
                         };
 
                         let context_file =
@@ -5526,15 +5520,24 @@ pub async fn open_pull_request(
 
     // Use the worktree path for the PR creation; open against the worktree base
     // (not only the project default) so stacked branches target the right base.
-    let gh = resolve_gh_binary(&app);
-    let result = git::open_pull_request(
-        &worktree.path,
-        title.as_deref(),
-        body.as_deref(),
-        draft.unwrap_or(false),
-        Some(&base_branch),
-        &gh,
-    )?;
+    let result = if resolve_git_provider(&worktree.path).0 == GitProvider::Gitlab {
+        crate::projects::gitlab_issues::open_mr_web(
+            &app,
+            &worktree.path,
+            draft.unwrap_or(false),
+            Some(&base_branch),
+        )?
+    } else {
+        let gh = resolve_gh_binary(&app);
+        git::open_pull_request(
+            &worktree.path,
+            title.as_deref(),
+            body.as_deref(),
+            draft.unwrap_or(false),
+            Some(&base_branch),
+            &gh,
+        )?
+    };
 
     log::trace!(
         "Successfully opened pull request for worktree: {}",
@@ -6412,6 +6415,20 @@ fn find_open_pr_for_branch(
     worktree_path: &str,
 ) -> Result<Option<DetectPrResponse>, String> {
     let current_branch = git::get_current_branch(worktree_path)?;
+
+    if resolve_git_provider(worktree_path).0 == GitProvider::Gitlab {
+        return Ok(crate::projects::gitlab_issues::view_open_mr_for_branch(
+            app,
+            worktree_path,
+            &current_branch,
+        )?
+        .map(|(pr_number, pr_url, title)| DetectPrResponse {
+            pr_number,
+            pr_url,
+            title,
+        }));
+    }
+
     let gh = resolve_gh_binary(app);
     let output = gh_command(&gh, worktree_path)
         .args([
@@ -6463,34 +6480,41 @@ pub async fn link_worktree_pr(
 
     log::trace!("Linking PR #{pr_number} to worktree {worktree_id}");
 
-    let gh = resolve_gh_binary(&app);
-    let output = gh_command(&gh, &worktree_path)
-        .args([
-            "pr",
-            "view",
-            &pr_number.to_string(),
-            "--json",
-            "number,url,title",
-        ])
-        .output()
-        .map_err(|e| format!("Failed to run gh pr view: {e}"))?;
+    let (viewed_pr_number, pr_url, title) = if resolve_git_provider(&worktree_path).0
+        == GitProvider::Gitlab
+    {
+        crate::projects::gitlab_issues::get_mr_brief(&app, &worktree_path, pr_number)?
+    } else {
+        let gh = resolve_gh_binary(&app);
+        let output = gh_command(&gh, &worktree_path)
+            .args([
+                "pr",
+                "view",
+                &pr_number.to_string(),
+                "--json",
+                "number,url,title",
+            ])
+            .output()
+            .map_err(|e| format!("Failed to run gh pr view: {e}"))?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if stderr.contains("gh auth login") || stderr.contains("authentication") {
-            return Err("GitHub CLI not authenticated. Run 'gh auth login' first.".to_string());
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if stderr.contains("gh auth login") || stderr.contains("authentication") {
+                return Err("GitHub CLI not authenticated. Run 'gh auth login' first.".to_string());
+            }
+            if stderr.contains("Could not resolve") || stderr.contains("not found") {
+                return Err(format!("PR #{pr_number} not found"));
+            }
+            return Err(format!("Failed to load PR #{pr_number}: {stderr}"));
         }
-        if stderr.contains("Could not resolve") || stderr.contains("not found") {
-            return Err(format!("PR #{pr_number} not found"));
-        }
-        return Err(format!("Failed to load PR #{pr_number}: {stderr}"));
-    }
 
-    let view_json: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .map_err(|e| format!("Failed to parse PR #{pr_number}: {e}"))?;
-    let viewed_pr_number = view_json["number"].as_u64().unwrap_or(0) as u32;
-    let pr_url = view_json["url"].as_str().unwrap_or("").to_string();
-    let title = view_json["title"].as_str().unwrap_or("").to_string();
+        let view_json: serde_json::Value = serde_json::from_slice(&output.stdout)
+            .map_err(|e| format!("Failed to parse PR #{pr_number}: {e}"))?;
+        let n = view_json["number"].as_u64().unwrap_or(0) as u32;
+        let u = view_json["url"].as_str().unwrap_or("").to_string();
+        let t = view_json["title"].as_str().unwrap_or("").to_string();
+        (n, u, t)
+    };
 
     if viewed_pr_number == 0 || pr_url.is_empty() {
         return Err(format!("PR #{pr_number} did not return a valid URL"));
@@ -6546,12 +6570,26 @@ fn parse_pr_view_link(output: &[u8]) -> Result<Option<DetectPrResponse>, String>
     }))
 }
 
-/// Resolve PR number/url/title via `gh pr view <number>`.
+/// Resolve PR/MR number/url/title by number (via `gh pr view` or the GitLab API).
 fn view_pr_link_by_number(
     app: &AppHandle,
     worktree_path: &str,
     pr_number: u32,
 ) -> Result<Option<DetectPrResponse>, String> {
+    if resolve_git_provider(worktree_path).0 == GitProvider::Gitlab {
+        return match crate::projects::gitlab_issues::get_mr_brief(app, worktree_path, pr_number) {
+            Ok((num, url, title)) => Ok(Some(DetectPrResponse {
+                pr_number: num,
+                pr_url: url,
+                title,
+            })),
+            Err(e) => {
+                log::warn!("glab MR !{pr_number} lookup failed: {e}");
+                Ok(None)
+            }
+        };
+    }
+
     let gh = resolve_gh_binary(app);
     let output = gh_command(&gh, worktree_path)
         .args([
@@ -6756,6 +6794,12 @@ pub async fn trigger_coderabbit_pr_review(
     pr_number: Option<u32>,
 ) -> Result<TriggerCodeRabbitPrReviewResponse, String> {
     log::trace!("Triggering CodeRabbit PR review for: {worktree_path}");
+
+    if resolve_git_provider(&worktree_path).0 == GitProvider::Gitlab {
+        return Err(
+            "Triggering a CodeRabbit review from Jean isn't supported on GitLab yet.".to_string(),
+        );
+    }
 
     let gh = resolve_gh_binary(&app);
     let target_pr_number =
@@ -7832,6 +7876,23 @@ fn parse_pr_output(output: &str) -> Result<(u32, String), String> {
     Ok((pr_number, url))
 }
 
+/// Persist a PR/MR link (`number` + `url`) onto the worktree matching `path`.
+/// Best-effort: logs on failure and never returns an error to the caller.
+fn save_worktree_pr_link_by_path(
+    app: &AppHandle,
+    worktree_path: &str,
+    pr_number: u32,
+    pr_url: &str,
+) {
+    if let Ok(mut data) = load_projects_data(app) {
+        if let Some(wt) = data.worktrees.iter_mut().find(|w| w.path == worktree_path) {
+            wt.pr_number = Some(pr_number);
+            wt.pr_url = Some(pr_url.to_string());
+            let _ = save_projects_data(app, &data);
+        }
+    }
+}
+
 /// Create a PR with AI-generated title and body
 ///
 /// This command:
@@ -7964,42 +8025,51 @@ pub async fn create_pr_with_ai_content(
     }
     check_pr_creation_cancelled(&pr_creation.cancelled)?;
 
-    // Check if a PR already exists for this branch before spending time/tokens on AI generation
+    // Which git host does this project use? (GitHub via gh / GitLab via glab)
+    let git_provider = resolve_git_provider(&worktree_path).0;
     let gh = resolve_gh_binary(&app);
-    let view_output = gh_command(&gh, &worktree_path)
-        .args(["pr", "view", "--json", "number,url,title"])
-        .output();
 
-    if let Ok(view_out) = view_output {
-        if view_out.status.success() {
-            if let Ok(view_json) = serde_json::from_slice::<serde_json::Value>(&view_out.stdout) {
-                let pr_number = view_json["number"].as_u64().unwrap_or(0) as u32;
-                let pr_url = view_json["url"].as_str().unwrap_or("").to_string();
-                let title = view_json["title"].as_str().unwrap_or("").to_string();
+    // Check if a PR/MR already exists for this branch before spending time/tokens on AI generation
+    let existing_pr: Option<(u32, String, String)> = if git_provider == GitProvider::Gitlab {
+        crate::projects::gitlab_issues::view_open_mr_for_branch(
+            &app,
+            &worktree_path,
+            &current_branch,
+        )
+        .unwrap_or(None)
+    } else {
+        gh_command(&gh, &worktree_path)
+            .args(["pr", "view", "--json", "number,url,title"])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .and_then(|o| serde_json::from_slice::<serde_json::Value>(&o.stdout).ok())
+            .and_then(|j| {
+                let n = j["number"].as_u64().unwrap_or(0) as u32;
+                let u = j["url"].as_str().unwrap_or("").to_string();
+                let t = j["title"].as_str().unwrap_or("").to_string();
+                (n > 0 && !u.is_empty()).then_some((n, u, t))
+            })
+    };
 
-                if pr_number > 0 && !pr_url.is_empty() {
-                    log::trace!("Found existing PR #{pr_number}, skipping AI generation");
+    if let Some((pr_number, pr_url, title)) = existing_pr {
+        log::trace!("Found existing PR/MR #{pr_number}, skipping AI generation");
 
-                    // Save PR info to worktree
-                    if let Ok(mut data) = load_projects_data(&app) {
-                        if let Some(wt) =
-                            data.worktrees.iter_mut().find(|w| w.path == worktree_path)
-                        {
-                            wt.pr_number = Some(pr_number);
-                            wt.pr_url = Some(pr_url.clone());
-                            let _ = save_projects_data(&app, &data);
-                        }
-                    }
-
-                    return Ok(CreatePrResponse {
-                        pr_number,
-                        pr_url,
-                        title,
-                        existing: true,
-                    });
-                }
+        // Save PR info to worktree
+        if let Ok(mut data) = load_projects_data(&app) {
+            if let Some(wt) = data.worktrees.iter_mut().find(|w| w.path == worktree_path) {
+                wt.pr_number = Some(pr_number);
+                wt.pr_url = Some(pr_url.clone());
+                let _ = save_projects_data(&app, &data);
             }
         }
+
+        return Ok(CreatePrResponse {
+            pr_number,
+            pr_url,
+            title,
+            existing: true,
+        });
     }
 
     // Gather issue/PR context for this session AND worktree.
@@ -8099,6 +8169,53 @@ pub async fn create_pr_with_ai_content(
 
     log::trace!("Generated PR title: {}", pr_content.title);
     check_pr_creation_cancelled(&pr_creation.cancelled)?;
+
+    // GitLab: create the MR via glab and return early.
+    if git_provider == GitProvider::Gitlab {
+        log::trace!("Creating merge request with glab");
+        let result = crate::projects::gitlab_issues::create_mr(
+            &app,
+            &worktree_path,
+            &current_branch,
+            &target_branch,
+            &pr_content.title,
+            &pr_content.body,
+        );
+        check_pr_creation_cancelled(&pr_creation.cancelled)?;
+
+        let (pr_number, pr_url) = match result {
+            Ok(created) => created,
+            Err(e) if e.contains("already exists") || e.contains("409") => {
+                // Race/edge: an open MR appeared — link it instead of failing.
+                match crate::projects::gitlab_issues::view_open_mr_for_branch(
+                    &app,
+                    &worktree_path,
+                    &current_branch,
+                ) {
+                    Ok(Some((num, url, title))) => {
+                        save_worktree_pr_link_by_path(&app, &worktree_path, num, &url);
+                        return Ok(CreatePrResponse {
+                            pr_number: num,
+                            pr_url: url,
+                            title,
+                            existing: true,
+                        });
+                    }
+                    _ => return Err("A merge request for this branch already exists".to_string()),
+                }
+            }
+            Err(e) => return Err(format!("Failed to create merge request: {e}")),
+        };
+
+        log::trace!("Successfully created MR !{pr_number}: {pr_url}");
+        save_worktree_pr_link_by_path(&app, &worktree_path, pr_number, &pr_url);
+        return Ok(CreatePrResponse {
+            pr_number,
+            pr_url,
+            title: pr_content.title,
+            existing: false,
+        });
+    }
 
     // Create the PR using gh CLI (base = worktree base branch when set)
     log::trace!("Creating PR with gh CLI against base branch: {target_branch}");
@@ -8284,6 +8401,27 @@ pub async fn merge_github_pr(
     app: AppHandle,
     worktree_path: String,
 ) -> Result<MergePrResponse, String> {
+    // GitLab: find the current branch's MR and merge it via glab. GitLab's merge
+    // endpoint enforces mergeability (conflicts / unmet approvals) server-side.
+    if resolve_git_provider(&worktree_path).0 == GitProvider::Gitlab {
+        let branch = git::get_current_branch(&worktree_path)?;
+        let (mr_number, _url, title) =
+            match crate::projects::gitlab_issues::view_open_mr_for_branch(
+                &app,
+                &worktree_path,
+                &branch,
+            )? {
+                Some(mr) => mr,
+                None => return Err("No open merge request found for this branch".to_string()),
+            };
+        crate::projects::gitlab_issues::merge_mr(&app, &worktree_path, mr_number)?;
+        log::info!("Merged MR: {title}");
+        return Ok(MergePrResponse {
+            merged: true,
+            message: format!("Merged: {title}"),
+        });
+    }
+
     let gh = resolve_gh_binary(&app);
 
     // 1. Check PR status and mergeability

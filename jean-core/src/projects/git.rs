@@ -1058,6 +1058,22 @@ pub fn git_push_to_pr(
 ) -> Result<PushResult, String> {
     log::trace!("Pushing to PR #{pr_number} remote branch in {repo_path}");
 
+    // GitLab has no `gh pr view` for fork detection. Jean's MR source branches are
+    // regular tracking branches on origin, so a plain push of the current branch
+    // is correct; skip the gh call (which would fail and log a noisy fallback).
+    if crate::projects::provider::resolve_git_provider(repo_path).0
+        == crate::projects::provider::GitProvider::Gitlab
+    {
+        let output = git_push(repo_path, None)?;
+        return Ok(PushResult {
+            output,
+            fell_back: false,
+            permission_denied: false,
+            pushed_remote: None,
+            pushed_branch: None,
+        });
+    }
+
     // 1. Query PR info from GitHub
     let gh_output = gh_command(gh_binary, repo_path)
         .args([
@@ -1473,7 +1489,15 @@ pub fn fetch_pr_to_branch(
     pr_number: u32,
     local_branch: &str,
 ) -> Result<(), String> {
-    let refspec = format!("pull/{pr_number}/head:{local_branch}");
+    // GitLab exposes MR heads at `refs/merge-requests/<iid>/head` (mirrored on the
+    // target project even for fork MRs); GitHub uses `refs/pull/<n>/head`.
+    let refspec = if crate::projects::provider::resolve_git_provider(repo_path).0
+        == crate::projects::provider::GitProvider::Gitlab
+    {
+        format!("merge-requests/{pr_number}/head:{local_branch}")
+    } else {
+        format!("pull/{pr_number}/head:{local_branch}")
+    };
     let output = wsl_aware_command("git", Some(Path::new(repo_path)))
         .args(["fetch", "origin", &refspec])
         .output()
@@ -1512,6 +1536,19 @@ pub fn gh_pr_checkout(
     branch_name: Option<&str>,
     gh_binary: &std::path::Path,
 ) -> Result<String, String> {
+    // GitLab has no `gh pr checkout` equivalent that fits this flow; fetch the MR
+    // head ref into the target branch and check it out via plain git.
+    if crate::projects::provider::resolve_git_provider(worktree_path).0
+        == crate::projects::provider::GitProvider::Gitlab
+    {
+        let branch = branch_name
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("mr-{pr_number}"));
+        fetch_pr_to_branch(worktree_path, pr_number, &branch)?;
+        checkout_branch(worktree_path, &branch)?;
+        return Ok(branch);
+    }
+
     log::trace!("Running gh pr checkout {pr_number} in {worktree_path}");
 
     let pr_num_str = pr_number.to_string();

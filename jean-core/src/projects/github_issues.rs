@@ -6,6 +6,13 @@ use tauri::AppHandle;
 
 use super::git::get_repo_identifier;
 use crate::gh_cli::config::resolve_gh_binary;
+use crate::projects::provider::{resolve_git_provider, unconfigured_provider_error, GitProvider};
+
+/// True when the project resolves to the GitLab provider, so the GitHub
+/// commands below should delegate to [`super::gitlab_issues`].
+fn is_gitlab_project(project_path: &str) -> bool {
+    resolve_git_provider(project_path).0 == GitProvider::Gitlab
+}
 
 fn gh_command(gh: &Path, project_path: &str) -> Command {
     crate::platform::resolved_cli_command(gh, Some(Path::new(project_path)))
@@ -85,6 +92,13 @@ pub async fn list_github_labels(
 ) -> Result<Vec<GitHubLabel>, String> {
     log::trace!("Listing GitHub labels for {project_path}");
 
+    if is_gitlab_project(&project_path) {
+        return super::gitlab_issues::list_labels(&app, &project_path).await;
+    }
+    if let Some(err) = unconfigured_provider_error(&project_path) {
+        return Err(err);
+    }
+
     let gh = resolve_gh_binary(&app);
     let output = gh_command(&gh, &project_path)
         .args(["label", "list", "--json", "name,color", "-L", "1000"])
@@ -159,6 +173,14 @@ pub async fn list_github_issues(
     state: Option<String>,
 ) -> Result<GitHubIssueListResult, String> {
     log::trace!("Listing GitHub issues for {project_path} with state: {state:?}");
+
+    if is_gitlab_project(&project_path) {
+        return super::gitlab_issues::list_issues(&app, &project_path, state).await;
+    }
+    // Don't silently run gh against an unclassifiable self-hosted host.
+    if let Some(err) = unconfigured_provider_error(&project_path) {
+        return Err(err);
+    }
 
     let gh = resolve_gh_binary(&app);
     let state_arg = state.unwrap_or_else(|| "open".to_string());
@@ -249,6 +271,13 @@ pub async fn search_github_issues(
 ) -> Result<Vec<GitHubIssue>, String> {
     log::trace!("Searching GitHub issues for {project_path} with query: {query}");
 
+    if is_gitlab_project(&project_path) {
+        return super::gitlab_issues::search_issues(&app, &project_path, query).await;
+    }
+    if let Some(err) = unconfigured_provider_error(&project_path) {
+        return Err(err);
+    }
+
     let gh = resolve_gh_binary(&app);
     let output = gh_command(&gh, &project_path)
         .args([
@@ -299,6 +328,13 @@ pub async fn get_github_issue_by_number(
 ) -> Result<GitHubIssue, String> {
     log::trace!("Getting GitHub issue #{issue_number} by number for {project_path}");
 
+    if is_gitlab_project(&project_path) {
+        return super::gitlab_issues::get_issue_by_number(&app, &project_path, issue_number).await;
+    }
+    if let Some(err) = unconfigured_provider_error(&project_path) {
+        return Err(err);
+    }
+
     let gh = resolve_gh_binary(&app);
     let output = gh_command(&gh, &project_path)
         .args([
@@ -339,6 +375,13 @@ pub async fn get_github_issue(
     issue_number: u32,
 ) -> Result<GitHubIssueDetail, String> {
     log::trace!("Getting GitHub issue #{issue_number} for {project_path}");
+
+    if is_gitlab_project(&project_path) {
+        return super::gitlab_issues::get_issue_detail(&app, &project_path, issue_number).await;
+    }
+    if let Some(err) = unconfigured_provider_error(&project_path) {
+        return Err(err);
+    }
 
     let gh = resolve_gh_binary(&app);
     // Run gh issue view
@@ -1545,6 +1588,14 @@ pub async fn list_github_prs(
 ) -> Result<Vec<GitHubPullRequest>, String> {
     log::trace!("Listing GitHub PRs for {project_path} with state: {state:?}");
 
+    if is_gitlab_project(&project_path) {
+        return super::gitlab_issues::list_mrs(&app, &project_path, state).await;
+    }
+    // Don't silently run gh against an unclassifiable self-hosted host.
+    if let Some(err) = unconfigured_provider_error(&project_path) {
+        return Err(err);
+    }
+
     let gh = resolve_gh_binary(&app);
     let state_arg = state.unwrap_or_else(|| "open".to_string());
 
@@ -1596,6 +1647,13 @@ pub async fn search_github_prs(
 ) -> Result<Vec<GitHubPullRequest>, String> {
     log::trace!("Searching GitHub PRs for {project_path} with query: {query}");
 
+    if is_gitlab_project(&project_path) {
+        return super::gitlab_issues::search_mrs(&app, &project_path, query).await;
+    }
+    if let Some(err) = unconfigured_provider_error(&project_path) {
+        return Err(err);
+    }
+
     let gh = resolve_gh_binary(&app);
     let output = gh_command(&gh, &project_path)
         .args([
@@ -1646,6 +1704,13 @@ pub async fn get_github_pr_by_number(
 ) -> Result<GitHubPullRequest, String> {
     log::trace!("Getting GitHub PR #{pr_number} by number for {project_path}");
 
+    if is_gitlab_project(&project_path) {
+        return super::gitlab_issues::get_mr_by_number(&app, &project_path, pr_number).await;
+    }
+    if let Some(err) = unconfigured_provider_error(&project_path) {
+        return Err(err);
+    }
+
     let gh = resolve_gh_binary(&app);
     let output = gh_command(&gh, &project_path)
         .args([
@@ -1686,6 +1751,13 @@ pub async fn get_github_pr(
     pr_number: u32,
 ) -> Result<GitHubPullRequestDetail, String> {
     log::trace!("Getting GitHub PR #{pr_number} for {project_path}");
+
+    if is_gitlab_project(&project_path) {
+        return super::gitlab_issues::get_mr_detail(&app, &project_path, pr_number).await;
+    }
+    if let Some(err) = unconfigured_provider_error(&project_path) {
+        return Err(err);
+    }
 
     let gh = resolve_gh_binary(&app);
     // Run gh pr view
@@ -1731,6 +1803,10 @@ pub async fn get_pr_review_comments(
     pr_number: u32,
 ) -> Result<Vec<GitHubReviewComment>, String> {
     log::trace!("Getting review comments for PR #{pr_number} in {project_path}");
+
+    if is_gitlab_project(&project_path) {
+        return super::gitlab_issues::get_mr_review_comments(&app, &project_path, pr_number);
+    }
 
     let gh = resolve_gh_binary(&app);
     let repo_id = get_repo_identifier(&project_path)?;
@@ -1901,26 +1977,27 @@ pub fn format_pr_context_markdown(ctx: &PullRequestContext) -> String {
 /// Get the diff for a PR using `gh pr diff`
 ///
 /// Returns the diff as a string, truncated to 100KB if too large.
-pub fn get_pr_diff(
-    project_path: &str,
-    pr_number: u32,
-    gh_binary: &std::path::Path,
-) -> Result<String, String> {
+pub fn get_pr_diff(app: &AppHandle, project_path: &str, pr_number: u32) -> Result<String, String> {
     log::debug!("Fetching diff for PR #{pr_number} in {project_path}");
 
-    let output = gh_command(gh_binary, project_path)
-        .args(["pr", "diff", &pr_number.to_string(), "--color", "never"])
-        .output()
-        .map_err(|e| format!("Failed to run gh pr diff: {e}"))?;
+    let diff = if is_gitlab_project(project_path) {
+        super::gitlab_issues::get_mr_diff(app, project_path, pr_number)?
+    } else {
+        let gh_binary = resolve_gh_binary(app);
+        let output = gh_command(&gh_binary, project_path)
+            .args(["pr", "diff", &pr_number.to_string(), "--color", "never"])
+            .output()
+            .map_err(|e| format!("Failed to run gh pr diff: {e}"))?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        log::debug!("gh pr diff failed: {stderr}");
-        // Return empty string on failure (diff might not be available)
-        return Ok(String::new());
-    }
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            log::debug!("gh pr diff failed: {stderr}");
+            // Return empty string on failure (diff might not be available)
+            return Ok(String::new());
+        }
+        String::from_utf8_lossy(&output.stdout).to_string()
+    };
 
-    let diff = String::from_utf8_lossy(&output.stdout).to_string();
     log::debug!("Got diff for PR #{pr_number}: {} bytes", diff.len());
 
     // Truncate if > 100KB
@@ -1934,10 +2011,9 @@ pub fn get_pr_diff(
             .map(|(i, c)| i + c.len_utf8())
             .unwrap_or(MAX_DIFF_SIZE.min(diff.len()));
         Ok(format!(
-            "{}...\n\n[Diff truncated at 100KB - {} bytes total. Run `gh pr diff {}` to see the full diff.]",
+            "{}...\n\n[Diff truncated at 100KB - {} bytes total.]",
             &diff[..end],
             diff.len(),
-            pr_number
         ))
     } else {
         Ok(diff)
@@ -1960,13 +2036,11 @@ pub async fn load_pr_context(
     let repo_id = get_repo_identifier(&project_path)?;
     let repo_key = repo_id.to_key();
 
-    let gh = resolve_gh_binary(&app);
-
     // Fetch PR data from GitHub
     let pr = get_github_pr(app.clone(), project_path.clone(), pr_number).await?;
 
     // Fetch the diff
-    let diff = get_pr_diff(&project_path, pr_number, &gh).ok();
+    let diff = get_pr_diff(&app, &project_path, pr_number).ok();
 
     // Create PR context
     let ctx = PullRequestContext {

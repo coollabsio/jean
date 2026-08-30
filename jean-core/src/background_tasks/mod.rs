@@ -16,7 +16,6 @@ use std::time::Duration;
 
 use tauri::AppHandle;
 
-use crate::gh_cli::config::resolve_gh_binary;
 use crate::http_server::EmitExt;
 use crate::projects::git_status::{get_branch_status, ActiveWorktreeInfo, GitBranchStatus};
 use crate::projects::pr_status::{get_pr_status, PrStatus};
@@ -442,13 +441,12 @@ impl BackgroundTaskManager {
                                 times.insert(info.worktree_id.clone(), now);
                             }
 
-                            let gh = resolve_gh_binary(&app);
                             match get_pr_status(
+                                &app,
                                 &info.worktree_path,
                                 *pr_number,
                                 pr_url,
                                 &info.worktree_id,
-                                &gh,
                             ) {
                                 Ok(status) => {
                                     log::trace!(
@@ -505,13 +503,12 @@ impl BackgroundTaskManager {
                                     candidate.worktree_id
                                 );
 
-                                let gh = resolve_gh_binary(&app);
                                 match get_pr_status(
+                                    &app,
                                     &candidate.worktree_path,
                                     *pr_num,
                                     pr_url,
                                     &candidate.worktree_id,
-                                    &gh,
                                 ) {
                                     Ok(status) => {
                                         if let Err(e) = emit_pr_status(&app, status) {

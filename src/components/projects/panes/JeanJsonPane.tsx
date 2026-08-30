@@ -29,7 +29,8 @@ export function JeanJsonPane({
   projectId: string
   projectPath: string
 }) {
-  const { data: jeanConfig } = useJeanConfig(projectPath)
+  const { data: jeanConfig, isLoading: isConfigLoading } =
+    useJeanConfig(projectPath)
   const saveJeanConfig = useSaveJeanConfig()
 
   const [localSetup, setLocalSetup] = useState('')
@@ -128,6 +129,8 @@ export function JeanJsonPane({
     saveJeanConfig.mutate({
       projectPath,
       config: {
+        // Preserve any fields this pane doesn't manage (e.g. provider binding).
+        ...jeanConfig,
         scripts: {
           setup: localSetup.trim() || null,
           teardown: localTeardown.trim() || null,
@@ -137,6 +140,7 @@ export function JeanJsonPane({
       },
     })
   }, [
+    jeanConfig,
     localSetup,
     localTeardown,
     localRun,
@@ -317,7 +321,12 @@ export function JeanJsonPane({
           <Button
             size="sm"
             onClick={handleSave}
-            disabled={!hasChanges || saveJeanConfig.isPending}
+            // Wait for the existing config to load before saving so we don't
+            // spread `undefined` and drop fields this pane doesn't manage
+            // (e.g. a `provider` block).
+            disabled={
+              !hasChanges || saveJeanConfig.isPending || isConfigLoading
+            }
           >
             {saveJeanConfig.isPending && (
               <Loader2 className="h-4 w-4 animate-spin" />

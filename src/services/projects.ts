@@ -32,7 +32,9 @@ import { getFileManagerName } from '@/lib/platform'
 
 import type { AppPreferences } from '@/types/preferences'
 import type { AdvisoryContext } from '@/types/github'
+import type { ProviderConfig } from '@/types/provider'
 import { hasBackend, hasBackendTransport } from '@/lib/environment'
+import { gitProviderQueryKeys } from '@/services/git-provider'
 import { openExternal, preOpenWindow } from '@/lib/platform'
 import { shouldSuppressAutoFixConflictNotification } from './worktree-conflict-events'
 import { preserveQueryCacheOnError } from '@/lib/query-error'
@@ -2328,6 +2330,7 @@ export interface JeanConfig {
     run: string | string[] | null
   }
   ports?: PortEntry[] | null
+  provider?: ProviderConfig | null
 }
 
 /**
@@ -2379,6 +2382,9 @@ export function useSaveJeanConfig() {
       queryClient.invalidateQueries({ queryKey: ['jean-config', projectPath] })
       queryClient.invalidateQueries({ queryKey: ['run-scripts'] })
       queryClient.invalidateQueries({ queryKey: ['ports'] })
+      // A saved `provider` block changes git-host resolution; refresh it so
+      // useProjectGitProvider does not stay stale for up to 5 minutes.
+      queryClient.invalidateQueries({ queryKey: gitProviderQueryKeys.all })
     },
     onError: error => {
       toast.error('Failed to save jean.json', {

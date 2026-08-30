@@ -1319,6 +1319,7 @@ export interface AppPreferences {
   kimi_cli_source?: 'jean' | 'path' // Kimi Code CLI source: 'jean' (managed) or 'path' (system PATH)
   antigravity_cli_source?: 'jean' | 'path' // Antigravity CLI source: 'jean' (managed) or 'path' (system PATH)
   gh_cli_source: 'jean' | 'path' // GitHub CLI source: 'jean' (managed) or 'path' (system PATH)
+  glab_cli_source: 'jean' | 'path' // GitLab CLI source: 'jean' (managed) or 'path' (system PATH)
   pi_cli_source: 'jean' | 'path' // PI CLI source: 'jean' (managed) or 'path' (system PATH)
   commandcode_cli_source?: 'jean' | 'path' // Command Code CLI source: 'jean' (managed) or 'path' (system PATH)
   wsl_mode_chosen: boolean // Whether WSL mode selection has been made (prevents re-asking on Windows)
@@ -2445,6 +2446,7 @@ export const defaultPreferences: AppPreferences = {
   kimi_cli_source: 'jean', // Default: Jean-managed
   antigravity_cli_source: 'jean', // Default: Jean-managed
   gh_cli_source: 'jean', // Default: Jean-managed
+  glab_cli_source: 'jean', // Default: Jean-managed
   pi_cli_source: 'jean', // Default: Jean-managed
   commandcode_cli_source: 'jean', // Default: Jean-managed
   wsl_mode_chosen: false, // Default: not yet chosen

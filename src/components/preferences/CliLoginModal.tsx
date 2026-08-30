@@ -13,6 +13,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { logger } from '@/lib/logger'
 import { claudeCliQueryKeys } from '@/services/claude-cli'
 import { ghCliQueryKeys } from '@/services/gh-cli'
+import { glabCliQueryKeys } from '@/services/glab-cli'
 import { codexCliQueryKeys } from '@/services/codex-cli'
 import { opencodeCliQueryKeys } from '@/services/opencode-cli'
 import { cursorCliQueryKeys } from '@/services/cursor-cli'
@@ -71,6 +72,7 @@ interface CliLoginModalContentProps {
   cliType:
     | 'claude'
     | 'gh'
+    | 'glab'
     | 'codex'
     | 'opencode'
     | 'cursor'
@@ -123,7 +125,9 @@ function CliLoginModalContent({
                       ? 'Kimi Code'
                       : cliType === 'antigravity'
                         ? 'Antigravity CLI'
-                        : 'GitHub CLI'
+                        : cliType === 'glab'
+                          ? 'GitLab CLI'
+                          : 'GitHub CLI'
   const cliTitle =
     cliType === 'cursor' ||
     cliType === 'pi' ||
@@ -192,6 +196,9 @@ function CliLoginModalContent({
           queryClient.invalidateQueries({ queryKey: claudeCliQueryKeys.all })
         } else if (cliType === 'gh') {
           queryClient.invalidateQueries({ queryKey: ghCliQueryKeys.all })
+          queryClient.invalidateQueries({ queryKey: githubQueryKeys.all })
+        } else if (cliType === 'glab') {
+          queryClient.invalidateQueries({ queryKey: glabCliQueryKeys.all })
           queryClient.invalidateQueries({ queryKey: githubQueryKeys.all })
         } else if (cliType === 'codex') {
           queryClient.invalidateQueries({ queryKey: codexCliQueryKeys.all })

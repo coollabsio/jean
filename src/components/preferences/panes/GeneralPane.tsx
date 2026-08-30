@@ -45,6 +45,13 @@ import {
   ghCliQueryKeys,
 } from '@/services/gh-cli'
 import {
+  useGlabCliStatus,
+  useGlabCliAuth,
+  useGlabPathDetection,
+  useAvailableGlabVersions,
+  glabCliQueryKeys,
+} from '@/services/glab-cli'
+import {
   useCodexCliStatus,
   useCodexCliAuth,
   useAvailableCodexVersions,
@@ -108,6 +115,7 @@ import {
 import { useAntigravityCliStatus } from '@/services/antigravity-cli'
 import type { ClaudeAuthStatus } from '@/types/claude-cli'
 import type { GhAuthStatus } from '@/types/gh-cli'
+import type { GlabAuthStatus } from '@/types/glab-cli'
 import type { CodexAuthStatus } from '@/types/codex-cli'
 import type { CodeRabbitAuthStatus } from '@/types/coderabbit-cli'
 import type { OpenCodeAuthStatus } from '@/types/opencode-cli'
@@ -372,6 +380,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     | 'opencode'
     | 'pi'
     | 'gh'
+    | 'glab'
     | 'coderabbit'
     | 'commandcode'
     | 'grok'
@@ -416,6 +425,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   const { data: codexPathDetection } = useCodexPathDetection()
   const { data: opencodePathDetection } = useOpenCodePathDetection()
   const { data: ghPathDetection } = useGhPathDetection()
+  const { data: glabPathDetection } = useGlabPathDetection()
   const { data: coderabbitPathDetection } = useCodeRabbitPathDetection()
   const { data: cursorPathDetection } = useCursorPathDetection()
   const { data: piPathDetection } = usePiPathDetection()
@@ -434,6 +444,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     !!claudeLatestStable &&
     isNewerVersion(claudeLatestStable.version, cliStatus.version)
   const { data: ghStatus, isLoading: isGhLoading } = useGhCliStatus()
+  const { data: glabStatus, isLoading: isGlabLoading } = useGlabCliStatus()
   const { data: cursorStatus, isLoading: isCursorLoading } =
     useCursorCliStatus()
   const { data: piStatus, isLoading: isPiLoading } = usePiCliStatus()
@@ -450,6 +461,16 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     !!ghStatus?.version &&
     !!ghLatestStable &&
     isNewerVersion(ghLatestStable.version, ghStatus.version)
+  const isGlabPathSource = preferences?.glab_cli_source === 'path'
+  const { data: glabVersions, isLoading: isGlabVersionsLoading } =
+    useAvailableGlabVersions({
+      enabled: isGlabPathSource && !!glabStatus?.installed,
+    })
+  const glabLatestStable = glabVersions?.find(v => !v.prerelease)
+  const glabHasUpdate =
+    !!glabStatus?.version &&
+    !!glabLatestStable &&
+    isNewerVersion(glabLatestStable.version, glabStatus.version)
   const { data: codexStatus, isLoading: isCodexLoading } = useCodexCliStatus()
   const isCodexPathSource = preferences?.codex_cli_source === 'path'
   const { data: codexVersions, isLoading: isCodexVersionsLoading } =
@@ -496,6 +517,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   )
   const { data: ghAuth, isLoading: isGhAuthLoading } = useGhCliAuth({
     enabled: !!ghStatus?.installed,
+  })
+  const { data: glabAuth, isLoading: isGlabAuthLoading } = useGlabCliAuth({
+    enabled: !!glabStatus?.installed,
   })
   const { data: codexAuth, isLoading: isCodexAuthLoading } = useCodexCliAuth({
     enabled: !!codexStatus?.installed,
@@ -550,6 +574,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   const prevSources = useRef({
     claude: preferences?.claude_cli_source,
     gh: preferences?.gh_cli_source,
+    glab: preferences?.glab_cli_source,
     codex: preferences?.codex_cli_source,
     opencode: preferences?.opencode_cli_source,
     pi: preferences?.pi_cli_source,
@@ -562,6 +587,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     const cur = {
       claude: preferences?.claude_cli_source,
       gh: preferences?.gh_cli_source,
+      glab: preferences?.glab_cli_source,
       codex: preferences?.codex_cli_source,
       opencode: preferences?.opencode_cli_source,
       pi: preferences?.pi_cli_source,
@@ -575,6 +601,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     }
     if (cur.gh !== prevSources.current.gh) {
       queryClient.invalidateQueries({ queryKey: ghCliQueryKeys.status() })
+    }
+    if (cur.glab !== prevSources.current.glab) {
+      queryClient.invalidateQueries({ queryKey: glabCliQueryKeys.status() })
     }
     if (cur.codex !== prevSources.current.codex) {
       queryClient.invalidateQueries({ queryKey: codexCliQueryKeys.status() })
@@ -605,6 +634,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   }, [
     preferences?.claude_cli_source,
     preferences?.gh_cli_source,
+    preferences?.glab_cli_source,
     preferences?.codex_cli_source,
     preferences?.opencode_cli_source,
     preferences?.pi_cli_source,
@@ -630,6 +660,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   // Track which auth check is in progress (for manual refresh)
   const [checkingClaudeAuth, setCheckingClaudeAuth] = useState(false)
   const [checkingGhAuth, setCheckingGhAuth] = useState(false)
+  const [checkingGlabAuth, setCheckingGlabAuth] = useState(false)
   const [checkingCodexAuth, setCheckingCodexAuth] = useState(false)
   const [checkingCodeRabbitAuth, setCheckingCodeRabbitAuth] = useState(false)
   const [checkingOpenCodeAuth, setCheckingOpenCodeAuth] = useState(false)
@@ -902,6 +933,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
       },
       pi: { name: 'PI CLI', cmd: 'uninstall_pi_cli' as const },
       gh: { name: 'GitHub CLI', cmd: 'uninstall_gh_cli' as const },
+      glab: { name: 'GitLab CLI', cmd: 'uninstall_glab_cli' as const },
       coderabbit: {
         name: 'CodeRabbit CLI',
         cmd: 'uninstall_coderabbit_cli' as const,
@@ -935,7 +967,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                       ? 'grok_cli_source'
                       : target === 'kimi'
                         ? 'kimi_cli_source'
-                        : 'coderabbit_cli_source'
+                        : target === 'glab'
+                          ? 'glab_cli_source'
+                          : 'coderabbit_cli_source'
       await new Promise<void>((resolve, reject) => {
         patchPreferences.mutate(
           { [sourceKey]: 'path' } as Partial<AppPreferences>,
@@ -962,7 +996,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                       ? grokCliQueryKeys.all
                       : target === 'kimi'
                         ? kimiCliQueryKeys.all
-                        : coderabbitCliQueryKeys.all
+                        : target === 'glab'
+                          ? glabCliQueryKeys.all
+                          : coderabbitCliQueryKeys.all
       queryClient.invalidateQueries({ queryKey: queryKeys })
       const pathFound =
         target === 'claude'
@@ -981,7 +1017,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                       ? grokPathDetection?.found
                       : target === 'kimi'
                         ? kimiPathDetection?.found
-                        : coderabbitPathDetection?.found
+                        : target === 'glab'
+                          ? glabPathDetection?.found
+                          : coderabbitPathDetection?.found
       if (pathFound) {
         toast.success(`Jean-managed ${name} removed. Using system PATH.`, {
           id: toastId,
@@ -1007,6 +1045,19 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         {
           onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ghCliQueryKeys.all })
+          },
+        }
+      )
+    }
+  }
+
+  const handleGlabSourceChange = (value: 'jean' | 'path') => {
+    if (preferences) {
+      patchPreferences.mutate(
+        { glab_cli_source: value },
+        {
+          onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: glabCliQueryKeys.all })
           },
         }
       )
@@ -1555,6 +1606,30 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     openCliLoginModal('gh', ghStatus.path, ['auth', 'login'])
   }, [ghStatus?.path, openCliLoginModal, queryClient])
 
+  const handleGlabLogin = useCallback(async () => {
+    if (!glabStatus?.path) return
+
+    // First check if already authenticated
+    setCheckingGlabAuth(true)
+    try {
+      // Invalidate cache and refetch to get fresh status
+      await queryClient.invalidateQueries({ queryKey: glabCliQueryKeys.auth() })
+      const result = await queryClient.fetchQuery<GlabAuthStatus>({
+        queryKey: glabCliQueryKeys.auth(),
+      })
+
+      if (result?.authenticated) {
+        toast.success('GitLab CLI is already authenticated')
+        return
+      }
+    } finally {
+      setCheckingGlabAuth(false)
+    }
+
+    // Not authenticated, open login modal
+    openCliLoginModal('glab', glabStatus.path, ['auth', 'login'])
+  }, [glabStatus?.path, openCliLoginModal, queryClient])
+
   const handleCodexLogin = useCallback(async () => {
     if (!codexStatus?.path) return
 
@@ -1635,6 +1710,11 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     if (!ghStatus?.path) return
     openCliLoginModal('gh', ghStatus.path, ['auth', 'login'])
   }, [ghStatus?.path, openCliLoginModal])
+
+  const handleGlabRelogin = useCallback(() => {
+    if (!glabStatus?.path) return
+    openCliLoginModal('glab', glabStatus.path, ['auth', 'login'])
+  }, [glabStatus?.path, openCliLoginModal])
 
   const handleCodexRelogin = useCallback(() => {
     if (!codexStatus?.path) return
@@ -2144,6 +2224,157 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             {!ghStatus?.installed && !ghPathDetection?.found && (
               <p className="text-xs text-muted-foreground px-1">
                 Install with Jean, or install <code>gh</code> yourself in your
+                environment — we&apos;ll detect it on your PATH.
+              </p>
+            )}
+          </div>
+        </SettingsSection>
+      )}
+
+      {hasBackend() && scope === 'github' && (
+        <SettingsSection
+          title="GitLab CLI"
+          anchorId="pref-gitlab-section-cli"
+          actions={
+            glabStatus?.installed ? (
+              checkingGlabAuth || isGlabAuthLoading ? (
+                <span className="text-sm text-muted-foreground flex items-center gap-2">
+                  <Loader2 className="size-3 animate-spin" />
+                  Checking...
+                </span>
+              ) : glabAuth?.authenticated ? (
+                <span className="text-sm text-muted-foreground flex items-center gap-2">
+                  Logged in
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleGlabRelogin}
+                  >
+                    Relogin
+                  </Button>
+                </span>
+              ) : (
+                <Button variant="outline" size="sm" onClick={handleGlabLogin}>
+                  Sign in to GitLab
+                </Button>
+              )
+            ) : (
+              <span className="text-sm text-muted-foreground">
+                Not installed
+              </span>
+            )
+          }
+        >
+          <div className="space-y-4">
+            <InlineField
+              label={glabStatus?.installed ? 'Version' : 'Status'}
+              description={
+                glabStatus?.installed
+                  ? 'Enables GitLab issues and merge requests'
+                  : 'Optional — enables GitLab issues and merge requests'
+              }
+            >
+              {isGlabLoading ? (
+                <Loader2 className="size-4 animate-spin text-muted-foreground" />
+              ) : glabStatus?.installed ? (
+                isGlabPathSource ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm">
+                      {glabStatus.version ?? 'Installed'}
+                    </span>
+                    {isGlabVersionsLoading ? (
+                      <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                    ) : (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={!glabHasUpdate}
+                        onClick={() => {
+                          const action = getPathUpdateAction(
+                            glabStatus.path,
+                            glabPathDetection?.package_manager,
+                            'glab',
+                            null
+                          )
+                          if (action) {
+                            openCliLoginModal(
+                              'glab',
+                              action[0],
+                              action[1],
+                              'update'
+                            )
+                          } else {
+                            openCliUpdateModal('glab')
+                          }
+                        }}
+                      >
+                        {glabHasUpdate
+                          ? `Update to ${glabLatestStable?.version}`
+                          : 'Up to date'}
+                      </Button>
+                    )}
+                  </div>
+                ) : (
+                  <Button
+                    variant="outline"
+                    className="w-full sm:w-40 justify-between"
+                    onClick={() => openCliUpdateModal('glab')}
+                  >
+                    {glabStatus.version ?? 'Installed'}
+                  </Button>
+                )
+              ) : (
+                <Button
+                  className="w-full sm:w-40"
+                  onClick={() => openCliUpdateModal('glab')}
+                >
+                  Install
+                </Button>
+              )}
+            </InlineField>
+            <InlineField
+              label="Source"
+              description={
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() =>
+                        handleCopyPath(
+                          preferences?.glab_cli_source === 'path'
+                            ? glabPathDetection?.path
+                            : glabStatus?.path
+                        )
+                      }
+                      className="text-left hover:underline cursor-pointer"
+                    >
+                      {preferences?.glab_cli_source === 'path'
+                        ? (glabPathDetection?.path ?? 'System PATH')
+                        : (glabStatus?.path ?? 'Not installed')}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>Click to copy path</TooltipContent>
+                </Tooltip>
+              }
+            >
+              <Select
+                value={preferences?.glab_cli_source ?? 'jean'}
+                onValueChange={handleGlabSourceChange}
+              >
+                <SelectTrigger className="w-full sm:w-80">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="jean">Jean (managed)</SelectItem>
+                  <SelectItem value="path" disabled={!glabPathDetection?.found}>
+                    System PATH
+                    {!glabPathDetection?.found && ' (not found)'}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </InlineField>
+            {!glabStatus?.installed && !glabPathDetection?.found && (
+              <p className="text-xs text-muted-foreground px-1">
+                Install with Jean, or install <code>glab</code> yourself in your
                 environment — we&apos;ll detect it on your PATH.
               </p>
             )}

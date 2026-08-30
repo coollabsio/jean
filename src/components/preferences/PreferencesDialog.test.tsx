@@ -152,7 +152,7 @@ describe('PreferencesDialog', () => {
       'Grok',
       'Kimi Code',
       'Antigravity CLIBeta',
-      'GitHub CLI',
+      'Git Provider',
       'CodeRabbit CLI',
       'Terminal',
       'Magic Prompts',

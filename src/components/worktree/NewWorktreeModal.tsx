@@ -12,6 +12,8 @@ import {
 import { LinearIcon } from '@/components/icons/LinearIcon'
 import type { LucideIcon } from 'lucide-react'
 import { useGhLogin } from '@/hooks/useGhLogin'
+import { useGlabLogin } from '@/hooks/useGlabLogin'
+import { useProjectGitProvider, providerLabels } from '@/services/git-provider'
 import {
   Dialog,
   DialogContent,
@@ -61,6 +63,7 @@ export const TABS: Tab[] = [
 
 export function NewWorktreeModal() {
   const { triggerLogin: triggerGhLogin, isGhInstalled } = useGhLogin()
+  const { triggerLogin: triggerGlabLogin, isGlabInstalled } = useGlabLogin()
   const { newWorktreeModalOpen } = useUIStore()
   const isMobile = useIsMobile()
 
@@ -87,6 +90,29 @@ export function NewWorktreeModal() {
 
   // Hooks
   const data = useNewWorktreeData(searchQuery, includeClosed)
+
+  // Resolve the project's git host provider for provider-aware auth + wording.
+  const { data: providerInfo, isLoading: isProviderLoading } =
+    useProjectGitProvider(data.selectedProject?.path)
+  const provider = providerInfo?.provider ?? 'github'
+  // Until the provider resolves it defaults to `github`; auth-error UI must wait
+  // for this so a GitLab project never flashes the GitHub sign-in prompt.
+  const providerResolved = !isProviderLoading
+  const labels = providerLabels(provider)
+  const triggerLogin =
+    provider === 'gitlab' ? triggerGlabLogin : triggerGhLogin
+  const isCliInstalled = provider === 'gitlab' ? isGlabInstalled : isGhInstalled
+  // Security (Dependabot/advisories) is GitHub-only; hide it for GitLab.
+  const securityTabEnabled = provider !== 'gitlab'
+  const displayTabs = TABS.filter(
+    tab => tab.id !== 'security' || securityTabEnabled
+  ).map(tab =>
+    tab.id === 'prs' ? { ...tab, label: labels.pullRequestsShort } : tab
+  )
+  // If the active tab was hidden (e.g. Security selected, then provider resolves
+  // to GitLab), fall back to a safe default instead of a blank hidden tab.
+  const activeTabAvailable = displayTabs.some(tab => tab.id === activeTab)
+
   const handlers = useNewWorktreeHandlers(data, {
     setActiveTab: handleTabChange,
     setSearchQuery,
@@ -127,6 +153,7 @@ export function NewWorktreeModal() {
   const { handleKeyDown } = useNewWorktreeKeyboard({
     activeTab,
     setActiveTab: handleTabChange,
+    securityTabEnabled,
     filteredIssues: data.filteredIssues,
     filteredPRs: data.filteredPRs,
     filteredSecurityAlerts: data.filteredSecurityAlerts,
@@ -162,6 +189,13 @@ export function NewWorktreeModal() {
     handleSelectSentryIssueAndInvestigate:
       handlers.handleSelectSentryIssueAndInvestigate,
   })
+
+  // Reset to a safe tab when the current one is hidden (e.g. Security on GitLab).
+  useEffect(() => {
+    if (!activeTabAvailable) {
+      handleTabChange('quick')
+    }
+  }, [activeTabAvailable, handleTabChange])
 
   // Apply store-provided default tab when modal opens (resets selection via handleTabChange)
   useEffect(() => {
@@ -252,7 +286,7 @@ export function NewWorktreeModal() {
           <SessionTabBar
             activeTab={activeTab}
             onTabChange={handleTabChange}
-            tabs={TABS}
+            tabs={displayTabs}
           />
 
           {/* Tab content */}
@@ -297,8 +331,10 @@ export function NewWorktreeModal() {
                 creatingFromNumber={handlers.creatingFromNumber}
                 isBulkInvestigating={handlers.isBulkInvestigating}
                 searchInputRef={searchInputRef}
-                onGhLogin={triggerGhLogin}
-                isGhInstalled={isGhInstalled}
+                onLogin={triggerLogin}
+                isCliInstalled={isCliInstalled}
+                provider={provider}
+                providerResolved={providerResolved}
               />
             )}
 
@@ -325,8 +361,10 @@ export function NewWorktreeModal() {
                 stackingFromPR={handlers.stackingFromPR}
                 isBulkInvestigating={handlers.isBulkInvestigating}
                 searchInputRef={searchInputRef}
-                onGhLogin={triggerGhLogin}
-                isGhInstalled={isGhInstalled}
+                onLogin={triggerLogin}
+                isCliInstalled={isCliInstalled}
+                provider={provider}
+                providerResolved={providerResolved}
               />
             )}
 

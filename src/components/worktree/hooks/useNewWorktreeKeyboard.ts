@@ -12,6 +12,8 @@ import type { SentryIssue } from '@/types/sentry'
 interface Params {
   activeTab: TabId
   setActiveTab: (tab: TabId) => void
+  /** Whether the Security tab is available (hidden for GitLab projects). */
+  securityTabEnabled: boolean
   filteredIssues: GitHubIssue[]
   filteredPRs: GitHubPullRequest[]
   filteredSecurityAlerts: DependabotAlert[]
@@ -70,6 +72,7 @@ interface Params {
 export function useNewWorktreeKeyboard({
   activeTab,
   setActiveTab,
+  securityTabEnabled,
   filteredIssues,
   filteredPRs,
   filteredSecurityAlerts,
@@ -131,7 +134,10 @@ export function useNewWorktreeKeyboard({
         }
         if (key === '4') {
           e.preventDefault()
-          setActiveTab('security')
+          // Security tab is hidden for GitLab projects — ignore its shortcut.
+          if (securityTabEnabled) {
+            setActiveTab('security')
+          }
           return
         }
         if (key === '5') {
@@ -460,6 +466,7 @@ export function useNewWorktreeKeyboard({
       handleSelectSentryIssueAndInvestigate,
       creatingFromNumber,
       setActiveTab,
+      securityTabEnabled,
       setSelectedItemIndex,
     ]
   )
