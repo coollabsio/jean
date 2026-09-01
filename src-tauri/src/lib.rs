@@ -340,6 +340,11 @@ pub fn run() {
     // Product version must be the desktop package, not jean-core's library version.
     jean_core::set_app_version(env!("CARGO_PKG_VERSION"));
 
+    // macOS GUI apps inherit a low open-file limit (usually 256). Raise it
+    // before starting Tauri so detached AI servers and every other child
+    // process inherit the safer limit too.
+    jean_core::raise_fd_limit();
+
     if should_run_server() {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
