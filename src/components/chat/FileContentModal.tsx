@@ -5,6 +5,7 @@ import {
   useMemo,
   lazy,
   Suspense,
+  useRef,
 } from 'react'
 import {
   FileText,
@@ -123,19 +124,13 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
   const [imageLoaded, setImageLoaded] = useState(false)
   /** data: URL for images loaded via backend (works for /tmp and remote) */
   const [imageSrc, setImageSrc] = useState<string | null>(null)
+  const [copiedPath, setCopiedPath] = useState(false)
+  const copiedPathTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  )
 
   const { theme } = useTheme()
   const { data: preferences } = usePreferences()
-  const [copiedPath, setCopiedPath] = useState(false)
-
-  const handleCopyPath = useCallback(() => {
-    if (filePath) {
-      void copyToClipboard(filePath)
-      toast.success('Copied file path to clipboard')
-      setCopiedPath(true)
-      setTimeout(() => setCopiedPath(false), 2000)
-    }
-  }, [filePath])
 
   // Resolve 'system' theme to actual dark/light
   const resolvedTheme = useMemo((): 'dark' | 'light' => {
@@ -158,53 +153,59 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
   /** Bumps when content should remount the Pierre edit session (load / discard). */
   const [editorEpoch, setEditorEpoch] = useState(0)
 
-  const loadFileContent = useCallback(async (path: string, signal: { cancelled: boolean }) => {
-    setIsLoading(true)
-    setError(null)
-    setContent(null)
-    setEditedContent(null)
-    setIsEditing(false)
-    setEditorEpoch(e => e + 1)
+  const loadFileContent = useCallback(
+    async (path: string, signal: { cancelled: boolean }) => {
+      setIsLoading(true)
+      setError(null)
+      setContent(null)
+      setEditedContent(null)
+      setIsEditing(false)
+      setEditorEpoch(e => e + 1)
 
-    try {
-      const fileContent = await invoke<string>('read_file_content', { path })
-      if (signal.cancelled) return
-      setContent(fileContent)
-      setEditedContent(fileContent)
-      // Open in edit mode by default (matches mobile file browser)
-      setIsEditing(true)
-    } catch (err) {
-      if (signal.cancelled) return
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      if (!signal.cancelled) setIsLoading(false)
-    }
-  }, [])
+      try {
+        const fileContent = await invoke<string>('read_file_content', { path })
+        if (signal.cancelled) return
+        setContent(fileContent)
+        setEditedContent(fileContent)
+        // Open in edit mode by default (matches mobile file browser)
+        setIsEditing(true)
+      } catch (err) {
+        if (signal.cancelled) return
+        setError(err instanceof Error ? err.message : String(err))
+      } finally {
+        if (!signal.cancelled) setIsLoading(false)
+      }
+    },
+    []
+  )
 
   // Load images through the backend so remote/web and paths outside project
   // roots (e.g. /tmp screenshots) work — convertProjectFileSrc only serves
   // known project/worktree directories.
-  const loadImageContent = useCallback(async (path: string, signal: { cancelled: boolean }) => {
-    setIsLoading(true)
-    setError(null)
-    setImageError(false)
-    setImageLoaded(false)
-    setImageSrc(null)
+  const loadImageContent = useCallback(
+    async (path: string, signal: { cancelled: boolean }) => {
+      setIsLoading(true)
+      setError(null)
+      setImageError(false)
+      setImageLoaded(false)
+      setImageSrc(null)
 
-    try {
-      const result = await invoke<FileBase64Content>('read_file_base64', {
-        path,
-      })
-      if (signal.cancelled) return
-      setImageSrc(`data:${result.mimeType};base64,${result.data}`)
-    } catch (err) {
-      if (signal.cancelled) return
-      setError(err instanceof Error ? err.message : String(err))
-      setImageError(true)
-    } finally {
-      if (!signal.cancelled) setIsLoading(false)
-    }
-  }, [])
+      try {
+        const result = await invoke<FileBase64Content>('read_file_base64', {
+          path,
+        })
+        if (signal.cancelled) return
+        setImageSrc(`data:${result.mimeType};base64,${result.data}`)
+      } catch (err) {
+        if (signal.cancelled) return
+        setError(err instanceof Error ? err.message : String(err))
+        setImageError(true)
+      } finally {
+        if (!signal.cancelled) setIsLoading(false)
+      }
+    },
+    []
+  )
 
   useEffect(() => {
     const signal = { cancelled: false }
@@ -236,12 +237,47 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
 
   const filename = filePath ? getFilename(filePath) : filePath
 
+  useEffect(() => {
+    setCopiedPath(false)
+    if (copiedPathTimeoutRef.current !== null) {
+      clearTimeout(copiedPathTimeoutRef.current)
+      copiedPathTimeoutRef.current = null
+    }
+
+    return () => {
+      if (copiedPathTimeoutRef.current !== null) {
+        clearTimeout(copiedPathTimeoutRef.current)
+        copiedPathTimeoutRef.current = null
+      }
+    }
+  }, [filePath])
+
   const isImage = isImageFile(filename)
   const isMarkdown = isMarkdownFile(filename)
   const language = filePath ? getLanguageFromPath(filePath) : 'text'
 
   // Check if content has been modified
   const hasChanges = isEditing && editedContent !== content
+
+  const handleCopyPath = useCallback(async () => {
+    if (!filePath) return
+
+    try {
+      await copyToClipboard(filePath)
+      toast.success('Copied file path to clipboard')
+      setCopiedPath(true)
+      if (copiedPathTimeoutRef.current !== null) {
+        clearTimeout(copiedPathTimeoutRef.current)
+      }
+      copiedPathTimeoutRef.current = setTimeout(() => {
+        setCopiedPath(false)
+        copiedPathTimeoutRef.current = null
+      }, 2000)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      toast.error(`Failed to copy: ${message}`)
+    }
+  }, [filePath])
 
   // Handle save — stay in edit mode so the user can keep working
   const handleSave = useCallback(async () => {
@@ -368,23 +404,24 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
             )}
           </div>
           {filePath && (
-            <div className="flex items-center gap-1.5 mt-0.5 select-text group/path min-w-0">
-              <span className="text-muted-foreground font-normal text-xs break-all [overflow-wrap:anywhere] select-text">
+            <div className="inline-flex items-center gap-1 min-w-0 max-w-full">
+              <span className="min-w-0 text-muted-foreground font-normal text-xs break-all [overflow-wrap:anywhere] select-text">
                 {filePath}
               </span>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-sm"
                 onClick={handleCopyPath}
-                className="inline-flex items-center justify-center h-5 w-5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0 cursor-pointer"
                 title="Copy file path"
+                aria-label="Copy file path"
               >
                 {copiedPath ? (
-                  <Check className="h-3 w-3 text-green-500" />
+                  <Check className="size-3 text-green-500" />
                 ) : (
-                  <Copy className="h-3 w-3" />
+                  <Copy className="size-3 text-muted-foreground" />
                 )}
-                <span className="sr-only">Copy file path</span>
-              </button>
+              </Button>
             </div>
           )}
         </DialogTitle>
