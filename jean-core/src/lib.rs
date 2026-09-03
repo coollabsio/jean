@@ -76,6 +76,9 @@ pub use chat::open_file_in_default_app;
 pub use platform::open_url_in_browser;
 pub use projects::open_worktree_in_editor;
 
+// Process startup helper shared by the desktop and headless entry points.
+pub use platform::raise_fd_limit;
+
 // Validation functions
 fn validate_filename(filename: &str) -> Result<(), String> {
     // Regex pattern: only alphanumeric, dash, underscore, dot
