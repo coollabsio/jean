@@ -480,7 +480,7 @@ pub async fn get_cursor_install_command(_app: AppHandle) -> Result<CursorInstall
             args: vec![
                 "-NoProfile".to_string(),
                 "-Command".to_string(),
-                "irm https://cursor.com/install | iex".to_string(),
+                "irm 'https://cursor.com/install?win32=true' | iex".to_string(),
             ],
             description: "Installs Cursor Agent using Cursor's official installer".to_string(),
         })
