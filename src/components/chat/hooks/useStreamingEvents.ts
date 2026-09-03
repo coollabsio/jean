@@ -1929,12 +1929,11 @@ export default function useStreamingEvents({
         // Clear compacting state (safety net)
         useChatStore.getState().setCompacting(session_id, false)
 
-        // Restore message to input ONLY when the prompt never started
-        // (backend undo_send=true: process not registered / pending cancel).
-        // If the prompt is already running, do not restore even when no
-        // assistant content has streamed yet — cancel of a live run leaves
-        // the input empty. Also skip restore when queued messages exist
-        // ("Skip to Next").
+        // Restore a prompt with no assistant output, regardless of whether the
+        // backend classified cancellation as undo_send. Normal cancellation
+        // events use undo_send=false once a run has started, but the prompt is
+        // still retryable when nothing was streamed. Queued messages are
+        // handled by "Skip to Next" and must not be restored here.
         const hasToolCalls = toolCalls && toolCalls.length > 0
         const hasText = sanitizedContent.trim().length > 0
         const hasThinking = !!streamingThinkingContent[session_id]
@@ -1945,7 +1944,7 @@ export default function useStreamingEvents({
         const hasQueuedMessages =
           (useChatStore.getState().messageQueues[session_id] ?? []).length > 0
         const shouldHydrateCancelledFromBackend = !undo_send && !hasContent
-        const shouldRestoreMessage = !hasQueuedMessages && undo_send
+        const shouldRestoreMessage = !hasQueuedMessages && !hasContent
 
         const removeLatestUserMessageFromCache = () => {
           queryClient.setQueryData<Session>(
@@ -2013,10 +2012,13 @@ export default function useStreamingEvents({
             }
             clearLastSentMessage(session_id)
 
-            removeLatestUserMessageFromCache()
+            // undo_send means the prompt never entered the run history. A
+            // normal live cancellation keeps the user turn visible while the
+            // draft is restored for retry.
+            if (undo_send) removeLatestUserMessageFromCache()
           } else {
             useChatStore.getState().clearLastSentAttachments(session_id)
-            removeLatestUserMessageFromCache()
+            if (undo_send) removeLatestUserMessageFromCache()
           }
         } else {
           // Partial response exists — keep the prompt + streamed partial output
