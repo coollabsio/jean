@@ -1,7 +1,5 @@
 use serde::Serialize;
 
-use crate::platform::silent_command;
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SystemPrerequisites {
@@ -18,11 +16,7 @@ pub struct SystemPrerequisites {
 }
 
 fn version(command: &str) -> Option<String> {
-    let output = silent_command(command).arg("--version").output().ok()?;
-    output
-        .status
-        .success()
-        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+    crate::platform::detect_cli_in_path(command, None, None).version
 }
 
 pub fn check_system_prerequisites() -> SystemPrerequisites {
