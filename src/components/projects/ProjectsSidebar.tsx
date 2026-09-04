@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Plus, Folder, Archive, Briefcase } from 'lucide-react'
+import { Plus, Folder, Archive, Briefcase, AlertTriangle } from 'lucide-react'
 import { useSidebarWidth } from '@/components/layout/SidebarWidthContext'
 import {
   DropdownMenu,
@@ -23,7 +23,13 @@ function closeMobileSidebarIfNeeded(isMobile: boolean) {
 }
 
 export function ProjectsSidebar() {
-  const { data: projects = [], isLoading } = useProjects()
+  const {
+    data: projects = [],
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useProjects()
   const { setAddProjectDialogOpen } = useProjectsStore()
   const createFolder = useCreateFolder()
   const sidebarWidth = useSidebarWidth()
@@ -55,6 +61,32 @@ export function ProjectsSidebar() {
         {isLoading ? (
           <div className="flex items-center justify-center p-4">
             <span className="text-sm text-muted-foreground">Loading...</span>
+          </div>
+        ) : isError && projects.length === 0 ? (
+          <div
+            className="flex h-full flex-col items-center justify-center gap-2 px-3 text-center"
+            role="alert"
+          >
+            <AlertTriangle className="size-4 text-destructive" />
+            <span className="text-sm text-muted-foreground">
+              Unable to load projects
+            </span>
+            <span className="text-xs text-muted-foreground/70">
+              Your project data may be corrupted. Jean kept the file unchanged
+              so it can be recovered.
+            </span>
+            <button
+              type="button"
+              className="text-xs text-primary underline-offset-4 hover:underline"
+              onClick={() => void refetch()}
+            >
+              Retry
+            </button>
+            {error && (
+              <span className="sr-only">
+                {error instanceof Error ? error.message : String(error)}
+              </span>
+            )}
           </div>
         ) : projects.length === 0 ? (
           <div className="flex h-full items-center justify-center px-2">
