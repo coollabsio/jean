@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  attachDroppedPaths,
   classifyAttachmentFile,
+  classifyAttachmentPath,
+  pendingFileFromPath,
   processAttachmentFile,
 } from './attachment-processing'
-import { MAX_IMAGE_SIZE } from './image-constants'
+import { MAX_FILE_SIZE, MAX_IMAGE_SIZE } from './image-constants'
 
 const { invoke, toast, storeState } = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -15,11 +18,16 @@ const { invoke, toast, storeState } = vi.hoisted(() => ({
     updatePendingImage: vi.fn(),
     removePendingImage: vi.fn(),
     addPendingTextFile: vi.fn(),
+    addPendingFile: vi.fn(),
   },
 }))
 
 vi.mock('@/lib/transport', () => ({
   invoke: (...args: unknown[]) => invoke(...args),
+}))
+
+vi.mock('@/lib/environment', () => ({
+  isLocalBackend: () => false,
 }))
 
 vi.mock('sonner', () => ({
@@ -60,9 +68,10 @@ describe('attachment-processing', () => {
     storeState.updatePendingImage.mockReset()
     storeState.removePendingImage.mockReset()
     storeState.addPendingTextFile.mockReset()
+    storeState.addPendingFile.mockReset()
   })
 
-  it('classifies raster, svg, and unsupported files', () => {
+  it('classifies raster, svg, and generic files', () => {
     expect(
       classifyAttachmentFile(makeFile('photo.png', { type: 'image/png' }))
     ).toBe('raster')
@@ -71,7 +80,30 @@ describe('attachment-processing', () => {
     )
     expect(
       classifyAttachmentFile(makeFile('notes.txt', { type: 'text/plain' }))
-    ).toBe('unsupported')
+    ).toBe('file')
+  })
+
+  it('classifies dropped paths by extension', () => {
+    expect(classifyAttachmentPath('/tmp/a.PNG')).toBe('raster')
+    expect(classifyAttachmentPath('C:\\tmp\\logo.svg')).toBe('svg')
+    expect(classifyAttachmentPath('/tmp/report.pdf')).toBe('file')
+    expect(classifyAttachmentPath('/tmp/Makefile')).toBe('file')
+  })
+
+  it('builds a pending file from posix and windows paths', () => {
+    expect(pendingFileFromPath('/tmp/docs/report.pdf', { id: 'f-1' })).toEqual({
+      id: 'f-1',
+      relativePath: 'report.pdf',
+      sourceRootPath: '/tmp/docs',
+      extension: '.pdf',
+      isDirectory: false,
+      attached: true,
+    })
+    const win = pendingFileFromPath('C:\\Users\\x\\a.pdf')
+    expect(win.id).toMatch(/^file-/)
+    expect(win.relativePath).toBe('a.pdf')
+    expect(win.sourceRootPath).toBe('C:/Users/x')
+    expect(win.extension).toBe('.pdf')
   })
 
   it('saves raster files via save_pasted_image', async () => {
@@ -176,15 +208,165 @@ describe('attachment-processing', () => {
     })
   })
 
-  it('rejects unsupported file types', async () => {
+  it('uploads generic files via save_pasted_file and attaches them by path', async () => {
+    invoke.mockResolvedValueOnce({
+      id: 'file-1',
+      path: '/app/pasted-files/report.pdf',
+      filename: 'report.pdf',
+      size: 5,
+    })
+
     await processAttachmentFile(
-      makeFile('notes.txt', { type: 'text/plain', content: 'hello' }),
+      makeFile('report.pdf', { type: 'application/pdf', content: 'hello' }),
+      'session-1'
+    )
+
+    expect(invoke).toHaveBeenCalledWith('save_pasted_file', {
+      data: btoa('hello'),
+      filename: 'report.pdf',
+    })
+    expect(storeState.addPendingFile).toHaveBeenCalledWith('session-1', {
+      id: 'file-1',
+      relativePath: 'report.pdf',
+      sourceRootPath: '/app/pasted-files',
+      extension: '.pdf',
+      isDirectory: false,
+      attached: true,
+    })
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it('uploads video files as generic files', async () => {
+    invoke.mockResolvedValueOnce({
+      id: 'file-2',
+      path: '/app/pasted-files/clip.mov',
+      filename: 'clip.mov',
+      size: 3,
+    })
+
+    await processAttachmentFile(
+      makeFile('clip.mov', { type: 'video/quicktime', content: 'mov' }),
+      'session-1'
+    )
+
+    expect(invoke).toHaveBeenCalledWith('save_pasted_file', {
+      data: expect.any(String),
+      filename: 'clip.mov',
+    })
+    expect(storeState.addPendingFile).toHaveBeenCalledWith(
+      'session-1',
+      expect.objectContaining({ relativePath: 'clip.mov' })
+    )
+  })
+
+  it('rejects oversized generic files before upload', async () => {
+    await processAttachmentFile(
+      makeFile('big.zip', { type: 'application/zip', size: MAX_FILE_SIZE + 1 }),
       'session-1'
     )
 
     expect(invoke).not.toHaveBeenCalled()
-    expect(toast.error).toHaveBeenCalledWith('Unsupported image type', {
-      description: 'Allowed types: PNG, JPEG, GIF, WebP, SVG',
+    expect(storeState.addPendingFile).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledWith('File too large', {
+      description: 'Maximum size is 25MB',
+    })
+  })
+
+  it('surfaces save failures for generic files', async () => {
+    invoke.mockRejectedValueOnce(new Error('disk full'))
+
+    await processAttachmentFile(
+      makeFile('notes.md', { type: 'text/markdown', content: '# hi' }),
+      'session-1'
+    )
+
+    expect(storeState.addPendingFile).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledWith('Failed to save file', {
+      description: 'Error: disk full',
+    })
+  })
+
+  describe('attachDroppedPaths', () => {
+    it('references generic files by path without copying', async () => {
+      await attachDroppedPaths(
+        [{ path: '/tmp/docs/spec.pdf', isDir: false }],
+        'session-1'
+      )
+
+      expect(invoke).not.toHaveBeenCalled()
+      expect(storeState.addPendingFile).toHaveBeenCalledWith(
+        'session-1',
+        expect.objectContaining({
+          relativePath: 'spec.pdf',
+          sourceRootPath: '/tmp/docs',
+          extension: '.pdf',
+          isDirectory: false,
+        })
+      )
+    })
+
+    it('routes raster images through save_dropped_image', async () => {
+      invoke.mockResolvedValueOnce({
+        id: 'img-9',
+        path: '/app/pasted-images/shot.png',
+        filename: 'shot.png',
+      })
+
+      await attachDroppedPaths(
+        [{ path: '/tmp/shot.png', isDir: false }],
+        'session-1'
+      )
+
+      expect(invoke).toHaveBeenCalledWith('save_dropped_image', {
+        sourcePath: '/tmp/shot.png',
+      })
+      expect(storeState.updatePendingImage).toHaveBeenCalledWith(
+        'session-1',
+        expect.any(String),
+        expect.objectContaining({ id: 'img-9', loading: false })
+      )
+      expect(storeState.addPendingFile).not.toHaveBeenCalled()
+    })
+
+    it('references svg paths in place instead of reading them via plugin-fs', async () => {
+      await attachDroppedPaths(
+        [{ path: '/tmp/art/logo.svg', isDir: false }],
+        'session-1'
+      )
+
+      expect(invoke).not.toHaveBeenCalled()
+      expect(storeState.addPendingTextFile).not.toHaveBeenCalled()
+      expect(storeState.addPendingFile).toHaveBeenCalledWith(
+        'session-1',
+        expect.objectContaining({
+          relativePath: 'logo.svg',
+          sourceRootPath: '/tmp/art',
+          extension: '.svg',
+          isDirectory: false,
+        })
+      )
+    })
+
+    it('attaches directories as directory chips', async () => {
+      await attachDroppedPaths(
+        [
+          { path: '/tmp/proj/src', isDir: true },
+          { path: '/tmp/proj/src', isDir: true },
+        ],
+        'session-1'
+      )
+
+      expect(invoke).not.toHaveBeenCalled()
+      expect(storeState.addPendingFile).toHaveBeenCalledTimes(1)
+      expect(storeState.addPendingFile).toHaveBeenCalledWith(
+        'session-1',
+        expect.objectContaining({
+          relativePath: 'src',
+          sourceRootPath: '/tmp/proj',
+          extension: '',
+          isDirectory: true,
+        })
+      )
     })
   })
 })

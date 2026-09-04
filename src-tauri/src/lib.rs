@@ -394,6 +394,8 @@ pub fn run() {
             desktop_commands::set_window_vibrancy,
             desktop_commands::send_native_notification,
             desktop_commands::read_clipboard_image,
+            desktop_commands::read_clipboard_file_paths,
+            desktop_commands::read_drag_file_paths,
             desktop_commands::write_clipboard_text,
             desktop_commands::read_clipboard_text,
             desktop_commands::save_dropped_image,

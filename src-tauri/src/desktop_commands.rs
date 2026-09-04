@@ -6,6 +6,7 @@ use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::CoreRuntime;
+use jean_core::DroppedPath;
 
 async fn core_command(runtime: &CoreRuntime, command: &str, args: Value) -> Result<Value, String> {
     jean_core::http_server::dispatch::dispatch_command(&runtime.0, command, args).await
@@ -144,6 +145,62 @@ pub async fn read_clipboard_image(
         .await
         .map(Some),
         None => Ok(None),
+    }
+}
+
+fn dropped_path(path: String) -> DroppedPath {
+    DroppedPath {
+        is_dir: std::path::Path::new(&path).is_dir(),
+        path,
+    }
+}
+
+/// File paths copied to the system clipboard (e.g. Cmd+C on files in Finder).
+#[tauri::command]
+pub async fn read_clipboard_file_paths() -> Result<Vec<DroppedPath>, String> {
+    tokio::task::spawn_blocking(|| {
+        let mut clipboard = arboard::Clipboard::new().map_err(|error| error.to_string())?;
+        match clipboard.get().file_list() {
+            Ok(paths) => Ok(paths
+                .iter()
+                .map(|path| dropped_path(path.to_string_lossy().to_string()))
+                .collect()),
+            Err(arboard::Error::ContentNotAvailable) => Ok(Vec::new()),
+            Err(error) => Err(error.to_string()),
+        }
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// File paths of the most recent OS drag. With `dragDropEnabled: false` the
+/// webview only sees a DOM `DragEvent` (no paths), but the macOS drag pasteboard
+/// still holds the dropped file URLs right after `drop` fires.
+#[tauri::command]
+pub async fn read_drag_file_paths() -> Result<Vec<DroppedPath>, String> {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_app_kit::{NSPasteboard, NSPasteboardNameDrag, NSPasteboardTypeFileURL};
+        use objc2_foundation::NSURL;
+
+        let pasteboard = NSPasteboard::pasteboardWithName(unsafe { NSPasteboardNameDrag });
+        let Some(items) = pasteboard.pasteboardItems() else {
+            return Ok(Vec::new());
+        };
+        let file_type = unsafe { NSPasteboardTypeFileURL };
+        let paths = items
+            .iter()
+            .filter_map(|item| item.stringForType(file_type))
+            .filter_map(|url_string| NSURL::URLWithString(&url_string))
+            .filter(|url| url.isFileURL())
+            .filter_map(|url| url.path())
+            .map(|path| dropped_path(path.to_string()))
+            .collect();
+        Ok(paths)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(Vec::new())
     }
 }
 

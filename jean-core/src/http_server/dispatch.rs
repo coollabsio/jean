@@ -2354,6 +2354,17 @@ pub async fn dispatch_command(
             let result = crate::chat::read_pasted_text(app.clone(), path).await?;
             to_value(result)
         }
+        "save_pasted_file" => {
+            let data: String = from_field(&args, "data")?;
+            let filename: String = from_field(&args, "filename")?;
+            let result = crate::chat::save_pasted_file(app.clone(), data, filename).await?;
+            to_value(result)
+        }
+        "delete_pasted_file" => {
+            let path: String = from_field(&args, "path")?;
+            crate::chat::delete_pasted_file(app.clone(), path).await?;
+            Ok(Value::Null)
+        }
 
         // =====================================================================
         // File Operations (additional)
@@ -3184,6 +3195,14 @@ pub async fn dispatch_command(
         }
         "read_clipboard_image" => {
             let result = crate::chat::read_clipboard_image(app.clone()).await?;
+            to_value(result)
+        }
+        "read_clipboard_file_paths" => {
+            let result = crate::chat::read_clipboard_file_paths().await?;
+            to_value(result)
+        }
+        "read_drag_file_paths" => {
+            let result = crate::chat::read_drag_file_paths().await?;
             to_value(result)
         }
         "write_clipboard_text" => {

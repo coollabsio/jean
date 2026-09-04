@@ -153,6 +153,8 @@ const DESKTOP_ONLY_COMMANDS = new Set([
   'set_window_vibrancy',
   'send_native_notification',
   'read_clipboard_image',
+  'read_clipboard_file_paths',
+  'read_drag_file_paths',
   'write_clipboard_text',
   'read_clipboard_text',
   'save_dropped_image',
@@ -192,6 +194,8 @@ const LOCAL_SHELL_COMMANDS = new Set([
   'set_window_vibrancy',
   'send_native_notification',
   'read_clipboard_image',
+  'read_clipboard_file_paths',
+  'read_drag_file_paths',
   'write_clipboard_text',
   'read_clipboard_text',
   // Quit confirmation must query the local process registry — remote sessions

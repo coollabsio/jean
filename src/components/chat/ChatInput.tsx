@@ -14,6 +14,7 @@ import type {
   PendingFile,
   PendingSkill,
   ClaudeCommand,
+  DroppedPath,
   SaveImageResponse,
   SaveTextResponse,
   ReadTextResponse,
@@ -41,8 +42,11 @@ import {
   type ContextMentionPopoverHandle,
 } from './ContextMentionPopover'
 import type { ContextMentionItem } from './hooks/useContextMentionData'
-import { processAttachmentFile } from './attachment-processing'
-import { IMAGE_ATTACHMENT_ACCEPT, MAX_TEXT_SIZE } from './image-constants'
+import {
+  attachDroppedPaths,
+  processAttachmentFile,
+} from './attachment-processing'
+import { MAX_TEXT_SIZE } from './image-constants'
 import {
   listControlChars,
   sanitizeTextInputValue,
@@ -55,7 +59,7 @@ import {
 } from './message-content-utils'
 import { isModKeyEvent } from '@/types/keybindings'
 import { isSteerCapableBackend } from '@/lib/backend-auto-steer'
-import { isNativeApp } from '@/lib/environment'
+import { isLocalBackend, isNativeApp } from '@/lib/environment'
 
 /** Threshold for saving pasted text as file (2000 chars) */
 const TEXT_PASTE_THRESHOLD = 2000
@@ -247,9 +251,32 @@ export const ChatInput = memo(function ChatInput({
     return () => onRegisterClearHandler?.(null)
   }, [clearInputState, onRegisterClearHandler])
 
-  const handleAttachClick = useCallback(() => {
-    fileInputRef.current?.click()
-  }, [])
+  const handleAttachClick = useCallback(async () => {
+    if (!activeSessionId) return
+    if (!isLocalBackend()) {
+      fileInputRef.current?.click()
+      return
+    }
+    // Native picker returns real paths, so files are referenced in place.
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog')
+      const selected = await open({
+        multiple: true,
+        directory: false,
+        title: 'Attach files',
+      })
+      if (!selected) return
+      const paths = Array.isArray(selected) ? selected : [selected]
+      await attachDroppedPaths(
+        paths.map(path => ({ path, isDir: false })),
+        activeSessionId
+      )
+      inputRef.current?.focus()
+    } catch (error) {
+      console.error('Failed to open the file picker:', error)
+      toast.error('Failed to attach files', { description: String(error) })
+    }
+  }, [activeSessionId, inputRef])
 
   useEffect(() => {
     onRegisterAttachHandler?.(handleAttachClick)
@@ -308,8 +335,10 @@ export const ChatInput = memo(function ChatInput({
           }
         }
 
-        // Remove files that are no longer mentioned
+        // Remove files that are no longer mentioned. Attached chips (button,
+        // drop, paste) have no @mention in the text, so they are never synced.
         for (const file of files) {
+          if (file.attached) continue
           const filename = getFilename(file.relativePath)
           if (!mentionedNames.has(filename)) {
             removePendingFile(activeSessionId, file.id)
@@ -856,13 +885,16 @@ export const ChatInput = memo(function ChatInput({
           })
         )
 
-        // Restore file and directory mentions
+        // Restore file and directory chips. They are restored by this paste,
+        // not typed as an @mention, so they must be marked attached or the
+        // next keystroke would sync them away.
         for (const file of copiedPromptMetadata.files) {
           addPendingFile(activeSessionId, {
             id: generateId(),
             relativePath: file.path,
             extension: getExtension(file.path),
             isDirectory: file.isDirectory,
+            attached: true,
           })
         }
 
@@ -878,9 +910,27 @@ export const ChatInput = memo(function ChatInput({
       }
 
       const items = e.clipboardData?.items ?? []
+      // Snapshot before the first await: the DataTransfer is only guaranteed
+      // to be readable while the event is being dispatched.
+      const clipboardFiles = Array.from(e.clipboardData?.files ?? [])
+
+      // Files copied in Finder/Explorer expose real paths through the native
+      // clipboard. Ask for them before falling back to the DOM File objects,
+      // which carry bytes but no path and would be uploaded needlessly.
+      // Screenshots have no file list, so this falls through for them.
+      if (isNativeApp() && isLocalBackend() && clipboardFiles.length > 0) {
+        e.preventDefault()
+        const entries = await invoke<DroppedPath[]>(
+          'read_clipboard_file_paths'
+        ).catch(() => [])
+        if (entries.length > 0) {
+          await attachDroppedPaths(entries, activeSessionId)
+          return
+        }
+      }
 
       // First, check for image items in the clipboard
-      const imageFiles: File[] = []
+      const attachmentFiles: File[] = []
       for (const item of items) {
         if (!item.type.startsWith('image/')) continue
         // Prevent the browser from also inserting any text/html fallback for
@@ -889,27 +939,36 @@ export const ChatInput = memo(function ChatInput({
 
         const file = item.getAsFile()
         if (!file) continue
-        imageFiles.push(file)
+        attachmentFiles.push(file)
       }
       // iOS can expose an image copied from the share sheet through `files`
-      // while leaving `items` empty.
-      for (const file of Array.from(e.clipboardData?.files ?? [])) {
-        if (file.type.startsWith('image/') && !imageFiles.includes(file)) {
-          e.preventDefault()
-          imageFiles.push(file)
-        }
+      // while leaving `items` empty; Finder/Explorer-copied files (PDF, …)
+      // also arrive here in web access / remote backends. Accept them all and
+      // let processAttachmentFile classify.
+      // `items[].getAsFile()` and `files[i]` are not guaranteed to be the same
+      // object for the same clipboard entry, so compare by identity attributes.
+      const fileKey = (file: File) =>
+        `${file.name}:${file.size}:${file.lastModified}`
+      const seenFiles = new Set(attachmentFiles.map(fileKey))
+      for (const file of clipboardFiles) {
+        if (seenFiles.has(fileKey(file))) continue
+        seenFiles.add(fileKey(file))
+        e.preventDefault()
+        attachmentFiles.push(file)
       }
-      const hasImage = imageFiles.length > 0
-      // Independent per-image save; process in parallel
-      if (imageFiles.length > 0) {
+      const hasAttachments = attachmentFiles.length > 0
+      // Independent per-file save; process in parallel
+      if (hasAttachments) {
         await Promise.all(
-          imageFiles.map(file => processAttachmentFile(file, activeSessionId))
+          attachmentFiles.map(file =>
+            processAttachmentFile(file, activeSessionId)
+          )
         )
       }
 
-      // Mixed image+text paste should preserve both parts. Because image paste
+      // Mixed attachment+text paste should preserve both parts. Because it
       // requires preventDefault(), manually apply the text branch too.
-      if (hasImage) {
+      if (hasAttachments) {
         if (plainText) {
           const savedAsFile = await saveLargeTextPaste(plainText)
           if (!savedAsFile) {
@@ -925,6 +984,16 @@ export const ChatInput = memo(function ChatInput({
       const clipboardHtml = e.clipboardData?.getData('text/html')
       if (isNativeApp() && !clipboardText && !clipboardHtml) {
         e.preventDefault()
+        if (isLocalBackend()) {
+          // Files copied in Finder/Explorer: reference them by real path.
+          const entries = await invoke<DroppedPath[]>(
+            'read_clipboard_file_paths'
+          ).catch(() => [])
+          if (entries.length > 0) {
+            await attachDroppedPaths(entries, activeSessionId)
+            return
+          }
+        }
         const placeholderId = `clipboard-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
         const { addPendingImage, updatePendingImage, removePendingImage } =
           useChatStore.getState()
@@ -1252,11 +1321,10 @@ export const ChatInput = memo(function ChatInput({
       <input
         ref={fileInputRef}
         type="file"
-        accept={IMAGE_ATTACHMENT_ACCEPT}
         multiple
         tabIndex={-1}
         className="sr-only"
-        aria-label="Attach images"
+        aria-label="Attach files"
         onChange={handleFileInputChange}
       />
       <Textarea

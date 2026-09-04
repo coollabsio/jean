@@ -1338,6 +1338,29 @@ export interface PendingTextFile {
 }
 
 /**
+ * Response from the save_pasted_file Tauri command
+ */
+export interface SaveFileResponse {
+  /** Unique ID for this file */
+  id: string
+  /** Saved filename */
+  filename: string
+  /** Full path to the saved file */
+  path: string
+  /** Size in bytes */
+  size: number
+}
+
+/**
+ * A filesystem path handed to chat via drop / clipboard / file picker
+ * (read_clipboard_file_paths / read_drag_file_paths return these)
+ */
+export interface DroppedPath {
+  path: string
+  isDir: boolean
+}
+
+/**
  * Response from the save_pasted_text Tauri command
  */
 export interface SaveTextResponse {
@@ -1396,6 +1419,12 @@ export interface PendingFile {
   extension: string
   /** Whether this is a directory mention */
   isDirectory: boolean
+  /**
+   * True when the chip came from the attach button, a drop, or a paste instead
+   * of an `@mention`. Attached chips are not tied to any text in the input, so
+   * they must survive typing and must not rewrite the draft when removed.
+   */
+  attached?: boolean
 }
 
 // ============================================================================

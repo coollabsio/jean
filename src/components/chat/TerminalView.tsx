@@ -30,7 +30,7 @@ import {
 import { Kbd } from '@/components/ui/kbd'
 import { formatShortcutDisplay } from '@/types/keybindings'
 import { cn } from '@/lib/utils'
-import { useTerminalImageDrop } from './hooks/useTerminalImageDrop'
+import { useTerminalFileDrop } from './hooks/useTerminalFileDrop'
 import { MODAL_TERMINAL_SECONDARY_ROW_CLASS } from './modal-terminal-layout'
 import { TerminalExtraKeysBar } from './TerminalExtraKeysBar'
 import { TerminalArrowGesture } from './TerminalArrowGesture'
@@ -75,7 +75,7 @@ const TerminalTabContent = memo(function TerminalTabContent({
     rootRef,
     showExtraKeys && isActive
   )
-  const { isDraggingImage, dropHandlers } = useTerminalImageDrop(terminal.id)
+  const { isDraggingFile, dropHandlers } = useTerminalFileDrop(terminal.id)
   const { initTerminal, fit, focus } = useTerminal({
     terminalId: terminal.id,
     worktreeId,
@@ -172,10 +172,10 @@ const TerminalTabContent = memo(function TerminalTabContent({
         )}
       >
         <div ref={containerRef} className="h-full w-full overflow-hidden" />
-        {isDraggingImage && (
+        {isDraggingFile && (
           <div className="pointer-events-none absolute inset-2 z-10 flex flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed border-primary bg-background/80 text-sm font-medium text-foreground">
             <Terminal className="h-5 w-5" aria-hidden />
-            <span>Drop image to insert its path</span>
+            <span>Drop file to insert its path</span>
           </div>
         )}
       </div>
