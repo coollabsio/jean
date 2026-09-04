@@ -815,6 +815,14 @@ fn effective_execution_mode(execution_mode: Option<&str>) -> &'static str {
     }
 }
 
+fn cursor_sandbox_mode(is_windows: bool, wsl_enabled: bool) -> &'static str {
+    if is_windows && !wsl_enabled {
+        "disabled"
+    } else {
+        "enabled"
+    }
+}
+
 fn parse_cursor_stream(
     app: &AppHandle,
     session_id: &str,
@@ -1082,15 +1090,19 @@ pub fn execute_cursor(
     }
 
     let effective_mode = effective_execution_mode(execution_mode);
+    let sandbox_mode = cursor_sandbox_mode(
+        cfg!(target_os = "windows"),
+        crate::platform::get_wsl_config().enabled,
+    );
     match effective_mode {
         "plan" => {
-            cmd.args(["--mode", "plan", "--sandbox", "enabled"]);
+            cmd.args(["--mode", "plan", "--sandbox", sandbox_mode]);
         }
         "build" | "yolo" => {
             cmd.args(["--yolo", "--sandbox", "disabled", "--force"]);
         }
         _ => {
-            cmd.args(["--sandbox", "enabled"]);
+            cmd.args(["--sandbox", sandbox_mode]);
         }
     }
 
@@ -1213,13 +1225,17 @@ pub fn execute_one_shot_cursor(
     }
 
     let dir = working_dir.unwrap_or_else(|| Path::new("."));
+    let sandbox_mode = cursor_sandbox_mode(
+        cfg!(target_os = "windows"),
+        crate::platform::get_wsl_config().enabled,
+    );
     let mut cmd = crate::platform::cli_command(&cli_path.to_string_lossy(), None);
     cmd.arg("--print")
         .args(["--output-format", "stream-json"])
         .arg("--trust")
         .args(["--workspace"])
         .arg(dir)
-        .args(["--mode", "ask", "--sandbox", "enabled"]);
+        .args(["--mode", "ask", "--sandbox", sandbox_mode]);
 
     let model = raw_cursor_model(Some(model)).unwrap_or("auto");
     cmd.args(["--model", model])
@@ -1315,6 +1331,13 @@ mod tests {
     #[test]
     fn build_mode_falls_back_to_yolo() {
         assert_eq!(effective_execution_mode(Some("build")), "yolo");
+    }
+
+    #[test]
+    fn native_windows_cursor_uses_allowlist_mode() {
+        assert_eq!(cursor_sandbox_mode(true, false), "disabled");
+        assert_eq!(cursor_sandbox_mode(true, true), "enabled");
+        assert_eq!(cursor_sandbox_mode(false, false), "enabled");
     }
 
     #[test]

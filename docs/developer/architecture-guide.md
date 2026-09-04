@@ -233,6 +233,7 @@ Cursor-specific notes:
 
 - Cursor auth/status checks must use short timeouts; `cursor-agent status/about` can hang indefinitely
 - Cursor chat integration should use `cursor-agent --print --output-format stream-json` and parse structured NDJSON, not terminal text scraping
+- Native Windows does not provide Cursor's OS sandbox, so Jean uses Cursor's `--sandbox disabled` allowlist mode there; enable WSL and use the Linux CLI when OS-level sandboxing is required
 - Cursor only supports `--mode plan` and `--mode ask`; build/yolo omit `--mode` (defaults to full agent) and use `--sandbox disabled --force`
 - Cursor `plan` runs synthesize an `EnterPlanMode` timeline item from Jean so the native plan banner/instructions survive streaming + JSONL reload
 - Cursor history repair should prefer complete message snapshots / repeated-prefix cleanup; avoid destructive suffix trimming during reload
