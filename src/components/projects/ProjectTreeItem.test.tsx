@@ -11,6 +11,7 @@ import { useChatStore } from '@/store/chat-store'
 
 const mocks = vi.hoisted(() => ({
   worktrees: [] as Worktree[],
+  worktreeQueryOptions: [] as { enabled?: boolean }[],
   updateSettingsMutate: vi.fn(),
 }))
 
@@ -23,7 +24,10 @@ vi.mock('@/hooks/useRemotePicker', () => ({
 }))
 
 vi.mock('@/services/projects', () => ({
-  useWorktrees: () => ({ data: mocks.worktrees }),
+  useWorktrees: (_projectId: string, options?: { enabled?: boolean }) => {
+    mocks.worktreeQueryOptions.push(options ?? {})
+    return { data: mocks.worktrees }
+  },
   useAppDataDir: () => ({ data: '' }),
   useUpdateProjectSettings: () => ({
     mutate: mocks.updateSettingsMutate,
@@ -96,6 +100,7 @@ describe('resolveProjectRowClickAction', () => {
 describe('ProjectTreeItem', () => {
   beforeEach(() => {
     mocks.worktrees = [worktree]
+    mocks.worktreeQueryOptions = []
     mocks.updateSettingsMutate.mockReset()
     useProjectsStore.setState({
       selectedProjectId: 'project-1',
@@ -135,6 +140,21 @@ describe('ProjectTreeItem', () => {
     expect(projectsState.expandedProjectIds.has('project-1')).toBe(false)
     expect(useChatStore.getState().activeWorktreeId).toBe('wt-1')
     expect(useChatStore.getState().activeWorktreePath).toBe('/tmp/jean-feature')
+  })
+
+  it('disables worktree loading for collapsed, unselected projects', () => {
+    useProjectsStore.setState({
+      selectedProjectId: null,
+      selectedWorktreeId: null,
+      expandedProjectIds: new Set(),
+    })
+
+    render(<ProjectTreeItem project={project} />)
+
+    expect(mocks.worktreeQueryOptions.at(-1)).toEqual({ enabled: false })
+    expect(
+      screen.getByRole('button', { name: 'Expand project' })
+    ).toBeInTheDocument()
   })
 
   it('opens project canvas when the project has no worktrees', async () => {

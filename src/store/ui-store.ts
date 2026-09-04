@@ -301,6 +301,10 @@ interface UIState {
   ) => void
   setSessionTerminalId: (sessionId: string, terminalId: string) => void
   clearSessionTerminalSurface: (sessionId: string) => string | undefined
+  clearWorktreeState: (
+    worktreeId: string,
+    sessionIds?: readonly string[]
+  ) => void
   openNewSessionModeModal: (target: NewSessionModeTarget) => void
   closeNewSessionModeModal: () => void
   setChatToolbarMounted: (mounted: boolean) => void
@@ -1134,6 +1138,122 @@ export const useUIStore = create<UIState>()(
 
         return terminalId
       },
+
+      clearWorktreeState: (
+        worktreeId: string,
+        sessionIds: readonly string[] = []
+      ) =>
+        set(
+          state => {
+            const sessionIdSet = new Set(sessionIds)
+            const removeSession = (value: string): boolean =>
+              sessionIdSet.has(value)
+            const removeFromSet = (values: Set<string>): Set<string> => {
+              let changed = false
+              const next = new Set(values)
+              if (next.delete(worktreeId)) changed = true
+              return changed ? next : values
+            }
+            const removeRecordEntries = <T,>(
+              record: Record<string, T>,
+              predicate: (key: string, value: T) => boolean
+            ): Record<string, T> => {
+              let changed = false
+              const next: Record<string, T> = {}
+              for (const [key, value] of Object.entries(record)) {
+                if (predicate(key, value)) {
+                  changed = true
+                } else {
+                  next[key] = value
+                }
+              }
+              return changed ? next : record
+            }
+
+            const autoInvestigateWorktreeIds = removeFromSet(
+              state.autoInvestigateWorktreeIds
+            )
+            const autoInvestigatePRWorktreeIds = removeFromSet(
+              state.autoInvestigatePRWorktreeIds
+            )
+            const autoInvestigateSecurityAlertWorktreeIds = removeFromSet(
+              state.autoInvestigateSecurityAlertWorktreeIds
+            )
+            const autoInvestigateAdvisoryWorktreeIds = removeFromSet(
+              state.autoInvestigateAdvisoryWorktreeIds
+            )
+            const autoInvestigateLinearIssueWorktreeIds = removeFromSet(
+              state.autoInvestigateLinearIssueWorktreeIds
+            )
+            const autoInvestigateSentryIssueWorktreeIds = removeFromSet(
+              state.autoInvestigateSentryIssueWorktreeIds
+            )
+            const autoOpenSessionWorktreeIds = removeFromSet(
+              state.autoOpenSessionWorktreeIds
+            )
+            const pendingAutoOpenSessionIds = removeRecordEntries(
+              state.pendingAutoOpenSessionIds,
+              key => key === worktreeId
+            )
+            const sessionPrimarySurface = removeRecordEntries(
+              state.sessionPrimarySurface,
+              sessionId => removeSession(sessionId)
+            )
+            const sessionTerminalIds = removeRecordEntries(
+              state.sessionTerminalIds,
+              sessionId => removeSession(sessionId)
+            )
+
+            const worktreeStateChanged =
+              autoInvestigateWorktreeIds !==
+                state.autoInvestigateWorktreeIds ||
+              autoInvestigatePRWorktreeIds !==
+                state.autoInvestigatePRWorktreeIds ||
+              autoInvestigateSecurityAlertWorktreeIds !==
+                state.autoInvestigateSecurityAlertWorktreeIds ||
+              autoInvestigateAdvisoryWorktreeIds !==
+                state.autoInvestigateAdvisoryWorktreeIds ||
+              autoInvestigateLinearIssueWorktreeIds !==
+                state.autoInvestigateLinearIssueWorktreeIds ||
+              autoInvestigateSentryIssueWorktreeIds !==
+                state.autoInvestigateSentryIssueWorktreeIds ||
+              autoOpenSessionWorktreeIds !== state.autoOpenSessionWorktreeIds ||
+              pendingAutoOpenSessionIds !== state.pendingAutoOpenSessionIds ||
+              sessionPrimarySurface !== state.sessionPrimarySurface ||
+              sessionTerminalIds !== state.sessionTerminalIds ||
+              state.sessionChatModalWorktreeId === worktreeId ||
+              state.newSessionModeTarget?.worktreeId === worktreeId
+
+            if (!worktreeStateChanged) return state
+
+            return {
+              autoInvestigateWorktreeIds,
+              autoInvestigatePRWorktreeIds,
+              autoInvestigateSecurityAlertWorktreeIds,
+              autoInvestigateAdvisoryWorktreeIds,
+              autoInvestigateLinearIssueWorktreeIds,
+              autoInvestigateSentryIssueWorktreeIds,
+              autoOpenSessionWorktreeIds,
+              pendingAutoOpenSessionIds,
+              sessionPrimarySurface,
+              sessionTerminalIds,
+              sessionChatModalOpen:
+                state.sessionChatModalWorktreeId === worktreeId
+                  ? false
+                  : state.sessionChatModalOpen,
+              sessionChatModalWorktreeId:
+                state.sessionChatModalWorktreeId === worktreeId
+                  ? null
+                  : state.sessionChatModalWorktreeId,
+              newSessionModeTarget:
+                state.newSessionModeTarget?.worktreeId === worktreeId
+                  ? null
+                  : state.newSessionModeTarget,
+            }
+          },
+          undefined,
+          'clearWorktreeState'
+        ),
 
       openNewSessionModeModal: (target: NewSessionModeTarget) =>
         set(

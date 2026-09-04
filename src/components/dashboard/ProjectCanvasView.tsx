@@ -81,7 +81,7 @@ import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import { GitStatusBadges } from '@/components/ui/git-status-badges'
 import {
-  useWorktrees,
+  useProjectBootstrap,
   useProjects,
   useJeanConfig,
   isTauri,
@@ -142,7 +142,7 @@ import {
 } from '@/lib/worktree-labels'
 import {
   type SessionCardData,
-  computeSessionCardData,
+  createSessionCardDataCache,
   groupCardsByStatus,
   flattenGroups,
   isActionableWaitingStatus,
@@ -182,9 +182,9 @@ import {
 import {
   CANVAS_FILTER_TABS,
   getCanvasFilterTabCount,
+  getCanvasWorktreeSearchTerms,
   isLabelFilterTab,
   matchesCanvasFilterTab,
-  matchesCanvasWorktreeSearch,
   shouldShowCanvasWorktreeSection,
   type CanvasFilterTab,
   type CanvasPredefinedFilterTab,
@@ -244,6 +244,33 @@ interface WorktreeSection {
   worktree: Worktree
   cards: SessionCardData[]
   isPending?: boolean
+}
+
+function useCanvasRowVisibility() {
+  const elementRef = useRef<HTMLDivElement | null>(null)
+  const [isVisible, setIsVisible] = useState(true)
+
+  useEffect(() => {
+    const element = elementRef.current
+    if (!element || typeof IntersectionObserver === 'undefined') return
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        const nextIsVisible = entry?.isIntersecting ?? true
+        setIsVisible(previous =>
+          previous === nextIsVisible ? previous : nextIsVisible
+        )
+      },
+      // Keep nearby rows warm so keyboard navigation and short scrolls do not
+      // churn their subscriptions at the viewport edge.
+      { rootMargin: '600px 0px' }
+    )
+
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+
+  return { elementRef, isVisible }
 }
 
 function canManuallyReorderWorktree(worktree: Worktree): boolean {
@@ -334,7 +361,10 @@ function SortableCanvasWorktreeSection({
       ref={elementRef}
       data-pdnd-worktree-id={section.worktree.id}
       data-pdnd-worktree-scope={DRAG_SCOPE_CANVAS_WORKTREE_LIST}
-      className={cn('relative transition-opacity', isDragging && 'opacity-40')}
+      className={cn(
+        'relative transition-opacity [content-visibility:auto] [contain-intrinsic-size:0_220px]',
+        isDragging && 'opacity-40'
+      )}
     >
       <DropIndicator edge={closestEdge} insetClassName="left-0 right-0" />
       {!disabled && (
@@ -471,6 +501,7 @@ function getSessionMetrics(cards: SessionCardData[]) {
 function WorktreeSectionHeader({
   worktree,
   projectId,
+  gitSyncButton,
   defaultBranch,
   openPRs,
   cards,
@@ -485,6 +516,7 @@ function WorktreeSectionHeader({
 }: {
   worktree: Worktree
   projectId: string
+  gitSyncButton: boolean
   defaultBranch: string
   openPRs?: { number: number; headRefName: string }[]
   cards?: SessionCardData[]
@@ -497,6 +529,7 @@ function WorktreeSectionHeader({
   onResolveConflicts?: (worktree: Worktree) => void
   disableTextSelection?: boolean
 }) {
+  const { elementRef: rowVisibilityRef, isVisible } = useCanvasRowVisibility()
   const stackedBaseBranch = getStackedBaseBranch(
     worktree.base_branch,
     worktree.branch,
@@ -509,9 +542,7 @@ function WorktreeSectionHeader({
     defaultBranch
   )
   const isBase = isBaseSession(worktree)
-  const { data: gitStatus } = useGitStatus(worktree.id)
-  const { data: preferences } = usePreferences()
-  const gitSyncButton = preferences?.git_sync_button ?? false
+  const { data: gitStatus } = useGitStatus(isVisible ? worktree.id : null)
 
   const behindCount =
     gitStatus?.behind_count ?? worktree.cached_behind_count ?? 0
@@ -672,6 +703,7 @@ function WorktreeSectionHeader({
 
   const row = (
     <div
+      ref={rowVisibilityRef}
       className={cn(
         'group relative border border-transparent transition-colors',
         showDetails
@@ -712,10 +744,12 @@ function WorktreeSectionHeader({
               <span className="text-[9px]">⌘{shortcutNumber}</span>
             </kbd>
           )}
-          <TerminalStatusIndicator
-            worktreeId={worktree.id}
-            iconSize="h-3 w-3"
-          />
+          {isVisible && (
+            <TerminalStatusIndicator
+              worktreeId={worktree.id}
+              iconSize="h-3 w-3"
+            />
+          )}
           <span className="flex min-w-0 flex-1 flex-col gap-1 font-medium sm:flex-row sm:items-center sm:gap-1.5">
             <span className="flex min-w-0 items-center gap-1.5">
               <span className="min-w-0 flex-1 truncate">
@@ -1015,9 +1049,9 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
     [mobileWorkflowRuns?.runs, seenFailedWorkflowRunIds]
   )
 
-  // Get worktrees (+ seed session lists in the same backend round-trip)
+  // Load worktrees and session lists only for the selected project canvas.
   const { data: worktrees = [], isLoading: worktreesLoading } =
-    useWorktrees(projectId)
+    useProjectBootstrap(projectId)
 
   // Filter worktrees: include ready, pending, and error (exclude deleting)
   const visibleWorktrees = useMemo(() => {
@@ -1092,31 +1126,34 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
   )
 
   // Load sessions for all worktrees dynamically using useQueries.
-  // Bootstrap (via useWorktrees → bootstrap_project) seeds these keys; staleTime
+  // Project bootstrap seeds these keys; staleTime
   // avoids an immediate N-way refetch waterfall over WebSocket on project open.
-  const sessionQueries = useQueries({
-    queries: readyWorktrees.map(wt => ({
-      queryKey: [...chatQueryKeys.sessions(wt.id), 'with-counts'],
-      queryFn: async (): Promise<WorktreeSessions> => {
-        if (!hasBackendTransport() || !wt.id || !wt.path) {
-          return {
-            worktree_id: wt.id,
-            sessions: [],
-            active_session_id: null,
-            version: 2,
+  const sessionQueryOptions = useMemo(
+    () =>
+      readyWorktrees.map(wt => ({
+        queryKey: [...chatQueryKeys.sessions(wt.id), 'with-counts'],
+        queryFn: async (): Promise<WorktreeSessions> => {
+          if (!hasBackendTransport() || !wt.id || !wt.path) {
+            return {
+              worktree_id: wt.id,
+              sessions: [],
+              active_session_id: null,
+              version: 2,
+            }
           }
-        }
-        return invoke<WorktreeSessions>('get_sessions', {
-          worktreeId: wt.id,
-          worktreePath: wt.path,
-          includeMessageCounts: true,
-        })
-      },
-      enabled: !!wt.id && !!wt.path,
-      staleTime: 1000 * 60 * 5,
-      gcTime: 1000 * 60 * 5,
-    })),
-  })
+          return invoke<WorktreeSessions>('get_sessions', {
+            worktreeId: wt.id,
+            worktreePath: wt.path,
+            includeMessageCounts: true,
+          })
+        },
+        enabled: !!wt.id && !!wt.path,
+        staleTime: 1000 * 60 * 5,
+        gcTime: 1000 * 60 * 2,
+      })),
+    [readyWorktrees]
+  )
+  const sessionQueries = useQueries({ queries: sessionQueryOptions })
 
   // Derive a stable fingerprint from query data to avoid re-computing
   // sessionsByWorktreeId when useQueries returns a new array with same data.
@@ -1162,6 +1199,10 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
   // Use shared store state hook
   const storeState = useCanvasStoreState()
   const queryClient = useQueryClient()
+  const sessionCardDataCache = useMemo(
+    () => createSessionCardDataCache(),
+    []
+  )
 
   const markWorktreeLastUsed = useCallback(
     (worktreeId: string) => {
@@ -1245,6 +1286,8 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
   const worktreeSections: WorktreeSection[] = useMemo(() => {
     const result: WorktreeSection[] = []
     const latestActivityByWorktreeId = new Map<string, number>()
+    const normalizedSearchQuery = searchQuery.trim().toLowerCase()
+    const hasSearchQuery = normalizedSearchQuery.length > 0
 
     // Add pending worktrees first
     const sortedPending = [...pendingWorktrees].sort(
@@ -1252,7 +1295,14 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
     )
     for (const worktree of sortedPending) {
       if (!matchesCanvasFilterTab(worktree, activeFilterTab)) continue
-      if (!matchesCanvasWorktreeSearch(worktree, searchQuery)) continue
+      if (
+        hasSearchQuery &&
+        !getCanvasWorktreeSearchTerms(worktree).some(term =>
+          term.includes(normalizedSearchQuery)
+        )
+      ) {
+        continue
+      }
       latestActivityByWorktreeId.set(worktree.id, worktree.created_at)
       // Include pending worktrees even without sessions - show setup card
       result.push({ worktree, cards: [], isPending: true })
@@ -1263,29 +1313,32 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
       if (!matchesCanvasFilterTab(worktree, activeFilterTab)) continue
       const sessionData = sessionsByWorktreeId.get(worktree.id)
       const sessions = sessionData?.sessions ?? []
-      const worktreeMatchesSearch = matchesCanvasWorktreeSearch(
-        worktree,
-        searchQuery
-      )
+      const worktreeMatchesSearch =
+        !hasSearchQuery ||
+        getCanvasWorktreeSearchTerms(worktree).some(term =>
+          term.includes(normalizedSearchQuery)
+        )
 
-      // Filter sessions based on search query (includes labels)
-      const filteredSessions = searchQuery.trim()
+      // Filter sessions based on search query (includes labels). Worktree
+      // metadata is normalized once per worktree, not once per session.
+      const filteredSessions = hasSearchQuery
         ? sessions.filter(session => {
-            const q = searchQuery.trim().toLowerCase()
             return (
-              session.name.toLowerCase().includes(q) ||
               worktreeMatchesSearch ||
-              (session.label?.name ?? '').toLowerCase().includes(q) ||
+              session.name.toLowerCase().includes(normalizedSearchQuery) ||
+              (session.label?.name ?? '')
+                .toLowerCase()
+                .includes(normalizedSearchQuery) ||
               (storeState.sessionLabels[session.id]?.name ?? '')
                 .toLowerCase()
-                .includes(q)
+                .includes(normalizedSearchQuery)
             )
           })
         : sessions
 
       // Compute card data for each session
       const cards = filteredSessions.map(session =>
-        computeSessionCardData(session, storeState)
+        sessionCardDataCache(session, storeState)
       )
 
       // Sort: labeled first, grouped by label name, then unlabeled
@@ -1308,7 +1361,7 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
       // Keep every worktree available, including those without a session yet.
       if (
         shouldShowCanvasWorktreeSection(worktree) &&
-        (!searchQuery.trim() || worktreeMatchesSearch || grouped.length > 0)
+        (!hasSearchQuery || worktreeMatchesSearch || grouped.length > 0)
       ) {
         readySections.push({ worktree, cards: grouped })
       }
@@ -1331,6 +1384,7 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
     readyWorktrees,
     pendingWorktrees,
     sessionsByWorktreeId,
+    sessionCardDataCache,
     storeState,
     searchQuery,
     worktreeSortMode,
@@ -3649,6 +3703,7 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
                         <WorktreeSectionHeader
                           worktree={section.worktree}
                           projectId={projectId}
+                          gitSyncButton={preferences?.git_sync_button ?? false}
                           defaultBranch={project.default_branch}
                           openPRs={openPRs}
                           cards={section.cards}

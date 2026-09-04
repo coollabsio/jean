@@ -15,6 +15,44 @@ import {
 import { projectsQueryKeys, isTauri } from '@/services/projects'
 import type { Project, Worktree } from '@/types/projects'
 
+/** Keep local Git polling useful for recently used worktrees without waking
+ * every clean inactive repository on the normal sweep cadence. */
+export const RECENT_WORKTREE_ACTIVITY_SECS = 24 * 60 * 60
+
+function hasPositiveCachedCount(value: number | undefined): boolean {
+  return (value ?? 0) > 0
+}
+
+/** Decide whether an inactive worktree still needs the global Git sweep. */
+export function shouldIncludeInGitSweep(
+  worktree: Pick<
+    Worktree,
+    | 'pr_number'
+    | 'pr_url'
+    | 'cached_status_at'
+    | 'cached_uncommitted_added'
+    | 'cached_uncommitted_removed'
+    | 'cached_unpushed_count'
+    | 'cached_worktree_ahead_count'
+    | 'last_opened_at'
+  >,
+  now = Math.floor(Date.now() / 1000)
+): boolean {
+  if (worktree.pr_number && worktree.pr_url) return true
+  if (worktree.cached_status_at == null) return true
+
+  const recentlyOpened =
+    worktree.last_opened_at != null &&
+    now - worktree.last_opened_at <= RECENT_WORKTREE_ACTIVITY_SECS
+  const hasLocalChanges =
+    hasPositiveCachedCount(worktree.cached_uncommitted_added) ||
+    hasPositiveCachedCount(worktree.cached_uncommitted_removed) ||
+    hasPositiveCachedCount(worktree.cached_unpushed_count) ||
+    hasPositiveCachedCount(worktree.cached_worktree_ahead_count)
+
+  return recentlyOpened || hasLocalChanges
+}
+
 /** Resolve the base branch used for git status sweep of one worktree. */
 export function resolveSweepBaseBranch(
   worktree: Pick<Worktree, 'base_branch'>,
@@ -24,8 +62,8 @@ export function resolveSweepBaseBranch(
 }
 
 /**
- * Hook that pushes all non-archived worktrees with open PRs to the backend
- * for background sweep polling. Should be mounted at the app root level.
+ * Hook that pushes open-PR and locally relevant worktrees to the backend for
+ * background sweep polling. Should be mounted at the app root level.
  *
  * Subscribes to query cache changes so the list updates when worktrees
  * are created, archived, or get new PRs.
@@ -69,13 +107,6 @@ export function usePrWorktreeSweep(projects: Project[] | undefined) {
             default_branch: projectDefault,
           })
 
-          // All non-archived worktrees for git status sweep
-          allWorktrees.push({
-            worktreeId: w.id,
-            worktreePath: w.path,
-            baseBranch,
-          })
-
           // PR worktrees for PR status sweep
           if (w.pr_number && w.pr_url) {
             prWorktrees.push({
@@ -84,6 +115,16 @@ export function usePrWorktreeSweep(projects: Project[] | undefined) {
               baseBranch,
               prNumber: w.pr_number,
               prUrl: w.pr_url,
+            })
+          }
+
+          // Clean, inactive worktrees are refreshed when their project is
+          // opened (or when they become relevant again), not every sweep.
+          if (shouldIncludeInGitSweep(w)) {
+            allWorktrees.push({
+              worktreeId: w.id,
+              worktreePath: w.path,
+              baseBranch,
             })
           }
         }

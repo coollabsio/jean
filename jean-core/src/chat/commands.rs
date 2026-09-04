@@ -16,12 +16,13 @@ use super::registry::{cancel_process, cancel_process_if_running};
 use super::run_log;
 use super::storage::{
     cleanup_combined_context_files, delete_session_data, get_base_index_path, get_data_dir,
-    get_index_path, get_session_dir, load_metadata, load_sessions, save_metadata,
-    with_existing_metadata_mut, with_metadata_mut, with_sessions_mut,
+    get_index_path, get_session_dir, load_index, load_metadata, load_sessions, save_metadata,
+    with_existing_metadata_mut, with_index_mut, with_metadata_mut, with_sessions_mut,
 };
 use super::types::{
     AllSessionsEntry, AllSessionsResponse, Backend, ChatMessage, ClaudeContext, EffortLevel,
-    LabelData, MessageRole, RunStatus, Session, ThinkingLevel, WorktreeIndex, WorktreeSessions,
+    LabelData, MessageRole, RunStatus, Session, SessionUnreadSummary, ThinkingLevel, WorktreeIndex,
+    WorktreeSessions,
 };
 use crate::claude_cli::resolve_cli_binary;
 use crate::http_server::EmitExt;
@@ -818,6 +819,94 @@ pub async fn list_all_sessions(app: AppHandle) -> Result<AllSessionsResponse, St
 
     log::trace!("Found {} worktree entries with sessions", entries.len());
     Ok(AllSessionsResponse { entries })
+}
+
+/// Return only the unread-session count across all projects.
+///
+/// The unread badge does not need session objects or message history. Keeping
+/// this result as a scalar prevents the frontend from retaining every session
+/// in a global TanStack Query cache just to render a badge.
+pub async fn get_unread_session_count(app: AppHandle) -> Result<usize, String> {
+    log::trace!("Counting unread sessions across all worktrees");
+
+    let projects_data = load_projects_data(&app)?;
+    let mut unread_count = 0;
+
+    for project in &projects_data.projects {
+        for worktree in projects_data
+            .worktrees_for_project(&project.id)
+            .into_iter()
+            .filter(|worktree| worktree.archived_at.is_none())
+        {
+            let index = load_index(&app, &worktree.id)?;
+            let mut legacy_summaries = HashMap::new();
+
+            for entry in &index.sessions {
+                if entry.archived_at.is_some() {
+                    continue;
+                }
+
+                let summary = if let Some(summary) = &entry.unread_summary {
+                    summary.clone()
+                } else {
+                    // Older indexes do not contain summaries. Read each legacy
+                    // metadata file once, then persist the compact result so
+                    // future count checks stay index-only.
+                    match load_metadata(&app, &entry.id) {
+                        Ok(Some(metadata)) => {
+                            let summary = metadata.to_unread_summary();
+                            legacy_summaries.insert(entry.id.clone(), summary.clone());
+                            summary
+                        }
+                        Ok(None) => {
+                            let summary = SessionUnreadSummary::default();
+                            legacy_summaries.insert(entry.id.clone(), summary.clone());
+                            summary
+                        }
+                        Err(error) => {
+                            log::warn!(
+                                "Failed to load legacy unread metadata for session {}: {error}",
+                                entry.id
+                            );
+                            continue;
+                        }
+                    }
+                };
+
+                if summary.is_unread() {
+                    unread_count += 1;
+                }
+            }
+
+            if !legacy_summaries.is_empty() {
+                let migration_result = with_index_mut(&app, &worktree.id, |index| {
+                    for (session_id, summary) in &legacy_summaries {
+                        if let Some(entry) = index.find_session_mut(session_id) {
+                            if entry.unread_summary.is_none() {
+                                entry.unread_summary = Some(summary.clone());
+                            }
+                        }
+                    }
+                    Ok(())
+                });
+                if let Err(error) = migration_result {
+                    log::warn!(
+                        "Failed to persist unread index migration for worktree {}: {error}",
+                        worktree.id
+                    );
+                }
+            }
+        }
+    }
+
+    Ok(unread_count)
+}
+
+fn is_unread_session(session: &Session) -> bool {
+    if session.archived_at.is_some() {
+        return false;
+    }
+    SessionUnreadSummary::from_session(session).is_unread()
 }
 
 /// Get a single session with message history.
@@ -10240,6 +10329,44 @@ mod tests {
         assert_eq!(event.session_id, "session-1");
         assert_eq!(event.worktree_id, "worktree-1");
         assert_eq!(event.error, "rate limit reached");
+    }
+
+    fn unread_test_session() -> Session {
+        let mut session = Session::new("Session".to_string(), 0, Backend::Claude);
+        session.updated_at = 20;
+        session.last_opened_at = Some(10);
+        session
+    }
+
+    #[test]
+    fn unread_session_count_matches_finished_unopened_activity() {
+        let mut session = unread_test_session();
+        session.last_run_status = Some(RunStatus::Completed);
+
+        assert!(is_unread_session(&session));
+
+        session.last_opened_at = Some(session.updated_at);
+        assert!(!is_unread_session(&session));
+    }
+
+    #[test]
+    fn unread_session_count_includes_waiting_and_review_activity() {
+        let mut waiting = unread_test_session();
+        waiting.waiting_for_input = true;
+        assert!(is_unread_session(&waiting));
+
+        let mut review = unread_test_session();
+        review.review_results = Some(serde_json::json!({ "status": "completed" }));
+        assert!(is_unread_session(&review));
+    }
+
+    #[test]
+    fn archived_sessions_are_never_unread() {
+        let mut session = unread_test_session();
+        session.archived_at = Some(30);
+        session.last_run_status = Some(RunStatus::Completed);
+
+        assert!(!is_unread_session(&session));
     }
 
     #[test]

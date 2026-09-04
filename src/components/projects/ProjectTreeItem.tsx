@@ -69,10 +69,16 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
     toggleProjectExpanded,
     openProjectSettings,
   } = useProjectsStore()
-  const { data: worktrees = [] } = useWorktrees(project.id)
+  const isProjectExpanded = expandedProjectIds.has(project.id)
+  const shouldLoadWorktrees =
+    isProjectExpanded || selectedProjectId === project.id
+  const { data: worktrees = [] } = useWorktrees(project.id, {
+    enabled: shouldLoadWorktrees,
+  })
   const { data: appDataDir = '' } = useAppDataDir()
-  const hasWorktrees = worktrees.length > 0
-  const isExpanded = hasWorktrees && expandedProjectIds.has(project.id)
+  const hasWorktrees =
+    worktrees.length > 0 || (project.worktree_count ?? 0) > 0
+  const isExpanded = hasWorktrees && isProjectExpanded
   const setNewWorktreeModalOpen = useUIStore(
     state => state.setNewWorktreeModalOpen
   )

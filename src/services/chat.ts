@@ -268,6 +268,7 @@ export const chatQueryKeys = {
       searchQuery,
       resultLimit,
     ] as const,
+  unreadSessionCount: () => ['unread-session-count'] as const,
 }
 
 export interface NativeCliHistorySession {
@@ -361,7 +362,7 @@ export function useSessions(
     },
     enabled: !!worktreeId && !!worktreePath,
     staleTime: 1000 * 60 * 5, // 5 minutes - enables instant tab bar rendering from cache
-    gcTime: 1000 * 60 * 5,
+    gcTime: 1000 * 60 * 2,
     refetchOnMount: true, // Respects staleTime; status changes pushed via streaming/cache:invalidate events
   })
 }
@@ -627,7 +628,27 @@ export function useAllSessions(enabled = true) {
     },
     enabled,
     staleTime: 1000 * 60 * 5, // 5 minutes
-    gcTime: 1000 * 60 * 5,
+    gcTime: 1000 * 60 * 2,
+  })
+}
+
+/**
+ * Load only the unread-session count for the title-bar badge.
+ * Full cross-project session data remains an explicit unread-popover query.
+ */
+export function useUnreadSessionCount() {
+  return useQuery({
+    queryKey: chatQueryKeys.unreadSessionCount(),
+    queryFn: async (): Promise<number> => {
+      try {
+        return await invoke<number>('get_unread_session_count')
+      } catch (error) {
+        logger.error('Failed to load unread session count', { error })
+        return 0
+      }
+    },
+    staleTime: 1000 * 60,
+    gcTime: 1000 * 60 * 2,
   })
 }
 
@@ -1124,10 +1145,15 @@ export function useCloseSession() {
 
       // Drop from the finished-session bell (reads from ['all-sessions']).
       removeSessionFromAllSessionsCache(queryClient, sessionId)
+      queryClient.invalidateQueries({
+        queryKey: chatQueryKeys.unreadSessionCount(),
+      })
       queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
 
       // Clear all session-scoped state
-      useChatStore.getState().clearSessionState(sessionId)
+      useChatStore
+        .getState()
+        .clearSessionState(sessionId, { removeReferences: true })
       clearSessionScrollState(sessionId)
       cleanupSessionTerminalForRemovedSession(worktreeId, sessionId)
 
@@ -1202,10 +1228,15 @@ export function useArchiveSession() {
 
       // Drop from the finished-session bell (reads from ['all-sessions']).
       removeSessionFromAllSessionsCache(queryClient, sessionId)
+      queryClient.invalidateQueries({
+        queryKey: chatQueryKeys.unreadSessionCount(),
+      })
       queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
 
       // Clear all session-scoped state
-      useChatStore.getState().clearSessionState(sessionId)
+      useChatStore
+        .getState()
+        .clearSessionState(sessionId, { removeReferences: true })
       clearSessionScrollState(sessionId)
       cleanupSessionTerminalForRemovedSession(worktreeId, sessionId)
 

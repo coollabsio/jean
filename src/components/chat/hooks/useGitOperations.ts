@@ -975,6 +975,9 @@ export function useGitOperations({
               queryClient.invalidateQueries({
                 queryKey: chatQueryKeys.sessions(activeWorktreeId),
               })
+              queryClient.invalidateQueries({
+                queryKey: chatQueryKeys.unreadSessionCount(),
+              })
               queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
             })
             toast.dismiss(toastId)

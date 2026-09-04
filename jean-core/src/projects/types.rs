@@ -183,6 +183,18 @@ pub struct Project {
     pub auto_fix_settings: Option<ProjectAutoFixSettings>,
 }
 
+/// Project data used by the sidebar and initial bootstrap.
+///
+/// Worktree metadata is intentionally reduced to counts here. Full worktrees
+/// and their session lists are loaded only when a project is opened.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProjectListItem {
+    #[serde(flatten)]
+    pub project: Project,
+    pub worktree_count: usize,
+    pub has_base_session: bool,
+}
+
 /// A git worktree created for a project
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Worktree {

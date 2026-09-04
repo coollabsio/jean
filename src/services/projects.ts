@@ -1,5 +1,10 @@
 import { useEffect } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+  type QueryClient,
+} from '@tanstack/react-query'
 import { invoke, useWsConnectionStatus, setAppDataDir } from '@/lib/transport'
 import { listen, type UnlistenFn } from '@/lib/transport'
 import { toast } from 'sonner'
@@ -24,11 +29,14 @@ import type {
   WorktreeBranchExistsEvent,
   WorktreeSetupCompleteEvent,
 } from '@/types/projects'
-import type { WorktreeSessions } from '@/types/chat'
+import type { AllSessionsResponse, WorktreeSessions } from '@/types/chat'
 import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import { getFileManagerName } from '@/lib/platform'
+import { clearSessionScrollState } from '@/components/chat/session-scroll-state'
+import { browserBackend } from '@/hooks/useBrowserPane'
+import { useBrowserStore } from '@/store/browser-store'
 
 import type { AppPreferences } from '@/types/preferences'
 import type { AdvisoryContext } from '@/types/github'
@@ -45,6 +53,49 @@ import {
 // Kept as `isTauri` for backward compatibility across the codebase
 export const isTauri = hasBackend
 
+/**
+ * Drop client-side state that is keyed by a worktree or one of its sessions.
+ * Worktree lifecycle events can arrive without this tab having initiated the
+ * mutation, so this is intentionally idempotent and used by both paths.
+ */
+function clearLocalWorktreeState(
+  worktreeId: string,
+  queryClient?: QueryClient
+): void {
+  const sessionIds = useChatStore.getState().clearWorktreeState(worktreeId)
+  useUIStore.getState().clearWorktreeState(worktreeId, sessionIds)
+  for (const sessionId of sessionIds) {
+    clearSessionScrollState(sessionId)
+  }
+  disposeAllWorktreeTerminals(worktreeId)
+  const browserTabIds = useBrowserStore.getState().clearWorktreeState(worktreeId)
+  for (const tabId of browserTabIds) {
+    void browserBackend.close(tabId)
+  }
+
+  if (queryClient) {
+    // Worktree session queries can contain full message-count/session payloads;
+    // remove them immediately instead of waiting for the short cache timer.
+    queryClient.removeQueries({
+      queryKey: ['chat', 'sessions', worktreeId],
+    })
+    for (const sessionId of sessionIds) {
+      queryClient.removeQueries({
+        queryKey: ['chat', 'session', sessionId],
+      })
+    }
+    queryClient.setQueryData<AllSessionsResponse>(['all-sessions'], old => {
+      if (!old) return old
+      const entries = old.entries.filter(
+        entry => entry.worktree_id !== worktreeId
+      )
+      return entries.length === old.entries.length ? old : { ...old, entries }
+    })
+    queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
+    queryClient.invalidateQueries({ queryKey: ['unread-session-count'] })
+  }
+}
+
 // Query keys for projects
 export const projectsQueryKeys = {
   all: ['projects'] as const,
@@ -52,6 +103,8 @@ export const projectsQueryKeys = {
   detail: (id: string) => [...projectsQueryKeys.all, 'detail', id] as const,
   worktrees: (projectId: string) =>
     [...projectsQueryKeys.all, 'worktrees', projectId] as const,
+  bootstrap: (projectId: string) =>
+    [...projectsQueryKeys.all, 'bootstrap', projectId] as const,
 }
 
 // ============================================================================
@@ -133,13 +186,66 @@ export async function fetchAndSeedProjectBootstrap(
 }
 
 /**
- * Hook to list worktrees for a specific project.
+ * Load the selected project's canvas data, including session lists.
  *
- * Uses `bootstrap_project` so session lists (with message counts) are seeded in
- * the same round-trip. That removes the worktrees → N× get_sessions waterfall
- * when opening a project over WebSocket (sidebar + canvas share this cache key).
+ * This is deliberately separate from useWorktrees: sidebar rows need only
+ * worktree metadata, while the canvas is the one view that needs all session
+ * cards for a project.
  */
-export function useWorktrees(projectId: string | null) {
+export function useProjectBootstrap(projectId: string | null) {
+  const queryClient = useQueryClient()
+
+  return useQuery({
+    queryKey: projectsQueryKeys.bootstrap(projectId ?? ''),
+    queryFn: async (): Promise<Worktree[]> => {
+      if (!hasBackendTransport() || !projectId) {
+        return []
+      }
+
+      try {
+        return await fetchAndSeedProjectBootstrap(projectId, queryClient)
+      } catch (error) {
+        // Keep the canvas usable with older/partial servers that do not have
+        // bootstrap_project yet. Session queries will load independently.
+        logger.warn(
+          'bootstrap_project failed, falling back to list_worktrees',
+          {
+            error,
+            projectId,
+          }
+        )
+        try {
+          const worktrees = await invoke<Worktree[]>('list_worktrees', {
+            projectId,
+          })
+          const previous = queryClient.getQueryData<Worktree[]>(
+            projectsQueryKeys.worktrees(projectId)
+          )
+          const merged = mergeWorktreesPreservingOptimistic(worktrees, previous)
+          queryClient.setQueryData(projectsQueryKeys.worktrees(projectId), merged)
+          return merged
+        } catch (fallbackError) {
+          logger.error('Failed to load canvas worktrees', {
+            error: fallbackError,
+            projectId,
+          })
+          return preserveQueryCacheOnError(fallbackError)
+        }
+      }
+    },
+    enabled: !!projectId,
+    staleTime: 1000 * 60 * 5,
+    gcTime: 1000 * 60 * 2,
+  })
+}
+
+/**
+ * Hook to list worktrees for a specific project without loading sessions.
+ */
+export function useWorktrees(
+  projectId: string | null,
+  options?: { enabled?: boolean }
+) {
   const queryClient = useQueryClient()
 
   return useQuery({
@@ -150,41 +256,32 @@ export function useWorktrees(projectId: string | null) {
       }
 
       try {
-        return await fetchAndSeedProjectBootstrap(projectId, queryClient)
+        logger.debug('Loading worktrees for project', { projectId })
+        const worktrees = await invoke<Worktree[]>('list_worktrees', {
+          projectId,
+        })
+        // Pending creations are client-only until git finishes; keep them when
+        // something else invalidates this query mid-create (issue #528).
+        const previous = queryClient.getQueryData<Worktree[]>(
+          projectsQueryKeys.worktrees(projectId)
+        )
+        const merged = mergeWorktreesPreservingOptimistic(worktrees, previous)
+        logger.info('Worktrees loaded successfully', {
+          count: worktrees.length,
+          pendingPreserved: merged.length - worktrees.length,
+        })
+        return merged
       } catch (error) {
-        // Older servers / partial deploy: fall back to worktrees-only.
-        logger.warn('bootstrap_project failed, falling back to list_worktrees', {
+        logger.error('Failed to load worktrees', {
           error,
           projectId,
         })
-        try {
-          logger.debug('Loading worktrees for project', { projectId })
-          const worktrees = await invoke<Worktree[]>('list_worktrees', {
-            projectId,
-          })
-          // Pending creations are client-only until git finishes; keep them when
-          // something else invalidates this query mid-create (issue #528).
-          const previous = queryClient.getQueryData<Worktree[]>(
-            projectsQueryKeys.worktrees(projectId)
-          )
-          const merged = mergeWorktreesPreservingOptimistic(worktrees, previous)
-          logger.info('Worktrees loaded successfully', {
-            count: worktrees.length,
-            pendingPreserved: merged.length - worktrees.length,
-          })
-          return merged
-        } catch (fallbackError) {
-          logger.error('Failed to load worktrees', {
-            error: fallbackError,
-            projectId,
-          })
-          return preserveQueryCacheOnError(fallbackError)
-        }
+        return preserveQueryCacheOnError(error)
       }
     },
-    enabled: !!projectId,
+    enabled: (options?.enabled ?? true) && !!projectId,
     staleTime: 1000 * 60 * 5,
-    gcTime: 1000 * 60 * 10,
+    gcTime: 1000 * 60 * 2,
   })
 }
 
@@ -1293,6 +1390,7 @@ export function useWorktreeEvents() {
       listen<WorktreeDeletedEvent>('worktree:deleted', event => {
         const { id, project_id, teardown_output } = event.payload
         logger.info('Worktree deleted (background complete)', { id })
+        clearLocalWorktreeState(id, queryClient)
 
         // Remove worktree from cache
         queryClient.setQueryData<Worktree[]>(
@@ -1379,6 +1477,7 @@ export function useWorktreeEvents() {
       listen<WorktreeArchivedEvent>('worktree:archived', event => {
         const { id, project_id } = event.payload
         logger.info('Worktree archived', { id })
+        clearLocalWorktreeState(id, queryClient)
 
         // Remove worktree from cache (archived worktrees are filtered out)
         queryClient.setQueryData<Worktree[]>(
@@ -1423,6 +1522,7 @@ export function useWorktreeEvents() {
         event => {
           const { id, project_id } = event.payload
           logger.info('Worktree permanently deleted', { id })
+          clearLocalWorktreeState(id, queryClient)
 
           // Invalidate archived worktrees query
           queryClient.invalidateQueries({ queryKey: ['archived-worktrees'] })
@@ -1610,10 +1710,13 @@ export function useDeleteWorktree() {
 
       // Drop the worktree's sessions from the finished-session bell, which
       // reads from ['all-sessions'].
+      queryClient.invalidateQueries({
+        queryKey: ['unread-session-count'],
+      })
       queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
 
       // Cleanup terminal instances for this worktree
-      disposeAllWorktreeTerminals(worktreeId)
+      clearLocalWorktreeState(worktreeId, queryClient)
 
       // Clear chat if the deleted worktree was active
       const { activeWorktreeId, clearActiveWorktree } = useChatStore.getState()
@@ -1685,7 +1788,7 @@ export function useArchiveWorktree() {
       queryClient.invalidateQueries({ queryKey: ['all-archived-sessions'] })
 
       // Cleanup terminal instances for this worktree
-      disposeAllWorktreeTerminals(worktreeId)
+      clearLocalWorktreeState(worktreeId, queryClient)
 
       // Clear chat if this worktree was active
       const { activeWorktreeId, clearActiveWorktree } = useChatStore.getState()
@@ -1930,7 +2033,7 @@ export function useCloseBaseSession() {
       })
 
       // Cleanup terminal instances for this worktree
-      disposeAllWorktreeTerminals(worktreeId)
+      clearLocalWorktreeState(worktreeId, queryClient)
 
       // Clear chat if the closed session was active
       const { activeWorktreeId, clearActiveWorktree } = useChatStore.getState()
@@ -1981,7 +2084,7 @@ export function useCloseBaseSessionClean() {
       })
 
       // Cleanup terminal instances for this worktree
-      disposeAllWorktreeTerminals(worktreeId)
+      clearLocalWorktreeState(worktreeId, queryClient)
 
       // Clear chat if the closed session was active
       const { activeWorktreeId, clearActiveWorktree } = useChatStore.getState()
@@ -2031,7 +2134,7 @@ export function useCloseBaseSessionArchive() {
       queryClient.invalidateQueries({ queryKey: ['all-archived-sessions'] })
 
       // Cleanup terminal instances for this worktree
-      disposeAllWorktreeTerminals(worktreeId)
+      clearLocalWorktreeState(worktreeId, queryClient)
 
       // Clear chat if the closed session was active
       const { activeWorktreeId, clearActiveWorktree } = useChatStore.getState()

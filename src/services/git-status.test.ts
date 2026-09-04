@@ -16,12 +16,14 @@ import {
   getRemotePollInterval,
   triggerImmediateRemotePoll,
   getGitDiff,
+  areGitStatusValuesEqual,
   useGitStatus,
   useAppFocusTracking,
   useWorktreePolling,
   performGitPull,
   performGitSync,
   type WorktreePollingInfo,
+  type GitStatusEvent,
 } from './git-status'
 
 const mockInvoke = vi.fn()
@@ -82,6 +84,28 @@ const createWrapper = (queryClient: QueryClient) => {
   return Wrapper
 }
 
+const createGitStatus = (
+  overrides: Partial<GitStatusEvent> = {}
+): GitStatusEvent => ({
+  worktree_id: 'wt-123',
+  current_branch: 'feature/test',
+  base_branch: 'main',
+  base_remote: undefined,
+  behind_count: 0,
+  ahead_count: 1,
+  has_updates: false,
+  checked_at: 100,
+  uncommitted_added: 0,
+  uncommitted_removed: 0,
+  branch_diff_added: 10,
+  branch_diff_removed: 2,
+  base_branch_ahead_count: 0,
+  base_branch_behind_count: 0,
+  worktree_ahead_count: 1,
+  unpushed_count: 1,
+  ...overrides,
+})
+
 describe('git-status service', () => {
   let queryClient: QueryClient
 
@@ -114,6 +138,26 @@ describe('git-status service', () => {
         'git-status',
         'wt-123',
       ])
+    })
+  })
+
+  describe('areGitStatusValuesEqual', () => {
+    it('ignores polling timestamps when status values are unchanged', () => {
+      expect(
+        areGitStatusValuesEqual(
+          createGitStatus({ checked_at: 100 }),
+          createGitStatus({ checked_at: 200 })
+        )
+      ).toBe(true)
+    })
+
+    it('detects repository status changes', () => {
+      expect(
+        areGitStatusValuesEqual(
+          createGitStatus(),
+          createGitStatus({ uncommitted_added: 1 })
+        )
+      ).toBe(false)
     })
   })
 

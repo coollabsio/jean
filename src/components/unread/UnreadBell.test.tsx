@@ -21,6 +21,9 @@ vi.mock('@/lib/transport', () => ({
 }))
 
 vi.mock('@/services/chat', () => ({
+  chatQueryKeys: {
+    unreadSessionCount: () => ['unread-session-count'],
+  },
   useAllSessions: () => ({ data: allSessions, isLoading: false }),
 }))
 

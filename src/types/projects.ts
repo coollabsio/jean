@@ -93,6 +93,10 @@ export interface Project {
   linked_project_ids?: string[]
   /** Per-project automated issue fixing settings */
   auto_fix_settings?: ProjectAutoFixSettings | null
+  /** Number of active worktrees, included in the lightweight project list response */
+  worktree_count?: number
+  /** Whether an active base-branch session exists */
+  has_base_session?: boolean
 }
 
 export interface DirEntry {
