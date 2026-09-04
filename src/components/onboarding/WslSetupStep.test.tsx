@@ -18,5 +18,8 @@ describe('WslSetupStep', () => {
 
     expect(screen.getByText('WSL')).toBeInTheDocument()
     expect(screen.getByText('Beta')).toBeInTheDocument()
+    expect(
+      screen.getByText(/Cursor runs without OS sandboxing/)
+    ).toBeInTheDocument()
   })
 })
