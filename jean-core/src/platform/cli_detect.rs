@@ -221,6 +221,37 @@ C:\Users\u\AppData\Roaming\npm\opencode.ps1";
     }
 
     #[test]
+    fn windows_path_detection_prefers_npm_cmd_for_version_manager_shims() {
+        let cases = [
+            (
+                r"C:\Users\u\AppData\Local\nvs\default\npm
+C:\Users\u\AppData\Local\nvs\default\npm.cmd
+C:\Users\u\AppData\Local\nvs\default\npm.ps1",
+                r"C:\Users\u\AppData\Local\nvs\default\npm.cmd",
+            ),
+            (
+                r"C:\Program Files\nodejs\npm
+C:\Program Files\nodejs\npm.cmd
+C:\Program Files\nodejs\npm.ps1",
+                r"C:\Program Files\nodejs\npm.cmd",
+            ),
+            (
+                r"C:\Users\u\AppData\Local\fnm\active\installation\npm
+C:\Users\u\AppData\Local\fnm\active\installation\npm.cmd
+C:\Users\u\AppData\Local\fnm\active\installation\npm.ps1",
+                r"C:\Users\u\AppData\Local\fnm\active\installation\npm.cmd",
+            ),
+        ];
+
+        for (output, expected) in cases {
+            assert_eq!(
+                select_cli_candidate(output, true, None),
+                Some(PathBuf::from(expected))
+            );
+        }
+    }
+
+    #[test]
     fn prefer_windows_executable_sibling_resolves_cmd_when_extensionless_is_selected() {
         let dir = tempfile::tempdir().expect("tempdir");
         let extensionless = dir.path().join("codex");
