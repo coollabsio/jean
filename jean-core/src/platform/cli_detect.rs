@@ -5,6 +5,7 @@
 //! bash cannot exec. Non-WSL paths use the existing native `where`/`which` lookup.
 
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use super::{cli_command, detect_package_manager, silent_command};
 
@@ -117,6 +118,46 @@ pub fn find_cli_in_host_path(tool: &str, jean_managed: Option<&Path>) -> Option<
         .filter(|path| path.exists())
 }
 
+/// Build a Command for a tool Jean expects on `PATH` — `npm`, `npx`, `node`,
+/// `git`, or an already-resolved CLI path.
+///
+/// Windows needs this indirection. When `CreateProcessW` searches `PATH` it only
+/// appends `.exe`, so spawning bare `npm` fails with "program not found" on a
+/// stock Node.js install, which ships `npm.cmd`/`npx.cmd` plus an extensionless
+/// shell shim that is not a valid executable image (issue #675). Resolving the
+/// name first lets [`host_cli_command`] hand the shim to `std::process`, which
+/// launches batch files through `cmd.exe` with the argument escaping that needs.
+///
+/// Paths stay on the Windows host rather than routing through WSL, because these
+/// callers pass host directories (`npm install --prefix <app data dir>`).
+///
+/// Non-Windows targets spawn `tool` directly: the kernel already resolves `PATH`
+/// and shebangs, so no lookup subprocess is spawned there.
+pub fn path_tool_command(tool: &str) -> Command {
+    if !cfg!(target_os = "windows") {
+        return silent_command(tool);
+    }
+
+    // A bare name needs a `where` lookup; anything with a directory component is
+    // already resolved (self-update commands pass the detected CLI path) and only
+    // needs the shim handling.
+    let resolved = if Path::new(tool)
+        .parent()
+        .is_some_and(|parent| !parent.as_os_str().is_empty())
+    {
+        Some(PathBuf::from(tool))
+    } else {
+        find_cli_in_host_path(tool, None)
+    };
+
+    match resolved {
+        Some(path) => super::host_cli_command(&path.to_string_lossy(), None),
+        // Nothing on PATH: spawn bare so callers still surface the OS
+        // "not found" error and their own "install Node.js" hint.
+        None => silent_command(tool),
+    }
+}
+
 /// Select the path Jean should use from `where`/`which` output.
 ///
 /// Windows npm installs often produce several shims for one command. The
@@ -205,6 +246,53 @@ mod tests {
 
     use super::super::wsl_detect_package_manager;
     use super::select_cli_candidate;
+
+    #[test]
+    fn windows_path_detection_prefers_npm_cmd_when_no_exe_shim_exists() {
+        // `where npm` on a stock Node.js install: an extensionless shell shim, the
+        // batch shim Windows can actually launch, and a PowerShell shim. There is
+        // no `npm.exe` at all, so bare `npm` is unlaunchable (issue #675).
+        let output = "C:\\Program Files\\nodejs\\npm\r\n\
+C:\\Program Files\\nodejs\\npm.cmd\r\n\
+C:\\Program Files\\nodejs\\npm.ps1\r\n";
+
+        assert_eq!(
+            select_cli_candidate(output, true, None),
+            Some(PathBuf::from(r"C:\Program Files\nodejs\npm.cmd"))
+        );
+    }
+
+    #[test]
+    fn windows_path_detection_accepts_a_lone_npx_cmd_shim() {
+        let output = "C:\\Program Files\\nodejs\\npx.cmd\r\n";
+
+        assert_eq!(
+            select_cli_candidate(output, true, None),
+            Some(PathBuf::from(r"C:\Program Files\nodejs\npx.cmd"))
+        );
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn path_tool_command_spawns_the_bare_tool_off_windows() {
+        // No `which` probe, no shell wrapper: the kernel resolves PATH itself.
+        let cmd = super::path_tool_command("npm");
+
+        assert_eq!(cmd.get_program(), std::ffi::OsStr::new("npm"));
+        assert_eq!(cmd.get_args().count(), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn path_tool_command_runs_a_real_path_tool_off_windows() {
+        let output = super::path_tool_command("echo")
+            .arg("jean")
+            .output()
+            .expect("echo should be spawnable from PATH");
+
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "jean");
+    }
 
     #[test]
     fn windows_path_detection_prefers_cmd_shim_over_extensionless_npm_shim() {
@@ -327,5 +415,89 @@ C:\Users\u\AppData\Roaming\npm\codex.cmd";
     #[test]
     fn wsl_pkg_mgr_system() {
         assert_eq!(wsl_detect_package_manager("/usr/bin/gh"), None);
+    }
+}
+
+/// Node tooling must never be spawned as a bare program name.
+///
+/// Windows `PATH` search only appends `.exe`, so a bare spawn of the Node
+/// launchers cannot find the `.cmd` shims a stock install ships and reports them
+/// as missing (issue #675). New call sites have to go through
+/// [`path_tool_command`], which resolves the shim first.
+#[cfg(test)]
+mod node_launcher_audit {
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    fn repo_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("jean-core should live under the repo root")
+            .to_path_buf()
+    }
+
+    fn collect_rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_rust_files(&path, out);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    fn line_number(source: &str, byte_offset: usize) -> usize {
+        source[..byte_offset]
+            .bytes()
+            .filter(|&b| b == b'\n')
+            .count()
+            + 1
+    }
+
+    #[test]
+    fn npm_and_npx_are_never_spawned_as_bare_program_names() {
+        let root = repo_root();
+        let mut files = Vec::new();
+        collect_rust_files(&root.join("jean-core/src"), &mut files);
+        collect_rust_files(&root.join("src-tauri/src"), &mut files);
+        assert!(!files.is_empty(), "audit scanned no Rust sources");
+
+        // Built at runtime so this module's own source cannot match the needles.
+        let needles: Vec<String> = ["npm", "npx"]
+            .iter()
+            .flat_map(|tool| {
+                [
+                    format!("silent_command(\"{tool}\")"),
+                    format!("Command::new(\"{tool}\")"),
+                ]
+            })
+            .collect();
+
+        let mut violations = Vec::new();
+        for path in &files {
+            let Ok(source) = fs::read_to_string(path) else {
+                continue;
+            };
+            let rel = path.strip_prefix(&root).unwrap_or(path);
+            for needle in &needles {
+                for (idx, _) in source.match_indices(needle.as_str()) {
+                    violations.push(format!(
+                        "{}:{}: {needle} — use path_tool_command() so Windows finds the .cmd shim",
+                        rel.to_string_lossy().replace('\\', "/"),
+                        line_number(&source, idx)
+                    ));
+                }
+            }
+        }
+
+        assert!(
+            violations.is_empty(),
+            "Bare npm/npx spawns found (issue #675):\n{}",
+            violations.join("\n")
+        );
     }
 }

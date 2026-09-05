@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::platform::silent_command;
+use crate::platform::path_tool_command;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -17,8 +17,13 @@ pub struct SystemPrerequisites {
     pub manual_install_url: String,
 }
 
+/// Read `<command> --version`.
+///
+/// Goes through [`path_tool_command`] so Windows finds `npm.cmd` — bare `npm` is
+/// not launchable by `CreateProcessW`, which would report npm as missing on a
+/// perfectly good Node.js install (issue #675).
 fn version(command: &str) -> Option<String> {
-    let output = silent_command(command).arg("--version").output().ok()?;
+    let output = path_tool_command(command).arg("--version").output().ok()?;
     output
         .status
         .success()

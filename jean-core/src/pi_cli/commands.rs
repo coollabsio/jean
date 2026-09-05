@@ -6,7 +6,7 @@ use std::time::Duration;
 use tauri::AppHandle;
 
 use super::config::{find_pi_in_path, get_cli_dir, resolve_cli_binary};
-use crate::platform::silent_command;
+use crate::platform::path_tool_command;
 
 const PI_NPM_PACKAGE: &str = "@earendil-works/pi-coding-agent";
 
@@ -642,7 +642,7 @@ pub async fn install_pi_cli(app: AppHandle, version: Option<String>) -> Result<(
         Some(version) if !version.trim().is_empty() => format!("{PI_NPM_PACKAGE}@{version}"),
         _ => PI_NPM_PACKAGE.to_string(),
     };
-    let status = silent_command("npm")
+    let status = path_tool_command("npm")
         .args(["install", "--prefix"])
         .arg(&dir)
         .arg("--ignore-scripts")

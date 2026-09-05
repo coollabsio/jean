@@ -690,7 +690,8 @@ async fn install_caveman(app: &AppHandle) -> Result<String, String> {
 
                 #[cfg(not(unix))]
                 {
-                    let mut command = silent_command("npx");
+                    // Windows ships `npx.cmd`, which is not directly launchable.
+                    let mut command = crate::platform::path_tool_command("npx");
                     command.args(args);
                     command.output()
                 }

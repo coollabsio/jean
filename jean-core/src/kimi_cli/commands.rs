@@ -10,7 +10,7 @@ use super::config::{
     binary_exists, ensure_cli_dir, find_system_kimi_binary, get_cli_binary_path, get_cli_dir,
     resolve_cli_binary,
 };
-use crate::platform::silent_command;
+use crate::platform::path_tool_command;
 
 const AUTH_TIMEOUT: Duration = Duration::from_secs(5);
 const PACKAGE_NAME: &str = "@moonshot-ai/kimi-code";
@@ -410,7 +410,7 @@ pub async fn get_kimi_install_command(app: AppHandle) -> Result<KimiInstallComma
 pub async fn install_kimi_cli(app: AppHandle, version: Option<String>) -> Result<(), String> {
     crate::prerequisites::require_npm("Kimi Code CLI")?;
     let dir = ensure_cli_dir(&app)?;
-    let output = silent_command("npm")
+    let output = path_tool_command("npm")
         .args(["install", "--prefix"])
         .arg(&dir)
         .arg(package(version.as_deref()))
