@@ -41,6 +41,9 @@ pub enum ServerEvent {
         method: String,
         params: Value,
     },
+    /// The detached transport was restored. The resume snapshot lets the
+    /// consumer backfill events emitted while the WebSocket was disconnected.
+    Reconnected { snapshot: Value },
     /// Server process died (EOF on stdout) or the connection to a detached
     /// server was lost.
     ServerDied,
@@ -311,6 +314,8 @@ fn use_stdio_transport() -> bool {
 
 fn ensure_running_inner(app: &AppHandle) -> Result<(), String> {
     let mut guard = CODEX_SERVER.lock().unwrap();
+    #[cfg(unix)]
+    let mut reconnect_sessions = None;
 
     // Check if existing connection is still alive
     if let Some(ref server) = *guard {
@@ -322,6 +327,10 @@ fn ensure_running_inner(app: &AppHandle) -> Result<(), String> {
         // pid/socket files alone so the reconnect path below can adopt it.
         log::warn!("Codex app-server connection died, reconnecting/respawning...");
         if let Some(mut old) = guard.take() {
+            #[cfg(unix)]
+            if matches!(old.transport, Transport::Socket { .. }) {
+                reconnect_sessions = Some(old.active_sessions.clone());
+            }
             match old.transport {
                 Transport::Stdio { ref mut child, .. } => {
                     let _ = child.kill();
@@ -351,10 +360,27 @@ fn ensure_running_inner(app: &AppHandle) -> Result<(), String> {
 
     #[cfg(unix)]
     if !use_stdio_transport() {
-        return ensure_running_socket(app, &cli_path, &mut guard);
+        let sessions_to_resume = reconnect_sessions.clone();
+        let result = ensure_running_socket(app, &cli_path, &mut guard, reconnect_sessions);
+        drop(guard);
+        finish_session_recovery(&result, sessions_to_resume.as_ref());
+        return result;
     }
 
     ensure_running_stdio(&cli_path, &mut guard)
+}
+
+#[cfg(unix)]
+fn finish_session_recovery(result: &Result<(), String>, active_sessions: Option<&ActiveSessions>) {
+    let Some(active_sessions) = active_sessions else {
+        return;
+    };
+
+    if result.is_ok() {
+        resume_active_sessions(active_sessions);
+    } else {
+        notify_sessions_server_died(active_sessions);
+    }
 }
 
 // =============================================================================
@@ -528,10 +554,18 @@ fn connect_socket_transport(
             }
         }
 
-        fail_connection(&pending_requests, &active_sessions, &server_dead);
-
         // Connection death only implies process death if the PID is gone.
-        if !is_process_alive(server_pid) {
+        if is_process_alive(server_pid) {
+            if mark_connection_dead(&pending_requests, &server_dead) {
+                reconnect_detached_server(
+                    server_pid,
+                    socket_path_owned,
+                    active_sessions,
+                    server_dead,
+                );
+            }
+        } else {
+            fail_connection(&pending_requests, &active_sessions, &server_dead);
             log::warn!("Codex app-server process (pid={server_pid}) is dead");
             remove_socket_file(Some(&socket_path_owned));
             remove_pid_file();
@@ -541,9 +575,119 @@ fn connect_socket_transport(
     Ok(outgoing_tx)
 }
 
+#[cfg(unix)]
+fn reconnect_detached_server(
+    server_pid: u32,
+    socket_path: PathBuf,
+    active_sessions: ActiveSessions,
+    old_server_dead: Arc<AtomicBool>,
+) {
+    std::thread::spawn(move || {
+        log::warn!(
+            "Codex app-server connection lost while process {server_pid} is alive; reconnecting"
+        );
+
+        let mut current_connection = old_server_dead;
+        for attempt in 1..=8 {
+            if attempt > 1 {
+                std::thread::sleep(std::time::Duration::from_millis((attempt * 250).min(2_000)));
+            }
+
+            if !is_process_alive(server_pid) {
+                break;
+            }
+
+            let pending_requests: PendingRequests = Arc::new(Mutex::new(HashMap::new()));
+            let server_dead = Arc::new(AtomicBool::new(false));
+            let outgoing_tx = match connect_socket_transport(
+                &socket_path,
+                server_pid,
+                pending_requests.clone(),
+                active_sessions.clone(),
+                server_dead.clone(),
+            ) {
+                Ok(tx) => tx,
+                Err(error) => {
+                    log::warn!("Codex app-server reconnect attempt {attempt} failed: {error}");
+                    continue;
+                }
+            };
+
+            let mut guard = CODEX_SERVER.lock().unwrap();
+            let still_current = guard
+                .as_ref()
+                .is_some_and(|server| Arc::ptr_eq(&server.server_dead, &current_connection));
+            if !still_current {
+                return;
+            }
+
+            *guard = Some(CodexAppServerInner {
+                transport: Transport::Socket {
+                    outgoing_tx,
+                    socket_path: socket_path.clone(),
+                },
+                server_pid,
+                next_request_id: AtomicU64::new(1),
+                pending_requests,
+                active_sessions: active_sessions.clone(),
+                server_dead,
+            });
+
+            match do_initialize(&guard) {
+                Ok(()) => {
+                    drop(guard);
+                    resume_active_sessions(&active_sessions);
+                    log::info!(
+                        "Reconnected to live codex app-server (pid={server_pid}) without stopping active runs"
+                    );
+                    return;
+                }
+                Err(error) => {
+                    log::warn!(
+                        "Codex app-server reconnect initialization attempt {attempt} failed: {error}"
+                    );
+                    current_connection = guard
+                        .as_ref()
+                        .expect("reconnected server exists")
+                        .server_dead
+                        .clone();
+                }
+            }
+        }
+
+        log::error!("Could not reconnect to live codex app-server (pid={server_pid})");
+        notify_sessions_server_died(&active_sessions);
+    });
+}
+
+#[cfg(unix)]
+fn resume_active_sessions(active_sessions: &ActiveSessions) {
+    let thread_ids = active_sessions
+        .lock()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
+    for thread_id in thread_ids {
+        let params = serde_json::json!({
+            "threadId": thread_id,
+            "persistExtendedHistory": true,
+        });
+        match send_request("thread/resume", params) {
+            Ok(snapshot) => notify_thread_reconnected(active_sessions, &thread_id, snapshot),
+            Err(error) => {
+                log::error!("Failed to resume Codex thread {thread_id} after reconnect: {error}");
+                notify_thread_server_died(active_sessions, &thread_id);
+            }
+        }
+    }
+}
+
 /// Try to adopt a live detached server recorded in the pid file.
 #[cfg(unix)]
-fn try_adopt_existing_server() -> Option<CodexAppServerInner> {
+fn try_adopt_existing_server(
+    active_sessions: Option<ActiveSessions>,
+) -> Option<CodexAppServerInner> {
     let record = read_pid_file()?;
     let socket_path = record.socket_path.clone()?;
     if !is_process_alive(record.server_pid) {
@@ -553,7 +697,7 @@ fn try_adopt_existing_server() -> Option<CodexAppServerInner> {
     }
 
     let pending_requests: PendingRequests = Arc::new(Mutex::new(HashMap::new()));
-    let active_sessions: ActiveSessions = Arc::new(Mutex::new(HashMap::new()));
+    let active_sessions = active_sessions.unwrap_or_else(|| Arc::new(Mutex::new(HashMap::new())));
     let server_dead = Arc::new(AtomicBool::new(false));
 
     match connect_socket_transport(
@@ -608,10 +752,11 @@ fn ensure_running_socket(
     app: &AppHandle,
     cli_path: &std::path::Path,
     guard: &mut std::sync::MutexGuard<'_, Option<CodexAppServerInner>>,
+    active_sessions: Option<ActiveSessions>,
 ) -> Result<(), String> {
     // 1. Adopt a live detached server from a previous Jean process (or a
     //    previous connection of this process).
-    if let Some(server) = try_adopt_existing_server() {
+    if let Some(server) = try_adopt_existing_server(active_sessions.clone()) {
         **guard = Some(server);
         SERVER_GENERATION.fetch_add(1, Ordering::SeqCst);
         return do_initialize(guard);
@@ -657,7 +802,7 @@ fn ensure_running_socket(
     )?;
 
     let pending_requests: PendingRequests = Arc::new(Mutex::new(HashMap::new()));
-    let active_sessions: ActiveSessions = Arc::new(Mutex::new(HashMap::new()));
+    let active_sessions = active_sessions.unwrap_or_else(|| Arc::new(Mutex::new(HashMap::new())));
     let server_dead = Arc::new(AtomicBool::new(false));
 
     let outgoing_tx = connect_socket_transport(
@@ -803,21 +948,18 @@ fn do_initialize(
 
     write_message(&server.transport, &request)?;
 
-    // Drop the mutex guard temporarily is not possible here since we hold it,
-    // so we rely on the reader thread running concurrently.
-    // Use a blocking recv with timeout.
-    let response = rx
-        .blocking_recv()
-        .map_err(|_| "Initialize response channel dropped")?;
-
-    match response {
-        Ok(result) => {
-            log::info!("Codex app-server initialized: {result}");
-        }
-        Err(e) => {
-            return Err(format!("Initialize failed: {e}"));
-        }
-    }
+    // Keep initialization bounded: this function holds CODEX_SERVER while the
+    // reader resolves the response, so an unresponsive socket must not freeze
+    // every future request and shutdown operation.
+    let (wait_tx, wait_rx) = std::sync::mpsc::channel();
+    tauri::async_runtime::spawn(async move {
+        let _ = wait_tx.send(rx.await);
+    });
+    let response = wait_rx
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .map_err(|_| "Timed out waiting for Codex app-server initialize".to_string())?
+        .map_err(|_| "Initialize response channel dropped".to_string())??;
+    log::info!("Codex app-server initialized: {response}");
 
     // Send initialized notification (no id)
     let notification = serde_json::json!({
@@ -1126,18 +1268,41 @@ fn fail_connection(
     active_sessions: &ActiveSessions,
     server_dead: &Arc<AtomicBool>,
 ) {
-    if server_dead.swap(true, Ordering::SeqCst) {
+    if !mark_connection_dead(pending_requests, server_dead) {
         return;
     }
 
-    // Notify all active sessions
+    notify_sessions_server_died(active_sessions);
+}
+
+fn mark_connection_dead(pending_requests: &PendingRequests, server_dead: &Arc<AtomicBool>) -> bool {
+    if server_dead.swap(true, Ordering::SeqCst) {
+        return false;
+    }
+    fail_pending_requests(pending_requests);
+    true
+}
+
+fn notify_sessions_server_died(active_sessions: &ActiveSessions) {
     let sessions = active_sessions.lock().unwrap();
     for ctx in sessions.values() {
         let _ = ctx.event_tx.send(ServerEvent::ServerDied);
     }
-    drop(sessions);
+}
 
-    // Fail all pending requests
+fn notify_thread_server_died(active_sessions: &ActiveSessions, thread_id: &str) {
+    if let Some(ctx) = active_sessions.lock().unwrap().get(thread_id) {
+        let _ = ctx.event_tx.send(ServerEvent::ServerDied);
+    }
+}
+
+fn notify_thread_reconnected(active_sessions: &ActiveSessions, thread_id: &str, snapshot: Value) {
+    if let Some(ctx) = active_sessions.lock().unwrap().get(thread_id) {
+        let _ = ctx.event_tx.send(ServerEvent::Reconnected { snapshot });
+    }
+}
+
+fn fail_pending_requests(pending_requests: &PendingRequests) {
     let mut pr = pending_requests.lock().unwrap();
     for (_id, sender) in pr.drain() {
         let _ = sender.send(Err("Server died".to_string()));
@@ -1237,6 +1402,74 @@ fn route_server_request(active_sessions: &ActiveSessions, id: u64, method: Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recoverable_disconnect_fails_pending_requests_without_stopping_active_session() {
+        let pending: PendingRequests = Arc::new(Mutex::new(HashMap::new()));
+        let sessions: ActiveSessions = Arc::new(Mutex::new(HashMap::new()));
+        let dead = Arc::new(AtomicBool::new(false));
+        let (event_tx, event_rx) = std::sync::mpsc::channel();
+        let (request_tx, request_rx) = tokio::sync::oneshot::channel();
+
+        sessions.lock().unwrap().insert(
+            "thread-1".to_string(),
+            SessionContext {
+                session_id: "session-1".to_string(),
+                worktree_id: "worktree-1".to_string(),
+                event_tx,
+            },
+        );
+        pending.lock().unwrap().insert(1, request_tx);
+
+        assert!(mark_connection_dead(&pending, &dead));
+        assert!(request_rx.blocking_recv().unwrap().is_err());
+        assert!(event_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn reconnect_snapshot_is_delivered_to_the_active_run() {
+        let sessions: ActiveSessions = Arc::new(Mutex::new(HashMap::new()));
+        let (event_tx, event_rx) = std::sync::mpsc::channel();
+        sessions.lock().unwrap().insert(
+            "thread-1".to_string(),
+            SessionContext {
+                session_id: "session-1".to_string(),
+                worktree_id: "worktree-1".to_string(),
+                event_tx,
+            },
+        );
+        let snapshot = serde_json::json!({
+            "thread": {"turns": [{"id": "turn-1", "status": "completed"}]}
+        });
+
+        notify_thread_reconnected(&sessions, "thread-1", snapshot.clone());
+
+        match event_rx.try_recv().unwrap() {
+            ServerEvent::Reconnected { snapshot: received } => {
+                assert_eq!(received, snapshot);
+            }
+            other => panic!("Expected reconnect snapshot, got {other:?}"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_concurrent_recovery_stops_the_preserved_run() {
+        let sessions: ActiveSessions = Arc::new(Mutex::new(HashMap::new()));
+        let (event_tx, event_rx) = std::sync::mpsc::channel();
+        sessions.lock().unwrap().insert(
+            "thread-1".to_string(),
+            SessionContext {
+                session_id: "session-1".to_string(),
+                worktree_id: "worktree-1".to_string(),
+                event_tx,
+            },
+        );
+
+        finish_session_recovery(&Err("initialize failed".to_string()), Some(&sessions));
+
+        assert!(matches!(event_rx.try_recv(), Ok(ServerEvent::ServerDied)));
+    }
 
     #[test]
     fn server_pid_record_roundtrip_with_socket_path() {

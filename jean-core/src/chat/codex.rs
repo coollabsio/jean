@@ -1911,6 +1911,7 @@ fn process_turn_events(
     let mut error_emitted = false;
     let mut usage: Option<UsageData> = None;
     let mut received_completed_agent_message = false;
+    let mut recovered_connection = false;
 
     // Coalesce token-rate text/thinking deltas into fewer, larger
     // chat:chunk / chat:thinking events. Flushed before any other event is
@@ -2144,6 +2145,62 @@ fn process_turn_events(
                     is_yolo_mode,
                 );
             }
+            ServerEvent::Reconnected { snapshot } => {
+                recovered_connection = true;
+                log::info!(
+                    "Codex app-server connection recovered during turn for session {session_id}"
+                );
+                flush_stream_coalescers(
+                    app,
+                    session_id,
+                    worktree_id,
+                    run_id,
+                    &mut chunk_coalescer,
+                    &mut thinking_coalescer,
+                );
+                if let Some(ref mut writer) = output_writer {
+                    let _ = writer.flush();
+                }
+
+                let disposition = classify_codex_resume(&snapshot, recovery_turn_id, true);
+                if disposition != CodexResumeDisposition::Active {
+                    if let Err(error) = append_codex_thread_snapshot_to_history_file(
+                        output_file,
+                        &snapshot,
+                        recovery_turn_id,
+                        disposition == CodexResumeDisposition::Idle,
+                    ) {
+                        log::warn!("Failed to backfill Codex reconnect snapshot: {error}");
+                    }
+                }
+
+                match disposition {
+                    CodexResumeDisposition::Active => continue,
+                    CodexResumeDisposition::Idle => break 'outer,
+                    CodexResumeDisposition::Interrupted => {
+                        cancelled = true;
+                        server_interrupted = true;
+                        break 'outer;
+                    }
+                    CodexResumeDisposition::Failed => {
+                        if let Some(turn) = select_codex_recovery_turn(&snapshot, recovery_turn_id)
+                        {
+                            let raw_error = codex_turn_error_message(turn)
+                                .unwrap_or_else(|| "Unknown Codex error".to_string());
+                            let _ = app.emit_all(
+                                "chat:error",
+                                &ErrorEvent {
+                                    session_id: session_id.to_string(),
+                                    worktree_id: worktree_id.to_string(),
+                                    error: format_codex_user_error(&raw_error),
+                                },
+                            );
+                        }
+                        error_emitted = true;
+                        break 'outer;
+                    }
+                }
+            }
             ServerEvent::ServerDied => {
                 log::error!("Codex app-server died during turn for session {session_id}");
                 flush_stream_coalescers(
@@ -2173,6 +2230,31 @@ fn process_turn_events(
 
         if completed {
             break 'outer;
+        }
+    }
+
+    // A reconnect snapshot can contain in-progress items. Do not persist those
+    // as completed. Once the turn finishes, read one authoritative snapshot
+    // and backfill everything emitted during the connection gap.
+    if recovered_connection && completed {
+        if let Some(ref mut writer) = output_writer {
+            let _ = writer.flush();
+        }
+        match super::codex_server::send_request(
+            "thread/read",
+            serde_json::json!({"threadId": thread_id, "includeTurns": true}),
+        ) {
+            Ok(snapshot) => {
+                if let Err(error) = append_codex_thread_snapshot_to_history_file(
+                    output_file,
+                    &snapshot,
+                    recovery_turn_id,
+                    true,
+                ) {
+                    log::warn!("Failed to backfill completed Codex reconnect snapshot: {error}");
+                }
+            }
+            Err(error) => log::warn!("Failed to read completed Codex reconnect snapshot: {error}"),
         }
     }
 
