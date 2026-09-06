@@ -898,7 +898,7 @@ describe('useStreamingEvents cancellation sanitization', () => {
     expect(useChatStore.getState().isSessionReviewing('session-1')).toBe(true)
   })
 
-  it('does not restore input when cancelling an already-running prompt with no streamed content yet', async () => {
+  it('restores input when cancelling an already-running prompt with no streamed content yet', async () => {
     const queryClient = createQueryClient()
     const wrapper = createWrapper(queryClient)
 
@@ -952,12 +952,14 @@ describe('useStreamingEvents cancellation sanitization', () => {
       messages: { id: string; role: string; content: string }[]
     }>(['chat', 'session', 'session-1'])
 
-    // Prompt already started — keep the user message, do not put it back in input.
+    // A live cancellation keeps the user message in history, but restores the
+    // draft so the prompt can be sent again.
     expect(session?.messages.map(message => message.id)).toEqual([
       'current-user',
-      'cancelled-session-1-2000',
     ])
-    expect(useChatStore.getState().inputDrafts['session-1']).toBe('')
+    expect(useChatStore.getState().inputDrafts['session-1']).toBe(
+      'already running'
+    )
     expect(useChatStore.getState().lastSentMessages['session-1']).toBe(
       undefined
     )
