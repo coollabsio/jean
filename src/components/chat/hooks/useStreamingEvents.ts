@@ -1932,8 +1932,9 @@ export default function useStreamingEvents({
         // Restore a prompt with no assistant output, regardless of whether the
         // backend classified cancellation as undo_send. Normal cancellation
         // events use undo_send=false once a run has started, but the prompt is
-        // still retryable when nothing was streamed. Queued messages are
-        // handled by "Skip to Next" and must not be restored here.
+        // still retryable when nothing was streamed. Skip restoration when
+        // queued messages exist ("Skip to Next") or the user already typed a
+        // newer draft (hydrate persisted cancelled output instead).
         const hasToolCalls = toolCalls && toolCalls.length > 0
         const hasText = sanitizedContent.trim().length > 0
         const hasThinking = !!streamingThinkingContent[session_id]
@@ -1943,8 +1944,15 @@ export default function useStreamingEvents({
           hasToolCalls || hasText || hasThinking || hasContentBlocks
         const hasQueuedMessages =
           (useChatStore.getState().messageQueues[session_id] ?? []).length > 0
-        const shouldHydrateCancelledFromBackend = !undo_send && !hasContent
-        const shouldRestoreMessage = !hasQueuedMessages && !hasContent
+        const hasCurrentDraft = !!useChatStore
+          .getState()
+          .inputDrafts[session_id]?.trim()
+        const shouldRestoreMessage =
+          !hasQueuedMessages && !hasCurrentDraft && (undo_send || !hasContent)
+        // Skip hydrate while restoring so backend history (which omits
+        // no-output cancelled runs) cannot wipe the optimistic user turn.
+        const shouldHydrateCancelledFromBackend =
+          !undo_send && !hasContent && !shouldRestoreMessage
 
         const removeLatestUserMessageFromCache = () => {
           queryClient.setQueryData<Session>(
@@ -1962,9 +1970,9 @@ export default function useStreamingEvents({
         }
 
         // Update TanStack Query cache FIRST (before clearing Zustand streaming state)
-        // so the cancelled optimistic prompt/partial response disappears as soon
-        // as StreamingMessage unmounts. The backend still keeps run logs/metadata
-        // for diagnostics, but cancelled turns are not visible chat history.
+        // so StreamingMessage unmount does not flicker. undo_send removes the
+        // optimistic user turn; a live no-output cancel keeps it visible and
+        // restores the draft. Partial output stays in history, marked cancelled.
 
         // Optimistically update last_run_status so "restored session" indicator hides
         queryClient.setQueryData<Session>(

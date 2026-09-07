@@ -733,6 +733,10 @@ describe('BackendModelPickerContent', () => {
       />
     )
 
+    await user.type(
+      screen.getByPlaceholderText(/search codex models/i),
+      'GPT 5.6 Sol'
+    )
     await user.keyboard('{ArrowDown}')
     await user.keyboard('{Meta>}f{/Meta}')
 

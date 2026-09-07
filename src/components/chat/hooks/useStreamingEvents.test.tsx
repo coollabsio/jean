@@ -963,6 +963,10 @@ describe('useStreamingEvents cancellation sanitization', () => {
     expect(useChatStore.getState().lastSentMessages['session-1']).toBe(
       undefined
     )
+    expect(mockInvoke).not.toHaveBeenCalledWith(
+      'get_session',
+      expect.anything()
+    )
   })
 
   it('restores an instant-cancelled prompt while keeping prior history visible', async () => {

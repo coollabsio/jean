@@ -150,12 +150,14 @@ describe('model option helpers', () => {
 
   it('offers GPT 5.6 preview variants in Codex selectors', () => {
     const values = codexDefaultModelOptions.map(option => option.value)
-    expect(values.slice(0, 3)).toEqual([
+    expect(values.slice(0, 4)).toEqual([
+      'gpt-6-astra',
       'gpt-5.6-sol',
       'gpt-5.6-terra',
       'gpt-5.6-luna',
     ])
     expect(values).not.toContain('gpt-5.6')
+    expect(normalizeCodexModel('gpt-6-astra')).toBe('gpt-6-astra')
     expect(normalizeCodexModel('gpt-5.6-sol')).toBe('gpt-5.6-sol')
     expect(normalizeCodexModel('gpt-5.6-terra')).toBe('gpt-5.6-terra')
     expect(normalizeCodexModel('gpt-5.6-luna')).toBe('gpt-5.6-luna')
