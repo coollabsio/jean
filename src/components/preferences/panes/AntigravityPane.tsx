@@ -173,7 +173,9 @@ export function AntigravityPane() {
                 ? 'Checking authentication…'
                 : auth.data?.authenticated
                   ? 'Authenticated'
-                  : `Not authenticated${auth.data?.error ? ` · ${auth.data.error}` : ''}`}
+                  : auth.data?.timedOut
+                    ? 'Auth check timed out. Try again or run `agy` manually.'
+                    : `Not authenticated${auth.data?.error ? ` · ${auth.data.error}` : ''}`}
           </span>
           {status.data?.installed && status.data.path && (
             <Button

@@ -8,6 +8,13 @@ const installMutate = vi.fn()
 const uninstallMutate = vi.fn()
 const openLogin = vi.fn()
 
+interface AuthData {
+  authenticated: boolean
+  error?: string | null
+  timedOut?: boolean
+}
+let authData: AuthData = { authenticated: true }
+
 vi.mock('@/store/ui-store', () => ({
   useUIStore: (
     selector: (state: { openCliLoginModal: typeof openLogin }) => unknown
@@ -34,7 +41,7 @@ vi.mock('@/services/antigravity-cli', () => ({
   useAntigravityCliStatus: () => ({
     data: { installed: true, version: '0.54.4', path: '/managed/antigravity' },
   }),
-  useAntigravityCliAuth: () => ({ data: { authenticated: true } }),
+  useAntigravityCliAuth: () => ({ data: authData }),
   useAvailableAntigravityModels: () => ({ data: [{ id: 'auto', label: 'Auto' }] }),
   useAvailableAntigravityVersions: () => ({
     data: [
@@ -56,7 +63,10 @@ vi.mock('@/services/antigravity-cli', () => ({
 }))
 
 describe('AntigravityPane', () => {
-  beforeEach(() => vi.clearAllMocks())
+  beforeEach(() => {
+    vi.clearAllMocks()
+    authData = { authenticated: true }
+  })
 
   it('shows Jean-managed and system PATH sources', () => {
     render(<AntigravityPane />)
@@ -100,5 +110,26 @@ describe('AntigravityPane', () => {
       [],
       'login'
     )
+  })
+
+  it('reports a timed-out auth check separately from being signed out', () => {
+    authData = {
+      authenticated: false,
+      error: 'Antigravity CLI status check timed out',
+      timedOut: true,
+    }
+
+    render(<AntigravityPane />)
+
+    expect(screen.getByText(/Auth check timed out/)).toBeInTheDocument()
+    expect(screen.queryByText(/Not authenticated/)).not.toBeInTheDocument()
+  })
+
+  it('still reports a genuine signed-out state', () => {
+    authData = { authenticated: false, error: 'Please sign in', timedOut: false }
+
+    render(<AntigravityPane />)
+
+    expect(screen.getByText(/Not authenticated · Please sign in/)).toBeInTheDocument()
   })
 })

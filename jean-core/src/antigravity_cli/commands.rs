@@ -12,7 +12,10 @@ use crate::platform::silent_command;
 
 const MANIFEST_BASE: &str =
     "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests";
-const AUTH_TIMEOUT: Duration = Duration::from_secs(8);
+// `agy models` is a network round-trip to Google, not a local check, so it
+// inherits real latency variance. Matches the 15s the other network-bound CLI
+// checks use (claude_cli, codex_cli).
+const AUTH_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AntigravityCliStatus {
