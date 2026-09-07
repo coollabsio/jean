@@ -275,8 +275,11 @@ pub async fn get_antigravity_install_command(
         command: "sh".to_string(),
         args: vec![
             "-c".to_string(),
+            // Google's install.sh is `#!/bin/bash` and uses `set -o pipefail`, so it
+            // must be interpreted by bash. Piping it into `sh` fails wherever /bin/sh
+            // is dash (Debian, Ubuntu, most Linux containers).
             format!(
-                "curl -fsSL https://antigravity.google/cli/install.sh | sh -s -- --dir '{}'",
+                "curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- --dir '{}'",
                 dir.replace('\'', "'\\''")
             ),
         ],
