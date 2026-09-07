@@ -33,6 +33,27 @@ fn permission_diagnostic(response: &AntigravityResponse) -> Option<&str> {
     })
 }
 
+/// Message for a CLI that exited without emitting a terminal event and without
+/// producing any output. Diagnostics are unparsed CLI lines, so only the last few
+/// are surfaced — the tail is where a startup or auth failure prints.
+fn exit_without_result_error(diagnostics: &[String]) -> String {
+    const MAX_DIAGNOSTIC_LINES: usize = 5;
+    let base = "Antigravity CLI exited before it produced a result. Open Settings → Antigravity CLI to check authentication and permissions.";
+    let tail = diagnostics
+        .iter()
+        .rev()
+        .take(MAX_DIAGNOSTIC_LINES)
+        .rev()
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("\n");
+    if tail.is_empty() {
+        base.to_string()
+    } else {
+        format!("{base}\n\n{tail}")
+    }
+}
+
 pub struct AntigravityExecutionOptions<'a> {
     pub app: &'a AppHandle,
     pub jean_session_id: &'a str,
@@ -618,6 +639,18 @@ pub fn tail_antigravity_output(
         }
         if !crate::platform::is_process_alive(pid) && start.elapsed() > Duration::from_secs(2) {
             response.content = response.content.trim().to_string();
+            // The process is gone without a terminal event. Run the same checks the
+            // terminal-event path above runs, otherwise a crashed run reports success.
+            if let Some(error) = response.terminal_error.clone() {
+                return Err(error);
+            }
+            if let Some(denial) = permission_diagnostic(&response) {
+                return Err(format!("Antigravity permission denied: {denial}"));
+            }
+            if !response.cancelled && response.content.is_empty() && response.tool_calls.is_empty()
+            {
+                return Err(exit_without_result_error(&response.diagnostics));
+            }
             return Ok(response);
         }
         std::thread::sleep(next_poll_interval(had_data, start.elapsed()));
@@ -806,5 +839,15 @@ mod tests {
             terminal_error: None,
             diagnostics: vec![],
         }
+    }
+
+    #[test]
+    fn exit_without_result_surfaces_the_last_diagnostics() {
+        assert!(!exit_without_result_error(&[]).contains("\n\n"));
+
+        let lines: Vec<String> = (1..=8).map(|n| format!("line {n}")).collect();
+        let message = exit_without_result_error(&lines);
+        assert!(message.ends_with("line 4\nline 5\nline 6\nline 7\nline 8"));
+        assert!(!message.contains("line 3"));
     }
 }
