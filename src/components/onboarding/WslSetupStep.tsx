@@ -123,6 +123,7 @@ export function WslSetupStep({ onComplete }: WslSetupStepProps) {
         queryClient.invalidateQueries({ queryKey: ['codex-cli'] }),
         queryClient.invalidateQueries({ queryKey: ['opencode-cli'] }),
         queryClient.invalidateQueries({ queryKey: ['gh-cli'] }),
+        queryClient.invalidateQueries({ queryKey: ['cursor-cli'] }),
       ])
       onComplete()
     } catch {
@@ -192,6 +193,13 @@ export function WslSetupStep({ onComplete }: WslSetupStepProps) {
           </div>
         </button>
       </div>
+
+      {mode === 'native' && (
+        <p className="text-muted-foreground text-xs">
+          Native Windows uses Cursor&apos;s allowlist mode instead of OS
+          sandboxing. Choose WSL for sandboxed execution.
+        </p>
+      )}
 
       {/* WSL distro selection */}
       {mode === 'wsl' && (
