@@ -35,7 +35,7 @@ const QUEUE_DEFAULT_ALLOWED_TOOLS: [&str; 4] = ["Bash(git:*)", "Read", "Glob", "
 const IMAGE_ONLY_DEFAULT_PROMPT: &str = "Please check this image and tell me what is wrong.";
 const TEXT_ONLY_DEFAULT_PROMPT: &str = "Please check the attached text as reference.";
 
-fn resumed_grok_tail_error_event(
+fn resumed_tail_error_event(
     session_id: &str,
     worktree_id: &str,
     error: &str,
@@ -8382,6 +8382,9 @@ pub async fn resume_session(
                         {
                             let _ = writer.crash();
                         }
+                        let (event_name, event) =
+                            resumed_tail_error_event(&session_id_clone, &worktree_id_clone, &error);
+                        let _ = app_clone.emit_all(event_name, &event);
                     }
                 }
             });
@@ -8544,11 +8547,8 @@ pub async fn resume_session(
                                 log::error!("Failed to mark Grok run as crashed: {e}");
                             }
                         }
-                        let (event_name, event) = resumed_grok_tail_error_event(
-                            &session_id_clone,
-                            &worktree_id_clone,
-                            &e,
-                        );
+                        let (event_name, event) =
+                            resumed_tail_error_event(&session_id_clone, &worktree_id_clone, &e);
                         let _ = app_clone.emit_all(event_name, &event);
                         return;
                     }
@@ -10234,7 +10234,7 @@ mod tests {
     #[test]
     fn resumed_grok_host_error_uses_chat_error_event() {
         let (event_name, event) =
-            resumed_grok_tail_error_event("session-1", "worktree-1", "rate limit reached");
+            resumed_tail_error_event("session-1", "worktree-1", "rate limit reached");
 
         assert_eq!(event_name, "chat:error");
         assert_eq!(event.session_id, "session-1");
