@@ -123,6 +123,7 @@ export function WslSetupStep({ onComplete }: WslSetupStepProps) {
         queryClient.invalidateQueries({ queryKey: ['codex-cli'] }),
         queryClient.invalidateQueries({ queryKey: ['opencode-cli'] }),
         queryClient.invalidateQueries({ queryKey: ['gh-cli'] }),
+        queryClient.invalidateQueries({ queryKey: ['cursor-cli'] }),
       ])
       onComplete()
     } catch {

@@ -1338,6 +1338,7 @@ mod tests {
         assert_eq!(cursor_sandbox_mode(true, false), "disabled");
         assert_eq!(cursor_sandbox_mode(true, true), "enabled");
         assert_eq!(cursor_sandbox_mode(false, false), "enabled");
+        assert_eq!(cursor_sandbox_mode(false, true), "enabled");
     }
 
     #[test]
