@@ -6,7 +6,6 @@ use std::time::Duration;
 use tauri::AppHandle;
 
 use super::config::{find_pi_in_path, get_cli_dir, resolve_cli_binary};
-use crate::platform::silent_command;
 
 const PI_NPM_PACKAGE: &str = "@earendil-works/pi-coding-agent";
 
@@ -635,14 +634,14 @@ pub async fn check_pi_cli_version_exists(_app: AppHandle, version: String) -> Re
 }
 
 pub async fn install_pi_cli(app: AppHandle, version: Option<String>) -> Result<(), String> {
-    crate::prerequisites::require_npm("PI CLI")?;
+    let npm_path = crate::prerequisites::require_npm("PI CLI")?;
     let dir = get_cli_dir(&app)?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create PI CLI dir: {e}"))?;
     let package = match version {
         Some(version) if !version.trim().is_empty() => format!("{PI_NPM_PACKAGE}@{version}"),
         _ => PI_NPM_PACKAGE.to_string(),
     };
-    let status = silent_command("npm")
+    let status = crate::platform::cli_command(&npm_path, None)
         .args(["install", "--prefix"])
         .arg(&dir)
         .arg("--ignore-scripts")
