@@ -1,7 +1,14 @@
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
+import type { CliBackend } from '@/types/preferences'
 import type { CliType } from '@/lib/cli-update'
 import { mergeSeenFailedWorkflowRunIds } from '@/components/shared/workflow-run-utils'
+
+export interface InvestigationOverride {
+  backend?: CliBackend
+  model: string
+  provider: string | null
+}
 
 export type PreferencePane =
   | 'general'
@@ -149,10 +156,7 @@ interface UIState {
   autoInvestigateLinearIssueWorktreeIds: Set<string>
   /** Worktree IDs that should auto-trigger Sentry issue investigation */
   autoInvestigateSentryIssueWorktreeIds: Set<string>
-  autoInvestigateOverrides: Record<
-    string,
-    { model: string; provider: string | null }
-  >
+  autoInvestigateOverrides: Record<string, InvestigationOverride>
   /** Counter for background worktree creations (CMD+Click) — skip auto-navigation */
   pendingBackgroundCreations: number
   /** Worktree IDs that should auto-open first session modal when canvas mounts */
@@ -270,12 +274,12 @@ interface UIState {
   consumePendingBackgroundCreation: () => boolean
   markWorktreeForAutoInvestigate: (
     worktreeId: string,
-    override?: { model: string; provider: string | null }
+    override?: InvestigationOverride
   ) => void
   consumeAutoInvestigate: (worktreeId: string) => boolean
   markWorktreeForAutoInvestigatePR: (
     worktreeId: string,
-    override?: { model: string; provider: string | null }
+    override?: InvestigationOverride
   ) => void
   consumeAutoInvestigatePR: (worktreeId: string) => boolean
   markWorktreeForAutoInvestigateSecurityAlert: (worktreeId: string) => void

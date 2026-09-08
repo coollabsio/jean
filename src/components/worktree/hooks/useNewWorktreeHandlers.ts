@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
 import { invoke } from '@/lib/transport'
 import { toast } from 'sonner'
-import { useUIStore } from '@/store/ui-store'
+import { useUIStore, type InvestigationOverride } from '@/store/ui-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
 import { githubQueryKeys } from '@/services/github'
@@ -35,7 +35,7 @@ interface Setters {
 export function useNewWorktreeHandlers(
   data: Data,
   setters: Setters,
-  investigationOverride?: { model: string; provider: string | null }
+  investigationOverride?: InvestigationOverride
 ) {
   const {
     queryClient,
