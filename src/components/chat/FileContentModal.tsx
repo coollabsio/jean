@@ -5,7 +5,6 @@ import {
   useMemo,
   lazy,
   Suspense,
-  useRef,
 } from 'react'
 import {
   FileText,
@@ -16,11 +15,8 @@ import {
   Eye,
   Save,
   ExternalLink,
-  Copy,
-  Check,
 } from 'lucide-react'
 import { invoke } from '@/lib/transport'
-import { copyToClipboard } from '@/lib/clipboard'
 import {
   Dialog,
   DialogContent,
@@ -39,6 +35,7 @@ import { usePreferences } from '@/services/preferences'
 import { cn } from '@/lib/utils'
 import type { SyntaxTheme } from '@/types/preferences'
 import { toast } from 'sonner'
+import { FilePathCopyRow } from './FilePathCopyRow'
 
 // Lazy load CodeEditor (Pierre File + edit mode) so the main bundle stays lean
 const CodeEditor = lazy(() => import('@/components/ui/code-editor'))
@@ -124,10 +121,6 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
   const [imageLoaded, setImageLoaded] = useState(false)
   /** data: URL for images loaded via backend (works for /tmp and remote) */
   const [imageSrc, setImageSrc] = useState<string | null>(null)
-  const [copiedPath, setCopiedPath] = useState(false)
-  const copiedPathTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null
-  )
 
   const { theme } = useTheme()
   const { data: preferences } = usePreferences()
@@ -237,47 +230,12 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
 
   const filename = filePath ? getFilename(filePath) : filePath
 
-  useEffect(() => {
-    setCopiedPath(false)
-    if (copiedPathTimeoutRef.current !== null) {
-      clearTimeout(copiedPathTimeoutRef.current)
-      copiedPathTimeoutRef.current = null
-    }
-
-    return () => {
-      if (copiedPathTimeoutRef.current !== null) {
-        clearTimeout(copiedPathTimeoutRef.current)
-        copiedPathTimeoutRef.current = null
-      }
-    }
-  }, [filePath])
-
   const isImage = isImageFile(filename)
   const isMarkdown = isMarkdownFile(filename)
   const language = filePath ? getLanguageFromPath(filePath) : 'text'
 
   // Check if content has been modified
   const hasChanges = isEditing && editedContent !== content
-
-  const handleCopyPath = useCallback(async () => {
-    if (!filePath) return
-
-    try {
-      await copyToClipboard(filePath)
-      toast.success('Copied file path to clipboard')
-      setCopiedPath(true)
-      if (copiedPathTimeoutRef.current !== null) {
-        clearTimeout(copiedPathTimeoutRef.current)
-      }
-      copiedPathTimeoutRef.current = setTimeout(() => {
-        setCopiedPath(false)
-        copiedPathTimeoutRef.current = null
-      }, 2000)
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      toast.error(`Failed to copy: ${message}`)
-    }
-  }, [filePath])
 
   // Handle save — stay in edit mode so the user can keep working
   const handleSave = useCallback(async () => {
@@ -347,84 +305,75 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
         overlayClassName="z-[90]"
         className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-auto sm:max-h-[85vh] sm:!rounded-lg sm:p-4 bg-background/95 z-[90]"
       >
-        <DialogTitle className="flex flex-col gap-1 px-4 pt-4 pr-14 sm:px-0 sm:pt-0 sm:pr-8">
-          <div className="flex items-center gap-2">
-            {isImage ? (
-              <ImageIcon className="h-4 w-4 shrink-0" />
-            ) : (
-              <FileText className="h-4 w-4 shrink-0" />
-            )}
-            <span className="truncate">{filename}</span>
+        <div className="flex flex-col gap-1 px-4 pt-4 pr-14 sm:px-0 sm:pt-0 sm:pr-8">
+          <DialogTitle>
+            <div className="flex items-center gap-2">
+              {isImage ? (
+                <ImageIcon className="h-4 w-4 shrink-0" />
+              ) : (
+                <FileText className="h-4 w-4 shrink-0" />
+              )}
+              <span className="truncate">{filename}</span>
 
-            {/* Action buttons - only for non-image files */}
-            {!isImage && content !== null && (
-              <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
-                {isEditing ? (
-                  <>
+              {/* Action buttons - only for non-image files */}
+              {!isImage && content !== null && (
+                <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
+                  {isEditing ? (
+                    <>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleToggleEdit}
+                        disabled={isSaving}
+                      >
+                        <Eye className="h-4 w-4 sm:mr-1" />
+                        <span className="hidden sm:inline">View</span>
+                      </Button>
+                      <Button
+                        variant="default"
+                        size="sm"
+                        onClick={handleSave}
+                        disabled={!hasChanges || isSaving}
+                      >
+                        {isSaving ? (
+                          <Loader2 className="h-4 w-4 sm:mr-1 animate-spin" />
+                        ) : (
+                          <Save className="h-4 w-4 sm:mr-1" />
+                        )}
+                        <span className="hidden sm:inline">Save</span>
+                      </Button>
+                    </>
+                  ) : (
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={handleToggleEdit}
-                      disabled={isSaving}
                     >
-                      <Eye className="h-4 w-4 sm:mr-1" />
-                      <span className="hidden sm:inline">View</span>
+                      <Pencil className="h-4 w-4 sm:mr-1" />
+                      <span className="hidden sm:inline">Edit</span>
                     </Button>
+                  )}
+                  {canOpenInEditor() && (
                     <Button
-                      variant="default"
+                      variant="ghost"
                       size="sm"
-                      onClick={handleSave}
-                      disabled={!hasChanges || isSaving}
+                      onClick={handleOpenExternal}
                     >
-                      {isSaving ? (
-                        <Loader2 className="h-4 w-4 sm:mr-1 animate-spin" />
-                      ) : (
-                        <Save className="h-4 w-4 sm:mr-1" />
-                      )}
-                      <span className="hidden sm:inline">Save</span>
+                      <ExternalLink className="h-4 w-4 sm:mr-1" />
+                      <span className="hidden sm:inline">Open in Editor</span>
                     </Button>
-                  </>
-                ) : (
-                  <Button variant="ghost" size="sm" onClick={handleToggleEdit}>
-                    <Pencil className="h-4 w-4 sm:mr-1" />
-                    <span className="hidden sm:inline">Edit</span>
-                  </Button>
-                )}
-                {canOpenInEditor() && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleOpenExternal}
-                  >
-                    <ExternalLink className="h-4 w-4 sm:mr-1" />
-                    <span className="hidden sm:inline">Open in Editor</span>
-                  </Button>
-                )}
-              </div>
-            )}
-          </div>
-          {filePath && (
-            <div className="inline-flex items-center gap-1 min-w-0 max-w-full">
-              <span className="min-w-0 text-muted-foreground font-normal text-xs break-all [overflow-wrap:anywhere] select-text">
-                {filePath}
-              </span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                onClick={handleCopyPath}
-                title="Copy file path"
-                aria-label="Copy file path"
-              >
-                {copiedPath ? (
-                  <Check className="size-3 text-green-500" />
-                ) : (
-                  <Copy className="size-3 text-muted-foreground" />
-                )}
-              </Button>
+                  )}
+                </div>
+              )}
             </div>
+          </DialogTitle>
+          {filePath && (
+            <FilePathCopyRow
+              filePath={filePath}
+              pathClassName="break-all [overflow-wrap:anywhere]"
+            />
           )}
-        </DialogTitle>
+        </div>
         <DialogDescription className="sr-only">
           View or edit the contents of {filename ?? 'the selected file'}.
         </DialogDescription>

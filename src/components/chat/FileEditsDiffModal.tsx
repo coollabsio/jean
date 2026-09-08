@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { FileText, Copy, Check } from 'lucide-react'
+import { FileText } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -8,10 +7,8 @@ import {
 } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { getFilename } from '@/lib/path-utils'
-import { copyToClipboard } from '@/lib/clipboard'
-import { Button } from '@/components/ui/button'
-import { toast } from 'sonner'
 import { InlineFileDiff } from './InlineFileDiff'
+import { FilePathCopyRow } from './FilePathCopyRow'
 
 export interface FileEdit {
   oldString: string
@@ -36,81 +33,26 @@ export function FileEditsDiffModal({
   onClose,
 }: FileEditsDiffModalProps) {
   const filename = filePath ? getFilename(filePath) : null
-  const [copiedPath, setCopiedPath] = useState(false)
-  const copiedPathTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null
-  )
-
-  useEffect(() => {
-    setCopiedPath(false)
-    if (copiedPathTimeoutRef.current !== null) {
-      clearTimeout(copiedPathTimeoutRef.current)
-      copiedPathTimeoutRef.current = null
-    }
-
-    return () => {
-      if (copiedPathTimeoutRef.current !== null) {
-        clearTimeout(copiedPathTimeoutRef.current)
-        copiedPathTimeoutRef.current = null
-      }
-    }
-  }, [filePath])
-
-  const handleCopyPath = useCallback(async () => {
-    if (!filePath) return
-
-    try {
-      await copyToClipboard(filePath)
-      toast.success('Copied file path to clipboard')
-      setCopiedPath(true)
-      if (copiedPathTimeoutRef.current !== null) {
-        clearTimeout(copiedPathTimeoutRef.current)
-      }
-      copiedPathTimeoutRef.current = setTimeout(() => {
-        setCopiedPath(false)
-        copiedPathTimeoutRef.current = null
-      }, 2000)
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      toast.error(`Failed to copy: ${message}`)
-    }
-  }, [filePath])
 
   return (
     <Dialog open={!!filePath} onOpenChange={open => !open && onClose()}>
       <DialogContent className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-auto sm:max-h-[85vh] sm:!rounded-lg sm:p-4 bg-background/95 backdrop-blur-sm">
-        <DialogTitle className="flex flex-col gap-1 px-4 pt-4 pr-14 sm:px-0 sm:pt-0 sm:pr-8">
-          <div className="flex items-center gap-2">
-            <FileText className="h-4 w-4 shrink-0" />
-            <span className="truncate">{filename}</span>
-            {edits.length > 1 && (
-              <span className="text-xs text-muted-foreground font-normal">
-                {edits.length} edits
-              </span>
-            )}
-          </div>
-          {filePath && (
-            <div className="inline-flex items-center gap-1 min-w-0 max-w-full">
-              <span className="min-w-0 text-muted-foreground font-normal text-xs truncate select-text">
-                {filePath}
-              </span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                onClick={handleCopyPath}
-                title="Copy file path"
-                aria-label="Copy file path"
-              >
-                {copiedPath ? (
-                  <Check className="size-3 text-green-500" />
-                ) : (
-                  <Copy className="size-3 text-muted-foreground" />
-                )}
-              </Button>
+        <div className="flex flex-col gap-1 px-4 pt-4 pr-14 sm:px-0 sm:pt-0 sm:pr-8">
+          <DialogTitle>
+            <div className="flex items-center gap-2">
+              <FileText className="h-4 w-4 shrink-0" />
+              <span className="truncate">{filename}</span>
+              {edits.length > 1 && (
+                <span className="text-xs text-muted-foreground font-normal">
+                  {edits.length} edits
+                </span>
+              )}
             </div>
+          </DialogTitle>
+          {filePath && (
+            <FilePathCopyRow filePath={filePath} pathClassName="truncate" />
           )}
-        </DialogTitle>
+        </div>
         <DialogDescription className="sr-only">
           Diff of edits applied to {filename ?? 'the selected file'}.
         </DialogDescription>
