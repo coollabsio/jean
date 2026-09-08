@@ -4578,6 +4578,10 @@ async fn wait_for_shutdown_signal() -> Result<(), String> {
 
 /// Run the standalone Axum adapter until it receives a shutdown signal.
 pub async fn run_server() -> Result<(), String> {
+    // Host modes (MCP stdio, PI RPC, Grok/Kimi ACP) return before the rest of
+    // startup. Raise the limit first so those processes get it when launched
+    // via jean-server rather than the desktop binary (which also raises in run()).
+    platform::raise_fd_limit();
     if std::env::args().any(|argument| argument == jean_mcp_core::JEAN_MCP_STDIO_ARG) {
         jean_mcp_stdio::run_stdio_server()?;
         return Ok(());
@@ -4595,7 +4599,6 @@ pub async fn run_server() -> Result<(), String> {
         return Ok(());
     }
     async_runtime::set(tokio::runtime::Handle::current());
-    platform::raise_fd_limit();
     #[cfg(target_os = "linux")]
     platform::fix_headless_path();
     let cli = parse_cli_args();
