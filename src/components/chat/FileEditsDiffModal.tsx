@@ -8,6 +8,7 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { getFilename } from '@/lib/path-utils'
 import { InlineFileDiff } from './InlineFileDiff'
+import { FilePathCopyRow } from './FilePathCopyRow'
 
 export interface FileEdit {
   oldString: string
@@ -36,22 +37,22 @@ export function FileEditsDiffModal({
   return (
     <Dialog open={!!filePath} onOpenChange={open => !open && onClose()}>
       <DialogContent className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-auto sm:max-h-[85vh] sm:!rounded-lg sm:p-4 bg-background/95 backdrop-blur-sm">
-        <DialogTitle className="flex flex-col gap-1 px-4 pt-4 pr-14 sm:px-0 sm:pt-0 sm:pr-8">
-          <div className="flex items-center gap-2">
-            <FileText className="h-4 w-4 shrink-0" />
-            <span className="truncate">{filename}</span>
-            {edits.length > 1 && (
-              <span className="text-xs text-muted-foreground font-normal">
-                {edits.length} edits
-              </span>
-            )}
-          </div>
+        <div className="flex flex-col gap-1 px-4 pt-4 pr-14 sm:px-0 sm:pt-0 sm:pr-8">
+          <DialogTitle>
+            <div className="flex items-center gap-2">
+              <FileText className="h-4 w-4 shrink-0" />
+              <span className="truncate">{filename}</span>
+              {edits.length > 1 && (
+                <span className="text-xs text-muted-foreground font-normal">
+                  {edits.length} edits
+                </span>
+              )}
+            </div>
+          </DialogTitle>
           {filePath && (
-            <span className="text-muted-foreground font-normal text-xs truncate">
-              {filePath}
-            </span>
+            <FilePathCopyRow filePath={filePath} pathClassName="truncate" />
           )}
-        </DialogTitle>
+        </div>
         <DialogDescription className="sr-only">
           Diff of edits applied to {filename ?? 'the selected file'}.
         </DialogDescription>

@@ -35,6 +35,7 @@ import { usePreferences } from '@/services/preferences'
 import { cn } from '@/lib/utils'
 import type { SyntaxTheme } from '@/types/preferences'
 import { toast } from 'sonner'
+import { FilePathCopyRow } from './FilePathCopyRow'
 
 // Lazy load CodeEditor (Pierre File + edit mode) so the main bundle stays lean
 const CodeEditor = lazy(() => import('@/components/ui/code-editor'))
@@ -145,53 +146,59 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
   /** Bumps when content should remount the Pierre edit session (load / discard). */
   const [editorEpoch, setEditorEpoch] = useState(0)
 
-  const loadFileContent = useCallback(async (path: string, signal: { cancelled: boolean }) => {
-    setIsLoading(true)
-    setError(null)
-    setContent(null)
-    setEditedContent(null)
-    setIsEditing(false)
-    setEditorEpoch(e => e + 1)
+  const loadFileContent = useCallback(
+    async (path: string, signal: { cancelled: boolean }) => {
+      setIsLoading(true)
+      setError(null)
+      setContent(null)
+      setEditedContent(null)
+      setIsEditing(false)
+      setEditorEpoch(e => e + 1)
 
-    try {
-      const fileContent = await invoke<string>('read_file_content', { path })
-      if (signal.cancelled) return
-      setContent(fileContent)
-      setEditedContent(fileContent)
-      // Open in edit mode by default (matches mobile file browser)
-      setIsEditing(true)
-    } catch (err) {
-      if (signal.cancelled) return
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      if (!signal.cancelled) setIsLoading(false)
-    }
-  }, [])
+      try {
+        const fileContent = await invoke<string>('read_file_content', { path })
+        if (signal.cancelled) return
+        setContent(fileContent)
+        setEditedContent(fileContent)
+        // Open in edit mode by default (matches mobile file browser)
+        setIsEditing(true)
+      } catch (err) {
+        if (signal.cancelled) return
+        setError(err instanceof Error ? err.message : String(err))
+      } finally {
+        if (!signal.cancelled) setIsLoading(false)
+      }
+    },
+    []
+  )
 
   // Load images through the backend so remote/web and paths outside project
   // roots (e.g. /tmp screenshots) work — convertProjectFileSrc only serves
   // known project/worktree directories.
-  const loadImageContent = useCallback(async (path: string, signal: { cancelled: boolean }) => {
-    setIsLoading(true)
-    setError(null)
-    setImageError(false)
-    setImageLoaded(false)
-    setImageSrc(null)
+  const loadImageContent = useCallback(
+    async (path: string, signal: { cancelled: boolean }) => {
+      setIsLoading(true)
+      setError(null)
+      setImageError(false)
+      setImageLoaded(false)
+      setImageSrc(null)
 
-    try {
-      const result = await invoke<FileBase64Content>('read_file_base64', {
-        path,
-      })
-      if (signal.cancelled) return
-      setImageSrc(`data:${result.mimeType};base64,${result.data}`)
-    } catch (err) {
-      if (signal.cancelled) return
-      setError(err instanceof Error ? err.message : String(err))
-      setImageError(true)
-    } finally {
-      if (!signal.cancelled) setIsLoading(false)
-    }
-  }, [])
+      try {
+        const result = await invoke<FileBase64Content>('read_file_base64', {
+          path,
+        })
+        if (signal.cancelled) return
+        setImageSrc(`data:${result.mimeType};base64,${result.data}`)
+      } catch (err) {
+        if (signal.cancelled) return
+        setError(err instanceof Error ? err.message : String(err))
+        setImageError(true)
+      } finally {
+        if (!signal.cancelled) setIsLoading(false)
+      }
+    },
+    []
+  )
 
   useEffect(() => {
     const signal = { cancelled: false }
@@ -298,68 +305,75 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
         overlayClassName="z-[90]"
         className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-auto sm:max-h-[85vh] sm:!rounded-lg sm:p-4 bg-background/95 z-[90]"
       >
-        <DialogTitle className="flex flex-col gap-1 px-4 pt-4 pr-14 sm:px-0 sm:pt-0 sm:pr-8">
-          <div className="flex items-center gap-2">
-            {isImage ? (
-              <ImageIcon className="h-4 w-4 shrink-0" />
-            ) : (
-              <FileText className="h-4 w-4 shrink-0" />
-            )}
-            <span className="truncate">{filename}</span>
+        <div className="flex flex-col gap-1 px-4 pt-4 pr-14 sm:px-0 sm:pt-0 sm:pr-8">
+          <DialogTitle>
+            <div className="flex items-center gap-2">
+              {isImage ? (
+                <ImageIcon className="h-4 w-4 shrink-0" />
+              ) : (
+                <FileText className="h-4 w-4 shrink-0" />
+              )}
+              <span className="truncate">{filename}</span>
 
-            {/* Action buttons - only for non-image files */}
-            {!isImage && content !== null && (
-              <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
-                {isEditing ? (
-                  <>
+              {/* Action buttons - only for non-image files */}
+              {!isImage && content !== null && (
+                <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
+                  {isEditing ? (
+                    <>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleToggleEdit}
+                        disabled={isSaving}
+                      >
+                        <Eye className="h-4 w-4 sm:mr-1" />
+                        <span className="hidden sm:inline">View</span>
+                      </Button>
+                      <Button
+                        variant="default"
+                        size="sm"
+                        onClick={handleSave}
+                        disabled={!hasChanges || isSaving}
+                      >
+                        {isSaving ? (
+                          <Loader2 className="h-4 w-4 sm:mr-1 animate-spin" />
+                        ) : (
+                          <Save className="h-4 w-4 sm:mr-1" />
+                        )}
+                        <span className="hidden sm:inline">Save</span>
+                      </Button>
+                    </>
+                  ) : (
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={handleToggleEdit}
-                      disabled={isSaving}
                     >
-                      <Eye className="h-4 w-4 sm:mr-1" />
-                      <span className="hidden sm:inline">View</span>
+                      <Pencil className="h-4 w-4 sm:mr-1" />
+                      <span className="hidden sm:inline">Edit</span>
                     </Button>
+                  )}
+                  {canOpenInEditor() && (
                     <Button
-                      variant="default"
+                      variant="ghost"
                       size="sm"
-                      onClick={handleSave}
-                      disabled={!hasChanges || isSaving}
+                      onClick={handleOpenExternal}
                     >
-                      {isSaving ? (
-                        <Loader2 className="h-4 w-4 sm:mr-1 animate-spin" />
-                      ) : (
-                        <Save className="h-4 w-4 sm:mr-1" />
-                      )}
-                      <span className="hidden sm:inline">Save</span>
+                      <ExternalLink className="h-4 w-4 sm:mr-1" />
+                      <span className="hidden sm:inline">Open in Editor</span>
                     </Button>
-                  </>
-                ) : (
-                  <Button variant="ghost" size="sm" onClick={handleToggleEdit}>
-                    <Pencil className="h-4 w-4 sm:mr-1" />
-                    <span className="hidden sm:inline">Edit</span>
-                  </Button>
-                )}
-                {canOpenInEditor() && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleOpenExternal}
-                  >
-                    <ExternalLink className="h-4 w-4 sm:mr-1" />
-                    <span className="hidden sm:inline">Open in Editor</span>
-                  </Button>
-                )}
-              </div>
-            )}
-          </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </DialogTitle>
           {filePath && (
-            <span className="text-muted-foreground font-normal text-xs break-all [overflow-wrap:anywhere]">
-              {filePath}
-            </span>
+            <FilePathCopyRow
+              filePath={filePath}
+              pathClassName="break-all [overflow-wrap:anywhere]"
+            />
           )}
-        </DialogTitle>
+        </div>
         <DialogDescription className="sr-only">
           View or edit the contents of {filename ?? 'the selected file'}.
         </DialogDescription>
