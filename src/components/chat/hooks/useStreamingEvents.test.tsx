@@ -975,7 +975,6 @@ describe('useStreamingEvents cancellation sanitization', () => {
     expect(useChatStore.getState().lastSentMessages['session-1']).toBe(
       undefined
     )
-
     await waitFor(() =>
       expect(mockInvoke).toHaveBeenCalledWith('get_session', {
         sessionId: 'session-1',
