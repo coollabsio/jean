@@ -44,57 +44,79 @@ describe('useBackgroundInvestigation', () => {
     })
   })
 
-  it('uses and consumes the temporary model and provider override', async () => {
-    preferencesData = {
-      magic_prompt_models: { investigate_issue_model: 'sonnet' },
-      magic_prompt_providers: { investigate_issue_provider: null },
-    }
-    useUIStore.setState({
-      autoInvestigateOverrides: {
-        'worktree-1': { model: 'opus', provider: 'team-profile' },
-      },
-    })
-
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    })
-    queryClient.setQueryData<Worktree>(
-      [...projectsQueryKeys.all, 'worktree', 'worktree-1'],
-      {
-        id: 'worktree-1',
-        project_id: 'project-1',
-        path: '/tmp/worktree-1',
-        status: 'ready',
-      } as Worktree
-    )
-
-    vi.mocked(invoke).mockImplementation(async command => {
-      if (command === 'list_loaded_issue_contexts') return [{ number: 42 }]
-      if (command === 'start_background_investigation') {
-        return {
-          sessionId: 'session-1',
-          worktreeId: 'worktree-1',
-          status: 'investigation_started',
-        }
+  it.each([
+    {
+      backend: 'claude' as const,
+      model: 'opus',
+      provider: 'team-profile',
+      expectedProvider: 'team-profile',
+    },
+    {
+      backend: 'codex' as const,
+      model: 'custom-model',
+      provider: 'team-profile',
+      expectedProvider: null,
+    },
+  ])(
+    'uses and consumes the $backend investigation override',
+    async ({ backend, model, provider, expectedProvider }) => {
+      preferencesData = {
+        magic_prompt_models: { investigate_issue_model: 'sonnet' },
+        magic_prompt_providers: { investigate_issue_provider: null },
       }
-      throw new Error(`Unexpected command: ${command}`)
-    })
+      useUIStore.setState({
+        autoInvestigateOverrides: {
+          'worktree-1': { backend, model, provider },
+        },
+      })
 
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    )
-    renderHook(() => useBackgroundInvestigation(), { wrapper })
-
-    await waitFor(() => {
-      expect(invoke).toHaveBeenCalledWith(
-        'start_background_investigation',
-        expect.objectContaining({ model: 'opus', provider: 'team-profile' })
+      const queryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      })
+      queryClient.setQueryData<Worktree>(
+        [...projectsQueryKeys.all, 'worktree', 'worktree-1'],
+        {
+          id: 'worktree-1',
+          project_id: 'project-1',
+          path: '/tmp/worktree-1',
+          status: 'ready',
+        } as Worktree
       )
-    })
-    await waitFor(() => {
-      expect(useUIStore.getState().autoInvestigateOverrides).toEqual({})
-    })
-  })
+
+      vi.mocked(invoke).mockImplementation(async command => {
+        if (command === 'list_loaded_issue_contexts') return [{ number: 42 }]
+        if (command === 'start_background_investigation') {
+          return {
+            sessionId: 'session-1',
+            worktreeId: 'worktree-1',
+            status: 'investigation_started',
+          }
+        }
+        throw new Error(`Unexpected command: ${command}`)
+      })
+
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={queryClient}>
+          {children}
+        </QueryClientProvider>
+      )
+      renderHook(() => useBackgroundInvestigation(), { wrapper })
+
+      await waitFor(() => {
+        expect(invoke).toHaveBeenCalledWith(
+          'start_background_investigation',
+          expect.objectContaining({
+            backend,
+            model,
+            provider: expectedProvider,
+          })
+        )
+      })
+      await waitFor(() => {
+        expect(useUIStore.getState().autoInvestigateOverrides).toEqual({})
+      })
+    }
+  )
 
   it('keeps the investigation pending when starting it fails', async () => {
     const queryClient = new QueryClient({

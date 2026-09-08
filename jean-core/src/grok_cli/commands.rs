@@ -13,7 +13,6 @@ use super::config::{
     binary_exists, ensure_cli_dir, find_system_grok_binary, get_cli_binary_path, get_cli_dir,
     resolve_cli_binary,
 };
-use crate::platform::silent_command;
 
 const AUTH_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 const MODELS_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
@@ -669,10 +668,10 @@ pub async fn get_grok_install_command(app: AppHandle) -> Result<GrokInstallComma
 }
 
 pub async fn install_grok_cli(app: AppHandle, version: Option<String>) -> Result<(), String> {
-    crate::prerequisites::require_npm("Grok CLI")?;
+    let npm_path = crate::prerequisites::require_npm("Grok CLI")?;
     let cli_dir = ensure_cli_dir(&app)?;
     let package = grok_package(version.as_deref());
-    let output = silent_command("npm")
+    let output = crate::platform::cli_command(&npm_path, None)
         .args(["install", "--prefix"])
         .arg(&cli_dir)
         .arg(package)

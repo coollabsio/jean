@@ -36,11 +36,28 @@ fn local_install_candidates(home: &Path) -> [PathBuf; 2] {
     ]
 }
 
+/// Official native Windows installer layout (`%LOCALAPPDATA%\cursor-agent`).
+///
+/// Cursor copies `cursor-agent.exe` / `.cmd` into this directory and aliases
+/// them as `agent.exe` / `agent.cmd`, then adds the directory to the user PATH.
+/// Jean's process PATH is not refreshed until restart, so we look here directly.
+fn windows_install_dir_candidates(local_app_data: &Path) -> [PathBuf; 4] {
+    let dir = local_app_data.join("cursor-agent");
+    [
+        dir.join("cursor-agent.exe"),
+        dir.join("cursor-agent.cmd"),
+        dir.join("agent.exe"),
+        dir.join("agent.cmd"),
+    ]
+}
+
 /// Resolve the Cursor Agent binary from system PATH.
 ///
 /// Cursor's installer places the binary on PATH, so Jean resolves the
 /// discovered system binary when available and returns a non-existent fallback
-/// path otherwise.
+/// path otherwise. On native Windows, also check the official
+/// `%LOCALAPPDATA%\cursor-agent` install directory so detection works before
+/// Jean is restarted and picks up the updated user PATH.
 pub fn resolve_cli_binary(_app: &AppHandle) -> PathBuf {
     let wsl = get_wsl_config();
     if wsl.enabled {
@@ -65,6 +82,16 @@ pub fn resolve_cli_binary(_app: &AppHandle) -> PathBuf {
         for candidate in local_install_candidates(&home) {
             if candidate.is_file() {
                 return candidate;
+            }
+        }
+    }
+
+    if cfg!(windows) {
+        if let Some(local_app_data) = dirs::data_local_dir() {
+            for candidate in windows_install_dir_candidates(&local_app_data) {
+                if candidate.is_file() {
+                    return candidate;
+                }
             }
         }
     }
@@ -107,5 +134,32 @@ mod tests {
             candidates[1],
             PathBuf::from("/home/tester/.local/bin").join(CLI_BINARY_NAME)
         );
+    }
+
+    #[test]
+    fn windows_install_dir_matches_official_cursor_agent_layout() {
+        let local_app_data = Path::new(r"C:\Users\u\AppData\Local");
+        let dir = local_app_data.join("cursor-agent");
+        let candidates = windows_install_dir_candidates(local_app_data);
+
+        assert_eq!(candidates[0], dir.join("cursor-agent.exe"));
+        assert_eq!(candidates[1], dir.join("cursor-agent.cmd"));
+        assert_eq!(candidates[2], dir.join("agent.exe"));
+        assert_eq!(candidates[3], dir.join("agent.cmd"));
+    }
+
+    #[test]
+    fn windows_install_dir_prefers_cursor_agent_exe_when_present() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path().join("cursor-agent");
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("cursor-agent.exe");
+        std::fs::write(&exe, b"").unwrap();
+
+        let found = windows_install_dir_candidates(tmp.path())
+            .into_iter()
+            .find(|path| path.is_file());
+
+        assert_eq!(found.as_deref(), Some(exe.as_path()));
     }
 }
