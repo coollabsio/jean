@@ -59,6 +59,7 @@ pub enum MergeableStatus {
 #[serde(rename_all = "camelCase")]
 struct GhPrViewResponse {
     state: String,
+    base_ref_name: String,
     is_draft: bool,
     review_decision: Option<String>,
     status_check_rollup: Option<Vec<StatusCheck>>,
@@ -77,6 +78,7 @@ pub struct PrStatus {
     pub worktree_id: String,
     pub pr_number: u32,
     pub pr_url: String,
+    pub base_branch: String,
     pub state: PrState,
     pub is_draft: bool,
     pub review_decision: Option<ReviewDecision>,
@@ -103,7 +105,7 @@ pub fn get_pr_status(
             "view",
             &pr_number.to_string(),
             "--json",
-            "state,isDraft,reviewDecision,statusCheckRollup,mergeable",
+            "state,baseRefName,isDraft,reviewDecision,statusCheckRollup,mergeable",
         ])
         .output()
         .map_err(|e| format!("Failed to run gh pr view: {e}"))?;
@@ -146,6 +148,7 @@ pub fn get_pr_status(
         worktree_id: worktree_id.to_string(),
         pr_number,
         pr_url: pr_url.to_string(),
+        base_branch: response.base_ref_name,
         state,
         is_draft: response.is_draft,
         review_decision,
@@ -280,6 +283,7 @@ mod tests {
             worktree_id: "test-id".to_string(),
             pr_number: 123,
             pr_url: "https://github.com/owner/repo/pull/123".to_string(),
+            base_branch: "main".to_string(),
             state: PrState::Open,
             is_draft: false,
             review_decision: Some(ReviewDecision::Approved),
@@ -293,6 +297,7 @@ mod tests {
         assert!(json.contains("\"display_status\":\"review\""));
         assert!(json.contains("\"check_status\":\"success\""));
         assert!(json.contains("\"mergeable\":\"mergeable\""));
+        assert!(json.contains("\"base_branch\":\"main\""));
     }
 
     #[test]

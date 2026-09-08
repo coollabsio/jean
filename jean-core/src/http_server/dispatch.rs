@@ -719,6 +719,7 @@ pub async fn dispatch_command(
             let worktree_ahead_count: Option<u32> =
                 field_opt(&args, "worktreeAheadCount", "worktree_ahead_count")?;
             let unpushed_count: Option<u32> = field_opt(&args, "unpushedCount", "unpushed_count")?;
+            let base_branch: Option<String> = field_opt(&args, "baseBranch", "base_branch")?;
             crate::projects::update_worktree_cached_status(
                 app.clone(),
                 worktree_id,
@@ -735,6 +736,7 @@ pub async fn dispatch_command(
                 base_branch_behind_count,
                 worktree_ahead_count,
                 unpushed_count,
+                base_branch,
             )
             .await?;
             emit_cache_invalidation(app, &["projects"]);

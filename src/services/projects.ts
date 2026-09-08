@@ -2701,7 +2701,8 @@ export async function updateWorktreeCachedStatus(
   baseBranchAheadCount: number | null = null,
   baseBranchBehindCount: number | null = null,
   worktreeAheadCount: number | null = null,
-  unpushedCount: number | null = null
+  unpushedCount: number | null = null,
+  baseBranch: string | null = null
 ): Promise<void> {
   if (!isTauri()) return
 
@@ -2720,6 +2721,7 @@ export async function updateWorktreeCachedStatus(
     baseBranchBehindCount,
     worktreeAheadCount,
     unpushedCount,
+    baseBranch,
   })
 }
 

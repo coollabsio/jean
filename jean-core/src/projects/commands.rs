@@ -7102,6 +7102,7 @@ pub async fn update_worktree_cached_status(
     base_branch_behind_count: Option<u32>,
     worktree_ahead_count: Option<u32>,
     unpushed_count: Option<u32>,
+    base_branch: Option<String>,
 ) -> Result<(), String> {
     log::trace!("Updating cached status for worktree {worktree_id}");
 
@@ -7156,6 +7157,9 @@ pub async fn update_worktree_cached_status(
     }
     if unpushed_count.is_some() {
         worktree.cached_unpushed_count = unpushed_count;
+    }
+    if base_branch.is_some() {
+        worktree.base_branch = base_branch;
     }
     worktree.cached_status_at = Some(
         std::time::SystemTime::now()
