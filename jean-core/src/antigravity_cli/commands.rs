@@ -264,6 +264,39 @@ pub async fn check_antigravity_cli_version_exists(
         || version.trim().trim_start_matches('v') == latest.version)
 }
 
+#[cfg_attr(windows, allow(dead_code))]
+fn unix_install_script(dir: &str) -> String {
+    // Google's install.sh is `#!/bin/bash` and uses `set -o pipefail`, so it
+    // must be interpreted by bash. Piping it into `sh` fails wherever /bin/sh
+    // is dash (Debian, Ubuntu, most Linux containers).
+    format!(
+        "curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- --dir '{}'",
+        dir.replace('\'', "'\\''")
+    )
+}
+
+#[cfg_attr(windows, allow(dead_code))]
+fn unix_install_command(dir: &str) -> AntigravityInstallCommand {
+    AntigravityInstallCommand {
+        command: "sh".to_string(),
+        args: vec!["-c".to_string(), unix_install_script(dir)],
+        description: "Install Antigravity CLI from Google's official installer".to_string(),
+    }
+}
+
+fn missing_binary_error(stdout: &str, stderr: &str) -> String {
+    let stderr = stderr.trim();
+    let stdout = stdout.trim();
+    let detail = if !stderr.is_empty() {
+        stderr
+    } else if !stdout.is_empty() {
+        stdout
+    } else {
+        "no installer output"
+    };
+    format!("Antigravity CLI install completed but the `agy` binary was not found ({detail})")
+}
+
 pub async fn get_antigravity_install_command(
     app: AppHandle,
 ) -> Result<AntigravityInstallCommand, String> {
@@ -271,20 +304,7 @@ pub async fn get_antigravity_install_command(
     #[cfg(windows)]
     return Ok(AntigravityInstallCommand { command: "powershell".to_string(), args: vec!["-NoProfile".to_string(), "-Command".to_string(), format!("& ([scriptblock]::Create((irm https://antigravity.google/cli/install.ps1))) --dir '{dir}'")], description: "Install Antigravity CLI from Google's official installer".to_string() });
     #[cfg(not(windows))]
-    Ok(AntigravityInstallCommand {
-        command: "sh".to_string(),
-        args: vec![
-            "-c".to_string(),
-            // Google's install.sh is `#!/bin/bash` and uses `set -o pipefail`, so it
-            // must be interpreted by bash. Piping it into `sh` fails wherever /bin/sh
-            // is dash (Debian, Ubuntu, most Linux containers).
-            format!(
-                "curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- --dir '{}'",
-                dir.replace('\'', "'\\''")
-            ),
-        ],
-        description: "Install Antigravity CLI from Google's official installer".to_string(),
-    })
+    Ok(unix_install_command(&dir))
 }
 
 pub async fn install_antigravity_cli(
@@ -306,15 +326,20 @@ pub async fn install_antigravity_cli(
         .output()
         .map_err(|error| format!("Failed to install Antigravity CLI: {error}"))?;
     if !output.status.success() {
-        return Err(format!(
-            "Antigravity CLI install failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let detail = if !stderr.trim().is_empty() {
+            stderr.trim()
+        } else {
+            stdout.trim()
+        };
+        return Err(format!("Antigravity CLI install failed: {detail}"));
     }
     if !get_cli_binary_path(&app)?.exists() {
-        return Err(
-            "Antigravity CLI install completed but the `agy` binary was not found".to_string(),
-        );
+        return Err(missing_binary_error(
+            &String::from_utf8_lossy(&output.stdout),
+            &String::from_utf8_lossy(&output.stderr),
+        ));
     }
     Ok(())
 }
@@ -354,5 +379,52 @@ mod tests {
         let models = parse_models("gemini-3.6-flash-high Gemini 3.6 Flash (High)\ngemini-3.1-pro-high Gemini 3.1 Pro (High)\n");
         assert_eq!(models[0].id, "gemini-3.6-flash-high");
         assert_eq!(models[0].label, "Gemini 3.6 Flash (High)");
+    }
+
+    #[test]
+    fn unix_install_script_pipes_into_bash_not_sh() {
+        let script = unix_install_script("/tmp/antigravity-cli");
+        assert!(
+            script.contains(
+                "curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- --dir '/tmp/antigravity-cli'"
+            ),
+            "Google's installer is #!/bin/bash and uses pipefail; piping into sh breaks on dash: {script}"
+        );
+        assert!(
+            !script.contains("| sh "),
+            "must not pipe the installer into sh: {script}"
+        );
+    }
+
+    #[test]
+    fn unix_install_script_escapes_single_quotes_in_dir() {
+        let script = unix_install_script("/tmp/it's here");
+        assert!(
+            script.contains("--dir '/tmp/it'\\''s here'"),
+            "dir must be POSIX-single-quote escaped: {script}"
+        );
+    }
+
+    #[test]
+    fn unix_install_command_runs_pipeline_via_sh_c() {
+        let command = unix_install_command("/opt/agy");
+        assert_eq!(command.command, "sh");
+        assert_eq!(
+            command.args,
+            vec!["-c".to_string(), unix_install_script("/opt/agy")]
+        );
+    }
+
+    #[test]
+    fn missing_binary_error_includes_installer_stderr() {
+        let error = missing_binary_error("", "sh: 8: set: Illegal option -o pipefail\n");
+        assert!(
+            error.contains("agy"),
+            "should still say the binary was missing: {error}"
+        );
+        assert!(
+            error.contains("Illegal option -o pipefail"),
+            "should surface installer output instead of hiding it: {error}"
+        );
     }
 }
