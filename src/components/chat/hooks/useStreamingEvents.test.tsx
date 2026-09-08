@@ -952,12 +952,20 @@ describe('useStreamingEvents cancellation sanitization', () => {
       messages: { id: string; role: string; content: string }[]
     }>(['chat', 'session', 'session-1'])
 
-    expect(session?.messages.map(message => message.id)).toEqual([])
+    // A live cancellation keeps the user message in history, but restores the
+    // draft so the prompt can be sent again.
+    expect(session?.messages.map(message => message.id)).toEqual([
+      'current-user',
+    ])
     expect(useChatStore.getState().inputDrafts['session-1']).toBe(
       'already running'
     )
     expect(useChatStore.getState().lastSentMessages['session-1']).toBe(
       undefined
+    )
+    expect(mockInvoke).not.toHaveBeenCalledWith(
+      'get_session',
+      expect.anything()
     )
   })
 
