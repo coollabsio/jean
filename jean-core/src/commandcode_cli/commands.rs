@@ -702,14 +702,9 @@ pub async fn install_commandcode_cli(
     app: AppHandle,
     version: Option<String>,
 ) -> Result<(), String> {
-    crate::prerequisites::require_npm("Command Code CLI")?;
+    let npm_path = crate::prerequisites::require_npm("Command Code CLI")?;
     let cli_dir = ensure_cli_dir(&app)?;
     let package = commandcode_package(version.as_deref());
-    let npm_path = crate::platform::detect_cli_in_path("npm", None, None)
-        .path
-        .ok_or_else(|| {
-            "Failed to locate npm after verifying Command Code CLI prerequisites".to_string()
-        })?;
     let output = crate::platform::cli_command(&npm_path, None)
         .args(["install", "--prefix"])
         .arg(&cli_dir)

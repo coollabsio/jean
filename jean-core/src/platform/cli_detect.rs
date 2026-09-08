@@ -236,6 +236,12 @@ C:\Program Files\nodejs\npm.ps1",
                 r"C:\Program Files\nodejs\npm.cmd",
             ),
             (
+                r"C:\Users\u\AppData\Roaming\nvm\nodejs\npm
+C:\Users\u\AppData\Roaming\nvm\nodejs\npm.cmd
+C:\Users\u\AppData\Roaming\nvm\nodejs\npm.ps1",
+                r"C:\Users\u\AppData\Roaming\nvm\nodejs\npm.cmd",
+            ),
+            (
                 r"C:\Users\u\AppData\Local\fnm\active\installation\npm
 C:\Users\u\AppData\Local\fnm\active\installation\npm.cmd
 C:\Users\u\AppData\Local\fnm\active\installation\npm.ps1",
