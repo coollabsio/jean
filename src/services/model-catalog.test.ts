@@ -201,6 +201,20 @@ describe('model catalog', () => {
     }
   })
 
+  it('uses the documented effort levels for bundled GPT 6 Astra', () => {
+    const reasoning = getCatalogModelReasoning(null, 'codex', 'gpt-6-astra')
+
+    expect(reasoning?.default).toBe('medium')
+    expect(reasoning?.levels.map(level => level.value)).toEqual([
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+      'max',
+      'ultra',
+    ])
+  })
+
   it('does not expose Ultra effort for bundled GPT 5.6 Luna', () => {
     const reasoning = getCatalogModelReasoning(
       null,

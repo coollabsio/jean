@@ -36,6 +36,7 @@ import { useIsMobile } from '@/hooks/use-mobile'
 import { usePreferences } from '@/services/preferences'
 import { invoke } from '@/lib/transport'
 import { canOpenInEditor } from '@/lib/environment'
+import { FilePathCopyRow } from './FilePathCopyRow'
 
 function DiffBlock({
   fileName,
@@ -318,19 +319,24 @@ export function MessageDiffModal({
         showCloseButton={false}
       >
         <div className="flex shrink-0 flex-col gap-2 border-b border-border/60 px-4 pb-3 pt-4 pr-24 sm:flex-row sm:items-center sm:border-0 sm:px-0 sm:pb-0 sm:pt-0 sm:pr-24">
-          <DialogTitle className="flex w-full min-w-0 items-center gap-2 sm:w-auto">
-            <FileText className="h-4 w-4 shrink-0" />
-            <span className="truncate">{getFilename(filePath)}</span>
-            {hasCurrentStats && (
-              <span className="shrink-0 font-mono text-sm font-semibold">
-                <span className="text-green-500">
-                  +{currentStats.additions}
+          <div className="flex w-full min-w-0 items-center gap-1 sm:w-auto">
+            <DialogTitle className="flex min-w-0 items-center gap-2">
+              <FileText className="h-4 w-4 shrink-0" />
+              <span className="truncate">{getFilename(filePath)}</span>
+              {hasCurrentStats && (
+                <span className="shrink-0 font-mono text-sm font-semibold">
+                  <span className="text-green-500">
+                    +{currentStats.additions}
+                  </span>
+                  <span className="mx-1 text-muted-foreground">/</span>
+                  <span className="text-red-500">
+                    -{currentStats.deletions}
+                  </span>
                 </span>
-                <span className="mx-1 text-muted-foreground">/</span>
-                <span className="text-red-500">-{currentStats.deletions}</span>
-              </span>
-            )}
-          </DialogTitle>
+              )}
+            </DialogTitle>
+            <FilePathCopyRow filePath={filePath} iconOnly />
+          </div>
 
           <div className="absolute right-4 top-4 flex items-center gap-1 sm:right-5">
             {!isMobile && canOpenInEditor() && (
