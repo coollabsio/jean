@@ -4,10 +4,37 @@ import {
   coalesceContentBlocks,
   getIntroTextBeforeDuplicatePlan,
   isDuplicatePlanTextBlock,
+  normalizeTodosForDisplay,
   resolvePlanContent,
   splitTextAroundPlan,
 } from './tool-call-utils'
 import type { ContentBlock, ToolCall } from '@/types/chat'
+
+describe('normalizeTodosForDisplay', () => {
+  const todos = [
+    { content: 'Done', activeForm: 'Done', status: 'completed' as const },
+    {
+      content: 'Running',
+      activeForm: 'Running',
+      status: 'in_progress' as const,
+    },
+    { content: 'Queued', activeForm: 'Queued', status: 'pending' as const },
+  ]
+
+  it('completes stale Grok tasks when the turn finishes', () => {
+    expect(normalizeTodosForDisplay(todos, false, false, true)).toEqual(
+      todos.map(todo => ({ ...todo, status: 'completed' }))
+    )
+  })
+
+  it('keeps pending tasks for other backends when the turn finishes', () => {
+    expect(normalizeTodosForDisplay(todos, false)).toEqual([
+      todos[0],
+      { ...todos[1], status: 'completed' },
+      todos[2],
+    ])
+  })
+})
 
 describe('splitTextAroundPlan', () => {
   it('separates prose before a trailing plan block', () => {

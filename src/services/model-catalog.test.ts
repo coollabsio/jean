@@ -173,10 +173,12 @@ describe('model catalog', () => {
       }),
     })
 
-    expect(getCatalogModelOptions(catalog, 'claude')).toContainEqual({
-      value: 'claude-opus-4-8[1m]',
-      label: 'Claude Opus 4.8 (1M)',
-    })
+    expect(getCatalogModelOptions(catalog, 'claude')).toEqual(
+      expect.arrayContaining([
+        { value: 'claude-fable-5-1', label: 'Claude Fable 5.1' },
+        { value: 'claude-opus-4-8[1m]', label: 'Claude Opus 4.8 (1M)' },
+      ])
+    )
     expect(getCatalogModelOptions(catalog, 'codex')).toContainEqual({
       value: 'gpt-5.5',
       label: 'GPT 5.5',
@@ -197,6 +199,20 @@ describe('model catalog', () => {
         'ultra',
       ])
     }
+  })
+
+  it('uses the documented effort levels for bundled GPT 6 Astra', () => {
+    const reasoning = getCatalogModelReasoning(null, 'codex', 'gpt-6-astra')
+
+    expect(reasoning?.default).toBe('medium')
+    expect(reasoning?.levels.map(level => level.value)).toEqual([
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+      'max',
+      'ultra',
+    ])
   })
 
   it('does not expose Ultra effort for bundled GPT 5.6 Luna', () => {

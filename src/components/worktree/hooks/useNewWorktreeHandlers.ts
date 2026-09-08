@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
 import { invoke } from '@/lib/transport'
 import { toast } from 'sonner'
-import { useUIStore } from '@/store/ui-store'
+import { useUIStore, type InvestigationOverride } from '@/store/ui-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
 import { githubQueryKeys } from '@/services/github'
@@ -32,7 +32,11 @@ interface Setters {
   setIncludeClosed: (v: boolean) => void
 }
 
-export function useNewWorktreeHandlers(data: Data, setters: Setters) {
+export function useNewWorktreeHandlers(
+  data: Data,
+  setters: Setters,
+  investigationOverride?: InvestigationOverride
+) {
   const {
     queryClient,
     selectedProjectId,
@@ -285,7 +289,13 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
         setCreatingFromNumber(null)
       }
     },
-    [selectedProjectId, selectedProject, createWorktree, handleOpenChange]
+    [
+      selectedProjectId,
+      selectedProject,
+      createWorktree,
+      handleOpenChange,
+      investigationOverride,
+    ]
   )
 
   const handleSelectIssueAndInvestigate = useCallback(
@@ -337,7 +347,9 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
           issueContext,
           background,
         })
-        useUIStore.getState().markWorktreeForAutoInvestigate(worktree.id)
+        useUIStore
+          .getState()
+          .markWorktreeForAutoInvestigate(worktree.id, investigationOverride)
 
         if (background) {
           setCreatingFromNumber(null)
@@ -405,7 +417,9 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
             issueContext,
             background: true,
           })
-          useUIStore.getState().markWorktreeForAutoInvestigate(worktree.id)
+          useUIStore
+            .getState()
+            .markWorktreeForAutoInvestigate(worktree.id, investigationOverride)
           return issue.number
         })
       )
@@ -420,7 +434,7 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
         'issues'
       )
     },
-    [selectedProjectId, selectedProject, createWorktree]
+    [selectedProjectId, selectedProject, createWorktree, investigationOverride]
   )
 
   const handleBulkInvestigatePRs = useCallback(
@@ -495,7 +509,12 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
             prContext,
             background: true,
           })
-          useUIStore.getState().markWorktreeForAutoInvestigatePR(worktree.id)
+          useUIStore
+            .getState()
+            .markWorktreeForAutoInvestigatePR(
+              worktree.id,
+              investigationOverride
+            )
           return pr.number
         })
       )
@@ -510,7 +529,7 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
         'PRs'
       )
     },
-    [selectedProjectId, selectedProject, createWorktree]
+    [selectedProjectId, selectedProject, createWorktree, investigationOverride]
   )
 
   const handleBulkInvestigateSecurity = useCallback(
@@ -784,7 +803,13 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
         setCreatingFromNumber(null)
       }
     },
-    [selectedProjectId, selectedProject, createWorktree, handleOpenChange]
+    [
+      selectedProjectId,
+      selectedProject,
+      createWorktree,
+      handleOpenChange,
+      investigationOverride,
+    ]
   )
 
   const handleSelectPRAndInvestigate = useCallback(
@@ -856,7 +881,9 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
           prContext,
           background,
         })
-        useUIStore.getState().markWorktreeForAutoInvestigatePR(worktree.id)
+        useUIStore
+          .getState()
+          .markWorktreeForAutoInvestigatePR(worktree.id, investigationOverride)
 
         if (background) {
           setCreatingFromNumber(null)

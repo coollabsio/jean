@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { invoke } from '@/lib/transport'
 import { useChatStore } from '@/store/chat-store'
-import { useUIStore } from '@/store/ui-store'
+import { useUIStore, type InvestigationOverride } from '@/store/ui-store'
 import { usePreferences } from '@/services/preferences'
 import { chatQueryKeys } from '@/services/chat'
 import { resolveBackend, supportsAdaptiveThinking } from '@/lib/model-utils'
@@ -106,6 +106,7 @@ export function useBackgroundInvestigation(): void {
         autoInvestigateAdvisoryWorktreeIds,
         autoInvestigateLinearIssueWorktreeIds,
         autoInvestigateSentryIssueWorktreeIds,
+        autoInvestigateOverrides,
       } = useUIStore.getState()
 
       const { worktreePaths } = useChatStore.getState()
@@ -261,7 +262,8 @@ export function useBackgroundInvestigation(): void {
           type,
           preferencesRef.current,
           null,
-          queryClient
+          queryClient,
+          autoInvestigateOverrides[worktreeId]
         )
           .then(() => {
             if (!disposed) consumeByType[type](worktreeId)
@@ -493,7 +495,8 @@ async function processBackgroundInvestigation(
   type: InvestigationType,
   preferences: ReturnType<typeof usePreferences>['data'],
   cliVersion: string | null,
-  queryClient: ReturnType<typeof useQueryClient>
+  queryClient: ReturnType<typeof useQueryClient>,
+  override?: InvestigationOverride
 ): Promise<void> {
   const worktreePath = useChatStore.getState().worktreePaths[worktreeId]
   if (!worktreePath) {
@@ -517,15 +520,21 @@ async function processBackgroundInvestigation(
     investigationConfig[type]
 
   const selectedModel =
+    override?.model ??
     preferences?.magic_prompt_models?.[modelKey] ??
     preferences?.selected_model ??
     'sonnet'
-  const provider = resolveMagicPromptProvider(
-    preferences?.magic_prompt_providers,
-    providerKey,
-    preferences?.default_provider
-  )
-  const backend = resolveBackend(selectedModel)
+  const backend = override?.backend ?? resolveBackend(selectedModel)
+  const provider =
+    backend !== 'claude'
+      ? null
+      : override
+        ? override.provider
+        : resolveMagicPromptProvider(
+            preferences?.magic_prompt_providers,
+            providerKey,
+            preferences?.default_provider
+          )
 
   // Resolve custom profile name
   let customProfileName: string | undefined

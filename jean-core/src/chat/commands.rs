@@ -416,9 +416,14 @@ fn should_clear_stale_resumed_claude_session(
     has_tool_calls: bool,
     has_content_blocks: bool,
     has_usage: bool,
-    _was_cancelled: bool,
+    was_cancelled: bool,
 ) -> bool {
-    was_resuming && !has_content && !has_tool_calls && !has_content_blocks && !has_usage
+    was_resuming
+        && !was_cancelled
+        && !has_content
+        && !has_tool_calls
+        && !has_content_blocks
+        && !has_usage
 }
 
 fn default_model_for_backend(
@@ -4878,6 +4883,15 @@ pub async fn send_chat_message(
 
                     if super::should_include_recap_instruction(&thread_app, thread_include_recap) {
                         parts.push(super::RECAP_INSTRUCTION.to_string());
+                    }
+
+                    let loaded_context = super::context_instructions::build_loaded_context_content(
+                        &thread_app,
+                        &thread_session_id,
+                        &thread_worktree_id,
+                    );
+                    if !loaded_context.is_empty() {
+                        parts.push(loaded_context);
                     }
 
                     if parts.is_empty() {
@@ -10674,7 +10688,14 @@ mod tests {
     }
 
     #[test]
-    fn stale_resumed_claude_session_is_cleared_for_empty_cancelled_response() {
+    fn cancelled_empty_response_keeps_resumed_claude_session() {
+        assert!(!should_clear_stale_resumed_claude_session(
+            true, false, false, false, false, true
+        ));
+    }
+
+    #[test]
+    fn non_cancelled_empty_response_clears_stale_resumed_claude_session() {
         assert!(should_clear_stale_resumed_claude_session(
             true, false, false, false, false, false
         ));
