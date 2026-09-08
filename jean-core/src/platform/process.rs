@@ -116,6 +116,21 @@ pub fn open_url_in_browser(url: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Darwin historically advertised `OPEN_MAX` as 10240. The kernel rejects
+/// `RLIM_INFINITY` (and values above `kern.maxfilesperproc`) for `RLIMIT_NOFILE`.
+#[cfg(target_os = "macos")]
+const DARWIN_OPEN_MAX: libc::rlim_t = 10_240;
+
+#[cfg(unix)]
+fn fd_limit_warn(message: String) {
+    log::warn!("{message}");
+    // Desktop `run()` calls this before the Tauri log plugin is installed, so
+    // failures would otherwise vanish. Surface them on stderr in that case.
+    if !log::log_enabled!(log::Level::Warn) {
+        eprintln!("{message}");
+    }
+}
+
 /// Raise the open-file-descriptor soft limit (`RLIMIT_NOFILE`) to the hard limit.
 ///
 /// macOS GUI apps launch with a low default soft limit (often 256). Jean spawns
@@ -133,10 +148,10 @@ pub fn raise_fd_limit() {
             rlim_max: 0,
         };
         if libc::getrlimit(libc::RLIMIT_NOFILE, &mut rlim) != 0 {
-            log::warn!(
+            fd_limit_warn(format!(
                 "raise_fd_limit: getrlimit failed: {}",
                 std::io::Error::last_os_error()
-            );
+            ));
             return;
         }
 
@@ -148,13 +163,7 @@ pub fn raise_fd_limit() {
         let target = rlim.rlim_max;
 
         #[cfg(target_os = "macos")]
-        let target = {
-            let mut target = rlim.rlim_max;
-            if let Some(max_per_proc) = macos_maxfilesperproc() {
-                target = target.min(max_per_proc);
-            }
-            target
-        };
+        let target = macos_nofile_target(rlim.rlim_max);
 
         if old_cur >= target {
             log::info!("raise_fd_limit: soft fd limit already sufficient ({old_cur})");
@@ -163,14 +172,41 @@ pub fn raise_fd_limit() {
 
         rlim.rlim_cur = target;
         if libc::setrlimit(libc::RLIMIT_NOFILE, &rlim) != 0 {
-            log::warn!(
+            #[cfg(target_os = "macos")]
+            if target > DARWIN_OPEN_MAX && old_cur < DARWIN_OPEN_MAX {
+                rlim.rlim_cur = DARWIN_OPEN_MAX;
+                if libc::setrlimit(libc::RLIMIT_NOFILE, &rlim) == 0 {
+                    log::info!(
+                        "raise_fd_limit: raised soft fd limit {old_cur} -> {DARWIN_OPEN_MAX} (OPEN_MAX fallback)"
+                    );
+                    return;
+                }
+            }
+            fd_limit_warn(format!(
                 "raise_fd_limit: setrlimit to {target} failed: {}",
                 std::io::Error::last_os_error()
-            );
+            ));
             return;
         }
 
         log::info!("raise_fd_limit: raised soft fd limit {old_cur} -> {target}");
+    }
+}
+
+/// Choose a `RLIMIT_NOFILE` soft-limit target that macOS will accept.
+///
+/// GUI apps often report `rlim_max = RLIM_INFINITY`. The kernel rejects that
+/// with EINVAL, so clamp to `kern.maxfilesperproc`, or Darwin `OPEN_MAX` if
+/// the sysctl is unavailable.
+#[cfg(target_os = "macos")]
+fn macos_nofile_target(rlim_max: libc::rlim_t) -> libc::rlim_t {
+    if let Some(max_per_proc) = macos_maxfilesperproc() {
+        return rlim_max.min(max_per_proc);
+    }
+    if rlim_max == 0 || rlim_max == libc::RLIM_INFINITY {
+        DARWIN_OPEN_MAX
+    } else {
+        rlim_max.min(DARWIN_OPEN_MAX)
     }
 }
 
@@ -200,6 +236,102 @@ fn macos_maxfilesperproc() -> Option<libc::rlim_t> {
 /// No-op on Windows — there is no per-process open-file-descriptor limit to raise.
 #[cfg(windows)]
 pub fn raise_fd_limit() {}
+
+#[cfg(test)]
+mod fd_limit_tests {
+    use super::raise_fd_limit;
+
+    #[cfg(unix)]
+    fn nofile_limit() -> libc::rlimit {
+        unsafe {
+            let mut rlim = libc::rlimit {
+                rlim_cur: 0,
+                rlim_max: 0,
+            };
+            assert_eq!(
+                libc::getrlimit(libc::RLIMIT_NOFILE, &mut rlim),
+                0,
+                "getrlimit(RLIMIT_NOFILE) failed: {}",
+                std::io::Error::last_os_error()
+            );
+            rlim
+        }
+    }
+
+    #[test]
+    fn raise_fd_limit_does_not_panic() {
+        raise_fd_limit();
+        raise_fd_limit();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn raise_fd_limit_does_not_lower_soft_limit() {
+        let before = nofile_limit();
+        raise_fd_limit();
+        let after = nofile_limit();
+        assert!(
+            after.rlim_cur >= before.rlim_cur,
+            "soft limit decreased: {} -> {}",
+            before.rlim_cur,
+            after.rlim_cur
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn raise_fd_limit_is_idempotent() {
+        raise_fd_limit();
+        let once = nofile_limit();
+        raise_fd_limit();
+        let twice = nofile_limit();
+        assert_eq!(once.rlim_cur, twice.rlim_cur);
+        assert_eq!(once.rlim_max, twice.rlim_max);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_nofile_target_clamps_infinity_without_sysctl() {
+        // Even if sysctl works, infinity must never be returned as the target.
+        let target = super::macos_nofile_target(libc::RLIM_INFINITY);
+        assert_ne!(target, libc::RLIM_INFINITY);
+        assert!(target > 0);
+        assert!(target >= super::DARWIN_OPEN_MAX || super::macos_maxfilesperproc().is_some());
+    }
+
+    #[test]
+    fn desktop_run_raises_fd_limit_before_tauri() {
+        let source = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../src-tauri/src/lib.rs"
+        ));
+        let raise = source
+            .find("jean_core::raise_fd_limit();")
+            .expect("desktop run() must call jean_core::raise_fd_limit()");
+        let builder = source
+            .find("tauri::Builder::default()")
+            .expect("desktop Tauri builder");
+        assert!(
+            raise < builder,
+            "desktop run() must raise the fd limit before Tauri initializes"
+        );
+    }
+
+    #[test]
+    fn run_server_raises_fd_limit_before_host_early_returns() {
+        let source = include_str!("../lib.rs");
+        let raise = source
+            .find("platform::raise_fd_limit();")
+            .expect("run_server must call platform::raise_fd_limit()");
+        let pi_host = source
+            .find("chat::pi::run_pi_rpc_host_from_args")
+            .expect("PI RPC host early return");
+        assert!(
+            raise < pi_host,
+            "raise_fd_limit must run before PI RPC host early return so jean-server hosts inherit the limit"
+        );
+    }
+}
 
 /// Check if a process is still alive
 /// - Unix: Uses kill(pid, 0) to check
