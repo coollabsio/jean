@@ -1912,6 +1912,8 @@ fn process_turn_events(
     let mut usage: Option<UsageData> = None;
     let mut received_completed_agent_message = false;
     let mut recovered_connection = false;
+    let mut status_poll_interval = status_poll_interval;
+    let mut recovery_turn_id = recovery_turn_id.map(str::to_owned);
 
     // Coalesce token-rate text/thinking deltas into fewer, larger
     // chat:chunk / chat:thinking events. Flushed before any other event is
@@ -1970,8 +1972,11 @@ fn process_turn_events(
                         );
                         match snapshot {
                             Ok(snapshot) => {
-                                let disposition =
-                                    classify_codex_resume(&snapshot, recovery_turn_id, true);
+                                let disposition = classify_codex_resume(
+                                    &snapshot,
+                                    recovery_turn_id.as_deref(),
+                                    true,
+                                );
                                 if disposition == CodexResumeDisposition::Active {
                                     continue;
                                 }
@@ -1982,7 +1987,7 @@ fn process_turn_events(
                                 if let Err(e) = append_codex_thread_snapshot_to_history_file(
                                     output_file,
                                     &snapshot,
-                                    recovery_turn_id,
+                                    recovery_turn_id.as_deref(),
                                     false,
                                 ) {
                                     log::warn!(
@@ -1992,9 +1997,10 @@ fn process_turn_events(
 
                                 match disposition {
                                     CodexResumeDisposition::Failed => {
-                                        if let Some(turn) =
-                                            select_codex_recovery_turn(&snapshot, recovery_turn_id)
-                                        {
+                                        if let Some(turn) = select_codex_recovery_turn(
+                                            &snapshot,
+                                            recovery_turn_id.as_deref(),
+                                        ) {
                                             let raw_error = codex_turn_error_message(turn)
                                                 .unwrap_or_else(|| {
                                                     "Unknown Codex error".to_string()
@@ -2085,6 +2091,7 @@ fn process_turn_events(
                         .and_then(|t| t.get("id"))
                         .and_then(|v| v.as_str())
                     {
+                        recovery_turn_id = Some(turn_id.to_string());
                         super::registry::register_codex_turn(
                             session_id.to_string(),
                             thread_id.to_string(),
@@ -2147,6 +2154,9 @@ fn process_turn_events(
             }
             ServerEvent::Reconnected { snapshot } => {
                 recovered_connection = true;
+                if status_poll_interval.is_none() {
+                    status_poll_interval = Some(std::time::Duration::from_secs(15));
+                }
                 log::info!(
                     "Codex app-server connection recovered during turn for session {session_id}"
                 );
@@ -2162,12 +2172,13 @@ fn process_turn_events(
                     let _ = writer.flush();
                 }
 
-                let disposition = classify_codex_resume(&snapshot, recovery_turn_id, true);
+                let disposition =
+                    classify_codex_resume(&snapshot, recovery_turn_id.as_deref(), true);
                 if disposition != CodexResumeDisposition::Active {
                     if let Err(error) = append_codex_thread_snapshot_to_history_file(
                         output_file,
                         &snapshot,
-                        recovery_turn_id,
+                        recovery_turn_id.as_deref(),
                         disposition == CodexResumeDisposition::Idle,
                     ) {
                         log::warn!("Failed to backfill Codex reconnect snapshot: {error}");
@@ -2176,14 +2187,18 @@ fn process_turn_events(
 
                 match disposition {
                     CodexResumeDisposition::Active => continue,
-                    CodexResumeDisposition::Idle => break 'outer,
+                    CodexResumeDisposition::Idle => {
+                        completed = true;
+                        break 'outer;
+                    }
                     CodexResumeDisposition::Interrupted => {
                         cancelled = true;
                         server_interrupted = true;
                         break 'outer;
                     }
                     CodexResumeDisposition::Failed => {
-                        if let Some(turn) = select_codex_recovery_turn(&snapshot, recovery_turn_id)
+                        if let Some(turn) =
+                            select_codex_recovery_turn(&snapshot, recovery_turn_id.as_deref())
                         {
                             let raw_error = codex_turn_error_message(turn)
                                 .unwrap_or_else(|| "Unknown Codex error".to_string());
@@ -2248,7 +2263,7 @@ fn process_turn_events(
                 if let Err(error) = append_codex_thread_snapshot_to_history_file(
                     output_file,
                     &snapshot,
-                    recovery_turn_id,
+                    recovery_turn_id.as_deref(),
                     true,
                 ) {
                     log::warn!("Failed to backfill completed Codex reconnect snapshot: {error}");
