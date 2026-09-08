@@ -7,6 +7,7 @@ const patchMutate = vi.fn()
 const installMutate = vi.fn()
 const uninstallMutate = vi.fn()
 const openLogin = vi.fn()
+const authRefetch = vi.fn()
 
 interface AuthData {
   authenticated: boolean
@@ -41,7 +42,11 @@ vi.mock('@/services/antigravity-cli', () => ({
   useAntigravityCliStatus: () => ({
     data: { installed: true, version: '0.54.4', path: '/managed/antigravity' },
   }),
-  useAntigravityCliAuth: () => ({ data: authData }),
+  useAntigravityCliAuth: () => ({
+    data: authData,
+    isFetching: false,
+    refetch: authRefetch,
+  }),
   useAvailableAntigravityModels: () => ({ data: [{ id: 'auto', label: 'Auto' }] }),
   useAvailableAntigravityVersions: () => ({
     data: [
@@ -123,6 +128,22 @@ describe('AntigravityPane', () => {
 
     expect(screen.getByText(/Auth check timed out/)).toBeInTheDocument()
     expect(screen.queryByText(/Not authenticated/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Login' })).toBeInTheDocument()
+  })
+
+  it('retries a timed-out auth check without opening login', () => {
+    authData = {
+      authenticated: false,
+      error: 'Antigravity CLI status check timed out',
+      timedOut: true,
+    }
+
+    render(<AntigravityPane />)
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+
+    expect(authRefetch).toHaveBeenCalled()
+    expect(openLogin).not.toHaveBeenCalled()
   })
 
   it('still reports a genuine signed-out state', () => {
@@ -131,5 +152,7 @@ describe('AntigravityPane', () => {
     render(<AntigravityPane />)
 
     expect(screen.getByText(/Not authenticated · Please sign in/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Login' })).toBeInTheDocument()
   })
 })

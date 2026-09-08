@@ -178,19 +178,31 @@ export function AntigravityPane() {
                     : `Not authenticated${auth.data?.error ? ` · ${auth.data.error}` : ''}`}
           </span>
           {status.data?.installed && status.data.path && (
-            <Button
-              size="sm"
-              onClick={() =>
-                openCliLoginModal(
-                  'antigravity',
-                  status.data?.path ?? 'agy',
-                  [],
-                  'login'
-                )
-              }
-            >
-              {auth.data?.authenticated ? 'Relogin' : 'Login'}
-            </Button>
+            <div className="flex items-center gap-2">
+              {auth.data?.timedOut && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={auth.isFetching}
+                  onClick={() => auth.refetch()}
+                >
+                  {auth.isFetching ? 'Retrying…' : 'Retry'}
+                </Button>
+              )}
+              <Button
+                size="sm"
+                onClick={() =>
+                  openCliLoginModal(
+                    'antigravity',
+                    status.data?.path ?? 'agy',
+                    [],
+                    'login'
+                  )
+                }
+              >
+                {auth.data?.authenticated ? 'Relogin' : 'Login'}
+              </Button>
+            </div>
           )}
         </div>
       </SettingsSection>

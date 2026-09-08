@@ -190,9 +190,17 @@ pub async fn check_antigravity_cli_auth(app: AppHandle) -> Result<AntigravityAut
             timed_out: false,
         });
     }
-    let mut command = crate::platform::cli_command(&binary.to_string_lossy(), None);
-    command.arg("models");
-    match run_with_timeout(command) {
+    let binary = binary.to_string_lossy().to_string();
+    // `agy models` is a network round-trip and may sit on the AUTH_TIMEOUT
+    // budget. Don't pin a Tokio worker with the poll/sleep loop.
+    let result = tokio::task::spawn_blocking(move || {
+        let mut command = crate::platform::cli_command(&binary, None);
+        command.arg("models");
+        run_with_timeout(command)
+    })
+    .await
+    .map_err(|error| format!("Failed to join Antigravity auth check: {error}"))?;
+    match result {
         Ok(output) if output.status.success() => Ok(AntigravityAuthStatus {
             authenticated: true,
             error: None,
@@ -354,5 +362,29 @@ mod tests {
         let models = parse_models("gemini-3.6-flash-high Gemini 3.6 Flash (High)\ngemini-3.1-pro-high Gemini 3.1 Pro (High)\n");
         assert_eq!(models[0].id, "gemini-3.6-flash-high");
         assert_eq!(models[0].label, "Gemini 3.6 Flash (High)");
+    }
+
+    #[test]
+    fn auth_timeout_matches_other_network_cli_checks() {
+        assert_eq!(AUTH_TIMEOUT, Duration::from_secs(15));
+    }
+
+    #[test]
+    fn auth_status_serializes_timed_out_as_camel_case() {
+        let auth_json = serde_json::to_value(AntigravityAuthStatus {
+            authenticated: false,
+            error: Some("Antigravity CLI status check timed out".to_string()),
+            timed_out: true,
+        })
+        .unwrap();
+        assert_eq!(
+            auth_json.get("timedOut").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert!(auth_json.get("timed_out").is_none());
+        assert_eq!(
+            auth_json.get("authenticated").and_then(|v| v.as_bool()),
+            Some(false)
+        );
     }
 }
