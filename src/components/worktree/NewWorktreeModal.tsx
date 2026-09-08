@@ -15,19 +15,12 @@ import { useGhLogin } from '@/hooks/useGhLogin'
 import { usePreferences } from '@/services/preferences'
 import {
   resolveMagicPromptProvider,
-  type MagicPromptModel,
+  resolveMagicPromptBackend,
+  type CliBackend,
 } from '@/types/preferences'
-import {
-  MODEL_OPTIONS,
-  CODEX_MODEL_OPTIONS,
-  OPENCODE_MODEL_OPTIONS,
-  CURSOR_MODEL_OPTIONS,
-  PI_MODEL_OPTIONS,
-  COMMANDCODE_MODEL_OPTIONS,
-  GROK_MODEL_OPTIONS,
-  KIMI_MODEL_OPTIONS,
-  ANTIGRAVITY_MODEL_OPTIONS,
-} from '@/components/chat/toolbar/toolbar-options'
+import { DesktopBackendModelPicker } from '@/components/chat/toolbar/DesktopBackendModelPicker'
+import { useInstalledBackends } from '@/hooks/useInstalledBackends'
+import { resolveSelectedModelForBackend } from '@/lib/session-defaults'
 import {
   Select,
   SelectContent,
@@ -82,32 +75,22 @@ export const TABS: Tab[] = [
   { id: 'sentry', label: 'Sentry', key: '7', icon: Bug },
 ]
 
-const INVESTIGATION_MODEL_OPTIONS = [
-  ...MODEL_OPTIONS,
-  ...CODEX_MODEL_OPTIONS,
-  ...OPENCODE_MODEL_OPTIONS,
-  ...CURSOR_MODEL_OPTIONS,
-  ...PI_MODEL_OPTIONS,
-  ...COMMANDCODE_MODEL_OPTIONS,
-  ...GROK_MODEL_OPTIONS,
-  ...KIMI_MODEL_OPTIONS,
-  ...ANTIGRAVITY_MODEL_OPTIONS,
-].filter(
-  (option, index, options) =>
-    options.findIndex(candidate => candidate.value === option.value) === index
-)
-
 export function NewWorktreeModal() {
   const { triggerLogin: triggerGhLogin, isGhInstalled } = useGhLogin()
   const { newWorktreeModalOpen } = useUIStore()
   const isMobile = useIsMobile()
   const { data: preferences } = usePreferences()
+  const { installedBackends } = useInstalledBackends({
+    enabled: newWorktreeModalOpen,
+  })
 
   // Local state
   const [activeTab, setActiveTab] = useState<TabId>('quick')
   const [searchQuery, setSearchQuery] = useState('')
   const [includeClosed, setIncludeClosed] = useState(false)
   const [selectedItemIndex, setSelectedItemIndex] = useState(0)
+  const [investigationBackend, setInvestigationBackend] =
+    useState<CliBackend>('claude')
   const [investigationModel, setInvestigationModel] = useState('sonnet')
   const [investigationProvider, setInvestigationProvider] =
     useState('__anthropic__')
@@ -138,8 +121,10 @@ export function NewWorktreeModal() {
       setIncludeClosed,
     },
     {
+      backend: investigationBackend,
       model: investigationModel,
       provider:
+        investigationBackend !== 'claude' ||
         investigationProvider === '__anthropic__'
           ? null
           : investigationProvider,
@@ -218,17 +203,6 @@ export function NewWorktreeModal() {
   // Apply store-provided default tab when modal opens (resets selection via handleTabChange)
   useEffect(() => {
     if (newWorktreeModalOpen) {
-      const model =
-        preferences?.magic_prompt_models?.investigate_issue_model ??
-        preferences?.selected_model ??
-        'sonnet'
-      const provider = resolveMagicPromptProvider(
-        preferences?.magic_prompt_providers,
-        'investigate_issue_provider',
-        preferences?.default_provider
-      )
-      setInvestigationModel(model)
-      setInvestigationProvider(provider ?? '__anthropic__')
       const { newWorktreeModalDefaultTab, setNewWorktreeModalDefaultTab } =
         useUIStore.getState()
       if (newWorktreeModalDefaultTab) {
@@ -237,7 +211,53 @@ export function NewWorktreeModal() {
         setNewWorktreeModalDefaultTab(null)
       }
     }
-  }, [newWorktreeModalOpen, handleTabChange, preferences])
+  }, [newWorktreeModalOpen, handleTabChange])
+
+  const investigationKind = activeTab === 'prs' ? 'pr' : 'issue'
+  const defaultInvestigationBackend =
+    resolveMagicPromptBackend(
+      preferences?.magic_prompt_backends,
+      `investigate_${investigationKind}_backend`,
+      data.selectedProject?.default_backend ?? preferences?.default_backend
+    ) ?? 'claude'
+  const defaultInvestigationProvider =
+    defaultInvestigationBackend === 'claude'
+      ? resolveMagicPromptProvider(
+          preferences?.magic_prompt_providers,
+          `investigate_${investigationKind}_provider`,
+          preferences?.default_provider
+        )
+      : null
+  const defaultInvestigationModel = resolveSelectedModelForBackend(
+    defaultInvestigationBackend,
+    preferences?.magic_prompt_models?.[
+      `investigate_${investigationKind}_model`
+    ],
+    preferences
+  )
+
+  // Only relevant defaults reset selection, not favorites/fast-mode updates.
+  useEffect(() => {
+    if (
+      !newWorktreeModalOpen ||
+      (activeTab !== 'issues' && activeTab !== 'prs')
+    )
+      return
+    setInvestigationBackend(defaultInvestigationBackend)
+    setInvestigationProvider(defaultInvestigationProvider ?? '__anthropic__')
+    setInvestigationModel(
+      defaultInvestigationProvider &&
+        !['opus', 'sonnet', 'haiku'].includes(defaultInvestigationModel)
+        ? 'sonnet'
+        : defaultInvestigationModel
+    )
+  }, [
+    newWorktreeModalOpen,
+    activeTab,
+    defaultInvestigationBackend,
+    defaultInvestigationProvider,
+    defaultInvestigationModel,
+  ])
 
   // Focus search input when switching to searchable tabs
   useEffect(() => {
@@ -323,52 +343,60 @@ export function NewWorktreeModal() {
               <span className="text-xs text-muted-foreground shrink-0">
                 Investigate with
               </span>
-              <Select
-                value={investigationProvider}
-                onValueChange={setInvestigationProvider}
-              >
-                <SelectTrigger
-                  className="h-8 min-w-0 flex-1 text-xs"
-                  aria-label="Investigation provider"
+              {newWorktreeModalOpen && (
+                <DesktopBackendModelPicker
+                  triggerClassName="!flex min-w-0 flex-1 max-w-full"
+                  selectedBackend={investigationBackend}
+                  selectedModel={investigationModel}
+                  selectedProvider={
+                    investigationBackend === 'claude' &&
+                    investigationProvider !== '__anthropic__'
+                      ? investigationProvider
+                      : null
+                  }
+                  installedBackends={installedBackends}
+                  customCliProfiles={preferences?.custom_cli_profiles ?? []}
+                  onModelChange={setInvestigationModel}
+                  onBackendModelChange={(backend, model) => {
+                    setInvestigationBackend(backend)
+                    setInvestigationModel(model)
+                    if (backend !== 'claude')
+                      setInvestigationProvider('__anthropic__')
+                  }}
+                />
+              )}
+              {investigationBackend === 'claude' && (
+                <Select
+                  value={investigationProvider}
+                  onValueChange={provider => {
+                    setInvestigationProvider(provider)
+                    setInvestigationModel(
+                      provider === '__anthropic__'
+                        ? resolveSelectedModelForBackend(
+                            'claude',
+                            undefined,
+                            preferences
+                          )
+                        : 'sonnet'
+                    )
+                  }}
                 >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__anthropic__">Anthropic</SelectItem>
-                  {(preferences?.custom_cli_profiles ?? []).map(profile => (
-                    <SelectItem key={profile.name} value={profile.name}>
-                      {profile.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select
-                value={investigationModel}
-                onValueChange={value =>
-                  setInvestigationModel(value as MagicPromptModel)
-                }
-              >
-                <SelectTrigger
-                  className="h-8 min-w-0 flex-[1.4] text-xs"
-                  aria-label="Investigation model"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {!INVESTIGATION_MODEL_OPTIONS.some(
-                    option => option.value === investigationModel
-                  ) && (
-                    <SelectItem value={investigationModel}>
-                      {investigationModel}
-                    </SelectItem>
-                  )}
-                  {INVESTIGATION_MODEL_OPTIONS.map(option => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                  <SelectTrigger
+                    className="h-8 min-w-0 flex-1 text-xs"
+                    aria-label="Investigation provider"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__anthropic__">Anthropic</SelectItem>
+                    {(preferences?.custom_cli_profiles ?? []).map(profile => (
+                      <SelectItem key={profile.name} value={profile.name}>
+                        {profile.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
           )}
 
