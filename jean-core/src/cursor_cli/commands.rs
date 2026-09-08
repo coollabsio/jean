@@ -452,51 +452,55 @@ pub async fn list_cursor_models(app: AppHandle) -> Result<Vec<CursorModelInfo>, 
     }
 }
 
-pub async fn get_cursor_install_command(_app: AppHandle) -> Result<CursorInstallCommand, String> {
-    let wsl = crate::platform::get_wsl_config();
-    if wsl.enabled {
+const CURSOR_UNIX_INSTALLER: &str = "curl -fsSL https://cursor.com/install | bash";
+const CURSOR_WINDOWS_INSTALLER: &str = "irm 'https://cursor.com/install?win32=true' | iex";
+
+fn cursor_install_command(wsl_distro: Option<&str>, is_windows: bool) -> CursorInstallCommand {
+    if let Some(distro) = wsl_distro {
         // Run Cursor's Linux installer inside the WSL distro so the binary
         // ends up on the distro-side $PATH rather than on Windows.
-        return Ok(CursorInstallCommand {
+        return CursorInstallCommand {
             command: "wsl.exe".to_string(),
             args: vec![
                 "-d".to_string(),
-                wsl.distro,
+                distro.to_string(),
                 "--".to_string(),
                 "bash".to_string(),
                 "-lc".to_string(),
-                "curl -fsSL https://cursor.com/install | bash".to_string(),
+                CURSOR_UNIX_INSTALLER.to_string(),
             ],
             description:
                 "Installs Cursor Agent inside your WSL distro using Cursor's official installer"
                     .to_string(),
-        });
+        };
     }
 
-    #[cfg(target_os = "windows")]
-    {
-        Ok(CursorInstallCommand {
+    if is_windows {
+        CursorInstallCommand {
             command: "powershell".to_string(),
             args: vec![
                 "-NoProfile".to_string(),
                 "-Command".to_string(),
-                "irm 'https://cursor.com/install?win32=true' | iex".to_string(),
+                CURSOR_WINDOWS_INSTALLER.to_string(),
             ],
             description: "Installs Cursor Agent using Cursor's official installer".to_string(),
-        })
+        }
+    } else {
+        CursorInstallCommand {
+            command: "/bin/sh".to_string(),
+            args: vec!["-c".to_string(), CURSOR_UNIX_INSTALLER.to_string()],
+            description: "Installs Cursor Agent using Cursor's official installer".to_string(),
+        }
+    }
+}
+
+pub async fn get_cursor_install_command(_app: AppHandle) -> Result<CursorInstallCommand, String> {
+    let wsl = crate::platform::get_wsl_config();
+    if wsl.enabled {
+        return Ok(cursor_install_command(Some(&wsl.distro), false));
     }
 
-    #[cfg(not(target_os = "windows"))]
-    {
-        Ok(CursorInstallCommand {
-            command: "/bin/sh".to_string(),
-            args: vec![
-                "-c".to_string(),
-                "curl -fsSL https://cursor.com/install | bash".to_string(),
-            ],
-            description: "Installs Cursor Agent using Cursor's official installer".to_string(),
-        })
-    }
+    Ok(cursor_install_command(None, cfg!(windows)))
 }
 
 #[cfg(test)]
@@ -571,5 +575,58 @@ Tip: use --model <id> (or /model <id> in interactive mode) to switch.
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].id, "kimi-k2.5");
         assert_eq!(models[0].label, "Kimi K2.5");
+    }
+
+    #[test]
+    fn windows_install_command_uses_official_win32_installer() {
+        let cmd = cursor_install_command(None, true);
+
+        assert_eq!(cmd.command, "powershell");
+        assert_eq!(
+            cmd.args,
+            vec![
+                "-NoProfile".to_string(),
+                "-Command".to_string(),
+                "irm 'https://cursor.com/install?win32=true' | iex".to_string(),
+            ]
+        );
+        assert!(
+            !cmd.args.iter().any(|arg| arg.contains("curl")),
+            "native Windows must not pipe the Unix installer into PowerShell"
+        );
+    }
+
+    #[test]
+    fn unix_install_command_uses_bash_installer() {
+        let cmd = cursor_install_command(None, false);
+
+        assert_eq!(cmd.command, "/bin/sh");
+        assert_eq!(
+            cmd.args,
+            vec![
+                "-c".to_string(),
+                "curl -fsSL https://cursor.com/install | bash".to_string(),
+            ]
+        );
+        assert!(!cmd.args.iter().any(|arg| arg.contains("win32=true")));
+    }
+
+    #[test]
+    fn wsl_install_command_uses_unix_installer_inside_distro() {
+        let cmd = cursor_install_command(Some("Ubuntu"), true);
+
+        assert_eq!(cmd.command, "wsl.exe");
+        assert_eq!(
+            cmd.args,
+            vec![
+                "-d".to_string(),
+                "Ubuntu".to_string(),
+                "--".to_string(),
+                "bash".to_string(),
+                "-lc".to_string(),
+                "curl -fsSL https://cursor.com/install | bash".to_string(),
+            ]
+        );
+        assert!(!cmd.args.iter().any(|arg| arg.contains("win32=true")));
     }
 }
