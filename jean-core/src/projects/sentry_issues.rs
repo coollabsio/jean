@@ -4,7 +4,7 @@ use tauri::AppHandle;
 use super::github_issues::{
     get_github_contexts_dir, load_context_references, save_context_references, slugify_issue_title,
 };
-use super::storage::load_projects_data;
+use super::storage::{load_projects_data, save_projects_data};
 
 const SENTRY_BASE_URL: &str = "https://sentry.io";
 
@@ -76,6 +76,7 @@ struct SentryConfig {
     organization_slug: String,
     sentry_project_slug: String,
     project_name: String,
+    base_url: String,
 }
 
 fn get_sentry_auth_token(app: &AppHandle, project_id: Option<&str>) -> Result<String, String> {
@@ -102,8 +103,8 @@ fn get_sentry_auth_token(app: &AppHandle, project_id: Option<&str>) -> Result<St
         })
 }
 
-fn get_sentry_config(app: &AppHandle, project_id: &str) -> Result<SentryConfig, String> {
-    let data = load_projects_data(app)?;
+async fn get_sentry_config(app: &AppHandle, project_id: &str) -> Result<SentryConfig, String> {
+    let mut data = load_projects_data(app)?;
     let project = data
         .find_project(project_id)
         .ok_or_else(|| format!("Project not found: {project_id}"))?;
@@ -120,14 +121,33 @@ fn get_sentry_config(app: &AppHandle, project_id: &str) -> Result<SentryConfig, 
         .clone()
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| "No Sentry project configured. Add it in project settings.".to_string())?;
+    let project_name = project.name.clone();
+    let stored_base_url = project.sentry_base_url.clone();
 
     let auth_token = get_sentry_auth_token(app, Some(project_id))?;
+
+    let base_url = match stored_base_url.filter(|value| !value.trim().is_empty()) {
+        Some(url) => url,
+        None => {
+            let (base_url, to_persist) = pick_region_host(
+                resolve_sentry_base_url_for_org(&auth_token, &organization_slug).await,
+            );
+            if let Some(host) = to_persist {
+                if let Some(project) = data.find_project_mut(project_id) {
+                    project.sentry_base_url = Some(host);
+                    let _ = save_projects_data(app, &data);
+                }
+            }
+            base_url
+        }
+    };
 
     Ok(SentryConfig {
         auth_token,
         organization_slug,
         sentry_project_slug,
-        project_name: project.name.clone(),
+        project_name,
+        base_url,
     })
 }
 
@@ -153,7 +173,7 @@ async fn sentry_get(
         }
         if status.as_u16() == 404 {
             return Err(
-                "Sentry organization or project was not found. Check the slugs in project settings."
+                "Sentry resource not found (organization, project, or issue). Check the slugs in project settings."
                     .to_string(),
             );
         }
@@ -188,6 +208,43 @@ fn sentry_projects_url(organization: &SentryOrganization) -> Result<reqwest::Url
         .map(|links| links.region_url.as_str())
         .unwrap_or(SENTRY_BASE_URL);
     sentry_api_url_for_base(base_url, &["organizations", &organization.slug, "projects"])
+}
+
+/// Resolve the org's region API host (issue IDs are region-scoped).
+async fn resolve_sentry_base_url_for_org(
+    auth_token: &str,
+    organization_slug: &str,
+) -> Result<String, String> {
+    let organizations_value =
+        sentry_get(auth_token, sentry_api_url(&["organizations"])?, "org:read").await?;
+    let organizations: Vec<SentryOrganization> = serde_json::from_value(organizations_value)
+        .map_err(|e| format!("Unexpected Sentry organizations response: {e}"))?;
+    resolve_sentry_base_url(&organizations, organization_slug)
+}
+
+fn resolve_sentry_base_url(
+    organizations: &[SentryOrganization],
+    organization_slug: &str,
+) -> Result<String, String> {
+    organizations
+        .iter()
+        .find(|organization| organization.slug == organization_slug)
+        .and_then(|organization| {
+            organization
+                .links
+                .as_ref()
+                .map(|links| links.region_url.clone())
+        })
+        .ok_or_else(|| format!("Sentry organization {organization_slug} was not found"))
+}
+
+/// Region host to use plus the value to cache. Only a successfully resolved host
+/// is persisted, so the default fallback is never mistaken for a resolved region.
+fn pick_region_host(result: Result<String, String>) -> (String, Option<String>) {
+    match result {
+        Ok(host) => (host.clone(), Some(host)),
+        Err(_) => (SENTRY_BASE_URL.to_string(), None),
+    }
 }
 
 fn format_latest_event(event: &serde_json::Value) -> String {
@@ -366,13 +423,16 @@ pub async fn list_sentry_issues(
     project_id: String,
     query: Option<String>,
 ) -> Result<Vec<SentryIssue>, String> {
-    let config = get_sentry_config(&app, &project_id)?;
-    let mut url = sentry_api_url(&[
-        "projects",
-        &config.organization_slug,
-        &config.sentry_project_slug,
-        "issues",
-    ])?;
+    let config = get_sentry_config(&app, &project_id).await?;
+    let mut url = sentry_api_url_for_base(
+        &config.base_url,
+        &[
+            "projects",
+            &config.organization_slug,
+            &config.sentry_project_slug,
+            "issues",
+        ],
+    )?;
     let sentry_query = match query.map(|value| value.trim().to_string()) {
         Some(value) if !value.is_empty() => format!("is:unresolved {value}"),
         _ => "is:unresolved".to_string(),
@@ -391,10 +451,10 @@ pub async fn get_sentry_issue(
     project_id: String,
     issue_id: String,
 ) -> Result<SentryIssueContext, String> {
-    let config = get_sentry_config(&app, &project_id)?;
+    let config = get_sentry_config(&app, &project_id).await?;
     let issue_value = sentry_get(
         &config.auth_token,
-        sentry_api_url(&["issues", &issue_id])?,
+        sentry_api_url_for_base(&config.base_url, &["issues", &issue_id])?,
         "event:read",
     )
     .await?;
@@ -402,7 +462,7 @@ pub async fn get_sentry_issue(
         .map_err(|e| format!("Unexpected Sentry issue response: {e}"))?;
     let latest_event = sentry_get(
         &config.auth_token,
-        sentry_api_url(&["issues", &issue_id, "events", "latest"])?,
+        sentry_api_url_for_base(&config.base_url, &["issues", &issue_id, "events", "latest"])?,
         "event:read",
     )
     .await?;
@@ -477,7 +537,7 @@ pub async fn load_sentry_issue_context(
     project_id: String,
     issue_id: String,
 ) -> Result<SentryIssueContext, String> {
-    let config = get_sentry_config(&app, &project_id)?;
+    let config = get_sentry_config(&app, &project_id).await?;
     let context = get_sentry_issue(app.clone(), project_id, issue_id).await?;
     let contexts_dir = get_github_contexts_dir(&app)?;
     std::fs::create_dir_all(&contexts_dir)
@@ -495,10 +555,17 @@ pub async fn remove_sentry_issue_context(
     project_id: String,
     issue_id: String,
 ) -> Result<(), String> {
-    let config = get_sentry_config(&app, &project_id)?;
-    if remove_sentry_reference(&app, &config.project_name, &issue_id, &session_id)? {
-        let path = get_github_contexts_dir(&app)?
-            .join(format!("{}-sentry-{issue_id}.md", config.project_name));
+    // Only the project name is needed to locate the file. Must work even when the
+    // Sentry token/org is no longer configured so stale contexts stay removable.
+    let data = load_projects_data(&app)?;
+    let project_name = data
+        .find_project(&project_id)
+        .ok_or_else(|| format!("Project not found: {project_id}"))?
+        .name
+        .clone();
+    if remove_sentry_reference(&app, &project_name, &issue_id, &session_id)? {
+        let path =
+            get_github_contexts_dir(&app)?.join(format!("{project_name}-sentry-{issue_id}.md"));
         if path.exists() {
             std::fs::remove_file(path)
                 .map_err(|e| format!("Failed to remove Sentry context file: {e}"))?;
@@ -513,7 +580,7 @@ pub async fn get_sentry_issue_context_contents(
     worktree_id: Option<String>,
     project_id: String,
 ) -> Result<Vec<SentryIssueContext>, String> {
-    let config = get_sentry_config(&app, &project_id)?;
+    let config = get_sentry_config(&app, &project_id).await?;
     let mut keys = get_session_sentry_refs(&app, &session_id)?;
     if let Some(worktree_id) = worktree_id {
         if let Ok(worktree_keys) = get_session_sentry_refs(&app, &worktree_id) {
@@ -613,6 +680,42 @@ mod tests {
             sentry_api_url(&["organizations"]).unwrap().as_str(),
             "https://sentry.io/api/0/organizations/"
         );
+    }
+
+    #[test]
+    fn resolves_the_organizations_region_base_url() {
+        let organizations: Vec<SentryOrganization> = serde_json::from_value(serde_json::json!([
+            { "id": "1", "name": "Alpha", "slug": "alpha" },
+            {
+                "id": "2",
+                "name": "Beta",
+                "slug": "beta",
+                "links": { "regionUrl": "https://eu.sentry.io" },
+            },
+        ]))
+        .unwrap();
+
+        assert_eq!(
+            resolve_sentry_base_url(&organizations, "beta").unwrap(),
+            "https://eu.sentry.io"
+        );
+        // Org without region links falls back to the default host upstream.
+        assert!(resolve_sentry_base_url(&organizations, "alpha").is_err());
+        assert!(resolve_sentry_base_url(&organizations, "missing").is_err());
+    }
+
+    #[test]
+    fn falls_back_to_default_without_persisting_region_on_error() {
+        let (host, to_persist) = pick_region_host(Err("org not found".to_string()));
+        assert_eq!(host, SENTRY_BASE_URL);
+        assert!(to_persist.is_none());
+    }
+
+    #[test]
+    fn persists_a_resolved_region_host() {
+        let (host, to_persist) = pick_region_host(Ok("https://eu.sentry.io".to_string()));
+        assert_eq!(host, "https://eu.sentry.io");
+        assert_eq!(to_persist.as_deref(), Some("https://eu.sentry.io"));
     }
 
     #[test]

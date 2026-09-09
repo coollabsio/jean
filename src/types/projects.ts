@@ -89,6 +89,8 @@ export interface Project {
   sentry_organization_slug?: string | null
   /** Sentry project slug */
   sentry_project_slug?: string | null
+  /** Sentry region API base URL (auto-resolved from the org) */
+  sentry_base_url?: string | null
   /** IDs of linked projects for cross-project context sharing */
   linked_project_ids?: string[]
   /** Per-project automated issue fixing settings */
