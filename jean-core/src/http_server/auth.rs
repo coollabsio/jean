@@ -9,14 +9,14 @@ pub fn generate_token() -> String {
 
 /// Validate a token against the expected value (constant-time comparison).
 pub fn validate_token(provided: &str, expected: &str) -> bool {
-    if provided.len() != expected.len() {
-        return false;
+    let provided_bytes = provided.as_bytes();
+    let expected_bytes = expected.as_bytes();
+    let mut diff = (provided_bytes.len() ^ expected_bytes.len()) as u8;
+    let max_len = provided_bytes.len().max(expected_bytes.len());
+    for i in 0..max_len {
+        let a = provided_bytes.get(i).copied().unwrap_or(0);
+        let b = expected_bytes.get(i).copied().unwrap_or(0);
+        diff |= a ^ b;
     }
-    // Simple constant-time compare
-    provided
-        .as_bytes()
-        .iter()
-        .zip(expected.as_bytes().iter())
-        .fold(0u8, |acc, (a, b)| acc | (a ^ b))
-        == 0
+    diff == 0
 }
