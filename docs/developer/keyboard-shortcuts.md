@@ -378,3 +378,28 @@ fn default_keybindings() -> std::collections::HashMap<String, String> {
 5. **Support migration**: Add to `MIGRATED_KEYBINDINGS` when changing defaults
 6. **Use `mod` prefix**: Allows cross-platform compatibility
 7. **Provide feedback**: Use notifications or UI changes to confirm execution
+
+## Shift+Enter in the embedded terminal
+
+Terminals send a bare carriage return for both Enter and Shift+Enter, so a CLI
+that submits on Enter (Claude Code, Codex, …) cannot tell them apart and sends
+the message instead of inserting a newline. Terminals that can distinguish them
+encode the modifier with CSI u; xterm.js does not implement that protocol, so
+`src/lib/terminal-instances.ts` injects `\x1b[13;2u` itself.
+
+Two details make it work:
+
+- **Every event of the press is claimed, not just `keydown`.** The renderer
+  calls its key handler for `keydown`, `keypress` and `keyup`; letting
+  `keypress` through makes it emit its own carriage return in addition to the
+  sequence, which the CLI still reads as submit.
+- **The sequence is only sent when the foreground program can read it**
+  (`acceptsModifierEncodedKeys`), tracked from the program's own output: a
+  kitty keyboard protocol push, or focus reporting (`CSI ? 1004 h`). Claude Code
+  negotiates no keyboard protocol yet parses CSI u anyway, so focus reporting is
+  the signal it is recognised by. The alternate screen buffer is deliberately
+  **not** trusted — `vim`, `less`, `htop` and `fzf` use it without reading CSI u,
+  and in vim's insert mode the sequence would leave insert and undo changes.
+
+A plain shell prompt enables neither, so Shift+Enter there behaves like Enter
+instead of echoing a raw `;2u`.
