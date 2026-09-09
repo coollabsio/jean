@@ -823,4 +823,36 @@ describe('computeSessionCardData', () => {
     expect(card.hasExitPlanMode).toBe(true)
     expect(card.status).toBe('input_required')
   })
+
+  it('exposes the session label from the store (drives sidebar/tab badges)', () => {
+    const session = createBaseSession()
+    const storeState = createBaseStoreState({
+      sessionLabels: {
+        'session-1': { name: 'Needs testing', color: '#eab308' },
+      },
+    })
+
+    const card = computeSessionCardData(session, storeState)
+
+    expect(card.label).toEqual({ name: 'Needs testing', color: '#eab308' })
+  })
+
+  it('returns a null label when the session has no label', () => {
+    const card = computeSessionCardData(
+      createBaseSession(),
+      createBaseStoreState()
+    )
+
+    expect(card.label).toBeNull()
+  })
+
+  it('only labels the matching session id', () => {
+    const storeState = createBaseStoreState({
+      sessionLabels: { 'other-session': { name: 'Bug', color: '#ef4444' } },
+    })
+
+    const card = computeSessionCardData(createBaseSession(), storeState)
+
+    expect(card.label).toBeNull()
+  })
 })
