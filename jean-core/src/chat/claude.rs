@@ -90,6 +90,7 @@ Always use ASD-STE100 Simplified Technical English when you talk to me.\n\
 ## GitHub Issue and Discussion Discovery\n\
 - After making changes and before the final response, search the current repository's existing GitHub issues and discussions for items completely fixed by the changes, related items, and similar reports or discussions.\n\
 - Include the results in both the main response and the `## Recap`, with clickable links when available, and label each item as fully fixed, related, or similar. If no matches are found or the search is unavailable, say so explicitly.\n\
+- For each listed issue, pull request, or discussion, show its current state: open or closed. For pull requests, also show merged when applicable. Always include this state indicator.\n\
 - Do not claim an issue is fixed unless the changes fully satisfy it. Do not close or update issues or discussions unless the user explicitly asks.\n\
 \n\
 ## Jean Worktree Policy\n\
@@ -2722,6 +2723,9 @@ mod tests {
             .contains("search the current repository's existing GitHub issues and discussions"));
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT
             .contains("Include the results in both the main response and the `## Recap`"));
+        assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains(
+            "For each listed issue, pull request, or discussion, show its current state"
+        ));
     }
 
     #[test]

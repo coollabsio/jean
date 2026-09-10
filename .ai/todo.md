@@ -1,15 +1,15 @@
-# Select the new investigation session
+# GitHub discovery status indicators
 
-- [x] Trace the modal/session race.
-- [x] Delay modal opening until the backend returns the new session ID.
-- [x] Open and select the exact created session.
-- [x] Run focused and full quality checks.
+- [x] Find all default system prompt copies and existing tests.
+- [x] Add a failing assertion that results must show open or closed status.
+- [x] Update all source copies of the prompt.
+- [x] Run focused tests and quality checks.
 - [x] Search GitHub issues and discussions.
+- [x] Record review results.
 
 ## Review
 
-- The issue action no longer opens the worktree before session creation finishes.
-- The background investigation path sets the returned session ID as active, then emits `open-session-modal` with the exact session, worktree, and path.
-- A regression test verifies event ordering and the selected session ID.
-- `bun run check:all` passed: 2,171 frontend tests, 1,145 Jean Core tests, and 13 Tauri library tests.
-- No matching GitHub issue or discussion was found.
+- Every discovered issue, pull request, or discussion must now show open or closed state; merged pull requests also show merged.
+- Rust and TypeScript regression assertions cover the new requirement.
+- Related: open PR #658 changes the same global prompt as part of quota-saving work.
+- No matching issues or discussions were found.

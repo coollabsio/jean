@@ -1,5 +1,10 @@
 # Lessons
 
+## Make discovery output requirements explicit
+
+- When a prompt requires GitHub discovery results, require a visible state for every issue, pull request, and discussion.
+- Use open or closed for all results, and add merged for pull requests when applicable.
+
 ## Verify session creation semantics at the backend boundary
 
 - Do not infer that an API named `start_background_investigation` creates a new session.

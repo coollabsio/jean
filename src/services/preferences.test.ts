@@ -259,6 +259,9 @@ describe('model option helpers', () => {
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
       'Include the results in both the main response and the `## Recap`'
     )
+    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
+      'For each listed issue, pull request, or discussion, show its current state'
+    )
   })
 })
 
@@ -1304,15 +1307,10 @@ describe('preferences service', () => {
   })
 
   describe('AppearancePane scaling', () => {
-    it(
-      'stores desktop/mobile zoom on this client only (not shared prefs)',
-      async () => {
+    it('stores desktop/mobile zoom on this client only (not shared prefs)', async () => {
       const { invoke } = await import('@/lib/transport')
-      const {
-        clearClientZoomForTests,
-        readClientZoom,
-        writeClientZoom,
-      } = await import('@/lib/client-zoom')
+      const { clearClientZoomForTests, readClientZoom, writeClientZoom } =
+        await import('@/lib/client-zoom')
       clearClientZoomForTests()
       // Seed client zoom so the pane does not depend on async prefs hydrate.
       writeClientZoom({
@@ -1353,8 +1351,9 @@ describe('preferences service', () => {
 
       const patchCallsBefore = vi
         .mocked(invoke)
-        .mock.calls.filter(([command]) => command === 'patch_preferences')
-        .length
+        .mock.calls.filter(
+          ([command]) => command === 'patch_preferences'
+        ).length
 
       await user.click(syncCheckbox)
 
@@ -1388,9 +1387,7 @@ describe('preferences service', () => {
       ).toHaveLength(patchCallsBefore)
 
       clearClientZoomForTests()
-    },
-      15_000
-    )
+    }, 15_000)
   })
 
   describe('AppearancePane finished session animation', () => {
@@ -1428,8 +1425,13 @@ describe('preferences service', () => {
 
       await user.click(switchEl)
 
-      await waitFor(() => expect(switchEl).toHaveAttribute('aria-checked', 'false'))
-      expect(invoke).not.toHaveBeenCalledWith('patch_preferences', expect.anything())
+      await waitFor(() =>
+        expect(switchEl).toHaveAttribute('aria-checked', 'false')
+      )
+      expect(invoke).not.toHaveBeenCalledWith(
+        'patch_preferences',
+        expect.anything()
+      )
       expect(switchEl).toHaveAttribute('aria-checked', 'false')
     })
   })
@@ -1462,10 +1464,15 @@ describe('preferences service', () => {
 
       await user.click(switchEl)
 
-      await waitFor(() => expect(invoke).toHaveBeenCalledWith('set_window_vibrancy', {
-        enabled: true,
-      }))
-      expect(invoke).not.toHaveBeenCalledWith('patch_preferences', expect.anything())
+      await waitFor(() =>
+        expect(invoke).toHaveBeenCalledWith('set_window_vibrancy', {
+          enabled: true,
+        })
+      )
+      expect(invoke).not.toHaveBeenCalledWith(
+        'patch_preferences',
+        expect.anything()
+      )
       expect(
         queryClient.getQueryData<AppPreferences>(
           preferencesQueryKeys.preferences()

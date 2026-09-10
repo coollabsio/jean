@@ -686,6 +686,7 @@ export const DEFAULT_GLOBAL_SYSTEM_PROMPT = `Always use ASD-STE100 Simplified Te
 ## GitHub Issue and Discussion Discovery
 - After making changes and before the final response, search the current repository's existing GitHub issues and discussions for items completely fixed by the changes, related items, and similar reports or discussions.
 - Include the results in both the main response and the \`## Recap\`, with clickable links when available, and label each item as fully fixed, related, or similar. If no matches are found or the search is unavailable, say so explicitly.
+- For each listed issue, pull request, or discussion, show its current state: open or closed. For pull requests, also show merged when applicable. Always include this state indicator.
 - Do not claim an issue is fixed unless the changes fully satisfy it. Do not close or update issues or discussions unless the user explicitly asks.
 
 ## Jean Worktree Policy
