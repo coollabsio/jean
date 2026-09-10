@@ -1,8 +1,17 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import userEvent from '@testing-library/user-event'
 import { render, screen } from '@/test/test-utils'
-import { BranchItem, IssueItem, SecurityAlertItem } from './NewWorktreeItems'
-import type { DependabotAlert, GitHubIssue } from '@/types/github'
+import {
+  BranchItem,
+  IssueItem,
+  PRItem,
+  SecurityAlertItem,
+} from './NewWorktreeItems'
+import type {
+  DependabotAlert,
+  GitHubIssue,
+  GitHubPullRequest,
+} from '@/types/github'
 
 let isMobile = false
 
@@ -42,6 +51,94 @@ function renderSecurityAlertItem(overrides = {}) {
 
 beforeEach(() => {
   isMobile = false
+})
+
+describe('compact issue and PR rows', () => {
+  it('shows the new-session investigation action on desktop', async () => {
+    const user = userEvent.setup()
+    const onInvestigateInNewSession = vi.fn()
+    render(
+      <IssueItem
+        issue={{
+          number: 42,
+          title: 'A detailed issue title',
+          state: 'OPEN',
+          labels: [],
+          created_at: '2026-01-01T00:00:00Z',
+          author: { login: 'octocat' },
+        }}
+        index={0}
+        isSelected={false}
+        isCreating={false}
+        onMouseEnter={vi.fn()}
+        onClick={vi.fn()}
+        onInvestigate={vi.fn()}
+        onInvestigateInNewSession={onInvestigateInNewSession}
+        onPreview={vi.fn()}
+      />
+    )
+    await user.click(
+      screen.getByRole('button', { name: /investigate issue in new session/i })
+    )
+    expect(onInvestigateInNewSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('hides labels and uses compact issue text', () => {
+    render(
+      <IssueItem
+        issue={{
+          number: 42,
+          title: 'A detailed issue title',
+          state: 'OPEN',
+          labels: [{ name: 'Triage', color: 'ffff00' }],
+          created_at: '2026-01-01T00:00:00Z',
+          author: { login: 'octocat' },
+        }}
+        index={0}
+        isSelected={false}
+        isCreating={false}
+        onMouseEnter={vi.fn()}
+        onClick={vi.fn()}
+        onInvestigate={vi.fn()}
+        onPreview={vi.fn()}
+      />
+    )
+    expect(screen.queryByText('Triage')).toBeNull()
+    expect(screen.getByText('A detailed issue title')).toHaveClass(
+      'text-[11px]'
+    )
+  })
+
+  it('hides labels and branch names and uses compact PR text', () => {
+    const pr = {
+      number: 711,
+      title: 'feat(web): sign-in screen',
+      state: 'OPEN',
+      labels: [{ name: 'Feature', color: 'a855f7' }],
+      headRefName: 'feat/web-auth-screen',
+      baseRefName: 'main',
+      isDraft: false,
+    } as GitHubPullRequest
+    render(
+      <PRItem
+        pr={pr}
+        index={0}
+        isSelected={false}
+        isCreating={false}
+        isStacking={false}
+        onMouseEnter={vi.fn()}
+        onClick={vi.fn()}
+        onInvestigate={vi.fn()}
+        onStack={vi.fn()}
+        onPreview={vi.fn()}
+      />
+    )
+    expect(screen.queryByText('Feature')).toBeNull()
+    expect(screen.queryByText(/feat\/web-auth-screen/)).toBeNull()
+    expect(screen.getByText('feat(web): sign-in screen')).toHaveClass(
+      'text-[11px]'
+    )
+  })
 })
 
 describe('NewWorktreeItems mobile actions', () => {

@@ -1,21 +1,16 @@
-# Reset `.ai/todo.md` for each task
+# Compact issue and PR rows
 
-- [x] Find each synchronized default system prompt.
-- [x] Add a failing assertion for the reset rule.
-- [x] Add the reset rule to each prompt.
-- [x] Run focused tests and quality checks.
+- [x] Show the new-session investigation action on desktop.
+- [x] Remove issue and PR labels and PR branch names.
+- [x] Reduce issue and PR row font sizes.
+- [x] Run focused tests and full quality checks.
 - [x] Search GitHub issues and discussions.
-- [x] Record results and test steps.
 
 ## Review
 
-- Added a reset step to the TypeScript default prompt, the Rust default prompt, and Claude's synchronized fallback prompt.
-- The rule tells agents to replace `.ai/todo.md` at the start of each new task instead of appending to it.
-- The regression assertions failed before the prompt update and passed after it.
-- Verification passed: 2 focused Rust tests, 24 focused TypeScript tests, Rust formatting, Prettier, and `git diff --check`.
-- GitHub: [#535](https://github.com/coollabsio/jean/issues/535) is related because it reports differences between backend system prompts. This change does not fully fix that broader report. No fully fixed or similar issue or discussion was found.
-
-## How to test
-
-- Reset the global system prompt to its default in Settings. Confirm Task Management starts with `Reset Task File`.
-- Start two separate coding tasks. Confirm the second task replaces `.ai/todo.md` instead of appending below the first task.
+- Desktop issue rows now show a dedicated new-session investigation button.
+- Issue and PR rows no longer render labels. PR rows no longer render head/base branch names.
+- Titles use 11px text, numbers use 10px text, and row spacing is smaller.
+- `bun run check:all` passed. The suite ran 2,169 frontend tests, 1,145 Jean Core tests, and 13 Tauri library tests.
+- No matching GitHub issue or discussion was found.
+- Jean reported no active Run environment, so live UI verification was not available.
