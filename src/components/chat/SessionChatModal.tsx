@@ -76,6 +76,7 @@ import {
 import { isBaseSession } from '@/types/projects'
 import type { Session } from '@/types/chat'
 import { isNativeApp } from '@/lib/environment'
+import { isImeComposingEvent } from '@/lib/ime-composition'
 import { notify } from '@/lib/notifications'
 import { copyToClipboard } from '@/lib/clipboard'
 import { toast } from 'sonner'
@@ -996,6 +997,9 @@ export function SessionChatModal({
   // Close on Escape key
   const onEscapeClose = useEffectEvent((e: KeyboardEvent) => {
     if (e.key !== 'Escape') return
+    // CJK IME: Escape cancels the active composition — must not close the
+    // modal. keyCode 229 covers Safari/WKWebView (see issue #584 for Enter).
+    if (isImeComposingEvent(e)) return
     const target = e.target as HTMLElement
     const portalAncestor = target?.closest?.(
       '[data-slot="dialog-portal"], [data-slot="alert-dialog-portal"], [data-slot="sheet-portal"]'
