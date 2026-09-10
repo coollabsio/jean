@@ -43,6 +43,7 @@ export function useNewWorktreeHandlers(
     selectedProject,
     hasBaseSession,
     baseSession,
+    worktrees,
     createWorktree,
     createBaseSession,
     createWorktreeFromBranch,
@@ -362,6 +363,70 @@ export function useNewWorktreeHandlers(
       }
     },
     [selectedProjectId, selectedProject, createWorktree, handleOpenChange]
+  )
+
+  const handleInvestigateIssueInNewSession = useCallback(
+    async (issue: GitHubIssue) => {
+      const projectPath = selectedProject?.path
+      if (!selectedProjectId || !projectPath) {
+        toast.error('No project selected')
+        return
+      }
+
+      setCreatingFromNumber(issue.number)
+
+      try {
+        const chatStore = useChatStore.getState()
+        const selectedWorktreeId = useProjectsStore.getState().selectedWorktreeId
+        const currentWorktreeId =
+          chatStore.activeWorktreeId ?? selectedWorktreeId
+        let targetWorktree = worktrees.find(
+          worktree =>
+            worktree.id === currentWorktreeId &&
+            worktree.project_id === selectedProjectId
+        )
+
+        if (!targetWorktree) {
+          targetWorktree =
+            baseSession ??
+            (await createBaseSession.mutateAsync(selectedProjectId))
+        }
+
+        await invoke('load_issue_context', {
+          sessionId: targetWorktree.id,
+          issueNumber: issue.number,
+          projectPath,
+        })
+
+        chatStore.registerWorktreePath(targetWorktree.id, targetWorktree.path)
+        useProjectsStore.getState().selectWorktree(targetWorktree.id)
+        useUIStore
+          .getState()
+          .markWorktreeForAutoInvestigate(targetWorktree.id, investigationOverride)
+
+        handleOpenChange(false)
+        window.dispatchEvent(
+          new CustomEvent('open-worktree-modal', {
+            detail: {
+              worktreeId: targetWorktree.id,
+              worktreePath: targetWorktree.path,
+            },
+          })
+        )
+      } catch (error) {
+        toast.error(`Failed to start issue investigation: ${error}`)
+        setCreatingFromNumber(null)
+      }
+    },
+    [
+      selectedProjectId,
+      selectedProject,
+      worktrees,
+      baseSession,
+      createBaseSession,
+      investigationOverride,
+      handleOpenChange,
+    ]
   )
 
   /** Start background investigation for multiple issues at once (new-session multi-select). */
@@ -1316,6 +1381,7 @@ export function useNewWorktreeHandlers(
     handleSelectBranch,
     handleSelectIssue,
     handleSelectIssueAndInvestigate,
+    handleInvestigateIssueInNewSession,
     handleBulkInvestigateIssues,
     handleSelectPR,
     handleSelectPRAndInvestigate,

@@ -37,3 +37,9 @@
 - A new streaming backend needs two parser paths: the live response parser and the run-log reconstruction parser.
 - Route persisted runs by the per-run backend or model prefix before using a generic fallback parser.
 - Test history reload with the backend's real NDJSON format. Live streaming success does not prove that the response survives a query refresh or app reload.
+
+## Apply default prompts consistently across backends
+
+- A `null` prompt preference means “use Jean's default,” not “omit the prompt.”
+- When adding or changing a backend, verify that default, custom, and empty global prompts resolve consistently on every chat turn.
+- Backend-specific mode instructions must augment the shared global prompt rather than replace it.

@@ -652,6 +652,26 @@ describe('computeSessionCardData', () => {
     expect(card.status).toBe('input_required')
   })
 
+  it('ignores stale persisted waiting state after a Claude turn starts sending', () => {
+    const session: Session = {
+      ...createBaseSession(),
+      backend: 'claude',
+      waiting_for_input: true,
+      waiting_for_input_type: 'question',
+      last_run_status: 'running',
+      last_run_execution_mode: 'yolo',
+    }
+    const storeState = createBaseStoreState({
+      sendingSessionIds: { 'session-1': true },
+      executingModes: { 'session-1': 'yolo' },
+    })
+
+    const card = computeSessionCardData(session, storeState)
+
+    expect(card.isWaiting).toBe(false)
+    expect(card.status).toBe('yoloing')
+  })
+
   it('maps cancelled last_run_status to cancelled (not idle)', () => {
     const session = createBaseSession({ last_run_status: 'cancelled' })
     const card = computeSessionCardData(session, createBaseStoreState())

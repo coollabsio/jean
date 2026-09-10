@@ -51,7 +51,7 @@ interface UnreadItem {
   worktreePath: string
 }
 
-function getSessionStatus(session: Session) {
+function getSessionStatus(session: Session, isSending: boolean) {
   // Prefer specific actionable reasons over generic waiting (matches canvas)
   const hasCodexPermission =
     (session.pending_codex_permission_requests?.length ?? 0) > 0 ||
@@ -99,6 +99,13 @@ function getSessionStatus(session: Session) {
       icon: HelpCircle,
       label: 'Input required',
       className: 'text-yellow-500',
+    }
+  }
+  if (isSending) {
+    return {
+      icon: Loader2,
+      label: 'Running',
+      className: 'text-green-500 animate-spin',
     }
   }
   if (session.waiting_for_input) {
@@ -160,6 +167,7 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
   const animationEnabled =
     preferences?.finished_session_animation_enabled ?? true
   const { data: allSessions, isLoading } = useAllSessions(open)
+  const sendingSessionIds = useChatStore(state => state.sendingSessionIds)
   // Listen for command palette event to open the popover
   useEffect(() => {
     const handler = () => setOpen(true)
@@ -493,7 +501,10 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
         ) : (
           <div className="max-h-[min(400px,60vh)] overflow-y-auto p-1">
             {displayItems.map((item, idx) => {
-              const status = getSessionStatus(item.session)
+              const status = getSessionStatus(
+                item.session,
+                sendingSessionIds[item.session.id] ?? false
+              )
               const StatusIcon = status?.icon ?? CheckCircle2
 
               return (

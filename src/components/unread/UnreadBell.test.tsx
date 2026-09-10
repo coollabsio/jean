@@ -15,6 +15,7 @@ import { UnreadBell } from './UnreadBell'
 const invokeMock = vi.fn()
 let allSessions: AllSessionsResponse
 let unreadCount = 2
+let sendingSessionIds: Record<string, boolean> = {}
 
 vi.mock('@/lib/transport', () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
@@ -64,13 +65,17 @@ const setActiveSessionMock = vi.fn()
 const clearActiveWorktreeMock = vi.fn()
 const setLastOpenedForProjectMock = vi.fn()
 vi.mock('@/store/chat-store', () => ({
-  useChatStore: {
+  useChatStore: Object.assign(
+    (selector: (state: { sendingSessionIds: Record<string, boolean> }) => unknown) =>
+      selector({ sendingSessionIds }),
+    {
     getState: () => ({
       setActiveSession: setActiveSessionMock,
       clearActiveWorktree: clearActiveWorktreeMock,
       setLastOpenedForProject: setLastOpenedForProjectMock,
     }),
-  },
+    }
+  ),
 }))
 
 const markWorktreeForAutoOpenSessionMock = vi.fn()
@@ -137,6 +142,7 @@ describe('UnreadBell', () => {
       globalThis as typeof globalThis & { __JEAN_TEST_IS_NATIVE__?: boolean }
     ).__JEAN_TEST_IS_NATIVE__ = true
     unreadCount = 2
+    sendingSessionIds = {}
     finishedSessionAnimationEnabled = true
     allSessions = {
       entries: [
@@ -162,6 +168,24 @@ describe('UnreadBell', () => {
       ],
     }
     invokeMock.mockResolvedValue(undefined)
+  })
+
+  it('shows a running Claude session instead of stale waiting state', async () => {
+    sendingSessionIds = { 'session-1': true }
+    const firstEntry = allSessions.entries[0]
+    if (!firstEntry) throw new Error('Expected an unread session entry')
+    firstEntry.sessions[0] = session({
+      waiting_for_input: true,
+      waiting_for_input_type: 'question',
+      last_run_status: 'running',
+    })
+
+    await openDropdown()
+
+    const row = screen.getByText('Session one').closest('button')
+    expect(row?.querySelector('svg')?.getAttribute('class') ?? '').toContain(
+      'animate-spin'
+    )
   })
 
   it('marks the focused unread session read when R is pressed', async () => {

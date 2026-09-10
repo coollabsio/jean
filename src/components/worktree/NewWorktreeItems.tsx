@@ -85,6 +85,7 @@ export interface IssueItemProps {
   onMouseEnter: () => void
   onClick: (background: boolean) => void
   onInvestigate: (background: boolean) => void
+  onInvestigateInNewSession?: () => void
   onPreview: () => void
   onLabelClick?: (label: string) => void
 }
@@ -99,6 +100,7 @@ export function IssueItem({
   onMouseEnter,
   onClick,
   onInvestigate,
+  onInvestigateInNewSession,
   onPreview,
   onLabelClick,
 }: IssueItemProps) {
@@ -201,6 +203,7 @@ export function IssueItem({
           isCreating={isCreating}
           onPreview={onPreview}
           onInvestigate={onInvestigate}
+          onInvestigateInNewSession={onInvestigateInNewSession}
         />
       </div>
     </div>
@@ -438,6 +441,7 @@ function ItemActions({
   isCreating,
   onPreview,
   onInvestigate,
+  onInvestigateInNewSession,
 }: {
   label: string
   previewLabel: string
@@ -445,6 +449,7 @@ function ItemActions({
   isCreating: boolean
   onPreview: () => void
   onInvestigate: (background: boolean) => void
+  onInvestigateInNewSession?: () => void
 }) {
   const isMobile = useIsMobile()
 
@@ -470,6 +475,12 @@ function ItemActions({
             <Wand2 className="h-4 w-4 text-current dark:text-yellow-400" />
             Investigate
           </DropdownMenuItem>
+          {onInvestigateInNewSession && (
+            <DropdownMenuItem onClick={onInvestigateInNewSession}>
+              <Wand2 className="h-4 w-4 text-current dark:text-yellow-400" />
+              Investigate in New Session
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem onClick={() => onInvestigate(true)}>
             <Wand2 className="h-4 w-4 text-current dark:text-yellow-400" />
             Investigate in Background

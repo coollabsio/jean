@@ -255,6 +255,7 @@ export function useNewWorktreeData(
     selectedProject,
     hasBaseSession,
     baseSession,
+    worktrees: worktrees ?? [],
     jeanConfig,
 
     // Issues

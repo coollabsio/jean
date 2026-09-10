@@ -1,8 +1,8 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import userEvent from '@testing-library/user-event'
 import { render, screen } from '@/test/test-utils'
-import { BranchItem, SecurityAlertItem } from './NewWorktreeItems'
-import type { DependabotAlert } from '@/types/github'
+import { BranchItem, IssueItem, SecurityAlertItem } from './NewWorktreeItems'
+import type { DependabotAlert, GitHubIssue } from '@/types/github'
 
 let isMobile = false
 
@@ -45,6 +45,42 @@ beforeEach(() => {
 })
 
 describe('NewWorktreeItems mobile actions', () => {
+  it('offers investigating an issue in a new session', async () => {
+    isMobile = true
+    const user = userEvent.setup()
+    const onInvestigateInNewSession = vi.fn()
+    const issue: GitHubIssue = {
+      number: 42,
+      title: 'Investigate without a new worktree',
+      body: '',
+      state: 'OPEN',
+      labels: [],
+      created_at: '2026-01-01T00:00:00Z',
+      author: { login: 'octocat' },
+    }
+
+    render(
+      <IssueItem
+        issue={issue}
+        index={0}
+        isSelected={false}
+        isCreating={false}
+        onMouseEnter={vi.fn()}
+        onClick={vi.fn()}
+        onInvestigate={vi.fn()}
+        onInvestigateInNewSession={onInvestigateInNewSession}
+        onPreview={vi.fn()}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: /issue actions/i }))
+    await user.click(
+      screen.getByRole('menuitem', { name: /investigate in new session/i })
+    )
+
+    expect(onInvestigateInNewSession).toHaveBeenCalledTimes(1)
+  })
+
   it('puts preview, investigate, and background investigation behind a mobile overflow menu', async () => {
     isMobile = true
     const user = userEvent.setup()

@@ -558,7 +558,7 @@ export function computeSessionCardData(
   // When sessionSending is true, persisted waiting_for_input from TanStack Query
   // may be stale (not yet refetched after approval). Only use it as fallback when idle.
   const isWaiting = sessionSending
-    ? isWaitingFromMessages || isExplicitlyWaiting
+    ? isWaitingFromMessages
     : isWaitingFromMessages || isExplicitlyWaiting || persistedWaitingForInput
 
   // hasExitPlanMode should also consider persisted state
