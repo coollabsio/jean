@@ -241,6 +241,9 @@ describe('model option helpers', () => {
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
       'include clickable links when available'
     )
+    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
+      "At the start of a new task, replace '.ai/todo.md' instead of appending to it"
+    )
   })
 
   it('requires GitHub issue and discussion discovery after changes', () => {

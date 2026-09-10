@@ -1,5 +1,11 @@
 # Lessons
 
+## Verify session creation semantics at the backend boundary
+
+- Do not infer that an API named `start_background_investigation` creates a new session.
+- Read the backend session-selection logic before wiring a UI action that promises a fresh session.
+- Add a regression test for explicit fresh-session behavior instead of testing only that the menu callback fires.
+
 ## Keep task tracking proportional
 
 - The project instructions require work to be tracked in `.ai/todo.md`, but do not expand it with excessive implementation detail.

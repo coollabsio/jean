@@ -528,7 +528,7 @@ async function processBackgroundInvestigation(
   const provider =
     backend !== 'claude'
       ? null
-      : override
+      : override?.provider !== undefined
         ? override.provider
         : resolveMagicPromptProvider(
             preferences?.magic_prompt_providers,
@@ -582,6 +582,7 @@ async function processBackgroundInvestigation(
     chromeEnabled: preferences?.chrome_enabled ?? false,
     aiLanguage: preferences?.ai_language,
     executionMode,
+    forceNewSession: override?.forceNewSession,
   })
 
   const sessionId = result.sessionId

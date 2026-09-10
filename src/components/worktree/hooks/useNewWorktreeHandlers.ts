@@ -402,7 +402,10 @@ export function useNewWorktreeHandlers(
         useProjectsStore.getState().selectWorktree(targetWorktree.id)
         useUIStore
           .getState()
-          .markWorktreeForAutoInvestigate(targetWorktree.id, investigationOverride)
+          .markWorktreeForAutoInvestigate(targetWorktree.id, {
+            ...investigationOverride,
+            forceNewSession: true,
+          })
 
         handleOpenChange(false)
         window.dispatchEvent(

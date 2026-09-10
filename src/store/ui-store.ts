@@ -6,8 +6,9 @@ import { mergeSeenFailedWorkflowRunIds } from '@/components/shared/workflow-run-
 
 export interface InvestigationOverride {
   backend?: CliBackend
-  model: string
-  provider: string | null
+  model?: string
+  provider?: string | null
+  forceNewSession?: boolean
 }
 
 export type PreferencePane =

@@ -1137,6 +1137,8 @@ pub async fn dispatch_command(
             )?;
             let execution_mode: Option<String> =
                 field_opt(&args, "executionMode", "execution_mode")?;
+            let force_new_session: Option<bool> =
+                field_opt(&args, "forceNewSession", "force_new_session")?;
             let result = crate::jean_mcp_core::start_background_investigation(
                 app.clone(),
                 worktree_id,
@@ -1151,6 +1153,7 @@ pub async fn dispatch_command(
                 ai_language,
                 parallel_execution_prompt,
                 execution_mode,
+                force_new_session,
             )
             .await?;
             to_value(result)

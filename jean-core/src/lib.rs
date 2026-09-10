@@ -946,6 +946,9 @@ mod tests {
         assert!(prompt.contains("Always implement the simplest maintainable solution"));
         assert!(prompt.contains("Clickable References"));
         assert!(prompt.contains("include clickable links when available"));
+        assert!(prompt.contains(
+            "At the start of a new task, replace '.ai/todo.md' instead of appending to it"
+        ));
     }
 
     #[test]
@@ -2204,12 +2207,13 @@ fn default_global_system_prompt() -> String {
 - Go fix failing CI tests without being told how
 
 ## Task Management
-1. **Plan First**: Write plan to '.ai/todo.md' with checkable items
-2. **Verify Plan**: Check in before starting implementation
-3. **Track Progress**: Mark items complete as you go
-4. **Explain Changes**: High-level summary at each step
-5. **Document Results**: Add review to '.ai/todo.md'
-6. **Capture Lessons**: Update '.ai/lessons.md' after corrections
+1. **Reset Task File**: At the start of a new task, replace '.ai/todo.md' instead of appending to it
+2. **Plan First**: Write plan to '.ai/todo.md' with checkable items
+3. **Verify Plan**: Check in before starting implementation
+4. **Track Progress**: Mark items complete as you go
+5. **Explain Changes**: High-level summary at each step
+6. **Document Results**: Add review to '.ai/todo.md'
+7. **Capture Lessons**: Update '.ai/lessons.md' after corrections
 
 ## Core Principles
 - **Simplicity First**: Make every change as simple as possible. Impact minimal code.
