@@ -1,16 +1,20 @@
-# Compact issue and PR rows
+# Keep `.ai/lessons.md` concise
 
-- [x] Show the new-session investigation action on desktop.
-- [x] Remove issue and PR labels and PR branch names.
-- [x] Reduce issue and PR row font sizes.
-- [x] Run focused tests and full quality checks.
+- [x] Add failing prompt assertions.
+- [x] Add the maintenance rule to all synchronized prompts.
+- [x] Run focused tests and formatting checks.
 - [x] Search GitHub issues and discussions.
+- [x] Record review results and test steps.
 
 ## Review
 
-- Desktop issue rows now show a dedicated new-session investigation button.
-- Issue and PR rows no longer render labels. PR rows no longer render head/base branch names.
-- Titles use 11px text, numbers use 10px text, and row spacing is smaller.
-- `bun run check:all` passed. The suite ran 2,169 frontend tests, 1,145 Jean Core tests, and 13 Tauri library tests.
-- No matching GitHub issue or discussion was found.
-- Jean reported no active Run environment, so live UI verification was not available.
+- Added the lesson-maintenance rule to the TypeScript default prompt, the Rust default prompt, and Claude's synchronized fallback prompt.
+- Agents must keep lessons across tasks, merge duplicate rules, and remove obsolete entries.
+- The assertions failed before the prompt update and passed after it.
+- Verification passed: 2 focused Rust tests, 24 focused TypeScript tests, Rust formatting, Prettier, and `git diff --check`.
+- GitHub: no fully fixed, related, or similar issue or discussion was found for `.ai/lessons.md`.
+
+## How to test
+
+- Reset the global system prompt to its default. Confirm the Self-Improvement Loop contains the lesson-maintenance rule.
+- Add duplicate or obsolete lessons, then start a new agent session. Confirm the agent consolidates the file without clearing reusable lessons.

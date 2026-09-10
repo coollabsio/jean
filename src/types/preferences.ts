@@ -646,6 +646,7 @@ export const DEFAULT_GLOBAL_SYSTEM_PROMPT = `Always use ASD-STE100 Simplified Te
 - Write rules for yourself that prevent the same mistake
 - Ruthlessly iterate on these lessons until mistake rate drops
 - Review lessons at session start for relevant project
+- Keep '.ai/lessons.md' concise by merging duplicate rules and removing obsolete entries
 
 ### 5. Verification Before Done
 - Never mark a task complete without proving it works

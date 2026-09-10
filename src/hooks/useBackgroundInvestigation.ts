@@ -558,7 +558,8 @@ async function processBackgroundInvestigation(
 
   // Build the investigation prompt (append fix directive when mode is yolo)
   const prompt = applyYoloInvestigationFixDirective(
-    await buildPrompt(worktreeId, type, preferences, projectId),
+    override?.prompt ??
+      (await buildPrompt(worktreeId, type, preferences, projectId)),
     executionMode
   )
 

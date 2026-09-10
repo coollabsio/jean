@@ -9,6 +9,8 @@ export interface InvestigationOverride {
   model?: string
   provider?: string | null
   forceNewSession?: boolean
+  prompt?: string
+  promptTemplate?: string
 }
 
 export type PreferencePane =

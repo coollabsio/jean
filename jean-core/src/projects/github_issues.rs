@@ -1299,6 +1299,7 @@ pub fn cleanup_issue_contexts_for_session(
 pub async fn remove_issue_context(
     app: tauri::AppHandle,
     session_id: String,
+    worktree_id: Option<String>,
     issue_number: u32,
     project_path: String,
 ) -> Result<(), String> {
@@ -1309,7 +1310,10 @@ pub async fn remove_issue_context(
     let repo_key = repo_id.to_key();
 
     // Remove reference
-    let is_orphaned = remove_issue_reference(&app, &repo_key, issue_number, &session_id)?;
+    let mut is_orphaned = remove_issue_reference(&app, &repo_key, issue_number, &session_id)?;
+    if let Some(worktree_id) = worktree_id.filter(|id| id != &session_id) {
+        is_orphaned = remove_issue_reference(&app, &repo_key, issue_number, &worktree_id)?;
+    }
 
     // If orphaned, delete the shared file immediately
     if is_orphaned {

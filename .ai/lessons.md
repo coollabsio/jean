@@ -6,6 +6,7 @@
 - Read the backend session-selection logic before wiring a UI action that promises a fresh session.
 - Add a regression test for explicit fresh-session behavior instead of testing only that the menu callback fires.
 - Check every responsive branch when adding an action. A mobile menu item does not make the action available on native desktop.
+- Do not store one-shot investigation context under a worktree ID. Worktree-owned references leak into later sessions and cannot be removed from a session context menu.
 
 ## Keep task tracking proportional
 

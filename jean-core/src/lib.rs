@@ -949,6 +949,9 @@ mod tests {
         assert!(prompt.contains(
             "At the start of a new task, replace '.ai/todo.md' instead of appending to it"
         ));
+        assert!(prompt.contains(
+            "Keep '.ai/lessons.md' concise by merging duplicate rules and removing obsolete entries"
+        ));
     }
 
     #[test]
@@ -2186,6 +2189,7 @@ fn default_global_system_prompt() -> String {
 - Write rules for yourself that prevent the same mistake
 - Ruthlessly iterate on these lessons until mistake rate drops
 - Review lessons at session start for relevant project
+- Keep '.ai/lessons.md' concise by merging duplicate rules and removing obsolete entries
 
 ### 5. Verification Before Done
 - Never mark a task complete without proving it works

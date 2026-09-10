@@ -815,11 +815,13 @@ pub async fn dispatch_command(
         }
         "remove_issue_context" => {
             let session_id: String = field(&args, "sessionId", "session_id")?;
+            let worktree_id: Option<String> = field_opt(&args, "worktreeId", "worktree_id")?;
             let issue_number: u32 = field(&args, "issueNumber", "issue_number")?;
             let project_path: String = field(&args, "projectPath", "project_path")?;
             crate::projects::remove_issue_context(
                 app.clone(),
                 session_id,
+                worktree_id,
                 issue_number,
                 project_path,
             )

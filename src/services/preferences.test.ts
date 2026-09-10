@@ -244,6 +244,9 @@ describe('model option helpers', () => {
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
       "At the start of a new task, replace '.ai/todo.md' instead of appending to it"
     )
+    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
+      "Keep '.ai/lessons.md' concise by merging duplicate rules and removing obsolete entries"
+    )
   })
 
   it('requires GitHub issue and discussion discovery after changes', () => {

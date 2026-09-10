@@ -50,6 +50,7 @@ Always use ASD-STE100 Simplified Technical English when you talk to me.\n\
 - Write rules for yourself that prevent the same mistake\n\
 - Ruthlessly iterate on these lessons until mistake rate drops\n\
 - Review lessons at session start for relevant project\n\
+- Keep '.ai/lessons.md' concise by merging duplicate rules and removing obsolete entries\n\
 \n\
 ### 5. Verification Before Done\n\
 - Never mark a task complete without proving it works\n\
@@ -2708,6 +2709,9 @@ mod tests {
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("include clickable links when available"));
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains(
             "At the start of a new task, replace '.ai/todo.md' instead of appending to it"
+        ));
+        assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains(
+            "Keep '.ai/lessons.md' concise by merging duplicate rules and removing obsolete entries"
         ));
     }
 

@@ -118,6 +118,59 @@ describe('useBackgroundInvestigation', () => {
     }
   )
 
+  it('uses a one-time investigation prompt without loading persistent issue context', async () => {
+    preferencesData = {}
+    useUIStore.setState({
+      autoInvestigateOverrides: {
+        'worktree-1': {
+          prompt: 'Investigate issue #42\n\nIssue details',
+          forceNewSession: true,
+        },
+      },
+    })
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    queryClient.setQueryData<Worktree>(
+      [...projectsQueryKeys.all, 'worktree', 'worktree-1'],
+      {
+        id: 'worktree-1',
+        project_id: 'project-1',
+        path: '/tmp/worktree-1',
+        status: 'ready',
+      } as Worktree
+    )
+    vi.mocked(invoke).mockImplementation(async command => {
+      if (command === 'start_background_investigation') {
+        return {
+          sessionId: 'session-2',
+          worktreeId: 'worktree-1',
+          status: 'investigation_started',
+        }
+      }
+      throw new Error(`Unexpected command: ${command}`)
+    })
+
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    )
+    renderHook(() => useBackgroundInvestigation(), { wrapper })
+
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith(
+        'start_background_investigation',
+        expect.objectContaining({
+          message: 'Investigate issue #42\n\nIssue details',
+          forceNewSession: true,
+        })
+      )
+    })
+    expect(invoke).not.toHaveBeenCalledWith(
+      'list_loaded_issue_contexts',
+      expect.anything()
+    )
+  })
+
   it('keeps the investigation pending when starting it fails', async () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },

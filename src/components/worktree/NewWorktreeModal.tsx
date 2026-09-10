@@ -16,6 +16,7 @@ import { usePreferences } from '@/services/preferences'
 import {
   resolveMagicPromptProvider,
   resolveMagicPromptBackend,
+  DEFAULT_INVESTIGATE_ISSUE_PROMPT,
   type CliBackend,
 } from '@/types/preferences'
 import { DesktopBackendModelPicker } from '@/components/chat/toolbar/DesktopBackendModelPicker'
@@ -128,6 +129,9 @@ export function NewWorktreeModal() {
         investigationProvider === '__anthropic__'
           ? null
           : investigationProvider,
+      promptTemplate:
+        preferences?.magic_prompts?.investigate_issue ??
+        DEFAULT_INVESTIGATE_ISSUE_PROMPT,
     }
   )
 

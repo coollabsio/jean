@@ -392,11 +392,32 @@ export function useNewWorktreeHandlers(
             (await createBaseSession.mutateAsync(selectedProjectId))
         }
 
-        await invoke('load_issue_context', {
-          sessionId: targetWorktree.id,
+        const issueDetail = await invoke<
+          GitHubIssue & {
+            comments: {
+              body: string
+              author: { login: string }
+              created_at: string
+            }[]
+          }
+        >('get_github_issue', {
           issueNumber: issue.number,
           projectPath,
         })
+
+        const issuePrompt = (
+          investigationOverride?.promptTemplate ??
+          'Investigate the loaded GitHub {issueWord} ({issueRefs})'
+        )
+          .replace(/\{issueWord\}/g, 'issue')
+          .replace(/\{issueRefs\}/g, `#${issue.number}`)
+        const comments = (issueDetail.comments ?? [])
+          .map(
+            comment =>
+              `Comment by @${comment.author.login}:\n${comment.body || '(empty)'}`
+          )
+          .join('\n\n')
+        const prompt = `${issuePrompt}\n\n## GitHub issue #${issue.number}: ${issueDetail.title}\n\n${issueDetail.body || '(No description provided)'}${comments ? `\n\n## Comments\n\n${comments}` : ''}`
 
         chatStore.registerWorktreePath(targetWorktree.id, targetWorktree.path)
         useProjectsStore.getState().selectWorktree(targetWorktree.id)
@@ -405,6 +426,7 @@ export function useNewWorktreeHandlers(
           .markWorktreeForAutoInvestigate(targetWorktree.id, {
             ...investigationOverride,
             forceNewSession: true,
+            prompt,
           })
 
         handleOpenChange(false)
