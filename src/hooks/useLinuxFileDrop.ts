@@ -2,26 +2,14 @@ import { useEffect } from 'react'
 import { toast } from 'sonner'
 import { isLocalBackend } from '@/lib/environment'
 import { useChatStore } from '@/store/chat-store'
-import {
-  classifyAttachmentFile,
-  type AttachmentFileKind,
-} from '@/components/chat/attachment-processing'
-import {
-  processDroppedImage,
-  processDroppedSvg,
-} from '@/components/chat/hooks/useDragAndDropImages'
-import { writePathsToTerminal } from '@/components/chat/hooks/useTerminalImageDrop'
+import { attachDroppedPaths } from '@/components/chat/attachment-processing'
+import { writePathsToTerminal } from '@/components/chat/hooks/useTerminalFileDrop'
 
 interface LinuxFileDropPayload {
   paths: string[]
   /** Drop position in webview device pixels (from GTK drag-drop) */
   x: number
   y: number
-}
-
-/** Classify a dropped path by extension (reusing the chat attachment rules). */
-function classifyPath(path: string): AttachmentFileKind {
-  return classifyAttachmentFile({ name: path, type: '' })
 }
 
 interface DropTarget {
@@ -51,31 +39,19 @@ function activeSessionId(): string | undefined {
   return activeWorktreeId ? activeSessionIds[activeWorktreeId] : undefined
 }
 
-/** Attach dropped images to a chat session. */
+/** Attach dropped files to a chat session. */
 function routeToChat(paths: string[], sessionId: string | undefined): void {
   if (!sessionId) {
     toast.error('No active session', {
-      description: 'Open a session to attach a dropped image',
+      description: 'Open a session to attach a dropped file',
     })
     return
   }
-
-  let handled = false
-  for (const path of paths) {
-    const kind = classifyPath(path)
-    if (kind === 'raster') {
-      processDroppedImage(path, sessionId)
-      handled = true
-    } else if (kind === 'svg') {
-      processDroppedSvg(path, sessionId)
-      handled = true
-    }
-  }
-  if (!handled) {
-    toast.error('No image detected', {
-      description: 'Only PNG, JPEG, GIF, WebP, SVG files are accepted',
-    })
-  }
+  // ponytail: GTK payload is bare paths, so Linux drops can't tell dirs apart yet.
+  attachDroppedPaths(
+    paths.map(path => ({ path, isDir: false })),
+    sessionId
+  )
 }
 
 /**
@@ -85,7 +61,7 @@ function routeToChat(paths: string[], sessionId: string | undefined): void {
  * fire usable events — tauri-apps/tauri#12052), so the Rust side intercepts
  * the drop, prevents the default navigation, and emits `linux-file-drop` with
  * the file paths + drop position. Here we route by position: a drop over a
- * terminal writes the path into its pty; anywhere else attaches the image to
+ * terminal writes the path into its pty; anywhere else attaches the file to
  * the active chat session.
  */
 export function useLinuxFileDrop(): void {

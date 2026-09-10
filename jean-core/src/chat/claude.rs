@@ -476,6 +476,7 @@ fn build_claude_args(
         } else {
             for subdir in [
                 "pasted-images",
+                "pasted-files",
                 "pasted-texts",
                 "session-context",
                 "git-context",

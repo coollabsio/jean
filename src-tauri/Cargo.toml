@@ -41,7 +41,8 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 arboard = { version = "3", features = ["wayland-data-control"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSColor", "NSResponder"] }
+objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSColor", "NSResponder", "NSPasteboard", "NSPasteboardItem"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSString", "NSURL"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Intercept OS file drops at the GTK widget level so WebKitGTK does not navigate

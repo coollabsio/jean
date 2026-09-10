@@ -84,7 +84,7 @@ export function usePendingAttachments({
 
       const files = getPendingFiles(activeSessionId)
       const file = files.find(f => f.id === fileId)
-      if (file) {
+      if (file && !file.attached) {
         const filename = getFilename(file.relativePath)
         const currentInput = inputDrafts[activeSessionId] ?? ''
         const pattern = new RegExp(

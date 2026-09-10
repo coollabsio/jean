@@ -704,6 +704,27 @@ pub struct SaveTextResponse {
     pub size: usize,
 }
 
+/// Response from saving an attached (arbitrary) file
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SaveFileResponse {
+    /// Unique ID for this file
+    pub id: String,
+    /// Filename (e.g., "quarterly-report-1704067200-abc123.pdf")
+    pub filename: String,
+    /// Full path to the saved file
+    pub path: String,
+    /// Size in bytes
+    pub size: usize,
+}
+
+/// A file-system path handed to chat via drop / clipboard / picker
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DroppedPath {
+    pub path: String,
+    pub is_dir: bool,
+}
+
 /// Response from reading a pasted text file
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReadTextResponse {

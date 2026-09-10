@@ -4,7 +4,8 @@ import { DismissButton } from '@/components/ui/dismiss-button'
 import type { PendingFile } from '@/types/chat'
 import { cn } from '@/lib/utils'
 import { getExtensionColor } from '@/lib/file-colors'
-import { getFilename } from '@/lib/path-utils'
+import { getFilename, joinPaths } from '@/lib/path-utils'
+import { invoke } from '@/lib/transport'
 import {
   Tooltip,
   TooltipTrigger,
@@ -29,6 +30,15 @@ export function FilePreview({ files, onRemove, disabled }: FilePreviewProps) {
     (e: React.MouseEvent, file: PendingFile) => {
       e.stopPropagation()
       if (disabled) return
+      // Uploaded files live in app data; delete them when the chip is removed.
+      if (
+        file.sourceRootPath &&
+        /[\\/]pasted-files[\\/]*$/.test(file.sourceRootPath)
+      ) {
+        invoke('delete_pasted_file', {
+          path: joinPaths(file.sourceRootPath, file.relativePath),
+        }).catch(error => console.error('Failed to delete file:', error))
+      }
       onRemove(file.id)
     },
     [disabled, onRemove]
@@ -71,7 +81,9 @@ export function FilePreview({ files, onRemove, disabled }: FilePreviewProps) {
           <TooltipContent>
             {file.sourceProjectName
               ? `${file.sourceProjectName}: ${file.relativePath}`
-              : file.relativePath}
+              : file.sourceRootPath
+                ? joinPaths(file.sourceRootPath, file.relativePath)
+                : file.relativePath}
           </TooltipContent>
         </Tooltip>
       ))}

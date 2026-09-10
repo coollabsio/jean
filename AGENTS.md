@@ -404,6 +404,18 @@ Images pasted or dropped into chat are processed before saving (`process_image()
 - **Token cost**: `(width × height) / 750` tokens per image. Max optimal size (~1568×1568) ≈ 3,280 tokens.
 - **Reference**: https://platform.claude.com/docs/en/build-with-claude/vision
 
+#### Generic File Attachments (Non-Image)
+
+Any non-image/SVG file (PDF, video, markdown, …) becomes a `PendingFile` chip and is sent as `[File: <abs path> - Use the Read tool to view this file]` — the same marker `@` mentions use, so backends need no special handling. Single chokepoint: `src/components/chat/attachment-processing.ts` (`classifyAttachmentFile` → `raster | svg | file`, `attachDroppedPaths` for path-based input).
+
+- **Path first, copy second**: real paths are used when available (native file picker via `plugin-dialog`, clipboard file list via `read_clipboard_file_paths`, macOS drop via `read_drag_file_paths` reading the drag pasteboard, Linux drop via `linux-file-drop`); path commands return `DroppedPath { path, isDir }` so folders become directory chips. Path-based SVGs become generic file chips too (plugin-fs scope forbids reading arbitrary user paths); only DOM `File` SVGs go through the text-file flow. Only web access, Windows DOM drops, native app on a remote backend, and the macOS fallback when the drag pasteboard read fails upload bytes to `<app_data>/pasted-files/` via `save_pasted_file` (25MB cap — base64 over the WebSocket must stay under tungstenite's 64MB message limit).
+- **Why not `dragDropEnabled: true`**: Tauri's native drag handler would swallow the HTML5 DnD used for session/terminal/worktree/canvas reordering (`src/test/tauri-config.test.ts`). DOM `File` objects never expose OS paths, hence the pasteboard trick.
+- **Prime the drag pasteboard**: `read_drag_file_paths` must be issued during the drag (`dragenter`/`dragover`), not after the drop — macOS can empty the drag pasteboard once the drop lands, which silently downgrades every drop to the upload path. `src/components/chat/drag-path-cache.ts` holds the in-flight read; `takeDragPaths()` runs at the top of every drop handler (before any early return, so an ignored drop cannot leak its paths into the next drag), and `dragPathsMatchFiles()` requires the pasteboard entries to match the DOM files by count *and* NFC-normalized name before they are trusted.
+- **Ask for clipboard paths before reading DOM files**: WebKit fills `clipboardData.files` for a Finder copy, so any handler that consumes DOM files first makes `read_clipboard_file_paths` unreachable and uploads a file whose path was available. Screenshots have no file list, so the path probe falls through to the image flow.
+- **Gaps**: Linux drop cannot tell directories from files (`// ponytail:` in `src/hooks/useLinuxFileDrop.ts`), Windows DOM drops always upload, and the attach button picks files only (`directory: false`) even though the rest of the pipeline handles directories.
+- **`attached: true`**: chips created by the attach button, a drop, or a paste set this flag (`pendingFileFromPath`). `PendingFile` used to exist only for `@mentions`, so `ChatInput` deletes any chip whose `@filename` is missing from the text and `usePendingAttachments` strips that `@filename` on remove. Both skip `attached` chips — otherwise typing one character wipes the attachment.
+- **Cleanup**: `collect_session_pasted_paths` only deletes `[File:` paths inside `pasted-files/`; user-owned originals referenced by path are never touched. Removing a chip calls `delete_pasted_file` for uploaded files only.
+
 #### Adding a New Claude Model
 
 Three files need updating when adding a new model option:

@@ -10,23 +10,29 @@ import {
   encodePromptAttachmentMetadata,
   type PromptAttachmentMetadata,
 } from './message-content-utils'
+import type { PendingFile } from '@/types/chat'
 
 const processAttachmentFile = vi.fn()
+const attachDroppedPaths = vi.fn()
 const invokeMock = invoke as unknown as ReturnType<typeof vi.fn>
-const { mobileState, nativeState, slashPopoverMock } = vi.hoisted(() => ({
-  mobileState: { value: false },
-  nativeState: { value: false },
-  slashPopoverMock: vi.fn(() => null),
-}))
+const { mobileState, nativeState, localBackendState, slashPopoverMock } =
+  vi.hoisted(() => ({
+    mobileState: { value: false },
+    nativeState: { value: false },
+    localBackendState: { value: false },
+    slashPopoverMock: vi.fn(() => null),
+  }))
 
 const storeState = {
   inputDrafts: {} as Record<string, string>,
   setInputDraft: vi.fn(),
-  getPendingFiles: vi.fn(() => []),
+  getPendingFiles: vi.fn((): PendingFile[] => []),
   removePendingFile: vi.fn(),
   addPendingFile: vi.fn(),
   addPendingSkill: vi.fn(),
   addPendingImage: vi.fn(),
+  updatePendingImage: vi.fn(),
+  removePendingImage: vi.fn(),
   addPendingTextFile: vi.fn(),
 }
 
@@ -37,10 +43,12 @@ vi.mock('@/hooks/use-mobile', () => ({
 vi.mock('@/lib/environment', async importOriginal => ({
   ...(await importOriginal<typeof EnvironmentModule>()),
   isNativeApp: () => nativeState.value,
+  isLocalBackend: () => localBackendState.value,
 }))
 
 vi.mock('./attachment-processing', () => ({
   processAttachmentFile: (...args: unknown[]) => processAttachmentFile(...args),
+  attachDroppedPaths: (...args: unknown[]) => attachDroppedPaths(...args),
 }))
 
 vi.mock('./FileMentionPopover', () => ({
@@ -87,8 +95,10 @@ describe('ChatInput attachments', () => {
   beforeEach(() => {
     mobileState.value = false
     nativeState.value = false
+    localBackendState.value = false
     useUIStore.setState({ zenMode: false })
     processAttachmentFile.mockReset()
+    attachDroppedPaths.mockReset()
     invokeMock.mockReset()
     storeState.setInputDraft.mockReset()
     storeState.getPendingFiles.mockReset()
@@ -97,6 +107,8 @@ describe('ChatInput attachments', () => {
     storeState.addPendingFile.mockReset()
     storeState.addPendingSkill.mockReset()
     storeState.addPendingImage.mockReset()
+    storeState.updatePendingImage.mockReset()
+    storeState.removePendingImage.mockReset()
     storeState.addPendingTextFile.mockReset()
     storeState.inputDrafts = {}
     slashPopoverMock.mockClear()
@@ -285,6 +297,37 @@ describe('ChatInput attachments', () => {
     )
   })
 
+  it('keeps attached files when typing but still syncs @mention chips', () => {
+    storeState.getPendingFiles.mockReturnValue([
+      {
+        id: 'attached-1',
+        relativePath: 'addon.py',
+        sourceRootPath: '/Users/me/blender',
+        extension: 'py',
+        isDirectory: false,
+        attached: true,
+      },
+      {
+        id: 'mention-1',
+        relativePath: 'src/main.rs',
+        extension: 'rs',
+        isDirectory: false,
+      },
+    ])
+    const textarea = renderInput()
+
+    fireEvent.change(textarea, { target: { value: 'test' } })
+
+    expect(storeState.removePendingFile).toHaveBeenCalledWith(
+      'session-1',
+      'mention-1'
+    )
+    expect(storeState.removePendingFile).not.toHaveBeenCalledWith(
+      'session-1',
+      'attached-1'
+    )
+  })
+
   it('restores attachments from rich copied prompt metadata', async () => {
     const textarea = renderInput()
     const metadata: PromptAttachmentMetadata = {
@@ -322,11 +365,13 @@ describe('ChatInput attachments', () => {
           filename: 'image.png',
         })
       )
+      // Restored by a paste, not typed as an @mention: must survive typing.
       expect(storeState.addPendingFile).toHaveBeenCalledWith(
         'session-1',
         expect.objectContaining({
           relativePath: 'src/App.tsx',
           isDirectory: false,
+          attached: true,
         })
       )
       expect(storeState.addPendingFile).toHaveBeenCalledWith(
@@ -432,6 +477,105 @@ describe('ChatInput attachments', () => {
     expect(invokeMock).not.toHaveBeenCalledWith('read_clipboard_image')
   })
 
+  it('uploads non-image clipboard files on a web paste', async () => {
+    const textarea = renderInput()
+    const pdf = new File(['%PDF'], 'report.pdf', { type: 'application/pdf' })
+    processAttachmentFile.mockResolvedValue(undefined)
+
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        getData: () => '',
+        items: [],
+        files: [pdf],
+      },
+    })
+
+    await waitFor(() => {
+      expect(processAttachmentFile).toHaveBeenCalledWith(pdf, 'session-1')
+    })
+    expect(invokeMock).not.toHaveBeenCalledWith('read_clipboard_file_paths')
+  })
+
+  it('attaches copied files by path on a native empty paste', async () => {
+    nativeState.value = true
+    localBackendState.value = true
+    const entries = [{ path: '/tmp/a.pdf', isDir: false }]
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'read_clipboard_file_paths') return entries
+      return null
+    })
+    attachDroppedPaths.mockResolvedValue(undefined)
+    const textarea = renderInput()
+
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        getData: () => '',
+        items: [],
+        files: [],
+      },
+    })
+
+    await waitFor(() => {
+      expect(attachDroppedPaths).toHaveBeenCalledWith(entries, 'session-1')
+    })
+    expect(invokeMock).not.toHaveBeenCalledWith('read_clipboard_image')
+    expect(storeState.addPendingImage).not.toHaveBeenCalled()
+  })
+
+  it('prefers the copied file real path over its clipboard bytes', async () => {
+    nativeState.value = true
+    localBackendState.value = true
+    const entries = [{ path: '/Users/me/report.pdf', isDir: false }]
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'read_clipboard_file_paths') return entries
+      return null
+    })
+    attachDroppedPaths.mockResolvedValue(undefined)
+    const textarea = renderInput()
+    // WebKit exposes Finder-copied files through `files` too; uploading those
+    // bytes would ignore the real path and copy the file needlessly.
+    const pdf = new File(['%PDF'], 'report.pdf', { type: 'application/pdf' })
+
+    fireEvent.paste(textarea, {
+      clipboardData: { getData: () => '', items: [], files: [pdf] },
+    })
+
+    await waitFor(() => {
+      expect(attachDroppedPaths).toHaveBeenCalledWith(entries, 'session-1')
+    })
+    expect(processAttachmentFile).not.toHaveBeenCalled()
+  })
+
+  it('falls back to the clipboard image when no files are copied', async () => {
+    nativeState.value = true
+    localBackendState.value = true
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'read_clipboard_file_paths') return []
+      if (command === 'read_clipboard_image') {
+        return { id: 'img-1', path: '/tmp/clip.png', filename: 'clip.png' }
+      }
+      return null
+    })
+    const textarea = renderInput()
+
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        getData: () => '',
+        items: [],
+        files: [],
+      },
+    })
+
+    await waitFor(() => {
+      expect(storeState.updatePendingImage).toHaveBeenCalledWith(
+        'session-1',
+        expect.any(String),
+        expect.objectContaining({ id: 'img-1', loading: false })
+      )
+    })
+    expect(attachDroppedPaths).not.toHaveBeenCalled()
+  })
+
   it('does not request the desktop clipboard for an empty web paste', async () => {
     const textarea = renderInput()
 
@@ -501,6 +645,8 @@ describe('ChatInput IME composition (issue #584)', () => {
     storeState.addPendingFile.mockReset()
     storeState.addPendingSkill.mockReset()
     storeState.addPendingImage.mockReset()
+    storeState.updatePendingImage.mockReset()
+    storeState.removePendingImage.mockReset()
     storeState.addPendingTextFile.mockReset()
     storeState.inputDrafts = {}
   })
