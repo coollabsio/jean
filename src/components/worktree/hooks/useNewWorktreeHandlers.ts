@@ -377,7 +377,8 @@ export function useNewWorktreeHandlers(
 
       try {
         const chatStore = useChatStore.getState()
-        const selectedWorktreeId = useProjectsStore.getState().selectedWorktreeId
+        const selectedWorktreeId =
+          useProjectsStore.getState().selectedWorktreeId
         const currentWorktreeId =
           chatStore.activeWorktreeId ?? selectedWorktreeId
         let targetWorktree = worktrees.find(
@@ -427,17 +428,10 @@ export function useNewWorktreeHandlers(
             ...investigationOverride,
             forceNewSession: true,
             prompt,
+            openSession: true,
           })
 
         handleOpenChange(false)
-        window.dispatchEvent(
-          new CustomEvent('open-worktree-modal', {
-            detail: {
-              worktreeId: targetWorktree.id,
-              worktreePath: targetWorktree.path,
-            },
-          })
-        )
       } catch (error) {
         toast.error(`Failed to start issue investigation: ${error}`)
         setCreatingFromNumber(null)

@@ -11,6 +11,7 @@ export interface InvestigationOverride {
   forceNewSession?: boolean
   prompt?: string
   promptTemplate?: string
+  openSession?: boolean
 }
 
 export type PreferencePane =

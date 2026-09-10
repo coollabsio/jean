@@ -171,6 +171,60 @@ describe('useBackgroundInvestigation', () => {
     )
   })
 
+  it('selects the created session before opening its worktree modal', async () => {
+    preferencesData = {}
+    useUIStore.setState({
+      autoInvestigateOverrides: {
+        'worktree-1': {
+          prompt: 'Investigate issue #42',
+          forceNewSession: true,
+          openSession: true,
+        },
+      },
+    })
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    queryClient.setQueryData<Worktree>(
+      [...projectsQueryKeys.all, 'worktree', 'worktree-1'],
+      {
+        id: 'worktree-1',
+        project_id: 'project-1',
+        path: '/tmp/worktree-1',
+        status: 'ready',
+      } as Worktree
+    )
+    vi.mocked(invoke).mockImplementation(async command => {
+      if (command === 'start_background_investigation') {
+        return {
+          sessionId: 'new-session',
+          worktreeId: 'worktree-1',
+          status: 'investigation_started',
+        }
+      }
+      throw new Error(`Unexpected command: ${command}`)
+    })
+    const openEvents: CustomEvent[] = []
+    const listener = (event: Event) => openEvents.push(event as CustomEvent)
+    window.addEventListener('open-session-modal', listener)
+
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    )
+    renderHook(() => useBackgroundInvestigation(), { wrapper })
+
+    await waitFor(() => expect(openEvents).toHaveLength(1))
+    expect(useChatStore.getState().activeSessionIds['worktree-1']).toBe(
+      'new-session'
+    )
+    expect(openEvents[0]?.detail).toEqual({
+      sessionId: 'new-session',
+      worktreeId: 'worktree-1',
+      worktreePath: '/tmp/worktree-1',
+    })
+    window.removeEventListener('open-session-modal', listener)
+  })
+
   it('keeps the investigation pending when starting it fails', async () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },

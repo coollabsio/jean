@@ -1,20 +1,15 @@
-# Keep `.ai/lessons.md` concise
+# Select the new investigation session
 
-- [x] Add failing prompt assertions.
-- [x] Add the maintenance rule to all synchronized prompts.
-- [x] Run focused tests and formatting checks.
+- [x] Trace the modal/session race.
+- [x] Delay modal opening until the backend returns the new session ID.
+- [x] Open and select the exact created session.
+- [x] Run focused and full quality checks.
 - [x] Search GitHub issues and discussions.
-- [x] Record review results and test steps.
 
 ## Review
 
-- Added the lesson-maintenance rule to the TypeScript default prompt, the Rust default prompt, and Claude's synchronized fallback prompt.
-- Agents must keep lessons across tasks, merge duplicate rules, and remove obsolete entries.
-- The assertions failed before the prompt update and passed after it.
-- Verification passed: 2 focused Rust tests, 24 focused TypeScript tests, Rust formatting, Prettier, and `git diff --check`.
-- GitHub: no fully fixed, related, or similar issue or discussion was found for `.ai/lessons.md`.
-
-## How to test
-
-- Reset the global system prompt to its default. Confirm the Self-Improvement Loop contains the lesson-maintenance rule.
-- Add duplicate or obsolete lessons, then start a new agent session. Confirm the agent consolidates the file without clearing reusable lessons.
+- The issue action no longer opens the worktree before session creation finishes.
+- The background investigation path sets the returned session ID as active, then emits `open-session-modal` with the exact session, worktree, and path.
+- A regression test verifies event ordering and the selected session ID.
+- `bun run check:all` passed: 2,171 frontend tests, 1,145 Jean Core tests, and 13 Tauri library tests.
+- No matching GitHub issue or discussion was found.

@@ -605,6 +605,14 @@ async function processBackgroundInvestigation(
 
   setActiveSession(worktreeId, sessionId)
 
+  if (override?.openSession) {
+    window.dispatchEvent(
+      new CustomEvent('open-session-modal', {
+        detail: { sessionId, worktreeId, worktreePath },
+      })
+    )
+  }
+
   // Invalidate sessions query so ProjectCanvasView picks up the session
   queryClient.invalidateQueries({
     queryKey: chatQueryKeys.sessions(worktreeId),

@@ -7,6 +7,7 @@
 - Add a regression test for explicit fresh-session behavior instead of testing only that the menu callback fires.
 - Check every responsive branch when adding an action. A mobile menu item does not make the action available on native desktop.
 - Do not store one-shot investigation context under a worktree ID. Worktree-owned references leak into later sessions and cannot be removed from a session context menu.
+- Do not open a worktree modal before an asynchronous session creator returns its session ID. Set the exact active session first, then open with an event that includes the worktree and session IDs.
 
 ## Keep task tracking proportional
 
