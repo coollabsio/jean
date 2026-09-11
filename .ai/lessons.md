@@ -57,3 +57,11 @@
 - A `null` prompt preference means “use Jean's default,” not “omit the prompt.”
 - When adding or changing a backend, verify that default, custom, and empty global prompts resolve consistently on every chat turn.
 - Backend-specific mode instructions must augment the shared global prompt rather than replace it.
+
+## Verify installed skill discovery in each harness
+
+- Do not treat copied `SKILL.md` files as proof that a harness discovers or invokes them.
+- Test the installed directory layout through each backend's real skill-listing path.
+- Adapt backend-specific frontmatter and command syntax when an upstream pack targets one harness.
+- Verify a representative workflow set, not only the pack's setup skill or source file count.
+- Do not adapt an optional vendor configuration skill when the requested product is the workflow skill pack. Exclude the configuration skill and preserve the remaining upstream skills.

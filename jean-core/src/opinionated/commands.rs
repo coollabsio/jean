@@ -1493,10 +1493,14 @@ fn copy_pstack_skills(source_skills_dir: &Path, target_skills_dir: &Path) -> Res
     let mut copied = 0;
     for entry in entries.flatten() {
         let source = entry.path();
-        if !source.is_dir() || !source.join("SKILL.md").exists() {
+        if entry.file_name() == "setup-pstack"
+            || !source.is_dir()
+            || !source.join("SKILL.md").exists()
+        {
             continue;
         }
-        copy_dir_replace(&source, &target_skills_dir.join(entry.file_name()))?;
+        let target = target_skills_dir.join(entry.file_name());
+        copy_dir_replace(&source, &target)?;
         copied += 1;
     }
     Ok(copied)
@@ -1507,7 +1511,11 @@ fn pstack_skill_names(source_skills_dir: &Path) -> Result<Vec<String>, String> {
         .map_err(|e| format!("Failed to read pstack skills dir {source_skills_dir:?}: {e}"))?;
     let mut names = entries
         .flatten()
-        .filter(|entry| entry.path().is_dir() && entry.path().join("SKILL.md").exists())
+        .filter(|entry| {
+            entry.file_name() != "setup-pstack"
+                && entry.path().is_dir()
+                && entry.path().join("SKILL.md").exists()
+        })
         .map(|entry| entry.file_name().to_string_lossy().to_string())
         .collect::<Vec<_>>();
     names.sort();
@@ -2146,6 +2154,7 @@ async fn install_superpowers(app: &AppHandle) -> Result<String, String> {
 
 async fn install_pstack(_app: &AppHandle) -> Result<String, String> {
     let home = dirs::home_dir().ok_or("Cannot determine home directory")?;
+    remove_legacy_pstack_setup_from_home(&home)?;
     let skills_dir = tokio::task::spawn_blocking(clone_pstack_skills_dir)
         .await
         .map_err(|e| e.to_string())??;
@@ -2200,6 +2209,30 @@ async fn install_pstack(_app: &AppHandle) -> Result<String, String> {
         message.push_str(&format!(". Warnings: {}", warnings.join("; ")));
     }
     Ok(message)
+}
+
+fn remove_legacy_pstack_setup_from_home(home: &Path) -> Result<(), String> {
+    let manifest = pstack_manifest_path(home);
+    let was_installed_by_jean = std::fs::read_to_string(manifest)
+        .is_ok_and(|content| content.lines().any(|name| name == "setup-pstack"));
+    if !was_installed_by_jean {
+        return Ok(());
+    }
+
+    let mut removed = Vec::new();
+    for (backend, _) in installable_jean_backends() {
+        let global = jean_global_backend_skills_dir(home, backend);
+        remove_path_if_exists(&global.join("setup-pstack"), &mut removed)?;
+        let native = if backend == "claude" {
+            Some(home.join(".claude").join("skills"))
+        } else {
+            backend_skills_dir(home, backend)
+        };
+        if let Some(native) = native.filter(|path| path != &global) {
+            remove_path_if_exists(&native.join("setup-pstack"), &mut removed)?;
+        }
+    }
+    Ok(())
 }
 
 fn uninstall_pstack_from_home(home: &Path) -> Result<Vec<String>, String> {
@@ -2265,12 +2298,19 @@ mod tests {
         let source = temp.path().join("source");
         let poteto = source.join("poteto-mode");
         let principle = source.join("principle-prove-it-works");
+        let setup = source.join("setup-pstack");
         std::fs::create_dir_all(poteto.join("playbooks")).expect("create poteto skill");
         std::fs::create_dir_all(&principle).expect("create principle skill");
-        std::fs::write(poteto.join("SKILL.md"), "# Poteto mode").expect("write poteto skill");
+        std::fs::create_dir_all(&setup).expect("create setup skill");
+        std::fs::write(
+            poteto.join("SKILL.md"),
+            "# Poteto mode\nRead ~/.cursor/rules/pstack-models.mdc when present.",
+        )
+        .expect("write poteto skill");
         std::fs::write(poteto.join("playbooks/feature.md"), "# Feature").expect("write playbook");
         std::fs::write(principle.join("SKILL.md"), "# Prove it works")
             .expect("write principle skill");
+        std::fs::write(setup.join("SKILL.md"), "# Setup pstack").expect("write setup skill");
 
         let target = temp.path().join("target");
         let copied = copy_pstack_skills(&source, &target).expect("copy pstack skills");
@@ -2279,6 +2319,10 @@ mod tests {
         assert!(target.join("poteto-mode/SKILL.md").exists());
         assert!(target.join("poteto-mode/playbooks/feature.md").exists());
         assert!(target.join("principle-prove-it-works/SKILL.md").exists());
+        assert!(!target.join("setup-pstack").exists());
+        let installed = std::fs::read_to_string(target.join("poteto-mode/SKILL.md"))
+            .expect("read installed skill");
+        assert!(installed.contains("~/.cursor/rules/pstack-models.mdc"));
     }
 
     #[test]
@@ -2302,6 +2346,22 @@ mod tests {
         assert!(!codex_skills.join("principle-prove-it-works").exists());
         assert!(codex_skills.join("my-skill/SKILL.md").exists());
         assert!(!manifest.exists());
+    }
+
+    #[test]
+    fn reinstall_cleanup_removes_the_old_setup_pstack_skill() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let setup = temp.path().join(".codex/skills/setup-pstack");
+        std::fs::create_dir_all(&setup).expect("create setup skill");
+        std::fs::write(setup.join("SKILL.md"), "# Setup pstack").expect("write setup skill");
+        let manifest = pstack_manifest_path(temp.path());
+        std::fs::create_dir_all(manifest.parent().expect("manifest parent"))
+            .expect("create manifest dir");
+        std::fs::write(&manifest, "poteto-mode\nsetup-pstack\n").expect("write manifest");
+
+        remove_legacy_pstack_setup_from_home(temp.path()).expect("remove legacy setup skill");
+
+        assert!(!setup.exists());
     }
 
     #[test]

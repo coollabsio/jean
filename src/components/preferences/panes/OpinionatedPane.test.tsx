@@ -85,6 +85,9 @@ describe('OpinionatedPane', () => {
     expect(
       within(pstackCard as HTMLElement).getByText('/poteto-mode')
     ).toBeInTheDocument()
+    expect(
+      within(pstackCard as HTMLElement).queryByText('/setup-pstack')
+    ).not.toBeInTheDocument()
   })
 
   it('shows opinionated skill installation status for each backend', async () => {

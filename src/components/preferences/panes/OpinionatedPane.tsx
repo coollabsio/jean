@@ -155,15 +155,11 @@ const PLUGINS: PluginDefinition[] = [
     ],
     usage: [
       {
-        note: 'Downloads the current pstack skills from the Cursor plugins repository, then installs the complete skill pack into each backend path and Jean-global mirror.',
+        note: 'Downloads the current pstack workflow skills from the Cursor plugins repository, then installs them into each backend path and Jean-global mirror. Jean omits the Cursor-only setup-pstack configuration skill.',
       },
       {
         label: 'Start rigorous engineering mode',
         command: '/poteto-mode',
-      },
-      {
-        label: 'Configure model roles',
-        command: '/setup-pstack',
       },
     ],
   },
