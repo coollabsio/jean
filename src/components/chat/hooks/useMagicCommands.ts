@@ -41,7 +41,6 @@ interface MagicCommandHandlers {
     prompt: string | string[],
     options?: { executionMode?: ExecutionMode }
   ) => void
-  handleSmokeTest: () => void
 }
 
 interface UseMagicCommandsOptions extends MagicCommandHandlers {
@@ -78,7 +77,6 @@ export function useMagicCommands({
   handleInvestigateWorkflowRun,
   handleInvestigate,
   handleReviewComments,
-  handleSmokeTest,
   isModal = false,
   sessionModalOpen = false,
 }: UseMagicCommandsOptions): void {
@@ -101,7 +99,6 @@ export function useMagicCommands({
     handleInvestigateWorkflowRun,
     handleInvestigate,
     handleReviewComments,
-    handleSmokeTest,
   })
 
   // Update refs in useLayoutEffect to avoid linter warning about ref updates during render
@@ -125,7 +122,6 @@ export function useMagicCommands({
       handleInvestigateWorkflowRun,
       handleInvestigate,
       handleReviewComments,
-      handleSmokeTest,
     }
   })
 
@@ -221,9 +217,6 @@ export function useMagicCommands({
           })
           break
         }
-        case 'smoke-test':
-          handlers.handleSmokeTest()
-          break
       }
     }
 

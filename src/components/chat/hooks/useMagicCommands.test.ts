@@ -24,7 +24,6 @@ function renderUseMagicCommands(
     handleInvestigateWorkflowRun: vi.fn(),
     handleInvestigate: vi.fn(),
     handleReviewComments: vi.fn(),
-    handleSmokeTest: vi.fn(),
     ...overrides,
   }
   renderHook(() => useMagicCommands(handlers))
@@ -47,16 +46,6 @@ describe('useMagicCommands review comments batch', () => {
     )
 
     expect(handlers.handleForkSession).toHaveBeenCalledTimes(1)
-  })
-
-  it('dispatches the smoke test magic command', () => {
-    const handlers = renderUseMagicCommands()
-
-    window.dispatchEvent(
-      new CustomEvent('magic-command', { detail: { command: 'smoke-test' } })
-    )
-
-    expect(handlers.handleSmokeTest).toHaveBeenCalledTimes(1)
   })
 
   it('passes separate review comment prompts and plan mode from event detail', () => {

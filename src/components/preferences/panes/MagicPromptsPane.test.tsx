@@ -121,24 +121,6 @@ beforeEach(() => {
 })
 
 describe('MagicPromptsPane', () => {
-  it('provides smoke test prompt, backend, model, and mode settings', async () => {
-    const user = userEvent.setup()
-    render(<MagicPromptsPane />)
-
-    await user.click(screen.getByRole('button', { name: 'Smoke Test' }))
-
-    expect(
-      (screen.getByRole('textbox') as HTMLTextAreaElement).value
-    ).toContain('start the development server')
-    expect(
-      screen.getByRole('combobox', { name: 'Backend' })
-    ).toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: 'Model' })).toBeInTheDocument()
-    expect(
-      screen.getByRole('combobox', { name: 'Default mode' })
-    ).toBeInTheDocument()
-  })
-
   it('lets chat-style magic prompts choose plan or yolo as their default mode', async () => {
     const user = userEvent.setup()
     render(<MagicPromptsPane />)

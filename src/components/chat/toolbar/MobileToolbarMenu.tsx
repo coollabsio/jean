@@ -7,7 +7,6 @@ import {
   Bug,
   Eye,
   FileText,
-  FlaskConical,
   FolderOpen,
   GitBranchPlus,
   GitCommitHorizontal,
@@ -90,33 +89,6 @@ export function MobileToolbarMenu({
         align={isMobile ? 'end' : 'start'}
         className="w-56 max-h-[min(80vh,640px)] overflow-y-auto"
       >
-        <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
-          Test
-        </div>
-        <DropdownMenuItem
-          onClick={() => {
-            setMenuOpen(false)
-            window.dispatchEvent(
-              new CustomEvent('magic-command', {
-                detail: { command: 'smoke-test' },
-              })
-            )
-          }}
-        >
-          <FlaskConical className="h-4 w-4" />
-          Smoke Test
-          <span
-            className={cn(
-              'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
-              isMobile && 'hidden'
-            )}
-          >
-            X
-          </span>
-        </DropdownMenuItem>
-
-        <DropdownMenuSeparator />
-
         <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
           Context
         </div>

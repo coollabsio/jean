@@ -894,10 +894,9 @@ fn resolve_http_server_bind_host(prefs: &AppPreferences) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        default_global_system_prompt, default_model, migrate_smoke_test_preferences,
-        parse_cli_args_from, resolve_headless_bind_host, resolve_headless_token_required,
-        resolve_http_server_bind_host, server_preferences_value, validate_headless_security,
-        AppPreferences,
+        default_global_system_prompt, default_model, parse_cli_args_from,
+        resolve_headless_bind_host, resolve_headless_token_required, resolve_http_server_bind_host,
+        server_preferences_value, validate_headless_security, AppPreferences,
     };
     use serde_json::json;
 
@@ -1392,26 +1391,6 @@ mod tests {
         );
         assert_eq!(prefs.magic_prompt_modes.final_review_mode, "yolo");
     }
-
-    #[test]
-    fn missing_smoke_test_settings_follow_the_existing_codex_default() {
-        let mut prefs = AppPreferences {
-            default_backend: "codex".to_string(),
-            selected_codex_model: "gpt-5.6-terra".to_string(),
-            ..Default::default()
-        };
-        let raw = json!({
-            "magic_prompt_models": {},
-            "magic_prompt_backends": {}
-        });
-
-        assert!(migrate_smoke_test_preferences(&mut prefs, &raw));
-        assert_eq!(
-            prefs.magic_prompt_backends.smoke_test_backend.as_deref(),
-            Some("codex")
-        );
-        assert_eq!(prefs.magic_prompt_models.smoke_test_model, "gpt-5.6-terra");
-    }
 }
 
 fn default_removal_behavior() -> String {
@@ -1439,8 +1418,6 @@ fn default_auto_archive_on_pr_merged() -> bool {
 /// Some(text) = user customization (preserved across updates).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MagicPrompts {
-    #[serde(default)]
-    pub smoke_test: Option<String>,
     #[serde(default)]
     pub investigate_issue: Option<String>,
     #[serde(default)]
@@ -1524,37 +1501,6 @@ Investigate the loaded GitHub {issueWord} ({issueRefs})
 - Reference specific file paths and line numbers
 
 </guidelines>"#
-        .to_string()
-}
-
-pub(crate) fn default_smoke_test_prompt() -> String {
-    r#"Smoke test the feature or fix in worktree {worktree_id}.
-
-1. Inspect worktree {worktree_id}: resolve its path, current branch, git status, changed files and diff. Treat the actual worktree changes as the source of truth for identifying the feature or fix, its intended behavior, and what must be tested. Read relevant repository documentation, tasks, issues, commits, and code when needed. Confirm that the branch and worktree match the code under test.
-2. Use the changed code and surrounding implementation to determine the expected behavior, affected interfaces, risks, and realistic success and failure scenarios. Do not require a source chat session to understand or test the worktree.
-3. Call the Jean MCP get_run_environments tool for the current worktree before starting a server.
-   - Reuse an existing environment when available.
-   - Do not guess a port or start a duplicate server.
-   - If no environment is running, call the Jean MCP start_run_environment tool for the current worktree. This starts the command configured in jean.json. Do not invent or launch a separate command.
-4. When needed, start the development server and confirm it is serving the current worktree and branch rather than another checkout or stale build. Wait for the environment to become ready and stable before running any real end-to-end tests: poll its detected URL, health endpoint, ports, or logs as appropriate until startup has completed and repeated checks succeed. If it does not stabilize within a reasonable timeout, capture the startup failure and do not run misleading end-to-end checks against it.
-5. Discover and prepare the prerequisites for realistic testing. Infer what is needed from the worktree changes, repository documentation, configuration, environment templates, test fixtures, available Jean context, and the running application's API, MCP, and UI. This can include authentication, accounts, permissions, database records, files, external-service substitutes, and related resources. Locate and use safe credentials or documented local/test authentication already available to the environment without printing secrets. Create temporary prerequisite data when permitted. Do not declare a prerequisite unavailable until you have actively looked for a supported way to obtain or create it.
-6. Run relevant automated tests and record their results.
-7. Test every applicable interface, including API or HTTP endpoints, MCP tools, desktop or web UI, and mobile UI when available.
-8. Exercise the main success path, important edge cases, validation errors, asynchronous completion, and failure recovery. Poll long-running operations through their real success or failure state instead of stopping after submission.
-9. You may create, update, and delete clearly identifiable temporary resources to test the behavior fully. Do not modify or delete existing user resources. Clean up all temporary resources and report any cleanup failure.
-10. Recheck the final application state after cleanup.
-
-Report:
-- Worktree ID, path, and branch tested
-- Development-server command, URL, and port
-- Automated tests and results
-- Each interface and scenario tested
-- Expected and actual behavior
-- Failures, logs, console errors, and skipped checks
-- Temporary resources created and cleanup result
-- Final verdict: passed, partially passed, or failed
-
-Do not claim the smoke test passed when an applicable interface or critical scenario could not be tested. Explain every skipped check."#
         .to_string()
 }
 
@@ -2269,8 +2215,6 @@ Read the Jean-local history carefully, reconstruct the task state, and answer th
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MagicPromptModels {
     #[serde(default = "default_model")]
-    pub smoke_test_model: String,
-    #[serde(default = "default_model")]
     pub investigate_issue_model: String,
     #[serde(default = "default_model")]
     pub investigate_pr_model: String,
@@ -2323,7 +2267,6 @@ fn default_sonnet_model() -> String {
 impl Default for MagicPromptModels {
     fn default() -> Self {
         Self {
-            smoke_test_model: default_model(),
             investigate_issue_model: default_model(),
             investigate_pr_model: default_model(),
             investigate_workflow_run_model: default_model(),
@@ -2350,8 +2293,7 @@ impl MagicPromptModels {
     /// default models are untouched. Returns true if any field changed.
     fn migrate_legacy_defaults(&mut self) -> bool {
         let new_opus = default_model();
-        let opus_fields: [&mut String; 13] = [
-            &mut self.smoke_test_model,
+        let opus_fields: [&mut String; 12] = [
             &mut self.investigate_issue_model,
             &mut self.investigate_pr_model,
             &mut self.investigate_workflow_run_model,
@@ -2424,8 +2366,6 @@ pub fn is_codex_model(model: &str) -> bool {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MagicPromptProviders {
     #[serde(default)]
-    pub smoke_test_provider: Option<String>,
-    #[serde(default)]
     pub investigate_issue_provider: Option<String>,
     #[serde(default)]
     pub investigate_pr_provider: Option<String>,
@@ -2463,8 +2403,6 @@ pub struct MagicPromptProviders {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MagicPromptBackends {
     #[serde(default)]
-    pub smoke_test_backend: Option<String>,
-    #[serde(default)]
     pub investigate_issue_backend: Option<String>,
     #[serde(default)]
     pub investigate_pr_backend: Option<String>,
@@ -2501,8 +2439,6 @@ pub struct MagicPromptBackends {
 /// Per-prompt reasoning effort overrides for magic prompts (None = use model default)
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MagicPromptReasoningEfforts {
-    #[serde(default)]
-    pub smoke_test_effort: Option<String>,
     #[serde(default)]
     pub investigate_issue_effort: Option<String>,
     #[serde(default)]
@@ -2548,8 +2484,6 @@ fn default_magic_prompt_yolo_mode() -> String {
 /// Per-prompt execution mode overrides for magic prompts that send chat turns
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MagicPromptModes {
-    #[serde(default = "default_magic_prompt_yolo_mode")]
-    pub smoke_test_mode: String,
     #[serde(default = "default_magic_prompt_plan_mode")]
     pub investigate_issue_mode: String,
     #[serde(default = "default_magic_prompt_plan_mode")]
@@ -2578,7 +2512,6 @@ pub struct MagicPromptModes {
 impl Default for MagicPromptModes {
     fn default() -> Self {
         Self {
-            smoke_test_mode: default_magic_prompt_yolo_mode(),
             investigate_issue_mode: default_magic_prompt_plan_mode(),
             investigate_pr_mode: default_magic_prompt_plan_mode(),
             investigate_workflow_run_mode: default_magic_prompt_yolo_mode(),
@@ -2658,44 +2591,12 @@ fn migrate_final_review_preferences(
     true
 }
 
-fn migrate_smoke_test_preferences(
-    preferences: &mut AppPreferences,
-    raw_preferences: &Value,
-) -> bool {
-    let raw_models = raw_preferences
-        .get("magic_prompt_models")
-        .and_then(Value::as_object);
-    let raw_backends = raw_preferences
-        .get("magic_prompt_backends")
-        .and_then(Value::as_object);
-    let backend_missing =
-        raw_backends.is_none_or(|backends| !backends.contains_key("smoke_test_backend"));
-    let model_missing = raw_models.is_none_or(|models| !models.contains_key("smoke_test_model"));
-
-    if backend_missing {
-        preferences.magic_prompt_backends.smoke_test_backend =
-            Some(preferences.default_backend.clone());
-    }
-    if model_missing {
-        let backend = preferences
-            .magic_prompt_backends
-            .smoke_test_backend
-            .as_deref()
-            .unwrap_or(&preferences.default_backend);
-        preferences.magic_prompt_models.smoke_test_model =
-            selected_model_for_backend(preferences, backend);
-    }
-
-    backend_missing || model_missing
-}
-
 impl MagicPrompts {
     /// Migrate prompts that match the current default to None.
     /// This ensures users who never customized a prompt get auto-updated defaults.
     fn migrate_defaults(&mut self) {
         type DefaultEntry<'a> = (fn() -> String, &'a mut Option<String>);
-        let defaults: [DefaultEntry; 19] = [
-            (default_smoke_test_prompt, &mut self.smoke_test),
+        let defaults: [DefaultEntry; 18] = [
             (
                 default_investigate_issue_prompt,
                 &mut self.investigate_issue,
@@ -3238,7 +3139,6 @@ pub fn load_preferences_sync(app: &AppHandle) -> Result<AppPreferences, String> 
     let mut preferences: AppPreferences = serde_json::from_value(raw_preferences.clone())
         .map_err(|e| format!("Failed to parse preferences: {e}"))?;
     migrate_final_review_preferences(&mut preferences, &raw_preferences);
-    migrate_smoke_test_preferences(&mut preferences, &raw_preferences);
     normalize_parallel_execution_preferences(&mut preferences);
     maybe_auto_select_system_cli_preferences(app, &mut preferences, Some(&raw_preferences));
     Ok(preferences)
@@ -3282,7 +3182,6 @@ async fn load_preferences(app: AppHandle) -> Result<AppPreferences, String> {
     // Migrate legacy default Claude model names to the 1M variants where
     // available so hidden non-1M defaults do not render blank in settings.
     let mut needs_resave = migrate_final_review_preferences(&mut preferences, &raw_preferences);
-    needs_resave |= migrate_smoke_test_preferences(&mut preferences, &raw_preferences);
     if let Some(new_model) = migrate_default_claude_model(&preferences.selected_model) {
         preferences.selected_model = new_model.to_string();
         needs_resave = true;
@@ -3568,7 +3467,6 @@ pub struct ServerCapabilitiesEnvelope {
 
 pub async fn get_server_capabilities() -> Result<ServerCapabilitiesEnvelope, String> {
     let prompts = [
-        ("smoke_test", "Smoke test", default_smoke_test_prompt()),
         ("investigate_issue", "Investigate issue", default_investigate_issue_prompt()),
         ("investigate_pr", "Investigate pull request", default_investigate_pr_prompt()),
         ("pr_content", "Pull request content", default_pr_content_prompt()),

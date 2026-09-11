@@ -20,7 +20,6 @@ import {
   Link2,
   ShieldAlert,
   Loader2,
-  FlaskConical,
 } from 'lucide-react'
 import {
   Dialog,
@@ -150,7 +149,6 @@ type MagicOption =
   | 'merge-pr'
   | 'review-comments'
   | 'revert-last-commit'
-  | 'smoke-test'
 
 interface TriggerCodeRabbitPrReviewResponse {
   pr_number: number
@@ -176,14 +174,10 @@ const CANVAS_ALLOWED_OPTIONS = new Set<MagicOption>([
   'merge-pr',
   'resolve-conflicts',
   'linked-projects',
-  'smoke-test',
 ])
 
 /** Canvas options that navigate to worktree chat and dispatch a magic-command event */
-const CANVAS_NAVIGATE_AND_DISPATCH_OPTIONS = new Set<MagicOption>([
-  'merge',
-  'smoke-test',
-])
+const CANVAS_NAVIGATE_AND_DISPATCH_OPTIONS = new Set<MagicOption>(['merge'])
 
 /** Git-only actions should not depend on a mounted ChatWindow event listener. */
 const DIRECT_MAGIC_GIT_OPTIONS = new Set<MagicOption>([
@@ -314,12 +308,6 @@ function buildMagicColumns(hasOpenPr: boolean): MagicColumns {
 
   const right: MagicSection[] = [
     {
-      header: 'Test',
-      options: [
-        { id: 'smoke-test', label: 'Smoke Test', icon: FlaskConical, key: 'X' },
-      ],
-    },
-    {
       header: 'Pull Request',
       options: [
         {
@@ -421,7 +409,6 @@ const KEY_TO_OPTION: Record<string, MagicOption> = {
   y: 'investigate-advisory',
   n: 'merge-pr',
   z: 'revert-last-commit',
-  x: 'smoke-test',
 }
 
 export function MagicModal() {

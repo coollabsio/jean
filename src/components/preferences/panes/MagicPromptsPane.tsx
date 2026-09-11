@@ -72,7 +72,6 @@ import {
   DEFAULT_INVESTIGATE_SENTRY_ISSUE_PROMPT,
   DEFAULT_RELEASE_NOTES_PROMPT,
   DEFAULT_REVIEW_COMMENTS_PROMPT,
-  DEFAULT_SMOKE_TEST_PROMPT,
   DEFAULT_SESSION_NAMING_PROMPT,
   DEFAULT_PARALLEL_EXECUTION_PROMPT,
   DEFAULT_GLOBAL_SYSTEM_PROMPT,
@@ -320,25 +319,6 @@ const PROMPT_SECTIONS: PromptSection[] = [
   {
     label: 'Git Operations',
     configs: [
-      {
-        key: 'smoke_test',
-        modelKey: 'smoke_test_model',
-        effortKey: 'smoke_test_effort',
-        providerKey: 'smoke_test_provider',
-        backendKey: 'smoke_test_backend',
-        modeKey: 'smoke_test_mode',
-        label: 'Smoke Test',
-        description:
-          'Prompt for testing the current work through the development server and available interfaces.',
-        variables: [
-          {
-            name: '{worktree_id}',
-            description: 'Worktree containing the feature or fix to test',
-          },
-        ],
-        defaultValue: DEFAULT_SMOKE_TEST_PROMPT,
-        defaultModel: 'claude-opus-4-8[1m]',
-      },
       {
         key: 'code_review',
         modelKey: 'code_review_model',

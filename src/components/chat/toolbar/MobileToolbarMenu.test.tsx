@@ -226,44 +226,6 @@ describe('MobileToolbarMenu', () => {
     dispatchSpy.mockRestore()
   })
 
-  it('shows smoke test and dispatches the magic command', async () => {
-    const user = userEvent.setup()
-    const dispatchSpy = vi.spyOn(window, 'dispatchEvent')
-
-    render(
-      <MobileToolbarMenu
-        isDisabled={false}
-        hasOpenPr={false}
-        hasIssueContexts={false}
-        hasPrContexts={false}
-        onSaveContext={vi.fn()}
-        onLoadContext={vi.fn()}
-        onCommit={vi.fn()}
-        onCommitAndPush={vi.fn()}
-        onRevertLastCommit={vi.fn()}
-        onOpenPr={vi.fn()}
-        onReview={vi.fn()}
-        onMerge={vi.fn()}
-        onMergePr={vi.fn()}
-        handleSyncClick={vi.fn()}
-        handlePullClick={vi.fn()}
-        handlePushClick={vi.fn()}
-      />
-    )
-
-    await user.click(screen.getByRole('button', { name: /more actions/i }))
-    await user.click(screen.getByText('Smoke Test'))
-
-    expect(dispatchSpy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: 'magic-command',
-        detail: { command: 'smoke-test' },
-      })
-    )
-
-    dispatchSpy.mockRestore()
-  })
-
   it('shows revert commit in the commit section and invokes its handler', async () => {
     const user = userEvent.setup()
     const onRevertLastCommit = vi.fn()
