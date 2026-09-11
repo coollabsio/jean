@@ -68,6 +68,25 @@ describe('OpinionatedPane', () => {
     })
   })
 
+  it('offers pstack for every Jean AI backend', async () => {
+    render(<OpinionatedPane />)
+
+    const pstackLabel = await screen.findByText('pstack')
+    const pstackCard = pstackLabel.closest('.rounded-lg')?.parentElement
+    if (!pstackCard) throw new Error('Expected pstack card')
+
+    await userEvent.click(pstackLabel)
+
+    expect(within(pstackCard as HTMLElement).getByText('Codex')).toBeInTheDocument()
+    expect(within(pstackCard as HTMLElement).getByText('Claude')).toBeInTheDocument()
+    expect(
+      within(pstackCard as HTMLElement).getByText('Command Code')
+    ).toBeInTheDocument()
+    expect(
+      within(pstackCard as HTMLElement).getByText('/poteto-mode')
+    ).toBeInTheDocument()
+  })
+
   it('shows opinionated skill installation status for each backend', async () => {
     render(<OpinionatedPane />)
 

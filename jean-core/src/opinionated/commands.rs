@@ -28,6 +28,7 @@ const SUPERPOWERS_GIT_WORKTREE_SKILL: &str = "using-git-worktrees";
 const SUPERPOWERS_REPO_URL: &str = "https://github.com/obra/superpowers";
 const SUPERPOWERS_ARCHIVE_URL: &str =
     "https://github.com/obra/superpowers/archive/refs/heads/main.zip";
+const PSTACK_REPO_URL: &str = "https://github.com/cursor/plugins";
 const RTK_RELEASE_LATEST_API: &str = "https://api.github.com/repos/rtk-ai/rtk/releases/latest";
 const RTK_CLI_DIR_NAME: &str = "rtk-cli";
 const RTK_BINARY_NAME: &str = if cfg!(windows) { "rtk.exe" } else { "rtk" };
@@ -66,6 +67,7 @@ pub async fn check_opinionated_plugin_status(
         "rtk" => check_rtk_status(&app).await,
         "caveman" => check_caveman_status(&app).await,
         "superpowers" => check_superpowers_status(&app).await,
+        "pstack" => check_pstack_status(&app).await,
         _ => Err(format!("Unknown plugin: {plugin_name}")),
     }
 }
@@ -78,6 +80,7 @@ pub async fn install_opinionated_plugin(
         "rtk" => install_rtk(&app).await,
         "caveman" => install_caveman(&app).await,
         "superpowers" => install_superpowers(&app).await,
+        "pstack" => install_pstack(&app).await,
         _ => Err(format!("Unknown plugin: {plugin_name}")),
     }
 }
@@ -89,6 +92,7 @@ pub async fn uninstall_opinionated_plugin(
     match plugin_name.as_str() {
         "caveman" => uninstall_caveman(&app).await,
         "superpowers" => uninstall_superpowers(&app).await,
+        "pstack" => uninstall_pstack(&app).await,
         "rtk" => {
             Err("RTK is a system-wide CLI; uninstall it with your package manager".to_string())
         }
@@ -783,6 +787,24 @@ async fn check_superpowers_status(app: &AppHandle) -> Result<PluginStatus, Strin
     })
 }
 
+async fn check_pstack_status(app: &AppHandle) -> Result<PluginStatus, String> {
+    let home = dirs::home_dir().ok_or("Cannot determine home directory")?;
+    let statuses = opinionated_backend_statuses(&home, "pstack");
+    let covered_backends = statuses
+        .iter()
+        .filter(|backend| backend.installed)
+        .map(|backend| backend.id.as_str())
+        .collect::<Vec<_>>();
+
+    Ok(PluginStatus {
+        installed: status_installed(&covered_backends, &detected_jean_backends(app)),
+        version: (!covered_backends.is_empty()).then(|| covered_backends.join(", ")),
+        install_supported: true,
+        unsupported_reason: None,
+        backends: Some(statuses),
+    })
+}
+
 fn plugin_installed_marker(home: &std::path::Path, plugin_id: &str) -> bool {
     let data_dir = home.join(".claude").join("plugins").join("data");
     if data_dir.exists() {
@@ -1255,6 +1277,7 @@ fn opinionated_backend_statuses(home: &Path, plugin_id: &str) -> Vec<BackendPlug
             let installed = match plugin_id {
                 "caveman" => caveman_installed_for_backend(home, id),
                 "superpowers" => superpowers_installed_for_backend(home, id),
+                "pstack" => pstack_installed_for_backend(home, id),
                 _ => false,
             };
 
@@ -1265,6 +1288,21 @@ fn opinionated_backend_statuses(home: &Path, plugin_id: &str) -> Vec<BackendPlug
             }
         })
         .collect()
+}
+
+fn pstack_installed_for_backend(home: &Path, backend: &str) -> bool {
+    let global = skill_installed_marker(
+        &jean_global_backend_skills_dir(home, backend),
+        "poteto-mode",
+    );
+    let native = match backend {
+        "claude" => Some(home.join(".claude").join("skills")),
+        _ => backend_skills_dir(home, backend),
+    };
+    global
+        || native
+            .as_deref()
+            .is_some_and(|dir| skill_installed_marker(dir, "poteto-mode"))
 }
 
 fn caveman_installed_for_backend(home: &Path, backend: &str) -> bool {
@@ -1444,6 +1482,80 @@ fn copy_superpowers_skills(
     }
 
     Ok(copied)
+}
+
+fn copy_pstack_skills(source_skills_dir: &Path, target_skills_dir: &Path) -> Result<usize, String> {
+    std::fs::create_dir_all(target_skills_dir)
+        .map_err(|e| format!("Failed to create skills dir {target_skills_dir:?}: {e}"))?;
+
+    let entries = std::fs::read_dir(source_skills_dir)
+        .map_err(|e| format!("Failed to read pstack skills dir {source_skills_dir:?}: {e}"))?;
+    let mut copied = 0;
+    for entry in entries.flatten() {
+        let source = entry.path();
+        if !source.is_dir() || !source.join("SKILL.md").exists() {
+            continue;
+        }
+        copy_dir_replace(&source, &target_skills_dir.join(entry.file_name()))?;
+        copied += 1;
+    }
+    Ok(copied)
+}
+
+fn pstack_skill_names(source_skills_dir: &Path) -> Result<Vec<String>, String> {
+    let entries = std::fs::read_dir(source_skills_dir)
+        .map_err(|e| format!("Failed to read pstack skills dir {source_skills_dir:?}: {e}"))?;
+    let mut names = entries
+        .flatten()
+        .filter(|entry| entry.path().is_dir() && entry.path().join("SKILL.md").exists())
+        .map(|entry| entry.file_name().to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+    names.sort();
+    Ok(names)
+}
+
+fn pstack_manifest_path(home: &Path) -> PathBuf {
+    home.join(".jean")
+        .join("opinionated")
+        .join("pstack-skills.txt")
+}
+
+fn clone_pstack_skills_dir() -> Result<PathBuf, String> {
+    let temp = std::env::temp_dir().join(format!("jean-pstack-{}", uuid::Uuid::new_v4()));
+    let repo = temp.join("plugins");
+    std::fs::create_dir_all(&temp)
+        .map_err(|e| format!("Failed to create pstack temp dir {temp:?}: {e}"))?;
+    let output = silent_command("git")
+        .args([
+            "clone",
+            "--depth",
+            "1",
+            "--filter=blob:none",
+            "--sparse",
+            PSTACK_REPO_URL,
+            repo.to_string_lossy().as_ref(),
+        ])
+        .output()
+        .map_err(|e| format!("Failed to run git clone for pstack: {e}"))?;
+    if !output.status.success() {
+        return Err(command_failure_message("Failed to clone pstack", &output));
+    }
+    let sparse = silent_command("git")
+        .args(["sparse-checkout", "set", "pstack"])
+        .current_dir(&repo)
+        .output()
+        .map_err(|e| format!("Failed to configure the pstack sparse checkout: {e}"))?;
+    if !sparse.status.success() {
+        return Err(command_failure_message(
+            "Failed to fetch the pstack directory",
+            &sparse,
+        ));
+    }
+    let skills = repo.join("pstack").join("skills");
+    if !dir_contains_skill(&skills) {
+        return Err("pstack did not contain installable skills".to_string());
+    }
+    Ok(skills)
 }
 
 fn copy_dir_replace(source: &Path, target: &Path) -> Result<(), String> {
@@ -2032,6 +2144,112 @@ async fn install_superpowers(app: &AppHandle) -> Result<String, String> {
     Ok(message)
 }
 
+async fn install_pstack(_app: &AppHandle) -> Result<String, String> {
+    let home = dirs::home_dir().ok_or("Cannot determine home directory")?;
+    let skills_dir = tokio::task::spawn_blocking(clone_pstack_skills_dir)
+        .await
+        .map_err(|e| e.to_string())??;
+    let temp_root = skills_dir
+        .ancestors()
+        .nth(3)
+        .map(Path::to_path_buf)
+        .ok_or("Cannot determine the pstack temporary directory")?;
+    let names = pstack_skill_names(&skills_dir)?;
+    let mut installed = Vec::new();
+    let mut warnings = Vec::new();
+
+    for (backend, label) in installable_jean_backends() {
+        let mut targets = vec![jean_global_backend_skills_dir(&home, backend)];
+        let native = if backend == "claude" {
+            Some(home.join(".claude").join("skills"))
+        } else {
+            backend_skills_dir(&home, backend)
+        };
+        if let Some(native) = native.filter(|path| !targets.contains(path)) {
+            targets.push(native);
+        }
+
+        let mut backend_ok = true;
+        for target in targets {
+            if let Err(error) = copy_pstack_skills(&skills_dir, &target) {
+                backend_ok = false;
+                warnings.push(format!("Failed to install pstack for {label}: {error}"));
+            }
+        }
+        if backend_ok {
+            installed.push(label);
+        }
+    }
+
+    if let Some(parent) = pstack_manifest_path(&home).parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create pstack manifest dir {parent:?}: {e}"))?;
+    }
+    std::fs::write(pstack_manifest_path(&home), names.join("\n"))
+        .map_err(|e| format!("Failed to write the pstack install manifest: {e}"))?;
+    let _ = std::fs::remove_dir_all(temp_root);
+
+    if installed.is_empty() {
+        return Err(format!("Failed to install pstack: {}", warnings.join("; ")));
+    }
+    let mut message = format!(
+        "pstack installed for Jean backends: {}",
+        installed.join(", ")
+    );
+    if !warnings.is_empty() {
+        message.push_str(&format!(". Warnings: {}", warnings.join("; ")));
+    }
+    Ok(message)
+}
+
+fn uninstall_pstack_from_home(home: &Path) -> Result<Vec<String>, String> {
+    let manifest = pstack_manifest_path(home);
+    let mut names = std::fs::read_to_string(&manifest)
+        .unwrap_or_else(|_| "poteto-mode".to_string())
+        .lines()
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    if !names.iter().any(|name| name == "poteto-mode") {
+        names.push("poteto-mode".to_string());
+    }
+
+    let mut removed = Vec::new();
+    for (backend, _) in installable_jean_backends() {
+        let mut roots = vec![jean_global_backend_skills_dir(home, backend)];
+        let native = if backend == "claude" {
+            Some(home.join(".claude").join("skills"))
+        } else {
+            backend_skills_dir(home, backend)
+        };
+        if let Some(native) = native.filter(|path| !roots.contains(path)) {
+            roots.push(native);
+        }
+        for root in roots {
+            for name in &names {
+                remove_path_if_exists(&root.join(name), &mut removed)?;
+            }
+        }
+    }
+    remove_path_if_exists(&manifest, &mut removed)?;
+    Ok(removed)
+}
+
+async fn uninstall_pstack(_app: &AppHandle) -> Result<String, String> {
+    let home = dirs::home_dir().ok_or("Cannot determine home directory")?;
+    let removed = tokio::task::spawn_blocking(move || uninstall_pstack_from_home(&home))
+        .await
+        .map_err(|e| e.to_string())??;
+    if removed.is_empty() {
+        Ok("pstack was not installed".to_string())
+    } else {
+        Ok(format!(
+            "pstack uninstalled from {} locations",
+            removed.len()
+        ))
+    }
+}
+
 fn extract_version(s: &str) -> Option<String> {
     let re = regex::Regex::new(r"(\d+\.\d+(?:\.\d+)?)").ok()?;
     re.find(s).map(|m| m.as_str().to_string())
@@ -2040,6 +2258,51 @@ fn extract_version(s: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn copies_the_complete_pstack_skill_pack_to_a_backend() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let source = temp.path().join("source");
+        let poteto = source.join("poteto-mode");
+        let principle = source.join("principle-prove-it-works");
+        std::fs::create_dir_all(poteto.join("playbooks")).expect("create poteto skill");
+        std::fs::create_dir_all(&principle).expect("create principle skill");
+        std::fs::write(poteto.join("SKILL.md"), "# Poteto mode").expect("write poteto skill");
+        std::fs::write(poteto.join("playbooks/feature.md"), "# Feature").expect("write playbook");
+        std::fs::write(principle.join("SKILL.md"), "# Prove it works")
+            .expect("write principle skill");
+
+        let target = temp.path().join("target");
+        let copied = copy_pstack_skills(&source, &target).expect("copy pstack skills");
+
+        assert_eq!(copied, 2);
+        assert!(target.join("poteto-mode/SKILL.md").exists());
+        assert!(target.join("poteto-mode/playbooks/feature.md").exists());
+        assert!(target.join("principle-prove-it-works/SKILL.md").exists());
+    }
+
+    #[test]
+    fn uninstalls_only_skills_recorded_in_the_pstack_manifest() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let codex_skills = temp.path().join(".codex/skills");
+        for name in ["poteto-mode", "principle-prove-it-works", "my-skill"] {
+            let skill = codex_skills.join(name);
+            std::fs::create_dir_all(&skill).expect("create skill");
+            std::fs::write(skill.join("SKILL.md"), format!("# {name}")).expect("write skill");
+        }
+        let manifest = pstack_manifest_path(temp.path());
+        std::fs::create_dir_all(manifest.parent().expect("manifest parent"))
+            .expect("create manifest dir");
+        std::fs::write(&manifest, "poteto-mode\nprinciple-prove-it-works\n")
+            .expect("write manifest");
+
+        uninstall_pstack_from_home(temp.path()).expect("uninstall pstack");
+
+        assert!(!codex_skills.join("poteto-mode").exists());
+        assert!(!codex_skills.join("principle-prove-it-works").exists());
+        assert!(codex_skills.join("my-skill/SKILL.md").exists());
+        assert!(!manifest.exists());
+    }
 
     #[test]
     fn skill_marker_detects_direct_skill_dir() {
