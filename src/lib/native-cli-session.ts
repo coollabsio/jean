@@ -1,6 +1,6 @@
 import type { Session } from '@/types/chat'
 
-export type NativeTerminalBackend = 'claude' | 'codex' | 'opencode'
+export type NativeTerminalBackend = 'claude' | 'codex' | 'opencode' | 'pi'
 
 export interface NativeTerminalLaunch {
   command: string
@@ -10,7 +10,12 @@ export interface NativeTerminalLaunch {
 export function isNativeTerminalBackend(
   backend: Session['backend']
 ): backend is NativeTerminalBackend {
-  return backend === 'claude' || backend === 'codex' || backend === 'opencode'
+  return (
+    backend === 'claude' ||
+    backend === 'codex' ||
+    backend === 'opencode' ||
+    backend === 'pi'
+  )
 }
 
 export function getNativeSessionId(session: Session): string | null {
@@ -22,6 +27,9 @@ export function getNativeSessionId(session: Session): string | null {
   }
   if (session.backend === 'opencode') {
     return session.opencode_session_id ?? null
+  }
+  if (session.backend === 'pi') {
+    return session.pi_session_id ?? null
   }
   return null
 }
@@ -63,6 +71,29 @@ function stripOpenCodeSessionArgs(args: string[]): string[] {
   return result
 }
 
+function stripPiSessionArgs(args: string[]): string[] {
+  const result: string[] = []
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]
+    if (arg === '--session' || arg === '--session-id') {
+      index += 1
+      continue
+    }
+    if (
+      arg === '--continue' ||
+      arg === '-c' ||
+      arg === '--resume' ||
+      arg === '-r' ||
+      arg?.startsWith('--session=') ||
+      arg?.startsWith('--session-id=')
+    ) {
+      continue
+    }
+    if (arg) result.push(arg)
+  }
+  return result
+}
+
 export function buildNativeResumeArgs(
   backend: NativeTerminalBackend,
   nativeSessionId: string,
@@ -78,11 +109,14 @@ export function buildNativeResumeArgs(
   if (backend === 'codex') {
     return [...stripCodexSessionArgs(persistedArgs), 'resume', nativeSessionId]
   }
-  return [
-    ...stripOpenCodeSessionArgs(persistedArgs),
-    '--session',
-    nativeSessionId,
-  ]
+  if (backend === 'opencode') {
+    return [
+      ...stripOpenCodeSessionArgs(persistedArgs),
+      '--session',
+      nativeSessionId,
+    ]
+  }
+  return [...stripPiSessionArgs(persistedArgs), '--session', nativeSessionId]
 }
 
 export function hasLegacyNativeResumeArgs(session: Session): boolean {
@@ -98,6 +132,15 @@ export function hasLegacyNativeResumeArgs(session: Session): boolean {
   if (session.backend === 'opencode') {
     return args.some(
       arg => arg === '--session' || arg === '-s' || arg.startsWith('--session=')
+    )
+  }
+  if (session.backend === 'pi') {
+    return args.some(
+      arg =>
+        arg === '--session' ||
+        arg === '--session-id' ||
+        arg.startsWith('--session=') ||
+        arg.startsWith('--session-id=')
     )
   }
   return false
