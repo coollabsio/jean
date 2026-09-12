@@ -193,17 +193,9 @@ fn save_projects_data_internal(app: &AppHandle, data: &ProjectsData) -> Result<(
         format!("Failed to serialize projects data: {e}")
     })?;
 
-    // Write to a temporary file first, then rename (atomic operation)
-    let temp_path = path.with_extension("tmp");
-
-    std::fs::write(&temp_path, json_content).map_err(|e| {
-        log::error!("Failed to write projects file: {e}");
-        format!("Failed to write projects file: {e}")
-    })?;
-
-    std::fs::rename(&temp_path, &path).map_err(|e| {
-        log::error!("Failed to finalize projects file: {e}");
-        format!("Failed to finalize projects file: {e}")
+    crate::platform::write_file_atomically(&path, json_content.as_bytes()).map_err(|error| {
+        log::error!("Failed to save projects file: {error}");
+        error
     })?;
 
     log::trace!(

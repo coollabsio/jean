@@ -1,11 +1,13 @@
 // Cross-platform abstractions for shell execution and process management
 
 pub mod cli_detect;
+pub mod file;
 pub mod process;
 pub mod shell;
 pub mod wsl;
 
 pub use cli_detect::*;
+pub use file::*;
 pub use process::*;
 pub use shell::*;
 pub use wsl::*;

@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
-use std::io::{BufReader, BufWriter};
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -175,21 +175,14 @@ fn load_index_internal(app: &AppHandle, worktree_id: &str) -> Result<WorktreeInd
 fn save_index_internal(app: &AppHandle, index: &WorktreeIndex) -> Result<(), String> {
     log::trace!("Saving index for worktree: {}", index.worktree_id);
     let path = get_index_path(app, &index.worktree_id)?;
-    let temp_path = path.with_extension("tmp");
-
     let json_content = serde_json::to_string_pretty(index).map_err(|e| {
         log::error!("Failed to serialize index: {e}");
         format!("Failed to serialize index: {e}")
     })?;
 
-    fs::write(&temp_path, &json_content).map_err(|e| {
-        log::error!("Failed to write index file: {e}");
-        format!("Failed to write index: {e}")
-    })?;
-
-    fs::rename(&temp_path, &path).map_err(|e| {
-        log::error!("Failed to finalize index file: {e}");
-        format!("Failed to finalize index: {e}")
+    crate::platform::write_file_atomically(&path, json_content.as_bytes()).map_err(|error| {
+        log::error!("Failed to save index file: {error}");
+        error
     })?;
 
     log::trace!(
@@ -274,16 +267,11 @@ fn save_metadata_internal(app: &AppHandle, metadata: &SessionMetadata) -> Result
 
 fn save_metadata_file(app: &AppHandle, metadata: &SessionMetadata) -> Result<(), String> {
     let path = get_metadata_path(app, &metadata.id)?;
-    let temp_path = path.with_extension("tmp");
-
-    let file = File::create(&temp_path)
-        .map_err(|e| format!("Failed to create temp metadata file: {e}"))?;
-
-    let writer = BufWriter::new(file);
-    serde_json::to_writer_pretty(writer, metadata)
+    let json_content = serde_json::to_vec_pretty(metadata)
         .map_err(|e| format!("Failed to write metadata: {e}"))?;
 
-    fs::rename(&temp_path, &path).map_err(|e| format!("Failed to rename metadata file: {e}"))?;
+    crate::platform::write_file_atomically(&path, &json_content)
+        .map_err(|error| format!("Failed to save metadata file: {error}"))?;
 
     log::trace!("Saved metadata for session: {}", metadata.id);
     Ok(())
@@ -1207,14 +1195,11 @@ pub fn save_saved_contexts_metadata(
     let _lock = SAVED_CONTEXTS_LOCK.lock().unwrap();
 
     let path = get_saved_contexts_metadata_path(app)?;
-    let temp_path = path.with_extension("tmp");
-
     let json = serde_json::to_string_pretty(metadata)
         .map_err(|e| format!("Failed to serialize metadata: {e}"))?;
 
-    fs::write(&temp_path, &json).map_err(|e| format!("Failed to write metadata file: {e}"))?;
-
-    fs::rename(&temp_path, &path).map_err(|e| format!("Failed to finalize metadata file: {e}"))?;
+    crate::platform::write_file_atomically(&path, json.as_bytes())
+        .map_err(|error| format!("Failed to save metadata file: {error}"))?;
 
     Ok(())
 }
