@@ -19,6 +19,16 @@ import { getActiveRemoteConnection } from './remote-connections'
 import { prepareRemoteEditorOpenArgs } from './remote-editor'
 import { warnRemoteVersionMismatch } from './remote-version'
 
+/**
+ * Why the browser session is not authenticated yet.
+ *
+ * - `signed-out`  — no token has been presented; this is the normal first
+ *   visit and a sign-in prompt, not a failure.
+ * - `rejected`    — a token was presented and the server refused it.
+ * - `unreachable` — the server could not be reached or dropped the session.
+ */
+export type WsAuthReason = 'signed-out' | 'rejected' | 'unreachable'
+
 export function usesWebSocketBackend(): boolean {
   return !isNativeApp() || getActiveRemoteConnection() !== null
 }
@@ -475,6 +485,7 @@ class WsTransport {
   private _hasConnectedOnce = false
   private _connecting = false
   private _authError: string | null = null
+  private _authReason: WsAuthReason | null = null
   private _subscribers = new Set<() => void>()
   private _establishedDisconnectListeners = new Set<() => void>()
   private _connectEnabled = false
@@ -508,8 +519,14 @@ class WsTransport {
     this.notifySubscribers()
   }
 
-  private setAuthError(error: string | null): void {
+  // Overloads force every caller that sets a message to also classify it —
+  // otherwise the UI cannot tell a first visit from a refused token or a
+  // dead server, and silently picks the wrong screen.
+  private setAuthError(error: null): void
+  private setAuthError(error: string, reason: WsAuthReason): void
+  private setAuthError(error: string | null, reason?: WsAuthReason): void {
     this._authError = error
+    this._authReason = error === null ? null : (reason as WsAuthReason)
     this.notifySubscribers()
   }
 
@@ -536,6 +553,11 @@ class WsTransport {
   /** Get current auth error snapshot for useSyncExternalStore. */
   getAuthErrorSnapshot(): string | null {
     return this._authError
+  }
+
+  /** Get why authentication is pending, for useSyncExternalStore. */
+  getAuthReasonSnapshot(): WsAuthReason | null {
+    return this._authReason
   }
 
   /** Connect to the WebSocket server (validates token first). */
@@ -596,8 +618,9 @@ class WsTransport {
         }
         this.setAuthError(
           token
-            ? "Invalid access token. Check the URL in Jean's Web Access settings."
-            : "No access token provided. Use the URL from Jean's Web Access settings."
+            ? "That access token was refused. Check the token in Jean's Web Access settings."
+            : "Enter the access token from Jean's Web Access settings.",
+          token ? 'rejected' : 'signed-out'
         )
         return
       }
@@ -615,7 +638,8 @@ class WsTransport {
     } catch {
       if (remote) {
         this.setAuthError(
-          "Jean could not reach the server's authentication endpoint. Check that the server is running and the URL and port are correct. If the address opens in a browser, update and restart the remote Jean server so it allows desktop connections (CORS)."
+          "Jean could not reach the server's authentication endpoint. Check that the server is running and the URL and port are correct. If the address opens in a browser, update and restart the remote Jean server so it allows desktop connections (CORS).",
+          'unreachable'
         )
         return
       }
@@ -706,7 +730,10 @@ class WsTransport {
 
       this.setConnected(false)
       if (wasConnected && getActiveRemoteConnection()) {
-        this.setAuthError('Connection to the selected Jean server was lost.')
+        this.setAuthError(
+          'Connection to the selected Jean server was lost.',
+          'unreachable'
+        )
       }
 
       // Clear event buffer — stale events from a dead connection
@@ -1083,6 +1110,7 @@ const wsTransport = new WsTransport()
 const subscribe = (cb: () => void) => wsTransport.subscribe(cb)
 const getSnapshot = () => wsTransport.getSnapshot()
 const getAuthErrorSnapshot = () => wsTransport.getAuthErrorSnapshot()
+const getAuthReasonSnapshot = () => wsTransport.getAuthReasonSnapshot()
 
 // E2E mock: always report connected, no auth errors
 const isE2eMocked =
@@ -1139,4 +1167,29 @@ export function useWsAuthError(): string | null {
     isE2eMocked ? noopSubscribe : subscribe,
     isE2eMocked ? () => null : getAuthErrorSnapshot
   )
+}
+
+/**
+ * React hook that returns why authentication is pending, or null when the
+ * session is authenticated. Lets the UI tell a first visit apart from a
+ * refused token instead of reporting both as a connection failure.
+ */
+export function useWsAuthReason(): WsAuthReason | null {
+  return useSyncExternalStore(
+    isE2eMocked ? noopSubscribe : subscribe,
+    isE2eMocked ? () => null : getAuthReasonSnapshot
+  )
+}
+
+/**
+ * Forget the access token stored in this browser and return to the sign-in
+ * screen. Only affects this device — the server keeps running and other
+ * browsers stay signed in.
+ */
+export function signOutOfWebAccess(): void {
+  localStorage.removeItem('jean-http-token')
+  // Reload on a bare origin. A bookmarked `?token=...` takes priority over
+  // localStorage on boot, so keeping the current URL would sign us straight
+  // back in and make the button look broken.
+  window.location.replace(`${window.location.origin}/`)
 }

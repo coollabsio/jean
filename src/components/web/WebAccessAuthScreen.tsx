@@ -2,18 +2,36 @@ import { useState, type FormEvent } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import type { WsAuthReason } from '@/lib/transport'
+import { webAccessServerLabel } from '@/lib/environment'
 
 interface WebAccessAuthScreenProps {
   authError: string
+  /** Why we are asking. Defaults to a first visit rather than a failure.
+   * Whatever the reason, the form stays available: submitting a token
+   * reloads the page, which is also how a lost connection recovers. */
+  reason?: Exclude<WsAuthReason, 'unreachable'>
   onTokenSubmit: (token: string) => void
 }
 
 export function WebAccessAuthScreen({
   authError,
+  reason = 'signed-out',
   onTokenSubmit,
 }: WebAccessAuthScreenProps) {
   const [token, setToken] = useState('')
   const [emptyError, setEmptyError] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  // The refused-token message describes the previous submission; drop it as
+  // soon as the user starts editing a replacement.
+  const [edited, setEdited] = useState(false)
+
+  const host = webAccessServerLabel()
+  const fieldError = emptyError
+    ? "Enter the access token from Jean's Web Access settings."
+    : reason === 'rejected' && !edited
+      ? authError
+      : null
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault()
@@ -23,47 +41,69 @@ export function WebAccessAuthScreen({
       return
     }
     setEmptyError(false)
+    // Submitting reloads the page (validation happens on the fresh load), so
+    // never re-enable the button — the reload resets it.
+    setSubmitting(true)
     onTokenSubmit(trimmed)
   }
 
   return (
-    <div className="mx-4 max-w-md rounded-lg border border-destructive/50 bg-background p-6 shadow-lg">
-      <div className="flex items-center gap-2 text-destructive">
-        <svg className="size-5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
-          <path
-            fillRule="evenodd"
-            d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
-            clipRule="evenodd"
-          />
-        </svg>
-        <h2 className="text-sm font-semibold">Connection Failed</h2>
+    <div className="w-full max-w-sm px-6">
+      <div className="flex flex-col items-center text-center">
+        <img
+          src="/logo.png"
+          alt=""
+          width={48}
+          height={48}
+          className="size-12 rounded-xl"
+        />
+        <h1 className="mt-5 text-xl font-semibold tracking-tight">
+          Sign in to Jean
+        </h1>
+        {host && (
+          <p className="mt-1.5 font-mono text-xs text-muted-foreground">
+            {host}
+          </p>
+        )}
       </div>
-      <p className="mt-2 text-sm text-muted-foreground">{authError}</p>
 
-      <form className="mt-4 space-y-3" onSubmit={handleSubmit}>
-        <div className="space-y-1.5">
+      <form className="mt-8 space-y-4" onSubmit={handleSubmit}>
+        <div className="space-y-2">
           <Label htmlFor="web-access-token">Access token</Label>
           <Input
             id="web-access-token"
             type="password"
             autoComplete="current-password"
+            autoFocus
             value={token}
             onChange={event => {
               setToken(event.target.value)
               if (emptyError) setEmptyError(false)
+              if (!edited) setEdited(true)
             }}
-            placeholder="Paste your Jean web access token"
+            placeholder="Paste your Jean access token"
+            aria-describedby={fieldError ? 'web-access-token-error' : undefined}
+            aria-invalid={!!fieldError}
           />
-          {emptyError && (
-            <p className="text-xs text-destructive">
-              Enter the access token from Jean&apos;s Web Access settings.
+          {fieldError && (
+            <p
+              id="web-access-token-error"
+              role="alert"
+              className="text-xs text-destructive"
+            >
+              {fieldError}
             </p>
           )}
         </div>
-        <Button type="submit" className="w-full">
-          Connect
+
+        <Button type="submit" className="w-full" disabled={submitting}>
+          {submitting ? 'Signing in…' : 'Sign in'}
         </Button>
       </form>
+
+      <p className="mt-8 text-center text-xs text-muted-foreground">
+        Find the token in Jean&apos;s Web Access settings.
+      </p>
     </div>
   )
 }

@@ -235,4 +235,21 @@ describe('GeneralPane settings structure', () => {
       '<SettingsSection'
     )
   })
+
+  it('offers a browser sign-out only when running as web access', () => {
+    const source = readFileSync(
+      'src/components/preferences/panes/GeneralPane.tsx',
+      'utf8'
+    )
+
+    const sectionIndex = source.indexOf('pref-general-section-session')
+    expect(sectionIndex).toBeGreaterThan(-1)
+
+    // The control must be gated on web access: the desktop app manages its
+    // connection from the title bar, not from a token in localStorage. Match
+    // the exact guard expression so an inverted or loosened condition fails.
+    const guard = source.slice(Math.max(0, sectionIndex - 400), sectionIndex)
+    expect(guard).toContain('isGeneralScope && isWebAccessView && (')
+    expect(source).toContain('signOutOfWebAccess')
+  })
 })
