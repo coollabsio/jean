@@ -304,6 +304,7 @@ export function useMessageSending({
         enqueueMessage,
         isSending: checkIsSendingNow,
         setSessionReviewing,
+        setSessionPaused,
         setExecutionMode,
       } = useChatStore.getState()
       const liveInputValue = inputRef.current?.value
@@ -517,6 +518,8 @@ export function useMessageSending({
       clearPendingSkills(activeSessionId)
       clearPendingTextFiles(activeSessionId)
       setSessionReviewing(activeSessionId, false)
+      // Auto-resume on send: clear paused flag too.
+      setSessionPaused(activeSessionId, false)
 
       clearChatInputState()
 

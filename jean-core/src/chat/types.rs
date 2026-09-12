@@ -2422,6 +2422,7 @@ mod tests {
         );
         metadata.backend = Backend::Codex;
         metadata.is_reviewing = true;
+        metadata.status_override = Some("paused".to_string());
         metadata.waiting_for_input = false;
         metadata.waiting_for_input_type = Some("plan".to_string());
         metadata.pending_plan_message_id = Some("plan-message-1".to_string());
@@ -2458,6 +2459,9 @@ mod tests {
         assert!(restored.waiting_for_input);
         assert_eq!(restored.waiting_for_input_type.as_deref(), Some("plan"));
         assert!(!restored.is_reviewing);
+        // A "paused" override round-trips unchanged (pending-plan logic only
+        // clears the legacy reviewing flag).
+        assert_eq!(restored.status_override.as_deref(), Some("paused"));
     }
 
     #[test]

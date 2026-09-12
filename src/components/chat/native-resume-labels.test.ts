@@ -3,7 +3,8 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const sourceFiles = [
-  'src/components/chat/SessionChatModal.tsx',
+  // The canvas tab-bar menu lives in the shared SessionContextMenuItems.
+  'src/components/chat/SessionContextMenuItems.tsx',
   'src/components/chat/SessionListRow.tsx',
   'src/components/ui/floating-dock.tsx',
   'src/components/chat/toolbar/MobileSettingsMenu.tsx',

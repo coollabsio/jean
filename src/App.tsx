@@ -32,6 +32,10 @@ import { projectsQueryKeys } from '@/services/projects'
 import { chatQueryKeys } from '@/services/chat'
 import { mergeWorktreesPreservingOptimistic } from '@/lib/worktree-list-cache'
 import type { Session, WorktreeSessions } from '@/types/chat'
+import {
+  isManualSessionStatus,
+  type ManualSessionStatus,
+} from '@/components/chat/session-card-utils'
 import type { Worktree } from '@/types/projects'
 import { initializeCommandSystem } from './lib/commands'
 import { logger } from './lib/logger'
@@ -423,10 +427,7 @@ function App() {
       // Also restore Zustand state for reviewing/waiting status
       if (data.sessionsByWorktree) {
         const reviewingUpdates: Record<string, boolean> = {}
-        const statusOverrideUpdates: Record<
-          string,
-          'idle' | 'review' | 'completed' | 'cancelled'
-        > = {}
+        const statusOverrideUpdates: Record<string, ManualSessionStatus> = {}
         const waitingUpdates: Record<string, boolean> = {}
         const sessionMappings: Record<string, string> = {}
 
@@ -450,12 +451,7 @@ function App() {
           for (const session of wts.sessions) {
             sessionMappings[session.id] = worktreeId
             const override = session.status_override
-            if (
-              override === 'idle' ||
-              override === 'review' ||
-              override === 'completed' ||
-              override === 'cancelled'
-            ) {
+            if (isManualSessionStatus(override)) {
               statusOverrideUpdates[session.id] = override
               if (override === 'review') {
                 reviewingUpdates[session.id] = true
@@ -540,10 +536,8 @@ function App() {
       // more messages from an event or query response racing the bootstrap.
       if (data.activeSessions) {
         const activeReviewingUpdates: Record<string, boolean> = {}
-        const activeStatusOverrideUpdates: Record<
-          string,
-          'idle' | 'review' | 'completed' | 'cancelled'
-        > = {}
+        const activeStatusOverrideUpdates: Record<string, ManualSessionStatus> =
+          {}
         const activeWaitingUpdates: Record<string, boolean> = {}
 
         for (const [sessionId, initSession] of Object.entries(
@@ -551,12 +545,7 @@ function App() {
         )) {
           const session = initSession as Session
           const override = session.status_override
-          if (
-            override === 'idle' ||
-            override === 'review' ||
-            override === 'completed' ||
-            override === 'cancelled'
-          ) {
+          if (isManualSessionStatus(override)) {
             activeStatusOverrideUpdates[sessionId] = override
             if (override === 'review') {
               activeReviewingUpdates[sessionId] = true

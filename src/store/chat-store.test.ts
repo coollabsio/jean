@@ -370,6 +370,74 @@ describe('ChatStore', () => {
     })
   })
 
+  describe('paused status', () => {
+    it('sets and clears the paused status override', () => {
+      const { setSessionPaused, isSessionPaused } = useChatStore.getState()
+
+      expect(isSessionPaused('session-1')).toBe(false)
+
+      setSessionPaused('session-1', true)
+      expect(useChatStore.getState().isSessionPaused('session-1')).toBe(true)
+      expect(
+        useChatStore.getState().sessionStatusOverrides['session-1']
+      ).toBe('paused')
+
+      setSessionPaused('session-1', false)
+      expect(useChatStore.getState().isSessionPaused('session-1')).toBe(false)
+      expect(
+        useChatStore.getState().sessionStatusOverrides['session-1']
+      ).toBeUndefined()
+    })
+
+    it('unpausing leaves a non-paused override alone', () => {
+      const { setSessionStatusOverride, setSessionPaused } =
+        useChatStore.getState()
+
+      setSessionStatusOverride('session-1', 'completed')
+      setSessionPaused('session-1', false)
+
+      expect(
+        useChatStore.getState().sessionStatusOverrides['session-1']
+      ).toBe('completed')
+    })
+
+    it('pausing clears reviewing (single-valued override)', () => {
+      const { setSessionReviewing, setSessionPaused } = useChatStore.getState()
+
+      setSessionReviewing('session-1', true)
+      expect(useChatStore.getState().reviewingSessions['session-1']).toBe(true)
+
+      setSessionPaused('session-1', true)
+      const state = useChatStore.getState()
+      expect(state.sessionStatusOverrides['session-1']).toBe('paused')
+      expect(state.reviewingSessions['session-1']).toBeUndefined()
+    })
+
+    it('reviewing clears paused (single-valued override)', () => {
+      const { setSessionReviewing, setSessionPaused } = useChatStore.getState()
+
+      setSessionPaused('session-1', true)
+      expect(useChatStore.getState().isSessionPaused('session-1')).toBe(true)
+
+      setSessionReviewing('session-1', true)
+      const state = useChatStore.getState()
+      expect(state.reviewingSessions['session-1']).toBe(true)
+      expect(state.sessionStatusOverrides['session-1']).toBe('review')
+      expect(state.isSessionPaused('session-1')).toBe(false)
+    })
+
+    it('clears waiting state so the paused override takes visual priority', () => {
+      const { setWaitingForInput, setSessionPaused } = useChatStore.getState()
+
+      setWaitingForInput('session-1', true)
+      setSessionPaused('session-1', true)
+
+      expect(
+        useChatStore.getState().waitingForInputSessionIds['session-1']
+      ).toBeUndefined()
+    })
+  })
+
   describe('waiting for input state', () => {
     it('sets and checks waiting for input', () => {
       const { setWaitingForInput, isWaitingForInput } = useChatStore.getState()
