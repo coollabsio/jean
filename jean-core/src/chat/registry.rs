@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -51,6 +51,64 @@ static CODEX_YOLO_AUTO_APPROVE: Lazy<Mutex<HashSet<String>>> =
 /// Sessions in PROCESS_REGISTRY whose process is fully detached (survives Jean
 /// quitting). Claude CLI and host-backed Pi/Grok/Kimi/Antigravity runs are detached.
 static DETACHED_SESSIONS: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
+
+/// Sessions with a `send_chat_message` call currently in flight.
+///
+/// The registry-based "actively managed" guard only catches duplicates after a
+/// process/turn is registered, leaving a window where two concurrent sends
+/// (frontend queue processor vs backend queue drain vs another client) both
+/// pass the check and spawn duplicate runs. This claim is taken atomically at
+/// `send_chat_message` entry and held for the whole call — unless cancel
+/// releases it early so a follow-up send is not stuck (#329).
+///
+/// Values are generation tokens so an early cancel release cannot be clobbered
+/// by a later `Drop` from the cancelled claim after a new claim was acquired.
+static ACTIVE_SENDS: Lazy<Mutex<HashMap<String, u64>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+static SEND_CLAIM_GENERATION: AtomicU64 = AtomicU64::new(1);
+
+/// RAII claim on a session's send slot — released on drop (any return path).
+pub struct SendClaim {
+    session_id: String,
+    generation: u64,
+}
+
+impl SendClaim {
+    pub fn try_acquire(session_id: &str) -> Option<Self> {
+        let mut active = lock_recover(&ACTIVE_SENDS, "ACTIVE_SENDS");
+        if active.contains_key(session_id) {
+            return None;
+        }
+        let generation = SEND_CLAIM_GENERATION.fetch_add(1, Ordering::Relaxed);
+        active.insert(session_id.to_string(), generation);
+        Some(Self {
+            session_id: session_id.to_string(),
+            generation,
+        })
+    }
+}
+
+impl Drop for SendClaim {
+    fn drop(&mut self) {
+        let mut active = lock_recover(&ACTIVE_SENDS, "ACTIVE_SENDS");
+        if active.get(&self.session_id) == Some(&self.generation) {
+            active.remove(&self.session_id);
+        }
+    }
+}
+
+/// Release the in-flight send claim for a session after cancel so a follow-up
+/// prompt is not rejected with "Session already has an active request" while
+/// the cancelled worker finishes teardown (#329).
+pub fn release_active_send(session_id: &str) {
+    if lock_recover(&ACTIVE_SENDS, "ACTIVE_SENDS").remove(session_id).is_some() {
+        log::info!("[SendChat] released active send claim after cancel session={session_id}");
+    }
+}
+
+pub fn has_active_send(session_id: &str) -> bool {
+    lock_recover(&ACTIVE_SENDS, "ACTIVE_SENDS").contains_key(session_id)
+}
 
 fn lock_recover<'a, T>(mutex: &'a Mutex<T>, name: &str) -> std::sync::MutexGuard<'a, T> {
     match mutex.lock() {
@@ -466,7 +524,7 @@ pub fn get_running_sessions() -> Vec<String> {
     sessions
 }
 
-/// Get all session IDs that are actively managed (running process, cancel flag, or codex turn).
+/// Get all session IDs that are actively managed (running process, cancel flag, codex turn, or active send).
 /// Used by recover_incomplete_runs to skip sessions that don't need recovery.
 pub fn get_actively_managed_sessions() -> HashSet<String> {
     let mut sessions: HashSet<String> = lock_recover(&PROCESS_REGISTRY, "PROCESS_REGISTRY")
@@ -479,6 +537,7 @@ pub fn get_actively_managed_sessions() -> HashSet<String> {
             .keys()
             .cloned(),
     );
+    sessions.extend(lock_recover(&ACTIVE_SENDS, "ACTIVE_SENDS").keys().cloned());
     sessions
 }
 
@@ -503,12 +562,13 @@ pub fn has_nonsurvivable_running_sessions() -> bool {
         .any(|session_id| !detached.contains(session_id))
 }
 
-/// Check if a specific session is actively managed (has a running process, cancel flag, or codex turn).
+/// Check if a specific session is actively managed (has a running process, cancel flag, codex turn, or active send).
 /// Used by resume_session to avoid starting a duplicate tail.
 pub fn is_session_actively_managed(session_id: &str) -> bool {
     lock_recover(&PROCESS_REGISTRY, "PROCESS_REGISTRY").contains_key(session_id)
         || lock_recover(&CANCEL_FLAGS, "CANCEL_FLAGS").contains_key(session_id)
         || lock_recover(&CODEX_TURN_REGISTRY, "CODEX_TURN_REGISTRY").contains_key(session_id)
+        || lock_recover(&ACTIVE_SENDS, "ACTIVE_SENDS").contains_key(session_id)
 }
 
 #[cfg(test)]
@@ -523,6 +583,7 @@ mod tests {
         lock_recover(&PENDING_CANCELS, "PENDING_CANCELS").clear();
         lock_recover(&CANCEL_FLAGS, "CANCEL_FLAGS").clear();
         lock_recover(&CODEX_TURN_REGISTRY, "CODEX_TURN_REGISTRY").clear();
+        lock_recover(&ACTIVE_SENDS, "ACTIVE_SENDS").clear();
     }
 
     #[test]
@@ -550,6 +611,26 @@ mod tests {
                 "opencode-session".to_string()
             ]
         );
+
+        clear_registries();
+    }
+
+    #[test]
+    fn send_claim_marks_session_as_actively_managed() {
+        let _guard = lock_recover(&TEST_LOCK, "TEST_LOCK");
+        clear_registries();
+
+        let session_id = "send-claim-session";
+        assert!(!is_session_actively_managed(session_id));
+        assert!(!get_actively_managed_sessions().contains(session_id));
+
+        let claim = SendClaim::try_acquire(session_id).expect("acquire claim");
+        assert!(is_session_actively_managed(session_id));
+        assert!(get_actively_managed_sessions().contains(session_id));
+
+        drop(claim);
+        assert!(!is_session_actively_managed(session_id));
+        assert!(!get_actively_managed_sessions().contains(session_id));
 
         clear_registries();
     }

@@ -106,19 +106,7 @@ When specifying subagent_type for Task tool calls, always use the fully qualifie
 static BACKEND_QUEUE_DRAINING: Lazy<Mutex<HashSet<String>>> =
     Lazy::new(|| Mutex::new(HashSet::new()));
 
-/// Sessions with a `send_chat_message` call currently in flight.
-///
-/// The registry-based "actively managed" guard only catches duplicates after a
-/// process/turn is registered, leaving a window where two concurrent sends
-/// (frontend queue processor vs backend queue drain vs another client) both
-/// pass the check and spawn duplicate runs. This claim is taken atomically at
-/// `send_chat_message` entry and held for the whole call — unless cancel
-/// releases it early so a follow-up send is not stuck (#329).
-///
-/// Values are generation tokens so an early cancel release cannot be clobbered
-/// by a later `Drop` from the cancelled claim after a new claim was acquired.
-static ACTIVE_SENDS: Lazy<Mutex<HashMap<String, u64>>> = Lazy::new(|| Mutex::new(HashMap::new()));
-static SEND_CLAIM_GENERATION: AtomicU64 = AtomicU64::new(1);
+use super::registry::{has_active_send, release_active_send, SendClaim};
 
 /// Whether a session has no prior user messages for auto-naming purposes.
 ///
@@ -152,53 +140,8 @@ fn should_auto_name_branch(worktree: Option<&Worktree>) -> bool {
         .unwrap_or(true)
 }
 
-/// RAII claim on a session's send slot — released on drop (any return path).
-struct SendClaim {
-    session_id: String,
-    generation: u64,
-}
-
-impl SendClaim {
-    fn try_acquire(session_id: &str) -> Option<Self> {
-        let mut active = ACTIVE_SENDS.lock().unwrap();
-        if active.contains_key(session_id) {
-            return None;
-        }
-        let generation = SEND_CLAIM_GENERATION.fetch_add(1, Ordering::Relaxed);
-        active.insert(session_id.to_string(), generation);
-        Some(Self {
-            session_id: session_id.to_string(),
-            generation,
-        })
-    }
-}
-
-impl Drop for SendClaim {
-    fn drop(&mut self) {
-        let mut active = ACTIVE_SENDS.lock().unwrap();
-        // Only clear if we still own the slot — cancel may have released early
-        // and a newer send may already hold a different generation.
-        if active.get(&self.session_id) == Some(&self.generation) {
-            active.remove(&self.session_id);
-        }
-    }
-}
-
-/// Release the in-flight send claim for a session after cancel so a follow-up
-/// prompt is not rejected with "Session already has an active request" while
-/// the cancelled worker finishes teardown (#329).
-fn release_active_send(session_id: &str) {
-    if ACTIVE_SENDS.lock().unwrap().remove(session_id).is_some() {
-        log::info!("[SendChat] released active send claim after cancel session={session_id}");
-    }
-}
-
-fn has_active_send(session_id: &str) -> bool {
-    ACTIVE_SENDS.lock().unwrap().contains_key(session_id)
-}
-
 fn should_forward_cancel_request(session_id: &str) -> bool {
-    has_active_send(session_id) || super::registry::is_session_actively_managed(session_id)
+    super::registry::is_session_actively_managed(session_id)
 }
 
 fn clear_stale_pending_cancel_before_send(session_id: &str) {
