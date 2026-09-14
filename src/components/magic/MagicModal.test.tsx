@@ -190,12 +190,9 @@ vi.mock('@/services/preferences', () => ({
       default_backend: 'claude',
       selected_model: 'claude-opus-4-8[1m]',
       selected_codex_model: 'gpt-5.5',
-      magic_prompt_models: {
-      },
-      magic_prompt_efforts: {
-      },
-      magic_prompt_modes: {
-      },
+      magic_prompt_models: {},
+      magic_prompt_efforts: {},
+      magic_prompt_modes: {},
       magic_prompts: {
         resolve_conflicts: 'Resolve and finish.',
       },
@@ -604,29 +601,20 @@ describe('MagicModal manual PR link', () => {
     ).toBeInTheDocument()
   })
 
-  it('shows the smoke test magic command', () => {
+  it('shows the check GitHub issues magic command', () => {
     render(<MagicModal />)
 
     expect(
-      screen.getByRole('button', { name: /smoke test/i })
+      screen.getByRole('button', { name: /check github issues/i })
     ).toBeInTheDocument()
   })
 
-  it('allows smoke test from the worktree canvas without an existing session', async () => {
-    const user = userEvent.setup()
+  it('does not show the removed smoke test magic command', () => {
     render(<MagicModal />)
 
-    const smokeTest = screen.getByRole('button', { name: /smoke test/i })
-    expect(smokeTest).toBeEnabled()
-    await user.click(smokeTest)
-
-    expect(mocks.setActiveWorktree).toHaveBeenCalledWith(
-      'wt-1',
-      '/repo/worktree'
-    )
-    expect(mocks.setPendingMagicCommand).toHaveBeenCalledWith({
-      command: 'smoke-test',
-    })
+    expect(
+      screen.queryByRole('button', { name: /smoke test/i })
+    ).not.toBeInTheDocument()
   })
 
   it('starts commit and push actions directly with loading notifications when chat is active', async () => {

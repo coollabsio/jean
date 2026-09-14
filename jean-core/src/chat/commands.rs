@@ -36,7 +36,7 @@ const QUEUE_DEFAULT_ALLOWED_TOOLS: [&str; 4] = ["Bash(git:*)", "Read", "Glob", "
 const IMAGE_ONLY_DEFAULT_PROMPT: &str = "Please check this image and tell me what is wrong.";
 const TEXT_ONLY_DEFAULT_PROMPT: &str = "Please check the attached text as reference.";
 
-fn resumed_grok_tail_error_event(
+fn resumed_tail_error_event(
     session_id: &str,
     worktree_id: &str,
     error: &str,
@@ -261,11 +261,18 @@ fn resolve_codex_global_system_prompt(
     preferences_prompt: Option<&str>,
     execution_mode: Option<&str>,
 ) -> String {
-    preferences_prompt
+    if let Some(custom_prompt) = preferences_prompt
         .map(str::trim)
         .filter(|prompt| !is_codex_default_global_system_prompt(prompt))
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| codex_default_global_system_prompt(execution_mode))
+    {
+        return custom_prompt.to_string();
+    }
+
+    format!(
+        "{}\n\n{}",
+        crate::default_global_system_prompt(),
+        codex_default_global_system_prompt(execution_mode)
+    )
 }
 
 fn append_codex_execution_mode_instruction(parts: &mut Vec<String>, execution_mode: Option<&str>) {
@@ -417,9 +424,14 @@ fn should_clear_stale_resumed_claude_session(
     has_tool_calls: bool,
     has_content_blocks: bool,
     has_usage: bool,
-    _was_cancelled: bool,
+    was_cancelled: bool,
 ) -> bool {
-    was_resuming && !has_content && !has_tool_calls && !has_content_blocks && !has_usage
+    was_resuming
+        && !was_cancelled
+        && !has_content
+        && !has_tool_calls
+        && !has_content_blocks
+        && !has_usage
 }
 
 fn default_model_for_backend(
@@ -450,6 +462,14 @@ fn normalize_optional_string(value: Option<String>) -> Option<String> {
     value
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
+}
+
+fn resolve_global_system_prompt(preferences_prompt: Option<&str>) -> String {
+    preferences_prompt
+        .map(str::trim)
+        .filter(|prompt| !prompt.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(crate::default_global_system_prompt)
 }
 
 /// Resolve the model used for a send.
@@ -492,17 +512,10 @@ fn build_kimi_system_prompt(
     if let Some(language) = ai_language.map(str::trim).filter(|value| !value.is_empty()) {
         parts.push(format!("Respond to the user in {language}."));
     }
-    if let Ok(preferences) = crate::load_preferences_sync(app) {
-        if let Some(prompt) = preferences
-            .magic_prompts
-            .global_system_prompt
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            parts.push(prompt.to_string());
-        }
-    }
+    let preferences = crate::load_preferences_sync(app).ok();
+    parts.push(resolve_global_system_prompt(preferences.as_ref().and_then(
+        |prefs| prefs.magic_prompts.global_system_prompt.as_deref(),
+    )));
     if let Some(prompt) = parallel_prompt
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -4204,24 +4217,13 @@ pub async fn send_chat_message(
                         }
                     }
 
-                    // Global system prompt from preferences
-                    if let Ok(prefs_path) = crate::get_preferences_path(&thread_app) {
-                        if let Ok(contents) = std::fs::read_to_string(&prefs_path) {
-                            if let Ok(prefs) =
-                                serde_json::from_str::<crate::AppPreferences>(&contents)
-                            {
-                                if let Some(prompt) = prefs
-                                    .magic_prompts
-                                    .global_system_prompt
-                                    .as_deref()
-                                    .map(|s| s.trim())
-                                    .filter(|s| !s.is_empty())
-                                {
-                                    system_prompt_parts.push(prompt.to_string());
-                                }
-                            }
-                        }
-                    }
+                    // Global system prompt from preferences, with the shared default fallback.
+                    let preferences = crate::load_preferences_sync(&thread_app).ok();
+                    system_prompt_parts.push(resolve_global_system_prompt(
+                        preferences
+                            .as_ref()
+                            .and_then(|prefs| prefs.magic_prompts.global_system_prompt.as_deref()),
+                    ));
 
                     // Parallel execution prompt
                     if let Some(prompt) = &thread_parallel_prompt {
@@ -4559,23 +4561,10 @@ pub async fn send_chat_message(
                         }
                     }
 
-                    if let Ok(prefs_path) = crate::get_preferences_path(&thread_app) {
-                        if let Ok(contents) = std::fs::read_to_string(&prefs_path) {
-                            if let Ok(prefs) =
-                                serde_json::from_str::<crate::AppPreferences>(&contents)
-                            {
-                                if let Some(prompt) = prefs
-                                    .magic_prompts
-                                    .global_system_prompt
-                                    .as_deref()
-                                    .map(|s| s.trim())
-                                    .filter(|s| !s.is_empty())
-                                {
-                                    parts.push(prompt.to_string());
-                                }
-                            }
-                        }
-                    }
+                    let preferences = crate::load_preferences_sync(&thread_app).ok();
+                    parts.push(resolve_global_system_prompt(preferences.as_ref().and_then(
+                        |prefs| prefs.magic_prompts.global_system_prompt.as_deref(),
+                    )));
 
                     if let Some(prompt) = &thread_parallel_prompt {
                         let prompt = prompt.trim();
@@ -4737,23 +4726,10 @@ pub async fn send_chat_message(
                         }
                     }
 
-                    if let Ok(prefs_path) = crate::get_preferences_path(&thread_app) {
-                        if let Ok(contents) = std::fs::read_to_string(&prefs_path) {
-                            if let Ok(prefs) =
-                                serde_json::from_str::<crate::AppPreferences>(&contents)
-                            {
-                                if let Some(prompt) = prefs
-                                    .magic_prompts
-                                    .global_system_prompt
-                                    .as_deref()
-                                    .map(|s| s.trim())
-                                    .filter(|s| !s.is_empty())
-                                {
-                                    parts.push(prompt.to_string());
-                                }
-                            }
-                        }
-                    }
+                    let preferences = crate::load_preferences_sync(&thread_app).ok();
+                    parts.push(resolve_global_system_prompt(preferences.as_ref().and_then(
+                        |prefs| prefs.magic_prompts.global_system_prompt.as_deref(),
+                    )));
 
                     if let Some(prompt) = &thread_parallel_prompt {
                         let prompt = prompt.trim();
@@ -4880,23 +4856,10 @@ pub async fn send_chat_message(
                         }
                     }
 
-                    if let Ok(prefs_path) = crate::get_preferences_path(&thread_app) {
-                        if let Ok(contents) = std::fs::read_to_string(&prefs_path) {
-                            if let Ok(prefs) =
-                                serde_json::from_str::<crate::AppPreferences>(&contents)
-                            {
-                                if let Some(prompt) = prefs
-                                    .magic_prompts
-                                    .global_system_prompt
-                                    .as_deref()
-                                    .map(|s| s.trim())
-                                    .filter(|s| !s.is_empty())
-                                {
-                                    parts.push(prompt.to_string());
-                                }
-                            }
-                        }
-                    }
+                    let preferences = crate::load_preferences_sync(&thread_app).ok();
+                    parts.push(resolve_global_system_prompt(preferences.as_ref().and_then(
+                        |prefs| prefs.magic_prompts.global_system_prompt.as_deref(),
+                    )));
 
                     if let Some(prompt) = &thread_parallel_prompt {
                         let prompt = prompt.trim();
@@ -4967,6 +4930,15 @@ pub async fn send_chat_message(
 
                     if super::should_include_recap_instruction(&thread_app, thread_include_recap) {
                         parts.push(super::RECAP_INSTRUCTION.to_string());
+                    }
+
+                    let loaded_context = super::context_instructions::build_loaded_context_content(
+                        &thread_app,
+                        &thread_session_id,
+                        &thread_worktree_id,
+                    );
+                    if !loaded_context.is_empty() {
+                        parts.push(loaded_context);
                     }
 
                     if parts.is_empty() {
@@ -8462,6 +8434,9 @@ pub async fn resume_session(
                         {
                             let _ = writer.crash();
                         }
+                        let (event_name, event) =
+                            resumed_tail_error_event(&session_id_clone, &worktree_id_clone, &error);
+                        let _ = app_clone.emit_all(event_name, &event);
                     }
                 }
             });
@@ -8624,11 +8599,8 @@ pub async fn resume_session(
                                 log::error!("Failed to mark Grok run as crashed: {e}");
                             }
                         }
-                        let (event_name, event) = resumed_grok_tail_error_event(
-                            &session_id_clone,
-                            &worktree_id_clone,
-                            &e,
-                        );
+                        let (event_name, event) =
+                            resumed_tail_error_event(&session_id_clone, &worktree_id_clone, &e);
                         let _ = app_clone.emit_all(event_name, &event);
                         return;
                     }
@@ -10314,7 +10286,7 @@ mod tests {
     #[test]
     fn resumed_grok_host_error_uses_chat_error_event() {
         let (event_name, event) =
-            resumed_grok_tail_error_event("session-1", "worktree-1", "rate limit reached");
+            resumed_tail_error_event("session-1", "worktree-1", "rate limit reached");
 
         assert_eq!(event_name, "chat:error");
         assert_eq!(event.session_id, "session-1");
@@ -10801,7 +10773,14 @@ mod tests {
     }
 
     #[test]
-    fn stale_resumed_claude_session_is_cleared_for_empty_cancelled_response() {
+    fn cancelled_empty_response_keeps_resumed_claude_session() {
+        assert!(!should_clear_stale_resumed_claude_session(
+            true, false, false, false, false, true
+        ));
+    }
+
+    #[test]
+    fn non_cancelled_empty_response_clears_stale_resumed_claude_session() {
         assert!(should_clear_stale_resumed_claude_session(
             true, false, false, false, false, false
         ));
@@ -10994,6 +10973,22 @@ mod tests {
     }
 
     #[test]
+    fn default_global_prompt_is_used_when_preference_is_missing_or_empty() {
+        let expected = crate::default_global_system_prompt();
+
+        assert_eq!(resolve_global_system_prompt(None), expected);
+        assert_eq!(resolve_global_system_prompt(Some("  ")), expected);
+    }
+
+    #[test]
+    fn configured_global_prompt_is_preserved() {
+        assert_eq!(
+            resolve_global_system_prompt(Some("  Custom global rule.  ")),
+            "Custom global rule."
+        );
+    }
+
+    #[test]
     fn test_codex_legacy_global_default_resolves_to_mode_specific_prompt() {
         let legacy_default = "### 1. Plan Mode Default
 - Every Codex plan-mode response that contains or revises a plan must use `update_plan`/`CodexPlan`; do not provide plain-text-only plans.
@@ -11001,12 +10996,12 @@ mod tests {
 ## Jean Worktree Policy";
 
         let yolo_prompt = resolve_codex_global_system_prompt(Some(legacy_default), Some("yolo"));
+        assert!(yolo_prompt.contains("### 4. Self-Improvement Loop"));
         assert!(!yolo_prompt.contains("Plan Mode Default"));
-        assert!(!yolo_prompt.contains("update_plan"));
-        assert!(!yolo_prompt.contains("CodexPlan"));
         assert!(yolo_prompt.contains("## Not Plan Mode"));
 
         let plan_prompt = resolve_codex_global_system_prompt(Some(legacy_default), Some("plan"));
+        assert!(plan_prompt.contains("### 4. Self-Improvement Loop"));
         assert!(plan_prompt.contains("## Plan Mode"));
         assert!(plan_prompt.contains("<proposed_plan>"));
     }

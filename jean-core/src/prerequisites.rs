@@ -1,7 +1,5 @@
 use serde::Serialize;
 
-use crate::platform::silent_command;
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SystemPrerequisites {
@@ -18,11 +16,7 @@ pub struct SystemPrerequisites {
 }
 
 fn version(command: &str) -> Option<String> {
-    let output = silent_command(command).arg("--version").output().ok()?;
-    output
-        .status
-        .success()
-        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+    crate::platform::detect_cli_in_path(command, None, None).version
 }
 
 pub fn check_system_prerequisites() -> SystemPrerequisites {
@@ -51,18 +45,33 @@ pub fn check_system_prerequisites() -> SystemPrerequisites {
     }
 }
 
-pub fn require_npm(tool: &str) -> Result<(), String> {
-    if version("node").is_some() && version("npm").is_some() {
-        return Ok(());
+const NPM_REQUIREMENT_HINT: &str = "requires Node.js and npm. Install a supported Node.js LTS using the official instructions at https://nodejs.org/en/download (distribution packages can be outdated), then retry. Jean onboarding can also install it automatically on supported Linux servers.";
+
+fn require_npm_from_detection(
+    tool: &str,
+    node_version: Option<&str>,
+    npm: &crate::platform::CliDetection,
+) -> Result<String, String> {
+    match (node_version, npm.version.as_deref(), npm.path.as_deref()) {
+        (Some(_), Some(_), Some(path)) if !path.is_empty() => Ok(path.to_string()),
+        _ => Err(format!("{tool} {NPM_REQUIREMENT_HINT}")),
     }
-    Err(format!(
-        "{tool} requires Node.js and npm. Install a supported Node.js LTS using the official instructions at https://nodejs.org/en/download (distribution packages can be outdated), then retry. Jean onboarding can also install it automatically on supported Linux servers."
-    ))
+}
+
+/// Confirm Node.js and npm are available and return the resolved npm launcher.
+///
+/// On Windows this path prefers `npm.cmd` over an extensionless version-manager
+/// shim so later `cli_command()` launches can succeed.
+pub fn require_npm(tool: &str) -> Result<String, String> {
+    let node_version = version("node");
+    let npm = crate::platform::detect_cli_in_path("npm", None, None);
+    require_npm_from_detection(tool, node_version.as_deref(), &npm)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::platform::CliDetection;
 
     #[test]
     fn prerequisite_status_has_official_node_url() {
@@ -70,5 +79,43 @@ mod tests {
             check_system_prerequisites().manual_install_url,
             "https://nodejs.org/en/download"
         );
+    }
+
+    fn npm_detection(path: Option<&str>, version: Option<&str>) -> CliDetection {
+        CliDetection {
+            found: path.is_some(),
+            path: path.map(str::to_string),
+            version: version.map(str::to_string),
+            package_manager: None,
+        }
+    }
+
+    #[test]
+    fn require_npm_returns_windows_cmd_shim_when_node_and_npm_are_present() {
+        let npm = npm_detection(
+            Some(r"C:\Users\u\AppData\Local\nvs\default\npm.cmd"),
+            Some("10.9.2"),
+        );
+
+        assert_eq!(
+            require_npm_from_detection("Command Code CLI", Some("v22.14.0"), &npm).unwrap(),
+            r"C:\Users\u\AppData\Local\nvs\default\npm.cmd"
+        );
+    }
+
+    #[test]
+    fn require_npm_errors_when_npm_is_missing() {
+        let err =
+            require_npm_from_detection("Grok CLI", Some("v22.14.0"), &npm_detection(None, None))
+                .unwrap_err();
+        assert!(err.contains("Grok CLI"), "{err}");
+        assert!(err.contains("Node.js and npm"), "{err}");
+    }
+
+    #[test]
+    fn require_npm_errors_when_npm_path_exists_but_version_check_failed() {
+        let npm = npm_detection(Some(r"C:\Users\u\AppData\Roaming\nvm\nodejs\npm"), None);
+        let err = require_npm_from_detection("PI CLI", Some("v22.14.0"), &npm).unwrap_err();
+        assert!(err.contains("PI CLI"), "{err}");
     }
 }

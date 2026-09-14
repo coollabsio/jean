@@ -195,7 +195,12 @@ export function useLoadContextHandlers({
 
       setRemovingNumbers(prev => new Set(prev).add(issueNumber))
       try {
-        await removeIssueContext(activeSessionId, issueNumber, worktreePath)
+        await removeIssueContext(
+          activeSessionId,
+          issueNumber,
+          worktreePath,
+          worktreeId
+        )
         await refetchIssueContexts()
         toast.success(`Removed issue #${issueNumber} from context`)
       } catch (error) {
@@ -208,7 +213,7 @@ export function useLoadContextHandlers({
         })
       }
     },
-    [activeSessionId, worktreePath, refetchIssueContexts]
+    [activeSessionId, worktreeId, worktreePath, refetchIssueContexts]
   )
 
   const handleViewIssue = useCallback((ctx: LoadedIssueContext) => {

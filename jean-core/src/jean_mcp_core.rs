@@ -1849,6 +1849,7 @@ async fn start_autoinvestigating(
         parallel_execution_prompt,
         Some(selection.execution_mode.clone()),
         Some(source.to_string()),
+        false,
     )
     .await
     .map_err(ToolError::internal)?;
@@ -2013,6 +2014,19 @@ fn build_background_investigation_queue_message(
     })
 }
 
+fn select_reusable_investigation_session(
+    sessions: &crate::chat::types::WorktreeSessions,
+    force_new_session: bool,
+) -> Option<String> {
+    if force_new_session {
+        return None;
+    }
+    sessions
+        .active_session_id
+        .clone()
+        .or_else(|| sessions.sessions.first().map(|session| session.id.clone()))
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn start_background_investigation_impl(
     app: &AppHandle,
@@ -2029,6 +2043,7 @@ pub async fn start_background_investigation_impl(
     parallel_execution_prompt: Option<String>,
     execution_mode: Option<String>,
     source: Option<String>,
+    force_new_session: bool,
 ) -> Result<BackgroundInvestigationResult, String> {
     let sessions = crate::chat::get_sessions(
         app.clone(),
@@ -2040,11 +2055,7 @@ pub async fn start_background_investigation_impl(
     .await?;
     // Prefer the active/first session; create one if the worktree has none yet
     // (e.g. programmatically empty index before the UI opens a tab).
-    let session_id = match sessions
-        .active_session_id
-        .clone()
-        .or_else(|| sessions.sessions.first().map(|session| session.id.clone()))
-    {
+    let session_id = match select_reusable_investigation_session(&sessions, force_new_session) {
         Some(id) => id,
         None => {
             let created = crate::chat::create_session(
@@ -2138,6 +2149,21 @@ pub async fn start_background_investigation_impl(
     })
 }
 
+#[cfg(test)]
+mod fresh_investigation_session_tests {
+    use super::select_reusable_investigation_session;
+    use crate::chat::types::WorktreeSessions;
+
+    #[test]
+    fn forced_new_investigation_does_not_reuse_the_active_session() {
+        let mut sessions = WorktreeSessions::default();
+        sessions.sessions[0].id = "existing-session".to_string();
+        sessions.active_session_id = Some("existing-session".to_string());
+
+        assert_eq!(select_reusable_investigation_session(&sessions, true), None);
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn start_background_investigation(
     app: AppHandle,
@@ -2153,6 +2179,7 @@ pub async fn start_background_investigation(
     ai_language: Option<String>,
     parallel_execution_prompt: Option<String>,
     execution_mode: Option<String>,
+    force_new_session: Option<bool>,
 ) -> Result<BackgroundInvestigationResult, String> {
     start_background_investigation_impl(
         &app,
@@ -2169,6 +2196,7 @@ pub async fn start_background_investigation(
         parallel_execution_prompt,
         execution_mode,
         Some("ui".to_string()),
+        force_new_session.unwrap_or(false),
     )
     .await
 }

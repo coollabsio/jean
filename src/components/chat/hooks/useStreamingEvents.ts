@@ -1939,12 +1939,14 @@ export default function useStreamingEvents({
         // Clear compacting state (safety net)
         useChatStore.getState().setCompacting(session_id, false)
 
-        // Restore message to input ONLY when the prompt never started
-        // (backend undo_send=true: process not registered / pending cancel).
-        // If the prompt is already running, do not restore even when no
-        // assistant content has streamed yet — cancel of a live run leaves
-        // the input empty. Also skip restore when queued messages exist
-        // ("Skip to Next").
+        // Restore a prompt with no assistant output, regardless of whether the
+        // backend classified cancellation as undo_send. Normal cancellation
+        // events use undo_send=false once a run has started, but the backend
+        // hides a cancelled run with no assistant content from chat history.
+        // Skip restoration when
+        // queued messages exist ("Skip to Next") or the user already typed a
+        // newer draft. Hydrate afterwards in case output was persisted before
+        // the frontend received it.
         const hasToolCalls = toolCalls && toolCalls.length > 0
         const hasText = sanitizedContent.trim().length > 0
         const hasThinking = !!streamingThinkingContent[session_id]
@@ -1954,8 +1956,14 @@ export default function useStreamingEvents({
           hasToolCalls || hasText || hasThinking || hasContentBlocks
         const hasQueuedMessages =
           (useChatStore.getState().messageQueues[session_id] ?? []).length > 0
-        const shouldHydrateCancelledFromBackend = !undo_send && !hasContent
-        const shouldRestoreMessage = !hasQueuedMessages && undo_send
+        const hasCurrentDraft = !!useChatStore
+          .getState()
+          .inputDrafts[session_id]?.trim()
+        const shouldRestoreMessage =
+          !hasQueuedMessages && !hasCurrentDraft && (undo_send || !hasContent)
+        const shouldHydrateCancelledFromBackend =
+          !undo_send && !hasContent
+        let restoredDraft: string | null = null
 
         const removeLatestUserMessageFromCache = () => {
           queryClient.setQueryData<Session>(
@@ -1973,9 +1981,9 @@ export default function useStreamingEvents({
         }
 
         // Update TanStack Query cache FIRST (before clearing Zustand streaming state)
-        // so the cancelled optimistic prompt/partial response disappears as soon
-        // as StreamingMessage unmounts. The backend still keeps run logs/metadata
-        // for diagnostics, but cancelled turns are not visible chat history.
+        // so StreamingMessage unmount does not flicker. undo_send removes the
+        // optimistic user turn; a live no-output cancel keeps it visible and
+        // restores the draft. Partial output stays in history, marked cancelled.
 
         // Optimistically update last_run_status so "restored session" indicator hides
         queryClient.setQueryData<Session>(
@@ -2015,6 +2023,7 @@ export default function useStreamingEvents({
             // Only restore if input is empty (user hasn't typed new content)
             if (!currentDraft.trim()) {
               setInputDraft(session_id, lastMessage)
+              restoredDraft = lastMessage
               // Restore any attachments that were sent with the message
               useChatStore.getState().restoreAttachments(session_id)
               toast.info('Message restored to input')
@@ -2023,10 +2032,13 @@ export default function useStreamingEvents({
             }
             clearLastSentMessage(session_id)
 
-            removeLatestUserMessageFromCache()
+            // undo_send means the prompt never entered the run history. A
+            // normal live cancellation keeps the user turn visible while the
+            // draft is restored for retry.
+            if (undo_send || !hasContent) removeLatestUserMessageFromCache()
           } else {
             useChatStore.getState().clearLastSentAttachments(session_id)
-            removeLatestUserMessageFromCache()
+            if (undo_send || !hasContent) removeLatestUserMessageFromCache()
           }
         } else {
           // Partial response exists — keep the prompt + streamed partial output
@@ -2144,7 +2156,13 @@ export default function useStreamingEvents({
                   lastHydratedMessage.cancelled === true
                 const currentDraft =
                   useChatStore.getState().inputDrafts[session_id] ?? ''
-                if (hydratedCancelledAssistant && !currentDraft) {
+                // Backend kept the cancelled turn (frontend missed streamed
+                // output). Drop a composer restore that would duplicate the
+                // prompt, but keep a draft the user typed after cancelling.
+                if (
+                  hydratedCancelledAssistant &&
+                  (!currentDraft.trim() || currentDraft === restoredDraft)
+                ) {
                   useChatStore.getState().clearInputDraft(session_id)
                 }
               })

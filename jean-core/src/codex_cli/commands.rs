@@ -1660,22 +1660,36 @@ async fn find_asset_url(
         .await
         .map_err(|e| format!("Failed to parse releases: {e}"))?;
 
-    for release in &releases {
+    find_release_asset(&releases, version, candidates)
+}
+
+fn find_release_asset(
+    releases: &[GitHubRelease],
+    version: &str,
+    candidates: &[CodexAssetCandidate],
+) -> Result<(String, CodexAssetCandidate), String> {
+    let mut matching_release_tags = Vec::new();
+
+    for release in releases {
         let release_version = extract_version_from_tag(&release.tag_name);
         if release_version == version {
             if let Some((url, candidate)) = find_matching_candidate_asset(release, candidates) {
                 return Ok((url, candidate));
             }
-            let asset_names: Vec<&str> = candidates
-                .iter()
-                .map(|candidate| candidate.name.as_str())
-                .collect();
-            return Err(format!(
-                "Assets [{}] not found in release {}",
-                asset_names.join(", "),
-                release.tag_name
-            ));
+            matching_release_tags.push(release.tag_name.as_str());
         }
+    }
+
+    if !matching_release_tags.is_empty() {
+        let asset_names: Vec<&str> = candidates
+            .iter()
+            .map(|candidate| candidate.name.as_str())
+            .collect();
+        return Err(format!(
+            "Assets [{}] not found in releases {}",
+            asset_names.join(", "),
+            matching_release_tags.join(", ")
+        ));
     }
 
     Err(format!("Release for version {version} not found"))
@@ -2919,6 +2933,37 @@ mod tests {
         );
 
         assert_eq!(version, Some("0.130.0".to_string()));
+    }
+
+    #[test]
+    fn asset_lookup_skips_same_version_release_for_another_codex_package() {
+        let releases = vec![
+            GitHubRelease {
+                tag_name: "python-v0.154.0".to_string(),
+                published_at: "2026-09-14T10:00:00Z".to_string(),
+                prerelease: false,
+                assets: vec![GitHubAsset {
+                    name: "codex-python-0.154.0.tar.gz".to_string(),
+                    browser_download_url: "https://example.com/codex-python.tar.gz".to_string(),
+                }],
+            },
+            GitHubRelease {
+                tag_name: "rust-v0.154.0".to_string(),
+                published_at: "2026-09-14T09:00:00Z".to_string(),
+                prerelease: false,
+                assets: vec![GitHubAsset {
+                    name: "codex-x86_64-unknown-linux-musl.tar.gz".to_string(),
+                    browser_download_url: "https://example.com/codex-linux-musl.tar.gz".to_string(),
+                }],
+            },
+        ];
+        let candidates = codex_asset_candidates("x86_64-unknown-linux-musl");
+
+        let (url, candidate) = find_release_asset(&releases, "0.154.0", &candidates)
+            .expect("Codex release asset should be selected");
+
+        assert_eq!(url, "https://example.com/codex-linux-musl.tar.gz");
+        assert_eq!(candidate.name, "codex-x86_64-unknown-linux-musl.tar.gz");
     }
 
     #[test]
