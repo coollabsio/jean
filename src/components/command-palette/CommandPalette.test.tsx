@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CommandPalette } from './CommandPalette'
 
@@ -7,11 +7,12 @@ Element.prototype.scrollIntoView = vi.fn()
 const {
   fetchRemoteServerInfo,
   markConnectionSwitch,
-  reloadApp,
   selectConnection,
+  selectProject,
   setCommandPaletteOpen,
   showToast,
   warnRemoteVersionMismatch,
+  isNativeApp,
 } = vi.hoisted(() => ({
   fetchRemoteServerInfo: vi.fn(async () => ({
     ok: true,
@@ -19,11 +20,12 @@ const {
     webBuildId: '0.1.69-test',
   })),
   markConnectionSwitch: vi.fn(),
-  reloadApp: vi.fn(),
   selectConnection: vi.fn(),
+  selectProject: vi.fn(),
   setCommandPaletteOpen: vi.fn(),
   showToast: vi.fn(),
   warnRemoteVersionMismatch: vi.fn(() => false),
+  isNativeApp: vi.fn(() => true),
 }))
 
 const remoteConnections = [
@@ -65,6 +67,14 @@ vi.mock('@/services/projects', () => ({
         path: '/projects/jean',
         is_folder: false,
       },
+      {
+        id: 'remote-2:project-1',
+        name: 'Jean',
+        path: '/projects/jean',
+        is_folder: false,
+        serverId: 'remote-2',
+        serverName: 'Build server',
+      },
     ],
   }),
   useAppDataDir: () => ({ data: undefined }),
@@ -75,8 +85,11 @@ vi.mock('@/store/chat-store', () => ({
 }))
 
 vi.mock('@/store/projects-store', () => ({
-  useProjectsStore: (selector: (state: unknown) => unknown) =>
-    selector({ projectAccessTimestamps: {}, selectedProjectId: null }),
+  useProjectsStore: Object.assign(
+    (selector: (state: unknown) => unknown) =>
+      selector({ projectAccessTimestamps: {}, selectedProjectId: null }),
+    { getState: () => ({ selectProject }) }
+  ),
 }))
 
 vi.mock('@/lib/commands', () => ({
@@ -98,7 +111,9 @@ vi.mock('@/lib/remote-version', () => ({
   warnRemoteVersionMismatch,
 }))
 
-describe('CommandPalette connections', () => {
+vi.mock('@/lib/environment', () => ({ isNativeApp }))
+
+describe('CommandPalette projects', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     fetchRemoteServerInfo.mockResolvedValue({
@@ -107,64 +122,39 @@ describe('CommandPalette connections', () => {
       webBuildId: '0.1.69-test',
     })
     warnRemoteVersionMismatch.mockReturnValue(false)
+    isNativeApp.mockReturnValue(true)
   })
 
-  it('lists localhost and inactive remote connections', () => {
+  it('does not offer global server switching', () => {
     render(<CommandPalette />)
 
-    expect(screen.getByText('Connections')).toBeInTheDocument()
-    expect(screen.getByText('Localhost')).toBeInTheDocument()
-    expect(screen.getByText('This device')).toBeInTheDocument()
-    expect(screen.getByText('Build server')).toBeInTheDocument()
-    expect(screen.getByText('https://build.example.com')).toBeInTheDocument()
-    expect(screen.queryByText('Active server')).not.toBeInTheDocument()
-  })
-
-  it('lists projects before connections', () => {
-    render(<CommandPalette />)
-
-    const projectsHeading = screen.getByText('Projects')
-    const connectionsHeading = screen.getByText('Connections')
-
+    expect(screen.queryByText('Connections')).not.toBeInTheDocument()
+    expect(screen.queryByText('Localhost')).not.toBeInTheDocument()
     expect(
-      projectsHeading.compareDocumentPosition(connectionsHeading) &
-        Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy()
+      screen.queryByText('https://build.example.com')
+    ).not.toBeInTheDocument()
   })
 
-  it('switches connections through the existing reload flow', async () => {
-    render(<CommandPalette reloadApp={reloadApp} />)
+  it('uses unique project values and shows the owning server', () => {
+    render(<CommandPalette />)
 
-    fireEvent.click(screen.getByText('Localhost'))
-
-    expect(setCommandPaletteOpen).toHaveBeenCalledWith(false)
-    expect(markConnectionSwitch).toHaveBeenCalledOnce()
-    expect(selectConnection).toHaveBeenCalledWith('local')
-    expect(reloadApp).toHaveBeenCalledOnce()
-    expect(fetchRemoteServerInfo).not.toHaveBeenCalled()
+    const projectRows = screen
+      .getAllByText('Jean')
+      .map(label => label.closest('[cmdk-item]'))
+    expect(projectRows).toHaveLength(2)
+    expect(projectRows[0]?.getAttribute('data-value')).not.toBe(
+      projectRows[1]?.getAttribute('data-value')
+    )
+    expect(screen.getByText('Open on Local')).toBeInTheDocument()
+    expect(screen.getByText('Open on Build server')).toBeInTheDocument()
   })
 
-  it('warns on version mismatch but still switches from the palette', async () => {
-    fetchRemoteServerInfo.mockResolvedValueOnce({
-      ok: true,
-      appVersion: '0.2.0',
-      webBuildId: '0.2.0-test',
-    })
-    warnRemoteVersionMismatch.mockReturnValueOnce(true)
+  it('does not show a redundant Local server label in Web Access', () => {
+    isNativeApp.mockReturnValue(false)
 
-    render(<CommandPalette reloadApp={reloadApp} />)
+    render(<CommandPalette />)
 
-    fireEvent.click(screen.getByText('Build server'))
-
-    await waitFor(() => {
-      expect(fetchRemoteServerInfo).toHaveBeenCalledWith(
-        'https://build.example.com',
-        'build-token'
-      )
-      expect(warnRemoteVersionMismatch).toHaveBeenCalledWith('0.2.0')
-      expect(selectConnection).toHaveBeenCalledWith('remote-2')
-      expect(reloadApp).toHaveBeenCalledOnce()
-    })
-    expect(showToast).not.toHaveBeenCalled()
+    expect(screen.queryByText('Open on Local')).not.toBeInTheDocument()
+    expect(screen.queryByText('Open on Build server')).not.toBeInTheDocument()
   })
 })

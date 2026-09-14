@@ -1,7 +1,7 @@
 /**
  * Onboarding remote setup: install jean-server over SSH or connect an existing
- * Web Access URL. On success, selects the connection and reloads so CLI setup
- * (if needed) continues against the remote.
+ * Web Access URL. On success, the remote joins the native client's parallel
+ * connection set while the client keeps using its local Jean core.
  */
 
 import { useEffect, useState, type FormEvent } from 'react'
@@ -14,10 +14,8 @@ import { isNativeApp } from '@/lib/environment'
 import { cn } from '@/lib/utils'
 import {
   addRemoteConnection,
-  markConnectionSwitch,
   parseOptionalSshPort,
   parseRemoteConnectionInput,
-  selectConnection,
 } from '@/lib/remote-connections'
 import {
   fetchRemoteServerInfo,
@@ -46,12 +44,10 @@ const EMPTY_INSTALL_FORM = {
 type AddMode = 'url' | 'install'
 
 interface RemoteSetupStepProps {
-  reloadApp?: () => void
+  onComplete: () => void
 }
 
-export function RemoteSetupStep({
-  reloadApp = () => window.location.reload(),
-}: RemoteSetupStepProps) {
+export function RemoteSetupStep({ onComplete }: RemoteSetupStepProps) {
   const native = isNativeApp()
   const [addMode, setAddMode] = useState<AddMode>(native ? 'install' : 'url')
   const [form, setForm] = useState(EMPTY_URL_FORM)
@@ -115,10 +111,8 @@ export function RemoteSetupStep({
         }
       }
 
-      const connection = addRemoteConnection(input)
-      markConnectionSwitch()
-      selectConnection(connection.id)
-      reloadApp()
+      addRemoteConnection(input)
+      onComplete()
     } catch (submitError) {
       setError(
         submitError instanceof Error ? submitError.message : String(submitError)
@@ -177,7 +171,7 @@ export function RemoteSetupStep({
         throw new Error('Remote jean-server did not report ready.')
       }
 
-      const connection = addRemoteConnection({
+      addRemoteConnection({
         name: result.name,
         url: result.url,
         token: result.token,
@@ -185,9 +179,7 @@ export function RemoteSetupStep({
         sshHost: host,
         sshPort,
       })
-      markConnectionSwitch()
-      selectConnection(connection.id)
-      reloadApp()
+      onComplete()
     } catch (installError) {
       setError(
         installError instanceof Error
@@ -313,7 +305,9 @@ export function RemoteSetupStep({
           </div>
         )}
         {error && (
-          <p className="whitespace-pre-wrap text-sm text-destructive">{error}</p>
+          <p className="whitespace-pre-wrap text-sm text-destructive">
+            {error}
+          </p>
         )}
         <Button type="submit" className="w-full" size="lg" disabled={busy}>
           {installing ? (

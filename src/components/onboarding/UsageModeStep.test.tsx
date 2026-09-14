@@ -8,18 +8,22 @@ describe('UsageModeStep', () => {
     render(<UsageModeStep onSelect={onSelect} />)
 
     expect(screen.getByText('How will you use Jean?')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Local/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Remote/i })).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /^Local Install/i })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /^Local \+ remote/i })
+    ).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
     expect(onSelect).toHaveBeenCalledWith('local')
   })
 
-  it('selects remote when the remote card is chosen', () => {
+  it('selects remote setup without changing the local client backend', () => {
     const onSelect = vi.fn()
     render(<UsageModeStep onSelect={onSelect} />)
 
-    fireEvent.click(screen.getByRole('button', { name: /Remote/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^Local \+ remote/i }))
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
     expect(onSelect).toHaveBeenCalledWith('remote')
   })

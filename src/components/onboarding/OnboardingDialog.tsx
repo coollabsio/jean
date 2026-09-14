@@ -100,6 +100,7 @@ import {
   type MagicPromptModels,
 } from '@/types/preferences'
 import { isServerWindows } from '@/lib/platform'
+import { isNativeApp } from '@/lib/environment'
 import {
   getActiveConnectionId,
   LOCAL_CONNECTION_ID,
@@ -263,13 +264,7 @@ const backendLabel: Record<CliType, string> = {
   gh: 'GitHub CLI',
 }
 
-const BETA_BACKENDS = new Set<AIBackend>([
-  'pi',
-  'commandcode',
-  'grok',
-  'kimi',
-  'antigravity',
-])
+const BETA_BACKENDS = new Set<AIBackend>(['antigravity'])
 
 function magicDefaultsForBackend(
   backend: AIBackend
@@ -1000,19 +995,22 @@ function OnboardingDialogContent() {
       onboardingManuallyTriggered
     )
 
-    // Manual re-open always starts with Local vs Remote so users can switch.
+    // Local vs Remote selects the desktop shell's backend. Web Access already
+    // targets the Jean server that served the page, so there is no choice to
+    // make there.
     if (onboardingManuallyTriggered) {
-      dbg('init effect: manual trigger → usage-mode')
+      const nextStep = isNativeApp() ? 'usage-mode' : 'backend-select'
+      dbg('init effect: manual trigger →', nextStep)
       queueMicrotask(() => {
         setSelectedBackends(readyBackends)
-        setStep('usage-mode', { replace: true })
+        setStep(nextStep, { replace: true })
       })
       return
     }
 
     // Already on a remote: skip usage mode and continue CLI setup there.
     // WSL mode only applies to local Windows development.
-    if (remoteActive) {
+    if (!isNativeApp() || remoteActive) {
       if (ghReady && readyBackends.length > 0) {
         // Auto-opened with tools already ready (e.g. reconnecting to a remote
         // that was set up earlier). Don't force the "Setup Complete" screen —
@@ -1283,7 +1281,8 @@ function OnboardingDialogContent() {
     if (step !== 'antigravity-auth-checking') return
     if (antigravityAuth.isLoading || antigravityAuth.isFetching) return
 
-    if (antigravityAuth.data?.authenticated) {
+    if (antigravityAuth.data?.authenticated || antigravityAuth.data?.timedOut) {
+      // A timed-out `agy models` probe is unknown, not signed-out.
       queueMicrotask(() => moveToNextBackendOrGh('antigravity'))
     } else {
       queueMicrotask(() => setStep('antigravity-auth-login'))
@@ -1293,6 +1292,7 @@ function OnboardingDialogContent() {
     antigravityAuth.isLoading,
     antigravityAuth.isFetching,
     antigravityAuth.data?.authenticated,
+    antigravityAuth.data?.timedOut,
     moveToNextBackendOrGh,
     setStep,
   ])
@@ -2823,7 +2823,7 @@ function OnboardingDialogContent() {
             {step === 'usage-mode' ? (
               <UsageModeStep onSelect={handleUsageModeSelect} />
             ) : step === 'remote-setup' ? (
-              <RemoteSetupStep />
+              <RemoteSetupStep onComplete={continueAfterLocalChoice} />
             ) : step === 'wsl-setup' ? (
               <WslSetupStep
                 onComplete={() => {

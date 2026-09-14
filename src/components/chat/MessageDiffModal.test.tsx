@@ -54,7 +54,6 @@ vi.mock('@pierre/diffs/edit', () => ({
   // Constructable stub; pierre-edit does `new Editor(options)`.
   Editor: vi.fn(),
 }))
-
 const patch = `Index: src/example.ts
 ===================================================================
 --- src/example.ts

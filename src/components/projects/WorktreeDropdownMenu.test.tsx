@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import userEvent from '@testing-library/user-event'
-import { render, screen } from '@/test/test-utils'
+import { fireEvent, render, screen } from '@/test/test-utils'
 import { WorktreeDropdownMenu } from './WorktreeDropdownMenu'
 import type { Worktree } from '@/types/projects'
 import type * as EnvironmentModule from '@/lib/environment'
@@ -17,6 +17,11 @@ const actionMocks = vi.hoisted(() => ({
   handleRun: vi.fn(),
   handleRunCommand: vi.fn(),
   runScripts: ['bun run dev'] as string[],
+  patchPreferences: vi.fn(),
+}))
+
+vi.mock('@/services/preferences', () => ({
+  usePatchPreferences: () => ({ mutate: actionMocks.patchPreferences }),
 }))
 
 vi.mock('@/lib/environment', async importOriginal => ({
@@ -82,6 +87,7 @@ describe('WorktreeDropdownMenu', () => {
     actionMocks.runScripts = ['bun run dev']
     actionMocks.handleRun.mockClear()
     actionMocks.handleRunCommand.mockClear()
+    actionMocks.patchPreferences.mockClear()
   })
 
   it('hides the jean.json run command in mobile web access', async () => {
@@ -143,9 +149,7 @@ describe('WorktreeDropdownMenu', () => {
     expect(
       screen.getByRole('menuitem', { name: /open in/i })
     ).toBeInTheDocument()
-    expect(
-      screen.queryByRole('menuitem', { name: /finder/i })
-    ).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: /finder/i })).toBeNull()
   })
 
   it('shows open-in editor/terminal/finder when the remote backend allows native open', async () => {
@@ -168,5 +172,125 @@ describe('WorktreeDropdownMenu', () => {
 
     const openItems = screen.getAllByRole('menuitem', { name: /open in/i })
     expect(openItems.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('shows issues, pull requests, and workflows on desktop when counts are zero', async () => {
+    const user = userEvent.setup()
+    envMocks.isMobile = false
+
+    render(
+      <WorktreeDropdownMenu
+        worktree={worktree}
+        projectId="project-1"
+        projectPath="/tmp/project"
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Actions' }))
+
+    expect(screen.getByRole('menuitem', { name: 'Issues' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('menuitem', { name: 'Pull Requests' })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('menuitem', { name: 'Workflows' })
+    ).toBeInTheDocument()
+  })
+
+  it('hides scripts and terminal from the mobile header menu', async () => {
+    const user = userEvent.setup()
+    const onToggleTerminal = vi.fn()
+    const onToggleBrowser = vi.fn()
+
+    render(
+      <WorktreeDropdownMenu
+        worktree={worktree}
+        projectId="project-1"
+        projectPath="/tmp/project"
+        onToggleTerminal={onToggleTerminal}
+        onToggleBrowser={onToggleBrowser}
+        packageScripts={[{ name: 'test', command: 'bun', args: ['test'] }]}
+        onRunPackageScript={vi.fn()}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Actions' }))
+    expect(screen.queryByRole('menuitem', { name: 'Terminal' })).toBeNull()
+    expect(screen.queryByText('Scripts')).toBeNull()
+    await user.click(screen.getByRole('menuitem', { name: 'Browser' }))
+    expect(onToggleBrowser).toHaveBeenCalledOnce()
+    expect(onToggleTerminal).not.toHaveBeenCalled()
+  })
+
+  it('shows terminal and scripts on web desktop', async () => {
+    const user = userEvent.setup()
+    const onToggleTerminal = vi.fn()
+    envMocks.isMobile = false
+
+    render(
+      <WorktreeDropdownMenu
+        worktree={worktree}
+        projectId="project-1"
+        projectPath="/tmp/project"
+        onToggleTerminal={onToggleTerminal}
+        packageScripts={[{ name: 'test', command: 'bun', args: ['test'] }]}
+        onRunPackageScript={vi.fn()}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Actions' }))
+    expect(
+      screen.getByRole('menuitem', { name: 'Terminal' })
+    ).toBeInTheDocument()
+    expect(screen.getByText('Scripts')).toBeInTheDocument()
+  })
+
+  it('hides scripts on native desktop where the scripts button is available', async () => {
+    const user = userEvent.setup()
+    envMocks.isNativeApp = true
+    envMocks.isMobile = false
+
+    render(
+      <WorktreeDropdownMenu
+        worktree={worktree}
+        projectId="project-1"
+        projectPath="/tmp/project"
+        packageScripts={[{ name: 'test', command: 'bun', args: ['test'] }]}
+        onRunPackageScript={vi.fn()}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Actions' }))
+    expect(screen.queryByText('Scripts')).toBeNull()
+  })
+
+  it('shows script icons, favorites, and a scrollable script submenu', async () => {
+    const user = userEvent.setup()
+    envMocks.isMobile = false
+
+    render(
+      <WorktreeDropdownMenu
+        worktree={worktree}
+        projectId="project-1"
+        projectPath="/tmp/project"
+        packageScripts={[{ name: 'test', command: 'bun', args: ['test'] }]}
+        onRunPackageScript={vi.fn()}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Actions' }))
+    await user.hover(screen.getByText('Scripts'))
+
+    const favorite = await screen.findByRole('button', {
+      name: 'Favorite test',
+    })
+    expect(favorite.closest('[role="menu"]')).toHaveClass(
+      'max-h-72',
+      'overflow-y-auto'
+    )
+    fireEvent.pointerDown(favorite)
+    expect(actionMocks.patchPreferences).toHaveBeenCalledWith({
+      favorite_package_scripts: ['project-1:test'],
+    })
   })
 })

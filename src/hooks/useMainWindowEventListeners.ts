@@ -40,6 +40,31 @@ const PLAN_DIALOG_APPROVAL_ACTIONS = new Set<KeybindingAction>([
   'approve_plan_worktree_yolo',
 ])
 
+interface RunEnvironmentStartedEvent {
+  worktreeId: string
+  terminalId: string
+  command: string
+}
+
+export function handleRunEnvironmentStarted(
+  payload: RunEnvironmentStartedEvent
+): void {
+  const terminalStore = useTerminalStore.getState()
+  terminalStore.registerStartedRun(
+    payload.worktreeId,
+    payload.terminalId,
+    payload.command
+  )
+
+  const uiState = useUIStore.getState()
+  if (
+    uiState.sessionChatModalOpen &&
+    uiState.sessionChatModalWorktreeId === payload.worktreeId
+  ) {
+    terminalStore.setModalTerminalOpen(payload.worktreeId, true)
+  }
+}
+
 export function shouldLetPlanDialogHandleAction(
   action: KeybindingAction,
   planDialogOpen: boolean
@@ -105,8 +130,8 @@ export function allowsKeybindingRepeat(action: KeybindingAction): boolean {
  * Apply backend `cache:invalidate` keys to the React Query client.
  * Shared by the debounced multi-client sync listener.
  *
- * `sessions` also invalidates `['all-sessions']` (finished/unread bell) which
- * is intentionally outside `chatQueryKeys.all` (`['chat']`).
+ * `sessions` also invalidates the finished/unread badge and popover queries,
+ * which are intentionally outside the normal per-worktree cache.
  */
 export function applyCacheInvalidationKeys(
   queryClient: QueryClient,
@@ -121,6 +146,9 @@ export function applyCacheInvalidationKeys(
         // UnreadBell / useUnreadCount read from this separate key.
         queryClient.invalidateQueries({
           queryKey: ['all-sessions'],
+        })
+        queryClient.invalidateQueries({
+          queryKey: chatQueryKeys.unreadSessionCount(),
         })
         break
       case 'projects':
@@ -220,6 +248,12 @@ export function shouldAllowKeybindingThroughOpenOverlay(
   }
 
   return action === 'open_in_modal' && uiState.gitDiffModalOpen
+}
+
+export function hasBlockingOpenOverlay(): boolean {
+  return !!document.querySelector(
+    '[role="dialog"][data-state="open"]:not([data-terminal-host]), [role="alertdialog"][data-state="open"], [role="menu"][data-state="open"], [role="listbox"][data-state="open"]'
+  )
 }
 
 function getFocusedTerminalElement(): HTMLElement | null {
@@ -440,25 +474,21 @@ function executeKeybindingAction(
 
       const resolvedWorktreePath = targetWorktreePath
 
-      // Fetch run scripts - use fetchQuery to handle uncached dashboard worktrees
+      // Always read jean.json from disk. A cached copy stays stale after
+      // the branch is updated from latest or Settings saves a new command.
       ;(async () => {
-        let runScripts = queryClient.getQueryData<string[]>([
-          'run-scripts',
-          resolvedWorktreePath,
-        ])
-
-        if (runScripts === undefined) {
-          try {
-            runScripts = await queryClient.fetchQuery<string[]>({
-              queryKey: ['run-scripts', resolvedWorktreePath],
-              queryFn: () =>
-                invoke<string[]>('get_run_scripts', {
-                  worktreePath: resolvedWorktreePath,
-                }),
-            })
-          } catch {
-            runScripts = []
-          }
+        let runScripts: string[] = []
+        try {
+          runScripts = await queryClient.fetchQuery<string[]>({
+            queryKey: ['run-scripts', resolvedWorktreePath],
+            queryFn: () =>
+              invoke<string[]>('get_run_scripts', {
+                worktreePath: resolvedWorktreePath,
+              }),
+            staleTime: 0,
+          })
+        } catch {
+          runScripts = []
         }
 
         const firstScript = runScripts?.[0]
@@ -846,9 +876,7 @@ export function useMainWindowEventListeners() {
       const uiState = useUIStore.getState()
       if (
         !shouldAllowKeybindingThroughOpenOverlay(matchedAction, uiState) &&
-        document.querySelector(
-          '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], [role="menu"][data-state="open"], [role="listbox"][data-state="open"]'
-        )
+        hasBlockingOpenOverlay()
       )
         return
       if (
@@ -1001,6 +1029,10 @@ export function useMainWindowEventListeners() {
     const setupMenuListeners = async () => {
       logger.debug('Setting up menu event listeners')
       const unlisteners = await Promise.all([
+        listen<RunEnvironmentStartedEvent>(
+          'run-environment:started',
+          event => handleRunEnvironmentStarted(event.payload)
+        ),
         listen<{ sessionId: string }>('terminal:working', event => {
           const sessionId = event.payload?.sessionId
           if (!sessionId) return

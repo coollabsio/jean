@@ -33,11 +33,13 @@ describe('RemoteConnectionRecovery', () => {
     )
 
     expect(dismissTransientUi).toHaveBeenCalledOnce()
-    expect(screen.getByRole('heading', { name: /Couldn't connect to Lab/i })).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: /Couldn't connect to Lab/i })
+    ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
     expect(
-      screen.getByRole('button', { name: 'Switch to Local' })
-    ).toBeInTheDocument()
+      screen.queryByRole('button', { name: 'Switch to Local' })
+    ).not.toBeInTheDocument()
   })
 
   it('uses a z-index above dialogs and menus', () => {

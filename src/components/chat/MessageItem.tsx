@@ -24,6 +24,7 @@ import {
 } from './tool-call-utils'
 import { PlanDisplay } from './PlanFileDisplay'
 import { ImageLightbox } from './ImageLightbox'
+import { parseServerResourceKey } from '@/lib/server-resource'
 import { TextFileLightbox } from './TextFileLightbox'
 import { FileMentionBadge } from './FileMentionBadge'
 import { SkillBadge } from './SkillBadge'
@@ -211,6 +212,9 @@ export const MessageItem = memo(function MessageItem({
   // Extract image, text file, file mention, and skill paths and clean content for user messages
   const imagePaths =
     message.role === 'user' ? extractImagePaths(message.content) : []
+  const messageServerId = worktreeId
+    ? parseServerResourceKey(worktreeId)?.serverId
+    : undefined
   const textFilePaths =
     message.role === 'user' ? extractTextFilePaths(message.content) : []
   const fileMentionPaths =
@@ -360,6 +364,9 @@ export const MessageItem = memo(function MessageItem({
             <ImageLightbox
               key={`${message.id}-img-${idx}`}
               src={path}
+              serverId={
+                messageServerId === 'local' ? undefined : messageServerId
+              }
               alt={`Attached image ${idx + 1}`}
               thumbnailClassName="h-20 max-w-40 object-contain rounded border border-border/50 cursor-pointer hover:border-primary/50 transition-colors"
             />

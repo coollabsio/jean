@@ -35,7 +35,6 @@ describe('ReviewMethodModal', () => {
         open
         onOpenChange={noop}
         onAiReview={noop}
-        onFinalReview={noop}
         onCodeRabbitCliReview={noop}
         onCodeRabbitPrReview={noop}
         codeRabbitPrAvailable
@@ -55,44 +54,31 @@ describe('ReviewMethodModal', () => {
     expect(codeRabbitDescription).not.toHaveClass('truncate')
   })
 
-  it('shows Final review immediately after Jean', () => {
+  it('does not offer the redundant Final review option', () => {
     render(
       <ReviewMethodModal
         open
         onOpenChange={noop}
         onAiReview={noop}
-        onFinalReview={noop}
         onCodeRabbitCliReview={noop}
         onCodeRabbitPrReview={noop}
         codeRabbitPrAvailable
       />
     )
 
-    const choices = screen.getAllByRole('button')
-    const jeanIndex = choices.findIndex(choice =>
-      choice.textContent?.includes('Jean review')
-    )
-    const finalReviewIndex = choices.findIndex(choice =>
-      choice.textContent?.includes('Final review')
-    )
-
-    expect(finalReviewIndex).toBe(jeanIndex + 1)
-    expect(
-      screen.getByText('Read-only merge-readiness audit in a new session')
-    ).toBeInTheDocument()
+    expect(screen.queryByText('Final review')).not.toBeInTheDocument()
   })
 
   it('enables numbered shortcuts on native desktop', async () => {
     environment.native = true
-    const onFinalReview = vi.fn()
+    const onCodeRabbitCliReview = vi.fn()
     const user = userEvent.setup()
     render(
       <ReviewMethodModal
         open
         onOpenChange={noop}
         onAiReview={noop}
-        onFinalReview={onFinalReview}
-        onCodeRabbitCliReview={noop}
+        onCodeRabbitCliReview={onCodeRabbitCliReview}
         onCodeRabbitPrReview={noop}
         codeRabbitPrAvailable
       />
@@ -100,7 +86,7 @@ describe('ReviewMethodModal', () => {
 
     expect(screen.getByText('2')).toBeInTheDocument()
     await user.keyboard('2')
-    expect(onFinalReview).toHaveBeenCalledOnce()
+    expect(onCodeRabbitCliReview).toHaveBeenCalledOnce()
   })
 
   it.each([
@@ -111,15 +97,14 @@ describe('ReviewMethodModal', () => {
     async (_, native, mobile) => {
       environment.native = native
       environment.mobile = mobile
-      const onFinalReview = vi.fn()
+      const onCodeRabbitCliReview = vi.fn()
       const user = userEvent.setup()
       render(
         <ReviewMethodModal
           open
           onOpenChange={noop}
           onAiReview={noop}
-          onFinalReview={onFinalReview}
-          onCodeRabbitCliReview={noop}
+          onCodeRabbitCliReview={onCodeRabbitCliReview}
           onCodeRabbitPrReview={noop}
           codeRabbitPrAvailable
         />
@@ -127,7 +112,7 @@ describe('ReviewMethodModal', () => {
 
       expect(screen.queryByText('2')).toBeNull()
       await user.keyboard('2')
-      expect(onFinalReview).not.toHaveBeenCalled()
+      expect(onCodeRabbitCliReview).not.toHaveBeenCalled()
     }
   )
 })

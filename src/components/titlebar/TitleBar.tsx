@@ -21,6 +21,7 @@ import {
   PanelLeftClose,
   Settings,
   X,
+  Server,
 } from 'lucide-react'
 import { usePreferences } from '@/services/preferences'
 import {
@@ -39,6 +40,9 @@ import { FALLBACK_APP_VERSION } from '@/lib/app-version'
 import { applyServerUpdate } from '@/hooks/useServerUpdateCheck'
 import { LinuxWindowControls } from './LinuxWindowControls'
 import { RemoteConnectionsDialog } from '@/components/remote/RemoteConnectionsDialog'
+import { useRemoteConnections } from '@/lib/remote-connections'
+import { useProjectsStore } from '@/store/projects-store'
+import { resolveHeaderServerLabel } from './server-context'
 
 interface TitleBarProps {
   className?: string
@@ -72,6 +76,12 @@ export function TitleBar({
       DEFAULT_KEYBINDINGS.toggle_file_browser) as string
   )
   const native = isNativeApp()
+  const selectedProjectId = useProjectsStore(state => state.selectedProjectId)
+  const remoteConnections = useRemoteConnections()
+  const serverLabel = resolveHeaderServerLabel(
+    selectedProjectId,
+    remoteConnections
+  )
 
   const [appVersion, setAppVersion] = useState<string>(FALLBACK_APP_VERSION)
   useEffect(() => {
@@ -227,13 +237,30 @@ export function TitleBar({
           <span className="truncate text-sm font-semibold text-foreground">
             {hideTitle ? '' : title}
           </span>
+          {native && (
+            <span className="ml-2 flex shrink-0 items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+              <Server className="size-3" />
+              {serverLabel}
+            </span>
+          )}
         </div>
       ) : (
         <div
           className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 max-w-[50%] px-2"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
-          <UnreadBell title={title} hideTitle={hideTitle} />
+          <div className="flex items-center gap-2">
+            <UnreadBell title={title} hideTitle={hideTitle} />
+            {native && (
+              <span
+                className="flex shrink-0 items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+                aria-label={`Current Jean server: ${serverLabel}`}
+              >
+                <Server className="size-3" />
+                {serverLabel}
+              </span>
+            )}
+          </div>
         </div>
       )}
 

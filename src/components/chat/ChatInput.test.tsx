@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@/test/test-utils'
 import { ChatInput } from './ChatInput'
 import { invoke } from '@/lib/transport'
+import type * as EnvironmentModule from '@/lib/environment'
 import { useUIStore } from '@/store/ui-store'
 import {
   appendPromptMetadataToPlainText,
@@ -34,7 +35,7 @@ vi.mock('@/hooks/use-mobile', () => ({
 }))
 
 vi.mock('@/lib/environment', async importOriginal => ({
-  ...(await importOriginal<typeof import('@/lib/environment')>()),
+  ...(await importOriginal<typeof EnvironmentModule>()),
   isNativeApp: () => nativeState.value,
 }))
 
@@ -429,6 +430,40 @@ describe('ChatInput attachments', () => {
       expect(processAttachmentFile).toHaveBeenCalledWith(image, 'session-1')
     })
     expect(invokeMock).not.toHaveBeenCalledWith('read_clipboard_image')
+  })
+
+  it('processes an image once when web clipboard items and files both expose it', async () => {
+    const textarea = renderInput()
+    const itemImage = new File(['png'], 'image.png', {
+      type: 'image/png',
+      lastModified: 123,
+    })
+    const filesImage = new File(['png'], 'image.png', {
+      type: 'image/png',
+      lastModified: 123,
+    })
+    processAttachmentFile.mockResolvedValue(undefined)
+
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        getData: () => '',
+        items: [
+          {
+            type: 'image/png',
+            getAsFile: () => itemImage,
+          },
+        ],
+        files: [filesImage],
+      },
+    })
+
+    await waitFor(() => {
+      expect(processAttachmentFile).toHaveBeenCalledTimes(1)
+    })
+    expect(processAttachmentFile).toHaveBeenCalledWith(
+      itemImage,
+      'session-1'
+    )
   })
 
   it('does not request the desktop clipboard for an empty web paste', async () => {

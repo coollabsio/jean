@@ -74,6 +74,27 @@ AI reviews shares one Code Review session, and `review_results` stores the
 backend/model results together so the review panel can switch between them;
 entries are created with a running status so the dropdown can show loading
 state before each result arrives.
+
+### Client and Server Preference Ownership
+
+Preferences use a strict ownership boundary. Display, input, notification, and
+native-application choices are client-local and persist in the versioned
+`jean-client-preferences-v1` browser storage record. Workflow and operational
+configuration—including favorites, AI defaults, Magic Prompts, Git behavior,
+providers, MCP, CLI sources, integrations, and Web Access—is instance-wide on
+the selected Jean service.
+
+`usePreferences()` temporarily overlays client values onto the legacy server
+response so existing consumers remain compatible. `usePatchPreferences()`
+partitions updates: client keys never cross the backend transport, while server
+keys continue to use backend persistence. New code can use
+`useClientPreferences()` directly.
+
+Servers expose `get_server_preferences`, `update_server_preferences`, and
+`get_server_capabilities`. Server preference responses omit client fields and
+redact secrets to configured flags. Updates use an opaque revision string to
+detect concurrent edits. Capabilities provide the server-owned Magic Prompt
+catalog/defaults; the React UI retains bundled fallbacks for older servers.
 Duplicate pairs are rejected while running. Job progress emits
 `review-job:updated`.
 
@@ -160,6 +181,13 @@ Additional systems (no dedicated docs yet):
   filesystem path to `ssh://[user@]host[:port]/path` and launches the local
   `zed` CLI (SSH fields live on the remote connection profile).
 
+  **Native multi-server scope.** The desktop client can create independent
+  background transports for enabled remote profiles. Each transport is
+  isolated by server ID. Browser Web Access does not use this manager and
+  continues to access only its serving Jean instance. New global client state
+  must use a composite `(serverId, resourceId)` identity; raw server resource
+  IDs are not globally unique.
+
   When an established WebSocket disconnects, the frontend reloads the page
   instead of repairing stale in-memory state. The normal
   HTTP bootstrap then restores current persisted state, while backend-owned
@@ -204,7 +232,7 @@ Additional systems (no dedicated docs yet):
 - **Background Tasks** - Git/PR polling with focus-aware intervals (`src-tauri/src/background_tasks/`); Auto Fix issue polling/planning/yolo handoff and scheduler active-hours window via `chrono` local time with midnight-crossing support (`src-tauri/src/auto_fix/`)
 - **HTTP Server** - Tauri-free Axum server + WebSocket from `jean-core`; `src-server` provides the standalone Tokio adapter. See [server-architecture.md](./server-architecture.md).
 - **Diagnostics** - CPU/memory monitoring panel (`src-tauri/src/diagnostics/`)
-- **MCP** - Model Context Protocol server integration with per-project overrides (`src/services/mcp.ts`). First-party **Jean MCP** (`jean-core/src/jean_mcp_core.rs`) exposes project/worktree/session tools, usage + session model controls (`get_usage`, `set_session_model`), plus the ship loop: `create_commit`, `push_worktree`, `detect_open_pr`, `create_pull_request`, `merge_pull_request`, `run_review` (thin wrappers over existing project commands).
+- **MCP** - Model Context Protocol server integration with per-project overrides (`src/services/mcp.ts`). First-party **Jean MCP** (`jean-core/src/jean_mcp_core.rs`) exposes project/worktree/session tools, usage + session model controls (`get_usage`, `set_session_model`), Run-command / panel-command dev environments (`get_run_environments`: running state, worktree/base session, startup command, ports, URL), plus the ship loop: `create_commit`, `push_worktree`, `detect_open_pr`, `create_pull_request`, `merge_pull_request`, `run_review` (thin wrappers over existing project commands).
 - **Model Catalog** - CDN-driven model lists and reasoning capabilities with bundled offline fallback ([model-catalog.md](./model-catalog.md))
 - **CLI Management** - Claude CLI, Codex CLI, Cursor CLI, OpenCode, PI, Command Code, Grok, Kimi Code, and gh CLI installation/versioning (backend-specific modules under `src-tauri/src/`)
 
@@ -212,6 +240,7 @@ Cursor-specific notes:
 
 - Cursor auth/status checks must use short timeouts; `cursor-agent status/about` can hang indefinitely
 - Cursor chat integration should use `cursor-agent --print --output-format stream-json` and parse structured NDJSON, not terminal text scraping
+- Native Windows does not provide Cursor's OS sandbox, so Jean uses Cursor's `--sandbox disabled` allowlist mode there; enable WSL and use the Linux CLI when OS-level sandboxing is required
 - Cursor only supports `--mode plan` and `--mode ask`; build/yolo omit `--mode` (defaults to full agent) and use `--sandbox disabled --force`
 - Cursor `plan` runs synthesize an `EnterPlanMode` timeline item from Jean so the native plan banner/instructions survive streaming + JSONL reload
 - Cursor history repair should prefer complete message snapshots / repeated-prefix cleanup; avoid destructive suffix trimming during reload

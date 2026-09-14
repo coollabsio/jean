@@ -34,6 +34,7 @@ interface MobileToolbarMenuProps {
   isDisabled: boolean
   hasOpenPr: boolean
   hasIssueContexts: boolean
+  hasSentryContexts?: boolean
   hasPrContexts: boolean
 
   onSaveContext: () => void
@@ -54,6 +55,7 @@ export function MobileToolbarMenu({
   isDisabled,
   hasOpenPr,
   hasIssueContexts,
+  hasSentryContexts = false,
   hasPrContexts,
   onSaveContext,
   onLoadContext,
@@ -85,9 +87,12 @@ export function MobileToolbarMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align={isMobile ? 'end' : 'start'}
-        className="w-56 max-h-[min(80vh,640px)] overflow-y-auto"
+        className={cn(
+          'max-h-[min(80vh,640px)] overflow-y-auto',
+          isMobile ? 'w-[calc(100vw-1rem)] max-w-none grid grid-cols-2' : 'w-56'
+        )}
       >
-        <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+        <div className="col-span-2 px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
           Context
         </div>
         <DropdownMenuItem onClick={onSaveContext}>
@@ -154,9 +159,31 @@ export function MobileToolbarMenu({
           </span>
         </DropdownMenuItem>
 
-        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onClick={() => {
+            setMenuOpen(false)
+            window.dispatchEvent(
+              new CustomEvent('magic-command', {
+                detail: { command: 'check-github-issues' },
+              })
+            )
+          }}
+        >
+          <Bug className="h-4 w-4" />
+          Check GitHub Issues
+          <span
+            className={cn(
+              'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
+              isMobile && 'hidden'
+            )}
+          >
+            Q
+          </span>
+        </DropdownMenuItem>
 
-        <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+        <DropdownMenuSeparator className="col-span-2" />
+
+        <div className="col-span-2 px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
           Commit
         </div>
         <DropdownMenuItem onClick={onCommit}>
@@ -201,9 +228,9 @@ export function MobileToolbarMenu({
           </span>
         </DropdownMenuItem>
 
-        <DropdownMenuSeparator />
+        <DropdownMenuSeparator className="col-span-2" />
 
-        <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+        <div className="col-span-2 px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
           Sync
         </div>
         <DropdownMenuItem onClick={handleSyncClick}>
@@ -243,9 +270,9 @@ export function MobileToolbarMenu({
           </span>
         </DropdownMenuItem>
 
-        <DropdownMenuSeparator />
+        <DropdownMenuSeparator className="col-span-2" />
 
-        <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+        <div className="col-span-2 px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
           Pull Request
         </div>
         <DropdownMenuItem onClick={onOpenPr}>
@@ -309,9 +336,9 @@ export function MobileToolbarMenu({
           </span>
         </DropdownMenuItem>
 
-        <DropdownMenuSeparator />
+        <DropdownMenuSeparator className="col-span-2" />
 
-        <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+        <div className="col-span-2 px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
           Release
         </div>
         <DropdownMenuItem
@@ -349,19 +376,22 @@ export function MobileToolbarMenu({
           </span>
         </DropdownMenuItem>
 
-        <DropdownMenuSeparator />
+        <DropdownMenuSeparator className="col-span-2" />
 
-        <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+        <div className="col-span-2 px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
           Investigate
         </div>
         <DropdownMenuItem
-          disabled={!hasIssueContexts}
+          disabled={!hasIssueContexts && !hasSentryContexts}
           onClick={() => {
-            if (!hasIssueContexts) return
+            if (!hasIssueContexts && !hasSentryContexts) return
             setMenuOpen(false)
             window.dispatchEvent(
               new CustomEvent('magic-command', {
-                detail: { command: 'investigate', type: 'issue' },
+                detail: {
+                  command: 'investigate',
+                  type: hasIssueContexts ? 'issue' : 'sentry-issue',
+                },
               })
             )
           }}
@@ -401,9 +431,9 @@ export function MobileToolbarMenu({
           </span>
         </DropdownMenuItem>
 
-        <DropdownMenuSeparator />
+        <DropdownMenuSeparator className="col-span-2" />
 
-        <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+        <div className="col-span-2 px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
           Branch
         </div>
         <DropdownMenuItem onClick={onMerge}>

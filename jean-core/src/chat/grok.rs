@@ -631,7 +631,7 @@ fn strip_ansi(input: &str) -> String {
 }
 
 /// Default Grok model used when no Grok-specific model is supplied.
-pub const GROK_DEFAULT_MODEL: &str = "grok-4.5";
+pub const GROK_DEFAULT_MODEL: &str = "grok-4.6";
 
 fn raw_grok_model(model: Option<&str>) -> Option<&str> {
     match model.map(|value| value.strip_prefix("grok/").unwrap_or(value)) {
@@ -4773,9 +4773,14 @@ mod tests {
         assert_eq!(resolve_one_shot_grok_model("sonnet"), GROK_DEFAULT_MODEL);
         // Grok models pass through unchanged.
         assert_eq!(resolve_one_shot_grok_model("grok-build"), "grok-build");
+        assert_eq!(GROK_DEFAULT_MODEL, "grok-4.6");
         assert_eq!(
             resolve_one_shot_grok_model("grok/grok-4.5"),
             "grok/grok-4.5"
+        );
+        assert_eq!(
+            resolve_one_shot_grok_model("grok/grok-4.6"),
+            "grok/grok-4.6"
         );
     }
 

@@ -50,6 +50,7 @@ interface BrowserState {
   // Tab actions
   addTab: (worktreeId: string, url?: string) => string
   removeTab: (worktreeId: string, tabId: string) => void
+  clearWorktreeState: (worktreeId: string) => string[]
   setActiveTab: (worktreeId: string, tabId: string) => void
   updateTab: (tabId: string, patch: Partial<Omit<BrowserTab, 'id'>>) => void
   setTabUrl: (tabId: string, url: string) => void
@@ -180,6 +181,39 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
           : state.bottomPanelOpen,
       }
     }),
+
+  clearWorktreeState: worktreeId => {
+    const state = get()
+    const tabIds = (state.tabs[worktreeId] ?? []).map(tab => tab.id)
+    const hasWorktreeState =
+      tabIds.length > 0 ||
+      worktreeId in state.tabs ||
+      worktreeId in state.activeTabIds ||
+      worktreeId in state.sidePaneOpen ||
+      worktreeId in state.modalOpen ||
+      worktreeId in state.bottomPanelOpen
+    if (!hasWorktreeState) return []
+
+    set(current => {
+      const { [worktreeId]: _tabs, ...tabs } = current.tabs
+      const { [worktreeId]: _activeTab, ...activeTabIds } =
+        current.activeTabIds
+      const { [worktreeId]: _sidePane, ...sidePaneOpen } =
+        current.sidePaneOpen
+      const { [worktreeId]: _modal, ...modalOpen } = current.modalOpen
+      const { [worktreeId]: _bottomPanel, ...bottomPanelOpen } =
+        current.bottomPanelOpen
+      return {
+        tabs,
+        activeTabIds,
+        sidePaneOpen,
+        modalOpen,
+        bottomPanelOpen,
+      }
+    })
+
+    return tabIds
+  },
 
   setActiveTab: (worktreeId, tabId) =>
     set(state => {

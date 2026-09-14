@@ -9,6 +9,8 @@ import type {
 import type { EditorOptions } from '@pierre/diffs/edit'
 import { getFileLineStats } from '@/lib/diff-stats'
 import { cn } from '@/lib/utils'
+import { convertProjectFileSrc } from '@/lib/transport'
+import { useUIStore } from '@/store/ui-store'
 import type { SyntaxTheme } from '@/types/preferences'
 import {
   PierreEditProvider,
@@ -30,6 +32,8 @@ export interface DiffComment {
 export interface MemoizedFileDiffProps {
   fileDiff: FileDiffMetadata
   fileName: string
+  rootPath?: string
+  isBinary?: boolean
   annotations: DiffLineAnnotation<DiffComment>[]
   selectedLines: SelectedLineRange | null
   themeType: 'dark' | 'light'
@@ -65,6 +69,8 @@ export const MemoizedFileDiff = memo(
   function MemoizedFileDiff({
     fileDiff,
     fileName,
+    rootPath,
+    isBinary = false,
     annotations,
     selectedLines,
     themeType,
@@ -126,6 +132,10 @@ export const MemoizedFileDiff = memo(
 
     // Calculate stats from hunks for the header
     const stats = useMemo(() => getFileLineStats(fileDiff), [fileDiff])
+    const absolutePath = rootPath
+      ? `${rootPath.replace(/[\\/]+$/, '')}/${fileName.replace(/^[\\/]+/, '')}`
+      : fileName
+    const isImage = /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(fileName)
 
     return (
       <div className="border border-border">
@@ -153,7 +163,25 @@ export const MemoizedFileDiff = memo(
           </div>
         </div>
         {/* Diff content */}
-        {fileDiff.hunks.length === 0 ||
+        {isBinary && isImage && fileDiff.type !== 'deleted' ? (
+          <button
+            type="button"
+            className="flex w-full cursor-zoom-in justify-center bg-black/5 p-3"
+            onClick={() =>
+              useUIStore.getState().setViewingFilePath(absolutePath)
+            }
+          >
+            <img
+              src={convertProjectFileSrc(absolutePath)}
+              alt={`Preview ${fileName}`}
+              className="max-h-[70vh] max-w-full object-contain"
+            />
+          </button>
+        ) : isBinary ? (
+          <div className="px-4 py-8 text-center text-muted-foreground text-sm">
+            {fileDiff.type === 'deleted' ? 'Binary file deleted' : 'Binary file'}
+          </div>
+        ) : fileDiff.hunks.length === 0 ||
         fileDiff.hunks.every(h => h.hunkContent.length === 0) ? (
           <div className="px-4 py-8 text-center text-muted-foreground text-sm">
             {fileDiff.type === 'deleted'

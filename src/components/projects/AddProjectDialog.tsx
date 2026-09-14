@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useEffectEvent, useState } from 'react'
-import { isLocalBackend } from '@/lib/environment'
+import { isLocalBackend, isNativeApp } from '@/lib/environment'
 import { invoke } from '@/lib/transport'
 import { FolderOpen, FolderPlus, Globe } from 'lucide-react'
 import {
@@ -13,6 +13,10 @@ import { Kbd } from '@/components/ui/kbd'
 import { useProjectsStore } from '@/store/projects-store'
 import { useAddProject, useInitProject } from '@/services/projects'
 import { DirectoryBrowser } from '@/components/projects/DirectoryBrowser'
+import { ServerTargetSelect } from './ServerTargetSelect'
+import { LOCAL_SERVER_ID } from '@/types/server-resource'
+import { parseServerResourceKey } from '@/lib/server-resource'
+import { getActiveConnectionId } from '@/lib/remote-connections'
 
 export function AddProjectDialog() {
   const {
@@ -23,6 +27,13 @@ export function AddProjectDialog() {
   const addProject = useAddProject()
   const initProject = useInitProject()
   const [browserMode, setBrowserMode] = useState<'select' | 'save' | null>(null)
+  const parentServerId = addProjectParentFolderId
+    ? parseServerResourceKey(addProjectParentFolderId)?.serverId
+    : undefined
+  const [targetServerId, setTargetServerId] = useState(
+    parentServerId ?? getActiveConnectionId() ?? LOCAL_SERVER_ID
+  )
+  const effectiveServerId = parentServerId ?? targetServerId
 
   const handleCloneRemote = useCallback(() => {
     const { openCloneModal } = useProjectsStore.getState()
@@ -34,7 +45,7 @@ export function AddProjectDialog() {
   const handleAddExisting = useCallback(async () => {
     // Remote backends (and pure web) must browse the server filesystem via
     // DirectoryBrowser — the native OS picker only sees the local machine.
-    if (!isLocalBackend()) {
+    if (!isLocalBackend() || effectiveServerId !== LOCAL_SERVER_ID) {
       setBrowserMode('select')
       return
     }
@@ -52,6 +63,7 @@ export function AddProjectDialog() {
           await addProject.mutateAsync({
             path: selected,
             parentId: addProjectParentFolderId ?? undefined,
+            serverId: isNativeApp() ? effectiveServerId : undefined,
           })
           setAddProjectDialogOpen(false)
         } catch (error) {
@@ -82,12 +94,17 @@ export function AddProjectDialog() {
       }
       // Other errors handled by mutation
     }
-  }, [addProject, addProjectParentFolderId, setAddProjectDialogOpen])
+  }, [
+    addProject,
+    addProjectParentFolderId,
+    effectiveServerId,
+    setAddProjectDialogOpen,
+  ])
 
   const handleInitNew = useCallback(async () => {
     // Remote backends (and pure web) must browse the server filesystem via
     // DirectoryBrowser — the native OS picker only sees the local machine.
-    if (!isLocalBackend()) {
+    if (!isLocalBackend() || effectiveServerId !== LOCAL_SERVER_ID) {
       setBrowserMode('save')
       return
     }
@@ -120,6 +137,7 @@ export function AddProjectDialog() {
         await initProject.mutateAsync({
           path: selected,
           parentId: addProjectParentFolderId ?? undefined,
+          serverId: isNativeApp() ? effectiveServerId : undefined,
         })
         setAddProjectDialogOpen(false)
       }
@@ -130,7 +148,12 @@ export function AddProjectDialog() {
       }
       // Other errors handled by mutation
     }
-  }, [initProject, addProjectParentFolderId, setAddProjectDialogOpen])
+  }, [
+    initProject,
+    addProjectParentFolderId,
+    effectiveServerId,
+    setAddProjectDialogOpen,
+  ])
 
   const handleBrowserOpenChange = useCallback((open: boolean) => {
     if (!open) setBrowserMode(null)
@@ -143,6 +166,7 @@ export function AddProjectDialog() {
           await addProject.mutateAsync({
             path: selected,
             parentId: addProjectParentFolderId ?? undefined,
+            serverId: isNativeApp() ? effectiveServerId : undefined,
           })
           setAddProjectDialogOpen(false)
           setBrowserMode(null)
@@ -185,6 +209,7 @@ export function AddProjectDialog() {
         await initProject.mutateAsync({
           path: selected,
           parentId: addProjectParentFolderId ?? undefined,
+          serverId: isNativeApp() ? effectiveServerId : undefined,
         })
         setAddProjectDialogOpen(false)
         setBrowserMode(null)
@@ -194,6 +219,7 @@ export function AddProjectDialog() {
       addProject,
       addProjectParentFolderId,
       browserMode,
+      effectiveServerId,
       initProject,
       setAddProjectDialogOpen,
     ]
@@ -253,6 +279,11 @@ export function AddProjectDialog() {
           </DialogHeader>
 
           <div className="grid gap-3 py-4">
+            <ServerTargetSelect
+              value={effectiveServerId}
+              onChange={setTargetServerId}
+              disabled={isPending || parentServerId !== undefined}
+            />
             <button
               type="button"
               onClick={handleAddExisting}
@@ -332,6 +363,7 @@ export function AddProjectDialog() {
             : 'Choose an existing git repository folder.'
         }
         defaultName={browserMode === 'save' ? 'my-project' : undefined}
+        serverId={isNativeApp() ? effectiveServerId : undefined}
       />
     </>
   )

@@ -35,18 +35,6 @@ function hasAttachments(msg: QueuedMessage): boolean {
   )
 }
 
-// Claude, Kimi, and Antigravity have no mid-turn steer API — their queued
-// prompts stay editable and "send now" falls back to promote + cancel.
-function supportsSteering(msg: QueuedMessage): boolean {
-  const backend = msg.backend ?? 'claude'
-  return (
-    backend === 'codex' ||
-    backend === 'opencode' ||
-    backend === 'pi' ||
-    backend === 'grok'
-  )
-}
-
 /**
  * Actions for the queued prompts panel: remove a queued prompt, or send a
  * specific queued prompt immediately.
@@ -82,7 +70,7 @@ export function useQueuedPromptActions() {
       const msg = store
         .getQueuedMessages(sessionId)
         .find(m => m.id === messageId)
-      if (!msg || supportsSteering(msg)) return
+      if (!msg) return
 
       const { worktreeId, worktreePath } = resolveWorktree(sessionId)
       if (!worktreeId || !worktreePath) return

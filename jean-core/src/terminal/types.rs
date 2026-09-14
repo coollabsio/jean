@@ -27,6 +27,16 @@ pub struct TerminalStoppedEvent {
     pub signal: Option<String>,
 }
 
+/// A TCP port that a terminal's child process is listening on
+#[derive(Clone, Serialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalPortInfo {
+    pub terminal_id: String,
+    pub port: u16,
+    pub process_name: String,
+    pub local_address: String,
+}
+
 /// Active terminal session state
 pub struct TerminalSession {
     pub terminal_id: String,
@@ -35,4 +45,8 @@ pub struct TerminalSession {
     pub child: Box<dyn Child + Send + Sync>,
     pub cols: u16,
     pub rows: u16,
+    pub worktree_path: String,
+    pub command: Option<String>,
+    pub command_args: Option<Vec<String>>,
+    pub session_id: Option<String>,
 }

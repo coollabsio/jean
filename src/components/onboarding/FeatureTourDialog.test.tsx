@@ -7,13 +7,12 @@ import { FeatureTourDialog } from './FeatureTourDialog'
 
 const mocks = vi.hoisted(() => ({
   patchPreferencesMutate: vi.fn(),
+  preferences: undefined as { has_seen_feature_tour: boolean } | undefined,
 }))
 
 vi.mock('@/services/preferences', () => ({
   usePreferences: () => ({
-    data: {
-      has_seen_feature_tour: false,
-    },
+    data: mocks.preferences,
   }),
   usePatchPreferences: () => ({ mutate: mocks.patchPreferencesMutate }),
 }))
@@ -29,6 +28,7 @@ function renderTour() {
 describe('FeatureTourDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.preferences = { has_seen_feature_tour: false }
     act(() => {
       useUIStore.setState({ featureTourOpen: false })
     })
@@ -66,8 +66,8 @@ describe('FeatureTourDialog', () => {
       'Codex',
       'OpenCode',
       'Cursor',
-      'Pi (Beta)',
-      'Command Code (Beta)',
+      'Pi',
+      'Command Code',
     ]) {
       expect(screen.getByText(backend)).toBeInTheDocument()
     }
@@ -98,4 +98,31 @@ describe('FeatureTourDialog', () => {
     })
     expect(useUIStore.getState().featureTourOpen).toBe(false)
   })
+
+  it.each([
+    [
+      'close button',
+      (user: ReturnType<typeof userEvent.setup>) =>
+        user.click(screen.getByRole('button', { name: /close/i })),
+    ],
+    [
+      'Skip button',
+      (user: ReturnType<typeof userEvent.setup>) =>
+        user.click(screen.getByRole('button', { name: /skip/i })),
+    ],
+  ])(
+    'marks the tour as seen with the %s before preferences load',
+    async (_name, dismiss) => {
+      const user = userEvent.setup()
+      mocks.preferences = undefined
+      renderTour()
+
+      await dismiss(user)
+
+      expect(mocks.patchPreferencesMutate).toHaveBeenCalledWith({
+        has_seen_feature_tour: true,
+      })
+      expect(useUIStore.getState().featureTourOpen).toBe(false)
+    }
+  )
 })
