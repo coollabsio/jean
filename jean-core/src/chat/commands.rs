@@ -1,8 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -12,7 +11,9 @@ use tauri::AppHandle;
 use uuid::Uuid;
 
 use super::naming::{spawn_naming_task, NamingRequest};
-use super::registry::{cancel_process, cancel_process_if_running};
+use super::registry::{
+    cancel_process, cancel_process_if_running, has_active_send, release_active_send, SendClaim,
+};
 use super::run_log;
 use super::storage::{
     cleanup_combined_context_files, delete_session_data, get_base_index_path, get_data_dir,
@@ -98,8 +99,6 @@ When specifying subagent_type for Task tool calls, always use the fully qualifie
 /// prevents this process from spawning two backend drain loops for one session.
 static BACKEND_QUEUE_DRAINING: Lazy<Mutex<HashSet<String>>> =
     Lazy::new(|| Mutex::new(HashSet::new()));
-
-use super::registry::{has_active_send, release_active_send, SendClaim};
 
 /// Whether a session has no prior user messages for auto-naming purposes.
 ///
@@ -2664,26 +2663,25 @@ pub async fn send_chat_message(
 
     clear_stale_pending_cancel_before_send(&session_id);
 
-    // Guard: atomically claim the session's send slot for the duration of this
-    // call. Closes the race window where two concurrent sends (queue processor
-    // vs backend drain vs another client) both pass the registry check below
-    // before either registers a process.
-    let Some(_send_claim) = SendClaim::try_acquire(&session_id) else {
-        log::warn!(
-            "[SendChat] REJECTED session={session_id} — concurrent send in flight (duplicate send)"
-        );
-        return Err("Session already has an active request".to_string());
-    };
-
-    // Guard: reject if this session already has an active process being tailed.
-    // Without this, a double-send (frontend race, page reload, etc.) creates
-    // duplicate run entries and orphans the first process in the registry.
+    // Check existing managed work before taking our own active-send claim.
+    // is_session_actively_managed includes active-send claims, so checking it
+    // after acquisition would reject every new send as its own duplicate.
     if super::registry::is_session_actively_managed(&session_id) {
         log::warn!(
             "[SendChat] REJECTED session={session_id} — already actively managed (duplicate send)"
         );
         return Err("Session already has an active request".to_string());
     }
+
+    // Atomically claim the session's send slot for the duration of this call.
+    // Two callers can pass the check above concurrently, but only one can take
+    // this claim before either caller registers a process.
+    let Some(_send_claim) = SendClaim::try_acquire(&session_id) else {
+        log::warn!(
+            "[SendChat] REJECTED session={session_id} — concurrent send in flight (duplicate send)"
+        );
+        return Err("Session already has an active request".to_string());
+    };
 
     // Load sessions
     let mut sessions = load_sessions(&app, &worktree_path, &worktree_id)?;
@@ -8461,7 +8459,8 @@ pub async fn check_resumable_sessions(
 
     // This calls recover_incomplete_runs which updates statuses and returns info.
     // Note: recover_incomplete_runs skips sessions that are actively managed
-    // (in PROCESS_REGISTRY or CANCEL_FLAGS) to avoid corrupting their metadata.
+    // (including sends still preparing a backend process) to avoid corrupting
+    // their metadata.
     let recovered = super::run_log::recover_incomplete_runs(&app)?;
 
     let mut resumable: Vec<_> = recovered.into_iter().filter(|r| r.resumable).collect();
