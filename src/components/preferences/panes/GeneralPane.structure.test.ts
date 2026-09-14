@@ -48,6 +48,16 @@ describe('GeneralPane settings structure', () => {
     }
   })
 
+  it('places managed uninstall actions below the full-width source cards', () => {
+    const source = readFileSync(
+      'src/components/preferences/panes/GeneralPane.tsx',
+      'utf8'
+    )
+
+    expect(source.match(/className="w-full space-y-3"/g)).toHaveLength(7)
+    expect(source.match(/<BackendCliSourceCards/g)).toHaveLength(7)
+  })
+
   it('renders the Kimi auto-steer toggle inside Kimi settings', () => {
     const source = readFileSync(
       'src/components/preferences/panes/GeneralPane.tsx',
@@ -92,6 +102,29 @@ describe('GeneralPane settings structure', () => {
     expect(grokSection).not.toContain('grokCliQueryKeys.auth()')
   })
 
+  // Regression #627/#649: default backend picker must list installed CLIs even
+  // when auth probes return false (login is gated at send time instead).
+  it('filters default backend options by install status only, not auth', () => {
+    const source = readFileSync(
+      'src/components/preferences/panes/GeneralPane.tsx',
+      'utf8'
+    )
+
+    expect(source).toContain('const claudeInstalled = !!cliStatus?.installed')
+    expect(source).toContain('const codexInstalled = !!codexStatus?.installed')
+    expect(source).toContain(
+      'const opencodeInstalled = !!opencodeStatus?.installed'
+    )
+    expect(source).toContain(
+      'const antigravityInstalled = !!antigravityStatus?.installed'
+    )
+    expect(source).not.toMatch(
+      /claudeInstalled\s*=\s*!!cliStatus\?\.installed\s*&&\s*!!claudeAuth\?\.authenticated/
+    )
+    expect(source).not.toContain('claudeUsable')
+    expect(source).toContain('installedBackendOptions.map(option =>')
+  })
+
   it('renders build and yolo reasoning overrides from model capabilities', () => {
     const source = readFileSync(
       'src/components/preferences/panes/GeneralPane.tsx',
@@ -105,6 +138,22 @@ describe('GeneralPane settings structure', () => {
     expect(executionOverrides).toContain('buildReasoning.levels.map')
     expect(executionOverrides).toContain('yoloReasoning.levels.map')
     expect(executionOverrides).not.toContain('? codexReasoningOptions')
+  })
+
+  it('uses Grok models for build and yolo overrides when Grok is selected', () => {
+    const source = readFileSync(
+      'src/components/preferences/panes/GeneralPane.tsx',
+      'utf8'
+    )
+    const executionOverrides = source.slice(
+      source.indexOf('Build execution'),
+      source.indexOf('AI Language')
+    )
+
+    expect(
+      executionOverrides.match(/effective(?:Build|Yolo)Backend === 'grok'/g)
+    ).toHaveLength(2)
+    expect(executionOverrides.match(/\? grokModelOptions/g)).toHaveLength(2)
   })
 
   // Regression #505: shared patchPreferences.isPending made the AI Language

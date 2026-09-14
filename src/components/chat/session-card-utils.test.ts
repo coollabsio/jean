@@ -134,6 +134,38 @@ describe('native client resume sessions', () => {
     })
   })
 
+  it('builds an Antigravity resume launch with --conversation', () => {
+    const antigravitySession: Session = {
+      ...session,
+      name: 'Antigravity conversation support',
+      backend: 'antigravity',
+      codex_thread_id: undefined,
+      antigravity_session_id: 'agy-conv-1',
+    }
+
+    expect(getResumeArgs(antigravitySession)).toEqual({
+      command: 'agy',
+      args: ['--conversation', 'agy-conv-1'],
+    })
+    expect(
+      buildNativeClientSessionInput(
+        antigravitySession,
+        'worktree-1',
+        '/tmp/worktree-1'
+      )
+    ).toEqual({
+      worktreeId: 'worktree-1',
+      worktreePath: '/tmp/worktree-1',
+      name: 'Antigravity conversation support (Native)',
+      backend: 'antigravity',
+      primarySurface: 'terminal',
+      terminalCommand: 'agy',
+      terminalCommandArgs: ['--conversation', 'agy-conv-1'],
+      terminalLabel: 'Antigravity conversation support (Native)',
+      nativeSessionId: 'agy-conv-1',
+    })
+  })
+
   it('builds a Kimi Code resume launch with --session', () => {
     const kimiSession: Session = {
       ...session,
@@ -618,6 +650,26 @@ describe('computeSessionCardData', () => {
 
     expect(card.isWaiting).toBe(true)
     expect(card.status).toBe('input_required')
+  })
+
+  it('ignores stale persisted waiting state after a Claude turn starts sending', () => {
+    const session: Session = {
+      ...createBaseSession(),
+      backend: 'claude',
+      waiting_for_input: true,
+      waiting_for_input_type: 'question',
+      last_run_status: 'running',
+      last_run_execution_mode: 'yolo',
+    }
+    const storeState = createBaseStoreState({
+      sendingSessionIds: { 'session-1': true },
+      executingModes: { 'session-1': 'yolo' },
+    })
+
+    const card = computeSessionCardData(session, storeState)
+
+    expect(card.isWaiting).toBe(false)
+    expect(card.status).toBe('yoloing')
   })
 
   it('maps cancelled last_run_status to cancelled (not idle)', () => {

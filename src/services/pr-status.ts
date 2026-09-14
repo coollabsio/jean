@@ -10,6 +10,8 @@ import { useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { isTauri, updateWorktreeCachedStatus } from '@/services/projects'
+import { projectsQueryKeys } from '@/services/projects'
+import type { Worktree } from '@/types/projects'
 import type { PrStatusEvent } from '@/types/pr-status'
 
 // ============================================================================
@@ -54,6 +56,31 @@ export function usePrStatusEvents(
           status
         )
 
+        // GitHub allows changing an open PR's target branch. Reconcile Jean's
+        // linked worktree so diffs, pull/merge actions, and branch badges use
+        // the current PR base instead of the base captured at import time.
+        const worktreeQueries = queryClient.getQueriesData<Worktree[]>({
+          queryKey: projectsQueryKeys.all,
+        })
+        for (const [key, worktrees] of worktreeQueries) {
+          if (!Array.isArray(worktrees)) continue
+          const index = worktrees.findIndex(w => w.id === status.worktree_id)
+          const worktree = worktrees[index]
+          if (
+            !status.base_branch ||
+            !worktree ||
+            worktree.base_branch === status.base_branch
+          )
+            continue
+
+          const updated = [...worktrees]
+          updated[index] = {
+            ...worktree,
+            base_branch: status.base_branch,
+          }
+          queryClient.setQueryData(key, updated)
+        }
+
         // Persist to worktree cached status (fire and forget)
         updateWorktreeCachedStatus(
           status.worktree_id,
@@ -61,7 +88,16 @@ export function usePrStatusEvents(
           status.display_status,
           status.check_status,
           null, // behind_count - handled by git-status service
-          null // ahead_count - handled by git-status service
+          null, // ahead_count - handled by git-status service
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          status.base_branch ?? null
         ).catch(() => {
           /* silent */
         })

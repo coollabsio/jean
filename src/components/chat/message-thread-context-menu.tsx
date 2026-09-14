@@ -54,6 +54,13 @@ export function MessageThreadContextMenu({
   onCopyMessage,
 }: MessageThreadContextMenuProps) {
   const [selection, setSelection] = useState('')
+  const [linkUrl, setLinkUrl] = useState('')
+
+  const handleContextMenu = useCallback((event: React.MouseEvent) => {
+    const target = event.target
+    const link = target instanceof Element ? target.closest('a[href]') : null
+    setLinkUrl(link instanceof HTMLAnchorElement ? link.href : '')
+  }, [])
 
   const handleOpenChange = useCallback((open: boolean) => {
     // Capture selection when the menu opens — opening the menu can clear
@@ -69,6 +76,13 @@ export function MessageThreadContextMenu({
       .then(() => toast.success('Copied to clipboard'))
       .catch(() => toast.error('Failed to copy'))
   }, [selection])
+
+  const handleCopyUrl = useCallback(() => {
+    if (!linkUrl) return
+    void copyToClipboard(linkUrl)
+      .then(() => toast.success('Copied to clipboard'))
+      .catch(() => toast.error('Failed to copy'))
+  }, [linkUrl])
 
   const handleCopyMessage = useCallback(() => {
     if (onCopyMessage) {
@@ -89,8 +103,16 @@ export function MessageThreadContextMenu({
 
   return (
     <ContextMenu onOpenChange={handleOpenChange}>
-      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+      <ContextMenuTrigger asChild onContextMenu={handleContextMenu}>
+        {children}
+      </ContextMenuTrigger>
       <ContextMenuContent className="w-48">
+        {linkUrl && (
+          <ContextMenuItem onSelect={handleCopyUrl}>
+            <Copy className="h-4 w-4" />
+            Copy URL
+          </ContextMenuItem>
+        )}
         {canCopySelection && (
           <ContextMenuItem onSelect={handleCopySelection}>
             <Copy className="h-4 w-4" />

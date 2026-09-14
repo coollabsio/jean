@@ -23,6 +23,13 @@ import type {
 import type { GitDiff, CommitHistoryResult } from '@/types/git-diff'
 import { toastActionLabel } from '@/lib/toast-action-label'
 import { logger } from '@/lib/logger'
+import { queryClient } from '@/lib/query-client'
+
+function invalidateJeanConfigQueries() {
+  queryClient.invalidateQueries({ queryKey: ['run-scripts'] })
+  queryClient.invalidateQueries({ queryKey: ['ports'] })
+  queryClient.invalidateQueries({ queryKey: ['jean-config'] })
+}
 
 // ============================================================================
 // Types
@@ -258,6 +265,7 @@ export async function performGitPull(opts: GitPullOptions): Promise<boolean> {
   try {
     await gitPull(worktreePath, baseBranch, remote)
     await triggerImmediateGitPoll()
+    invalidateJeanConfigQueries()
     if (projectId) fetchWorktreesStatus(projectId)
     if (keepLoadingOnSuccess) {
       // Caller continues the flow (e.g. push after pull)
@@ -293,6 +301,7 @@ export async function performGitPull(opts: GitPullOptions): Promise<boolean> {
         toast.loading('Restoring stashed changes...', { id: toastId })
         await gitStashPop(worktreePath)
         await triggerImmediateGitPoll()
+        invalidateJeanConfigQueries()
         if (projectId) fetchWorktreesStatus(projectId)
         if (keepLoadingOnSuccess) {
           toast.loading(loadingMessage ?? `Syncing ${label}...`, {
@@ -381,7 +390,7 @@ export async function performGitPull(opts: GitPullOptions): Promise<boolean> {
 export interface GitSyncOptions {
   /** When true, pull first (if pull fails, push is skipped) */
   needsPull: boolean
-  /** When true, push after a successful pull (or immediately if no pull) */
+  /** Whether the branch needs pushing before the sync starts */
   needsPush: boolean
   pull: GitPullOptions
   prNumber?: number
@@ -390,12 +399,15 @@ export interface GitSyncOptions {
 }
 
 /**
- * One-click git sync: pull (when behind) then push (when ahead).
+ * One-click git sync: pull (when behind) then push.
  * Uses a single "Syncing …" toast for the whole operation.
+ * A successful pull is always followed by a push because merging the remote
+ * branch can create a new local commit that was not ahead before the pull.
  * Skips push if pull was requested and failed.
  */
 export async function performGitSync(opts: GitSyncOptions): Promise<void> {
   const { needsPull, needsPush, pull, prNumber, pushRemote } = opts
+  const shouldPush = needsPush || needsPull
 
   if (!needsPull && !needsPush) return
 
@@ -409,18 +421,24 @@ export async function performGitSync(opts: GitSyncOptions): Promise<void> {
       toastId,
       loadingMessage: `Syncing ${label}...`,
       successMessage: 'Synced with remote',
-      keepLoadingOnSuccess: needsPush,
+      keepLoadingOnSuccess: shouldPush,
     })
     if (!pulled) return
   }
 
-  if (!needsPush) return
+  if (!shouldPush) return
 
   try {
     const result = await gitPush(pull.worktreePath, prNumber, pushRemote)
     await triggerImmediateGitPoll()
     if (pull.projectId) fetchWorktreesStatus(pull.projectId)
-    if (result.fellBack) {
+    if (result.permissionDenied) {
+      toast.error('Sync failed', {
+        id: toastId,
+        duration: Infinity,
+        description: result.output.trim() || 'The remote rejected the push.',
+      })
+    } else if (result.fellBack) {
       toast.warning(
         'Could not push to PR branch, pushed to new branch instead',
         { id: toastId }

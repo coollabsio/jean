@@ -1167,6 +1167,25 @@ async fn refresh_claude_access_token(
     Ok(next_oauth.access_token)
 }
 
+/// True when Claude can run via env API key (no OAuth login required).
+fn claude_env_api_key_present() -> bool {
+    std::env::var_os("ANTHROPIC_API_KEY")
+        .map(|v| !v.is_empty())
+        .unwrap_or(false)
+}
+
+/// Fallback auth signals when `claude auth status` is false or unavailable.
+/// Covers keychain/credentials.json OAuth tokens and ANTHROPIC_API_KEY.
+fn claude_credentials_or_env_authenticated() -> bool {
+    if claude_env_api_key_present() {
+        return true;
+    }
+    match load_claude_credentials() {
+        Ok((_, creds)) => credentials_have_access_token(&creds),
+        Err(_) => false,
+    }
+}
+
 /// Check if Claude CLI is authenticated by running a simple query
 pub async fn check_claude_cli_auth(app: AppHandle) -> Result<ClaudeAuthStatus, String> {
     log::trace!("Checking Claude CLI authentication status");
@@ -1211,16 +1230,50 @@ pub async fn check_claude_cli_auth(app: AppHandle) -> Result<ClaudeAuthStatus, S
             .ok()
             .and_then(|v| v.get("loggedIn")?.as_bool())
             .unwrap_or(false);
+        if logged_in {
+            return Ok(ClaudeAuthStatus {
+                authenticated: true,
+                error: None,
+            });
+        }
+        // `auth status` can false-negative while credentials/API key still work
+        // (custom providers, credential store vs CLI status desync). Fall back.
+        if claude_credentials_or_env_authenticated() {
+            log::trace!(
+                "Claude auth status reported loggedOut; treating as authenticated via credentials/env"
+            );
+            return Ok(ClaudeAuthStatus {
+                authenticated: true,
+                error: None,
+            });
+        }
         Ok(ClaudeAuthStatus {
-            authenticated: logged_in,
-            error: if logged_in { None } else { Some(stdout) },
+            authenticated: false,
+            error: Some(if stdout.is_empty() {
+                "Not authenticated".to_string()
+            } else {
+                stdout
+            }),
         })
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         log::warn!("Claude CLI auth check failed: {stderr}");
+        if claude_credentials_or_env_authenticated() {
+            log::trace!(
+                "Claude auth status command failed; treating as authenticated via credentials/env"
+            );
+            return Ok(ClaudeAuthStatus {
+                authenticated: true,
+                error: None,
+            });
+        }
         Ok(ClaudeAuthStatus {
             authenticated: false,
-            error: Some(stderr),
+            error: Some(if stderr.is_empty() {
+                "Not authenticated".to_string()
+            } else {
+                stderr
+            }),
         })
     }
 }
@@ -1489,6 +1542,22 @@ mod tests {
             ..Default::default()
         });
         assert!(credentials_have_access_token(&credentials));
+    }
+
+    #[test]
+    fn claude_env_api_key_present_when_non_empty() {
+        // SAFETY: test-only env mutation in a single-threaded unit test.
+        unsafe {
+            std::env::remove_var("ANTHROPIC_API_KEY");
+        }
+        assert!(!claude_env_api_key_present());
+        unsafe {
+            std::env::set_var("ANTHROPIC_API_KEY", "sk-test");
+        }
+        assert!(claude_env_api_key_present());
+        unsafe {
+            std::env::remove_var("ANTHROPIC_API_KEY");
+        }
     }
 
     #[test]

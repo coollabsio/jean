@@ -34,6 +34,7 @@ interface MobileToolbarMenuProps {
   isDisabled: boolean
   hasOpenPr: boolean
   hasIssueContexts: boolean
+  hasSentryContexts?: boolean
   hasPrContexts: boolean
 
   onSaveContext: () => void
@@ -54,6 +55,7 @@ export function MobileToolbarMenu({
   isDisabled,
   hasOpenPr,
   hasIssueContexts,
+  hasSentryContexts = false,
   hasPrContexts,
   onSaveContext,
   onLoadContext,
@@ -151,6 +153,28 @@ export function MobileToolbarMenu({
             )}
           >
             W
+          </span>
+        </DropdownMenuItem>
+
+        <DropdownMenuItem
+          onClick={() => {
+            setMenuOpen(false)
+            window.dispatchEvent(
+              new CustomEvent('magic-command', {
+                detail: { command: 'check-github-issues' },
+              })
+            )
+          }}
+        >
+          <Bug className="h-4 w-4" />
+          Check GitHub Issues
+          <span
+            className={cn(
+              'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
+              isMobile && 'hidden'
+            )}
+          >
+            Q
           </span>
         </DropdownMenuItem>
 
@@ -355,13 +379,16 @@ export function MobileToolbarMenu({
           Investigate
         </div>
         <DropdownMenuItem
-          disabled={!hasIssueContexts}
+          disabled={!hasIssueContexts && !hasSentryContexts}
           onClick={() => {
-            if (!hasIssueContexts) return
+            if (!hasIssueContexts && !hasSentryContexts) return
             setMenuOpen(false)
             window.dispatchEvent(
               new CustomEvent('magic-command', {
-                detail: { command: 'investigate', type: 'issue' },
+                detail: {
+                  command: 'investigate',
+                  type: hasIssueContexts ? 'issue' : 'sentry-issue',
+                },
               })
             )
           }}

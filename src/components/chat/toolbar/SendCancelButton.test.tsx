@@ -109,7 +109,7 @@ describe('SendCancelButton', () => {
     )
   })
 
-  it('renders queue or steer before cancel', () => {
+  it('renders the primary send/cancel action before queue or steer', () => {
     render(
       <SendCancelButton
         isSending
@@ -122,7 +122,7 @@ describe('SendCancelButton', () => {
     const queue = screen.getByRole('button', { name: /^queue$/i })
     const cancel = screen.getByRole('button', { name: /cancel/i })
     expect(
-      queue.compareDocumentPosition(cancel) & Node.DOCUMENT_POSITION_FOLLOWING
+      cancel.compareDocumentPosition(queue) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
   })
 })

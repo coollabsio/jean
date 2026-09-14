@@ -470,9 +470,10 @@ describe('git-status service', () => {
       expect(mockToast.loading).not.toHaveBeenCalledWith('Pushing changes...')
     })
 
-    it('uses sync toast for pull-only sync', async () => {
+    it('pushes after a pull even when the branch was not ahead before syncing', async () => {
       mockInvoke.mockImplementation(async (cmd: string) => {
         if (cmd === 'git_pull') return 'Already up to date.'
+        if (cmd === 'git_push') return { fellBack: false, remote: 'origin' }
         return undefined
       })
 
@@ -487,6 +488,12 @@ describe('git-status service', () => {
       })
 
       expect(mockToast.loading).toHaveBeenCalledWith('Syncing feature...')
+      expect(mockInvoke).toHaveBeenCalledWith(
+        'git_push',
+        expect.objectContaining({
+          worktreePath: '/path/to/repo',
+        })
+      )
       expect(mockToast.success).toHaveBeenCalledWith(
         'Synced with remote',
         expect.objectContaining({ id: 'toast-1' })
@@ -513,6 +520,39 @@ describe('git-status service', () => {
       expect(mockToast.loading).toHaveBeenCalledWith('Syncing main...')
       expect(mockInvoke).toHaveBeenCalledWith('git_pull', expect.anything())
       expect(mockInvoke).not.toHaveBeenCalledWith('git_push', expect.anything())
+    })
+
+    it('reports a denied push as a sync failure', async () => {
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'git_push') {
+          return {
+            output: 'remote: error: GH013: Repository rule violations found',
+            fellBack: false,
+            permissionDenied: true,
+          }
+        }
+        return undefined
+      })
+
+      await performGitSync({
+        needsPull: false,
+        needsPush: true,
+        pull: {
+          worktreeId: 'wt-123',
+          worktreePath: '/path/to/repo',
+          baseBranch: 'v4.x',
+        },
+      })
+
+      expect(mockToast.error).toHaveBeenCalledWith(
+        'Sync failed',
+        expect.objectContaining({
+          id: 'toast-1',
+          duration: Infinity,
+          description: 'remote: error: GH013: Repository rule violations found',
+        })
+      )
+      expect(mockToast.success).not.toHaveBeenCalled()
     })
   })
 

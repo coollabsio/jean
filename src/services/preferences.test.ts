@@ -41,6 +41,7 @@ import {
   defaultPreferences,
 } from '@/types/preferences'
 import { DEFAULT_KEYBINDINGS } from '@/types/keybindings'
+import { clearClientPreferencesForTests } from '@/lib/client-preferences'
 
 vi.mock('@/lib/transport', () => ({
   invoke: vi.fn(),
@@ -111,6 +112,7 @@ describe('model option helpers', () => {
 
   it('offers Claude 1M variants alongside standard context models', () => {
     expect(modelOptions.map(option => option.value)).toEqual([
+      'claude-fable-5-1',
       'claude-fable-5',
       'claude-opus-5',
       'claude-sonnet-5',
@@ -125,6 +127,7 @@ describe('model option helpers', () => {
       'claude-sonnet-4-6',
       'haiku',
     ])
+    expect(normalizeClaudeModel('claude-fable-5-1')).toBe('claude-fable-5-1')
     expect(normalizeClaudeModel('sonnet')).toBe('claude-sonnet-5')
     expect(normalizeClaudeModel('claude-fable-5')).toBe('claude-fable-5')
     expect(normalizeClaudeModel('claude-opus-5')).toBe('claude-opus-5')
@@ -147,12 +150,14 @@ describe('model option helpers', () => {
 
   it('offers GPT 5.6 preview variants in Codex selectors', () => {
     const values = codexDefaultModelOptions.map(option => option.value)
-    expect(values.slice(0, 3)).toEqual([
+    expect(values.slice(0, 4)).toEqual([
+      'gpt-6-astra',
       'gpt-5.6-sol',
       'gpt-5.6-terra',
       'gpt-5.6-luna',
     ])
     expect(values).not.toContain('gpt-5.6')
+    expect(normalizeCodexModel('gpt-6-astra')).toBe('gpt-6-astra')
     expect(normalizeCodexModel('gpt-5.6-sol')).toBe('gpt-5.6-sol')
     expect(normalizeCodexModel('gpt-5.6-terra')).toBe('gpt-5.6-terra')
     expect(normalizeCodexModel('gpt-5.6-luna')).toBe('gpt-5.6-luna')
@@ -221,6 +226,11 @@ describe('model option helpers', () => {
       'Do NOT create git worktrees manually'
     )
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain('Jean MCP/tools')
+    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain('Jean Run Environment')
+    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain('get_run_environments')
+    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
+      'test against its `url`, port, and startup command'
+    )
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
       'VERY IMPORTANT: Keep Code Simple'
     )
@@ -231,17 +241,17 @@ describe('model option helpers', () => {
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
       'include clickable links when available'
     )
+    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
+      "At the start of a new task, replace '.ai/todo.md' instead of appending to it"
+    )
+    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
+      "Keep '.ai/lessons.md' concise by merging duplicate rules and removing obsolete entries"
+    )
   })
 
-  it('requires GitHub issue and discussion discovery after changes', () => {
-    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
+  it('does not require GitHub discovery in every chat', () => {
+    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).not.toContain(
       'GitHub Issue and Discussion Discovery'
-    )
-    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
-      "search the current repository's existing GitHub issues and discussions"
-    )
-    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
-      'Include the results in both the main response and the `## Recap`'
     )
   })
 })
@@ -250,6 +260,7 @@ describe('preferences service', () => {
   let queryClient: QueryClient
 
   beforeEach(() => {
+    clearClientPreferencesForTests()
     queryClient = createTestQueryClient()
     vi.clearAllMocks()
     // Mock Tauri environment
@@ -1287,15 +1298,10 @@ describe('preferences service', () => {
   })
 
   describe('AppearancePane scaling', () => {
-    it(
-      'stores desktop/mobile zoom on this client only (not shared prefs)',
-      async () => {
+    it('stores desktop/mobile zoom on this client only (not shared prefs)', async () => {
       const { invoke } = await import('@/lib/transport')
-      const {
-        clearClientZoomForTests,
-        readClientZoom,
-        writeClientZoom,
-      } = await import('@/lib/client-zoom')
+      const { clearClientZoomForTests, readClientZoom, writeClientZoom } =
+        await import('@/lib/client-zoom')
       clearClientZoomForTests()
       // Seed client zoom so the pane does not depend on async prefs hydrate.
       writeClientZoom({
@@ -1336,8 +1342,9 @@ describe('preferences service', () => {
 
       const patchCallsBefore = vi
         .mocked(invoke)
-        .mock.calls.filter(([command]) => command === 'patch_preferences')
-        .length
+        .mock.calls.filter(
+          ([command]) => command === 'patch_preferences'
+        ).length
 
       await user.click(syncCheckbox)
 
@@ -1371,9 +1378,7 @@ describe('preferences service', () => {
       ).toHaveLength(patchCallsBefore)
 
       clearClientZoomForTests()
-    },
-      15_000
-    )
+    }, 15_000)
   })
 
   describe('AppearancePane finished session animation', () => {
@@ -1411,25 +1416,24 @@ describe('preferences service', () => {
 
       await user.click(switchEl)
 
-      await waitFor(() => {
-        expect(invoke).toHaveBeenCalledWith('patch_preferences', {
-          patch: { finished_session_animation_enabled: false },
-        })
-      })
+      await waitFor(() =>
+        expect(switchEl).toHaveAttribute('aria-checked', 'false')
+      )
+      expect(invoke).not.toHaveBeenCalledWith(
+        'patch_preferences',
+        expect.anything()
+      )
       expect(switchEl).toHaveAttribute('aria-checked', 'false')
     })
   })
 
   describe('AppearancePane window vibrancy', () => {
-    it('keeps the switch off and skips runtime vibrancy when persistence fails', async () => {
+    it('stores window vibrancy locally and applies it to the native window', async () => {
       const { invoke } = await import('@/lib/transport')
       const { toast } = await import('sonner')
       vi.mocked(invoke).mockImplementation(async command => {
         if (command === 'load_preferences') {
           return { ...defaultPreferences, window_vibrancy: false }
-        }
-        if (command === 'patch_preferences') {
-          throw new Error('Save failed')
         }
         if (command === 'set_window_vibrancy') return undefined
         throw new Error(`Unexpected command ${command}`)
@@ -1451,23 +1455,22 @@ describe('preferences service', () => {
 
       await user.click(switchEl)
 
-      await waitFor(() => {
-        expect(invoke).toHaveBeenCalledWith('patch_preferences', {
-          patch: { window_vibrancy: true },
+      await waitFor(() =>
+        expect(invoke).toHaveBeenCalledWith('set_window_vibrancy', {
+          enabled: true,
         })
-      })
-      expect(invoke).not.toHaveBeenCalledWith('set_window_vibrancy', {
-        enabled: true,
-      })
+      )
+      expect(invoke).not.toHaveBeenCalledWith(
+        'patch_preferences',
+        expect.anything()
+      )
       expect(
         queryClient.getQueryData<AppPreferences>(
           preferencesQueryKeys.preferences()
         )?.window_vibrancy
-      ).toBe(false)
-      expect(switchEl).toHaveAttribute('aria-checked', 'false')
-      expect(toast.error).toHaveBeenCalledWith('Failed to save preferences', {
-        description: 'Save failed',
-      })
+      ).toBe(true)
+      expect(switchEl).toHaveAttribute('aria-checked', 'true')
+      expect(toast.error).not.toHaveBeenCalled()
     })
   })
 })

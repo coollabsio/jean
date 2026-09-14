@@ -26,6 +26,7 @@ import {
 } from '@/lib/terminal-gesture'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useSwipeBack } from '@/hooks/useSwipeBack'
+import { JeanLoadingScreen } from '@/components/shared/JeanLoadingScreen'
 
 const ChatWindow = lazy(() =>
   import('@/components/chat/ChatWindow').then(mod => ({
@@ -103,7 +104,7 @@ export function MainWindowContent({
   const setAddProjectDialogOpen = useProjectsStore(
     state => state.setAddProjectDialogOpen
   )
-  const { data: projects = [] } = useProjects()
+  const { data: projects = [], isError: projectsLoadError } = useProjects()
   const [backendCheckReady, setBackendCheckReady] = useState(false)
   useEffect(() => scheduleIdleWork(() => setBackendCheckReady(true), 1500), [])
 
@@ -118,7 +119,11 @@ export function MainWindowContent({
   const awaitingBackendCheck = showWelcome && !backendCheckReady
   const setupIncomplete =
     shouldCheckBackends && !backendsLoading && installedBackends.length === 0
-  const showAddButton = showWelcome && projects.length === 0 && !setupIncomplete
+  const showAddButton =
+    showWelcome &&
+    projects.length === 0 &&
+    !projectsLoadError &&
+    !setupIncomplete
 
   const handleProjectClick = useCallback((projectId: string) => {
     const { selectProject, expandProject } = useProjectsStore.getState()
@@ -150,13 +155,7 @@ export function MainWindowContent({
   }, [showAddButton, setAddProjectDialogOpen])
 
   const nonChatContent = selectedProjectId ? (
-    <Suspense
-      fallback={
-        <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-          Loading project…
-        </div>
-      }
-    >
+    <Suspense fallback={<JeanLoadingScreen />}>
       <ProjectCanvasView
         key={selectedProjectId}
         projectId={selectedProjectId}
@@ -164,6 +163,18 @@ export function MainWindowContent({
     </Suspense>
   ) : children ? (
     children
+  ) : projectsLoadError && projects.length === 0 ? (
+    <div
+      className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center font-sans"
+      role="alert"
+    >
+      <h1 className="text-2xl font-bold text-foreground">
+        Unable to load Jean projects
+      </h1>
+      <p className="text-sm text-muted-foreground">
+        Check the projects sidebar for recovery details.
+      </p>
+    </div>
   ) : realProjects.length > 0 ? (
     <WelcomeProjectGrid
       projects={realProjects}

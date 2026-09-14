@@ -4,6 +4,8 @@ mod pty;
 mod registry;
 mod types;
 
+mod run_env;
+
 // Re-export commands for registration in lib.rs
 pub use commands::*;
 

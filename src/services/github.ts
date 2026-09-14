@@ -468,12 +468,14 @@ export async function loadIssueContext(
 export async function removeIssueContext(
   sessionId: string,
   issueNumber: number,
-  projectPath: string
+  projectPath: string,
+  worktreeId?: string | null
 ): Promise<void> {
   return invoke('remove_issue_context', {
     sessionId,
     issueNumber,
     projectPath,
+    worktreeId,
   })
 }
 

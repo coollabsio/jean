@@ -197,6 +197,7 @@ interface ChatUIState {
 
   // Setup script results per worktree (from jean.json) - stays at worktree level
   setupScriptResults: Record<string, SetupScriptResult>
+  dismissedSetupScripts: Record<string, boolean>
 
   // Pending images per session (before sending)
   pendingImages: Record<string, PendingImage[]>
@@ -501,6 +502,7 @@ interface ChatUIState {
     toolCallId: string,
     answers: QuestionAnswer[]
   ) => void
+  clearQuestionAnswer: (sessionId: string, toolCallId: string) => void
   isQuestionAnswered: (sessionId: string, toolCallId: string) => boolean
   getSubmittedAnswers: (
     sessionId: string,
@@ -530,6 +532,7 @@ interface ChatUIState {
   // Actions - Setup script results (worktree-based)
   addSetupScriptResult: (worktreeId: string, result: SetupScriptResult) => void
   clearSetupScriptResult: (worktreeId: string) => void
+  dismissSetupScript: (worktreeId: string) => void
 
   // Actions - Pending images (session-based)
   addPendingImage: (sessionId: string, image: PendingImage) => void
@@ -760,6 +763,7 @@ export const useChatStore = create<ChatUIState>()(
       lastSentMessages: {},
       lastSentAttachments: {},
       setupScriptResults: {},
+      dismissedSetupScripts: {},
       pendingImages: {},
       pendingFiles: {},
       pendingSkills: {},
@@ -2365,6 +2369,38 @@ export const useChatStore = create<ChatUIState>()(
           'markQuestionAnswered'
         ),
 
+      clearQuestionAnswer: (sessionId, toolCallId) =>
+        set(
+          state => {
+            const existingAnswered = state.answeredQuestions[sessionId]
+            const existingSubmitted = state.submittedAnswers[sessionId]
+            if (
+              !existingAnswered?.has(toolCallId) &&
+              !existingSubmitted?.[toolCallId]
+            ) {
+              return state
+            }
+
+            const nextAnswered = new Set(existingAnswered ?? [])
+            nextAnswered.delete(toolCallId)
+            const { [toolCallId]: _, ...nextSubmitted } =
+              existingSubmitted ?? {}
+
+            return {
+              answeredQuestions: {
+                ...state.answeredQuestions,
+                [sessionId]: nextAnswered,
+              },
+              submittedAnswers: {
+                ...state.submittedAnswers,
+                [sessionId]: nextSubmitted,
+              },
+            }
+          },
+          undefined,
+          'clearQuestionAnswer'
+        ),
+
       isQuestionAnswered: (sessionId, toolCallId) => {
         const answered = get().answeredQuestions[sessionId]
         return answered ? answered.has(toolCallId) : false
@@ -2515,6 +2551,21 @@ export const useChatStore = create<ChatUIState>()(
           },
           undefined,
           'clearSetupScriptResult'
+        ),
+
+      dismissSetupScript: worktreeId =>
+        set(
+          state => {
+            if (state.dismissedSetupScripts[worktreeId]) return state
+            return {
+              dismissedSetupScripts: {
+                ...state.dismissedSetupScripts,
+                [worktreeId]: true,
+              },
+            }
+          },
+          undefined,
+          'dismissSetupScript'
         ),
 
       // Pending images (session-based)

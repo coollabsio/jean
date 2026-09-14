@@ -66,8 +66,8 @@ describe('FeatureTourDialog', () => {
       'Codex',
       'OpenCode',
       'Cursor',
-      'Pi (Beta)',
-      'Command Code (Beta)',
+      'Pi',
+      'Command Code',
     ]) {
       expect(screen.getByText(backend)).toBeInTheDocument()
     }

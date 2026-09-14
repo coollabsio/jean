@@ -1,9 +1,11 @@
 use crate::platform::silent_command;
 use crate::platform::wsl_aware_command;
 use once_cell::sync::Lazy;
+use std::io::Read;
 use std::path::Path;
+use std::process::Stdio;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -15,6 +17,7 @@ fn gh_command(gh: &Path, repo_path: &str) -> std::process::Command {
 
 static WORKTREE_CREATE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 const WORKTREE_CREATE_ATTEMPTS: usize = 4;
+const JEAN_SCRIPT_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 /// Strip Windows `\\?\` / `\\?\UNC\` verbatim prefixes from a path string.
 ///
@@ -159,17 +162,51 @@ pub fn validate_git_repo(path: &str) -> Result<bool, String> {
     Ok(git_path.exists())
 }
 
+/// Create a selected project directory and its parents when they do not exist.
+pub fn ensure_project_directory(path: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(path)
+        .map_err(|error| format!("Failed to create directory {}: {error}", path.display()))?;
+
+    if !path.is_dir() {
+        return Err(format!("Path is not a directory: {}", path.display()));
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod project_directory_tests {
+    use super::*;
+
+    #[test]
+    fn ensure_project_directory_creates_a_missing_nested_path() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let project_path = temp.path().join("missing").join("project");
+
+        ensure_project_directory(&project_path).expect("create project directory");
+
+        assert!(project_path.is_dir());
+    }
+
+    #[test]
+    fn ensure_project_directory_rejects_an_existing_file() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let file_path = temp.path().join("project");
+        std::fs::write(&file_path, "not a directory").expect("write file");
+
+        let error = ensure_project_directory(&file_path).expect_err("reject file path");
+
+        assert!(error.contains("Failed to create directory"));
+    }
+}
+
 /// Initialize a new git repository at the given path
 ///
 /// Creates the directory if it doesn't exist, runs `git init`, and creates an initial commit
 pub fn init_repo(path: &str) -> Result<(), String> {
     let path_obj = Path::new(path);
 
-    // Create directory if it doesn't exist
-    if !path_obj.exists() {
-        std::fs::create_dir_all(path_obj)
-            .map_err(|e| format!("Failed to create directory: {e}"))?;
-    }
+    ensure_project_directory(path_obj)?;
 
     // Check if directory already has .git
     let git_path = path_obj.join(".git");
@@ -2067,6 +2104,93 @@ pub fn read_jean_config(worktree_path: &str) -> Option<JeanConfig> {
     }
 }
 
+/// Resolve jean.json for a worktree, preferring the newest project-level copy.
+///
+/// Worktrees keep a committed snapshot of jean.json from when the branch was
+/// created. Updating `latest` (or saving via Settings, which writes the project
+/// root) must win over that stale branch copy. After the worktree itself is
+/// updated from latest, its newer committed copy wins over an outdated main
+/// checkout. Uncommitted project-root edits (Settings) always win.
+pub fn resolve_jean_config(worktree_path: &str, project_path: Option<&str>) -> Option<JeanConfig> {
+    let worktree = jean_config_candidate(worktree_path);
+    let project = project_path
+        .filter(|path| !same_repo_path(path, worktree_path))
+        .and_then(jean_config_candidate);
+    pick_newest_jean_config(worktree, project).map(|c| c.config)
+}
+
+#[derive(Debug, Clone)]
+struct JeanConfigCandidate {
+    config: JeanConfig,
+    dirty: bool,
+    committed_at: Option<u64>,
+}
+
+fn jean_config_candidate(path: &str) -> Option<JeanConfigCandidate> {
+    Some(JeanConfigCandidate {
+        config: read_jean_config(path)?,
+        dirty: jean_json_is_dirty(path),
+        committed_at: jean_json_committed_at(path),
+    })
+}
+
+fn pick_newest_jean_config(
+    worktree: Option<JeanConfigCandidate>,
+    project: Option<JeanConfigCandidate>,
+) -> Option<JeanConfigCandidate> {
+    match (worktree, project) {
+        (None, None) => None,
+        (Some(only), None) | (None, Some(only)) => Some(only),
+        (Some(worktree), Some(project)) => Some(match (project.dirty, worktree.dirty) {
+            (true, false) => project,
+            (false, true) => worktree,
+            _ => {
+                if project.committed_at.unwrap_or(0) >= worktree.committed_at.unwrap_or(0) {
+                    project
+                } else {
+                    worktree
+                }
+            }
+        }),
+    }
+}
+
+fn same_repo_path(left: &str, right: &str) -> bool {
+    let left = left.trim_end_matches(['/', '\\']);
+    let right = right.trim_end_matches(['/', '\\']);
+    Path::new(left) == Path::new(right)
+}
+
+fn jean_json_is_dirty(repo_path: &str) -> bool {
+    let output = wsl_aware_command("git", Some(Path::new(repo_path)))
+        .args([
+            "status",
+            "--porcelain",
+            "--untracked-files=normal",
+            "--",
+            "jean.json",
+        ])
+        .output();
+    match output {
+        Ok(output) if output.status.success() => {
+            !String::from_utf8_lossy(&output.stdout).trim().is_empty()
+        }
+        // Not a git checkout (or git failed): an on-disk file is locally authoritative.
+        _ => true,
+    }
+}
+
+fn jean_json_committed_at(repo_path: &str) -> Option<u64> {
+    let output = wsl_aware_command("git", Some(Path::new(repo_path)))
+        .args(["log", "-1", "--format=%ct", "--", "jean.json"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout).trim().parse().ok()
+}
+
 /// Run a setup script in a worktree directory
 ///
 /// Executes the script using sh -c and captures output.
@@ -2190,6 +2314,24 @@ fn run_jean_script(
     branch: &str,
     script: &str,
 ) -> Result<String, String> {
+    run_jean_script_with_timeout(
+        kind,
+        worktree_path,
+        root_path,
+        branch,
+        script,
+        JEAN_SCRIPT_TIMEOUT,
+    )
+}
+
+fn run_jean_script_with_timeout(
+    kind: &str,
+    worktree_path: &str,
+    root_path: &str,
+    branch: &str,
+    script: &str,
+    timeout: Duration,
+) -> Result<String, String> {
     log::trace!("Running {kind} script in {worktree_path}: {script}");
 
     validate_script_env(worktree_path, root_path, branch)?;
@@ -2199,20 +2341,91 @@ fn run_jean_script(
 
     let mut cmd = silent_command(&shell);
     cmd.args(jean_script_shell_args(supports_login, script));
-
-    let output = cmd
-        .current_dir(worktree_path)
+    cmd.current_dir(worktree_path)
         .env("JEAN_WORKSPACE_PATH", worktree_path)
         .env("JEAN_ROOT_PATH", root_path)
         .env("JEAN_BRANCH", branch)
-        .output()
-        .map_err(|e| format!("Failed to run {kind} script: {e}"))?;
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    // Give the shell its own process group so timing out also stops package
+    // managers and other descendants that inherited the output pipes.
+    #[cfg(unix)]
+    unsafe {
+        use std::os::unix::process::CommandExt;
+        cmd.pre_exec(|| {
+            if libc::setpgid(0, 0) == 0 {
+                Ok(())
+            } else {
+                Err(std::io::Error::last_os_error())
+            }
+        });
+    }
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to run {kind} script: {e}"))?;
+    let mut stdout = child.stdout.take().expect("stdout was configured as piped");
+    let mut stderr = child.stderr.take().expect("stderr was configured as piped");
+    let stdout_reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = stdout.read_to_end(&mut bytes);
+        bytes
+    });
+    let stderr_reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = stderr.read_to_end(&mut bytes);
+        bytes
+    });
+    let deadline = Instant::now() + timeout;
+    let timed_out = loop {
+        if child
+            .try_wait()
+            .map_err(|e| format!("Failed while waiting for {kind} script: {e}"))?
+            .is_some()
+        {
+            break false;
+        }
+        if Instant::now() >= deadline {
+            break true;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
+
+    if timed_out {
+        #[cfg(unix)]
+        unsafe {
+            libc::kill(-(child.id() as i32), libc::SIGKILL);
+        }
+        #[cfg(windows)]
+        {
+            let _ = silent_command("taskkill")
+                .args(["/PID", &child.id().to_string(), "/T", "/F"])
+                .output();
+        }
+        let _ = child.kill();
+    }
+
+    let status = child
+        .wait()
+        .map_err(|e| format!("Failed to collect {kind} script status: {e}"))?;
+    let stdout = String::from_utf8_lossy(&stdout_reader.join().unwrap_or_default()).to_string();
+    let stderr = String::from_utf8_lossy(&stderr_reader.join().unwrap_or_default()).to_string();
     let combined = strip_non_tty_shell_noise(&format!("{stdout}{stderr}"));
 
-    if !output.status.success() {
+    if timed_out {
+        let minutes = timeout.as_secs().div_ceil(60);
+        let suffix = if combined.is_empty() {
+            String::new()
+        } else {
+            format!("\n{combined}")
+        };
+        return Err(format!(
+            "{kind} script timed out after {minutes} minute(s){suffix}"
+        ));
+    }
+
+    if !status.success() {
         return Err(format!("{kind} script failed:\n{combined}"));
     }
 
@@ -2851,6 +3064,27 @@ mod tests {
         assert_eq!(strip_non_tty_shell_noise(clean), "npm install\ndone");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn jean_script_timeout_stops_script_and_descendants() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_str().unwrap();
+        let started = Instant::now();
+
+        let error = run_jean_script_with_timeout(
+            "setup",
+            path,
+            path,
+            "test-branch",
+            "echo started; sleep 5",
+            Duration::from_millis(100),
+        )
+        .unwrap_err();
+
+        assert!(error.starts_with("setup script timed out after"));
+        assert!(started.elapsed() < Duration::from_secs(3));
+    }
+
     // ========================================================================
     // git push upstream retry tests
     // ========================================================================
@@ -3110,5 +3344,167 @@ mod tests {
         // Local/origin checks that get_valid_base_branch uses must both fail.
         assert!(!branch_exists(path, "feature-x"));
         assert!(!remote_branch_exists(path, "feature-x"));
+    }
+}
+
+#[cfg(test)]
+mod jean_config_resolve_tests {
+    use super::*;
+
+    fn write_jean_run(dir: &std::path::Path, run: &str) {
+        std::fs::write(
+            dir.join("jean.json"),
+            format!("{{\"scripts\":{{\"run\":\"{run}\"}}}}\n"),
+        )
+        .unwrap();
+    }
+
+    fn init_repo(dir: &std::path::Path) {
+        run_git_in(dir, &["init", "--initial-branch", "main"]);
+        run_git_in(dir, &["config", "user.email", "test@example.com"]);
+        run_git_in(dir, &["config", "user.name", "Test"]);
+    }
+
+    fn run_git_in(dir: &std::path::Path, args: &[&str]) {
+        let mut cmd = std::process::Command::new("git");
+        cmd.args(args).current_dir(dir);
+        let output = cmd.output().expect("git command");
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn commit_jean(dir: &std::path::Path, run: &str, date: &str) {
+        write_jean_run(dir, run);
+        run_git_in(dir, &["add", "jean.json"]);
+        let status = std::process::Command::new("git")
+            .args(["commit", "-m", &format!("jean.json {run}")])
+            .current_dir(dir)
+            .env("GIT_AUTHOR_DATE", date)
+            .env("GIT_COMMITTER_DATE", date)
+            .output()
+            .expect("git commit");
+        assert!(
+            status.status.success(),
+            "commit failed: {}",
+            String::from_utf8_lossy(&status.stderr)
+        );
+    }
+
+    fn run_script(path: &str) -> Option<String> {
+        resolve_jean_config(path, None)
+            .and_then(|c| c.scripts.run)
+            .map(|r| r.into_vec())
+            .and_then(|v| v.into_iter().next())
+    }
+
+    fn run_script_resolved(worktree: &str, project: &str) -> Option<String> {
+        resolve_jean_config(worktree, Some(project))
+            .and_then(|c| c.scripts.run)
+            .map(|r| r.into_vec())
+            .and_then(|v| v.into_iter().next())
+    }
+
+    #[test]
+    fn prefers_newer_project_jean_json_over_stale_branch_copy() {
+        let project = tempfile::tempdir().unwrap();
+        let worktree = tempfile::tempdir().unwrap();
+        init_repo(project.path());
+        init_repo(worktree.path());
+
+        commit_jean(worktree.path(), "old-run", "2020-01-01T00:00:00 +0000");
+        commit_jean(project.path(), "new-run", "2024-06-01T00:00:00 +0000");
+
+        assert_eq!(
+            run_script_resolved(
+                worktree.path().to_str().unwrap(),
+                project.path().to_str().unwrap(),
+            )
+            .as_deref(),
+            Some("new-run"),
+            "latest/project jean.json must win over an older branch copy"
+        );
+    }
+
+    #[test]
+    fn prefers_worktree_after_it_is_updated_from_latest() {
+        let project = tempfile::tempdir().unwrap();
+        let worktree = tempfile::tempdir().unwrap();
+        init_repo(project.path());
+        init_repo(worktree.path());
+
+        commit_jean(project.path(), "stale-main", "2020-01-01T00:00:00 +0000");
+        commit_jean(worktree.path(), "rebased-run", "2024-06-01T00:00:00 +0000");
+
+        assert_eq!(
+            run_script_resolved(
+                worktree.path().to_str().unwrap(),
+                project.path().to_str().unwrap(),
+            )
+            .as_deref(),
+            Some("rebased-run"),
+        );
+    }
+
+    #[test]
+    fn prefers_uncommitted_project_settings_over_committed_branch_copy() {
+        let project = tempfile::tempdir().unwrap();
+        let worktree = tempfile::tempdir().unwrap();
+        init_repo(project.path());
+        init_repo(worktree.path());
+
+        commit_jean(worktree.path(), "branch-run", "2024-06-01T00:00:00 +0000");
+        write_jean_run(project.path(), "settings-run");
+
+        assert_eq!(
+            run_script_resolved(
+                worktree.path().to_str().unwrap(),
+                project.path().to_str().unwrap(),
+            )
+            .as_deref(),
+            Some("settings-run"),
+        );
+    }
+
+    #[test]
+    fn falls_back_to_worktree_when_project_has_no_jean_json() {
+        let worktree = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        init_repo(worktree.path());
+        init_repo(project.path());
+        commit_jean(worktree.path(), "worktree-run", "2024-01-01T00:00:00 +0000");
+
+        assert_eq!(
+            run_script_resolved(
+                worktree.path().to_str().unwrap(),
+                project.path().to_str().unwrap(),
+            )
+            .as_deref(),
+            Some("worktree-run"),
+        );
+        assert_eq!(
+            run_script(worktree.path().to_str().unwrap()).as_deref(),
+            Some("worktree-run"),
+        );
+    }
+
+    #[test]
+    fn falls_back_to_project_when_worktree_has_no_jean_json() {
+        let worktree = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        init_repo(worktree.path());
+        init_repo(project.path());
+        commit_jean(project.path(), "project-run", "2024-01-01T00:00:00 +0000");
+
+        assert_eq!(
+            run_script_resolved(
+                worktree.path().to_str().unwrap(),
+                project.path().to_str().unwrap(),
+            )
+            .as_deref(),
+            Some("project-run"),
+        );
     }
 }

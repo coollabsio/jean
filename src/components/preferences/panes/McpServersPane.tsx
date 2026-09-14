@@ -220,7 +220,8 @@ export const McpServersPane: React.FC = () => {
       >
         <p className="text-sm text-muted-foreground">
           Selected servers will be enabled by default in new sessions. You can
-          override per-session from the toolbar.
+          override per-session from the toolbar. Antigravity loads its
+          configured servers automatically.
         </p>
 
         {isLoading ? (
@@ -256,10 +257,11 @@ export const McpServersPane: React.FC = () => {
                       id={`mcp-${backend}-${server.name}`}
                       checked={
                         !server.disabled &&
-                        enabledServersSet.has(mcpKey(backend, server.name))
+                        (backend === 'antigravity' ||
+                          enabledServersSet.has(mcpKey(backend, server.name)))
                       }
                       onCheckedChange={() => handleToggle(backend, server.name)}
-                      disabled={server.disabled}
+                      disabled={server.disabled || backend === 'antigravity'}
                     />
                     <Label
                       htmlFor={`mcp-${backend}-${server.name}`}
@@ -281,7 +283,11 @@ export const McpServersPane: React.FC = () => {
                       backend={backend}
                     />
                     <span className="text-xs text-muted-foreground">
-                      {server.disabled ? 'disabled' : server.scope}
+                      {server.disabled
+                        ? 'disabled'
+                        : backend === 'antigravity'
+                          ? 'automatic'
+                          : server.scope}
                     </span>
                   </div>
                 ))}

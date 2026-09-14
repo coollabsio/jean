@@ -87,7 +87,7 @@ const steps = [
     items: backendOptions.map(backend => ({
       label: backend.label,
       detail:
-        backend.value === 'pi' || backend.value === 'commandcode'
+        backend.value === 'antigravity'
           ? 'Beta backend available where installed and configured.'
           : 'Available for chat sessions, Magic prompts, and model picking when installed.',
     })) satisfies TourItem[],

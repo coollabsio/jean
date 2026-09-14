@@ -1911,6 +1911,9 @@ fn process_turn_events(
     let mut error_emitted = false;
     let mut usage: Option<UsageData> = None;
     let mut received_completed_agent_message = false;
+    let mut recovered_connection = false;
+    let mut status_poll_interval = status_poll_interval;
+    let mut recovery_turn_id = recovery_turn_id.map(str::to_owned);
 
     // Coalesce token-rate text/thinking deltas into fewer, larger
     // chat:chunk / chat:thinking events. Flushed before any other event is
@@ -1969,8 +1972,11 @@ fn process_turn_events(
                         );
                         match snapshot {
                             Ok(snapshot) => {
-                                let disposition =
-                                    classify_codex_resume(&snapshot, recovery_turn_id, true);
+                                let disposition = classify_codex_resume(
+                                    &snapshot,
+                                    recovery_turn_id.as_deref(),
+                                    true,
+                                );
                                 if disposition == CodexResumeDisposition::Active {
                                     continue;
                                 }
@@ -1981,7 +1987,7 @@ fn process_turn_events(
                                 if let Err(e) = append_codex_thread_snapshot_to_history_file(
                                     output_file,
                                     &snapshot,
-                                    recovery_turn_id,
+                                    recovery_turn_id.as_deref(),
                                     false,
                                 ) {
                                     log::warn!(
@@ -1991,9 +1997,10 @@ fn process_turn_events(
 
                                 match disposition {
                                     CodexResumeDisposition::Failed => {
-                                        if let Some(turn) =
-                                            select_codex_recovery_turn(&snapshot, recovery_turn_id)
-                                        {
+                                        if let Some(turn) = select_codex_recovery_turn(
+                                            &snapshot,
+                                            recovery_turn_id.as_deref(),
+                                        ) {
                                             let raw_error = codex_turn_error_message(turn)
                                                 .unwrap_or_else(|| {
                                                     "Unknown Codex error".to_string()
@@ -2084,6 +2091,7 @@ fn process_turn_events(
                         .and_then(|t| t.get("id"))
                         .and_then(|v| v.as_str())
                     {
+                        recovery_turn_id = Some(turn_id.to_string());
                         super::registry::register_codex_turn(
                             session_id.to_string(),
                             thread_id.to_string(),
@@ -2144,6 +2152,70 @@ fn process_turn_events(
                     is_yolo_mode,
                 );
             }
+            ServerEvent::Reconnected { snapshot } => {
+                recovered_connection = true;
+                if status_poll_interval.is_none() {
+                    status_poll_interval = Some(std::time::Duration::from_secs(15));
+                }
+                log::info!(
+                    "Codex app-server connection recovered during turn for session {session_id}"
+                );
+                flush_stream_coalescers(
+                    app,
+                    session_id,
+                    worktree_id,
+                    run_id,
+                    &mut chunk_coalescer,
+                    &mut thinking_coalescer,
+                );
+                if let Some(ref mut writer) = output_writer {
+                    let _ = writer.flush();
+                }
+
+                let disposition =
+                    classify_codex_resume(&snapshot, recovery_turn_id.as_deref(), true);
+                if disposition != CodexResumeDisposition::Active {
+                    if let Err(error) = append_codex_thread_snapshot_to_history_file(
+                        output_file,
+                        &snapshot,
+                        recovery_turn_id.as_deref(),
+                        disposition == CodexResumeDisposition::Idle,
+                    ) {
+                        log::warn!("Failed to backfill Codex reconnect snapshot: {error}");
+                    }
+                }
+
+                match disposition {
+                    CodexResumeDisposition::Active => continue,
+                    CodexResumeDisposition::Idle => {
+                        completed = true;
+                        break 'outer;
+                    }
+                    CodexResumeDisposition::Interrupted => {
+                        cancelled = true;
+                        server_interrupted = true;
+                        break 'outer;
+                    }
+                    CodexResumeDisposition::Failed => {
+                        if let Some(turn) =
+                            select_codex_recovery_turn(&snapshot, recovery_turn_id.as_deref())
+                        {
+                            let raw_error = codex_turn_error_message(turn)
+                                .unwrap_or_else(|| "Unknown Codex error".to_string());
+                            let _ = app.emit_all(
+                                "chat:error",
+                                &ErrorEvent {
+                                    session_id: session_id.to_string(),
+                                    worktree_id: worktree_id.to_string(),
+                                    error: format_codex_user_error(&raw_error),
+                                },
+                            );
+                        }
+                        error_emitted = true;
+                        break 'outer;
+                    }
+                }
+            }
             ServerEvent::ServerDied => {
                 log::error!("Codex app-server died during turn for session {session_id}");
                 flush_stream_coalescers(
@@ -2173,6 +2245,31 @@ fn process_turn_events(
 
         if completed {
             break 'outer;
+        }
+    }
+
+    // A reconnect snapshot can contain in-progress items. Do not persist those
+    // as completed. Once the turn finishes, read one authoritative snapshot
+    // and backfill everything emitted during the connection gap.
+    if recovered_connection && completed {
+        if let Some(ref mut writer) = output_writer {
+            let _ = writer.flush();
+        }
+        match super::codex_server::send_request(
+            "thread/read",
+            serde_json::json!({"threadId": thread_id, "includeTurns": true}),
+        ) {
+            Ok(snapshot) => {
+                if let Err(error) = append_codex_thread_snapshot_to_history_file(
+                    output_file,
+                    &snapshot,
+                    recovery_turn_id.as_deref(),
+                    true,
+                ) {
+                    log::warn!("Failed to backfill completed Codex reconnect snapshot: {error}");
+                }
+            }
+            Err(error) => log::warn!("Failed to read completed Codex reconnect snapshot: {error}"),
         }
     }
 
@@ -4944,6 +5041,7 @@ pub fn parse_codex_run_to_message(
         cancelled: run.cancelled,
         plan_approved: false,
         model: None,
+        backend: None,
         execution_mode: None,
         thinking_level: None,
         effort_level: None,
@@ -5085,12 +5183,15 @@ pub fn execute_one_shot_codex(
         );
 
         // User-facing error: detect common patterns and provide actionable hints
-        let user_msg = if stderr.contains("AuthRequired") || stderr.contains("invalid_token") {
+        let failure_detail = one_shot_failure_detail(&stderr, &stdout).unwrap_or_default();
+        let user_msg = if failure_detail.contains("AuthRequired")
+            || failure_detail.contains("invalid_token")
+        {
             "Codex CLI failed: an MCP server requires authentication. \
                  Check your Codex MCP server configuration."
                 .to_string()
         } else {
-            let trimmed = stderr.trim();
+            let trimmed = failure_detail.trim();
             if trimmed.len() > 200 {
                 let end = trimmed
                     .char_indices()
@@ -5116,6 +5217,21 @@ pub fn execute_one_shot_codex(
     log::trace!("Codex one-shot stdout length: {} bytes", stdout.len());
 
     extract_codex_structured_output(&stdout)
+}
+
+fn one_shot_failure_detail(stderr: &str, stdout: &str) -> Option<String> {
+    let stderr = stderr.trim();
+    if !stderr.is_empty() {
+        return Some(stderr.to_string());
+    }
+
+    stdout.lines().rev().find_map(|line| {
+        let event: serde_json::Value = serde_json::from_str(line).ok()?;
+        if event.get("type").and_then(|value| value.as_str()) != Some("turn.failed") {
+            return None;
+        }
+        extract_codex_error_message(&event)
+    })
 }
 
 fn wait_for_child_output(
@@ -6078,6 +6194,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
 
@@ -6136,6 +6253,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
 
@@ -6191,6 +6309,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
 
@@ -6251,6 +6370,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
 
@@ -6313,6 +6433,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
 
@@ -6385,6 +6506,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
 
@@ -6505,6 +6627,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
 
@@ -6563,6 +6686,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
 
@@ -6626,6 +6750,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
 
@@ -6670,6 +6795,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
 
@@ -6828,6 +6954,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
 
@@ -6904,4 +7031,29 @@ fn extract_codex_structured_output(output: &str) -> Result<String, String> {
     }
 
     structured_output.ok_or_else(|| "No structured output found in Codex response".to_string())
+}
+
+#[cfg(test)]
+mod one_shot_failure_tests {
+    use super::*;
+
+    #[test]
+    fn reads_turn_failure_from_jsonl_stdout_when_stderr_is_empty() {
+        let stdout = r#"{"type":"turn.failed","error":{"message":"Model is not available"}}"#;
+
+        assert_eq!(
+            one_shot_failure_detail("", stdout).as_deref(),
+            Some("Model is not available")
+        );
+    }
+
+    #[test]
+    fn prefers_stderr_over_jsonl_stdout() {
+        let stdout = r#"{"type":"turn.failed","error":{"message":"stdout detail"}}"#;
+
+        assert_eq!(
+            one_shot_failure_detail("stderr detail", stdout).as_deref(),
+            Some("stderr detail")
+        );
+    }
 }

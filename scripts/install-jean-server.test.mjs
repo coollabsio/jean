@@ -49,6 +49,13 @@ test('install-jean-server.sh refuses public bind without token', () => {
   assert.match(source, /is_wildcard_bind/)
 })
 
+test('headless docs recommend official Node.js installation for managed tools', () => {
+  const docs = readFileSync(resolve(root, 'docs/headless-server.md'), 'utf8')
+  assert.match(docs, /Node\.js and npm/)
+  assert.match(docs, /https:\/\/nodejs\.org\/en\/download/)
+  assert.match(docs, /does not recommend Debian\/Ubuntu's `nodejs` package/)
+})
+
 test('install-jean-server.sh prompts for bind interface and supports presets', () => {
   const source = readFileSync(script, 'utf8')
   assert.match(source, /prompt_bind_settings/)

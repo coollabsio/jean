@@ -46,6 +46,7 @@ const INSTALLABLE_BACKENDS = [
   'cursor',
   'grok',
   'kimi',
+  'antigravity',
 ] as const satisfies readonly CliBackend[]
 
 type InstallState = 'idle' | 'installing' | 'success' | 'error'
@@ -115,7 +116,7 @@ export const AgentBrowserSection: React.FC = () => {
     if (installableBackends.length === 0) {
       setInstallState('error')
       setInstallMessage(
-        'Install a supported CLI first (Claude, Codex, Cursor, Grok, Kimi, or OpenCode)'
+        'Install a supported CLI first (Claude, Codex, Cursor, Grok, Kimi, Antigravity, or OpenCode)'
       )
       return
     }

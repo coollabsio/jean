@@ -32,6 +32,9 @@ dist-ssr
 test-results
 playwright-report
 playwright/.cache
+/.superpowers/
+# Local Superpowers design and implementation planning artifacts
+docs/superpowers/
 
 # Rust build artifacts for standalone server wrapper
 src-server/target/

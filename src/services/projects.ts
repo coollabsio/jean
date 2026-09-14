@@ -2355,7 +2355,7 @@ export function useJeanConfig(projectPath: string | null) {
       return config ?? null
     },
     enabled: !!projectPath,
-    staleTime: 30_000,
+    staleTime: 0,
   })
 }
 
@@ -2406,7 +2406,7 @@ export function useRunScripts(worktreePath: string | null) {
       return scripts
     },
     enabled: !!worktreePath,
-    staleTime: 30_000, // Cache for 30 seconds
+    staleTime: 0,
   })
 }
 
@@ -2425,7 +2425,7 @@ export function usePackageScripts(worktreePath: string | null) {
         ? invoke<PackageScript[]>('get_package_scripts', { worktreePath })
         : Promise.resolve([]),
     enabled: !!worktreePath && hasBackendTransport(),
-    staleTime: 30_000,
+    staleTime: 0,
   })
 }
 
@@ -2443,7 +2443,7 @@ export function usePorts(worktreePath: string | null) {
       return ports
     },
     enabled: !!worktreePath && hasBackendTransport(),
-    staleTime: 30_000,
+    staleTime: 0,
   })
 }
 
@@ -2701,7 +2701,8 @@ export async function updateWorktreeCachedStatus(
   baseBranchAheadCount: number | null = null,
   baseBranchBehindCount: number | null = null,
   worktreeAheadCount: number | null = null,
-  unpushedCount: number | null = null
+  unpushedCount: number | null = null,
+  baseBranch: string | null = null
 ): Promise<void> {
   if (!isTauri()) return
 
@@ -2720,6 +2721,7 @@ export async function updateWorktreeCachedStatus(
     baseBranchBehindCount,
     worktreeAheadCount,
     unpushedCount,
+    baseBranch,
   })
 }
 

@@ -3,6 +3,7 @@ import type { Worktree } from '@/types/projects'
 import {
   CANVAS_FILTER_TABS,
   getCanvasFilterTabCount,
+  matchesCanvasWorktreeSearch,
   matchesCanvasFilterTab,
   shouldShowCanvasWorktreeSection,
 } from './canvas-worktree-filters'
@@ -54,7 +55,7 @@ describe('canvas worktree filters', () => {
     expect(getCanvasFilterTabCount(worktrees, 'auto_fix')).toBe(1)
   })
 
-  it('shows the base branch even when it has no sessions', () => {
+  it('shows ready worktrees even when they have no sessions', () => {
     const base = worktree({
       id: 'base',
       name: 'main',
@@ -63,7 +64,28 @@ describe('canvas worktree filters', () => {
     })
     const regular = worktree({ id: 'regular' })
 
-    expect(shouldShowCanvasWorktreeSection(base, 0)).toBe(true)
-    expect(shouldShowCanvasWorktreeSection(regular, 0)).toBe(false)
+    expect(shouldShowCanvasWorktreeSection(base)).toBe(true)
+    expect(shouldShowCanvasWorktreeSection(regular)).toBe(true)
+    expect(
+      shouldShowCanvasWorktreeSection(
+        worktree({ id: 'deleting', status: 'deleting' })
+      )
+    ).toBe(false)
+  })
+
+  it('matches worktree search only against relevant worktree metadata', () => {
+    const matching = worktree({
+      name: 'pr-10960-memory-crash',
+      branch: 'fix/memory-crash',
+      pr_number: 10960,
+    })
+    const unrelated = worktree({
+      name: 'smtp-server-setup',
+      branch: 'fix/smtp',
+      pr_number: 5877,
+    })
+
+    expect(matchesCanvasWorktreeSearch(matching, '10960')).toBe(true)
+    expect(matchesCanvasWorktreeSearch(unrelated, '10960')).toBe(false)
   })
 })

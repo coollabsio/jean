@@ -425,6 +425,7 @@ pub fn start_run(
         cursor_chat_id: None,
         grok_session_id: None,
         kimi_session_id: None,
+        antigravity_session_id: None,
         checkpoint_id: None,
     };
 
@@ -1084,6 +1085,7 @@ pub fn parse_run_to_message(lines: &[String], run: &RunEntry) -> Result<ChatMess
         cancelled: run.cancelled,
         plan_approved: false,
         model: None,
+        backend: None,
         execution_mode: None,
         thinking_level: None,
         effort_level: None,
@@ -1109,7 +1111,11 @@ fn should_inject_synthetic_exit_plan(
             .any(|tc| tc.name == "ExitPlanMode" || tc.name == "CodexPlan");
 
     match backend {
-        Backend::Opencode | Backend::Pi | Backend::Commandcode | Backend::Kimi => base_match,
+        Backend::Opencode
+        | Backend::Pi
+        | Backend::Commandcode
+        | Backend::Kimi
+        | Backend::Antigravity => base_match,
         // Grok owns live injection in grok.rs; recover plan tool on history reload
         // only when assistant text looks like a real plan (not research preamble).
         Backend::Grok => {
@@ -1153,6 +1159,14 @@ fn inject_synthetic_exit_plan(backend: &Backend, run_id: &str, assistant_msg: &m
             serde_json::json!({
                 "plan": assistant_msg.content,
                 "source": "kimi",
+            }),
+        )
+    } else if matches!(backend, Backend::Antigravity) {
+        (
+            "ExitPlanMode",
+            serde_json::json!({
+                "plan": assistant_msg.content,
+                "source": "antigravity",
             }),
         )
     } else if matches!(backend, Backend::Grok) {
@@ -1271,6 +1285,15 @@ fn run_uses_kimi_history_parser(metadata_backend: &Backend, run: &RunEntry) -> b
         || (run.model.is_none() && metadata_backend == &Backend::Kimi)
 }
 
+fn run_uses_antigravity_history_parser(metadata_backend: &Backend, run: &RunEntry) -> bool {
+    run.backend.as_ref() == Some(&Backend::Antigravity)
+        || run
+            .model
+            .as_deref()
+            .is_some_and(|model| model.starts_with("antigravity/"))
+        || (run.model.is_none() && metadata_backend == &Backend::Antigravity)
+}
+
 fn cancelled_codex_run_has_visible_artifacts(
     app: &tauri::AppHandle,
     session_id: &str,
@@ -1359,6 +1382,7 @@ pub fn load_session_messages_window(
             cancelled: false,
             plan_approved: false,
             model: run.model.clone(),
+            backend: run.backend.clone(),
             execution_mode: run.execution_mode.clone(),
             thinking_level: run.thinking_level.clone(),
             effort_level: run.effort_level.clone(),
@@ -1396,6 +1420,7 @@ pub fn load_session_messages_window(
                         cancelled: run.cancelled,
                         plan_approved: false,
                         model: run.model.clone(),
+                        backend: None,
                         execution_mode: run.execution_mode.clone(),
                         thinking_level: run.thinking_level.clone(),
                         effort_level: run.effort_level.clone(),
@@ -1422,6 +1447,8 @@ pub fn load_session_messages_window(
                 super::grok::parse_grok_run_to_message(&lines, run)
             } else if run_uses_kimi_history_parser(&metadata.backend, run) {
                 super::kimi::parse_kimi_run_to_message(&lines, run)
+            } else if run_uses_antigravity_history_parser(&metadata.backend, run) {
+                super::antigravity::parse_antigravity_run_to_message(&lines, run)
             } else {
                 parse_run_to_message(&lines, run)
             };
@@ -1447,6 +1474,7 @@ pub fn load_session_messages_window(
                         cancelled: run.cancelled,
                         plan_approved: false,
                         model: run.model.clone(),
+                        backend: None,
                         execution_mode: run.execution_mode.clone(),
                         thinking_level: run.thinking_level.clone(),
                         effort_level: run.effort_level.clone(),
@@ -1557,8 +1585,28 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         }
+    }
+
+    #[test]
+    fn antigravity_history_uses_stream_json_parser() {
+        let mut run = sample_run();
+        run.backend = Some(Backend::Antigravity);
+        run.model = Some("antigravity/auto".to_string());
+        let lines = vec![
+            r#"{"event":"step_update","step_update":{"step_type":"agent_response","text_delta":"Hello from Antigravity"}}"#.to_string(),
+            r#"{"event":"result","result":{"status":"SUCCESS","response":"Hello from Antigravity"}}"#.to_string(),
+        ];
+
+        assert!(run_uses_antigravity_history_parser(
+            &Backend::Antigravity,
+            &run
+        ));
+        let message = super::super::antigravity::parse_antigravity_run_to_message(&lines, &run)
+            .expect("Antigravity history message");
+        assert_eq!(message.content, "Hello from Antigravity");
     }
 
     fn sample_assistant_message() -> ChatMessage {
@@ -1575,6 +1623,7 @@ mod tests {
             cancelled: false,
             plan_approved: false,
             model: None,
+            backend: None,
             execution_mode: None,
             thinking_level: None,
             effort_level: None,
@@ -1648,6 +1697,24 @@ mod tests {
 
         assert_eq!(msg.tool_calls[0].name, "ExitPlanMode");
         assert_eq!(msg.tool_calls[0].input["source"], "kimi");
+        assert_eq!(msg.tool_calls[0].input["plan"], "Here is the plan");
+    }
+
+    #[test]
+    fn injects_synthetic_exit_plan_for_recovered_antigravity_plan_runs() {
+        let run = sample_run();
+        let mut msg = sample_assistant_message();
+
+        assert!(should_inject_synthetic_exit_plan(
+            &Backend::Antigravity,
+            &run,
+            &msg
+        ));
+
+        inject_synthetic_exit_plan(&Backend::Antigravity, &run.run_id, &mut msg);
+
+        assert_eq!(msg.tool_calls[0].name, "ExitPlanMode");
+        assert_eq!(msg.tool_calls[0].input["source"], "antigravity");
         assert_eq!(msg.tool_calls[0].input["plan"], "Here is the plan");
     }
 
@@ -2042,6 +2109,7 @@ Move services between instances without downtime.
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
 

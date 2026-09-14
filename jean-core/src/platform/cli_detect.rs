@@ -8,6 +8,60 @@ use std::path::{Path, PathBuf};
 
 use super::{cli_command, detect_package_manager, silent_command};
 
+#[cfg(unix)]
+fn find_cli_in_unix_login_shell(
+    tool: &str,
+    shell: &Path,
+    jean_managed: Option<&Path>,
+) -> Option<PathBuf> {
+    let output = silent_command(shell)
+        .args([
+            "-l",
+            "-i",
+            "-c",
+            "command -v \"$1\"",
+            "jean-cli-lookup",
+            tool,
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let path = stdout
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(PathBuf::from)?;
+
+    (path.is_file() && !is_jean_managed_candidate(&path, jean_managed)).then_some(path)
+}
+
+#[cfg(unix)]
+fn find_cli_in_unix_path(tool: &str, jean_managed: Option<&Path>) -> Option<PathBuf> {
+    let inherited = silent_command("which")
+        .arg(tool)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| {
+            select_cli_candidate(
+                &String::from_utf8_lossy(&output.stdout),
+                false,
+                jean_managed,
+            )
+        })
+        .filter(|path| path.exists());
+
+    inherited.or_else(|| {
+        let shell = super::get_default_shell();
+        find_cli_in_unix_login_shell(tool, Path::new(&shell), jean_managed)
+    })
+}
+
 /// Generic CLI detection result. Per-CLI Tauri commands map this into their
 /// typed wrapper structs to keep the wire protocol stable.
 #[derive(Debug, Clone)]
@@ -58,21 +112,23 @@ pub fn detect_cli_in_path(
         };
     }
 
-    let which_cmd = if cfg!(target_os = "windows") {
-        "where"
-    } else {
-        "which"
+    #[cfg(unix)]
+    let found_path = match find_cli_in_unix_path(tool, jean_managed) {
+        Some(path) => path,
+        None => return CliDetection::not_found(),
     };
 
-    let output = match silent_command(which_cmd).arg(tool).output() {
-        Ok(o) if o.status.success() => o,
-        _ => return CliDetection::not_found(),
-    };
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let Some(found_path) = select_cli_candidate(&stdout, cfg!(target_os = "windows"), jean_managed)
-    else {
-        return CliDetection::not_found();
+    #[cfg(windows)]
+    let found_path = {
+        let output = match silent_command("where").arg(tool).output() {
+            Ok(output) if output.status.success() => output,
+            _ => return CliDetection::not_found(),
+        };
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        match select_cli_candidate(&stdout, true, jean_managed) {
+            Some(path) => path,
+            None => return CliDetection::not_found(),
+        }
     };
 
     let version = match cli_command(&found_path.to_string_lossy(), None)
@@ -101,18 +157,19 @@ pub fn detect_cli_in_path(
 /// the executable `.cmd`/`.exe` shim. WSL callers should use `wsl_which`
 /// instead so Windows paths are not returned for Linux execution.
 pub fn find_cli_in_host_path(tool: &str, jean_managed: Option<&Path>) -> Option<PathBuf> {
-    let which_cmd = if cfg!(target_os = "windows") {
-        "where"
-    } else {
-        "which"
-    };
+    #[cfg(unix)]
+    return find_cli_in_unix_path(tool, jean_managed);
 
-    let output = silent_command(which_cmd).arg(tool).output().ok()?;
+    #[cfg(windows)]
+    let output = silent_command("where").arg(tool).output().ok()?;
+    #[cfg(windows)]
     if !output.status.success() {
         return None;
     }
 
+    #[cfg(windows)]
     let stdout = String::from_utf8_lossy(&output.stdout);
+    #[cfg(windows)]
     select_cli_candidate(&stdout, cfg!(target_os = "windows"), jean_managed)
         .filter(|path| path.exists())
 }
@@ -206,6 +263,35 @@ mod tests {
     use super::super::wsl_detect_package_manager;
     use super::select_cli_candidate;
 
+    #[cfg(unix)]
+    #[test]
+    fn unix_login_shell_detection_finds_cli_missing_from_process_path() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let codex = dir.path().join("codex");
+        std::fs::write(&codex, b"#!/bin/sh\n").expect("write codex");
+        std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o755))
+            .expect("make codex executable");
+
+        let shell = dir.path().join("login-shell");
+        std::fs::write(
+            &shell,
+            format!(
+                "#!/bin/sh\nprintf 'startup notice\\n{}\\n'\n",
+                codex.display()
+            ),
+        )
+        .expect("write shell");
+        std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755))
+            .expect("make shell executable");
+
+        assert_eq!(
+            super::find_cli_in_unix_login_shell("codex", &shell, None),
+            Some(codex)
+        );
+    }
+
     #[test]
     fn windows_path_detection_prefers_cmd_shim_over_extensionless_npm_shim() {
         let output = r"C:\Users\u\AppData\Roaming\npm\opencode
@@ -218,6 +304,43 @@ C:\Users\u\AppData\Roaming\npm\opencode.ps1";
                 r"C:\Users\u\AppData\Roaming\npm\opencode.cmd"
             ))
         );
+    }
+
+    #[test]
+    fn windows_path_detection_prefers_npm_cmd_for_version_manager_shims() {
+        let cases = [
+            (
+                r"C:\Users\u\AppData\Local\nvs\default\npm
+C:\Users\u\AppData\Local\nvs\default\npm.cmd
+C:\Users\u\AppData\Local\nvs\default\npm.ps1",
+                r"C:\Users\u\AppData\Local\nvs\default\npm.cmd",
+            ),
+            (
+                r"C:\Program Files\nodejs\npm
+C:\Program Files\nodejs\npm.cmd
+C:\Program Files\nodejs\npm.ps1",
+                r"C:\Program Files\nodejs\npm.cmd",
+            ),
+            (
+                r"C:\Users\u\AppData\Roaming\nvm\nodejs\npm
+C:\Users\u\AppData\Roaming\nvm\nodejs\npm.cmd
+C:\Users\u\AppData\Roaming\nvm\nodejs\npm.ps1",
+                r"C:\Users\u\AppData\Roaming\nvm\nodejs\npm.cmd",
+            ),
+            (
+                r"C:\Users\u\AppData\Local\fnm\active\installation\npm
+C:\Users\u\AppData\Local\fnm\active\installation\npm.cmd
+C:\Users\u\AppData\Local\fnm\active\installation\npm.ps1",
+                r"C:\Users\u\AppData\Local\fnm\active\installation\npm.cmd",
+            ),
+        ];
+
+        for (output, expected) in cases {
+            assert_eq!(
+                select_cli_candidate(output, true, None),
+                Some(PathBuf::from(expected))
+            );
+        }
     }
 
     #[test]

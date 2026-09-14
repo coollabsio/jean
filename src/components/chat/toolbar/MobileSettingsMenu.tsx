@@ -28,6 +28,7 @@ import {
   Sparkles,
   Star,
   Terminal,
+  Bug,
 } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -65,6 +66,7 @@ import type {
   AttachedSavedContext,
 } from '@/types/github'
 import type { LoadedLinearIssueContext } from '@/types/linear'
+import type { SentryIssueContext } from '@/types/sentry'
 import { LinearIcon } from '@/components/icons/LinearIcon'
 import { openExternal, preOpenWindow } from '@/lib/platform'
 import { copyToClipboard } from '@/lib/clipboard'
@@ -75,6 +77,7 @@ import {
   EFFORT_LEVEL_OPTIONS,
   GROK_EFFORT_LEVEL_OPTIONS,
   KIMI_EFFORT_LEVEL_OPTIONS,
+  ANTIGRAVITY_EFFORT_LEVEL_OPTIONS,
   PI_EFFORT_LEVEL_OPTIONS,
   THINKING_LEVEL_OPTIONS,
   withAdaptiveEffortOption,
@@ -151,6 +154,7 @@ interface MobileSettingsMenuProps {
   loadedSecurityContexts: LoadedSecurityAlertContext[]
   loadedAdvisoryContexts: LoadedAdvisoryContext[]
   loadedLinearContexts: LoadedLinearIssueContext[]
+  loadedSentryContexts: SentryIssueContext[]
   attachedSavedContexts: AttachedSavedContext[]
 
   handleViewIssue: (ctx: LoadedIssueContext) => void
@@ -158,6 +162,7 @@ interface MobileSettingsMenuProps {
   handleViewSecurityAlert: (ctx: LoadedSecurityAlertContext) => void
   handleViewAdvisory: (ctx: LoadedAdvisoryContext) => void
   handleViewLinear: (ctx: LoadedLinearIssueContext) => void
+  handleViewSentry: (ctx: SentryIssueContext) => void
   handleViewSavedContext: (ctx: AttachedSavedContext) => void
 
   availableMcpServers: McpServerInfo[]
@@ -205,12 +210,14 @@ export function MobileSettingsMenu({
   loadedSecurityContexts,
   loadedAdvisoryContexts,
   loadedLinearContexts,
+  loadedSentryContexts,
   attachedSavedContexts,
   handleViewIssue,
   handleViewPR,
   handleViewSecurityAlert,
   handleViewAdvisory,
   handleViewLinear,
+  handleViewSentry,
   handleViewSavedContext,
   availableMcpServers,
   enabledMcpServers,
@@ -231,6 +238,7 @@ export function MobileSettingsMenu({
   const isPi = selectedBackend === 'pi'
   const isGrok = selectedBackend === 'grok'
   const isKimi = selectedBackend === 'kimi'
+  const isAntigravity = selectedBackend === 'antigravity'
   const singleRunScript =
     runScripts.length === 1 ? (runScripts[0] ?? null) : null
   const enabledMcpServersSet = useMemo(
@@ -253,19 +261,35 @@ export function MobileSettingsMenu({
   const usesEffortControl =
     modelReasoning?.type === 'effort' ||
     (modelReasoning === undefined &&
-      (useAdaptiveThinking || isCodex || isPi || isGrok || isKimi))
+      (useAdaptiveThinking ||
+        isCodex ||
+        isPi ||
+        isGrok ||
+        isKimi ||
+        isAntigravity))
   const effortLevelOptions =
     modelReasoning?.type === 'effort'
       ? withAdaptiveEffortOption(modelReasoning.levels, selectedModel)
-      : isPi
-        ? withAdaptiveEffortOption(PI_EFFORT_LEVEL_OPTIONS, selectedModel)
-        : isCodex
-          ? withAdaptiveEffortOption(CODEX_EFFORT_LEVEL_OPTIONS, selectedModel)
-          : isKimi
-            ? withAdaptiveEffortOption(KIMI_EFFORT_LEVEL_OPTIONS, selectedModel)
-            : isGrok
-              ? withAdaptiveEffortOption(GROK_EFFORT_LEVEL_OPTIONS, selectedModel)
-              : withAdaptiveEffortOption(EFFORT_LEVEL_OPTIONS, selectedModel)
+      : isAntigravity
+        ? ANTIGRAVITY_EFFORT_LEVEL_OPTIONS
+        : isPi
+          ? withAdaptiveEffortOption(PI_EFFORT_LEVEL_OPTIONS, selectedModel)
+          : isCodex
+            ? withAdaptiveEffortOption(
+                CODEX_EFFORT_LEVEL_OPTIONS,
+                selectedModel
+              )
+            : isKimi
+              ? withAdaptiveEffortOption(
+                  KIMI_EFFORT_LEVEL_OPTIONS,
+                  selectedModel
+                )
+              : isGrok
+                ? withAdaptiveEffortOption(
+                    GROK_EFFORT_LEVEL_OPTIONS,
+                    selectedModel
+                  )
+                : withAdaptiveEffortOption(EFFORT_LEVEL_OPTIONS, selectedModel)
   const thinkingLevelOptions =
     modelReasoning?.type === 'thinking'
       ? withAdaptiveEffortOption(modelReasoning.levels, selectedModel)
@@ -504,6 +528,7 @@ export function MobileSettingsMenu({
     loadedSecurityContexts.length > 0 ||
     loadedAdvisoryContexts.length > 0 ||
     loadedLinearContexts.length > 0 ||
+    loadedSentryContexts.length > 0 ||
     attachedSavedContexts.length > 0
   const hasToggleableMcpServers = availableMcpServers.some(
     server => !server.disabled
@@ -745,14 +770,20 @@ export function MobileSettingsMenu({
                             }
                             onCheckedChange={() => onToggleMcpServer(key)}
                             onSelect={keepMenuOpenOnSelect}
-                            disabled={server.disabled}
+                            disabled={
+                              server.disabled || backend === 'antigravity'
+                            }
                             className={
                               server.disabled ? 'opacity-50' : undefined
                             }
                           >
                             {server.name}
                             <span className="ml-auto pl-4 text-xs text-muted-foreground">
-                              {server.disabled ? 'disabled' : server.scope}
+                              {server.disabled
+                                ? 'disabled'
+                                : backend === 'antigravity'
+                                  ? 'automatic'
+                                  : server.scope}
                             </span>
                           </DropdownMenuCheckboxItem>
                         )
@@ -1101,11 +1132,52 @@ export function MobileSettingsMenu({
                       {ctx.url && (
                         <button
                           type="button"
-                        aria-label="Open external link"
+                          aria-label="Open external link"
                           className="ml-auto shrink-0 rounded p-0.5 hover:bg-accent"
                           onClick={e => {
                             e.stopPropagation()
                             if (ctx.url) openExternal(ctx.url)
+                          }}
+                        >
+                          <ExternalLink className="h-3.5 w-3.5 opacity-60" />
+                        </button>
+                      )}
+                    </DropdownMenuItem>
+                  ))}
+                </>
+              )}
+              {loadedSentryContexts.length > 0 && (
+                <>
+                  {(loadedIssueContexts.length > 0 ||
+                    loadedPRContexts.length > 0 ||
+                    loadedSecurityContexts.length > 0 ||
+                    loadedAdvisoryContexts.length > 0 ||
+                    loadedLinearContexts.length > 0) && (
+                    <DropdownMenuSeparator />
+                  )}
+                  <DropdownMenuLabel className="text-xs text-muted-foreground">
+                    Sentry Issues
+                  </DropdownMenuLabel>
+                  {loadedSentryContexts.map(ctx => (
+                    <DropdownMenuItem
+                      key={ctx.id}
+                      onClick={() => {
+                        setMenuOpen(false)
+                        handleViewSentry(ctx)
+                      }}
+                    >
+                      <Bug className="h-4 w-4 text-orange-500" />
+                      <span className="truncate">
+                        {ctx.shortId} {ctx.title}
+                      </span>
+                      {ctx.permalink && (
+                        <button
+                          type="button"
+                          aria-label="Open external link"
+                          className="ml-auto shrink-0 rounded p-0.5 hover:bg-accent"
+                          onClick={event => {
+                            event.stopPropagation()
+                            openExternal(ctx.permalink)
                           }}
                         >
                           <ExternalLink className="h-3.5 w-3.5 opacity-60" />
@@ -1121,7 +1193,8 @@ export function MobileSettingsMenu({
                     loadedPRContexts.length > 0 ||
                     loadedSecurityContexts.length > 0 ||
                     loadedAdvisoryContexts.length > 0 ||
-                    loadedLinearContexts.length > 0) && (
+                    loadedLinearContexts.length > 0 ||
+                    loadedSentryContexts.length > 0) && (
                     <DropdownMenuSeparator />
                   )}
                   <DropdownMenuLabel className="text-xs text-muted-foreground">
@@ -1320,7 +1393,7 @@ export function MobileSettingsMenu({
                       <button
                         key={key}
                         type="button"
-                        disabled={server.disabled}
+                        disabled={server.disabled || backend === 'antigravity'}
                         aria-pressed={enabled}
                         className={cn(
                           'flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-left active:bg-accent disabled:opacity-50',
@@ -1332,6 +1405,11 @@ export function MobileSettingsMenu({
                           <span className="block truncate font-medium">
                             {server.name}
                           </span>
+                          {backend === 'antigravity' && !server.disabled && (
+                            <span className="block text-xs text-muted-foreground">
+                              Loaded automatically by Antigravity
+                            </span>
+                          )}
                           <span className="block text-xs text-muted-foreground">
                             {server.disabled ? 'Disabled' : server.scope}
                           </span>

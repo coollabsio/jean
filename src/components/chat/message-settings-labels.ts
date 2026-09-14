@@ -1,4 +1,5 @@
 import {
+  ANTIGRAVITY_MODEL_OPTIONS,
   CODEX_MODEL_OPTIONS,
   CURSOR_MODEL_OPTIONS,
   GROK_MODEL_OPTIONS,
@@ -28,6 +29,7 @@ import {
   isOpenCodeModel,
   isPiModel,
   isKimiModel,
+  isAntigravityCliModel,
 } from '@/types/preferences'
 
 const ALL_MODEL_OPTIONS = [
@@ -39,6 +41,7 @@ const ALL_MODEL_OPTIONS = [
   ...PI_MODEL_OPTIONS,
   ...GROK_MODEL_OPTIONS,
   ...KIMI_MODEL_OPTIONS,
+  ...ANTIGRAVITY_MODEL_OPTIONS,
 ]
 
 export function getMessageModelLabel(model: string): string {
@@ -64,6 +67,8 @@ export function getMessageModelLabel(model: string): string {
       /\bFOR\b/g,
       'for'
     )
+  if (model.startsWith('antigravity/'))
+    return formatModelIdTailLabel(model.slice('antigravity/'.length))
   return model.includes('/') ? formatOpencodeModelLabel(model) : model
 }
 
@@ -88,6 +93,8 @@ export function getMessagePromptModelLabel(model: string): string {
   if (isPiModel(model)) return `PI · ${getMessageModelLabel(model)}`
   if (isGrokModel(model)) return `Grok · ${formatGrokPromptModelLabel(model)}`
   if (isKimiModel(model)) return `Kimi Code · ${getMessageModelLabel(model)}`
+  if (isAntigravityCliModel(model))
+    return `Antigravity CLI · ${getMessageModelLabel(model)}`
   if (isClaudeMessageModel(model))
     return `Claude · ${getMessageModelLabel(model)}`
   return getMessageModelLabel(model)
@@ -107,6 +114,7 @@ export function inferBackendFromModel(
   if (isCommandCodeModel(model)) return 'commandcode'
   if (isGrokModel(model)) return 'grok'
   if (isKimiModel(model)) return 'kimi'
+  if (isAntigravityCliModel(model)) return 'antigravity'
   if (isCodexModel(model)) return 'codex'
   if (isClaudeMessageModel(model)) return 'claude'
   // Legacy short aliases + bare Claude ids
@@ -145,14 +153,15 @@ export function getProviderChangeBeforeMessage(
   const current = messages[index]
   if (!current || current.role !== 'user') return null
 
-  const to = inferBackendFromModel(current.model)
+  const to = current.backend ?? inferBackendFromModel(current.model)
   if (!to) return null
 
   for (let i = index - 1; i >= 0; i--) {
     const previous = messages[i]
-    if (previous?.role !== 'user' || !previous.model) continue
+    if (previous?.role !== 'user' || (!previous.backend && !previous.model))
+      continue
 
-    const from = inferBackendFromModel(previous.model)
+    const from = previous.backend ?? inferBackendFromModel(previous.model)
     if (!from || from === to) return null
 
     return {

@@ -54,6 +54,7 @@ describe('ChatStore', () => {
       errors: {},
       lastSentMessages: {},
       setupScriptResults: {},
+      dismissedSetupScripts: {},
       pendingImages: {},
       pendingFiles: {},
       pendingTextFiles: {},
@@ -72,6 +73,14 @@ describe('ChatStore', () => {
       sessionLabels: {},
       savingContext: {},
       skippedQuestionSessions: {},
+    })
+  })
+
+  it('persists setup-script dismissal per worktree in store state', () => {
+    useChatStore.getState().dismissSetupScript('worktree-1')
+
+    expect(useChatStore.getState().dismissedSetupScripts).toEqual({
+      'worktree-1': true,
     })
   })
 
@@ -882,6 +891,18 @@ describe('ChatStore', () => {
       const { isQuestionAnswered } = useChatStore.getState()
 
       expect(isQuestionAnswered('session-1', 'tool-1')).toBe(false)
+    })
+
+    it('rolls back an answered question when submitting the backend response fails', () => {
+      const store = useChatStore.getState()
+      store.markQuestionAnswered('session-1', 'tool-1', [
+        { questionIndex: 0, selectedOptions: [1] },
+      ])
+
+      store.clearQuestionAnswer('session-1', 'tool-1')
+
+      expect(store.isQuestionAnswered('session-1', 'tool-1')).toBe(false)
+      expect(store.getSubmittedAnswers('session-1', 'tool-1')).toBeUndefined()
     })
 
     it('tracks question skipping', () => {
