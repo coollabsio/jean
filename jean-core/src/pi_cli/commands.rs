@@ -135,7 +135,7 @@ fn parse_pi_models(stdout: &[u8], stderr: &[u8]) -> Vec<PiModelInfo> {
 
 #[cfg(test)]
 mod tests {
-    use super::{default_pi_models, parse_pi_models, parse_version};
+    use super::{build_pi_auth_script, default_pi_models, parse_pi_models, parse_version};
 
     #[test]
     fn parse_version_reads_pi_version_from_stderr() {
@@ -164,44 +164,85 @@ mod tests {
         assert!(models[0].is_default);
         assert!(models.iter().skip(1).all(|model| !model.is_default));
     }
+
+    #[test]
+    fn pi_auth_script_reads_only_allowlisted_environment_keys_without_eval() {
+        let script = build_pi_auth_script();
+
+        assert!(script.contains("printenv \"$key\""));
+        assert!(!script.contains("eval"));
+        for key in super::PI_AUTH_ENV_KEYS {
+            assert!(script.contains(key));
+        }
+    }
 }
 
-fn pi_auth_file_exists() -> bool {
-    dirs::home_dir()
+const PI_AUTH_ENV_KEYS: [&str; 5] = [
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "GOOGLE_API_KEY",
+    "GEMINI_API_KEY",
+    "OPENROUTER_API_KEY",
+];
+
+fn build_pi_auth_script() -> String {
+    format!(
+        "auth=\"$HOME/.pi/agent/auth.json\"; \
+         if [ -s \"$auth\" ] && [ \"$(tr -d '[:space:]' < \"$auth\")\" != '{{}}' ]; then exit 0; fi; \
+         for key in {}; do \
+           [ -n \"$(printenv \"$key\")\" ] && exit 0; \
+         done; exit 1",
+        PI_AUTH_ENV_KEYS.join(" ")
+    )
+}
+
+fn host_pi_auth_exists() -> bool {
+    let auth_file_exists = dirs::home_dir()
         .map(|home| home.join(".pi").join("agent").join("auth.json"))
         .filter(|path| path.exists())
         .and_then(|path| std::fs::read_to_string(path).ok())
         .map(|contents| !contents.trim().is_empty() && contents.trim() != "{}")
-        .unwrap_or(false)
+        .unwrap_or(false);
+
+    auth_file_exists
+        || PI_AUTH_ENV_KEYS.iter().any(|key| {
+            std::env::var(key)
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .is_some()
+        })
 }
 
-fn pi_env_auth_exists() -> bool {
-    [
-        "ANTHROPIC_API_KEY",
-        "OPENAI_API_KEY",
-        "GOOGLE_API_KEY",
-        "GEMINI_API_KEY",
-        "OPENROUTER_API_KEY",
-    ]
-    .iter()
-    .any(|key| {
-        std::env::var(key)
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-            .is_some()
-    })
+#[cfg(windows)]
+fn pi_auth_exists() -> bool {
+    let wsl = crate::platform::get_wsl_config();
+    if wsl.enabled {
+        let script = build_pi_auth_script();
+        return silent_command("wsl.exe")
+            .args(["-d", &wsl.distro, "--exec", "bash", "-lc", &script])
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false);
+    }
+
+    host_pi_auth_exists()
+}
+
+#[cfg(not(windows))]
+fn pi_auth_exists() -> bool {
+    host_pi_auth_exists()
 }
 
 pub async fn check_pi_cli_installed(app: AppHandle) -> Result<PiCliStatus, String> {
     let path = resolve_cli_binary(&app);
-    if !path.exists() {
+    if !crate::platform::resolved_cli_exists(&path) {
         return Ok(PiCliStatus {
             installed: false,
             version: None,
             path: None,
         });
     }
-    let version = crate::platform::cli_command(&path.to_string_lossy(), None)
+    let version = crate::platform::wsl_resolved_cli_command(&path.to_string_lossy(), None)
         .arg("--version")
         .output()
         .ok()
@@ -223,13 +264,18 @@ pub async fn detect_pi_in_path(_app: AppHandle) -> Result<PiPathDetection, Strin
             package_manager: None,
         });
     };
-    let version = crate::platform::cli_command(&path.to_string_lossy(), None)
+    let version = crate::platform::wsl_resolved_cli_command(&path.to_string_lossy(), None)
         .arg("--version")
         .output()
         .ok()
         .filter(|o| o.status.success())
         .and_then(|o| parse_version(&o.stdout, &o.stderr));
-    let package_manager = crate::platform::detect_package_manager(&path);
+    let wsl = crate::platform::get_wsl_config();
+    let package_manager = if cfg!(windows) && wsl.enabled {
+        crate::platform::wsl_detect_package_manager(&path.to_string_lossy())
+    } else {
+        crate::platform::detect_package_manager(&path)
+    };
     Ok(PiPathDetection {
         found: true,
         path: Some(path.to_string_lossy().to_string()),
@@ -239,7 +285,7 @@ pub async fn detect_pi_in_path(_app: AppHandle) -> Result<PiPathDetection, Strin
 }
 
 pub async fn check_pi_cli_auth(_app: AppHandle) -> Result<PiAuthStatus, String> {
-    let authenticated = pi_auth_file_exists() || pi_env_auth_exists();
+    let authenticated = pi_auth_exists();
     Ok(PiAuthStatus {
         authenticated,
         error: if authenticated {
@@ -255,10 +301,10 @@ pub async fn check_pi_cli_auth(_app: AppHandle) -> Result<PiAuthStatus, String> 
 
 pub async fn list_pi_models(app: AppHandle) -> Result<Vec<PiModelInfo>, String> {
     let path = resolve_cli_binary(&app);
-    if !path.exists() {
+    if !crate::platform::resolved_cli_exists(&path) {
         return Ok(default_pi_models());
     }
-    let output = crate::platform::cli_command(&path.to_string_lossy(), None)
+    let output = crate::platform::wsl_resolved_cli_command(&path.to_string_lossy(), None)
         .arg("--list-models")
         .output();
     let Ok(output) = output else {

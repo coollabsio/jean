@@ -267,12 +267,63 @@ fn cli_launch_plan(
 pub fn cli_command(program: &str, cwd: Option<&std::path::Path>) -> Command {
     let config = get_wsl_config();
     let plan = cli_launch_plan(program, cwd, cfg!(windows), config.enabled, &config.distro);
+    command_from_cli_launch_plan(plan)
+}
+
+fn wsl_resolved_cli_launch_plan(
+    program: &str,
+    cwd: Option<&std::path::Path>,
+    is_windows: bool,
+    wsl_enabled: bool,
+    wsl_distro: &str,
+) -> CliLaunchPlan {
+    if is_windows && wsl_enabled {
+        let mut args = vec!["-d".to_string(), wsl_distro.to_string()];
+        if let Some(dir) = cwd {
+            args.extend(["--cd".to_string(), win_to_wsl_path(&dir.to_string_lossy())]);
+        }
+        // npm-installed CLIs commonly use `#!/usr/bin/env node`. A login shell
+        // loads Homebrew/nvm/bun PATH and provider API keys from the user's
+        // profile. Additional Command arguments become positional parameters;
+        // `exec "$@"` preserves them exactly without shell interpolation.
+        args.extend([
+            "--exec".to_string(),
+            "bash".to_string(),
+            "-lc".to_string(),
+            "exec \"$@\"".to_string(),
+            "jean-cli".to_string(),
+            program.to_string(),
+        ]);
+        return CliLaunchPlan {
+            program: "wsl.exe".to_string(),
+            args,
+            cwd: None,
+        };
+    }
+
+    cli_launch_plan(program, cwd, is_windows, false, wsl_distro)
+}
+
+fn command_from_cli_launch_plan(plan: CliLaunchPlan) -> Command {
     let mut cmd = silent_command(plan.program);
     cmd.args(plan.args);
     if let Some(dir) = plan.cwd {
         cmd.current_dir(dir);
     }
     cmd
+}
+
+/// Create a command for a WSL-resolved CLI in the user's login environment.
+///
+/// Use this when a WSL-resolved executable can depend on user-configured PATH
+/// entries or provider environment variables (for example, an npm shim whose
+/// shebang uses `/usr/bin/env node`). On non-WSL hosts this behaves like
+/// [`cli_command`].
+pub fn wsl_resolved_cli_command(program: &str, cwd: Option<&std::path::Path>) -> Command {
+    let config = get_wsl_config();
+    let plan =
+        wsl_resolved_cli_launch_plan(program, cwd, cfg!(windows), config.enabled, &config.distro);
+    command_from_cli_launch_plan(plan)
 }
 
 /// True when `path` is a Unix-style absolute path that only exists inside WSL.
@@ -881,6 +932,45 @@ mod tests {
                 "/home/u/.local/bin/codex"
             ]
         );
+        assert_eq!(plan.cwd, None);
+    }
+
+    #[test]
+    fn wsl_resolved_cli_launch_plan_loads_login_environment_and_preserves_appended_args() {
+        let plan = wsl_resolved_cli_launch_plan(
+            "/home/linuxbrew/.linuxbrew/bin/pi",
+            Some(std::path::Path::new(r"D:\repos\jean")),
+            true,
+            true,
+            "Ubuntu-22.04",
+        );
+
+        assert_eq!(plan.program, "wsl.exe");
+        assert_eq!(
+            plan.args,
+            vec![
+                "-d",
+                "Ubuntu-22.04",
+                "--cd",
+                "/mnt/d/repos/jean",
+                "--exec",
+                "bash",
+                "-lc",
+                "exec \"$@\"",
+                "jean-cli",
+                "/home/linuxbrew/.linuxbrew/bin/pi",
+            ]
+        );
+        assert_eq!(plan.cwd, None);
+    }
+
+    #[test]
+    fn wsl_resolved_cli_launch_plan_keeps_native_windows_cli_behavior() {
+        let plan =
+            wsl_resolved_cli_launch_plan(r"D:\nodejs\npm.cmd", None, true, false, "Ubuntu-22.04");
+
+        assert_eq!(plan.program, "cmd.exe");
+        assert_eq!(plan.args, vec!["/C", r"D:\nodejs\npm.cmd"]);
         assert_eq!(plan.cwd, None);
     }
 
