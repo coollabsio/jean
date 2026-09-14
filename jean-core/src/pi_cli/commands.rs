@@ -136,7 +136,7 @@ fn parse_pi_models(stdout: &[u8], stderr: &[u8]) -> Vec<PiModelInfo> {
 
 #[cfg(test)]
 mod tests {
-    use super::{default_pi_models, parse_pi_models, parse_version};
+    use super::{build_pi_auth_script, default_pi_models, parse_pi_models, parse_version};
 
     #[test]
     fn parse_version_reads_pi_version_from_stderr() {
@@ -165,6 +165,17 @@ mod tests {
         assert!(models[0].is_default);
         assert!(models.iter().skip(1).all(|model| !model.is_default));
     }
+
+    #[test]
+    fn pi_auth_script_reads_only_allowlisted_environment_keys_without_eval() {
+        let script = build_pi_auth_script();
+
+        assert!(script.contains("printenv \"$key\""));
+        assert!(!script.contains("eval"));
+        for key in super::PI_AUTH_ENV_KEYS {
+            assert!(script.contains(key));
+        }
+    }
 }
 
 const PI_AUTH_ENV_KEYS: [&str; 5] = [
@@ -174,6 +185,17 @@ const PI_AUTH_ENV_KEYS: [&str; 5] = [
     "GEMINI_API_KEY",
     "OPENROUTER_API_KEY",
 ];
+
+fn build_pi_auth_script() -> String {
+    format!(
+        "auth=\"$HOME/.pi/agent/auth.json\"; \
+         if [ -s \"$auth\" ] && [ \"$(tr -d '[:space:]' < \"$auth\")\" != '{{}}' ]; then exit 0; fi; \
+         for key in {}; do \
+           [ -n \"$(printenv \"$key\")\" ] && exit 0; \
+         done; exit 1",
+        PI_AUTH_ENV_KEYS.join(" ")
+    )
+}
 
 fn host_pi_auth_exists() -> bool {
     let auth_file_exists = dirs::home_dir()
@@ -196,13 +218,9 @@ fn host_pi_auth_exists() -> bool {
 fn pi_auth_exists() -> bool {
     let wsl = crate::platform::get_wsl_config();
     if wsl.enabled {
-        let script = "auth=\"$HOME/.pi/agent/auth.json\"; \
-                      if [ -s \"$auth\" ] && [ \"$(tr -d '[:space:]' < \"$auth\")\" != '{}' ]; then exit 0; fi; \
-                      for key in ANTHROPIC_API_KEY OPENAI_API_KEY GOOGLE_API_KEY GEMINI_API_KEY OPENROUTER_API_KEY; do \
-                        eval \"value=\\${$key-}\"; [ -n \"$value\" ] && exit 0; \
-                      done; exit 1";
+        let script = build_pi_auth_script();
         return silent_command("wsl.exe")
-            .args(["-d", &wsl.distro, "--exec", "bash", "-lc", script])
+            .args(["-d", &wsl.distro, "--exec", "bash", "-lc", &script])
             .output()
             .map(|output| output.status.success())
             .unwrap_or(false);
