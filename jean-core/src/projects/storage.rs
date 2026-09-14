@@ -348,9 +348,22 @@ fn load_projects_file_with_recovery(path: &Path) -> Result<ProjectsData, String>
         ),
     };
 
+    let mut recovery_source_found = false;
     for candidate in recovery_candidates(path) {
-        let Ok(contents) = fs::read(&candidate) else {
-            continue;
+        let contents = match fs::read(&candidate) {
+            Ok(contents) => {
+                recovery_source_found = true;
+                contents
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                recovery_source_found = true;
+                log::warn!(
+                    "Failed to read projects recovery candidate {}: {error}",
+                    candidate.display()
+                );
+                continue;
+            }
         };
         let Ok(data) = parse_projects_bytes(&candidate, &contents) else {
             log::warn!(
@@ -383,7 +396,7 @@ fn load_projects_file_with_recovery(path: &Path) -> Result<ProjectsData, String>
         return Ok(data);
     }
 
-    if primary_missing {
+    if primary_missing && !recovery_source_found {
         log::trace!("Projects file not found, returning empty data");
         return Ok(ProjectsData::default());
     }
@@ -593,5 +606,19 @@ mod tests {
 
         assert!(error.contains("Projects data is corrupt"));
         assert_eq!(fs::read(&path).expect("original primary"), vec![0; 128]);
+    }
+
+    #[test]
+    fn missing_primary_with_only_invalid_recovery_sources_returns_an_error() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let path = directory.path().join("projects.json");
+        let backup = projects_backup_path(&path, 0);
+        fs::write(&backup, vec![0; 128]).expect("corrupt backup");
+
+        let error = load_projects_file_with_recovery(&path).expect_err("corrupt data error");
+
+        assert!(error.contains("No valid backup could be recovered"));
+        assert!(!path.exists());
+        assert_eq!(fs::read(&backup).expect("original backup"), vec![0; 128]);
     }
 }
