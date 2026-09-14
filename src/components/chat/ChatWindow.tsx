@@ -27,6 +27,7 @@ import {
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { invoke, listen } from '@/lib/transport'
 import { hydrateRunningSnapshot } from '@/lib/hydrate-running-snapshot'
+import { generateId } from '@/lib/uuid'
 import { GitBranch, GitMerge, Layers, Loader2 } from 'lucide-react'
 import {
   useSession,
@@ -66,6 +67,7 @@ import {
   useAttachedSavedContexts,
 } from '@/services/github'
 import { useLoadedLinearIssueContexts } from '@/services/linear'
+import { useLoadedSentryContexts } from '@/services/sentry'
 import { useChatStore, DEFAULT_THINKING_LEVEL } from '@/store/chat-store'
 import { usePreferences, usePatchPreferences } from '@/services/preferences'
 import { getLabelTextColor } from '@/lib/label-colors'
@@ -104,6 +106,7 @@ import {
   normalizeCodexQuestions,
 } from '@/types/chat'
 import { getFilename, normalizePath } from '@/lib/path-utils'
+import { registerChatComposer } from '@/lib/chat-composer-metrics'
 import { cn } from '@/lib/utils'
 import { PermissionApproval } from './PermissionApproval'
 import { AskUserQuestion } from './AskUserQuestion'
@@ -114,6 +117,7 @@ import { OpenCodePermissionsRequest } from './OpenCodePermissionsRequest'
 import { CodexMcpElicitationRequest as CodexMcpElicitationRequestCard } from './CodexMcpElicitationRequest'
 import { CodexDynamicToolCallRequest as CodexDynamicToolCallRequestCard } from './CodexDynamicToolCallRequest'
 import { SetupScriptOutput } from './SetupScriptOutput'
+import { isFirstWorktreeSession } from './setup-script-visibility'
 import { TodoWidget } from './TodoWidget'
 import { AgentWidget } from './AgentWidget'
 import { normalizeTodosForDisplay } from './tool-call-utils'
@@ -145,7 +149,7 @@ import { StreamingStatusBar } from './StreamingStatusBar'
 import { ChatErrorFallback } from './ChatErrorFallback'
 import { logger } from '@/lib/logger'
 import { saveCrashState } from '@/lib/recovery'
-import { resolveDefaultModelForBackend } from '@/lib/session-defaults'
+import { resolveSelectedModelForBackend } from '@/lib/session-defaults'
 import {
   isBackendAutoSteerEnabled,
   isSteerCapableBackend,
@@ -163,6 +167,7 @@ import {
 } from './message-content-utils'
 import { useUIStore } from '@/store/ui-store'
 import { buildMcpConfigJson } from '@/services/mcp'
+import { CHECK_GITHUB_ISSUES_PROMPT } from '@/lib/github-discovery-prompt'
 import type { McpServerInfo } from '@/types/chat'
 import { useGitStatus } from '@/services/git-status'
 import { useRemotePicker } from '@/hooks/useRemotePicker'
@@ -382,7 +387,7 @@ export function ChatWindow({
     clearInputDraft,
     setExecutionMode,
     setError,
-    clearSetupScriptResult,
+    dismissSetupScript,
   } = useChatStore.getState()
 
   const queryClient = useQueryClient()
@@ -393,6 +398,11 @@ export function ChatWindow({
     isLoading: isSessionsLoading,
     isFetching: isSessionsFetching,
   } = useSessions(activeWorktreeId, activeWorktreePath)
+
+  const isFirstSession = isFirstWorktreeSession(
+    activeSessionId,
+    sessionsData?.sessions
+  )
 
   const uiStateInitialized = useUIStore(state => state.uiStateInitialized)
 
@@ -691,6 +701,11 @@ export function ChatWindow({
     activeWorktreeId ?? null,
     worktree?.project_id ?? null
   )
+  const { data: loadedSentryContexts } = useLoadedSentryContexts(
+    activeSessionId ?? null,
+    activeWorktreeId ?? null,
+    worktree?.project_id ?? null
+  )
 
   // Attached saved contexts for indicator
   const { data: attachedSavedContexts } = useAttachedSavedContexts(
@@ -849,12 +864,12 @@ export function ChatWindow({
   )
 
   // Per-session model selection, falls back to preferences default (backend-aware)
-  const defaultModel = resolveDefaultModelForBackend(
+  const selectedModel = resolveSelectedModelForBackend(
     selectedBackend,
+    session?.selected_model,
     preferences,
     selectedBackend === 'pi' ? availablePiModelOptions : undefined
   )
-  const selectedModel: string = session?.selected_model ?? defaultModel
   const buildNewContextLabel = resolveApprovalLabel(
     'build',
     preferences,
@@ -930,14 +945,15 @@ export function ChatWindow({
   )
   // Custom providers don't support Opus 4.6 adaptive thinking — use thinking levels instead
   const useAdaptiveThinkingFlag =
-    !isCustomProvider &&
-    supportsAdaptiveThinking(
-      selectedModel,
-      cliStatus?.version ?? null,
-      selectedModelReasoning === undefined
-        ? undefined
-        : selectedModelReasoning?.type === 'effort'
-    )
+    selectedBackend === 'antigravity' ||
+    (!isCustomProvider &&
+      supportsAdaptiveThinking(
+        selectedModel,
+        cliStatus?.version ?? null,
+        selectedModelReasoning === undefined
+          ? undefined
+          : selectedModelReasoning?.type === 'effort'
+      ))
 
   // Hide thinking level UI entirely for providers that don't support it
   const customCliProfiles = preferences?.custom_cli_profiles ?? []
@@ -1027,6 +1043,11 @@ export function ChatWindow({
   // Per-worktree setup script result (stays at worktree level)
   const setupScriptResult = useChatStore(state =>
     activeWorktreeId ? state.setupScriptResults[activeWorktreeId] : undefined
+  )
+  const isSetupScriptDismissed = useChatStore(state =>
+    activeWorktreeId
+      ? (state.dismissedSetupScripts[activeWorktreeId] ?? false)
+      : false
   )
   // PERFORMANCE: Input-related selectors use activeSessionId for immediate feedback
   // When user switches tabs, attachments should reflect the NEW session immediately
@@ -1175,6 +1196,11 @@ export function ChatWindow({
 
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const formRef = useRef<HTMLFormElement>(null)
+  const unregisterChatComposerRef = useRef<(() => void) | null>(null)
+  const setChatComposerNode = useCallback((node: HTMLDivElement | null) => {
+    unregisterChatComposerRef.current?.()
+    unregisterChatComposerRef.current = node ? registerChatComposer(node) : null
+  }, [])
   const clearChatInputStateRef = useRef<(() => void) | null>(null)
   // PERFORMANCE: Refs for session/worktree IDs and settings to avoid recreating callbacks when session changes
   // This enables stable callback references that read current values from refs
@@ -1439,7 +1465,7 @@ export function ChatWindow({
                   ? (preferences?.selected_commandcode_model ??
                     'commandcode/default')
                   : yoloBackend === 'grok'
-                    ? (preferences?.selected_grok_model ?? 'grok/grok-4.5')
+                    ? (preferences?.selected_grok_model ?? 'grok/grok-4.6')
                     : yoloBackend === 'kimi'
                       ? (preferences?.selected_kimi_model ?? 'kimi/default')
                       : selectedModelRef.current)
@@ -1629,7 +1655,7 @@ export function ChatWindow({
                   ? (preferences?.selected_commandcode_model ??
                     'commandcode/default')
                   : buildBackend === 'grok'
-                    ? (preferences?.selected_grok_model ?? 'grok/grok-4.5')
+                    ? (preferences?.selected_grok_model ?? 'grok/grok-4.6')
                     : buildBackend === 'kimi'
                       ? (preferences?.selected_kimi_model ?? 'kimi/default')
                       : selectedModelRef.current)
@@ -1902,7 +1928,7 @@ export function ChatWindow({
                   ? (preferences?.selected_commandcode_model ??
                     'commandcode/default')
                   : modeBackend === 'grok'
-                    ? (preferences?.selected_grok_model ?? 'grok/grok-4.5')
+                    ? (preferences?.selected_grok_model ?? 'grok/grok-4.6')
                     : modeBackend === 'kimi'
                       ? (preferences?.selected_kimi_model ?? 'kimi/default')
                       : selectedModelRef.current)
@@ -2093,7 +2119,8 @@ export function ChatWindow({
         backend === 'opencode' ||
         backend === 'pi' ||
         backend === 'grok' ||
-        backend === 'kimi'
+        backend === 'kimi' ||
+        backend === 'antigravity'
       const effortLevel = usesEffortBackend
         ? ((preferences?.magic_prompt_efforts?.code_review_effort as
             | EffortLevel
@@ -2242,6 +2269,27 @@ export function ChatWindow({
     clearChatInputState: () => clearChatInputStateRef.current?.(),
   })
 
+  const handleCheckGitHubIssues = useCallback(() => {
+    sendMessageNow({
+      id: generateId(),
+      message: CHECK_GITHUB_ISSUES_PROMPT,
+      pendingImages: [],
+      pendingFiles: [],
+      pendingSkills: [],
+      pendingTextFiles: [],
+      model: selectedModelRef.current,
+      provider: selectedProviderRef.current,
+      executionMode: executionModeRef.current,
+      thinkingLevel: selectedThinkingLevelRef.current,
+      effortLevel: useAdaptiveThinkingRef.current
+        ? selectedEffortLevelRef.current
+        : undefined,
+      mcpConfig: getMcpConfig(),
+      backend: selectedBackendRef.current,
+      queuedAt: Date.now(),
+    })
+  }, [getMcpConfig, sendMessageNow])
+
   // Note: Queue processing moved to useQueueProcessor hook in App.tsx
   // This ensures queued messages execute even when the worktree is unfocused
 
@@ -2254,7 +2302,6 @@ export function ChatWindow({
     handleRevertLastCommit,
     handleOpenPr,
     handleReview,
-    handleFinalReview,
     handleCodeRabbitReview,
     handleCodeRabbitPrReview,
     handleMerge,
@@ -2504,6 +2551,7 @@ export function ChatWindow({
     handleLoadContext,
     handleLinkedProjects,
     handleForkSession,
+    handleCheckGitHubIssues,
     handleCommit,
     handleCommitAndPush: handleCommitAndPushWithPicker,
     handlePull: handlePullWithPicker,
@@ -2951,7 +2999,6 @@ export function ChatWindow({
           open={reviewMethodModalOpen}
           onOpenChange={setReviewMethodModalOpen}
           onAiReview={handleReview}
-          onFinalReview={handleFinalReview}
           onCodeRabbitCliReview={handleCodeRabbitReview}
           onCodeRabbitPrReview={handleCodeRabbitPrReview}
           codeRabbitPrAvailable={Boolean(worktree?.pr_number)}
@@ -3084,7 +3131,9 @@ export function ChatWindow({
                             {/* Setup script running indicator */}
                             {worktree?.setup_script &&
                               worktree.setup_success == null &&
-                              !setupScriptResult && (
+                              !setupScriptResult &&
+                              isFirstSession &&
+                              !isSetupScriptDismissed && (
                                 <div className="my-2 flex items-center gap-2 rounded border border-muted bg-muted/30 px-3 py-2 font-mono text-sm text-muted-foreground">
                                   <Loader2 className="h-4 w-4 animate-spin shrink-0" />
                                   <span>
@@ -3096,11 +3145,14 @@ export function ChatWindow({
                                 </div>
                               )}
                             {/* Setup script output from jean.json */}
-                            {setupScriptResult && activeWorktreeId && (
+                            {setupScriptResult &&
+                              activeWorktreeId &&
+                              isFirstSession &&
+                              !isSetupScriptDismissed && (
                               <SetupScriptOutput
                                 result={setupScriptResult}
                                 onDismiss={() =>
-                                  clearSetupScriptResult(activeWorktreeId)
+                                  dismissSetupScript(activeWorktreeId)
                                 }
                               />
                             )}
@@ -3543,7 +3595,11 @@ export function ChatWindow({
                     {/* Input container - full width, centered content */}
                     <div className="bg-background">
                       <div className="mx-auto max-w-7xl">
-                        <div className="relative sm:mx-auto sm:mb-3 sm:max-w-3xl xl:max-w-4xl">
+                        <div
+                          ref={setChatComposerNode}
+                          data-chat-composer=""
+                          className="relative sm:mx-auto sm:mb-3 sm:max-w-3xl xl:max-w-4xl"
+                        >
                           {/* Queued prompts - rendered as an extension above the chat input */}
                           {activeSessionId &&
                             currentQueuedMessages.length > 0 && (
@@ -3610,7 +3666,8 @@ export function ChatWindow({
                             )}
 
                             {/* Task widget - inline fallback for narrow screens */}
-                            {activeTodos.length > 0 &&
+                            {!zenMode &&
+                              activeTodos.length > 0 &&
                               (dismissedTodoMessageId === null ||
                                 (todoSourceMessageId !== null &&
                                   todoSourceMessageId !==
@@ -3625,7 +3682,9 @@ export function ChatWindow({
                                   <TodoWidget
                                     todos={normalizeTodosForDisplay(
                                       activeTodos,
-                                      isFromStreaming
+                                      isFromStreaming,
+                                      false,
+                                      isGrokBackend
                                     )}
                                     isStreaming={isSending}
                                     onClose={() =>
@@ -3638,7 +3697,8 @@ export function ChatWindow({
                               )}
 
                             {/* Agent widget - inline fallback for narrow screens */}
-                            {activeAgents.length > 0 &&
+                            {!zenMode &&
+                              activeAgents.length > 0 &&
                               (dismissedAgentMessageId === null ||
                                 (agentSourceMessageId !== null &&
                                   agentSourceMessageId !==
@@ -3800,6 +3860,9 @@ export function ChatWindow({
                                     loadedLinearContexts={
                                       loadedLinearContexts ?? []
                                     }
+                                    loadedSentryContexts={
+                                      loadedSentryContexts ?? []
+                                    }
                                     attachedSavedContexts={
                                       attachedSavedContexts ?? []
                                     }
@@ -3891,7 +3954,8 @@ export function ChatWindow({
                           </form>
 
                           {/* Side panel widgets (Tasks + Agents) for wide screens */}
-                          {!terminalPanelOpen &&
+                          {!zenMode &&
+                            !terminalPanelOpen &&
                             (activeTodos.length > 0 ||
                               activeAgents.length > 0) && (
                               <div className="hidden xl:flex flex-col gap-2 absolute left-full bottom-0 ml-3 w-64 z-20">
@@ -3903,7 +3967,9 @@ export function ChatWindow({
                                     <TodoWidget
                                       todos={normalizeTodosForDisplay(
                                         activeTodos,
-                                        isFromStreaming
+                                        isFromStreaming,
+                                        false,
+                                        isGrokBackend
                                       )}
                                       isStreaming={isSending}
                                       onClose={() =>

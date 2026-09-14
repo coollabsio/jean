@@ -3,6 +3,8 @@ import type { Worktree } from '@/types/projects'
 import {
   CANVAS_FILTER_TABS,
   getCanvasFilterTabCount,
+  getCanvasWorktreeSearchTerms,
+  matchesCanvasWorktreeSearch,
   matchesCanvasFilterTab,
   shouldShowCanvasWorktreeSection,
 } from './canvas-worktree-filters'
@@ -54,7 +56,7 @@ describe('canvas worktree filters', () => {
     expect(getCanvasFilterTabCount(worktrees, 'auto_fix')).toBe(1)
   })
 
-  it('shows the base branch even when it has no sessions', () => {
+  it('shows ready worktrees even when they have no sessions', () => {
     const base = worktree({
       id: 'base',
       name: 'main',
@@ -63,7 +65,54 @@ describe('canvas worktree filters', () => {
     })
     const regular = worktree({ id: 'regular' })
 
-    expect(shouldShowCanvasWorktreeSection(base, 0)).toBe(true)
-    expect(shouldShowCanvasWorktreeSection(regular, 0)).toBe(false)
+    expect(shouldShowCanvasWorktreeSection(base)).toBe(true)
+    expect(shouldShowCanvasWorktreeSection(regular)).toBe(true)
+    expect(
+      shouldShowCanvasWorktreeSection(
+        worktree({ id: 'deleting', status: 'deleting' })
+      )
+    ).toBe(false)
+  })
+
+  it('matches worktree search only against relevant worktree metadata', () => {
+    const matching = worktree({
+      name: 'pr-10960-memory-crash',
+      branch: 'fix/memory-crash',
+      pr_number: 10960,
+    })
+    const unrelated = worktree({
+      name: 'smtp-server-setup',
+      branch: 'fix/smtp',
+      pr_number: 5877,
+    })
+
+    expect(matchesCanvasWorktreeSearch(matching, '10960')).toBe(true)
+    expect(matchesCanvasWorktreeSearch(unrelated, '10960')).toBe(false)
+  })
+
+  it('normalizes searchable worktree metadata once per worktree', () => {
+    const terms = getCanvasWorktreeSearchTerms(
+      worktree({
+        name: 'Feature/Search',
+        branch: 'Feature/Search',
+        labels: [{ name: 'Needs Review', color: '#fff' }],
+        pr_number: 42,
+        issue_number: 7,
+        linear_issue_identifier: 'ENG-123',
+        security_alert_number: 9,
+        advisory_ghsa_id: 'GHSA-AbCd',
+      })
+    )
+
+    expect(terms).toEqual([
+      'feature/search',
+      'feature/search',
+      'needs review',
+      '42',
+      '7',
+      'eng-123',
+      '9',
+      'ghsa-abcd',
+    ])
   })
 })

@@ -8,6 +8,7 @@ import {
   GitPullRequest,
   Shield,
   ShieldAlert,
+  Bug,
 } from 'lucide-react'
 import { LinearIcon } from '@/components/icons/LinearIcon'
 import type { LucideIcon } from 'lucide-react'
@@ -28,12 +29,13 @@ import { linearQueryKeys } from '@/services/linear'
 import { GitHubItemsTab } from './GitHubItemsTab'
 import { SecurityAlertsTab } from './SecurityAlertsTab'
 import { LinearItemsTab } from './LinearItemsTab'
+import { SentryItemsTab } from './SentryItemsTab'
 import { ContextsTab } from './ContextsTab'
 import { useLoadContextData } from './hooks/useLoadContextData'
 import { useLoadContextHandlers } from './hooks/useLoadContextHandlers'
 import { useLoadContextKeyboard } from './hooks/useLoadContextKeyboard'
 
-type TabId = 'issues' | 'prs' | 'security' | 'contexts' | 'linear'
+type TabId = 'issues' | 'prs' | 'security' | 'contexts' | 'linear' | 'sentry'
 
 interface Tab {
   id: TabId
@@ -48,6 +50,7 @@ const TABS: Tab[] = [
   { id: 'prs', label: 'PRs', key: '3', icon: GitPullRequest },
   { id: 'security', label: 'Security', key: '4', icon: Shield },
   { id: 'linear', label: 'Linear', key: '5', icon: LinearIcon },
+  { id: 'sentry', label: 'Sentry', key: '6', icon: Bug },
 ]
 
 interface LoadContextModalProps {
@@ -109,6 +112,7 @@ export function LoadContextModal({
     refetchAdvisoryContexts: data.refetchAdvisoryContexts,
     refetchAttachedContexts: data.refetchAttachedContexts,
     refetchLinearContexts: data.refetchLinearContexts,
+    refetchSentryContexts: data.refetchSentryContexts,
     refetchContexts: data.refetchContexts,
     renameMutation: data.renameMutation,
     preferences,
@@ -123,6 +127,7 @@ export function LoadContextModal({
     filteredSecurityAlerts: data.filteredSecurityAlerts,
     filteredAdvisories: data.filteredAdvisories,
     filteredLinearIssues: data.filteredLinearIssues,
+    filteredSentryIssues: data.filteredSentryIssues,
     filteredContexts: data.filteredContexts,
     filteredEntries: data.filteredEntries,
     selectedIndex,
@@ -136,6 +141,7 @@ export function LoadContextModal({
     onSelectAdvisory: handlers.handleSelectAdvisory,
     onPreviewAdvisory: handlers.handlePreviewAdvisory,
     onSelectLinearIssue: handlers.handleSelectLinearIssue,
+    onSelectSentryIssue: handlers.handleSelectSentryIssue,
     onAttachContext: handlers.handleAttachContext,
     onSessionClick: handlers.handleSessionClick,
     onTabChange: setActiveTab,
@@ -159,6 +165,8 @@ export function LoadContextModal({
         setActiveTab('security')
       } else if (data.hasLoadedLinearContexts) {
         setActiveTab('linear')
+      } else if (data.hasLoadedSentryContexts) {
+        setActiveTab('sentry')
       } else {
         setActiveTab('contexts')
       }
@@ -254,6 +262,7 @@ export function LoadContextModal({
     data.hasLoadedSecurityContexts,
     data.hasLoadedAdvisoryContexts,
     data.hasLoadedLinearContexts,
+    data.hasLoadedSentryContexts,
     data.hasAttachedContexts,
     handlers.resetState,
   ])
@@ -477,6 +486,30 @@ export function LoadContextModal({
             />
           )}
 
+          {activeTab === 'sentry' && (
+            <SentryItemsTab
+              projectId={projectId ?? ''}
+              searchQuery={searchQuery}
+              setSearchQuery={setSearchQuery}
+              searchInputRef={searchInputRef}
+              loadedContexts={data.loadedSentryContexts ?? []}
+              isLoadingContexts={data.isLoadingSentryContexts}
+              loadingIds={handlers.loadingSentryIds}
+              removingIds={handlers.removingSentryIds}
+              onView={handlers.handleViewSentryIssue}
+              onRefreshContext={handlers.handleRefreshSentryIssue}
+              onRemove={handlers.handleRemoveSentryIssue}
+              issues={data.filteredSentryIssues}
+              isLoading={data.isLoadingSentryIssues}
+              isRefetching={data.isRefetchingSentryIssues}
+              error={data.sentryIssuesError}
+              onRefresh={() => data.refetchSentryIssues()}
+              selectedIndex={selectedIndex}
+              setSelectedIndex={setSelectedIndex}
+              onSelectIssue={handlers.handleSelectSentryIssue}
+            />
+          )}
+
           {activeTab === 'contexts' && (
             <ContextsTab
               searchQuery={searchQuery}
@@ -539,7 +572,8 @@ export function LoadContextModal({
           (handlers.viewingContext.type === 'saved' ||
             handlers.viewingContext.type === 'security' ||
             handlers.viewingContext.type === 'advisory' ||
-            handlers.viewingContext.type === 'linear') && (
+            handlers.viewingContext.type === 'linear' ||
+            handlers.viewingContext.type === 'sentry') && (
             <Dialog
               open={true}
               onOpenChange={() => handlers.setViewingContext(null)}
@@ -553,6 +587,8 @@ export function LoadContextModal({
                       <ShieldAlert className="h-4 w-4 text-orange-500" />
                     ) : handlers.viewingContext.type === 'linear' ? (
                       <LinearIcon className="h-4 w-4 text-violet-500" />
+                    ) : handlers.viewingContext.type === 'sentry' ? (
+                      <Bug className="h-4 w-4 text-orange-500" />
                     ) : (
                       <FolderOpen className="h-4 w-4 text-blue-500" />
                     )}

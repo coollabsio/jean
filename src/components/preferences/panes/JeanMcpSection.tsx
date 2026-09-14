@@ -22,6 +22,7 @@ import { invoke, listen } from '@/lib/transport'
 import { useInstalledBackends } from '@/hooks/useInstalledBackends'
 import { invalidateAllMcpServers } from '@/services/mcp'
 import { usePatchPreferences, usePreferences } from '@/services/preferences'
+import type { McpServerInfo } from '@/types/chat'
 import type { CliBackend } from '@/types/preferences'
 import { SettingsSection } from '../SettingsSection'
 
@@ -60,6 +61,7 @@ const INSTALLABLE_BACKENDS = [
   'cursor',
   'grok',
   'kimi',
+  'antigravity',
 ] as const satisfies readonly CliBackend[]
 
 const BACKEND_LABELS: Record<(typeof INSTALLABLE_BACKENDS)[number], string> = {
@@ -69,6 +71,7 @@ const BACKEND_LABELS: Record<(typeof INSTALLABLE_BACKENDS)[number], string> = {
   cursor: 'Cursor',
   grok: 'Grok',
   kimi: 'Kimi',
+  antigravity: 'Antigravity',
 }
 
 interface SnippetTarget {
@@ -122,7 +125,13 @@ function handleCopySnippet(label: string, content: string | null) {
   toast.success(`${label} snippet copied`)
 }
 
-export const JeanMcpSection: React.FC = () => {
+interface JeanMcpSectionProps {
+  mcpServers: McpServerInfo[]
+}
+
+export const JeanMcpSection: React.FC<JeanMcpSectionProps> = ({
+  mcpServers,
+}) => {
   const { data: preferences } = usePreferences()
   const patchPreferences = usePatchPreferences()
   const { installedBackends } = useInstalledBackends()
@@ -150,6 +159,12 @@ export const JeanMcpSection: React.FC = () => {
   const installableBackends = installedBackends.filter(
     (backend): backend is (typeof INSTALLABLE_BACKENDS)[number] =>
       (INSTALLABLE_BACKENDS as readonly CliBackend[]).includes(backend)
+  )
+  const configuredBackends = installableBackends.filter(backend =>
+    mcpServers.some(
+      server =>
+        server.backend === backend && server.name === snippet?.serverName
+    )
   )
   const installableLabels = installableBackends.flatMap(backend => {
     const label = BACKEND_LABELS[backend]
@@ -194,6 +209,12 @@ export const JeanMcpSection: React.FC = () => {
         path: '~/.config/opencode/opencode.json',
         content: snippet?.opencodeJson ?? null,
       },
+      {
+        id: 'antigravity',
+        label: 'Antigravity',
+        path: '~/.gemini/config/mcp_config.json',
+        content: snippet?.claude ?? null,
+      },
     ],
     [snippet]
   )
@@ -236,7 +257,7 @@ export const JeanMcpSection: React.FC = () => {
       if (installableBackends.length === 0) {
         setTemporaryInstallState(
           'error',
-          'Install a supported CLI first (Claude, Codex, Cursor, Grok, Kimi, or OpenCode)'
+          'Install a supported CLI first (Claude, Codex, Cursor, Grok, Kimi, Antigravity, or OpenCode)'
         )
         return
       }
@@ -385,6 +406,22 @@ export const JeanMcpSection: React.FC = () => {
                     : '. Install a supported CLI first.'}
                 </p>
               </div>
+              {configuredBackends.length > 0 && (
+                <div
+                  className="flex flex-wrap gap-2"
+                  aria-label="Install status"
+                >
+                  {configuredBackends.map(backend => (
+                    <span
+                      key={backend}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-green-600/30 bg-green-600/10 px-2.5 py-1 text-xs text-green-700 dark:text-green-400"
+                    >
+                      <CheckCircle className="size-3.5" />
+                      Installed in {BACKEND_LABELS[backend]}
+                    </span>
+                  ))}
+                </div>
+              )}
               <Button
                 size="sm"
                 onClick={() => handleInstall()}

@@ -462,8 +462,8 @@ export function ReviewResultsPanel({
         event.key === 'Enter' && (event.metaKey || event.ctrlKey)
       if (sendShortcut) {
         event.preventDefault()
-        if (event.shiftKey) handleSendSeparately()
-        else handleSendToChat()
+        if (event.shiftKey) handleSendToChat()
+        else handleSendSeparately()
         return
       }
 
@@ -827,14 +827,14 @@ export function ReviewResultsPanel({
               variant="outline"
               size="sm"
               disabled={selectedCount === 0 || isSending || !onSendFix}
-              onClick={handleSendSeparately}
+              onClick={handleSendToChat}
             >
               {isSending ? (
                 <Loader2 className="mr-1.5 size-3.5 animate-spin" />
               ) : (
-                <MessagesSquare className="mr-1.5 size-3.5" />
+                <MessageSquare className="mr-1.5 size-3.5" />
               )}
-              Send Separately ({selectedCount})
+              Send to Chat ({selectedCount})
               {showKeyboardHints && (
                 <KbdGroup className="ml-1.5">
                   <Kbd className="h-4 min-w-4 px-1 text-[10px]">⇧</Kbd>
@@ -845,14 +845,14 @@ export function ReviewResultsPanel({
             <Button
               size="sm"
               disabled={selectedCount === 0 || isSending || !onSendFix}
-              onClick={handleSendToChat}
+              onClick={handleSendSeparately}
             >
               {isSending ? (
                 <Loader2 className="mr-1.5 size-3.5 animate-spin" />
               ) : (
-                <MessageSquare className="mr-1.5 size-3.5" />
+                <MessagesSquare className="mr-1.5 size-3.5" />
               )}
-              Send to Chat ({selectedCount})
+              Send Separately ({selectedCount})
               {showKeyboardHints && (
                 <KbdGroup className="ml-1.5">
                   <Kbd className="h-4 min-w-4 px-1 text-[10px]">⌘</Kbd>

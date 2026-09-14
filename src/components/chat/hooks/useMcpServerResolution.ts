@@ -4,6 +4,7 @@ import {
   useMcpServers,
   invalidateMcpServers,
   getNewServersToAutoEnable,
+  mcpKey,
 } from '@/services/mcp'
 import type { Project } from '@/types/projects'
 import type { AppPreferences, CliBackend } from '@/types/preferences'
@@ -65,6 +66,14 @@ export function useMcpServerResolution({
     preferences?.default_enabled_mcp_servers,
   ])
 
+  const effectiveBaseEnabledMcpServers = useMemo(() => {
+    if (selectedBackend !== 'antigravity') return baseEnabledMcpServers
+    const automatic = availableMcpServers
+      .filter(server => !server.disabled)
+      .map(server => mcpKey('antigravity', server.name))
+    return [...new Set([...baseEnabledMcpServers, ...automatic])]
+  }, [availableMcpServers, baseEnabledMcpServers, selectedBackend])
+
   const knownMcpServers = useMemo(
     () => project?.known_mcp_servers ?? preferences?.known_mcp_servers ?? [],
     [project?.known_mcp_servers, preferences?.known_mcp_servers]
@@ -74,22 +83,22 @@ export function useMcpServerResolution({
     if (hasSessionOverride) return []
     return getNewServersToAutoEnable(
       availableMcpServers,
-      baseEnabledMcpServers,
+      effectiveBaseEnabledMcpServers,
       knownMcpServers
     )
   }, [
     hasSessionOverride,
     availableMcpServers,
-    baseEnabledMcpServers,
+    effectiveBaseEnabledMcpServers,
     knownMcpServers,
   ])
 
   const enabledMcpServers = useMemo(
     () =>
       newAutoEnabled.length > 0
-        ? [...baseEnabledMcpServers, ...newAutoEnabled]
-        : baseEnabledMcpServers,
-    [baseEnabledMcpServers, newAutoEnabled]
+        ? [...effectiveBaseEnabledMcpServers, ...newAutoEnabled]
+        : effectiveBaseEnabledMcpServers,
+    [effectiveBaseEnabledMcpServers, newAutoEnabled]
   )
 
   return {

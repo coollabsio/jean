@@ -1,5 +1,4 @@
 import { isNativeApp } from './environment'
-import { invoke } from './transport'
 
 function isInsecureWebContext(): boolean {
   // Browsers only treat HTTPS and loopback HTTP (localhost / 127.0.0.1 / ::1)
@@ -15,7 +14,7 @@ function isInsecureWebContext(): boolean {
  * 1. Native app → Tauri clipboard plugin
  * 2. Insecure HTTP → sync document.execCommand('copy') first (preserves user gesture)
  * 3. Secure context → navigator.clipboard.writeText()
- * 4. Remaining fallbacks → execCommand, then same-machine backend clipboard
+ * 4. Remaining fallback → execCommand
  */
 export async function copyToClipboard(text: string): Promise<void> {
   if (isNativeApp()) {
@@ -45,19 +44,14 @@ export async function copyToClipboard(text: string): Promise<void> {
 
   if (execCommandCopyFallback(text)) return
 
-  // Last resort for Jean web access on the same machine: ask the backend to
-  // write the OS clipboard. Useful after async command-palette work that lost
-  // browser user activation. Not useful for remote clients (writes host OS).
-  try {
-    await invoke('write_clipboard_text', { text })
-  } catch (error) {
-    if (insecure) {
-      throw new Error(
-        'Copy failed: browsers block the clipboard API on plain HTTP except localhost. Open Jean via HTTPS (Tailscale Serve or a reverse proxy), or use http://localhost on this machine.'
-      )
-    }
-    throw error instanceof Error ? error : new Error(String(error))
+  if (insecure) {
+    throw new Error(
+      'Copy failed: browsers block the clipboard API on plain HTTP except localhost. Open Jean via HTTPS (Tailscale Serve or a reverse proxy), or use http://localhost on this machine.'
+    )
   }
+  throw new Error(
+    'Copy failed: browser clipboard access is unavailable or permission was denied.'
+  )
 }
 
 /**
@@ -66,7 +60,6 @@ export async function copyToClipboard(text: string): Promise<void> {
  * Fallback chain:
  * 1. Native app → Tauri clipboard plugin
  * 2. Secure context → navigator.clipboard.readText()
- * 3. Same-machine backend clipboard (desktop host OS)
  */
 export async function readFromClipboard(): Promise<string> {
   if (isNativeApp()) {
@@ -82,21 +75,19 @@ export async function readFromClipboard(): Promise<string> {
       const text = await navigator.clipboard.readText()
       return typeof text === 'string' ? text : ''
     } catch {
-      // Permission denied or empty — try host fallback below.
+      // Permission denied — report the browser error below. A web client must
+      // never fall back to the server machine's unrelated clipboard.
     }
   }
 
-  try {
-    const text = await invoke<string>('read_clipboard_text')
-    return typeof text === 'string' ? text : ''
-  } catch (error) {
-    if (insecure) {
-      throw new Error(
-        'Paste failed: browsers block clipboard read on plain HTTP except localhost. Open Jean via HTTPS (Tailscale Serve or a reverse proxy), or use http://localhost on this machine.'
-      )
-    }
-    throw error instanceof Error ? error : new Error(String(error))
+  if (insecure) {
+    throw new Error(
+      'Paste failed: browsers block clipboard read on plain HTTP except localhost. Open Jean via HTTPS (Tailscale Serve or a reverse proxy), or use http://localhost on this machine.'
+    )
   }
+  throw new Error(
+    'Paste failed: browser clipboard access is unavailable or permission was denied.'
+  )
 }
 
 /**

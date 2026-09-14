@@ -5,6 +5,7 @@ import {
   GitPullRequest,
   Shield,
   ShieldAlert,
+  Bug,
 } from 'lucide-react'
 import {
   Dialog,
@@ -79,6 +80,9 @@ export function ContextViewerDialog({
               )}
               {viewingContext.type === 'linear' && (
                 <LinearIcon className="h-4 w-4 text-violet-500" />
+              )}
+              {viewingContext.type === 'sentry' && (
+                <Bug className="h-4 w-4 text-orange-500" />
               )}
               {titlePrefix}
             </DialogTitle>

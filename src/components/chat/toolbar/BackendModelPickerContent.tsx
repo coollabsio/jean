@@ -32,6 +32,7 @@ import { useAvailablePiModels } from '@/services/pi-cli'
 import { useAvailableCommandCodeModels } from '@/services/commandcode-cli'
 import { useAvailableGrokModels } from '@/services/grok-cli'
 import { useAvailableKimiModels } from '@/services/kimi-cli'
+import { useAvailableAntigravityModels } from '@/services/antigravity-cli'
 import {
   getCatalogModelFastInfo,
   useModelCatalog,
@@ -169,6 +170,9 @@ export function BackendModelPickerContent({
   const { data: availableKimiModels } = useAvailableKimiModels({
     enabled: installedBackends.includes('kimi'),
   })
+  const { data: availableAntigravityModels } = useAvailableAntigravityModels({
+    enabled: installedBackends.includes('antigravity'),
+  })
 
   const opencodeModelOptions = useMemo(() => {
     if (opencodeModelsError) return []
@@ -220,6 +224,14 @@ export function BackendModelPickerContent({
       })),
     [availableKimiModels]
   )
+  const antigravityModelOptions = useMemo(
+    () =>
+      availableAntigravityModels?.map(model => ({
+        value: `antigravity/${model.id}`,
+        label: model.label,
+      })),
+    [availableAntigravityModels]
+  )
 
   const { backendModelSections: baseBackendModelSections } =
     useToolbarDerivedState({
@@ -236,16 +248,36 @@ export function BackendModelPickerContent({
       installedBackends,
     })
 
-  const backendModelSections = useMemo(
-    () =>
-      defaultModelOption
-        ? baseBackendModelSections.map(section => ({
-            ...section,
-            options: [defaultModelOption, ...section.options],
-          }))
-        : baseBackendModelSections,
-    [baseBackendModelSections, defaultModelOption]
-  )
+  const backendModelSections = useMemo(() => {
+    let sections = baseBackendModelSections
+    // useToolbarDerivedState only knows the static Antigravity fallback list;
+    // surface CLI-reported models first and keep static entries as fallbacks.
+    if (antigravityModelOptions?.length) {
+      const dynamicValues = new Set(
+        antigravityModelOptions.map(option => option.value)
+      )
+      sections = sections.map(section =>
+        section.backend === 'antigravity'
+          ? {
+              ...section,
+              options: [
+                ...antigravityModelOptions,
+                ...section.options.filter(
+                  option => !dynamicValues.has(option.value)
+                ),
+              ],
+            }
+          : section
+      )
+    }
+    if (defaultModelOption) {
+      sections = sections.map(section => ({
+        ...section,
+        options: [defaultModelOption, ...section.options],
+      }))
+    }
+    return sections
+  }, [antigravityModelOptions, baseBackendModelSections, defaultModelOption])
 
   const installedBackendsSet = useMemo(
     () => new Set(installedBackends),

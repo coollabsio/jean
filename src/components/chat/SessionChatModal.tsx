@@ -39,9 +39,6 @@ import {
 import { DismissButton } from '@/components/ui/dismiss-button'
 import { StatusIndicator } from '@/components/ui/status-indicator'
 import { GitStatusBadges } from '@/components/ui/git-status-badges'
-import { NewIssuesBadge } from '@/components/shared/NewIssuesBadge'
-import { OpenPRsBadge } from '@/components/shared/OpenPRsBadge'
-import { FailedRunsBadge } from '@/components/shared/FailedRunsBadge'
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
 import { CloseWorktreeDialog } from './CloseWorktreeDialog'
 import { useChatStore } from '@/store/chat-store'
@@ -53,7 +50,6 @@ import {
   useCreateSession,
   useClearSessionHistory,
   useRenameSession,
-  useReorderSessions,
   reconnectNativeCliSession,
   canReconnectSession,
 } from '@/services/chat'
@@ -63,6 +59,7 @@ import {
   useWorktree,
   useProjects,
   useRunScripts,
+  usePackageScripts,
   type PackageScript,
 } from '@/services/projects'
 import { useGitHubPRs } from '@/services/github'
@@ -104,7 +101,6 @@ import {
 } from './session-card-utils'
 import { SessionStatusMenu } from './SessionStatusMenu'
 import {
-  buildReorderedSessionIdsWithinStatus,
   resolveModalSessionId,
   sortSessionCardsForTabs,
 } from './session-tab-order'
@@ -136,6 +132,7 @@ import {
   getStackedBaseBranch,
   resolveStackedOnPr,
 } from './worktree-branch-badge'
+import { isUnreadSession } from '@/components/unread/unread-utils'
 
 /** Track whether any waiting tabs are off-screen to the left or right */
 function useOffScreenWaiting(
@@ -194,6 +191,7 @@ interface SessionChatModalProps {
   worktreePath: string
   isOpen: boolean
   onClose: () => void
+  onRequestCloseWorktree: () => void
 }
 
 export function SessionChatModal({
@@ -201,6 +199,7 @@ export function SessionChatModal({
   worktreePath,
   isOpen,
   onClose,
+  onRequestCloseWorktree,
 }: SessionChatModalProps) {
   const isMobile = useIsMobile()
   const isTouch = useIsTouchDevice()
@@ -264,6 +263,7 @@ export function SessionChatModal({
   )
   const { data: preferences } = usePreferences()
   const { data: runScripts = [] } = useRunScripts(worktreePath)
+  const { data: packageScripts = [] } = usePackageScripts(worktreePath)
   const modalTerminalDockMode = useTerminalStore(
     state => state.modalTerminalDockMode
   )
@@ -373,7 +373,9 @@ export function SessionChatModal({
     project?.default_branch,
     worktree?.base_remote
   )
-  const { data: openPRs } = useGitHubPRs(project?.path ?? null, 'open')
+  const { data: openPRs } = useGitHubPRs(project?.path ?? null, 'open', {
+    ownerId: project?.id,
+  })
   const stackedOnPR = resolveStackedOnPr(
     stackedBaseBranch,
     openPRs,
@@ -541,6 +543,9 @@ export function SessionChatModal({
 
   // CMD+W: close the active session tab, or close modal if last tab
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)
+  const [closeConfirmMode, setCloseConfirmMode] = useState<
+    'worktree' | 'session'
+  >('session')
   const pendingCloseAction = useRef<(() => void) | null>(null)
 
   const executeCloseAction = useCallback(() => {
@@ -568,6 +573,7 @@ export function SessionChatModal({
       }
 
       if (needsConfirm) {
+        setCloseConfirmMode('session')
         pendingCloseAction.current = action
         setCloseConfirmOpen(true)
       } else {
@@ -597,6 +603,15 @@ export function SessionChatModal({
     const handler = (e: Event) => {
       e.stopImmediatePropagation()
       const activeSessions = sessions.filter(s => !s.archived_at)
+      if (activeSessions.length === 0) {
+        setCloseConfirmMode('worktree')
+        pendingCloseAction.current = () => {
+          onRequestCloseWorktree()
+          onClose()
+        }
+        setCloseConfirmOpen(true)
+        return
+      }
       const action = () => {
         if (activeSessions.length <= 1) {
           if (currentSessionId) {
@@ -610,6 +625,7 @@ export function SessionChatModal({
       const currentSession = sessions.find(s => s.id === currentSessionId)
       const sessionIsEmpty = !currentSession?.message_count
       if (preferences?.confirm_session_close !== false && !sessionIsEmpty) {
+        setCloseConfirmMode('session')
         pendingCloseAction.current = action
         setCloseConfirmOpen(true)
       } else {
@@ -630,6 +646,8 @@ export function SessionChatModal({
     handleDeleteSession,
     selectVisualNeighbor,
     preferences?.confirm_session_close,
+    onRequestCloseWorktree,
+    onClose,
   ])
 
   // Listen for toggle-session-label event (CMD+S)
@@ -656,9 +674,6 @@ export function SessionChatModal({
     [renamingSessionId, worktreeId]
   )
 
-  const reorderSessions = useReorderSessions()
-  const [draggedSessionId, setDraggedSessionId] = useState<string | null>(null)
-
   const handleCreateSession = useCallback(() => {
     useUIStore.getState().openNewSessionModeModal({
       worktreeId,
@@ -670,6 +685,12 @@ export function SessionChatModal({
 
   const handleClearContext = useCallback(() => {
     if (!currentSessionId || clearSessionHistory.isPending) return
+    if (useChatStore.getState().isSending(currentSessionId)) {
+      toast.info(
+        'Wait for the current session to finish before clearing context.'
+      )
+      return
+    }
     clearSessionHistory.mutate(
       {
         worktreeId,
@@ -744,57 +765,10 @@ export function SessionChatModal({
       })
   }, [isOpen, worktreeId, worktreePath])
 
-  // Keep Code Review first, then attention and active sessions, review,
-  // and idle/new empty sessions. Within each tier, manual tab order wins.
+  // Keep Code Review first, then show the most recently updated sessions.
   const sortedCards = useMemo(() => {
     return sortSessionCardsForTabs(cards)
   }, [cards])
-
-  const handleSessionDragStart = useCallback(
-    (e: React.DragEvent<HTMLDivElement>, sessionId: string) => {
-      setDraggedSessionId(sessionId)
-      e.dataTransfer.effectAllowed = 'move'
-      e.dataTransfer.setData('text/plain', sessionId)
-    },
-    []
-  )
-
-  const handleSessionDragOver = useCallback(
-    (e: React.DragEvent<HTMLDivElement>, targetSessionId: string) => {
-      if (
-        draggedSessionId &&
-        buildReorderedSessionIdsWithinStatus(
-          sortedCards,
-          draggedSessionId,
-          targetSessionId
-        )
-      ) {
-        e.preventDefault()
-        e.dataTransfer.dropEffect = 'move'
-      }
-    },
-    [draggedSessionId, sortedCards]
-  )
-
-  const handleSessionDrop = useCallback(
-    (e: React.DragEvent<HTMLDivElement>, targetSessionId: string) => {
-      e.preventDefault()
-      const sourceId =
-        draggedSessionId || e.dataTransfer.getData('text/plain') || null
-      if (!sourceId) return
-
-      const sessionIds = buildReorderedSessionIdsWithinStatus(
-        sortedCards,
-        sourceId,
-        targetSessionId
-      )
-      setDraggedSessionId(null)
-      if (!sessionIds) return
-
-      reorderSessions.mutate({ worktreeId, worktreePath, sessionIds })
-    },
-    [draggedSessionId, reorderSessions, sortedCards, worktreeId, worktreePath]
-  )
 
   const sortedSessions = useMemo(
     () => sortedCards.map(c => c.session),
@@ -909,11 +883,18 @@ export function SessionChatModal({
           const result = await gitPush(
             worktreePath,
             worktree?.pr_number,
-            remote
+            remote,
+            worktree?.id
           )
           triggerImmediateGitPoll()
           if (project) fetchWorktreesStatus(project.id)
-          if (result.fellBack) {
+          if (result.permissionDenied) {
+            opToast.error('Push failed', {
+              duration: Infinity,
+              description:
+                result.output.trim() || 'The remote rejected the push.',
+            })
+          } else if (result.fellBack) {
             opToast.warning(
               'Could not push to PR branch, pushed to new branch instead'
             )
@@ -934,7 +915,7 @@ export function SessionChatModal({
     [pickRemoteOrRun, worktree, worktreePath, project]
   )
 
-  const gitSyncButton = preferences?.git_sync_button ?? false
+  const gitSyncButton = preferences?.git_sync_button ?? true
 
   const handleSync = useCallback(
     (e: React.MouseEvent) => {
@@ -1019,6 +1000,14 @@ export function SessionChatModal({
     },
     [worktreeId]
   )
+
+  const handleToggleModalTerminal = useCallback(() => {
+    useTerminalStore.getState().toggleModalTerminal(worktreeId)
+  }, [worktreeId])
+
+  const handleToggleModalBrowser = useCallback(() => {
+    useBrowserStore.getState().toggleModal(worktreeId)
+  }, [worktreeId])
 
   // Close on Escape key
   const onEscapeClose = useEffectEvent((e: KeyboardEvent) => {
@@ -1177,19 +1166,6 @@ export function SessionChatModal({
                       onBranchDiffClick={handleBranchDiffClick}
                     />
                   )}
-                  {!zenMode && project && (
-                    <div className="hidden items-center gap-2 md:flex">
-                      <NewIssuesBadge
-                        projectPath={project.path}
-                        projectId={project.id}
-                      />
-                      <OpenPRsBadge
-                        projectPath={project.path}
-                        projectId={project.id}
-                      />
-                      <FailedRunsBadge projectPath={project.path} />
-                    </div>
-                  )}
                   {!zenMode && worktree && project && (
                     <WorktreeDropdownMenu
                       worktree={worktree}
@@ -1201,6 +1177,12 @@ export function SessionChatModal({
                       branchDiffRemoved={isBase ? 0 : branchDiffRemoved}
                       onUncommittedDiffClick={handleUncommittedDiffClick}
                       onBranchDiffClick={handleBranchDiffClick}
+                      onToggleTerminal={handleToggleModalTerminal}
+                      onToggleBrowser={
+                        isNativeApp() ? handleToggleModalBrowser : undefined
+                      }
+                      packageScripts={packageScripts}
+                      onRunPackageScript={handlePackageScript}
                     />
                   )}
                 </div>
@@ -1240,7 +1222,7 @@ export function SessionChatModal({
                   {!zenMode && (
                     <>
                       {/* Desktop: inline action buttons */}
-                      <div className="hidden sm:flex items-center gap-1">
+                      <div className="hidden 2xl:flex items-center gap-1">
                         <OpenInButton
                           worktreePath={worktreePath}
                           branch={worktree?.branch}
@@ -1432,15 +1414,6 @@ export function SessionChatModal({
                         <ContextMenuTrigger asChild>
                           <div
                             data-session-id={session.id}
-                            draggable={renamingSessionId !== session.id}
-                            onDragStart={e =>
-                              handleSessionDragStart(e, session.id)
-                            }
-                            onDragOver={e =>
-                              handleSessionDragOver(e, session.id)
-                            }
-                            onDrop={e => handleSessionDrop(e, session.id)}
-                            onDragEnd={() => setDraggedSessionId(null)}
                             onClick={() => handleTabClick(session.id)}
                             onAuxClick={e => handleTabAuxClick(e, session)}
                             onDoubleClick={() =>
@@ -1454,7 +1427,10 @@ export function SessionChatModal({
                               isActive
                                 ? 'bg-muted text-foreground'
                                 : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
-                              draggedSessionId === session.id && 'opacity-60',
+                              !isActive &&
+                                !isActionableWaitingStatus(status) &&
+                                isUnreadSession(session) &&
+                                'bg-muted/60 text-foreground/90 hover:bg-muted/80',
                               isActionableWaitingStatus(status) &&
                                 'bg-yellow-500/10 text-yellow-700 border-yellow-500 hover:bg-yellow-500/20 hover:text-yellow-800 dark:bg-yellow-400/10 dark:text-yellow-300 dark:border-yellow-400 dark:hover:bg-yellow-400/20 dark:hover:text-yellow-200'
                             )}
@@ -1500,12 +1476,7 @@ export function SessionChatModal({
                             )}
                             {renamingSessionId !== session.id && (
                               <DismissButton
-                                tooltip={
-                                  sessions.filter(s => !s.archived_at).length <=
-                                  1
-                                    ? 'Close worktree'
-                                    : 'Remove session'
-                                }
+                                tooltip={'Remove session'}
                                 onClick={e => {
                                   e.stopPropagation()
                                   removeSessionTab(session)
@@ -1713,7 +1684,7 @@ export function SessionChatModal({
         onOpenChange={setCloseConfirmOpen}
         onConfirm={executeCloseAction}
         branchName={worktree?.branch}
-        mode="session"
+        mode={closeConfirmMode}
       />
     </>
   )

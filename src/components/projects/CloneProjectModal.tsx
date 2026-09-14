@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo } from 'react'
-import { isLocalBackend } from '@/lib/environment'
+import { isLocalBackend, isNativeApp } from '@/lib/environment'
 import { Loader2, Globe, FolderOpen, AlertCircle } from 'lucide-react'
 import {
   Dialog,
@@ -16,6 +16,10 @@ import { useProjectsStore } from '@/store/projects-store'
 import { useCloneProject } from '@/services/projects'
 import { DirectoryBrowser } from '@/components/projects/DirectoryBrowser'
 import { toast } from 'sonner'
+import { ServerTargetSelect } from './ServerTargetSelect'
+import { LOCAL_SERVER_ID } from '@/types/server-resource'
+import { parseServerResourceKey } from '@/lib/server-resource'
+import { getActiveConnectionId } from '@/lib/remote-connections'
 
 /** Extract a repository name from a git URL (strips .git suffix) */
 function extractRepoName(url: string): string {
@@ -38,6 +42,13 @@ export function CloneProjectModal() {
   const [destination, setDestination] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [browserOpen, setBrowserOpen] = useState(false)
+  const parentServerId = addProjectParentFolderId
+    ? parseServerResourceKey(addProjectParentFolderId)?.serverId
+    : undefined
+  const [targetServerId, setTargetServerId] = useState(
+    parentServerId ?? getActiveConnectionId() ?? LOCAL_SERVER_ID
+  )
+  const effectiveServerId = parentServerId ?? targetServerId
 
   const repoName = useMemo(() => extractRepoName(url), [url])
 
@@ -48,8 +59,11 @@ export function CloneProjectModal() {
       setDestination('')
       setError(null)
       setBrowserOpen(false)
+      setTargetServerId(
+        parentServerId ?? getActiveConnectionId() ?? LOCAL_SERVER_ID
+      )
     }
-  }, [cloneModalOpen])
+  }, [cloneModalOpen, parentServerId])
 
   const handleOpenChange = useCallback(
     (open: boolean) => {
@@ -64,7 +78,7 @@ export function CloneProjectModal() {
   const handleBrowse = useCallback(async () => {
     // Remote backends (and pure web) must browse the server filesystem via
     // DirectoryBrowser — the native OS picker only sees the local machine.
-    if (!isLocalBackend()) {
+    if (!isLocalBackend() || effectiveServerId !== LOCAL_SERVER_ID) {
       setBrowserOpen(true)
       return
     }
@@ -83,7 +97,7 @@ export function CloneProjectModal() {
       // User cancelled
       if (error instanceof Error && error.message.includes('cancel')) return
     }
-  }, [repoName])
+  }, [effectiveServerId, repoName])
 
   const handleClone = useCallback(async () => {
     const trimmedUrl = url.trim()
@@ -109,6 +123,7 @@ export function CloneProjectModal() {
         url: trimmedUrl,
         path: destination,
         parentId: addProjectParentFolderId ?? undefined,
+        serverId: isNativeApp() ? effectiveServerId : undefined,
       })
       toast.dismiss(toastId)
     } catch {
@@ -121,6 +136,7 @@ export function CloneProjectModal() {
     repoName,
     cloneProject,
     addProjectParentFolderId,
+    effectiveServerId,
     closeCloneModal,
     setAddProjectDialogOpen,
   ])
@@ -140,6 +156,12 @@ export function CloneProjectModal() {
           </DialogHeader>
 
           <div className="min-w-0 space-y-4 py-4">
+            <ServerTargetSelect
+              id="clone-target-server"
+              value={effectiveServerId}
+              onChange={setTargetServerId}
+              disabled={cloneProject.isPending || parentServerId !== undefined}
+            />
             {/* Git URL input */}
             <div className="space-y-1.5">
               <Label htmlFor="clone-url" className="text-xs">
@@ -225,6 +247,7 @@ export function CloneProjectModal() {
           title="Choose clone destination"
           description="Choose a parent folder and enter the cloned repository name."
           defaultName={repoName || 'repo'}
+          serverId={isNativeApp() ? effectiveServerId : undefined}
         />
       </>
     </Dialog>

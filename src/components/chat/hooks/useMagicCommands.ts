@@ -22,6 +22,7 @@ interface MagicCommandHandlers {
   handleLoadContext: () => void
   handleLinkedProjects: () => void
   handleForkSession: () => void
+  handleCheckGitHubIssues: () => void
   handleCommit: () => void
   handleCommitAndPush: () => void
   handlePull: () => void
@@ -34,7 +35,7 @@ interface MagicCommandHandlers {
   handleResolveConflicts: (override?: InvestigateOverride) => void
   handleInvestigateWorkflowRun: (detail: WorkflowRunDetail) => void
   handleInvestigate: (
-    type: 'issue' | 'pr' | 'advisory',
+    type: 'issue' | 'pr' | 'advisory' | 'sentry-issue',
     override?: InvestigateOverride
   ) => void
   handleReviewComments: (
@@ -64,6 +65,7 @@ export function useMagicCommands({
   handleLoadContext,
   handleLinkedProjects,
   handleForkSession,
+  handleCheckGitHubIssues,
   handleCommit,
   handleCommitAndPush,
   handlePull,
@@ -86,6 +88,7 @@ export function useMagicCommands({
     handleLoadContext,
     handleLinkedProjects,
     handleForkSession,
+    handleCheckGitHubIssues,
     handleCommit,
     handleCommitAndPush,
     handlePull,
@@ -109,6 +112,7 @@ export function useMagicCommands({
       handleLoadContext,
       handleLinkedProjects,
       handleForkSession,
+      handleCheckGitHubIssues,
       handleCommit,
       handleCommitAndPush,
       handlePull,
@@ -160,6 +164,9 @@ export function useMagicCommands({
         case 'fork-session':
           handlers.handleForkSession()
           break
+        case 'check-github-issues':
+          handlers.handleCheckGitHubIssues()
+          break
         case 'commit':
           handlers.handleCommit()
           break
@@ -196,7 +203,7 @@ export function useMagicCommands({
           handlers.handleInvestigate(
             (
               rest as {
-                type: 'issue' | 'pr' | 'advisory'
+                type: 'issue' | 'pr' | 'advisory' | 'sentry-issue'
                 override?: InvestigateOverride
               }
             ).type ?? 'issue',

@@ -33,7 +33,8 @@ function isAgentTool(name: string): boolean {
 export function normalizeTodosForDisplay(
   todos: Todo[],
   isStreaming: boolean,
-  wasCancelled = false
+  wasCancelled = false,
+  completePending = false
 ): Todo[] {
   if (isStreaming) return todos
 
@@ -42,8 +43,13 @@ export function normalizeTodosForDisplay(
     if (wasCancelled && todo.status !== 'completed') {
       return { ...todo, status: 'cancelled' as const }
     }
-    // Normal completion: convert in_progress to completed
-    if (todo.status === 'in_progress') {
+    // Grok can finish a turn without sending the final TodoWrite status patch.
+    // A normally completed turn is authoritative, so clear its stale pending
+    // and in-progress states in the display.
+    if (
+      todo.status === 'in_progress' ||
+      (completePending && todo.status === 'pending')
+    ) {
       return { ...todo, status: 'completed' as const }
     }
     return todo

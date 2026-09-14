@@ -28,6 +28,14 @@ vi.mock('@/lib/transport', async () => {
       }
       return actual.invoke(cmd, args)
     },
+    invokeForServer: (
+      _serverId: string,
+      cmd: string,
+      args?: Record<string, unknown>
+    ) => {
+      if (cmd === 'browse_directory') return browseDirectoryMock(args)
+      return actual.invoke(cmd, args)
+    },
   }
 })
 

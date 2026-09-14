@@ -38,6 +38,7 @@ import {
 import { reorderWithClosestEdge } from '@/lib/drag-and-drop/reorder'
 import { announceDrag } from '@/lib/drag-and-drop/live-region'
 import { DropIndicator } from '@/components/drag-and-drop/DropIndicator'
+import { groupProjectsByServer } from './project-server-sections'
 
 const MAX_NESTING_DEPTH = 3
 
@@ -60,6 +61,7 @@ function getMaxSubtreeDepth(projects: Project[], itemId: string): number {
 
 interface ProjectTreeProps {
   projects: Project[]
+  groupByServer?: boolean
 }
 
 function canMoveIntoFolder({
@@ -152,7 +154,7 @@ function SortableItem({
 
   useEffect(() => {
     const element = elementRef.current
-    if (!element) return
+    if (!element || item.serverId || item.offline) return
 
     return combine(
       draggable({
@@ -222,7 +224,9 @@ function SortableItem({
         style={style}
         className={cn(
           'relative transition-opacity',
-          activeId === item.id ? 'cursor-grabbing' : 'cursor-grab'
+          !item.serverId &&
+            !item.offline &&
+            (activeId === item.id ? 'cursor-grabbing' : 'cursor-grab')
         )}
       >
         <DropIndicator edge={closestEdge} insetClassName="left-2 right-2" />
@@ -250,7 +254,9 @@ function SortableItem({
       style={style}
       className={cn(
         'relative transition-opacity',
-        activeId === item.id ? 'cursor-grabbing' : 'cursor-grab'
+        !item.serverId &&
+          !item.offline &&
+          (activeId === item.id ? 'cursor-grabbing' : 'cursor-grab')
       )}
     >
       <DropIndicator edge={closestEdge} insetClassName="left-2 right-2" />
@@ -340,7 +346,10 @@ function RootDropZone({ isOver }: { isOver: boolean }) {
   )
 }
 
-export function ProjectTree({ projects }: ProjectTreeProps) {
+export function ProjectTree({
+  projects,
+  groupByServer = false,
+}: ProjectTreeProps) {
   const reorderItems = useReorderItems()
   const moveItem = useMoveItem()
   const {
@@ -373,6 +382,12 @@ export function ProjectTree({ projects }: ProjectTreeProps) {
   const rootProjects = rootItems
     .filter(p => !isFolder(p))
     .sort((a, b) => a.order - b.order)
+  const projectSections =
+    rootProjects.length === 0
+      ? []
+      : groupByServer
+        ? groupProjectsByServer(rootProjects)
+        : [{ id: 'all', title: 'Projects', projects: rootProjects }]
   const hasBothTypes = rootFolders.length > 0 && rootProjects.length > 0
 
   // IDs for bulk expand/collapse actions (across all nesting levels)
@@ -380,11 +395,6 @@ export function ProjectTree({ projects }: ProjectTreeProps) {
     () => projects.flatMap(p => (isFolder(p) ? [p.id] : [])),
     [projects]
   )
-  const allProjectIds = useMemo(
-    () => projects.flatMap(p => (!isFolder(p) ? [p.id] : [])),
-    [projects]
-  )
-
   const clearDragState = useCallback(() => {
     setActiveId(null)
     setOverFolderId(null)
@@ -779,53 +789,72 @@ export function ProjectTree({ projects }: ProjectTreeProps) {
           <Separator />
         </div>
       )}
-      {rootProjects.length > 0 && (
-        <div className="group/header flex items-center justify-between pl-3 pr-2 pb-1 pt-2">
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/50">
-            Projects
-          </span>
-          <div className="flex items-center gap-1">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  className="flex size-4 shrink-0 items-center justify-center rounded opacity-50 hover:bg-accent-foreground/10 hover:opacity-100"
-                  onClick={() => expandAllProjects(allProjectIds)}
-                  aria-label="Expand all projects"
-                >
-                  <ChevronsUpDown className="size-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>Expand all</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  className="flex size-4 shrink-0 items-center justify-center rounded opacity-50 hover:bg-accent-foreground/10 hover:opacity-100"
-                  onClick={collapseAllProjects}
-                  aria-label="Collapse all projects"
-                >
-                  <ChevronsDownUp className="size-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>Collapse all</TooltipContent>
-            </Tooltip>
+      {projectSections.map((section, sectionIndex) => (
+        <div key={section.id}>
+          {sectionIndex > 0 && (
+            <div className="px-3 py-2">
+              <Separator />
+            </div>
+          )}
+          <div className="group/header flex items-center justify-between pl-3 pr-2 pb-1 pt-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+              {section.title}
+            </span>
+            {(!groupByServer || section.id === 'local') && (
+              <div className="flex items-center gap-1">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className="flex size-4 shrink-0 items-center justify-center rounded opacity-50 hover:bg-accent-foreground/10 hover:opacity-100"
+                      onClick={() =>
+                        expandAllProjects(section.projects.map(item => item.id))
+                      }
+                      aria-label={
+                        section.title === 'Projects'
+                          ? 'Expand all projects'
+                          : `Expand all projects on ${section.title}`
+                      }
+                    >
+                      <ChevronsUpDown className="size-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>Expand all</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className="flex size-4 shrink-0 items-center justify-center rounded opacity-50 hover:bg-accent-foreground/10 hover:opacity-100"
+                      onClick={collapseAllProjects}
+                      aria-label={
+                        section.title === 'Projects'
+                          ? 'Collapse all projects'
+                          : `Collapse all projects on ${section.title}`
+                      }
+                    >
+                      <ChevronsDownUp className="size-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>Collapse all</TooltipContent>
+                </Tooltip>
+              </div>
+            )}
           </div>
+          {section.projects.map(item => (
+            <SortableItem
+              key={item.id}
+              item={item}
+              allProjects={projects}
+              depth={0}
+              isOverFolder={false}
+              expandedFolderIds={expandedFolderIds}
+              overFolderId={overFolderId}
+              insertBeforeId={insertBeforeId}
+              activeId={activeId}
+            />
+          ))}
         </div>
-      )}
-      {rootProjects.map(item => (
-        <SortableItem
-          key={item.id}
-          item={item}
-          allProjects={projects}
-          depth={0}
-          isOverFolder={false}
-          expandedFolderIds={expandedFolderIds}
-          overFolderId={overFolderId}
-          insertBeforeId={insertBeforeId}
-          activeId={activeId}
-        />
       ))}
 
       {/* Root drop zone - visible when dragging an item that's inside a folder */}

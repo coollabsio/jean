@@ -215,6 +215,28 @@ describe('QueuedPromptsPanel', () => {
     expect(screen.getAllByLabelText('Edit queued prompt')).toHaveLength(3)
   })
 
+  it('allows editing queued prompts for the non-steerable Antigravity backend', () => {
+    const { onEdit } = renderPanel({
+      messages: [
+        createMessage('msg-1', 'Antigravity prompt', {
+          backend: 'antigravity',
+        } as Partial<QueuedMessage>),
+      ],
+    })
+
+    const editButton = screen.getByLabelText('Edit queued prompt')
+    fireEvent.click(editButton)
+    const editor = screen.getByLabelText('Queued prompt text')
+    fireEvent.change(editor, { target: { value: 'Updated antigravity' } })
+    fireEvent.click(screen.getByLabelText('Save queued prompt'))
+
+    expect(onEdit).toHaveBeenCalledWith(
+      'session-1',
+      'msg-1',
+      'Updated antigravity'
+    )
+  })
+
   it('allows editing queued steering prompts with file @-mentions', () => {
     renderPanel({
       messages: [

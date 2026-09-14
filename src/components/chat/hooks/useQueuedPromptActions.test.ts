@@ -130,7 +130,7 @@ describe('useQueuedPromptActions', () => {
     ).toEqual(['prompt msg-1', 'prompt msg-3'])
   })
 
-  it('does not edit queued messages that can be steered', async () => {
+  it('edits queued messages that can be steered while they remain queued', async () => {
     useChatStore.setState({
       messageQueues: {
         'session-1': [createMessage('msg-1', { backend: 'codex' })],
@@ -146,9 +146,15 @@ describe('useQueuedPromptActions', () => {
       )
     })
 
-    expect(persistUpdateQueued).not.toHaveBeenCalled()
+    expect(persistUpdateQueued).toHaveBeenCalledWith(
+      'worktree-1',
+      '/tmp/worktree-1',
+      'session-1',
+      'msg-1',
+      'updated prompt'
+    )
     expect(useChatStore.getState().messageQueues['session-1']?.[0]?.message).toBe(
-      'prompt msg-1'
+      'updated prompt'
     )
   })
 
@@ -499,6 +505,55 @@ describe('useQueuedPromptActions', () => {
       expect.stringContaining('[Image attached: /tmp/a.png')
     )
     expect(cancelChatMessage).not.toHaveBeenCalled()
+  })
+
+  it('allows editing queued antigravity prompts (no steer API)', async () => {
+    useChatStore.setState({
+      messageQueues: {
+        'session-1': [createMessage('msg-1', { backend: 'antigravity' })],
+      },
+    })
+    const { result } = renderHook(() => useQueuedPromptActions())
+
+    await act(async () => {
+      await result.current.handleEditQueuedMessage(
+        'session-1',
+        'msg-1',
+        'updated antigravity prompt'
+      )
+    })
+
+    expect(persistUpdateQueued).toHaveBeenCalledWith(
+      'worktree-1',
+      '/tmp/worktree-1',
+      'session-1',
+      'msg-1',
+      'updated antigravity prompt'
+    )
+    expect(
+      useChatStore.getState().messageQueues['session-1']?.[0]?.message
+    ).toBe('updated antigravity prompt')
+  })
+
+  it('busy antigravity session: promotes to front and cancels instead of steering', async () => {
+    useChatStore.setState({
+      sendingSessionIds: { 'session-1': true },
+      selectedBackends: { 'session-1': 'antigravity' },
+    })
+    const { result } = renderHook(() => useQueuedPromptActions())
+
+    await act(async () => {
+      await result.current.handleSendQueuedNow('session-1', 'msg-3')
+    })
+
+    expect(steerCodexTurn).not.toHaveBeenCalled()
+    expect(steerGrokTurn).not.toHaveBeenCalled()
+    expect(steerOpencodeTurn).not.toHaveBeenCalled()
+    expect(steerPiTurn).not.toHaveBeenCalled()
+    expect(
+      useChatStore.getState().messageQueues['session-1']?.map(m => m.id)
+    ).toEqual(['msg-3', 'msg-1', 'msg-2'])
+    expect(cancelChatMessage).toHaveBeenCalledWith('session-1', 'worktree-1')
   })
 
   it('busy claude session: promotes to front and cancels the run', async () => {

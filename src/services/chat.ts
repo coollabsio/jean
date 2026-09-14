@@ -29,17 +29,16 @@ import type {
   EffortLevel,
   LabelData,
   QueuedMessage,
+  Backend,
 } from '@/types/chat'
 import { isTauri, projectsQueryKeys } from '@/services/projects'
 import { hasBackendTransport } from '@/lib/environment'
 import { preferencesQueryKeys } from '@/services/preferences'
 import type { AppPreferences } from '@/types/preferences'
 import { useChatStore } from '@/store/chat-store'
-import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
 import { useTerminalStore } from '@/store/terminal-store'
 import { clearSessionScrollState } from '@/components/chat/session-scroll-state'
-import { navigateToProjectPicker } from '@/lib/restore-navigation'
 import { isNativeTerminalBackend } from '@/lib/native-cli-session'
 import { getResumeArgs } from '@/components/chat/session-card-utils'
 import {
@@ -48,10 +47,7 @@ import {
   preferResolvedCliCommand,
   resolveBackendCliPath,
 } from '@/services/cli-binary'
-import type {
-  StoredReviewResults,
-  Worktree,
-} from '@/types/projects'
+import type { StoredReviewResults, Worktree } from '@/types/projects'
 import { preserveQueryCacheOnError } from '@/lib/query-error'
 
 /** Default number of recent runs loaded on initial session fetch. */
@@ -63,41 +59,6 @@ export const OLDER_RUN_BATCH = 10
 function isWsDisconnectError(error: unknown): boolean {
   const msg = error instanceof Error ? error.message : String(error)
   return msg.includes('WebSocket disconnected')
-}
-
-export interface SessionRemovalNavigationState {
-  activeWorktreeId: string | null
-  activeWorktreePath: string | null
-  activeSessionId: string | null
-  selectedProjectId: string | null
-  selectedWorktreeId: string | null
-}
-
-function getSessionRemovalNavigationState(
-  worktreeId: string
-): SessionRemovalNavigationState {
-  const chat = useChatStore.getState()
-  const projects = useProjectsStore.getState()
-  return {
-    activeWorktreeId: chat.activeWorktreeId,
-    activeWorktreePath: chat.activeWorktreePath,
-    activeSessionId: chat.activeSessionIds[worktreeId] ?? null,
-    selectedProjectId: projects.selectedProjectId,
-    selectedWorktreeId: projects.selectedWorktreeId,
-  }
-}
-
-export function isSessionRemovalNavigationUnchanged(
-  before: SessionRemovalNavigationState,
-  current: SessionRemovalNavigationState
-): boolean {
-  return (
-    before.activeWorktreeId === current.activeWorktreeId &&
-    before.activeWorktreePath === current.activeWorktreePath &&
-    before.activeSessionId === current.activeSessionId &&
-    before.selectedProjectId === current.selectedProjectId &&
-    before.selectedWorktreeId === current.selectedWorktreeId
-  )
 }
 
 export function cleanupSessionTerminalForRemovedSession(
@@ -307,6 +268,7 @@ export const chatQueryKeys = {
       searchQuery,
       resultLimit,
     ] as const,
+  unreadSessionCount: () => ['unread-session-count'] as const,
 }
 
 export interface NativeCliHistorySession {
@@ -400,7 +362,7 @@ export function useSessions(
     },
     enabled: !!worktreeId && !!worktreePath,
     staleTime: 1000 * 60 * 5, // 5 minutes - enables instant tab bar rendering from cache
-    gcTime: 1000 * 60 * 5,
+    gcTime: 1000 * 60 * 2,
     refetchOnMount: true, // Respects staleTime; status changes pushed via streaming/cache:invalidate events
   })
 }
@@ -666,7 +628,26 @@ export function useAllSessions(enabled = true) {
     },
     enabled,
     staleTime: 1000 * 60 * 5, // 5 minutes
-    gcTime: 1000 * 60 * 5,
+    gcTime: 1000 * 60 * 2,
+  })
+}
+
+/**
+ * Load only the unread-session count for the title-bar badge.
+ * Full cross-project session data remains an explicit unread-popover query.
+ */
+export function fetchUnreadSessionCount(): Promise<number> {
+  // Let TanStack Query handle failures. Returning zero here would replace a
+  // valid cached count during a temporary transport or backend failure.
+  return invoke<number>('get_unread_session_count')
+}
+
+export function useUnreadSessionCount() {
+  return useQuery({
+    queryKey: chatQueryKeys.unreadSessionCount(),
+    queryFn: fetchUnreadSessionCount,
+    staleTime: 1000 * 60,
+    gcTime: 1000 * 60 * 2,
   })
 }
 
@@ -1130,7 +1111,6 @@ export function useCloseSession() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    onMutate: ({ worktreeId }) => getSessionRemovalNavigationState(worktreeId),
     mutationFn: async ({
       worktreeId,
       worktreePath,
@@ -1153,7 +1133,7 @@ export function useCloseSession() {
       logger.info('Session closed', { newActiveId })
       return newActiveId
     },
-    onSuccess: (newActiveId, { worktreeId, sessionId }, navigationBefore) => {
+    onSuccess: (newActiveId, { worktreeId, sessionId }) => {
       queryClient.invalidateQueries({
         queryKey: chatQueryKeys.sessions(worktreeId),
       })
@@ -1164,10 +1144,15 @@ export function useCloseSession() {
 
       // Drop from the finished-session bell (reads from ['all-sessions']).
       removeSessionFromAllSessionsCache(queryClient, sessionId)
+      queryClient.invalidateQueries({
+        queryKey: chatQueryKeys.unreadSessionCount(),
+      })
       queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
 
       // Clear all session-scoped state
-      useChatStore.getState().clearSessionState(sessionId)
+      useChatStore
+        .getState()
+        .clearSessionState(sessionId, { removeReferences: true })
       clearSessionScrollState(sessionId)
       cleanupSessionTerminalForRemovedSession(worktreeId, sessionId)
 
@@ -1179,17 +1164,13 @@ export function useCloseSession() {
         if (!currentActive || currentActive === sessionId) {
           useChatStore.getState().setActiveSession(worktreeId, newActiveId)
         }
-      } else if (
-        isSessionRemovalNavigationUnchanged(
-          navigationBefore,
-          getSessionRemovalNavigationState(worktreeId)
-        )
-      ) {
-        // Last non-archived session closed — show blank project picker (issue #501)
-        logger.debug('Last session closed, navigating to project picker', {
-          worktreeId,
+      } else {
+        // Keep the worktree modal open and let it render its empty state.
+        useChatStore.setState(state => {
+          if (!(worktreeId in state.activeSessionIds)) return state
+          const { [worktreeId]: _removed, ...rest } = state.activeSessionIds
+          return { activeSessionIds: rest }
         })
-        navigateToProjectPicker(worktreeId)
       }
     },
     onError: error => {
@@ -1214,7 +1195,6 @@ export function useArchiveSession() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    onMutate: ({ worktreeId }) => getSessionRemovalNavigationState(worktreeId),
     mutationFn: async ({
       worktreeId,
       worktreePath,
@@ -1237,7 +1217,7 @@ export function useArchiveSession() {
       logger.info('Session archived', { newActiveId })
       return newActiveId
     },
-    onSuccess: (newActiveId, { worktreeId, sessionId }, navigationBefore) => {
+    onSuccess: (newActiveId, { worktreeId, sessionId }) => {
       queryClient.invalidateQueries({
         queryKey: chatQueryKeys.sessions(worktreeId),
       })
@@ -1247,10 +1227,15 @@ export function useArchiveSession() {
 
       // Drop from the finished-session bell (reads from ['all-sessions']).
       removeSessionFromAllSessionsCache(queryClient, sessionId)
+      queryClient.invalidateQueries({
+        queryKey: chatQueryKeys.unreadSessionCount(),
+      })
       queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
 
       // Clear all session-scoped state
-      useChatStore.getState().clearSessionState(sessionId)
+      useChatStore
+        .getState()
+        .clearSessionState(sessionId, { removeReferences: true })
       clearSessionScrollState(sessionId)
       cleanupSessionTerminalForRemovedSession(worktreeId, sessionId)
 
@@ -1262,17 +1247,13 @@ export function useArchiveSession() {
         if (!currentActive || currentActive === sessionId) {
           useChatStore.getState().setActiveSession(worktreeId, newActiveId)
         }
-      } else if (
-        isSessionRemovalNavigationUnchanged(
-          navigationBefore,
-          getSessionRemovalNavigationState(worktreeId)
-        )
-      ) {
-        // Last non-archived session archived — show blank project picker (issue #501)
-        logger.debug('Last session archived, navigating to project picker', {
-          worktreeId,
+      } else {
+        // Keep the worktree modal open and let it render its empty state.
+        useChatStore.setState(state => {
+          if (!(worktreeId in state.activeSessionIds)) return state
+          const { [worktreeId]: _removed, ...rest } = state.activeSessionIds
+          return { activeSessionIds: rest }
         })
-        navigateToProjectPicker(worktreeId)
       }
     },
     onError: error => {
@@ -1567,7 +1548,6 @@ export function useCloseSessionOrWorktreeKeybinding(
         sessionId: activeSessionId,
       })
     }
-
   }, [archiveSession, closeSession, queryClient])
 
   useEffect(() => {
@@ -1779,6 +1759,7 @@ export function useSendMessage() {
       chromeEnabled,
       customProfileName,
       backend,
+      includeRecap,
     }: {
       sessionId: string
       worktreeId: string
@@ -1797,6 +1778,8 @@ export function useSendMessage() {
       backend?: string
       /** Set by the queue processor — its onError requeues the original message */
       fromQueue?: boolean
+      /** When false, skip the end-of-turn recap instruction. */
+      includeRecap?: boolean
     }): Promise<ChatMessage> => {
       if (!isTauri()) {
         throw new Error('Not in Tauri context')
@@ -1809,6 +1792,7 @@ export function useSendMessage() {
         sessionId,
         worktreeId,
         model,
+        backend: backend as Backend | undefined,
         executionMode,
         thinkingLevel,
         effortLevel,
@@ -1834,6 +1818,7 @@ export function useSendMessage() {
         chromeEnabled,
         customProfileName,
         backend,
+        includeRecap,
       })
       logger.info('Chat message sent', { responseId: response.id })
       return response
@@ -2015,8 +2000,12 @@ export function useSendMessage() {
           fromQueue: variables.fromQueue ?? false,
         })
         if (!variables.fromQueue) {
-          const { inputDrafts, setInputDraft, removeSendingSession, clearExecutingMode } =
-            useChatStore.getState()
+          const {
+            inputDrafts,
+            setInputDraft,
+            removeSendingSession,
+            clearExecutingMode,
+          } = useChatStore.getState()
           if (!inputDrafts[sessionId]?.trim()) {
             setInputDraft(sessionId, variables.message)
           }

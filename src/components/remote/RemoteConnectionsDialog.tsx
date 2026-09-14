@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import {
-  Check,
   HardDriveDownload,
   Link2,
   Loader2,
@@ -10,6 +9,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
   DialogContent,
@@ -25,16 +25,15 @@ import { Spinner } from '@/components/ui/spinner'
 import { isNativeApp } from '@/lib/environment'
 import { cn } from '@/lib/utils'
 import {
-  LOCAL_CONNECTION_ID,
   addRemoteConnection,
-  getActiveConnectionId,
-  markConnectionSwitch,
   parseOptionalSshPort,
   parseRemoteConnectionInput,
   removeRemoteConnection,
-  selectConnection,
+  setRemoteConnectionEnabled,
+  setLocalDashboardEnabled,
   updateRemoteConnection,
   useRemoteConnections,
+  useLocalDashboardEnabled,
   type RemoteConnection,
 } from '@/lib/remote-connections'
 import { DISMISS_TRANSIENT_UI_EVENT } from '@/lib/dismiss-transient-ui'
@@ -81,16 +80,11 @@ type VersionState =
   | { status: 'ready'; version: string | null }
   | { status: 'error'; message: string }
 
-export function RemoteConnectionsDialog({
-  reloadApp = () => window.location.reload(),
-}: {
-  reloadApp?: () => void
-}) {
+export function RemoteConnectionsDialog() {
   const connections = useRemoteConnections()
-  const activeId = getActiveConnectionId()
-  const remoteActive = activeId !== LOCAL_CONNECTION_ID
   const localVersion = getLocalJeanVersion()
   const native = isNativeApp()
+  const localDashboardEnabled = useLocalDashboardEnabled()
   const [open, setOpen] = useState(false)
   const [editingId, setEditingId] = useState<EditorMode>(null)
   const [addMode, setAddMode] = useState<AddMode>('url')
@@ -106,9 +100,7 @@ export function RemoteConnectionsDialog({
 
   const refreshVersions = useCallback(async (items: RemoteConnection[]) => {
     if (items.length === 0) {
-      setVersions(current =>
-        Object.keys(current).length === 0 ? current : {}
-      )
+      setVersions(current => (Object.keys(current).length === 0 ? current : {}))
       return
     }
 
@@ -263,39 +255,6 @@ export function RemoteConnectionsDialog({
     }
   }
 
-  const switchTo = async (id: string) => {
-    if (id === activeId || connectingId) return
-
-    if (id === LOCAL_CONNECTION_ID) {
-      markConnectionSwitch()
-      selectConnection(id)
-      reloadApp()
-      return
-    }
-
-    const connection = connections.find(item => item.id === id)
-    if (!connection) return
-
-    setConnectingId(id)
-    setError(null)
-    try {
-      // Best-effort probe so the user sees a version toast before reload;
-      // transport re-checks after connect. Failures do not block switching.
-      const info = await fetchRemoteServerInfo(
-        connection.url,
-        connection.token
-      )
-      warnRemoteVersionMismatch(info.appVersion)
-    } catch {
-      // Unreachable remotes still switch so recovery UI can handle them.
-    }
-
-    markConnectionSwitch()
-    selectConnection(id)
-    reloadApp()
-    setConnectingId(null)
-  }
-
   const handleUrlSubmit = async (event: FormEvent) => {
     event.preventDefault()
     setError(null)
@@ -324,28 +283,11 @@ export function RemoteConnectionsDialog({
             return
           }
         }
-        const connection = addRemoteConnection(input)
-        markConnectionSwitch()
-        selectConnection(connection.id)
-        reloadApp()
+        addRemoteConnection(input)
+        setEditingId(null)
         return
       }
       if (editingId) {
-        if (editingId === activeId) {
-          try {
-            const info = await fetchRemoteServerInfo(
-              normalized.url,
-              normalized.token
-            )
-            warnRemoteVersionMismatch(info.appVersion)
-          } catch {
-            // Allow reconnect; recovery screen handles hard failures.
-          }
-          updateRemoteConnection(editingId, input)
-          markConnectionSwitch()
-          reloadApp()
-          return
-        }
         const updated = updateRemoteConnection(editingId, input)
         // Probe after save so the list shows the new version promptly.
         void refreshVersions(
@@ -411,7 +353,7 @@ export function RemoteConnectionsDialog({
         throw new Error('Remote jean-server did not report ready.')
       }
 
-      const connection = addRemoteConnection({
+      addRemoteConnection({
         name: result.name,
         url: result.url,
         token: result.token,
@@ -419,9 +361,9 @@ export function RemoteConnectionsDialog({
         sshHost: host,
         sshPort,
       })
-      markConnectionSwitch()
-      selectConnection(connection.id)
-      reloadApp()
+      setEditingId(null)
+      setInstalling(false)
+      setProgress(null)
     } catch (installError) {
       setError(
         installError instanceof Error
@@ -434,12 +376,7 @@ export function RemoteConnectionsDialog({
   }
 
   const handleDelete = (id: string) => {
-    const wasActive = id === activeId
     removeRemoteConnection(id)
-    if (wasActive) {
-      markConnectionSwitch()
-      reloadApp()
-    }
   }
 
   const isNew = editingId === 'new'
@@ -456,20 +393,14 @@ export function RemoteConnectionsDialog({
           className="relative h-6 w-6 rounded-none text-foreground/70 hover:text-foreground"
         >
           <Server className="size-3.5" />
-          {remoteActive && (
-            <span className="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-green-500" />
-          )}
         </Button>
       </DialogTrigger>
       {/* Above RemoteConnectionRecovery (z-100) so Edit connection works while offline. */}
-      <DialogContent
-        className="sm:max-w-md z-[110]"
-        overlayClassName="z-[110]"
-      >
+      <DialogContent className="sm:max-w-md z-[110]" overlayClassName="z-[110]">
         <DialogHeader>
           <DialogTitle>Jean connections</DialogTitle>
           <DialogDescription>
-            Connect this client to Local or a remote Jean Web Access server.
+            Manage the Jean servers used by the combined dashboard.
           </DialogDescription>
         </DialogHeader>
 
@@ -759,9 +690,8 @@ export function RemoteConnectionsDialog({
               name="Local"
               detail="This computer"
               versionLabel={formatJeanVersionLabel(localVersion)}
-              active={activeId === LOCAL_CONNECTION_ID}
-              connecting={connectingId === LOCAL_CONNECTION_ID}
-              onSelect={() => void switchTo(LOCAL_CONNECTION_ID)}
+              enabled={native ? localDashboardEnabled : undefined}
+              onEnabledChange={native ? setLocalDashboardEnabled : undefined}
             />
             {connections.map(connection => {
               const versionState = versions[connection.id]
@@ -782,11 +712,15 @@ export function RemoteConnectionsDialog({
                   detail={connection.url}
                   versionLabel={versionLabel}
                   versionWarning={mismatch}
-                  active={activeId === connection.id}
-                  connecting={connectingId === connection.id}
-                  onSelect={() => void switchTo(connection.id)}
                   onEdit={() => beginEdit(connection)}
                   onDelete={() => handleDelete(connection.id)}
+                  enabled={native ? connection.enabled : undefined}
+                  onEnabledChange={
+                    native
+                      ? enabled =>
+                          setRemoteConnectionEnabled(connection.id, enabled)
+                      : undefined
+                  }
                 />
               )
             })}
@@ -864,41 +798,28 @@ function ConnectionRow({
   detail,
   versionLabel,
   versionWarning,
-  active,
-  connecting,
-  onSelect,
   onEdit,
   onDelete,
+  enabled,
+  onEnabledChange,
 }: {
   name: string
   detail: string
   versionLabel: string
   versionWarning?: boolean
-  active: boolean
-  connecting?: boolean
-  onSelect: () => void
   onEdit?: () => void
   onDelete?: () => void
+  enabled?: boolean
+  onEnabledChange?: (enabled: boolean) => void
 }) {
   const hasActions = Boolean(onEdit || onDelete)
 
   return (
     <div className="rounded-md border p-2">
       {/* Top row: name + version always share full width so versions align */}
-      <button
-        type="button"
-        className="flex w-full items-center gap-2 text-left text-sm font-medium disabled:opacity-60"
-        onClick={onSelect}
-        disabled={connecting}
-      >
-        <span
-          className={`size-2 shrink-0 rounded-full ${active ? 'bg-green-500' : 'bg-muted-foreground/35'}`}
-        />
+      <div className="flex w-full items-center gap-2 text-left text-sm font-medium">
+        <span className="size-2 shrink-0 rounded-full bg-green-500" />
         {name}
-        {active && <Check className="size-3.5 shrink-0 text-green-500" />}
-        {connecting && (
-          <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
-        )}
         <span
           className={`ml-auto shrink-0 text-xs font-normal ${
             versionWarning
@@ -906,25 +827,18 @@ function ConnectionRow({
               : 'text-muted-foreground'
           }`}
           title={
-            versionWarning
-              ? 'Remote version differs from this app'
-              : undefined
+            versionWarning ? 'Remote version differs from this app' : undefined
           }
         >
           {versionLabel}
           {versionWarning ? ' · mismatch' : ''}
         </span>
-      </button>
+      </div>
       {/* Second row: detail URL + edit/delete actions */}
       <div className="ml-4 flex items-center gap-1">
-        <button
-          type="button"
-          className="min-w-0 flex-1 truncate text-left text-xs text-muted-foreground disabled:opacity-60"
-          onClick={onSelect}
-          disabled={connecting}
-        >
+        <span className="min-w-0 flex-1 truncate text-left text-xs text-muted-foreground">
           {detail}
-        </button>
+        </span>
         {hasActions && (
           <div className="flex shrink-0 items-center gap-0.5">
             {onEdit && (
@@ -935,7 +849,6 @@ function ConnectionRow({
                 className="size-7"
                 aria-label={`Edit ${name}`}
                 onClick={onEdit}
-                disabled={connecting}
               >
                 <Pencil className="size-3.5" />
               </Button>
@@ -948,7 +861,6 @@ function ConnectionRow({
                 className="size-7 text-destructive"
                 aria-label={`Delete ${name}`}
                 onClick={onDelete}
-                disabled={connecting}
               >
                 <Trash2 className="size-3.5" />
               </Button>
@@ -956,6 +868,16 @@ function ConnectionRow({
           </div>
         )}
       </div>
+      {onEnabledChange && (
+        <label className="ml-4 mt-1.5 flex items-center gap-2 text-xs text-muted-foreground">
+          <Checkbox
+            checked={enabled}
+            onCheckedChange={checked => onEnabledChange(checked === true)}
+            aria-label={`Include ${name} in combined dashboard`}
+          />
+          Include in combined dashboard
+        </label>
+      )}
     </div>
   )
 }

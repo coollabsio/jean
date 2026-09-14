@@ -93,6 +93,11 @@ interface TerminalState {
 
   // Start a run command (creates new terminal with command)
   startRun: (worktreeId: string, command: string) => string
+  registerStartedRun: (
+    worktreeId: string,
+    terminalId: string,
+    command: string
+  ) => void
 
   // Close all terminals for a worktree (returns terminal IDs that need to be stopped)
   closeAllTerminals: (worktreeId: string) => string[]
@@ -430,6 +435,43 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     return get().addTerminal(worktreeId, command)
   },
 
+  registerStartedRun: (worktreeId, terminalId, command) =>
+    set(state => {
+      const existing = state.terminals[worktreeId] ?? []
+      const terminalExists = existing.some(terminal => terminal.id === terminalId)
+      const runningTerminals = new Set(state.runningTerminals)
+      runningTerminals.add(terminalId)
+
+      return {
+        terminals: terminalExists
+          ? state.terminals
+          : {
+              ...state.terminals,
+              [worktreeId]: [
+                ...existing,
+                {
+                  id: terminalId,
+                  worktreeId,
+                  command,
+                  commandArgs: null,
+                  label: getDefaultLabel(command),
+                  kind: 'panel',
+                },
+              ],
+            },
+        activeTerminalIds: {
+          ...state.activeTerminalIds,
+          [worktreeId]: terminalId,
+        },
+        runningTerminals,
+        terminalVisible: true,
+        terminalPanelOpen: {
+          ...state.terminalPanelOpen,
+          [worktreeId]: true,
+        },
+      }
+    }),
+
   closeAllTerminals: worktreeId => {
     const state = get()
     const terminals = state.terminals[worktreeId] ?? []
@@ -438,7 +480,8 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     if (
       terminalIds.length === 0 &&
       !state.activeTerminalIds[worktreeId] &&
-      !(state.terminalPanelOpen[worktreeId] ?? false)
+      !(state.terminalPanelOpen[worktreeId] ?? false) &&
+      !(state.modalTerminalOpen[worktreeId] ?? false)
     ) {
       return []
     }
@@ -451,21 +494,22 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       newFailed.delete(id)
     }
 
+    const { [worktreeId]: _terminals, ...remainingTerminals } =
+      state.terminals
+    const { [worktreeId]: _activeTerminal, ...activeTerminalIds } =
+      state.activeTerminalIds
+    const { [worktreeId]: _panelOpen, ...terminalPanelOpen } =
+      state.terminalPanelOpen
+    const { [worktreeId]: _modalOpen, ...modalTerminalOpen } =
+      state.modalTerminalOpen
+
     set({
-      terminals: {
-        ...state.terminals,
-        [worktreeId]: [],
-      },
-      activeTerminalIds: {
-        ...state.activeTerminalIds,
-        [worktreeId]: '',
-      },
+      terminals: remainingTerminals,
+      activeTerminalIds,
       runningTerminals: newRunning,
       failedTerminals: newFailed,
-      terminalPanelOpen: {
-        ...state.terminalPanelOpen,
-        [worktreeId]: false,
-      },
+      terminalPanelOpen,
+      modalTerminalOpen,
       // Don't set terminalVisible=false as that's global and affects other worktrees
     })
 

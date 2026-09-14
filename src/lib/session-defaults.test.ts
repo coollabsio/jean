@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { resolveDefaultModelForBackend } from './session-defaults'
+import {
+  resolveDefaultModelForBackend,
+  resolveSelectedModelForBackend,
+} from './session-defaults'
 import type { AppPreferences } from '@/types/preferences'
 
 const preferences = {
@@ -9,6 +12,7 @@ const preferences = {
   selected_cursor_model: 'cursor/auto',
   selected_commandcode_model: 'commandcode/deepseek/deepseek-v4-flash',
   selected_kimi_model: 'kimi/custom-coding-model',
+  selected_antigravity_model: 'antigravity/flash',
 } as unknown as AppPreferences
 
 describe('resolveDefaultModelForBackend', () => {
@@ -50,6 +54,18 @@ describe('resolveDefaultModelForBackend', () => {
     )
   })
 
+  it('uses the Antigravity model preference for Antigravity sessions', () => {
+    expect(resolveDefaultModelForBackend('antigravity', preferences)).toBe(
+      'antigravity/flash'
+    )
+  })
+
+  it('falls back to the Antigravity CLI automatic model', () => {
+    expect(resolveDefaultModelForBackend('antigravity', {} as AppPreferences)).toBe(
+      'antigravity/auto'
+    )
+  })
+
   it('uses the first available PI provider model when the stored PI default is unavailable', () => {
     expect(
       resolveDefaultModelForBackend(
@@ -76,5 +92,23 @@ describe('resolveDefaultModelForBackend', () => {
         ]
       )
     ).toBe('pi/openai-codex/gpt-5.4')
+  })
+})
+
+describe('resolveSelectedModelForBackend', () => {
+  it('replaces a stale Claude session model for a Codex backend', () => {
+    expect(
+      resolveSelectedModelForBackend(
+        'codex',
+        'claude-opus-4-8[1m]',
+        preferences
+      )
+    ).toBe('gpt-5.5-fast')
+  })
+
+  it('keeps a session model that matches its backend', () => {
+    expect(
+      resolveSelectedModelForBackend('codex', 'gpt-5.6-sol-fast', preferences)
+    ).toBe('gpt-5.6-sol-fast')
   })
 })

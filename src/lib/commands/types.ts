@@ -109,6 +109,7 @@ export interface CommandContext {
 
   // State getters for isAvailable checks
   hasActiveSession: () => boolean
+  hasCurrentSessionRunning: () => boolean
   hasActiveWorktree: () => boolean
   hasSelectedProject: () => boolean
   hasInstalledBackend: () => boolean

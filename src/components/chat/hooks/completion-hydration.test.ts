@@ -52,6 +52,17 @@ describe('shouldHydrateCompletedSessionFromBackend', () => {
     ).toBe(true)
   })
 
+  it('requests hydration for Antigravity so the backend parse carries the conversation id', () => {
+    expect(
+      shouldHydrateCompletedSessionFromBackend(
+        'Hello world with normal spaces',
+        [{ type: 'text', text: 'Hello world with normal spaces' }],
+        [],
+        { backend: 'antigravity' }
+      )
+    ).toBe(true)
+  })
+
   it('requests hydration when content looks space-collapsed', () => {
     expect(
       shouldHydrateCompletedSessionFromBackend(

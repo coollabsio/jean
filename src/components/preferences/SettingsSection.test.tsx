@@ -5,7 +5,7 @@ import { render, screen } from '@/test/test-utils'
 import { BackendPaneHeader, SettingsSection } from './SettingsSection'
 
 describe('SettingsSection', () => {
-  it('renders the card layout used by backend panes', () => {
+  it('renders the Antigravity-style section layout used by backend panes', () => {
     const { container } = render(
       <SettingsSection title="Default model" anchorId="model" variant="card">
         <span>Model picker</span>
@@ -13,11 +13,11 @@ describe('SettingsSection', () => {
     )
 
     expect(container.querySelector('#model')).toHaveClass(
-      'rounded-lg',
-      'border',
-      'sm:[&_.settings-inline-field]:justify-between'
+      '[&_.settings-inline-field]:rounded-lg',
+      '[&_.settings-inline-field]:border',
+      '[&_.settings-inline-field]:p-4'
     )
-    expect(container.querySelector('[data-slot="separator"]')).toBeNull()
+    expect(container.querySelector('[data-slot="separator"]')).not.toBeNull()
   })
 
   it('renders a backend pane header with its description', () => {

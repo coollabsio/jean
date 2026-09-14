@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { convertFileSrc } from '@/lib/transport'
+import { convertFileSrc, convertServerFileSrc } from '@/lib/transport'
 import {
   Dialog,
   DialogContent,
@@ -17,6 +17,8 @@ interface ImageLightboxProps {
   thumbnailClassName?: string
   /** Optional wrapper className */
   className?: string
+  /** Owning remote server for persisted attachment paths. */
+  serverId?: string
   /** Children to render as the clickable thumbnail (if not using default img) */
   children?: React.ReactNode
 }
@@ -29,6 +31,7 @@ export function ImageLightbox({
   alt,
   thumbnailClassName,
   className,
+  serverId,
   children,
 }: ImageLightboxProps) {
   const [isOpen, setIsOpen] = useState(false)
@@ -37,7 +40,9 @@ export function ImageLightbox({
     setIsOpen(true)
   }, [])
 
-  const assetSrc = convertFileSrc(src)
+  const assetSrc = serverId
+    ? convertServerFileSrc(serverId, src)
+    : convertFileSrc(src)
 
   return (
     <>

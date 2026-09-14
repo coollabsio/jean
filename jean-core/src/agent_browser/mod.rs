@@ -302,21 +302,24 @@ fn install_agent_browser_sync(app: &AppHandle) -> Result<AgentBrowserStatus, Str
 
     // Ensure profile exists so MCP install can succeed right after.
     ensure_profile(app)?;
+    let npm_path = crate::prerequisites::require_npm("agent-browser")?;
 
-    let npm_output = silent_command("npm")
+    let npm_output = crate::platform::cli_command(&npm_path, None)
         .args(["install", "--prefix"])
         .arg(&cli_dir)
         .arg(NPM_PACKAGE)
         .output()
         .map_err(|e| {
-            format!(
-                "Failed to run npm install for agent-browser (is npm on PATH?): {e}"
-            )
+            format!("Failed to run npm install for agent-browser (is npm on PATH?): {e}")
         })?;
 
     if !npm_output.status.success() {
-        let stderr = String::from_utf8_lossy(&npm_output.stderr).trim().to_string();
-        let stdout = String::from_utf8_lossy(&npm_output.stdout).trim().to_string();
+        let stderr = String::from_utf8_lossy(&npm_output.stderr)
+            .trim()
+            .to_string();
+        let stdout = String::from_utf8_lossy(&npm_output.stdout)
+            .trim()
+            .to_string();
         return Err(format!(
             "npm install agent-browser failed: {}",
             if stderr.is_empty() { stdout } else { stderr }
@@ -338,11 +341,9 @@ fn install_agent_browser_sync(app: &AppHandle) -> Result<AgentBrowserStatus, Str
     if cfg!(target_os = "linux") {
         install_cmd.arg("--with-deps");
     }
-    let chromium_output = install_cmd.output().map_err(|e| {
-        format!(
-            "Failed to run `agent-browser install` for Chromium download: {e}"
-        )
-    })?;
+    let chromium_output = install_cmd
+        .output()
+        .map_err(|e| format!("Failed to run `agent-browser install` for Chromium download: {e}"))?;
 
     if !chromium_output.status.success() {
         // Retry without --with-deps (flag may not exist on older versions).
@@ -351,8 +352,12 @@ fn install_agent_browser_sync(app: &AppHandle) -> Result<AgentBrowserStatus, Str
             .output()
             .map_err(|e| format!("Failed to run `agent-browser install`: {e}"))?;
         if !retry.status.success() {
-            let stderr = String::from_utf8_lossy(&chromium_output.stderr).trim().to_string();
-            let stdout = String::from_utf8_lossy(&chromium_output.stdout).trim().to_string();
+            let stderr = String::from_utf8_lossy(&chromium_output.stderr)
+                .trim()
+                .to_string();
+            let stdout = String::from_utf8_lossy(&chromium_output.stdout)
+                .trim()
+                .to_string();
             let retry_err = String::from_utf8_lossy(&retry.stderr).trim().to_string();
             return Err(format!(
                 "agent-browser install (Chromium) failed: {}",
@@ -368,9 +373,7 @@ fn install_agent_browser_sync(app: &AppHandle) -> Result<AgentBrowserStatus, Str
     let profile = profile_path(app)?;
     let resolved = resolve_agent_browser_binary(app);
     if !resolved.installed {
-        return Err(
-            "agent-browser install finished but binary still not detected".to_string(),
-        );
+        return Err("agent-browser install finished but binary still not detected".to_string());
     }
     let entry = McpEntry::new(
         resolved
@@ -412,6 +415,7 @@ pub async fn install_agent_browser_mcp(
             "cursor".to_string(),
             "grok".to_string(),
             "kimi".to_string(),
+            "antigravity".to_string(),
         ]
     });
 
@@ -424,6 +428,7 @@ pub async fn install_agent_browser_mcp(
             "cursor" => install_cursor(&entry),
             "grok" => install_grok(&entry),
             "kimi" => install_kimi(&entry),
+            "antigravity" => install_antigravity(&entry),
             other => Err(format!("Unsupported MCP config backend: {other}")),
         };
         results.push(match result {
@@ -464,8 +469,8 @@ fn enable_in_preferences(
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(e) => return Err(format!("Failed to read preferences: {e}")),
     };
-    let mut prefs: Value = serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse preferences: {e}"))?;
+    let mut prefs: Value =
+        serde_json::from_str(&content).map_err(|e| format!("Failed to parse preferences: {e}"))?;
 
     let Some(obj) = prefs.as_object_mut() else {
         return Ok(());
@@ -529,6 +534,21 @@ fn install_kimi(entry: &McpEntry) -> Result<(PathBuf, Option<PathBuf>), String> 
     )
 }
 
+fn install_antigravity(entry: &McpEntry) -> Result<(PathBuf, Option<PathBuf>), String> {
+    let home = dirs::home_dir().ok_or_else(|| "Home directory unavailable".to_string())?;
+    install_antigravity_at(
+        home.join(".gemini").join("config").join("mcp_config.json"),
+        entry,
+    )
+}
+
+fn install_antigravity_at(
+    path: PathBuf,
+    entry: &McpEntry,
+) -> Result<(PathBuf, Option<PathBuf>), String> {
+    install_json_server(path, "mcpServers", entry.claude_server_json())
+}
+
 fn install_opencode(entry: &McpEntry) -> Result<(PathBuf, Option<PathBuf>), String> {
     let home = dirs::home_dir().ok_or_else(|| "Home directory unavailable".to_string())?;
     let path = find_opencode_config_path(&home)
@@ -561,6 +581,30 @@ fn find_opencode_config_path(home: &Path) -> Option<PathBuf> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod antigravity_install_tests {
+    use super::*;
+
+    #[test]
+    fn installs_agent_browser_in_antigravity_global_config() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("mcp_config.json");
+        let entry = McpEntry {
+            command: "agent-browser".to_string(),
+            profile_path: temp.path().join("profile").to_string_lossy().to_string(),
+        };
+
+        install_antigravity_at(path.clone(), &entry).expect("install");
+
+        let value: Value =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("read")).expect("json");
+        assert_eq!(
+            value["mcpServers"][MCP_SERVER_NAME]["command"],
+            "agent-browser"
+        );
+    }
 }
 
 fn install_json_server(
@@ -687,20 +731,7 @@ fn write_atomic_with_backup(path: &Path, content: &str) -> Result<Option<PathBuf
         None
     };
 
-    let tmp = path.with_extension(format!(
-        "{}.tmp",
-        path.extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("config")
-    ));
-    std::fs::write(&tmp, content).map_err(|e| format!("Failed to write {}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, path).map_err(|e| {
-        format!(
-            "Failed to replace {} with {}: {e}",
-            path.display(),
-            tmp.display()
-        )
-    })?;
+    crate::platform::write_file_atomically(path, content.as_bytes())?;
     Ok(backup)
 }
 

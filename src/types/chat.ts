@@ -60,6 +60,7 @@ export type Backend =
   | 'commandcode'
   | 'grok'
   | 'kimi'
+  | 'antigravity'
 
 /**
  * Execution mode for Claude CLI permission handling
@@ -137,7 +138,7 @@ export interface PlanToolInput {
   plan_preview?: string
   explanation?: string
   steps?: PlanStep[]
-  source?: 'claude' | 'codex' | 'grok' | 'kimi'
+  source?: 'claude' | 'codex' | 'grok' | 'kimi' | 'antigravity'
 }
 
 /**
@@ -171,6 +172,8 @@ export interface ChatMessage {
   plan_approved?: boolean
   /** Model used when this message was sent (user messages only) */
   model?: string
+  /** Backend used when this message was sent (user messages only) */
+  backend?: Backend
   /** Execution mode when this message was sent (user messages only) */
   execution_mode?: ExecutionMode
   /** Thinking level when this message was sent (user messages only) */
@@ -205,6 +208,10 @@ export interface DeniedMessageContext {
 export interface Session {
   /** Unique session identifier (UUID v4) */
   id: string
+  /** Client-only owner for a resource loaded from a remote Jean server. */
+  serverId?: string
+  /** Original server-local id when `id` is a composite client key. */
+  resourceId?: string
   /** Display name ("Session 1", or user-customized name) */
   name: string
   /** Order index for tab ordering (0-indexed) */
@@ -239,6 +246,8 @@ export interface Session {
   grok_session_id?: string
   /** Kimi Code ACP session ID for resuming conversations */
   kimi_session_id?: string
+  /** Antigravity CLI conversation ID used for conversation continuity. */
+  antigravity_session_id?: string
   /** Selected model for this session */
   selected_model?: string
   /** Selected thinking level for this session */
@@ -534,12 +543,14 @@ export interface ErrorEvent {
 }
 
 /**
- * Event payload for cancellation from Rust (user pressed Escape)
+ * Event payload for cancellation from Rust (user pressed Escape).
+ * undo_send only indicates whether the user turn should be removed from
+ * history; a prompt with no streamed output may still be restored when false.
  */
 export interface CancelledEvent {
   session_id: string
   worktree_id: string // Kept for backward compatibility
-  undo_send: boolean // True only when the prompt never started (restore to input)
+  undo_send: boolean
   emitted_at_ms: number
   run_id?: string
 }

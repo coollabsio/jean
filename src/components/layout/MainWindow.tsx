@@ -190,7 +190,6 @@ import { useGlobalInputSanitizer } from '@/hooks/useGlobalInputSanitizer'
 import { useCloseSessionOrWorktreeKeybinding } from '@/services/chat'
 import { useUIStatePersistence } from '@/hooks/useUIStatePersistence'
 import { useSessionStatePersistence } from '@/hooks/useSessionStatePersistence'
-import { useSessionPrefetch } from '@/hooks/useSessionPrefetch'
 import { useRestoreLastArchived } from '@/hooks/useRestoreLastArchived'
 import { useArchiveCleanup } from '@/hooks/useArchiveCleanup'
 import { usePrWorktreeSweep } from '@/hooks/usePrWorktreeSweep'
@@ -231,7 +230,8 @@ function useRetainedMount(active: boolean) {
 export function MainWindow() {
   useTerminalThemeSync()
   const isMaximized = useWindowMaximized()
-  const toasterOffset = useToasterOffset()
+  const { offset: toasterOffset, mobileOffset: toasterMobileOffset } =
+    useToasterOffset()
   const leftSidebarVisible = useUIStore(state => state.leftSidebarVisible)
   const leftSidebarSize = useUIStore(state => state.leftSidebarSize)
   const setLeftSidebarSize = useUIStore(state => state.setLeftSidebarSize)
@@ -342,10 +342,6 @@ export function MainWindow() {
 
   // Persist session-specific state (answered questions, fixed findings, etc.)
   useSessionStatePersistence()
-
-  // Prefetch sessions for the selected or expanded projects after the UI state
-  // is restored so the first render path stays light.
-  useSessionPrefetch(isInitialized ? projects : undefined)
 
   // Ref for the sidebar element to update width directly during drag
   const sidebarRef = useRef<HTMLDivElement>(null)
@@ -823,7 +819,7 @@ export function MainWindow() {
       <Toaster
         position="bottom-right"
         offset={toasterOffset}
-        mobileOffset={toasterOffset}
+        mobileOffset={toasterMobileOffset}
         expand={true}
         swipeDirections={['left', 'right', 'top', 'bottom']}
         style={{ '--width': '400px' } as CSSProperties}

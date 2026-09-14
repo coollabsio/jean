@@ -13,8 +13,11 @@ import {
   closeActiveTerminalTabForShortcut,
   findKeybindingAction,
   getTerminalShortcutWorktreeId,
+  hasBlockingOpenOverlay,
+  handleRunEnvironmentStarted,
   isPlainSessionTerminalFocused,
   shouldAllowKeybindingThroughOpenOverlay,
+  shouldLetChatInputHandleAction,
   shouldLetPlanDialogHandleAction,
   switchActiveTerminalTabByIndexForShortcut,
   useWindowKeyboardFocusRestore,
@@ -27,6 +30,26 @@ import type {
   Session,
   WorktreeSessions,
 } from '@/types/chat'
+
+describe('shouldLetChatInputHandleAction', () => {
+  it('lets Cmd/Ctrl+Enter reach the chat input when no plan dialog is open', () => {
+    const input = document.createElement('textarea')
+    input.setAttribute('data-chat-input', '')
+
+    expect(shouldLetChatInputHandleAction('approve_plan', input, false)).toBe(
+      true
+    )
+  })
+
+  it('keeps plan approval handling when the plan dialog is open', () => {
+    const input = document.createElement('textarea')
+    input.setAttribute('data-chat-input', '')
+
+    expect(shouldLetChatInputHandleAction('approve_plan', input, true)).toBe(
+      false
+    )
+  })
+})
 
 const { mockInvoke, mockListen, mockDisposeTerminal, mockEnvironment } =
   vi.hoisted(() => ({
@@ -211,6 +234,23 @@ describe('useMainWindowEventListeners terminal shortcuts', () => {
       sessionTerminalIds: {},
       newSessionModeTarget: null,
     })
+  })
+
+  it('shows an MCP-started run in the active worktree modal', () => {
+    useUIStore.setState({
+      sessionChatModalOpen: true,
+      sessionChatModalWorktreeId: 'worktree-1',
+    })
+
+    handleRunEnvironmentStarted({
+      worktreeId: 'worktree-1',
+      terminalId: 'run-from-mcp',
+      command: 'bun run dev',
+    })
+
+    const state = useTerminalStore.getState()
+    expect(state.terminals['worktree-1']?.[0]?.id).toBe('run-from-mcp')
+    expect(state.modalTerminalOpen['worktree-1']).toBe(true)
   })
 
   it('maps Option+Cmd arrow shortcuts to medium chat scroll actions', () => {
@@ -551,16 +591,32 @@ describe('dialog overlay keybinding passthrough', () => {
     ).toBe(false)
   })
 
+  it('does not treat the floating terminal host as a blocking dialog', () => {
+    const terminalHost = document.createElement('div')
+    terminalHost.setAttribute('role', 'dialog')
+    terminalHost.setAttribute('data-state', 'open')
+    terminalHost.setAttribute('data-terminal-host', 'true')
+    document.body.appendChild(terminalHost)
+
+    expect(hasBlockingOpenOverlay()).toBe(false)
+  })
+
+  it('still treats other open dialogs as blocking overlays', () => {
+    const dialog = document.createElement('div')
+    dialog.setAttribute('role', 'dialog')
+    dialog.setAttribute('data-state', 'open')
+    document.body.appendChild(dialog)
+
+    expect(hasBlockingOpenOverlay()).toBe(true)
+  })
+
   it.each(['toggle_zen_mode', 'clear_session_context'] as const)(
     'allows %s through the open session chat modal',
     action => {
       useUIStore.setState({ sessionChatModalOpen: true })
 
       expect(
-        shouldAllowKeybindingThroughOpenOverlay(
-          action,
-          useUIStore.getState()
-        )
+        shouldAllowKeybindingThroughOpenOverlay(action, useUIStore.getState())
       ).toBe(true)
     }
   )
@@ -651,6 +707,9 @@ describe('applyCacheInvalidationKeys', () => {
     })
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ['all-sessions'],
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: chatQueryKeys.unreadSessionCount(),
     })
   })
 

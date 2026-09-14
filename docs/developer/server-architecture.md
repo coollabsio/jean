@@ -23,6 +23,24 @@ operations stay desktop-only. Finder/editor/terminal open commands are gated:
 - allowed when the desktop app hosts Web Access
 - otherwise return an explicit "desktop app" error over HTTP
 
+## Native multi-server client boundary
+
+The native desktop client can keep independent connections to several Jean
+servers. Each connection owns its WebSocket request map, listeners, replay
+state, retry state, and health state. The selected legacy remote reuses its
+existing transport so Jean does not create a duplicate socket.
+
+Multi-server behavior is native-only. Browser Web Access continues to use one
+HTTP/WebSocket backend at the origin that served the page. It must not start
+the native connection manager, read cross-server resources, or show
+multi-server aggregation controls.
+
+Client-wide resource identity uses `(serverId, resourceId)`. The reserved
+local server ID is `local`; server persistence does not add this field to
+projects, worktrees, or sessions. Server capability responses publish API
+protocol range `1..=1` and versioned named capabilities. Missing protocol
+fields are read as the legacy protocol version 1.
+
 Server paths never initialize a graphical toolkit; they only spawn existing host
 tools when the gate above permits it.
 
