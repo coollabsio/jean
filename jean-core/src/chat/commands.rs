@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -12,7 +11,9 @@ use tauri::AppHandle;
 use uuid::Uuid;
 
 use super::naming::{spawn_naming_task, NamingRequest};
-use super::registry::{cancel_process, cancel_process_if_running};
+use super::registry::{
+    cancel_process, cancel_process_if_running, has_active_send, release_active_send, SendClaim,
+};
 use super::run_log;
 use super::storage::{
     cleanup_combined_context_files, delete_session_data, get_base_index_path, get_data_dir,
@@ -107,20 +108,6 @@ When specifying subagent_type for Task tool calls, always use the fully qualifie
 static BACKEND_QUEUE_DRAINING: Lazy<Mutex<HashSet<String>>> =
     Lazy::new(|| Mutex::new(HashSet::new()));
 
-/// Sessions with a `send_chat_message` call currently in flight.
-///
-/// The registry-based "actively managed" guard only catches duplicates after a
-/// process/turn is registered, leaving a window where two concurrent sends
-/// (frontend queue processor vs backend queue drain vs another client) both
-/// pass the check and spawn duplicate runs. This claim is taken atomically at
-/// `send_chat_message` entry and held for the whole call — unless cancel
-/// releases it early so a follow-up send is not stuck (#329).
-///
-/// Values are generation tokens so an early cancel release cannot be clobbered
-/// by a later `Drop` from the cancelled claim after a new claim was acquired.
-static ACTIVE_SENDS: Lazy<Mutex<HashMap<String, u64>>> = Lazy::new(|| Mutex::new(HashMap::new()));
-static SEND_CLAIM_GENERATION: AtomicU64 = AtomicU64::new(1);
-
 /// Whether a session has no prior user messages for auto-naming purposes.
 ///
 /// After the NDJSON migration, `Session.messages` is always empty (messages are
@@ -157,53 +144,8 @@ fn should_auto_name_branch(worktree: Option<&Worktree>) -> bool {
         .unwrap_or(true)
 }
 
-/// RAII claim on a session's send slot — released on drop (any return path).
-struct SendClaim {
-    session_id: String,
-    generation: u64,
-}
-
-impl SendClaim {
-    fn try_acquire(session_id: &str) -> Option<Self> {
-        let mut active = ACTIVE_SENDS.lock().unwrap();
-        if active.contains_key(session_id) {
-            return None;
-        }
-        let generation = SEND_CLAIM_GENERATION.fetch_add(1, Ordering::Relaxed);
-        active.insert(session_id.to_string(), generation);
-        Some(Self {
-            session_id: session_id.to_string(),
-            generation,
-        })
-    }
-}
-
-impl Drop for SendClaim {
-    fn drop(&mut self) {
-        let mut active = ACTIVE_SENDS.lock().unwrap();
-        // Only clear if we still own the slot — cancel may have released early
-        // and a newer send may already hold a different generation.
-        if active.get(&self.session_id) == Some(&self.generation) {
-            active.remove(&self.session_id);
-        }
-    }
-}
-
-/// Release the in-flight send claim for a session after cancel so a follow-up
-/// prompt is not rejected with "Session already has an active request" while
-/// the cancelled worker finishes teardown (#329).
-fn release_active_send(session_id: &str) {
-    if ACTIVE_SENDS.lock().unwrap().remove(session_id).is_some() {
-        log::info!("[SendChat] released active send claim after cancel session={session_id}");
-    }
-}
-
-fn has_active_send(session_id: &str) -> bool {
-    ACTIVE_SENDS.lock().unwrap().contains_key(session_id)
-}
-
 fn should_forward_cancel_request(session_id: &str) -> bool {
-    has_active_send(session_id) || super::registry::is_session_actively_managed(session_id)
+    super::registry::is_session_actively_managed(session_id)
 }
 
 fn clear_stale_pending_cancel_before_send(session_id: &str) {
@@ -2856,26 +2798,25 @@ pub async fn send_chat_message(
 
     clear_stale_pending_cancel_before_send(&session_id);
 
-    // Guard: atomically claim the session's send slot for the duration of this
-    // call. Closes the race window where two concurrent sends (queue processor
-    // vs backend drain vs another client) both pass the registry check below
-    // before either registers a process.
-    let Some(_send_claim) = SendClaim::try_acquire(&session_id) else {
-        log::warn!(
-            "[SendChat] REJECTED session={session_id} — concurrent send in flight (duplicate send)"
-        );
-        return Err("Session already has an active request".to_string());
-    };
-
-    // Guard: reject if this session already has an active process being tailed.
-    // Without this, a double-send (frontend race, page reload, etc.) creates
-    // duplicate run entries and orphans the first process in the registry.
+    // Check existing managed work before taking our own active-send claim.
+    // is_session_actively_managed includes active-send claims, so checking it
+    // after acquisition would reject every new send as its own duplicate.
     if super::registry::is_session_actively_managed(&session_id) {
         log::warn!(
             "[SendChat] REJECTED session={session_id} — already actively managed (duplicate send)"
         );
         return Err("Session already has an active request".to_string());
     }
+
+    // Atomically claim the session's send slot for the duration of this call.
+    // Two callers can pass the check above concurrently, but only one can take
+    // this claim before either caller registers a process.
+    let Some(_send_claim) = SendClaim::try_acquire(&session_id) else {
+        log::warn!(
+            "[SendChat] REJECTED session={session_id} — concurrent send in flight (duplicate send)"
+        );
+        return Err("Session already has an active request".to_string());
+    };
 
     // Load sessions
     let mut sessions = load_sessions(&app, &worktree_path, &worktree_id)?;
@@ -8769,7 +8710,8 @@ pub async fn check_resumable_sessions(
 
     // This calls recover_incomplete_runs which updates statuses and returns info.
     // Note: recover_incomplete_runs skips sessions that are actively managed
-    // (in PROCESS_REGISTRY or CANCEL_FLAGS) to avoid corrupting their metadata.
+    // (including sends still preparing a backend process) to avoid corrupting
+    // their metadata.
     let recovered = super::run_log::recover_incomplete_runs(&app)?;
 
     let mut resumable: Vec<_> = recovered.into_iter().filter(|r| r.resumable).collect();
