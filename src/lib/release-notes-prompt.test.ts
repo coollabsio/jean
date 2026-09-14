@@ -7,10 +7,7 @@ import {
 
 describe('buildReleaseNotesFromTagSessionPrompt', () => {
   it('asks the session to inspect changes since the selected release and reply with copyable Markdown', () => {
-    const prompt = buildReleaseNotesFromTagSessionPrompt(
-      'v4.2.0',
-      'Jean 4.2'
-    )
+    const prompt = buildReleaseNotesFromTagSessionPrompt('v4.2.0', 'Jean 4.2')
 
     expect(prompt).toContain('v4.2.0')
     expect(prompt).toContain('Jean 4.2')
@@ -21,17 +18,29 @@ describe('buildReleaseNotesFromTagSessionPrompt', () => {
     expect(prompt).toContain('Create release on GitHub')
     expect(prompt).toContain('/releases/new?')
     expect(prompt).toContain('URL-encode the title and complete Markdown body')
+    expect(prompt).toContain('prefix the release version with `v`')
+    expect(prompt).toContain('`v0.1.74`')
+    expect(prompt).toContain(
+      'Do not repeat the app name or release version at the top of the release notes body'
+    )
+    expect(prompt).toContain(
+      'title query parameter must contain that same version-only title'
+    )
     expect(prompt).toContain('Do not create or edit a GitHub release')
   })
 
-  it('uses the configured magic prompt as-is with release placeholders resolved', () => {
+  it('adds the release title and body contract to a configured magic prompt', () => {
     const prompt = buildReleaseNotesFromTagSessionPrompt(
       'v4.2.0',
       'Jean 4.2',
       'Use this custom style for {tag} ({previous_release_name}).'
     )
 
-    expect(prompt).toBe('Use this custom style for v4.2.0 (Jean 4.2).')
+    expect(prompt).toContain('Use this custom style for v4.2.0 (Jean 4.2).')
+    expect(prompt).toContain('prefix the release version with `v`')
+    expect(prompt).toContain(
+      'title query parameter must contain that same version-only title'
+    )
     expect(prompt).not.toContain('{tag}')
     expect(prompt).not.toContain('{previous_release_name}')
   })

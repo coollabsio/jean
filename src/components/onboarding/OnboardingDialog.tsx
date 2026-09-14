@@ -264,13 +264,7 @@ const backendLabel: Record<CliType, string> = {
   gh: 'GitHub CLI',
 }
 
-const BETA_BACKENDS = new Set<AIBackend>([
-  'pi',
-  'commandcode',
-  'grok',
-  'kimi',
-  'antigravity',
-])
+const BETA_BACKENDS = new Set<AIBackend>(['antigravity'])
 
 function magicDefaultsForBackend(
   backend: AIBackend
@@ -1287,7 +1281,8 @@ function OnboardingDialogContent() {
     if (step !== 'antigravity-auth-checking') return
     if (antigravityAuth.isLoading || antigravityAuth.isFetching) return
 
-    if (antigravityAuth.data?.authenticated) {
+    if (antigravityAuth.data?.authenticated || antigravityAuth.data?.timedOut) {
+      // A timed-out `agy models` probe is unknown, not signed-out.
       queueMicrotask(() => moveToNextBackendOrGh('antigravity'))
     } else {
       queueMicrotask(() => setStep('antigravity-auth-login'))
@@ -1297,6 +1292,7 @@ function OnboardingDialogContent() {
     antigravityAuth.isLoading,
     antigravityAuth.isFetching,
     antigravityAuth.data?.authenticated,
+    antigravityAuth.data?.timedOut,
     moveToNextBackendOrGh,
     setStep,
   ])
@@ -2827,7 +2823,7 @@ function OnboardingDialogContent() {
             {step === 'usage-mode' ? (
               <UsageModeStep onSelect={handleUsageModeSelect} />
             ) : step === 'remote-setup' ? (
-              <RemoteSetupStep />
+              <RemoteSetupStep onComplete={continueAfterLocalChoice} />
             ) : step === 'wsl-setup' ? (
               <WslSetupStep
                 onComplete={() => {

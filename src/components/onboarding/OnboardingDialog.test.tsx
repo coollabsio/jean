@@ -149,6 +149,21 @@ vi.mock('@/services/gh-cli', () => ({
   useGhPathDetection: () => pathResult(true, '/usr/bin/gh'),
 }))
 
+vi.mock('@/services/prerequisites', () => ({
+  checkSystemPrerequisites: vi.fn().mockResolvedValue({
+    gitInstalled: true,
+    gitVersion: '2.50.0',
+    nodeInstalled: true,
+    nodeVersion: '24.0.0',
+    npmInstalled: true,
+    npmVersion: '11.0.0',
+    platform: 'linux',
+    automaticInstallSupported: false,
+    automaticInstallCommand: null,
+    manualInstallUrl: 'https://nodejs.org/en/download',
+  }),
+}))
+
 vi.mock('@/services/preferences', () => ({
   usePreferences: () => ({
     data: {
@@ -258,8 +273,12 @@ describe('OnboardingDialog backends', () => {
     expect(
       await screen.findByText('How will you use Jean?')
     ).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Local/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Remote/i })).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /^Local Install/i })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /^Local \+ remote/i })
+    ).toBeInTheDocument()
   })
 
   it('skips local vs remote selection in Jean Server Web Access', async () => {
@@ -270,9 +289,7 @@ describe('OnboardingDialog backends', () => {
     expect(
       await screen.findByText(/Select additional AI backends to install/i)
     ).toBeInTheDocument()
-    expect(
-      screen.queryByText('How will you use Jean?')
-    ).not.toBeInTheDocument()
+    expect(screen.queryByText('How will you use Jean?')).not.toBeInTheDocument()
   })
 
   it('shows remote setup after choosing remote', async () => {

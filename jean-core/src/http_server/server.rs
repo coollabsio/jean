@@ -228,6 +228,10 @@ pub async fn start_server(
         .route("/api/commit-jobs", post(start_commit_job_handler))
         .route("/api/init", get(init_handler))
         .route("/api/version", get(version_handler))
+        .route(
+            "/api/features/server-info",
+            get(server_info_feature_handler),
+        )
         .route("/api/files/{*filepath}", get(file_handler))
         .route("/api/project-files/{*filepath}", get(project_file_handler))
         .fallback(get(static_handler))
@@ -452,6 +456,32 @@ async fn version_handler(
     Json(read_web_build_info(&state.dist_path).await).into_response()
 }
 
+async fn server_info_feature_handler(
+    headers: HeaderMap,
+    Query(params): Query<WsAuth>,
+    State(state): State<AppState>,
+) -> Response {
+    if state.token_required
+        && !request_is_authorized(params.token.as_deref(), &headers, &state.token)
+    {
+        return (StatusCode::UNAUTHORIZED, "Invalid token").into_response();
+    }
+
+    let version = crate::app_version();
+    let html = format!(
+        r#"<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"><style>body{{font:14px system-ui;margin:0;padding:16px;color:#222}}button{{padding:6px 10px}}</style></head><body><h2>Jean server</h2><p>Version <strong>{version}</strong></p><button id="copy">Copy version</button><script>let channel='';addEventListener('message',e=>{{if(e.data?.type==='jean:init')channel=e.data.channel}});document.getElementById('copy').onclick=()=>parent.postMessage({{type:'jean:bridge',channel,requestId:String(Date.now()),permission:'clipboard.write',payload:{{text:'{version}'}}}},'*')</script></body></html>"#
+    );
+    (
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-store"),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+        ],
+        html,
+    )
+        .into_response()
+}
+
 /// Maximum number of chat messages loaded per active session at init.
 /// Older messages are fetched on-demand via `load_older_session_messages`
 /// when the user scrolls up in the chat window.
@@ -476,10 +506,8 @@ async fn load_active_sessions_windowed(
         return std::collections::HashMap::new();
     }
 
-    let worktree_map: std::collections::HashMap<&str, &crate::projects::types::Worktree> = worktrees
-        .iter()
-        .map(|wt| (wt.id.as_str(), wt))
-        .collect();
+    let worktree_map: std::collections::HashMap<&str, &crate::projects::types::Worktree> =
+        worktrees.iter().map(|wt| (wt.id.as_str(), wt)).collect();
 
     let session_futures: Vec<_> = active_session_ids
         .iter()
@@ -547,6 +575,7 @@ async fn init_handler(
     response["serverPlatform"] = Value::String(crate::server_platform_name().to_string());
     response["nativeOpenAllowed"] = Value::Bool(crate::platform::native_open_allowed());
 
+    let projects_load_failed = projects_result.is_err();
     let projects = match projects_result {
         Ok(projects) => projects,
         Err(e) => {
@@ -567,9 +596,11 @@ async fn init_handler(
         selected_project_id_for_init(params.selected_project.as_deref(), ui_state.as_ref());
 
     // Validate the selected project exists and is a real project (not a folder).
-    let selected_project = selected_project_id
-        .as_deref()
-        .and_then(|id| projects.iter().find(|p| p.id == id && !p.is_folder));
+    let selected_project = selected_project_id.as_deref().and_then(|id| {
+        projects
+            .iter()
+            .find(|p| p.project.id == id && !p.project.is_folder)
+    });
 
     // Fetch worktrees first (cheap JSON read), then overlap session lists with
     // windowed active-session messages so /api/init is one parallel disk phase.
@@ -579,7 +610,7 @@ async fn init_handler(
         SessionsByWorktree,
         std::collections::HashMap<String, crate::chat::types::Session>,
     ) = if let Some(project) = selected_project {
-        let project_id = project.id.clone();
+        let project_id = project.project.id.clone();
         let worktrees = crate::projects::list_worktrees(state.app.clone(), project_id.clone())
             .await
             .unwrap_or_default();
@@ -593,32 +624,33 @@ async fn init_handler(
             let app = state.app.clone();
             let worktrees = worktrees.clone();
             async move {
-                let futures: Vec<_> = worktrees
-                    .into_iter()
-                    .map(|wt| {
-                        let app = app.clone();
-                        async move {
-                            let worktree_id = wt.id.clone();
-                            let sessions = crate::chat::get_sessions(
-                                app,
-                                worktree_id.clone(),
-                                wt.path,
-                                None,
-                                Some(true),
-                            )
-                            .await
-                            .unwrap_or_else(|_| crate::chat::types::WorktreeSessions {
-                                worktree_id: worktree_id.clone(),
-                                sessions: vec![],
-                                active_session_id: None,
-                                default_model: None,
-                                version: 2,
-                                branch_naming_completed: false,
-                            });
-                            (worktree_id, sessions)
-                        }
-                    })
-                    .collect();
+                let futures: Vec<_> =
+                    worktrees
+                        .into_iter()
+                        .map(|wt| {
+                            let app = app.clone();
+                            async move {
+                                let worktree_id = wt.id.clone();
+                                let sessions = crate::chat::get_sessions(
+                                    app,
+                                    worktree_id.clone(),
+                                    wt.path,
+                                    None,
+                                    Some(true),
+                                )
+                                .await
+                                .unwrap_or_else(|_| crate::chat::types::WorktreeSessions {
+                                    worktree_id: worktree_id.clone(),
+                                    sessions: vec![],
+                                    active_session_id: None,
+                                    default_model: None,
+                                    version: 2,
+                                    branch_naming_completed: false,
+                                });
+                                (worktree_id, sessions)
+                            }
+                        })
+                        .collect();
                 futures_util::future::join_all(futures)
                     .await
                     .into_iter()
@@ -795,9 +827,13 @@ async fn init_handler(
         }
     }
 
-    // Serialize projects (always included)
-    if let Ok(val) = serde_json::to_value(&projects) {
-        response["projects"] = val;
+    // Do not serialize a failed project load as an empty list. Omitting the key
+    // lets the frontend run its normal list_projects query and surface the
+    // storage error instead of presenting data corruption as an empty account.
+    if !projects_load_failed {
+        if let Ok(val) = serde_json::to_value(&projects) {
+            response["projects"] = val;
+        }
     }
 
     // Only emit worktrees/sessions keys when we actually have data.
@@ -944,8 +980,10 @@ async fn file_handler(
         }
     };
 
-    // Build requested path and canonicalize
-    let requested = app_data_dir.join(&filepath);
+    // Axum wildcard captures include a leading slash. Treat ordinary wildcard
+    // values as app-data-relative, while accepting persisted absolute paths
+    // only when they already point inside this app-data directory.
+    let requested = resolve_app_data_file_path(&app_data_dir, &filepath);
     let canonical = match requested.canonicalize() {
         Ok(p) => p,
         Err(_) => return (StatusCode::NOT_FOUND, "File not found").into_response(),
@@ -977,6 +1015,18 @@ async fn file_handler(
             .unwrap()
             .into_response(),
         Err(_) => (StatusCode::NOT_FOUND, "Cannot read file").into_response(),
+    }
+}
+
+fn resolve_app_data_file_path(
+    app_data_dir: &std::path::Path,
+    filepath: &str,
+) -> std::path::PathBuf {
+    let candidate = std::path::Path::new(filepath);
+    if candidate.starts_with(app_data_dir) {
+        candidate.to_path_buf()
+    } else {
+        app_data_dir.join(filepath.trim_start_matches(['/', '\\']))
     }
 }
 
@@ -1710,5 +1760,22 @@ mod tests {
             &canonical_sibling,
             &[canonical_root]
         ));
+    }
+
+    #[test]
+    fn app_data_file_path_handles_axum_wildcards_and_persisted_absolute_paths() {
+        let base = std::path::Path::new("/tmp/com.jean.desktop");
+
+        assert_eq!(
+            super::resolve_app_data_file_path(base, "/pasted-images/image.png"),
+            base.join("pasted-images/image.png")
+        );
+        assert_eq!(
+            super::resolve_app_data_file_path(
+                base,
+                "/tmp/com.jean.desktop/pasted-images/image.png"
+            ),
+            base.join("pasted-images/image.png")
+        );
     }
 }

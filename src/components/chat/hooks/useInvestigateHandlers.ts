@@ -378,7 +378,7 @@ export function useInvestigateHandlers({
             content: string
           }[]
         >('get_sentry_issue_context_contents', {
-          sessionId: activeWorktreeId,
+          sessionId: activeSessionId ?? activeWorktreeId,
           worktreeId: activeWorktreeId,
           projectId: worktreeProjectId ?? '',
         })

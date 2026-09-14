@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import type { Session } from '@/types/chat'
 import type { SessionCardData } from './session-card-utils'
 import {
-  buildReorderedSessionIdsWithinStatus,
   resolveModalSessionId,
   sortSessionCardsForTabs,
 } from './session-tab-order'
@@ -18,9 +17,14 @@ function session(id: string, order: number, created_at = order): Session {
   }
 }
 
-function card(id: string, status: SessionCardData['status'], order: number) {
+function card(
+  id: string,
+  status: SessionCardData['status'],
+  order: number,
+  updatedAt = order
+) {
   return {
-    session: session(id, order),
+    session: { ...session(id, order), updated_at: updatedAt },
     status,
   } as SessionCardData
 }
@@ -38,42 +42,25 @@ describe('session tab ordering', () => {
 
     expect(sorted.map(item => item.session.id)).toEqual([
       'review-session',
-      'waiting',
       'running',
+      'waiting',
     ])
   })
 
-  it('keeps status priority while sorting sessions inside each status by manual order', () => {
+  it('sorts non-review sessions by most recently updated first', () => {
     const sorted = sortSessionCardsForTabs([
-      card('idle-low', 'idle', 0),
-      card('waiting-high', 'waiting', 20),
-      card('idle-high', 'idle', 10),
-      card('waiting-low', 'waiting', 2),
+      card('old-waiting', 'waiting', 0, 100),
+      card('new-idle', 'idle', 20, 400),
+      card('middle-running', 'vibing', 10, 300),
+      card('middle-idle', 'idle', 2, 200),
     ])
 
     expect(sorted.map(item => item.session.id)).toEqual([
-      'waiting-low',
-      'waiting-high',
-      'idle-low',
-      'idle-high',
+      'new-idle',
+      'middle-running',
+      'middle-idle',
+      'old-waiting',
     ])
-  })
-
-  it('builds a persisted session order only when dragging within the same status group', () => {
-    const cards = sortSessionCardsForTabs([
-      card('waiting-a', 'waiting', 0),
-      card('idle-a', 'idle', 1),
-      card('waiting-b', 'waiting', 2),
-      card('idle-b', 'idle', 3),
-    ])
-
-    expect(
-      buildReorderedSessionIdsWithinStatus(cards, 'waiting-b', 'waiting-a')
-    ).toEqual(['waiting-b', 'waiting-a', 'idle-a', 'idle-b'])
-
-    expect(
-      buildReorderedSessionIdsWithinStatus(cards, 'waiting-a', 'idle-a')
-    ).toBeNull()
   })
 })
 

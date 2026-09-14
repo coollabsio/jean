@@ -267,7 +267,7 @@ describe('NewSessionModeModal', () => {
     )
   })
 
-  it('marks Command Code and Grok, not Cursor, as beta in backend choices', () => {
+  it('does not mark Command Code or Grok as beta in backend choices', () => {
     cursorInstalled = true
     commandCodeInstalled = true
     grokInstalled = true
@@ -281,13 +281,15 @@ describe('NewSessionModeModal', () => {
 
     expect(screen.getByText('Cursor')).toBeInTheDocument()
     expect(screen.queryByText('Cursor (Beta)')).toBeNull()
-    expect(screen.getByText('Command Code (Beta)')).toBeInTheDocument()
-    expect(screen.getByText('Grok (Beta)')).toBeInTheDocument()
+    expect(screen.getByText('Command Code')).toBeInTheDocument()
+    expect(screen.queryByText('Command Code (Beta)')).toBeNull()
+    expect(screen.getByText('Grok')).toBeInTheDocument()
+    expect(screen.queryByText('Grok (Beta)')).toBeNull()
     expect(
-      screen.getByText('Open native Command Code (Beta) in a terminal session')
+      screen.getByText('Open native Command Code in a terminal session')
     ).toBeInTheDocument()
     expect(
-      screen.getByText('Open native Grok (Beta) in a terminal session')
+      screen.getByText('Open native Grok in a terminal session')
     ).toBeInTheDocument()
   })
 
@@ -302,8 +304,8 @@ describe('NewSessionModeModal', () => {
 
     render(<NewSessionModeModal />)
 
-    expect(screen.getByText('Grok (Beta)')).toBeInTheDocument()
-    expect(screen.queryByText('Kimi Code (Beta)')).toBeNull()
+    expect(screen.getByText('Grok')).toBeInTheDocument()
+    expect(screen.queryByText('Kimi Code')).toBeNull()
     expect(screen.queryByText(/Kimi/)).toBeNull()
   })
 
@@ -317,9 +319,9 @@ describe('NewSessionModeModal', () => {
 
     render(<NewSessionModeModal />)
 
-    expect(screen.getByText('Kimi Code (Beta)')).toBeInTheDocument()
+    expect(screen.getByText('Kimi Code')).toBeInTheDocument()
     expect(
-      screen.getByText('Open native Kimi Code (Beta) in a terminal session')
+      screen.getByText('Open native Kimi Code in a terminal session')
     ).toBeInTheDocument()
   })
 

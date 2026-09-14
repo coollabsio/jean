@@ -147,10 +147,10 @@ describe('PreferencesDialog', () => {
       'Codex',
       'OpenCode',
       'Cursor',
-      'PIBeta',
-      'Command CodeBeta',
-      'GrokBeta',
-      'Kimi CodeBeta',
+      'PI',
+      'Command Code',
+      'Grok',
+      'Kimi Code',
       'Antigravity CLIBeta',
       'GitHub CLI',
       'CodeRabbit CLI',
@@ -181,23 +181,27 @@ describe('PreferencesDialog', () => {
       'Advanced',
     ])
 
-    for (const label of ['PI', 'Command Code']) {
+    for (const label of ['PI', 'Command Code', 'Grok']) {
       const button = within(navigationMenu).getByText(label).closest('button')
       if (!button) {
         throw new Error(`Expected ${label} navigation button to be rendered`)
       }
 
-      expect(within(button).getByText('Beta')).toHaveClass('bg-yellow-500/10')
+      expect(within(button).queryByText('Beta')).toBeNull()
     }
 
-    const grokButton = within(navigationMenu)
-      .getByText('Grok')
+    const antigravityButton = within(navigationMenu)
+      .getByText('Antigravity CLI')
       .closest('button')
-    if (!grokButton) {
-      throw new Error('Expected Grok navigation button to be rendered')
+    if (!antigravityButton) {
+      throw new Error(
+        'Expected Antigravity CLI navigation button to be rendered'
+      )
     }
 
-    expect(within(grokButton).getByText('Beta')).toHaveClass('bg-yellow-500/10')
+    expect(within(antigravityButton).getByText('Beta')).toHaveClass(
+      'bg-yellow-500/10'
+    )
 
     const kimiButton = within(navigationMenu)
       .getByText('Kimi Code')

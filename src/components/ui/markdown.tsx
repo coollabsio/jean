@@ -29,6 +29,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox'
 import { cn } from '@/lib/utils'
 import { useChatStore } from '@/store/chat-store'
+import { useUIStore } from '@/store/ui-store'
 import { convertFileSrc } from '@/lib/transport'
 
 interface MarkdownProps {
@@ -81,6 +82,24 @@ function extractText(node: ReactNode): string {
     )
   }
   return ''
+}
+
+function openLocalFileLink(href: string | undefined): boolean {
+  if (!href || href.startsWith('#') || /^[a-z][a-z\d+.-]*:/i.test(href)) {
+    return false
+  }
+
+  const decodedHref = decodeURIComponent(href)
+  const isAbsolute = decodedHref.startsWith('/') || /^[a-z]:[\\/]/i.test(decodedHref)
+  const rootPath = useChatStore.getState().activeWorktreePath
+  if (!isAbsolute && !rootPath) return false
+
+  const separator = rootPath?.includes('\\') ? '\\' : '/'
+  const path = isAbsolute
+    ? decodedHref
+    : `${rootPath?.replace(/[\\/]+$/, '')}${separator}${decodedHref.replace(/^[\\/]+/, '')}`
+  useUIStore.getState().setViewingFilePath(path)
+  return true
 }
 
 function CodeBlock({ children }: { children: ReactNode }) {
@@ -415,6 +434,9 @@ const components: Components = {
   a: ({ href, children }) => (
     <a
       href={href}
+      onClick={event => {
+        if (openLocalFileLink(href)) event.preventDefault()
+      }}
       className="underline underline-offset-2 hover:text-foreground"
       target="_blank"
       rel="noopener noreferrer"

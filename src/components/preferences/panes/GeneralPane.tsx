@@ -341,9 +341,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   const grokReasoning = getCatalogModelReasoning(
     modelCatalog,
     'grok',
-    preferences?.selected_grok_model ?? 'grok/grok-4.5'
+    preferences?.selected_grok_model ?? 'grok/grok-4.6'
   )
-  const selectedGrokModel = preferences?.selected_grok_model ?? 'grok/grok-4.5'
+  const selectedGrokModel = preferences?.selected_grok_model ?? 'grok/grok-4.6'
   const selectedGrokReasoningOptions = withAdaptiveEffortOption(
     grokReasoning?.type === 'effort'
       ? grokReasoning.levels
@@ -4562,6 +4562,18 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   ))}
                 </SelectContent>
               </Select>
+            </InlineField>
+
+            <InlineField
+              label="Combined git sync button"
+              description="Replace separate Pull and Push badges with one Sync button that does both"
+            >
+              <Switch
+                checked={preferences?.git_sync_button ?? true}
+                onCheckedChange={checked => {
+                  patchPreferences.mutate({ git_sync_button: checked })
+                }}
+              />
             </InlineField>
 
             <InlineField

@@ -268,6 +268,7 @@ export const chatQueryKeys = {
       searchQuery,
       resultLimit,
     ] as const,
+  unreadSessionCount: () => ['unread-session-count'] as const,
 }
 
 export interface NativeCliHistorySession {
@@ -361,7 +362,7 @@ export function useSessions(
     },
     enabled: !!worktreeId && !!worktreePath,
     staleTime: 1000 * 60 * 5, // 5 minutes - enables instant tab bar rendering from cache
-    gcTime: 1000 * 60 * 5,
+    gcTime: 1000 * 60 * 2,
     refetchOnMount: true, // Respects staleTime; status changes pushed via streaming/cache:invalidate events
   })
 }
@@ -627,7 +628,26 @@ export function useAllSessions(enabled = true) {
     },
     enabled,
     staleTime: 1000 * 60 * 5, // 5 minutes
-    gcTime: 1000 * 60 * 5,
+    gcTime: 1000 * 60 * 2,
+  })
+}
+
+/**
+ * Load only the unread-session count for the title-bar badge.
+ * Full cross-project session data remains an explicit unread-popover query.
+ */
+export function fetchUnreadSessionCount(): Promise<number> {
+  // Let TanStack Query handle failures. Returning zero here would replace a
+  // valid cached count during a temporary transport or backend failure.
+  return invoke<number>('get_unread_session_count')
+}
+
+export function useUnreadSessionCount() {
+  return useQuery({
+    queryKey: chatQueryKeys.unreadSessionCount(),
+    queryFn: fetchUnreadSessionCount,
+    staleTime: 1000 * 60,
+    gcTime: 1000 * 60 * 2,
   })
 }
 
@@ -1124,10 +1144,15 @@ export function useCloseSession() {
 
       // Drop from the finished-session bell (reads from ['all-sessions']).
       removeSessionFromAllSessionsCache(queryClient, sessionId)
+      queryClient.invalidateQueries({
+        queryKey: chatQueryKeys.unreadSessionCount(),
+      })
       queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
 
       // Clear all session-scoped state
-      useChatStore.getState().clearSessionState(sessionId)
+      useChatStore
+        .getState()
+        .clearSessionState(sessionId, { removeReferences: true })
       clearSessionScrollState(sessionId)
       cleanupSessionTerminalForRemovedSession(worktreeId, sessionId)
 
@@ -1202,10 +1227,15 @@ export function useArchiveSession() {
 
       // Drop from the finished-session bell (reads from ['all-sessions']).
       removeSessionFromAllSessionsCache(queryClient, sessionId)
+      queryClient.invalidateQueries({
+        queryKey: chatQueryKeys.unreadSessionCount(),
+      })
       queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
 
       // Clear all session-scoped state
-      useChatStore.getState().clearSessionState(sessionId)
+      useChatStore
+        .getState()
+        .clearSessionState(sessionId, { removeReferences: true })
       clearSessionScrollState(sessionId)
       cleanupSessionTerminalForRemovedSession(worktreeId, sessionId)
 
@@ -1729,6 +1759,7 @@ export function useSendMessage() {
       chromeEnabled,
       customProfileName,
       backend,
+      includeRecap,
     }: {
       sessionId: string
       worktreeId: string
@@ -1747,6 +1778,8 @@ export function useSendMessage() {
       backend?: string
       /** Set by the queue processor — its onError requeues the original message */
       fromQueue?: boolean
+      /** When false, skip the end-of-turn recap instruction. */
+      includeRecap?: boolean
     }): Promise<ChatMessage> => {
       if (!isTauri()) {
         throw new Error('Not in Tauri context')
@@ -1785,6 +1818,7 @@ export function useSendMessage() {
         chromeEnabled,
         customProfileName,
         backend,
+        includeRecap,
       })
       logger.info('Chat message sent', { responseId: response.id })
       return response

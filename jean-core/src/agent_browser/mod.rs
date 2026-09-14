@@ -302,8 +302,9 @@ fn install_agent_browser_sync(app: &AppHandle) -> Result<AgentBrowserStatus, Str
 
     // Ensure profile exists so MCP install can succeed right after.
     ensure_profile(app)?;
+    let npm_path = crate::prerequisites::require_npm("agent-browser")?;
 
-    let npm_output = silent_command("npm")
+    let npm_output = crate::platform::cli_command(&npm_path, None)
         .args(["install", "--prefix"])
         .arg(&cli_dir)
         .arg(NPM_PACKAGE)
@@ -730,20 +731,7 @@ fn write_atomic_with_backup(path: &Path, content: &str) -> Result<Option<PathBuf
         None
     };
 
-    let tmp = path.with_extension(format!(
-        "{}.tmp",
-        path.extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("config")
-    ));
-    std::fs::write(&tmp, content).map_err(|e| format!("Failed to write {}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, path).map_err(|e| {
-        format!(
-            "Failed to replace {} with {}: {e}",
-            path.display(),
-            tmp.display()
-        )
-    })?;
+    crate::platform::write_file_atomically(path, content.as_bytes())?;
     Ok(backup)
 }
 

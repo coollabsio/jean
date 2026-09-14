@@ -89,8 +89,8 @@ describe('RemoteSetupStep', () => {
       ready: true,
       log: 'ok',
     })
-    const reloadApp = vi.fn()
-    render(<RemoteSetupStep reloadApp={reloadApp} />)
+    const onComplete = vi.fn()
+    render(<RemoteSetupStep onComplete={onComplete} />)
 
     expect(
       screen.getByRole('tab', { name: /Install via SSH/i })
@@ -114,14 +114,14 @@ describe('RemoteSetupStep', () => {
         userInstall: null,
       })
       expect(addRemoteConnection).toHaveBeenCalled()
-      expect(selectConnection).toHaveBeenCalledWith('remote-1')
-      expect(reloadApp).toHaveBeenCalled()
+      expect(selectConnection).not.toHaveBeenCalled()
+      expect(onComplete).toHaveBeenCalledOnce()
     })
   })
 
   it('connects with an existing Web Access URL', async () => {
-    const reloadApp = vi.fn()
-    render(<RemoteSetupStep reloadApp={reloadApp} />)
+    const onComplete = vi.fn()
+    render(<RemoteSetupStep onComplete={onComplete} />)
 
     fireEvent.click(screen.getByRole('tab', { name: /Existing URL/i }))
     fireEvent.change(screen.getByLabelText('Name'), {
@@ -141,8 +141,8 @@ describe('RemoteSetupStep', () => {
         sshHost: undefined,
         sshPort: 22,
       })
-      expect(selectConnection).toHaveBeenCalledWith('remote-1')
-      expect(reloadApp).toHaveBeenCalled()
+      expect(selectConnection).not.toHaveBeenCalled()
+      expect(onComplete).toHaveBeenCalledOnce()
     })
   })
 })

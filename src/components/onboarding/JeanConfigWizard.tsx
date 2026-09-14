@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label'
 import { useProjectsStore } from '@/store/projects-store'
 import { useProjects, useSaveJeanConfig } from '@/services/projects'
 import { usePreferences, usePatchPreferences } from '@/services/preferences'
+import { generateId } from '@/lib/uuid'
 
 export function JeanConfigWizard() {
   const open = useProjectsStore(s => s.jeanConfigWizardOpen)
@@ -37,7 +38,7 @@ function JeanConfigWizardContent() {
   const [teardownScript, setTeardownScript] = useState('')
   const [runScripts, setRunScripts] = useState<
     { id: string; value: string }[]
-  >(() => [{ id: crypto.randomUUID(), value: '' }])
+  >(() => [{ id: generateId(), value: '' }])
   const [ports, setPorts] = useState<
     { id: string; port: string; label: string; host: string }[]
   >([])
@@ -233,7 +234,7 @@ function JeanConfigWizardContent() {
               onClick={() =>
                 setRunScripts([
                   ...runScripts,
-                  { id: crypto.randomUUID(), value: '' },
+                  { id: generateId(), value: '' },
                 ])
               }
             >
@@ -306,7 +307,7 @@ function JeanConfigWizardContent() {
                 setPorts([
                   ...ports,
                   {
-                    id: crypto.randomUUID(),
+                    id: generateId(),
                     port: '',
                     label: '',
                     host: '',

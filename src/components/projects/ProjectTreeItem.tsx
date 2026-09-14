@@ -7,7 +7,12 @@ import {
   MoreHorizontal,
   Plus,
 } from 'lucide-react'
-import { convertFileSrc, convertProjectFileSrc } from '@/lib/transport'
+import {
+  convertFileSrc,
+  convertProjectFileSrc,
+  convertServerFileSrc,
+  convertServerProjectFileSrc,
+} from '@/lib/transport'
 import { cn } from '@/lib/utils'
 import { dismissibleToast } from '@/lib/dismissible-toast'
 import type { Project } from '@/types/projects'
@@ -60,8 +65,9 @@ export function resolveProjectRowClickAction(
 
 export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
   const isMobile = useIsMobile()
+  const isOffline = project.offline === true
   const { data: preferences } = usePreferences()
-  const gitSyncButton = preferences?.git_sync_button ?? false
+  const gitSyncButton = preferences?.git_sync_button ?? true
   const {
     expandedProjectIds,
     selectedProjectId,
@@ -69,10 +75,16 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
     toggleProjectExpanded,
     openProjectSettings,
   } = useProjectsStore()
-  const { data: worktrees = [] } = useWorktrees(project.id)
+  const isProjectExpanded = expandedProjectIds.has(project.id)
+  const shouldLoadWorktrees =
+    !isOffline && (isProjectExpanded || selectedProjectId === project.id)
+  const { data: worktrees = [] } = useWorktrees(project.id, {
+    enabled: shouldLoadWorktrees,
+  })
   const { data: appDataDir = '' } = useAppDataDir()
-  const hasWorktrees = worktrees.length > 0
-  const isExpanded = hasWorktrees && expandedProjectIds.has(project.id)
+  const hasWorktrees =
+    !isOffline && (worktrees.length > 0 || (project.worktree_count ?? 0) > 0)
+  const isExpanded = hasWorktrees && isProjectExpanded
   const setNewWorktreeModalOpen = useUIStore(
     state => state.setNewWorktreeModalOpen
   )
@@ -86,10 +98,19 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
 
   // Build avatar URL from relative path
   const avatarUrl =
-    project.avatar_path && appDataDir && !imgError
-      ? convertFileSrc(`${appDataDir}/${project.avatar_path}`)
+    project.avatar_path && !imgError
+      ? project.serverId
+        ? convertServerFileSrc(project.serverId, project.avatar_path)
+        : appDataDir
+          ? convertFileSrc(`${appDataDir}/${project.avatar_path}`)
+          : null
       : project.default_avatar_path && !imgError
-        ? convertProjectFileSrc(project.default_avatar_path)
+        ? project.serverId
+          ? convertServerProjectFileSrc(
+              project.serverId,
+              project.default_avatar_path
+            )
+          : convertProjectFileSrc(project.default_avatar_path)
         : null
 
   // Fetch git status for all worktrees when project is expanded
@@ -145,7 +166,7 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
   }, [isEditing])
 
   const handleClick = useCallback(() => {
-    if (isEditing) return
+    if (isEditing || isOffline) return
 
     const action = resolveProjectRowClickAction(hasWorktrees)
     if (action === 'toggle-expand') {
@@ -162,6 +183,7 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
     }
   }, [
     isEditing,
+    isOffline,
     hasWorktrees,
     toggleProjectExpanded,
     project.id,
@@ -173,11 +195,11 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
   const handleDoubleClick = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation()
-      if (isEditing) return
+      if (isEditing || isOffline) return
       setEditName(project.name)
       setIsEditing(true)
     },
-    [isEditing, project.name]
+    [isEditing, isOffline, project.name]
   )
 
   const handleSubmitRename = useCallback(
@@ -250,7 +272,12 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
       pickRemoteOrRun(async remote => {
         const opToast = dismissibleToast.loading('Pushing changes...')
         try {
-          const result = await gitPush(project.path, undefined, remote)
+          const result = await gitPush(
+            project.path,
+            undefined,
+            remote,
+            project.id
+          )
           fetchWorktreesStatus(project.id)
           if (result.permissionDenied) {
             opToast.error('Push failed', {
@@ -302,7 +329,8 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
         {/* Project Row */}
         <div
           className={cn(
-            'group relative flex cursor-pointer items-center gap-1.5 px-2 py-1.5 overflow-hidden transition-colors duration-150',
+            'group relative flex items-center gap-1.5 px-2 py-1.5 overflow-hidden transition-colors duration-150',
+            isOffline ? 'cursor-default opacity-70' : 'cursor-pointer',
             isSelected
               ? 'bg-primary/10 text-foreground before:absolute before:left-0 before:top-0 before:h-full before:w-[3px] before:bg-primary'
               : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
@@ -344,6 +372,11 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
           ) : (
             <span className="flex flex-1 items-center gap-0.5 truncate text-sm">
               <span className="truncate">{project.name}</span>
+              {isOffline && (
+                <span className="shrink-0 rounded bg-amber-500/10 px-1 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">
+                  Offline
+                </span>
+              )}
               {hasWorktrees && (
                 <button
                   type="button"
@@ -370,7 +403,8 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
           )}
 
           {/* Base branch pull/push indicators (when no base session) */}
-          {gitSyncButton &&
+          {!isOffline &&
+          gitSyncButton &&
           (baseBranchBehindCount > 0 || baseBranchAheadCount > 0) ? (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -445,7 +479,7 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
             </>
           )}
 
-          {showStatusBadges && (
+          {!isOffline && showStatusBadges && (
             <div className="hidden items-center gap-1 sm:flex">
               <NewIssuesBadge
                 projectPath={project.path}
@@ -461,37 +495,41 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
           )}
 
           {/* Settings */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={e => {
-                  e.stopPropagation()
-                  openProjectSettings(project.id)
-                }}
-                aria-label="Project settings"
-                className="flex size-4 shrink-0 items-center justify-center rounded opacity-50 hover:bg-accent-foreground/10 hover:opacity-100"
-              >
-                <MoreHorizontal className="size-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Project settings</TooltipContent>
-          </Tooltip>
+          {!isOffline && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={e => {
+                    e.stopPropagation()
+                    openProjectSettings(project.id)
+                  }}
+                  aria-label="Project settings"
+                  className="flex size-4 shrink-0 items-center justify-center rounded opacity-50 hover:bg-accent-foreground/10 hover:opacity-100"
+                >
+                  <MoreHorizontal className="size-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Project settings</TooltipContent>
+            </Tooltip>
+          )}
 
           {/* Add Worktree */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={handleAddWorktree}
-                aria-label="New worktree"
-                className="flex size-4 shrink-0 items-center justify-center rounded opacity-50 hover:bg-accent-foreground/10 hover:opacity-100"
-              >
-                <Plus className="size-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>New worktree</TooltipContent>
-          </Tooltip>
+          {!isOffline && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={handleAddWorktree}
+                  aria-label="New worktree"
+                  className="flex size-4 shrink-0 items-center justify-center rounded opacity-50 hover:bg-accent-foreground/10 hover:opacity-100"
+                >
+                  <Plus className="size-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>New worktree</TooltipContent>
+            </Tooltip>
+          )}
         </div>
 
         {/* Worktrees */}

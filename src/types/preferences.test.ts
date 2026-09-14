@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DEFAULT_RELEASE_NOTES_PROMPT,
   ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_BACKENDS,
   ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_MODELS,
   COMMANDCODE_DEFAULT_MAGIC_PROMPT_BACKENDS,
   COMMANDCODE_DEFAULT_MAGIC_PROMPT_MODELS,
-  DEFAULT_FINAL_REVIEW_PROMPT,
   DEFAULT_INVESTIGATE_ADVISORY_PROMPT,
   DEFAULT_INVESTIGATE_ISSUE_PROMPT,
   DEFAULT_INVESTIGATE_LINEAR_ISSUE_PROMPT,
@@ -23,14 +23,20 @@ import {
   resolveMagicPromptProvider,
 } from './preferences'
 
+describe('default release notes prompt', () => {
+  it('requires a v-prefixed version title without an app/version body heading', () => {
+    expect(DEFAULT_RELEASE_NOTES_PROMPT).toContain(
+      'prefix the release version with `v`'
+    )
+    expect(DEFAULT_RELEASE_NOTES_PROMPT).toContain('`v0.1.74`')
+    expect(DEFAULT_RELEASE_NOTES_PROMPT).toContain(
+      'Do not repeat the app name or release version at the top'
+    )
+  })
+})
+
 describe('magic prompt preference resolvers', () => {
   it('defines an audit-only final review prompt with tabular output', () => {
-    expect(DEFAULT_FINAL_REVIEW_PROMPT).toContain('Do not modify')
-    expect(DEFAULT_FINAL_REVIEW_PROMPT).toContain('regressions')
-    expect(DEFAULT_FINAL_REVIEW_PROMPT).toContain('consolidat')
-    expect(DEFAULT_FINAL_REVIEW_PROMPT).toContain('Fixes #')
-    expect(DEFAULT_FINAL_REVIEW_PROMPT).toContain('Markdown table')
-    expect(defaultPreferences.magic_prompt_modes.final_review_mode).toBe('yolo')
     expect(defaultPreferences.magic_prompt_modes.code_review_fix_mode).toBe(
       'plan'
     )
@@ -87,7 +93,7 @@ describe('magic prompt preference resolvers', () => {
       'grok'
     )
     expect(GROK_DEFAULT_MAGIC_PROMPT_MODELS.investigate_issue_model).toBe(
-      'grok/grok-4.5'
+      'grok/grok-4.6'
     )
     expect(GROK_DEFAULT_MAGIC_PROMPT_MODES.investigate_issue_mode).toBe('yolo')
     expect(GROK_DEFAULT_MAGIC_PROMPT_MODES.investigate_pr_mode).toBe('yolo')
@@ -108,8 +114,7 @@ describe('magic prompt preference resolvers', () => {
     )
     // Non-investigation chat modes keep shared defaults
     expect(GROK_DEFAULT_MAGIC_PROMPT_MODES.review_comments_mode).toBe('plan')
-    expect(GROK_DEFAULT_MAGIC_PROMPT_MODES.final_review_mode).toBe('yolo')
-    expect(defaultPreferences.selected_grok_model).toBe('grok/grok-4.5')
+    expect(defaultPreferences.selected_grok_model).toBe('grok/grok-4.6')
     expect(defaultPreferences.default_grok_reasoning_effort).toBe('high')
   })
 

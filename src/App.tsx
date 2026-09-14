@@ -1,10 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useEffectEvent,
-  useRef,
-  useState,
-} from 'react'
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   connectTransport,
@@ -92,6 +86,7 @@ import {
 import { scheduleIdleWork } from './lib/idle'
 import { isWindows } from './lib/platform'
 import { checkWebClientVersion } from './lib/web-client-version'
+import { startNativeServerConnections } from './lib/native-server-connections'
 import {
   collectExecutionModes,
   collectWorktreePaths,
@@ -154,6 +149,19 @@ function App() {
   const featureTourOpen = useUIStore(state => state.featureTourOpen)
   const jeanMcpIntroOpen = useUIStore(state => state.jeanMcpIntroOpen)
   const hasStartedTransportRef = useRef(false)
+
+  useEffect(() => {
+    let stopped = false
+    let cleanup: () => void = () => undefined
+    void startNativeServerConnections().then(dispose => {
+      if (stopped) dispose()
+      else cleanup = dispose
+    })
+    return () => {
+      stopped = true
+      cleanup()
+    }
+  }, [])
 
   // Keep quit working during preloading and server-switch overlays (MainWindow
   // may be unmounted). Production-only; uses destroy() so Windows cannot
@@ -968,10 +976,12 @@ function App() {
   })
   const { data: commandcodeStatus, isLoading: isCommandcodeStatusLoading } =
     useCommandCodeCliStatus({ enabled: nativeCli })
-  const { data: grokStatus, isLoading: isGrokStatusLoading } =
-    useGrokCliStatus({ enabled: nativeCli })
-  const { data: kimiStatus, isLoading: isKimiStatusLoading } =
-    useKimiCliStatus({ enabled: nativeCli })
+  const { data: grokStatus, isLoading: isGrokStatusLoading } = useGrokCliStatus(
+    { enabled: nativeCli }
+  )
+  const { data: kimiStatus, isLoading: isKimiStatusLoading } = useKimiCliStatus(
+    { enabled: nativeCli }
+  )
   const { data: ghStatus, isLoading: isGhStatusLoading } = useGhCliStatus({
     enabled: nativeCli,
   })
@@ -987,10 +997,11 @@ function App() {
     useOpencodeCliAuth({
       enabled: nativeCli && !!opencodeStatus?.installed,
     })
-  const { data: cursorAuth, isLoading: isCursorAuthLoading } =
-    useCursorCliAuth({
+  const { data: cursorAuth, isLoading: isCursorAuthLoading } = useCursorCliAuth(
+    {
       enabled: nativeCli && !!cursorStatus?.installed,
-    })
+    }
+  )
   const { data: piAuth, isLoading: isPiAuthLoading } = usePiCliAuth({
     enabled: nativeCli && !!piStatus?.installed,
   })
@@ -1191,8 +1202,7 @@ function App() {
 
     const ghReady = !!ghStatus?.installed && !!ghAuth?.authenticated
     const hasAiBackendReady = aiStatuses.some(
-      (status, index) =>
-        !!status?.installed && !!aiAuth[index]?.authenticated
+      (status, index) => !!status?.installed && !!aiAuth[index]?.authenticated
     )
 
     // If setup is incomplete, onboarding owns the startup surface.
@@ -1383,16 +1393,15 @@ function App() {
       if (ui.isUpdateInstalling) return
 
       // Web / remote: ask the host to install (desktop event or jean-server binary)
-      const version =
-        ui.pendingUpdateVersion || ui.updateModalVersion
+      const version = ui.pendingUpdateVersion || ui.updateModalVersion
       if (!version) {
         logger.warn(
           'install-pending-update fired with no version or update object'
         )
         return
       }
-      void import('@/hooks/useServerUpdateCheck').then(({ applyServerUpdate }) =>
-        applyServerUpdate(version)
+      void import('@/hooks/useServerUpdateCheck').then(
+        ({ applyServerUpdate }) => applyServerUpdate(version)
       )
     }
     window.addEventListener('install-pending-update', handleInstallPending)
