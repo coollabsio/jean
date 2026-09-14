@@ -33,6 +33,7 @@ test-results
 playwright-report
 playwright/.cache
 /.superpowers/
+.ai/todo.md
 # Local Superpowers design and implementation planning artifacts
 docs/superpowers/
 

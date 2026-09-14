@@ -509,6 +509,7 @@ async fn start_issue_auto_fix(
         None,
         None,
         Some("auto_fix".to_string()),
+        false,
     )
     .await?;
 
@@ -751,6 +752,7 @@ fn project_from_pending_auto_yolo(entry: &PendingAutoYolo) -> Project {
         sentry_auth_token: None,
         sentry_organization_slug: None,
         sentry_project_slug: None,
+        sentry_base_url: None,
         linked_project_ids: Vec::new(),
         auto_fix_settings: None,
     }
@@ -997,6 +999,7 @@ mod tests {
             sentry_auth_token: None,
             sentry_organization_slug: None,
             sentry_project_slug: None,
+            sentry_base_url: None,
             linked_project_ids: Vec::new(),
             auto_fix_settings,
         }

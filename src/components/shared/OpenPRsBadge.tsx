@@ -31,8 +31,9 @@ export function OpenPRsBadge({
   const isAuthenticated = authData?.authenticated ?? false
 
   const { data: prs } = useGitHubPRs(projectPath, 'open', {
-    enabled: isAuthenticated,
+    enabled: isAuthenticated || projectId.includes(':'),
     staleTime: BADGE_STALE_TIME,
+    ownerId: projectId,
   })
 
   const totalCount = prs?.length ?? 0

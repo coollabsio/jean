@@ -11,6 +11,7 @@ function renderUseMagicCommands(
     handleLoadContext: vi.fn(),
     handleLinkedProjects: vi.fn(),
     handleForkSession: vi.fn(),
+    handleCheckGitHubIssues: vi.fn(),
     handleCommit: vi.fn(),
     handleCommitAndPush: vi.fn(),
     handlePull: vi.fn(),
@@ -46,6 +47,18 @@ describe('useMagicCommands review comments batch', () => {
     )
 
     expect(handlers.handleForkSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('dispatches the check GitHub issues magic command', () => {
+    const handlers = renderUseMagicCommands()
+
+    window.dispatchEvent(
+      new CustomEvent('magic-command', {
+        detail: { command: 'check-github-issues' },
+      })
+    )
+
+    expect(handlers.handleCheckGitHubIssues).toHaveBeenCalledTimes(1)
   })
 
   it('passes separate review comment prompts and plan mode from event detail', () => {

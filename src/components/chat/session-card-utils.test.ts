@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildNativeClientSessionInput,
   computeSessionCardData,
+  createSessionCardDataCache,
   getEffectiveSessionWaiting,
   getResumeArgs,
   isDedicatedEmptyCodeReviewSession,
@@ -247,6 +248,35 @@ describe('computeSessionCardData', () => {
       ...overrides,
     }
   }
+
+  it('reuses a card when unrelated session state changes', () => {
+    const session = createBaseSession()
+    const cache = createSessionCardDataCache()
+    const storeState = createBaseStoreState()
+
+    const first = cache(session, storeState)
+    const unchanged = cache(session, {
+      ...storeState,
+      sendingSessionIds: { 'other-session': true },
+    })
+
+    expect(unchanged).toBe(first)
+  })
+
+  it('recomputes a card when its session state changes', () => {
+    const session = createBaseSession()
+    const cache = createSessionCardDataCache()
+    const storeState = createBaseStoreState()
+
+    const first = cache(session, storeState)
+    const changed = cache(session, {
+      ...storeState,
+      sendingSessionIds: { [session.id]: true },
+    })
+
+    expect(changed).not.toBe(first)
+    expect(changed.isSending).toBe(true)
+  })
 
   it('keeps streaming codex plans in planning status until the run actually pauses', () => {
     const session = createBaseSession()
@@ -650,6 +680,26 @@ describe('computeSessionCardData', () => {
 
     expect(card.isWaiting).toBe(true)
     expect(card.status).toBe('input_required')
+  })
+
+  it('ignores stale persisted waiting state after a Claude turn starts sending', () => {
+    const session: Session = {
+      ...createBaseSession(),
+      backend: 'claude',
+      waiting_for_input: true,
+      waiting_for_input_type: 'question',
+      last_run_status: 'running',
+      last_run_execution_mode: 'yolo',
+    }
+    const storeState = createBaseStoreState({
+      sendingSessionIds: { 'session-1': true },
+      executingModes: { 'session-1': 'yolo' },
+    })
+
+    const card = computeSessionCardData(session, storeState)
+
+    expect(card.isWaiting).toBe(false)
+    expect(card.status).toBe('yoloing')
   })
 
   it('maps cancelled last_run_status to cancelled (not idle)', () => {

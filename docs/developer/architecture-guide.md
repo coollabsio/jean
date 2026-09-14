@@ -181,6 +181,13 @@ Additional systems (no dedicated docs yet):
   filesystem path to `ssh://[user@]host[:port]/path` and launches the local
   `zed` CLI (SSH fields live on the remote connection profile).
 
+  **Native multi-server scope.** The desktop client can create independent
+  background transports for enabled remote profiles. Each transport is
+  isolated by server ID. Browser Web Access does not use this manager and
+  continues to access only its serving Jean instance. New global client state
+  must use a composite `(serverId, resourceId)` identity; raw server resource
+  IDs are not globally unique.
+
   When an established WebSocket disconnects, the frontend reloads the page
   instead of repairing stale in-memory state. The normal
   HTTP bootstrap then restores current persisted state, while backend-owned
@@ -233,6 +240,7 @@ Cursor-specific notes:
 
 - Cursor auth/status checks must use short timeouts; `cursor-agent status/about` can hang indefinitely
 - Cursor chat integration should use `cursor-agent --print --output-format stream-json` and parse structured NDJSON, not terminal text scraping
+- Native Windows does not provide Cursor's OS sandbox, so Jean uses Cursor's `--sandbox disabled` allowlist mode there; enable WSL and use the Linux CLI when OS-level sandboxing is required
 - Cursor only supports `--mode plan` and `--mode ask`; build/yolo omit `--mode` (defaults to full agent) and use `--sandbox disabled --force`
 - Cursor `plan` runs synthesize an `EnterPlanMode` timeline item from Jean so the native plan banner/instructions survive streaming + JSONL reload
 - Cursor history repair should prefer complete message snapshots / repeated-prefix cleanup; avoid destructive suffix trimming during reload

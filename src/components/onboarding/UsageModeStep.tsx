@@ -1,5 +1,5 @@
 /**
- * First onboarding step: local Jean vs remote control.
+ * First onboarding step: configure local only, or also add a remote server.
  *
  * Local continues into WSL (Windows) / CLI setup.
  * Remote continues into jean-server install or existing Web Access URL.
@@ -23,8 +23,8 @@ export function UsageModeStep({ onSelect }: UsageModeStepProps) {
       <div className="space-y-2 text-center">
         <h3 className="text-lg font-semibold">How will you use Jean?</h3>
         <p className="text-muted-foreground text-sm">
-          Use this computer for development, or connect to a Jean server
-          elsewhere. You can add more connections later from the title bar.
+          Jean always uses the local core. You can also add a remote server to
+          the combined dashboard.
         </p>
       </div>
 
@@ -58,9 +58,9 @@ export function UsageModeStep({ onSelect }: UsageModeStepProps) {
         >
           <Server className="h-8 w-8 text-muted-foreground" />
           <div className="text-center">
-            <div className="font-medium">Remote</div>
+            <div className="font-medium">Local + remote</div>
             <div className="text-muted-foreground mt-1 text-xs">
-              Control a jean-server via SSH install or Web Access URL
+              Add a jean-server via SSH install or Web Access URL
             </div>
           </div>
         </button>

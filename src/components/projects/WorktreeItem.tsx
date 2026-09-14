@@ -595,7 +595,8 @@ export function WorktreeItem({
           const result = await gitPush(
             worktree.path,
             worktree.pr_number,
-            remote
+            remote,
+            worktree.id
           )
           triggerImmediateGitPoll()
           fetchWorktreesStatus(projectId)
@@ -626,7 +627,7 @@ export function WorktreeItem({
     [pickRemoteOrRun, worktree.path, worktree.pr_number, projectId]
   )
 
-  const gitSyncButton = preferences?.git_sync_button ?? false
+  const gitSyncButton = preferences?.git_sync_button ?? true
 
   const handleSync = useCallback(
     (e: React.MouseEvent) => {

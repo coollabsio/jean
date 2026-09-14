@@ -1,6 +1,11 @@
 import { useMemo, useState } from 'react'
 import { Plus } from 'lucide-react'
-import { convertFileSrc, convertProjectFileSrc } from '@/lib/transport'
+import {
+  convertFileSrc,
+  convertProjectFileSrc,
+  convertServerFileSrc,
+  convertServerProjectFileSrc,
+} from '@/lib/transport'
 import type { Project } from '@/types/projects'
 import { useAppDataDir } from '@/services/projects'
 import { Button } from '@/components/ui/button'
@@ -27,10 +32,19 @@ function ProjectCard({
   const imgError = imgErrorKey === avatarKey
 
   const avatarUrl =
-    project.avatar_path && appDataDir && !imgError
-      ? convertFileSrc(`${appDataDir}/${project.avatar_path}`)
+    project.avatar_path && !imgError
+      ? project.serverId
+        ? convertServerFileSrc(project.serverId, project.avatar_path)
+        : appDataDir
+          ? convertFileSrc(`${appDataDir}/${project.avatar_path}`)
+          : null
       : project.default_avatar_path && !imgError
-        ? convertProjectFileSrc(project.default_avatar_path)
+        ? project.serverId
+          ? convertServerProjectFileSrc(
+              project.serverId,
+              project.default_avatar_path
+            )
+          : convertProjectFileSrc(project.default_avatar_path)
         : null
 
   return (

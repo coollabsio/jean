@@ -1,25 +1,23 @@
-# Investigate GitHub PR #685
+# Resolve merge conflicts
 
-- [x] Read repository guidance and PR metadata, discussion, reviews, and checks.
-- [x] Compare the head branch with `main` and inspect the affected IME paths.
-- [x] Prove the regression test fails without the guard and passes with it.
-- [x] Run the PR quality gates and inspect the final diff for security concerns.
-- [x] Record the review result, merge actions, and test steps.
+- [x] Inspect the active Git operation and conflicting file.
+- [x] Compare both versions of `.ai/todo.md`.
+- [x] Replace the stale task logs with this conflict-resolution record.
+- [x] Stage the resolved file and check for conflict markers.
+- [x] Continue the merge and check for later conflicts.
+- [x] Verify that the branch is ready to push.
 
 ## Review
 
-- The PR correctly adds the shared IME guard before the modal close path.
-- No reviewer comments, requested changes, dependency changes, secrets, or
-  suspicious behavior were found.
-- The regression test failed when the guard was temporarily removed. The two
-  focused files pass 22 tests after restoration.
-- TypeScript typecheck, ESLint, and `git diff --check` pass.
-- No further production change is necessary. The PR needs normal maintainer
-  review and any required CI jobs before merge.
+- `.ai/todo.md` contained two completed records for earlier tasks: the PR #685
+  review on this branch and an earlier conflict-resolution task on `origin/main`.
+- Neither record describes the current task. The repository rules require this
+  file to be reset, so the resolution keeps one current task record.
+- The production IME change is not part of this content conflict and remains
+  unchanged.
 
 ## How to test
 
-- Open a session modal and start Chinese, Japanese, or Korean IME composition.
-- Press Escape while the candidate list is open. Confirm the candidates close
-  and the session modal stays open.
-- Press Escape when composition is not active. Confirm the modal closes.
+- Run `git diff --check` and confirm that it reports no errors.
+- Run `git diff --name-only --diff-filter=U` and confirm that it prints nothing.
+- Run `git status --short --branch` and confirm that no merge is in progress.

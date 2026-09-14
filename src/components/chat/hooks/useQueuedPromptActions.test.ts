@@ -130,7 +130,7 @@ describe('useQueuedPromptActions', () => {
     ).toEqual(['prompt msg-1', 'prompt msg-3'])
   })
 
-  it('does not edit queued messages that can be steered', async () => {
+  it('edits queued messages that can be steered while they remain queued', async () => {
     useChatStore.setState({
       messageQueues: {
         'session-1': [createMessage('msg-1', { backend: 'codex' })],
@@ -146,9 +146,15 @@ describe('useQueuedPromptActions', () => {
       )
     })
 
-    expect(persistUpdateQueued).not.toHaveBeenCalled()
+    expect(persistUpdateQueued).toHaveBeenCalledWith(
+      'worktree-1',
+      '/tmp/worktree-1',
+      'session-1',
+      'msg-1',
+      'updated prompt'
+    )
     expect(useChatStore.getState().messageQueues['session-1']?.[0]?.message).toBe(
-      'prompt msg-1'
+      'updated prompt'
     )
   })
 

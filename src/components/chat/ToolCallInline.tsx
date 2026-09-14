@@ -1415,6 +1415,18 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
       }
     }
 
+    case 'ReportFindings': {
+      const findings = Array.isArray(input.findings) ? input.findings : []
+      const count = findings.length
+      return {
+        icon: <ListTodo className="h-4 w-4 shrink-0" />,
+        label: 'Report Findings',
+        detail: `${count} finding${count === 1 ? '' : 's'}`,
+        expandedContent:
+          count > 0 ? JSON.stringify(findings, null, 2) : 'No findings reported',
+      }
+    }
+
     case 'WebFetch':
     case 'WebSearch': {
       const url = input.url as string | undefined
