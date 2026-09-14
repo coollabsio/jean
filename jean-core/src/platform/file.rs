@@ -118,6 +118,14 @@ pub fn write_file_atomically(path: &Path, contents: &[u8]) -> Result<(), String>
             .open(&temp_path)?;
         temp_created = true;
         temp_file.write_all(contents)?;
+
+        // A POSIX rename installs the temp file's mode at the destination.
+        // Keep restrictive modes on existing preference and configuration files.
+        #[cfg(unix)]
+        if let Ok(metadata) = fs::metadata(path) {
+            temp_file.set_permissions(metadata.permissions())?;
+        }
+
         temp_file.sync_all()?;
         drop(temp_file);
 
@@ -155,5 +163,21 @@ mod tests {
                     .starts_with("state.json.tmp-")
             });
         assert!(!has_temp_file);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn preserves_existing_file_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().expect("tempdir");
+        let path = directory.path().join("settings.json");
+        fs::write(&path, b"old").expect("initial write");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).expect("set permissions");
+
+        write_file_atomically(&path, b"new").expect("replace file");
+
+        let mode = fs::metadata(&path).expect("metadata").permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
     }
 }
