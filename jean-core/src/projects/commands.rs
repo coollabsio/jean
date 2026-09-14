@@ -13901,6 +13901,23 @@ mod tests {
         assert!(collect_test_skills(&root).is_empty());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn skill_discovery_does_not_follow_symlinked_categories() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path().join("skills");
+        let outside_category = temp.path().join("outside-category");
+        let nested_skill = outside_category.join("nested-skill");
+        std::fs::create_dir_all(&root).expect("skills root");
+        std::fs::create_dir_all(&nested_skill).expect("nested skill dir");
+        std::fs::write(nested_skill.join("SKILL.md"), "# Nested\n").expect("nested skill");
+        symlink(&outside_category, root.join("linked-category")).expect("category symlink");
+
+        assert!(collect_test_skills(&root).is_empty());
+    }
+
     fn run_test_git(repo: &Path, args: &[&str]) {
         let output = silent_command("git")
             .args(args)
