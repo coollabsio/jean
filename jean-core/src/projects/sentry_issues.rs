@@ -104,7 +104,7 @@ fn get_sentry_auth_token(app: &AppHandle, project_id: Option<&str>) -> Result<St
 }
 
 async fn get_sentry_config(app: &AppHandle, project_id: &str) -> Result<SentryConfig, String> {
-    let mut data = load_projects_data(app)?;
+    let data = load_projects_data(app)?;
     let project = data
         .find_project(project_id)
         .ok_or_else(|| format!("Project not found: {project_id}"))?;
@@ -122,20 +122,40 @@ async fn get_sentry_config(app: &AppHandle, project_id: &str) -> Result<SentryCo
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| "No Sentry project configured. Add it in project settings.".to_string())?;
     let project_name = project.name.clone();
-    let stored_base_url = project.sentry_base_url.clone();
+    let stored_base_url = project
+        .sentry_base_url
+        .as_deref()
+        .and_then(|value| validate_sentry_base_url(value).ok());
 
     let auth_token = get_sentry_auth_token(app, Some(project_id))?;
 
-    let base_url = match stored_base_url.filter(|value| !value.trim().is_empty()) {
+    let base_url = match stored_base_url {
         Some(url) => url,
         None => {
             let (base_url, to_persist) = pick_region_host(
                 resolve_sentry_base_url_for_org(&auth_token, &organization_slug).await,
             );
             if let Some(host) = to_persist {
-                if let Some(project) = data.find_project_mut(project_id) {
-                    project.sentry_base_url = Some(host);
-                    let _ = save_projects_data(app, &data);
+                // Reload after the network request. Saving the earlier snapshot could
+                // overwrite project changes made while region discovery was in flight.
+                if let Ok(mut current_data) = load_projects_data(app) {
+                    let config_is_current =
+                        current_data
+                            .find_project(project_id)
+                            .is_some_and(|project| {
+                                project.sentry_organization_slug.as_deref()
+                                    == Some(organization_slug.as_str())
+                            })
+                            && get_sentry_auth_token(app, Some(project_id)).as_deref()
+                                == Ok(auth_token.as_str());
+                    if config_is_current {
+                        if let Some(project) = current_data.find_project_mut(project_id) {
+                            project.sentry_base_url = Some(host);
+                        }
+                        if let Err(error) = save_projects_data(app, &current_data) {
+                            log::warn!("Failed to cache Sentry region host: {error}");
+                        }
+                    }
                 }
             }
             base_url
@@ -201,13 +221,38 @@ fn sentry_api_url_for_base(base_url: &str, segments: &[&str]) -> Result<reqwest:
     Ok(url)
 }
 
+fn validate_sentry_base_url(base_url: &str) -> Result<String, String> {
+    let url =
+        reqwest::Url::parse(base_url).map_err(|e| format!("Invalid Sentry region URL: {e}"))?;
+    let host = url
+        .host_str()
+        .ok_or_else(|| "Invalid Sentry region URL: missing host".to_string())?;
+    let is_sentry_host = host == "sentry.io" || host.ends_with(".sentry.io");
+    if url.scheme() != "https"
+        || !is_sentry_host
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.port().is_some()
+        || url.path() != "/"
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err("Invalid Sentry region URL".to_string());
+    }
+    Ok(format!("https://{host}"))
+}
+
 fn sentry_projects_url(organization: &SentryOrganization) -> Result<reqwest::Url, String> {
     let base_url = organization
         .links
         .as_ref()
-        .map(|links| links.region_url.as_str())
-        .unwrap_or(SENTRY_BASE_URL);
-    sentry_api_url_for_base(base_url, &["organizations", &organization.slug, "projects"])
+        .map(|links| validate_sentry_base_url(&links.region_url))
+        .transpose()?
+        .unwrap_or_else(|| SENTRY_BASE_URL.to_string());
+    sentry_api_url_for_base(
+        &base_url,
+        &["organizations", &organization.slug, "projects"],
+    )
 }
 
 /// Resolve the org's region API host (issue IDs are region-scoped).
@@ -229,13 +274,11 @@ fn resolve_sentry_base_url(
     organizations
         .iter()
         .find(|organization| organization.slug == organization_slug)
-        .and_then(|organization| {
-            organization
-                .links
-                .as_ref()
-                .map(|links| links.region_url.clone())
-        })
-        .ok_or_else(|| format!("Sentry organization {organization_slug} was not found"))
+        .ok_or_else(|| format!("Sentry organization {organization_slug} was not found"))?
+        .links
+        .as_ref()
+        .ok_or_else(|| format!("Sentry organization {organization_slug} has no region URL"))
+        .and_then(|links| validate_sentry_base_url(&links.region_url))
 }
 
 /// Region host to use plus the value to cache. Only a successfully resolved host
@@ -680,6 +723,29 @@ mod tests {
             sentry_api_url(&["organizations"]).unwrap().as_str(),
             "https://sentry.io/api/0/organizations/"
         );
+    }
+
+    #[test]
+    fn accepts_only_https_sentry_region_hosts() {
+        assert_eq!(
+            validate_sentry_base_url("https://de.sentry.io").unwrap(),
+            "https://de.sentry.io"
+        );
+        assert_eq!(
+            validate_sentry_base_url("https://sentry.io/").unwrap(),
+            "https://sentry.io"
+        );
+
+        for url in [
+            "http://de.sentry.io",
+            "https://evil-sentry.io",
+            "https://sentry.io.attacker.example",
+            "https://user@sentry.io",
+            "https://sentry.io:8443",
+            "https://sentry.io/redirect",
+        ] {
+            assert!(validate_sentry_base_url(url).is_err(), "accepted {url}");
+        }
     }
 
     #[test]
