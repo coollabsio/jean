@@ -6,7 +6,6 @@ use std::time::Duration;
 use tauri::AppHandle;
 
 use super::config::{find_pi_in_path, get_cli_dir, resolve_cli_binary};
-
 const PI_NPM_PACKAGE: &str = "@earendil-works/pi-coding-agent";
 
 // NOTE: These structs intentionally use snake_case on the wire (no
@@ -682,7 +681,7 @@ pub async fn install_pi_cli(app: AppHandle, version: Option<String>) -> Result<(
         Some(version) if !version.trim().is_empty() => format!("{PI_NPM_PACKAGE}@{version}"),
         _ => PI_NPM_PACKAGE.to_string(),
     };
-    let status = crate::platform::cli_command(&npm_path, None)
+    let status = crate::platform::host_cli_command(&npm_path, None)
         .args(["install", "--prefix"])
         .arg(&dir)
         .arg("--ignore-scripts")

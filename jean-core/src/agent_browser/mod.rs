@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
 
-use crate::platform::{detect_cli_in_path, silent_command};
+use crate::platform::{detect_cli_in_path, host_cli_command};
 
 /// MCP server key written into CLI configs.
 pub const MCP_SERVER_NAME: &str = "agent-browser";
@@ -209,7 +209,10 @@ pub struct ResolvedBinary {
 }
 
 fn read_binary_version(path: &Path) -> Option<String> {
-    let output = silent_command(path).arg("--version").output().ok()?;
+    let output = host_cli_command(&path.to_string_lossy(), None)
+        .arg("--version")
+        .output()
+        .ok()?;
     if !output.status.success() {
         return None;
     }
@@ -304,7 +307,7 @@ fn install_agent_browser_sync(app: &AppHandle) -> Result<AgentBrowserStatus, Str
     ensure_profile(app)?;
     let npm_path = crate::prerequisites::require_npm("agent-browser")?;
 
-    let npm_output = crate::platform::cli_command(&npm_path, None)
+    let npm_output = host_cli_command(&npm_path, None)
         .args(["install", "--prefix"])
         .arg(&cli_dir)
         .arg(NPM_PACKAGE)
@@ -336,7 +339,7 @@ fn install_agent_browser_sync(app: &AppHandle) -> Result<AgentBrowserStatus, Str
 
     // Download Chrome for Testing into agent-browser's cache.
     // Linux servers often need OS shared libs; --with-deps helps when available.
-    let mut install_cmd = silent_command(&binary);
+    let mut install_cmd = host_cli_command(&binary.to_string_lossy(), None);
     install_cmd.arg("install");
     if cfg!(target_os = "linux") {
         install_cmd.arg("--with-deps");
@@ -347,7 +350,7 @@ fn install_agent_browser_sync(app: &AppHandle) -> Result<AgentBrowserStatus, Str
 
     if !chromium_output.status.success() {
         // Retry without --with-deps (flag may not exist on older versions).
-        let retry = silent_command(&binary)
+        let retry = host_cli_command(&binary.to_string_lossy(), None)
             .arg("install")
             .output()
             .map_err(|e| format!("Failed to run `agent-browser install`: {e}"))?;

@@ -15,6 +15,10 @@ pub struct SystemPrerequisites {
     pub manual_install_url: String,
 }
 
+/// Read `<command> --version`.
+///
+/// Uses shared CLI detection so Windows finds `npm.cmd` and callers can reuse
+/// the resolved launcher path.
 fn version(command: &str) -> Option<String> {
     crate::platform::detect_cli_in_path(command, None, None).version
 }
@@ -61,7 +65,7 @@ fn require_npm_from_detection(
 /// Confirm Node.js and npm are available and return the resolved npm launcher.
 ///
 /// On Windows this path prefers `npm.cmd` over an extensionless version-manager
-/// shim so later `cli_command()` launches can succeed.
+/// shim so later `host_cli_command()` launches can succeed.
 pub fn require_npm(tool: &str) -> Result<String, String> {
     let node_version = version("node");
     let npm = crate::platform::detect_cli_in_path("npm", None, None);
