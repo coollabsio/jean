@@ -199,7 +199,9 @@ function FeatureTourDialogContent() {
   const patchPreferences = usePatchPreferences()
 
   const markSeen = useCallback(() => {
-    if (preferences && !preferences.has_seen_feature_tour) {
+    // Persist a dismissal even when the preferences query is still loading.
+    // Otherwise, closing the startup tour during that window lets it reopen.
+    if (preferences?.has_seen_feature_tour !== true) {
       patchPreferences.mutate({ has_seen_feature_tour: true })
     }
   }, [preferences, patchPreferences])

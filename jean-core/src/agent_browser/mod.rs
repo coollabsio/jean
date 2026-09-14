@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
 
-use crate::platform::{detect_cli_in_path, host_cli_command, path_tool_command};
+use crate::platform::{detect_cli_in_path, host_cli_command};
 
 /// MCP server key written into CLI configs.
 pub const MCP_SERVER_NAME: &str = "agent-browser";
@@ -305,8 +305,9 @@ fn install_agent_browser_sync(app: &AppHandle) -> Result<AgentBrowserStatus, Str
 
     // Ensure profile exists so MCP install can succeed right after.
     ensure_profile(app)?;
+    let npm_path = crate::prerequisites::require_npm("agent-browser")?;
 
-    let npm_output = path_tool_command("npm")
+    let npm_output = host_cli_command(&npm_path, None)
         .args(["install", "--prefix"])
         .arg(&cli_dir)
         .arg(NPM_PACKAGE)
@@ -733,20 +734,7 @@ fn write_atomic_with_backup(path: &Path, content: &str) -> Result<Option<PathBuf
         None
     };
 
-    let tmp = path.with_extension(format!(
-        "{}.tmp",
-        path.extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("config")
-    ));
-    std::fs::write(&tmp, content).map_err(|e| format!("Failed to write {}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, path).map_err(|e| {
-        format!(
-            "Failed to replace {} with {}: {e}",
-            path.display(),
-            tmp.display()
-        )
-    })?;
+    crate::platform::write_file_atomically(path, content.as_bytes())?;
     Ok(backup)
 }
 

@@ -18,7 +18,7 @@ use tauri::AppHandle;
 
 use crate::gh_cli::config::resolve_gh_binary;
 use crate::http_server::EmitExt;
-use crate::projects::git_status::{get_branch_status, ActiveWorktreeInfo, GitBranchStatus};
+use crate::projects::git_status::{try_get_branch_status, ActiveWorktreeInfo, GitBranchStatus};
 use crate::projects::pr_status::{get_pr_status, PrStatus};
 
 pub mod commands;
@@ -390,8 +390,8 @@ impl BackgroundTaskManager {
                             times.insert(info.worktree_id.clone(), now);
                         }
 
-                        match get_branch_status(&info) {
-                            Ok(status) => {
+                        match try_get_branch_status(&info) {
+                            Ok(Some(status)) => {
                                 log::trace!(
                                     "Git status for {}: behind={}, ahead={}, has_updates={}",
                                     info.worktree_id,
@@ -403,6 +403,12 @@ impl BackgroundTaskManager {
                                 if let Err(e) = emit_git_status(&app, status) {
                                     log::error!("Failed to emit git status event: {e}");
                                 }
+                            }
+                            Ok(None) => {
+                                log::trace!(
+                                    "Skipping overlapping git status poll for {}",
+                                    info.worktree_id
+                                );
                             }
                             Err(e) => {
                                 log::warn!(
@@ -561,11 +567,17 @@ impl BackgroundTaskManager {
                                 candidate.worktree_id
                             );
 
-                            match get_branch_status(candidate) {
-                                Ok(status) => {
+                            match try_get_branch_status(candidate) {
+                                Ok(Some(status)) => {
                                     if let Err(e) = emit_git_status(&app, status) {
                                         log::error!("Git sweep: failed to emit git status: {e}");
                                     }
+                                }
+                                Ok(None) => {
+                                    log::trace!(
+                                        "Git sweep: skipping overlapping status poll for {}",
+                                        candidate.worktree_id
+                                    );
                                 }
                                 Err(e) => {
                                     log::warn!(

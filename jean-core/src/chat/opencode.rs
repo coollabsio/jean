@@ -3586,7 +3586,7 @@ fn one_shot_opencode_blocking(
         .map_err(|e| format!("Failed to parse OpenCode response: {e}"))?;
 
     // When using json_schema format, the structured output is in info.structured
-    if json_schema.is_some() {
+    if let Some(json_schema) = json_schema {
         if let Some(structured) = response_json.get("info").and_then(|i| i.get("structured")) {
             if !structured.is_null() {
                 return Ok(structured.to_string());
@@ -3614,9 +3614,7 @@ fn one_shot_opencode_blocking(
                     .remove("format");
                 payload["parts"] = prepare_opencode_parts(&structured_output_text_prompt(
                     prompt,
-                    &json_schema
-                        .expect("schema exists when handling structured output error")
-                        .to_string(),
+                    &json_schema.to_string(),
                 ));
                 let fallback_response =
                     client

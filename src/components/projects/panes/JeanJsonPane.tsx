@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
+import { generateId } from '@/lib/uuid'
 import {
   useJeanConfig,
   useSaveJeanConfig,
@@ -35,7 +36,7 @@ export function JeanJsonPane({
   const [localSetup, setLocalSetup] = useState('')
   const [localTeardown, setLocalTeardown] = useState('')
   const [localRun, setLocalRun] = useState<{ id: string; value: string }[]>(
-    () => [{ id: crypto.randomUUID(), value: '' }]
+    () => [{ id: generateId(), value: '' }]
   )
   const [localPorts, setLocalPorts] = useState<
     { id: string; port: string; label: string; host: string }[]
@@ -51,7 +52,7 @@ export function JeanJsonPane({
       const scripts = normalizeRunScripts(jeanConfig.scripts.run)
       setLocalRun(
         (scripts.length > 0 ? scripts : ['']).map(value => ({
-          id: crypto.randomUUID(),
+          id: generateId(),
           value,
         }))
       )
@@ -59,7 +60,7 @@ export function JeanJsonPane({
       const ports = jeanConfig.ports ?? []
       setLocalPorts(
         ports.map(p => ({
-          id: crypto.randomUUID(),
+          id: generateId(),
           port: String(p.port),
           label: p.label,
           host: p.host ?? '',
@@ -203,7 +204,7 @@ export function JeanJsonPane({
               onClick={() =>
                 setLocalRun([
                   ...localRun,
-                  { id: crypto.randomUUID(), value: '' },
+                  { id: generateId(), value: '' },
                 ])
               }
             >
@@ -269,7 +270,7 @@ export function JeanJsonPane({
                 setLocalPorts([
                   ...localPorts,
                   {
-                    id: crypto.randomUUID(),
+                    id: generateId(),
                     port: '',
                     label: '',
                     host: '',

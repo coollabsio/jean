@@ -175,12 +175,27 @@ pub struct Project {
     /// Sentry project slug mapped to this Jean project
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sentry_project_slug: Option<String>,
+    /// Sentry region API base URL (auto-resolved from the org on first use)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sentry_base_url: Option<String>,
     /// IDs of linked projects for cross-project context sharing
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub linked_project_ids: Vec<String>,
     /// Per-project automated issue fixing settings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_fix_settings: Option<ProjectAutoFixSettings>,
+}
+
+/// Project data used by the sidebar and initial bootstrap.
+///
+/// Worktree metadata is intentionally reduced to counts here. Full worktrees
+/// and their session lists are loaded only when a project is opened.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProjectListItem {
+    #[serde(flatten)]
+    pub project: Project,
+    pub worktree_count: usize,
+    pub has_base_session: bool,
 }
 
 /// A git worktree created for a project

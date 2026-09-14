@@ -19,7 +19,7 @@ use super::run_env::{
 use super::types::TerminalPortInfo;
 #[cfg(unix)]
 use crate::platform::silent_command;
-use crate::projects::git::read_jean_config;
+use crate::projects::git::resolve_jean_config;
 use crate::projects::types::SessionType;
 
 #[derive(Clone, Serialize, Debug, PartialEq)]
@@ -113,8 +113,8 @@ pub async fn prepare_backend_terminal_context(
 }
 
 /// Get the run script(s) from jean.json for a worktree
-pub async fn get_run_scripts(worktree_path: String) -> Vec<String> {
-    read_jean_config(&worktree_path)
+pub async fn get_run_scripts(app: AppHandle, worktree_path: String) -> Vec<String> {
+    resolve_jean_config_for_worktree(&app, &worktree_path)
         .and_then(|config| config.scripts.run)
         .map(|r| r.into_vec())
         .unwrap_or_default()
@@ -176,10 +176,36 @@ fn package_manager_binary(manager: &str) -> String {
 }
 
 /// Get configured ports from jean.json for a worktree
-pub async fn get_ports(worktree_path: String) -> Vec<crate::projects::types::PortEntry> {
-    read_jean_config(&worktree_path)
+pub async fn get_ports(
+    app: AppHandle,
+    worktree_path: String,
+) -> Vec<crate::projects::types::PortEntry> {
+    resolve_jean_config_for_worktree(&app, &worktree_path)
         .and_then(|config| config.ports)
         .unwrap_or_default()
+}
+
+fn resolve_jean_config_for_worktree(
+    app: &AppHandle,
+    worktree_path: &str,
+) -> Option<crate::projects::types::JeanConfig> {
+    resolve_jean_config(
+        worktree_path,
+        project_path_for_worktree(app, worktree_path).as_deref(),
+    )
+}
+
+fn project_path_for_worktree(app: &AppHandle, worktree_path: &str) -> Option<String> {
+    let data = crate::projects::storage::load_projects_data(app).ok()?;
+    let normalized = super::run_env::normalize_path(worktree_path);
+    let worktree = data
+        .worktrees
+        .iter()
+        .find(|w| super::run_env::normalize_path(&w.path) == normalized)?;
+    data.projects
+        .iter()
+        .find(|p| p.id == worktree.project_id)
+        .map(|p| p.path.clone())
 }
 
 /// Snapshot of Jean Run-command / panel-command terminals and discovered ports.
@@ -250,7 +276,7 @@ pub async fn get_run_environments(
 
     let mut configured_ports = std::collections::HashMap::new();
     for worktree in &worktrees {
-        let ports = get_ports(worktree.path.clone()).await;
+        let ports = get_ports(app.clone(), worktree.path.clone()).await;
         if !ports.is_empty() {
             configured_ports.insert(worktree.id.clone(), ports);
         }

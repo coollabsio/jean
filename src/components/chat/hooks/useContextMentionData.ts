@@ -190,12 +190,12 @@ export function useContextMentionData({
   const { data: issueResult, isFetching: isFetchingIssues } = useGitHubIssues(
     enabledProjectPath,
     issueState,
-    { enabled: open }
+    { enabled: open, ownerId: enabledProjectId ?? undefined }
   )
   const { data: prs = [], isFetching: isFetchingPRs } = useGitHubPRs(
     enabledProjectPath,
     prState,
-    { enabled: open }
+    { enabled: open, ownerId: enabledProjectId ?? undefined }
   )
   const { data: alerts = [], isFetching: isFetchingAlerts } =
     useDependabotAlerts(enabledProjectPath, securityState, { enabled: open })

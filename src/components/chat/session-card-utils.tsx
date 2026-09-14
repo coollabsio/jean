@@ -558,7 +558,7 @@ export function computeSessionCardData(
   // When sessionSending is true, persisted waiting_for_input from TanStack Query
   // may be stale (not yet refetched after approval). Only use it as fallback when idle.
   const isWaiting = sessionSending
-    ? isWaitingFromMessages || isExplicitlyWaiting
+    ? isWaitingFromMessages
     : isWaitingFromMessages || isExplicitlyWaiting || persistedWaitingForInput
 
   // hasExitPlanMode should also consider persisted state
@@ -737,6 +737,67 @@ export function computeSessionCardData(
     planContent,
     pendingPlanMessageId,
     label,
+  }
+}
+
+/**
+ * Cache canvas card derivation by the immutable Session object and only the
+ * store entries that can affect that session. A project canvas subscribes to
+ * several live maps, so an update for one session should not rescan messages
+ * for every other session. WeakMap keys let deleted query objects be garbage
+ * collected instead of turning this optimization into another retention path.
+ */
+export function createSessionCardDataCache(): (
+  session: Session,
+  storeState: ChatStoreState
+) => SessionCardData {
+  const cache = new WeakMap<Session, {
+    fingerprint: readonly unknown[]
+    card: SessionCardData
+  }>()
+
+  return (session, storeState) => {
+    const sessionId = session.id
+    const activeToolCalls = storeState.activeToolCalls[sessionId]
+    const streaming =
+      activeToolCalls && activeToolCalls.length > 0
+        ? storeState.getStreamingText(sessionId)
+        : null
+    const fingerprint: readonly unknown[] = [
+      storeState.getStreamingText,
+      storeState.sendingSessionIds[sessionId],
+      storeState.executingModes[sessionId],
+      storeState.executionModes[sessionId],
+      activeToolCalls,
+      storeState.answeredQuestions[sessionId],
+      storeState.waitingForInputSessionIds[sessionId],
+      storeState.reviewingSessions[sessionId],
+      storeState.sessionStatusOverrides[sessionId],
+      storeState.pendingPermissionDenials[sessionId],
+      storeState.pendingCodexPermissionRequests[sessionId],
+      storeState.pendingOpencodePermissionRequests[sessionId],
+      storeState.pendingCodexCommandApprovalRequests[sessionId],
+      storeState.pendingCodexUserInputRequests[sessionId],
+      storeState.pendingCodexMcpElicitationRequests[sessionId],
+      storeState.pendingCodexDynamicToolCallRequests[sessionId],
+      storeState.sessionLabels[sessionId],
+      streaming?.content ?? null,
+      streaming && streaming.blocks.length > 0 ? streaming.blocks : null,
+    ]
+    const previous = cache.get(session)
+    if (
+      previous &&
+      previous.fingerprint.length === fingerprint.length &&
+      previous.fingerprint.every((value, index) =>
+        Object.is(value, fingerprint[index])
+      )
+    ) {
+      return previous.card
+    }
+
+    const card = computeSessionCardData(session, storeState)
+    cache.set(session, { fingerprint, card })
+    return card
   }
 }
 

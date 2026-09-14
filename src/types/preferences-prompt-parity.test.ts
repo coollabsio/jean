@@ -31,8 +31,8 @@ describe('shared magic prompt defaults', () => {
     )
   )
     .map(match => [
-      `default_${match[1]!.toLowerCase()}_prompt`,
-      match[2]!.replaceAll('\\`', '`'),
+      `default_${match[1]?.toLowerCase()}_prompt`,
+      (match[2] ?? '').replaceAll('\\`', '`'),
     ])
     .filter(([functionName]) => rustSource.includes(`fn ${functionName}()`))
 

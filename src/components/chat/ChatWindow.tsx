@@ -27,6 +27,7 @@ import {
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { invoke, listen } from '@/lib/transport'
 import { hydrateRunningSnapshot } from '@/lib/hydrate-running-snapshot'
+import { generateId } from '@/lib/uuid'
 import { GitBranch, GitMerge, Layers, Loader2 } from 'lucide-react'
 import {
   useSession,
@@ -66,6 +67,7 @@ import {
   useAttachedSavedContexts,
 } from '@/services/github'
 import { useLoadedLinearIssueContexts } from '@/services/linear'
+import { useLoadedSentryContexts } from '@/services/sentry'
 import { useChatStore, DEFAULT_THINKING_LEVEL } from '@/store/chat-store'
 import { usePreferences, usePatchPreferences } from '@/services/preferences'
 import { getLabelTextColor } from '@/lib/label-colors'
@@ -115,6 +117,7 @@ import { OpenCodePermissionsRequest } from './OpenCodePermissionsRequest'
 import { CodexMcpElicitationRequest as CodexMcpElicitationRequestCard } from './CodexMcpElicitationRequest'
 import { CodexDynamicToolCallRequest as CodexDynamicToolCallRequestCard } from './CodexDynamicToolCallRequest'
 import { SetupScriptOutput } from './SetupScriptOutput'
+import { isFirstWorktreeSession } from './setup-script-visibility'
 import { TodoWidget } from './TodoWidget'
 import { AgentWidget } from './AgentWidget'
 import { normalizeTodosForDisplay } from './tool-call-utils'
@@ -164,6 +167,7 @@ import {
 } from './message-content-utils'
 import { useUIStore } from '@/store/ui-store'
 import { buildMcpConfigJson } from '@/services/mcp'
+import { CHECK_GITHUB_ISSUES_PROMPT } from '@/lib/github-discovery-prompt'
 import type { McpServerInfo } from '@/types/chat'
 import { useGitStatus } from '@/services/git-status'
 import { useRemotePicker } from '@/hooks/useRemotePicker'
@@ -383,7 +387,7 @@ export function ChatWindow({
     clearInputDraft,
     setExecutionMode,
     setError,
-    clearSetupScriptResult,
+    dismissSetupScript,
   } = useChatStore.getState()
 
   const queryClient = useQueryClient()
@@ -394,6 +398,11 @@ export function ChatWindow({
     isLoading: isSessionsLoading,
     isFetching: isSessionsFetching,
   } = useSessions(activeWorktreeId, activeWorktreePath)
+
+  const isFirstSession = isFirstWorktreeSession(
+    activeSessionId,
+    sessionsData?.sessions
+  )
 
   const uiStateInitialized = useUIStore(state => state.uiStateInitialized)
 
@@ -688,6 +697,11 @@ export function ChatWindow({
 
   // Loaded Linear issue contexts for indicator
   const { data: loadedLinearContexts } = useLoadedLinearIssueContexts(
+    activeSessionId ?? null,
+    activeWorktreeId ?? null,
+    worktree?.project_id ?? null
+  )
+  const { data: loadedSentryContexts } = useLoadedSentryContexts(
     activeSessionId ?? null,
     activeWorktreeId ?? null,
     worktree?.project_id ?? null
@@ -1029,6 +1043,11 @@ export function ChatWindow({
   // Per-worktree setup script result (stays at worktree level)
   const setupScriptResult = useChatStore(state =>
     activeWorktreeId ? state.setupScriptResults[activeWorktreeId] : undefined
+  )
+  const isSetupScriptDismissed = useChatStore(state =>
+    activeWorktreeId
+      ? (state.dismissedSetupScripts[activeWorktreeId] ?? false)
+      : false
   )
   // PERFORMANCE: Input-related selectors use activeSessionId for immediate feedback
   // When user switches tabs, attachments should reflect the NEW session immediately
@@ -2250,6 +2269,27 @@ export function ChatWindow({
     clearChatInputState: () => clearChatInputStateRef.current?.(),
   })
 
+  const handleCheckGitHubIssues = useCallback(() => {
+    sendMessageNow({
+      id: generateId(),
+      message: CHECK_GITHUB_ISSUES_PROMPT,
+      pendingImages: [],
+      pendingFiles: [],
+      pendingSkills: [],
+      pendingTextFiles: [],
+      model: selectedModelRef.current,
+      provider: selectedProviderRef.current,
+      executionMode: executionModeRef.current,
+      thinkingLevel: selectedThinkingLevelRef.current,
+      effortLevel: useAdaptiveThinkingRef.current
+        ? selectedEffortLevelRef.current
+        : undefined,
+      mcpConfig: getMcpConfig(),
+      backend: selectedBackendRef.current,
+      queuedAt: Date.now(),
+    })
+  }, [getMcpConfig, sendMessageNow])
+
   // Note: Queue processing moved to useQueueProcessor hook in App.tsx
   // This ensures queued messages execute even when the worktree is unfocused
 
@@ -2262,7 +2302,6 @@ export function ChatWindow({
     handleRevertLastCommit,
     handleOpenPr,
     handleReview,
-    handleFinalReview,
     handleCodeRabbitReview,
     handleCodeRabbitPrReview,
     handleMerge,
@@ -2512,6 +2551,7 @@ export function ChatWindow({
     handleLoadContext,
     handleLinkedProjects,
     handleForkSession,
+    handleCheckGitHubIssues,
     handleCommit,
     handleCommitAndPush: handleCommitAndPushWithPicker,
     handlePull: handlePullWithPicker,
@@ -2959,7 +2999,6 @@ export function ChatWindow({
           open={reviewMethodModalOpen}
           onOpenChange={setReviewMethodModalOpen}
           onAiReview={handleReview}
-          onFinalReview={handleFinalReview}
           onCodeRabbitCliReview={handleCodeRabbitReview}
           onCodeRabbitPrReview={handleCodeRabbitPrReview}
           codeRabbitPrAvailable={Boolean(worktree?.pr_number)}
@@ -3092,7 +3131,9 @@ export function ChatWindow({
                             {/* Setup script running indicator */}
                             {worktree?.setup_script &&
                               worktree.setup_success == null &&
-                              !setupScriptResult && (
+                              !setupScriptResult &&
+                              isFirstSession &&
+                              !isSetupScriptDismissed && (
                                 <div className="my-2 flex items-center gap-2 rounded border border-muted bg-muted/30 px-3 py-2 font-mono text-sm text-muted-foreground">
                                   <Loader2 className="h-4 w-4 animate-spin shrink-0" />
                                   <span>
@@ -3104,11 +3145,14 @@ export function ChatWindow({
                                 </div>
                               )}
                             {/* Setup script output from jean.json */}
-                            {setupScriptResult && activeWorktreeId && (
+                            {setupScriptResult &&
+                              activeWorktreeId &&
+                              isFirstSession &&
+                              !isSetupScriptDismissed && (
                               <SetupScriptOutput
                                 result={setupScriptResult}
                                 onDismiss={() =>
-                                  clearSetupScriptResult(activeWorktreeId)
+                                  dismissSetupScript(activeWorktreeId)
                                 }
                               />
                             )}
@@ -3638,7 +3682,9 @@ export function ChatWindow({
                                   <TodoWidget
                                     todos={normalizeTodosForDisplay(
                                       activeTodos,
-                                      isFromStreaming
+                                      isFromStreaming,
+                                      false,
+                                      isGrokBackend
                                     )}
                                     isStreaming={isSending}
                                     onClose={() =>
@@ -3814,6 +3860,9 @@ export function ChatWindow({
                                     loadedLinearContexts={
                                       loadedLinearContexts ?? []
                                     }
+                                    loadedSentryContexts={
+                                      loadedSentryContexts ?? []
+                                    }
                                     attachedSavedContexts={
                                       attachedSavedContexts ?? []
                                     }
@@ -3918,7 +3967,9 @@ export function ChatWindow({
                                     <TodoWidget
                                       todos={normalizeTodosForDisplay(
                                         activeTodos,
-                                        isFromStreaming
+                                        isFromStreaming,
+                                        false,
+                                        isGrokBackend
                                       )}
                                       isStreaming={isSending}
                                       onClose={() =>

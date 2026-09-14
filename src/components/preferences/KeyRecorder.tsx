@@ -27,7 +27,7 @@ function formatModifiersDisplay(modifiers: {
 
   const parts: string[] = []
   if (modifiers.meta || modifiers.ctrl)
-    parts.push(useMacCtrl ? '⌃' : isClientMacOS ? '⌘' : 'Ctrl')
+    parts.push(useMacCtrl ? 'Ctrl' : isClientMacOS ? '⌘' : 'Ctrl')
   if (modifiers.shift) parts.push(isClientMacOS ? '⇧' : 'Shift')
   if (modifiers.alt) parts.push(isClientMacOS ? '⌥' : 'Alt')
 

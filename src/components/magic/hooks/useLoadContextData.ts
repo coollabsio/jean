@@ -34,6 +34,11 @@ import {
   parseLinearItemNumber,
 } from '@/services/linear'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
+import {
+  filterSentryIssues,
+  useLoadedSentryContexts,
+  useSentryIssues,
+} from '@/services/sentry'
 import type { SavedContextsResponse } from '@/types/chat'
 
 interface UseLoadContextDataOptions {
@@ -99,6 +104,19 @@ export function useLoadContextData({
     refetch: refetchLinearContexts,
   } = useLoadedLinearIssueContexts(activeSessionId, worktreeId, projectId)
 
+  const {
+    data: loadedSentryContexts,
+    isLoading: isLoadingSentryContexts,
+    refetch: refetchSentryContexts,
+  } = useLoadedSentryContexts(activeSessionId, worktreeId, projectId)
+  const {
+    data: sentryIssues = [],
+    isLoading: isLoadingSentryIssues,
+    isFetching: isRefetchingSentryIssues,
+    error: sentryIssuesError,
+    refetch: refetchSentryIssues,
+  } = useSentryIssues(projectId, searchQuery)
+
   // Linear issues query
   const {
     data: linearIssueResult,
@@ -116,7 +134,9 @@ export function useLoadContextData({
     isFetching: isRefetchingIssues,
     error: issuesError,
     refetch: refetchIssues,
-  } = useGitHubIssues(worktreePath, issueState)
+  } = useGitHubIssues(worktreePath, issueState, {
+    ownerId: projectId ?? undefined,
+  })
   const issues = issueResult?.issues
 
   // GitHub security alerts query
@@ -145,7 +165,9 @@ export function useLoadContextData({
     isFetching: isRefetchingPRs,
     error: prsError,
     refetch: refetchPRs,
-  } = useGitHubPRs(worktreePath, prState)
+  } = useGitHubPRs(worktreePath, prState, {
+    ownerId: projectId ?? undefined,
+  })
 
   // Fetch saved contexts
   const {
@@ -342,6 +364,13 @@ export function useLoadContextData({
     exactLinearIssue,
   ])
 
+  const filteredSentryIssues = useMemo(() => {
+    const loadedIds = new Set(loadedSentryContexts?.map(context => context.id))
+    return filterSentryIssues(sentryIssues, searchQuery).filter(
+      issue => !loadedIds.has(issue.id)
+    )
+  }, [loadedSentryContexts, searchQuery, sentryIssues])
+
   // Mutation for renaming contexts
   const renameMutation = useMutation({
     mutationFn: async ({
@@ -417,6 +446,13 @@ export function useLoadContextData({
     isSearchingLinearIssues,
     linearIssuesError,
     refetchLinearIssues,
+    loadedSentryContexts,
+    isLoadingSentryContexts,
+    refetchSentryContexts,
+    isLoadingSentryIssues,
+    isRefetchingSentryIssues,
+    sentryIssuesError,
+    refetchSentryIssues,
 
     // Filtered data
     filteredIssues,
@@ -424,6 +460,7 @@ export function useLoadContextData({
     filteredSecurityAlerts,
     filteredAdvisories,
     filteredLinearIssues,
+    filteredSentryIssues,
     filteredContexts,
     filteredEntries,
 
@@ -436,6 +473,7 @@ export function useLoadContextData({
     hasLoadedSecurityContexts: (loadedSecurityContexts?.length ?? 0) > 0,
     hasLoadedAdvisoryContexts: (loadedAdvisoryContexts?.length ?? 0) > 0,
     hasLoadedLinearContexts: (loadedLinearContexts?.length ?? 0) > 0,
+    hasLoadedSentryContexts: (loadedSentryContexts?.length ?? 0) > 0,
     hasAttachedContexts: (attachedSavedContexts?.length ?? 0) > 0,
     hasContexts: filteredContexts.length > 0,
     hasSessions: filteredEntries.length > 0,

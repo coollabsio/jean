@@ -47,6 +47,14 @@ export function isBaseSession(worktree: Worktree): boolean {
  * A git project that has been added to Jean, or a folder for organizing projects
  */
 export interface Project {
+  /** Client-only owning server for native multi-server views. */
+  serverId?: string
+  /** Original server-side ID when `id` is a composite client identity. */
+  resourceId?: string
+  /** Client-only display name for the owning server. */
+  serverName?: string
+  /** Client-only marker for a read-only cached server snapshot. */
+  offline?: boolean
   /** Unique identifier (UUID v4) */
   id: string
   /** Display name (derived from repo directory name, or folder name) */
@@ -89,10 +97,16 @@ export interface Project {
   sentry_organization_slug?: string | null
   /** Sentry project slug */
   sentry_project_slug?: string | null
+  /** Sentry region API base URL (auto-resolved from the org) */
+  sentry_base_url?: string | null
   /** IDs of linked projects for cross-project context sharing */
   linked_project_ids?: string[]
   /** Per-project automated issue fixing settings */
   auto_fix_settings?: ProjectAutoFixSettings | null
+  /** Number of active worktrees, included in the lightweight project list response */
+  worktree_count?: number
+  /** Whether an active base-branch session exists */
+  has_base_session?: boolean
 }
 
 export interface DirEntry {
@@ -120,6 +134,10 @@ export function isFolder(project: Project): boolean {
  * A git worktree created for a project
  */
 export interface Worktree {
+  /** Client-only owning server for native multi-server views. */
+  serverId?: string
+  /** Original server-side ID when `id` is a composite client identity. */
+  resourceId?: string
   /** Unique identifier (UUID v4) */
   id: string
   /** Foreign key to Project */

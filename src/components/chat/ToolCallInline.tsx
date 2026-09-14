@@ -370,14 +370,19 @@ function formatCodexWebSearchExpanded(
 // Single source of truth for tool call row layout. Bump min-h-9/px-2.5 here, all rows update.
 // min-h ensures consistent baseline regardless of inline-content height (pill vs no-pill).
 export const TOOL_CALL_ROW_CLASS =
-  'flex min-h-9 w-full items-center gap-1.5 px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-muted/50 select-none min-w-0'
+  'tool-call-row flex min-h-9 w-full items-center gap-1.5 px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-muted/50 select-none min-w-0'
 
 export const TOOL_CALL_SUB_ROW_CLASS =
-  'flex min-h-7 w-full items-center gap-1.5 px-2 py-1 text-xs text-muted-foreground/80 hover:bg-muted/30 select-none min-w-0'
+  'tool-call-row flex min-h-7 w-full items-center gap-1.5 px-2 py-1 text-xs text-muted-foreground/80 hover:bg-muted/30 select-none min-w-0'
 
 // Detail pill — sits AFTER label, snug to content (no flex-1 stretch).
+// Always font-sans: .font-mono forces --chat-font-size !important and blows
+// Read/Edit/Write filenames up to message size while Grep/Bash stay compact.
 export const TOOL_CALL_DETAIL_PILL_CLASS =
   'min-w-0 max-w-[55%] sm:max-w-full truncate rounded px-1 text-[0.6875rem] font-sans leading-none'
+
+export const TOOL_CALL_SUB_DETAIL_PILL_CLASS =
+  'min-w-0 max-w-[55%] sm:max-w-full truncate rounded px-0.5 text-[0.625rem] font-sans leading-none'
 
 interface ToolCallInlineProps {
   toolCall: ToolCall
@@ -409,6 +414,7 @@ export function ToolCallInline({
     getToolDisplay(toolCall)
 
   const handleFileClick = (e: React.MouseEvent) => {
+    e.preventDefault()
     e.stopPropagation()
     if (filePath && onFileClick) {
       onFileClick(filePath)
@@ -427,41 +433,39 @@ export function ToolCallInline({
           isOpen && 'bg-muted/50'
         )}
       >
-        <div className={TOOL_CALL_ROW_CLASS}>
-          <CollapsibleTrigger className="flex shrink-0 items-center gap-1.5 self-stretch text-left outline-none">
+        <CollapsibleTrigger asChild>
+          <div className={TOOL_CALL_ROW_CLASS}>
             {icon}
             <span className="font-medium shrink-0 flex-none whitespace-nowrap">
               {label}
             </span>
-          </CollapsibleTrigger>
-          {detail && filePath && onFileClick ? (
-            <button
-              type="button"
-              onClick={handleFileClick}
-              className={cn(
-                TOOL_CALL_DETAIL_PILL_CLASS,
-                'inline-flex items-center gap-1 hover:bg-primary/20 hover:text-primary transition-colors cursor-pointer'
+            {detail ? (
+              <code className={TOOL_CALL_DETAIL_PILL_CLASS}>{detail}</code>
+            ) : null}
+            {filePath && onFileClick ? (
+              <button
+                type="button"
+                onClick={handleFileClick}
+                aria-label={`Open ${typeof detail === 'string' ? detail : filePath}`}
+                className="inline-flex shrink-0 items-center rounded p-0.5 hover:bg-primary/20 hover:text-primary transition-colors"
+              >
+                <ExternalLink className="h-3 w-3 opacity-60" />
+              </button>
+            ) : null}
+            <span className="ml-auto flex min-w-0 flex-1 items-center justify-end">
+              {isStreaming && isIncomplete ? (
+                <Loader2 className="h-3 w-3 animate-spin text-muted-foreground/50" />
+              ) : (
+                <ChevronRight
+                  className={cn(
+                    'h-3.5 w-3.5 transition-transform duration-200',
+                    isOpen && 'rotate-90'
+                  )}
+                />
               )}
-            >
-              <span className="truncate">{detail}</span>
-              <ExternalLink className="h-3 w-3 shrink-0 opacity-60" />
-            </button>
-          ) : detail ? (
-            <code className={TOOL_CALL_DETAIL_PILL_CLASS}>{detail}</code>
-          ) : null}
-          <CollapsibleTrigger className="ml-auto flex min-w-0 flex-1 items-center justify-end self-stretch outline-none">
-            {isStreaming && isIncomplete ? (
-              <Loader2 className="h-3 w-3 animate-spin text-muted-foreground/50" />
-            ) : (
-              <ChevronRight
-                className={cn(
-                  'h-3.5 w-3.5 transition-transform duration-200',
-                  isOpen && 'rotate-90'
-                )}
-              />
-            )}
-          </CollapsibleTrigger>
-        </div>
+            </span>
+          </div>
+        </CollapsibleTrigger>
         <CollapsibleContent>
           <div className="border-t border-border/50 px-3 py-2">
             <div className="whitespace-pre-wrap text-xs text-muted-foreground">
@@ -787,6 +791,7 @@ function SubToolItem({ toolCall, onFileClick }: SubToolItemProps) {
     getToolDisplay(toolCall)
 
   const handleFileClick = (e: React.MouseEvent) => {
+    e.preventDefault()
     e.stopPropagation()
     if (filePath && onFileClick) {
       onFileClick(filePath)
@@ -801,36 +806,35 @@ function SubToolItem({ toolCall, onFileClick }: SubToolItemProps) {
           isOpen && 'bg-muted/30'
         )}
       >
-        <div className={TOOL_CALL_SUB_ROW_CLASS}>
-          <CollapsibleTrigger className="flex shrink-0 items-center gap-1.5 self-stretch text-left outline-none">
+        <CollapsibleTrigger asChild>
+          <div className={TOOL_CALL_SUB_ROW_CLASS}>
             <span className="shrink-0 [&>svg]:h-3 [&>svg]:w-3">{icon}</span>
             <span className="font-medium shrink-0 flex-none whitespace-nowrap">
               {label}
             </span>
-          </CollapsibleTrigger>
-          {detail && filePath && onFileClick ? (
-            <button
-              type="button"
-              onClick={handleFileClick}
-              className="inline-flex min-w-0 max-w-[55%] sm:max-w-full items-center gap-0.5 truncate rounded px-0.5 text-[0.625rem] font-mono leading-none hover:bg-primary/20 hover:text-primary transition-colors cursor-pointer"
-            >
-              <span className="truncate">{detail}</span>
-              <ExternalLink className="h-2.5 w-2.5 shrink-0 opacity-60" />
-            </button>
-          ) : detail ? (
-            <code className="min-w-0 max-w-[55%] sm:max-w-full truncate rounded px-0.5 text-[0.625rem] font-sans leading-none">
-              {detail}
-            </code>
-          ) : null}
-          <CollapsibleTrigger className="ml-auto flex min-w-0 flex-1 items-center justify-end self-stretch outline-none">
-            <ChevronRight
-              className={cn(
-                'h-2.5 w-2.5 transition-transform duration-200',
-                isOpen && 'rotate-90'
-              )}
-            />
-          </CollapsibleTrigger>
-        </div>
+            {detail ? (
+              <code className={TOOL_CALL_SUB_DETAIL_PILL_CLASS}>{detail}</code>
+            ) : null}
+            {filePath && onFileClick ? (
+              <button
+                type="button"
+                onClick={handleFileClick}
+                aria-label={`Open ${typeof detail === 'string' ? detail : filePath}`}
+                className="inline-flex shrink-0 items-center rounded p-0.5 hover:bg-primary/20 hover:text-primary transition-colors"
+              >
+                <ExternalLink className="h-2.5 w-2.5 opacity-60" />
+              </button>
+            ) : null}
+            <span className="ml-auto flex min-w-0 flex-1 items-center justify-end">
+              <ChevronRight
+                className={cn(
+                  'h-2.5 w-2.5 transition-transform duration-200',
+                  isOpen && 'rotate-90'
+                )}
+              />
+            </span>
+          </div>
+        </CollapsibleTrigger>
         <CollapsibleContent>
           <div className="border-t border-border/30 px-2 py-1.5">
             <div className="whitespace-pre-wrap text-[0.625rem] text-muted-foreground/70">
@@ -1408,6 +1412,18 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
         label: subagentType ? `${toolLabel} (${subagentType})` : toolLabel,
         detail: description,
         expandedContent: prompt ?? description ?? 'No prompt specified',
+      }
+    }
+
+    case 'ReportFindings': {
+      const findings = Array.isArray(input.findings) ? input.findings : []
+      const count = findings.length
+      return {
+        icon: <ListTodo className="h-4 w-4 shrink-0" />,
+        label: 'Report Findings',
+        detail: `${count} finding${count === 1 ? '' : 's'}`,
+        expandedContent:
+          count > 0 ? JSON.stringify(findings, null, 2) : 'No findings reported',
       }
     }
 

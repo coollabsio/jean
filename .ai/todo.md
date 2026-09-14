@@ -1,18 +1,16 @@
-# PR #678 investigation
+# Resolve PR #678 merge conflicts
 
-- [x] Read PR metadata, reviews, comments, checks, and branch diff.
-- [x] Inspect changed code and related platform command behavior.
-- [x] Review security, correctness, and test coverage.
-- [x] Implement confirmed required changes with regression tests.
-- [x] Run focused validation and record the review result.
+- [x] Inspect the merge state and compare both sides of each conflict.
+- [x] Preserve main's resolved npm-path detection and the PR's safe host shim launcher.
+- [x] Preserve main's WSL login-environment launcher and the PR's explicit batch modes.
+- [x] Remove all conflict markers and stage each resolved file.
+- [x] Run focused formatting and Rust tests.
+- [x] Continue the merge and verify the branch is ready to push.
 
 ## Review
 
-- PR #678 correctly resolves Windows npm/npx shims and uses Rust's safe native batch-file launch path for installer and update arguments.
-- No PR reviews, inline comments, or requested changes exist. GitGuardian is the only reported check and it passes.
-- Found and fixed an allowlist mismatch: the frontend sends `commandcode` with a detected `cmd` or `command-code` binary, but the Rust update endpoint rejected all three values.
-- Added a regression test. It failed before the allowlist fix and passes after it.
-- Focused Rust tests pass: 34 WSL tests, 10 shim/audit tests, and 1 Command Code update test.
-- Scoped Rust formatting, documentation Prettier, and `git diff --check` pass.
-- Full `cargo fmt --check` is blocked by an unrelated existing formatting difference in `jean-core/src/chat/context_instructions.rs`.
-- Security review found no dependency changes, secrets, obfuscation, or hidden network access. The existing `cli_command()` `cmd.exe /C` mode remains injection-sensitive for a no-whitespace argument with cmd metacharacters; this PR documents but does not create that older risk.
+- Kept `main`'s resolved npm launcher path and used the PR's `host_cli_command()` for npm installs.
+- Kept `main`'s WSL login-environment launcher and integrated the PR's explicit safe batch launch modes.
+- Removed all conflict markers and staged all eight resolved files.
+- Focused validation passed: 36 WSL tests, 11 Windows shim and audit tests, and 4 prerequisite tests.
+- Scoped Rust formatting and `git diff --check` passed.

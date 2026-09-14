@@ -74,13 +74,17 @@ export function useServerPreferences() {
 export function useUpdateServerPreferences() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ patch, expectedRevision }: {
-      patch: Partial<AppPreferences>
-      expectedRevision: string
-    }) => invoke<ServerPreferencesEnvelope>('update_server_preferences', {
+    mutationFn: ({
       patch,
       expectedRevision,
-    }),
+    }: {
+      patch: Partial<AppPreferences>
+      expectedRevision: string
+    }) =>
+      invoke<ServerPreferencesEnvelope>('update_server_preferences', {
+        patch,
+        expectedRevision,
+      }),
     onSuccess: envelope => {
       queryClient.setQueryData(['server-preferences'], envelope)
       queryClient.invalidateQueries({ queryKey: preferencesQueryKeys.all })
@@ -144,6 +148,14 @@ export function usePatchPreferences() {
   const queryClient = useQueryClient()
 
   return useMutation({
+    onMutate: patch => {
+      const [clientPatch] = splitClientPreferencePatch(patch)
+      if (Object.keys(clientPatch).length === 0) return
+      queryClient.setQueryData<AppPreferences>(
+        preferencesQueryKeys.preferences(),
+        current => (current ? { ...current, ...clientPatch } : current)
+      )
+    },
     mutationFn: async (patch: Partial<AppPreferences>) => {
       const [clientPatch, serverPatch] = splitClientPreferencePatch(patch)
       if (Object.keys(clientPatch).length > 0) {
