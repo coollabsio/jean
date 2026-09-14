@@ -1,10 +1,44 @@
 use crate::platform::wsl_aware_command;
+use once_cell::sync::Lazy;
+use std::collections::HashSet;
 use std::path::Path;
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 
 const EMPTY_TREE_HASH: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+/// Worktree ids currently running the expensive status calculation.
+///
+/// Git status is requested by several independent paths (the active-worktree
+/// poller, the round-robin sweep, and project bootstrap).  Keep those paths
+/// from launching duplicate git command trees for the same worktree.
+static GIT_STATUS_IN_FLIGHT: Lazy<Mutex<HashSet<String>>> =
+    Lazy::new(|| Mutex::new(HashSet::new()));
+
+struct GitStatusInFlightGuard {
+    worktree_id: String,
+}
+
+impl Drop for GitStatusInFlightGuard {
+    fn drop(&mut self) {
+        if let Ok(mut worktrees) = GIT_STATUS_IN_FLIGHT.lock() {
+            worktrees.remove(&self.worktree_id);
+        }
+    }
+}
+
+fn try_acquire_git_status_slot(worktree_id: &str) -> Option<GitStatusInFlightGuard> {
+    let mut worktrees = GIT_STATUS_IN_FLIGHT.lock().ok()?;
+    if !worktrees.insert(worktree_id.to_string()) {
+        return None;
+    }
+
+    Some(GitStatusInFlightGuard {
+        worktree_id: worktree_id.to_string(),
+    })
+}
 
 /// Information about a worktree for polling
 #[derive(Debug, Clone)]
@@ -1059,6 +1093,21 @@ pub fn get_branch_status(info: &ActiveWorktreeInfo) -> Result<GitBranchStatus, S
     })
 }
 
+/// Get branch status unless another background path is already doing so for
+/// this worktree.
+///
+/// `None` means the caller should skip this refresh because the in-flight
+/// calculation will publish the next status event itself. Direct, user
+/// initiated status requests should continue to call `get_branch_status`
+/// because they need an immediate result rather than coalescing.
+pub fn try_get_branch_status(info: &ActiveWorktreeInfo) -> Result<Option<GitBranchStatus>, String> {
+    let Some(_slot) = try_acquire_git_status_slot(&info.worktree_id) else {
+        return Ok(None);
+    };
+
+    get_branch_status(info).map(Some)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1087,6 +1136,18 @@ mod tests {
         // Without this, a worktree started from fork/main is compared against
         // origin/main and every commit fork is ahead shows up as its own work.
         assert_eq!(base_ref(Some("fork"), "main"), "fork/main");
+    }
+
+    #[test]
+    fn git_status_slot_coalesces_same_worktree() {
+        let worktree_id = format!("status-slot-test-{}", std::process::id());
+
+        let first = try_acquire_git_status_slot(&worktree_id);
+        assert!(first.is_some());
+        assert!(try_acquire_git_status_slot(&worktree_id).is_none());
+
+        drop(first);
+        assert!(try_acquire_git_status_slot(&worktree_id).is_some());
     }
 
     #[test]

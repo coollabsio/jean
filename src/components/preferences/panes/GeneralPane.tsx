@@ -4569,6 +4569,18 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             </InlineField>
 
             <InlineField
+              label="Combined git sync button"
+              description="Replace separate Pull and Push badges with one Sync button that does both"
+            >
+              <Switch
+                checked={preferences?.git_sync_button ?? true}
+                onCheckedChange={checked => {
+                  patchPreferences.mutate({ git_sync_button: checked })
+                }}
+              />
+            </InlineField>
+
+            <InlineField
               label="Remote poll interval"
               description="Check for PR status updates"
             >

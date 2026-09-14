@@ -444,7 +444,8 @@ export function formatShortcutDisplay(
   if (!shortcut) return ''
 
   // On macOS web, Cmd shortcuts are intercepted by the browser.
-  // Ctrl+key already works (both map to "mod"), so show ⌃ instead of ⌘.
+  // Ctrl+key already works (both map to "mod"). Use a text label because the
+  // Control glyph is not available in all browser fonts.
   const isWeb =
     typeof window !== 'undefined' && !('__TAURI_INTERNALS__' in window)
   const useMacCtrl = isClientMacOS && isWeb
@@ -454,7 +455,7 @@ export function formatShortcutDisplay(
     .map(part => {
       switch (part) {
         case 'mod':
-          return useMacCtrl ? '⌃' : isClientMacOS ? '⌘' : 'Ctrl'
+          return useMacCtrl ? 'Ctrl' : isClientMacOS ? '⌘' : 'Ctrl'
         case 'shift':
           return isClientMacOS ? '⇧' : 'Shift'
         case 'alt':

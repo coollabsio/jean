@@ -17,7 +17,7 @@ import { Kbd } from '@/components/ui/kbd'
 import { cn } from '@/lib/utils'
 import { invoke } from '@/lib/transport'
 import { useQueryClient } from '@tanstack/react-query'
-import { useAllSessions } from '@/services/chat'
+import { chatQueryKeys, useAllSessions } from '@/services/chat'
 import { usePreferences } from '@/services/preferences'
 import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
@@ -51,7 +51,7 @@ interface UnreadItem {
   worktreePath: string
 }
 
-function getSessionStatus(session: Session) {
+function getSessionStatus(session: Session, isSending: boolean) {
   // Prefer specific actionable reasons over generic waiting (matches canvas)
   const hasCodexPermission =
     (session.pending_codex_permission_requests?.length ?? 0) > 0 ||
@@ -99,6 +99,13 @@ function getSessionStatus(session: Session) {
       icon: HelpCircle,
       label: 'Input required',
       className: 'text-yellow-500',
+    }
+  }
+  if (isSending) {
+    return {
+      icon: Loader2,
+      label: 'Running',
+      className: 'text-green-500 animate-spin',
     }
   }
   if (session.waiting_for_input) {
@@ -160,6 +167,7 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
   const animationEnabled =
     preferences?.finished_session_animation_enabled ?? true
   const { data: allSessions, isLoading } = useAllSessions(open)
+  const sendingSessionIds = useChatStore(state => state.sendingSessionIds)
   // Listen for command palette event to open the popover
   useEffect(() => {
     const handler = () => setOpen(true)
@@ -171,21 +179,22 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
   // Invalidate cache each time popover opens
   useEffect(() => {
     if (open) {
+      queryClient.invalidateQueries({
+        queryKey: chatQueryKeys.unreadSessionCount(),
+      })
       queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
       setFocusedIndex(0)
-      // Snapshot fallback: if popover was opened via command palette / external
-      // event (bypassing handleOpenChange), seed the snapshot here so subsequent
-      // status flips can't drain the rendered list. No-op if already set.
-      setSnapshotItems(prev => prev ?? unreadItems)
     }
-    // unreadItems intentionally omitted: snapshot only on open transition.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, queryClient])
 
   // Invalidate when any session is opened (so the count stays fresh)
   useEffect(() => {
-    const handler = () =>
+    const handler = () => {
+      queryClient.invalidateQueries({
+        queryKey: chatQueryKeys.unreadSessionCount(),
+      })
       queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
+    }
     window.addEventListener('session-opened', handler)
     return () => window.removeEventListener('session-opened', handler)
   }, [queryClient])
@@ -230,6 +239,14 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
     }
     return results.sort((a, b) => b.session.updated_at - a.session.updated_at)
   }, [allSessions])
+
+  // Take the open snapshot only after the on-demand query has data. Taking an
+  // empty snapshot while the query starts makes the first open look empty and
+  // hides data that arrives while the popover is open.
+  useEffect(() => {
+    if (!open || !allSessions) return
+    setSnapshotItems(prev => prev ?? unreadItems)
+  }, [allSessions, open, unreadItems])
 
   // Items rendered inside the popover. While open, prefer the snapshot taken at
   // open time so a queued prompt restarting a session (status flip → unread=false)
@@ -282,6 +299,9 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
       } catch {
         // Cache invalidation below will reconcile optimistic state.
       } finally {
+        queryClient.invalidateQueries({
+          queryKey: chatQueryKeys.unreadSessionCount(),
+        })
         queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
         window.dispatchEvent(
           new CustomEvent('session-opened', { detail: { sessionIds: ids } })
@@ -351,17 +371,17 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
         handleSelect(only)
         return
       }
-      setSnapshotItems(unreadItems)
+      if (allSessions) setSnapshotItems(unreadItems)
     },
-    [unreadItems, handleSelect]
+    [allSessions, unreadItems, handleSelect]
   )
 
   const handleOpenChange = useCallback(
     (next: boolean) => {
-      if (next) setSnapshotItems(unreadItems)
+      if (next && allSessions) setSnapshotItems(unreadItems)
       setOpen(next)
     },
-    [unreadItems]
+    [allSessions, unreadItems]
   )
 
   const handleKeyDown = useCallback(
@@ -493,7 +513,10 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
         ) : (
           <div className="max-h-[min(400px,60vh)] overflow-y-auto p-1">
             {displayItems.map((item, idx) => {
-              const status = getSessionStatus(item.session)
+              const status = getSessionStatus(
+                item.session,
+                sendingSessionIds[item.session.id] ?? false
+              )
               const StatusIcon = status?.icon ?? CheckCircle2
 
               return (

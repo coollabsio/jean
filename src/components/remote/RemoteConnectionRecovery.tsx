@@ -1,12 +1,7 @@
 import { useEffect } from 'react'
 import { ServerOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import {
-  LOCAL_CONNECTION_ID,
-  markConnectionSwitch,
-  selectConnection,
-  type RemoteConnection,
-} from '@/lib/remote-connections'
+import type { RemoteConnection } from '@/lib/remote-connections'
 import { dismissTransientUi } from '@/lib/dismiss-transient-ui'
 
 function reloadPage() {
@@ -58,16 +53,6 @@ export function RemoteConnectionRecovery({
             }
           >
             Edit connection
-          </Button>
-          <Button
-            variant="ghost"
-            onClick={() => {
-              markConnectionSwitch()
-              selectConnection(LOCAL_CONNECTION_ID)
-              reloadPage()
-            }}
-          >
-            Switch to Local
           </Button>
         </div>
       </div>

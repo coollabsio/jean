@@ -312,6 +312,31 @@ fn collect_context_paths(
     paths
 }
 
+fn format_loaded_context(context_paths: &[std::path::PathBuf]) -> String {
+    let mut content = String::new();
+    for path in context_paths {
+        if let Ok(file_content) = std::fs::read_to_string(path) {
+            if content.is_empty() {
+                content.push_str("# Loaded Context\n\n");
+                content.push_str(
+                    "The following context has been loaded. You should be aware of this when working on this task.\n\n---\n\n",
+                );
+            }
+            content.push_str(&file_content);
+            content.push_str("\n\n---\n\n");
+        }
+    }
+    content
+}
+
+pub fn build_loaded_context_content(
+    app: &tauri::AppHandle,
+    session_id: &str,
+    worktree_id: &str,
+) -> String {
+    format_loaded_context(&collect_context_paths(app, session_id, worktree_id))
+}
+
 pub fn build_combined_terminal_context_content(
     app: &tauri::AppHandle,
     session_id: &str,
@@ -320,7 +345,7 @@ pub fn build_combined_terminal_context_content(
 ) -> String {
     let system_prompt_parts =
         build_system_prompt_parts(app, session_id, worktree_id, include_recap);
-    let context_paths = collect_context_paths(app, session_id, worktree_id);
+    let loaded_context = build_loaded_context_content(app, session_id, worktree_id);
 
     let mut content = String::new();
     if !system_prompt_parts.is_empty() {
@@ -332,17 +357,8 @@ pub fn build_combined_terminal_context_content(
         content.push_str("\n---\n\n");
     }
 
-    if !context_paths.is_empty() {
-        content.push_str("# Loaded Context\n\n");
-        content.push_str(
-            "The following context has been loaded. You should be aware of this when working on this task.\n\n---\n\n",
-        );
-        for path in context_paths {
-            if let Ok(file_content) = std::fs::read_to_string(path) {
-                content.push_str(&file_content);
-                content.push_str("\n\n---\n\n");
-            }
-        }
+    if !loaded_context.is_empty() {
+        content.push_str(&loaded_context);
     }
 
     content
@@ -404,6 +420,21 @@ pub fn prepare_backend_terminal_context(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn format_loaded_context_inlines_each_context_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let advisory = dir.path().join("advisory.md");
+        let saved = dir.path().join("saved.md");
+        std::fs::write(&advisory, "# Advisory\n\nPrivate vulnerability details").unwrap();
+        std::fs::write(&saved, "# Saved context\n\nPrior investigation").unwrap();
+
+        let content = format_loaded_context(&[advisory, saved]);
+
+        assert!(content.starts_with("# Loaded Context\n\n"));
+        assert!(content.contains("Private vulnerability details"));
+        assert!(content.contains("Prior investigation"));
+    }
 
     #[test]
     fn toml_basic_string_escapes_multiline_context() {

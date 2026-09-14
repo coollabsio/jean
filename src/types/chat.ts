@@ -208,6 +208,10 @@ export interface DeniedMessageContext {
 export interface Session {
   /** Unique session identifier (UUID v4) */
   id: string
+  /** Client-only owner for a resource loaded from a remote Jean server. */
+  serverId?: string
+  /** Original server-local id when `id` is a composite client key. */
+  resourceId?: string
   /** Display name ("Session 1", or user-customized name) */
   name: string
   /** Order index for tab ordering (0-indexed) */
@@ -539,12 +543,14 @@ export interface ErrorEvent {
 }
 
 /**
- * Event payload for cancellation from Rust (user pressed Escape)
+ * Event payload for cancellation from Rust (user pressed Escape).
+ * undo_send only indicates whether the user turn should be removed from
+ * history; a prompt with no streamed output may still be restored when false.
  */
 export interface CancelledEvent {
   session_id: string
   worktree_id: string // Kept for backward compatibility
-  undo_send: boolean // True only when the prompt never started (restore to input)
+  undo_send: boolean
   emitted_at_ms: number
   run_id?: string
 }

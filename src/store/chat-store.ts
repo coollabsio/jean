@@ -171,6 +171,8 @@ interface ChatUIState {
   // Pending/fired/cancelled ScheduleWakeup entries keyed by tool_call_id
   // so ToolCallInline can render a live countdown + status indicator.
   scheduledWakeups: Record<string, ScheduledWakeupState>
+  // Session ownership for scheduled wakeups, allowing close/archive cleanup.
+  scheduledWakeupSessionIds: Record<string, string>
 
   // Answered questions per session (to make them read-only after answering)
   answeredQuestions: Record<string, Set<string>>
@@ -331,7 +333,11 @@ interface ChatUIState {
     rowIndex: number
   ) => void
   // Actions - ScheduleWakeup indicator state (keyed by tool_call_id)
-  setScheduledWakeup: (toolCallId: string, wakeup: ScheduledWakeupState) => void
+  setScheduledWakeup: (
+    toolCallId: string,
+    wakeup: ScheduledWakeupState,
+    sessionId?: string
+  ) => void
   markScheduledWakeupStatus: (
     toolCallId: string,
     status: ScheduledWakeupStatus
@@ -696,7 +702,12 @@ interface ChatUIState {
   failSession: (sessionId: string) => void
 
   // Actions - Unified session state cleanup (for close/archive)
-  clearSessionState: (sessionId: string) => void
+  clearSessionState: (
+    sessionId: string,
+    options?: { removeReferences?: boolean }
+  ) => void
+  /** Remove all session and worktree keyed state after a worktree is gone. */
+  clearWorktreeState: (worktreeId: string) => string[]
 
   // Actions - Compaction tracking
   setCompacting: (sessionId: string, compacting: boolean) => void
@@ -721,6 +732,152 @@ interface ChatUIState {
   addSendingWorktree: (worktreeId: string) => void
   /** @deprecated Use removeSendingSession instead */
   removeSendingWorktree: (worktreeId: string) => void
+}
+
+const SESSION_SCOPED_RECORD_KEYS = [
+  'reviewResults',
+  'fixedReviewFindings',
+  'fixedFindings',
+  'tableCheckedRows',
+  'sendingSessionIds',
+  'sendStartedAt',
+  'completedDurations',
+  'userInitiatedSessionIds',
+  'waitingForInputSessionIds',
+  'streamingContents',
+  'activeToolCalls',
+  'streamingContentBlocks',
+  'streamingReplayContentBlocks',
+  'streamingThinkingContent',
+  'inputDrafts',
+  'executionModes',
+  'thinkingLevels',
+  'effortLevels',
+  'selectedBackends',
+  'selectedModels',
+  'selectedProviders',
+  'enabledMcpServers',
+  'answeredQuestions',
+  'submittedAnswers',
+  'errors',
+  'lastSentMessages',
+  'lastSentAttachments',
+  'pendingImages',
+  'pendingFiles',
+  'pendingSkills',
+  'pendingTextFiles',
+  'activeTodos',
+  'streamingPlanApprovals',
+  'messageQueues',
+  'executingModes',
+  'approvedTools',
+  'pendingPermissionDenials',
+  'pendingCodexCommandApprovalRequests',
+  'pendingCodexPermissionRequests',
+  'pendingOpencodePermissionRequests',
+  'pendingCodexUserInputRequests',
+  'pendingCodexMcpElicitationRequests',
+  'pendingCodexDynamicToolCallRequests',
+  'deniedMessageContext',
+  'lastCompaction',
+  'compactingSessions',
+  'reviewingSessions',
+  'sessionStatusOverrides',
+  'planFilePaths',
+  'pendingPlanMessageIds',
+  'savingContext',
+  'skippedQuestionSessions',
+  'sessionLabels',
+  'codexGoals',
+] as const
+
+function omitRecordEntries<T extends object>(
+  record: T,
+  shouldRemove: (key: string, value: unknown) => boolean
+): T {
+  let changed = false
+  const nextEntries: [string, unknown][] = []
+
+  for (const [key, value] of Object.entries(record)) {
+    if (shouldRemove(key, value)) {
+      changed = true
+    } else {
+      nextEntries.push([key, value])
+    }
+  }
+
+  return changed ? (Object.fromEntries(nextEntries) as T) : record
+}
+
+function omitRecordKeys<T extends object>(
+  record: T,
+  keys: ReadonlySet<string>
+): T {
+  return omitRecordEntries(record, key => keys.has(key))
+}
+
+function collectSessionIdsForWorktree(
+  state: ChatUIState,
+  worktreeId: string
+): Set<string> {
+  const sessionIds = new Set<string>()
+
+  for (const [sessionId, mappedWorktreeId] of Object.entries(
+    state.sessionWorktreeMap
+  )) {
+    if (mappedWorktreeId === worktreeId) sessionIds.add(sessionId)
+  }
+
+  for (const [mappedWorktreeId, sessionId] of Object.entries(
+    state.activeSessionIds
+  )) {
+    if (mappedWorktreeId === worktreeId) sessionIds.add(sessionId)
+  }
+
+  for (const { worktreeId: mappedWorktreeId, sessionId } of Object.values(
+    state.lastOpenedPerProject
+  )) {
+    if (mappedWorktreeId === worktreeId) sessionIds.add(sessionId)
+  }
+
+  return sessionIds
+}
+
+function clearSessionScopedState(
+  state: ChatUIState,
+  sessionIds: ReadonlySet<string>
+): Partial<ChatUIState> {
+  if (sessionIds.size === 0) return {}
+
+  const updates: Partial<ChatUIState> = {}
+  for (const key of SESSION_SCOPED_RECORD_KEYS) {
+    const next = omitRecordKeys(state[key], sessionIds)
+    if (next !== state[key]) {
+      Object.assign(updates, { [key]: next })
+    }
+  }
+
+  const scheduledWakeupIds = new Set(
+    Object.entries(state.scheduledWakeupSessionIds)
+      .filter(([, sessionId]) => sessionIds.has(sessionId))
+      .map(([toolCallId]) => toolCallId)
+  )
+  const scheduledWakeups = omitRecordKeys(
+    state.scheduledWakeups,
+    scheduledWakeupIds
+  )
+  const scheduledWakeupSessionIds = omitRecordKeys(
+    state.scheduledWakeupSessionIds,
+    scheduledWakeupIds
+  )
+  if (scheduledWakeups !== state.scheduledWakeups) {
+    updates.scheduledWakeups = scheduledWakeups
+  }
+  if (scheduledWakeupSessionIds !== state.scheduledWakeupSessionIds) {
+    updates.scheduledWakeupSessionIds = scheduledWakeupSessionIds
+  }
+
+  return updates
 }
 
 export const useChatStore = create<ChatUIState>()(
@@ -757,6 +914,7 @@ export const useChatStore = create<ChatUIState>()(
       selectedProviders: {},
       enabledMcpServers: {},
       scheduledWakeups: {},
+      scheduledWakeupSessionIds: {},
       answeredQuestions: {},
       submittedAnswers: {},
       errors: {},
@@ -977,14 +1135,35 @@ export const useChatStore = create<ChatUIState>()(
         ),
 
       // ScheduleWakeup indicator state
-      setScheduledWakeup: (toolCallId, wakeup) =>
+      setScheduledWakeup: (toolCallId, wakeup, sessionId) =>
         set(
-          state => ({
-            scheduledWakeups: {
-              ...state.scheduledWakeups,
-              [toolCallId]: wakeup,
-            },
-          }),
+          state => {
+            const wakeupUnchanged =
+              state.scheduledWakeups[toolCallId] === wakeup
+            const mappedSessionId =
+              sessionId ?? state.scheduledWakeupSessionIds[toolCallId]
+            const sessionMappingUnchanged =
+              mappedSessionId ===
+              state.scheduledWakeupSessionIds[toolCallId]
+
+            if (wakeupUnchanged && sessionMappingUnchanged) return state
+
+            return {
+              scheduledWakeups: wakeupUnchanged
+                ? state.scheduledWakeups
+                : {
+                    ...state.scheduledWakeups,
+                    [toolCallId]: wakeup,
+                  },
+              scheduledWakeupSessionIds:
+                mappedSessionId && !sessionMappingUnchanged
+                  ? {
+                      ...state.scheduledWakeupSessionIds,
+                      [toolCallId]: mappedSessionId,
+                    }
+                  : state.scheduledWakeupSessionIds,
+            }
+          },
           undefined,
           'setScheduledWakeup'
         ),
@@ -1006,9 +1185,21 @@ export const useChatStore = create<ChatUIState>()(
       removeScheduledWakeup: toolCallId =>
         set(
           state => {
-            if (!(toolCallId in state.scheduledWakeups)) return state
-            const { [toolCallId]: _, ...rest } = state.scheduledWakeups
-            return { scheduledWakeups: rest }
+            if (
+              !(toolCallId in state.scheduledWakeups) &&
+              !(toolCallId in state.scheduledWakeupSessionIds)
+            ) {
+              return state
+            }
+            const scheduledWakeups = omitRecordKeys(
+              state.scheduledWakeups,
+              new Set([toolCallId])
+            )
+            const scheduledWakeupSessionIds = omitRecordKeys(
+              state.scheduledWakeupSessionIds,
+              new Set([toolCallId])
+            )
+            return { scheduledWakeups, scheduledWakeupSessionIds }
           },
           undefined,
           'removeScheduledWakeup'
@@ -3509,77 +3700,131 @@ export const useChatStore = create<ChatUIState>()(
         ),
 
       // Unified session state cleanup (for close/archive)
-      clearSessionState: sessionId =>
+      clearSessionState: (sessionId, options) =>
         set(
           state => {
-            const { [sessionId]: _approved, ...restApproved } =
-              state.approvedTools
-            const { [sessionId]: _denials, ...restDenials } =
-              state.pendingPermissionDenials
-            const { [sessionId]: _commandReqs, ...restCommandReqs } =
-              state.pendingCodexCommandApprovalRequests
-            const { [sessionId]: _permissionReqs, ...restPermissionReqs } =
-              state.pendingCodexPermissionRequests
-            const { [sessionId]: _opencodeReqs, ...restOpencodeReqs } =
-              state.pendingOpencodePermissionRequests
-            const { [sessionId]: _userInputReqs, ...restUserInputReqs } =
-              state.pendingCodexUserInputRequests
-            const { [sessionId]: _mcpReqs, ...restMcpReqs } =
-              state.pendingCodexMcpElicitationRequests
-            const { [sessionId]: _dynamicReqs, ...restDynamicReqs } =
-              state.pendingCodexDynamicToolCallRequests
-            const { [sessionId]: _denied, ...restDenied } =
-              state.deniedMessageContext
-            const { [sessionId]: _reviewing, ...restReviewing } =
-              state.reviewingSessions
-            const { [sessionId]: _statusOverride, ...restStatusOverrides } =
-              state.sessionStatusOverrides
-            const { [sessionId]: _waiting, ...restWaiting } =
-              state.waitingForInputSessionIds
-            const { [sessionId]: _answered, ...restAnswered } =
-              state.answeredQuestions
-            const { [sessionId]: _submitted, ...restSubmitted } =
-              state.submittedAnswers
-            const { [sessionId]: _fixed, ...restFixed } = state.fixedFindings
-            const { [sessionId]: _effort, ...restEffort } = state.effortLevels
-            const { [sessionId]: _mcp, ...restMcp } = state.enabledMcpServers
-            const { [sessionId]: _label, ...restLabels } = state.sessionLabels
-            const { [sessionId]: _goal, ...restCodexGoals } = state.codexGoals
-            const { [sessionId]: _duration, ...restDurations } =
-              state.completedDurations
-            const { [sessionId]: _replay, ...restReplayContentBlocks } =
-              state.streamingReplayContentBlocks
-            const { [sessionId]: _checkedRows, ...restTableCheckedRows } =
-              state.tableCheckedRows
+            const sessionIds = new Set([sessionId])
+            const updates = clearSessionScopedState(state, sessionIds)
 
-            return {
-              approvedTools: restApproved,
-              pendingPermissionDenials: restDenials,
-              pendingCodexCommandApprovalRequests: restCommandReqs,
-              pendingCodexPermissionRequests: restPermissionReqs,
-              pendingOpencodePermissionRequests: restOpencodeReqs,
-              pendingCodexUserInputRequests: restUserInputReqs,
-              pendingCodexMcpElicitationRequests: restMcpReqs,
-              pendingCodexDynamicToolCallRequests: restDynamicReqs,
-              deniedMessageContext: restDenied,
-              reviewingSessions: restReviewing,
-              sessionStatusOverrides: restStatusOverrides,
-              waitingForInputSessionIds: restWaiting,
-              answeredQuestions: restAnswered,
-              submittedAnswers: restSubmitted,
-              fixedFindings: restFixed,
-              effortLevels: restEffort,
-              enabledMcpServers: restMcp,
-              sessionLabels: restLabels,
-              codexGoals: restCodexGoals,
-              completedDurations: restDurations,
-              streamingReplayContentBlocks: restReplayContentBlocks,
-              tableCheckedRows: restTableCheckedRows,
+            if (options?.removeReferences) {
+              const activeSessionIds = omitRecordEntries(
+                state.activeSessionIds,
+                (_, activeSessionId) => activeSessionId === sessionId
+              )
+              const sessionWorktreeMap = omitRecordKeys(
+                state.sessionWorktreeMap,
+                sessionIds
+              )
+              const lastOpenedPerProject = omitRecordEntries(
+                state.lastOpenedPerProject,
+                (_, value) =>
+                  (value as { sessionId: string }).sessionId === sessionId
+              )
+
+              if (activeSessionIds !== state.activeSessionIds) {
+                updates.activeSessionIds = activeSessionIds
+              }
+              if (sessionWorktreeMap !== state.sessionWorktreeMap) {
+                updates.sessionWorktreeMap = sessionWorktreeMap
+              }
+              if (lastOpenedPerProject !== state.lastOpenedPerProject) {
+                updates.lastOpenedPerProject = lastOpenedPerProject
+              }
             }
+
+            return Object.keys(updates).length > 0 ? updates : state
           },
           undefined,
           'clearSessionState'
         ),
+
+      clearWorktreeState: worktreeId => {
+        const sessionIds = collectSessionIdsForWorktree(
+          get(),
+          worktreeId
+        )
+
+        set(
+          state => {
+            const currentSessionIds = collectSessionIdsForWorktree(
+              state,
+              worktreeId
+            )
+            const updates = clearSessionScopedState(
+              state,
+              currentSessionIds
+            )
+            const allSessionIds = new Set([...sessionIds, ...currentSessionIds])
+            const activeSessionIds = omitRecordEntries(
+              state.activeSessionIds,
+              (mappedWorktreeId, sessionId) =>
+                mappedWorktreeId === worktreeId ||
+                allSessionIds.has(sessionId as string)
+            )
+            const sessionWorktreeMap = omitRecordEntries(
+              state.sessionWorktreeMap,
+              (sessionId, mappedWorktreeId) =>
+                mappedWorktreeId === worktreeId ||
+                allSessionIds.has(sessionId)
+            )
+            const lastOpenedPerProject = omitRecordEntries(
+              state.lastOpenedPerProject,
+              (_, value) =>
+                (value as { worktreeId: string; sessionId: string })
+                    .worktreeId === worktreeId ||
+                allSessionIds.has(
+                  (value as { worktreeId: string; sessionId: string }).sessionId
+                )
+            )
+            const worktreePaths = omitRecordKeys(
+              state.worktreePaths,
+              new Set([worktreeId])
+            )
+            const setupScriptResults = omitRecordKeys(
+              state.setupScriptResults,
+              new Set([worktreeId])
+            )
+            const worktreeLoadingOperations = omitRecordKeys(
+              state.worktreeLoadingOperations,
+              new Set([worktreeId])
+            )
+
+            if (activeSessionIds !== state.activeSessionIds) {
+              updates.activeSessionIds = activeSessionIds
+            }
+            if (sessionWorktreeMap !== state.sessionWorktreeMap) {
+              updates.sessionWorktreeMap = sessionWorktreeMap
+            }
+            if (lastOpenedPerProject !== state.lastOpenedPerProject) {
+              updates.lastOpenedPerProject = lastOpenedPerProject
+            }
+            if (worktreePaths !== state.worktreePaths) {
+              updates.worktreePaths = worktreePaths
+            }
+            if (setupScriptResults !== state.setupScriptResults) {
+              updates.setupScriptResults = setupScriptResults
+            }
+            if (
+              worktreeLoadingOperations !== state.worktreeLoadingOperations
+            ) {
+              updates.worktreeLoadingOperations = worktreeLoadingOperations
+            }
+            if (state.activeWorktreeId === worktreeId) {
+              updates.activeWorktreeId = null
+              updates.activeWorktreePath = null
+            }
+            if (state.lastActiveWorktreeId === worktreeId) {
+              updates.lastActiveWorktreeId = null
+            }
+
+            return Object.keys(updates).length > 0 ? updates : state
+          },
+          undefined,
+          'clearWorktreeState'
+        )
+
+        return [...sessionIds]
+      },
 
       // Compaction tracking
       setCompacting: (sessionId, compacting) =>

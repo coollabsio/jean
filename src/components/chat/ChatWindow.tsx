@@ -27,6 +27,7 @@ import {
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { invoke, listen } from '@/lib/transport'
 import { hydrateRunningSnapshot } from '@/lib/hydrate-running-snapshot'
+import { generateId } from '@/lib/uuid'
 import { GitBranch, GitMerge, Layers, Loader2 } from 'lucide-react'
 import {
   useSession,
@@ -166,6 +167,7 @@ import {
 } from './message-content-utils'
 import { useUIStore } from '@/store/ui-store'
 import { buildMcpConfigJson } from '@/services/mcp'
+import { CHECK_GITHUB_ISSUES_PROMPT } from '@/lib/github-discovery-prompt'
 import type { McpServerInfo } from '@/types/chat'
 import { useGitStatus } from '@/services/git-status'
 import { useRemotePicker } from '@/hooks/useRemotePicker'
@@ -2267,6 +2269,27 @@ export function ChatWindow({
     clearChatInputState: () => clearChatInputStateRef.current?.(),
   })
 
+  const handleCheckGitHubIssues = useCallback(() => {
+    sendMessageNow({
+      id: generateId(),
+      message: CHECK_GITHUB_ISSUES_PROMPT,
+      pendingImages: [],
+      pendingFiles: [],
+      pendingSkills: [],
+      pendingTextFiles: [],
+      model: selectedModelRef.current,
+      provider: selectedProviderRef.current,
+      executionMode: executionModeRef.current,
+      thinkingLevel: selectedThinkingLevelRef.current,
+      effortLevel: useAdaptiveThinkingRef.current
+        ? selectedEffortLevelRef.current
+        : undefined,
+      mcpConfig: getMcpConfig(),
+      backend: selectedBackendRef.current,
+      queuedAt: Date.now(),
+    })
+  }, [getMcpConfig, sendMessageNow])
+
   // Note: Queue processing moved to useQueueProcessor hook in App.tsx
   // This ensures queued messages execute even when the worktree is unfocused
 
@@ -2412,7 +2435,6 @@ export function ChatWindow({
     handleInvestigate,
     handleInvestigateWorkflowRun,
     handleReviewComments,
-    handleSmokeTest,
   } = useInvestigateHandlers({
     activeSessionId,
     activeWorktreeId,
@@ -2529,6 +2551,7 @@ export function ChatWindow({
     handleLoadContext,
     handleLinkedProjects,
     handleForkSession,
+    handleCheckGitHubIssues,
     handleCommit,
     handleCommitAndPush: handleCommitAndPushWithPicker,
     handlePull: handlePullWithPicker,
@@ -2542,7 +2565,6 @@ export function ChatWindow({
     handleInvestigateWorkflowRun,
     handleInvestigate,
     handleReviewComments,
-    handleSmokeTest,
     isModal,
     sessionModalOpen,
   })
@@ -3660,7 +3682,9 @@ export function ChatWindow({
                                   <TodoWidget
                                     todos={normalizeTodosForDisplay(
                                       activeTodos,
-                                      isFromStreaming
+                                      isFromStreaming,
+                                      false,
+                                      isGrokBackend
                                     )}
                                     isStreaming={isSending}
                                     onClose={() =>
@@ -3943,7 +3967,9 @@ export function ChatWindow({
                                     <TodoWidget
                                       todos={normalizeTodosForDisplay(
                                         activeTodos,
-                                        isFromStreaming
+                                        isFromStreaming,
+                                        false,
+                                        isGrokBackend
                                       )}
                                       isStreaming={isSending}
                                       onClose={() =>

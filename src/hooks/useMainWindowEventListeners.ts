@@ -130,8 +130,8 @@ export function allowsKeybindingRepeat(action: KeybindingAction): boolean {
  * Apply backend `cache:invalidate` keys to the React Query client.
  * Shared by the debounced multi-client sync listener.
  *
- * `sessions` also invalidates `['all-sessions']` (finished/unread bell) which
- * is intentionally outside `chatQueryKeys.all` (`['chat']`).
+ * `sessions` also invalidates the finished/unread badge and popover queries,
+ * which are intentionally outside the normal per-worktree cache.
  */
 export function applyCacheInvalidationKeys(
   queryClient: QueryClient,
@@ -146,6 +146,9 @@ export function applyCacheInvalidationKeys(
         // UnreadBell / useUnreadCount read from this separate key.
         queryClient.invalidateQueries({
           queryKey: ['all-sessions'],
+        })
+        queryClient.invalidateQueries({
+          queryKey: chatQueryKeys.unreadSessionCount(),
         })
         break
       case 'projects':
@@ -245,6 +248,12 @@ export function shouldAllowKeybindingThroughOpenOverlay(
   }
 
   return action === 'open_in_modal' && uiState.gitDiffModalOpen
+}
+
+export function hasBlockingOpenOverlay(): boolean {
+  return !!document.querySelector(
+    '[role="dialog"][data-state="open"]:not([data-terminal-host]), [role="alertdialog"][data-state="open"], [role="menu"][data-state="open"], [role="listbox"][data-state="open"]'
+  )
 }
 
 function getFocusedTerminalElement(): HTMLElement | null {
@@ -867,9 +876,7 @@ export function useMainWindowEventListeners() {
       const uiState = useUIStore.getState()
       if (
         !shouldAllowKeybindingThroughOpenOverlay(matchedAction, uiState) &&
-        document.querySelector(
-          '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], [role="menu"][data-state="open"], [role="listbox"][data-state="open"]'
-        )
+        hasBlockingOpenOverlay()
       )
         return
       if (

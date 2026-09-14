@@ -13,6 +13,7 @@ import {
   closeActiveTerminalTabForShortcut,
   findKeybindingAction,
   getTerminalShortcutWorktreeId,
+  hasBlockingOpenOverlay,
   handleRunEnvironmentStarted,
   isPlainSessionTerminalFocused,
   shouldAllowKeybindingThroughOpenOverlay,
@@ -590,6 +591,25 @@ describe('dialog overlay keybinding passthrough', () => {
     ).toBe(false)
   })
 
+  it('does not treat the floating terminal host as a blocking dialog', () => {
+    const terminalHost = document.createElement('div')
+    terminalHost.setAttribute('role', 'dialog')
+    terminalHost.setAttribute('data-state', 'open')
+    terminalHost.setAttribute('data-terminal-host', 'true')
+    document.body.appendChild(terminalHost)
+
+    expect(hasBlockingOpenOverlay()).toBe(false)
+  })
+
+  it('still treats other open dialogs as blocking overlays', () => {
+    const dialog = document.createElement('div')
+    dialog.setAttribute('role', 'dialog')
+    dialog.setAttribute('data-state', 'open')
+    document.body.appendChild(dialog)
+
+    expect(hasBlockingOpenOverlay()).toBe(true)
+  })
+
   it.each(['toggle_zen_mode', 'clear_session_context'] as const)(
     'allows %s through the open session chat modal',
     action => {
@@ -687,6 +707,9 @@ describe('applyCacheInvalidationKeys', () => {
     })
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ['all-sessions'],
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: chatQueryKeys.unreadSessionCount(),
     })
   })
 

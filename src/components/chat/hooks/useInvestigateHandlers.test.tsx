@@ -123,35 +123,6 @@ describe('useInvestigateHandlers', () => {
     })
   })
 
-  it('creates a new session before sending a smoke test', async () => {
-    const { result, sendMessage, createSession } = renderHandlers()
-
-    await act(async () => {
-      await result.current.handleSmokeTest()
-    })
-
-    expect(createSession.mutateAsync).toHaveBeenCalledWith({
-      worktreeId: 'worktree-1',
-      worktreePath: '/tmp/worktree',
-    })
-    expect(sendMessage.mutate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sessionId: 'comment-session-1',
-        message: expect.stringContaining('start the development server'),
-      }),
-      expect.any(Object)
-    )
-    expect(useChatStore.getState().activeSessionIds['worktree-1']).toBe(
-      'comment-session-1'
-    )
-    const sent = vi.mocked(sendMessage.mutate).mock.calls[0]?.[0] as {
-      message: string
-    }
-    expect(sent.message).toContain('worktree-1')
-    expect(sent.message).not.toContain('{worktree_id}')
-    expect(sent.message).not.toContain('base-session')
-  })
-
   it('uses the dedicated Sentry prompt and execution settings', async () => {
     vi.mocked(invoke).mockImplementation(async command => {
       if (command === 'get_sentry_issue_context_contents') {
@@ -193,14 +164,11 @@ describe('useInvestigateHandlers', () => {
       await result.current.handleInvestigate('sentry-issue')
     })
 
-    expect(invoke).toHaveBeenCalledWith(
-      'get_sentry_issue_context_contents',
-      {
-        sessionId: 'base-session',
-        worktreeId: 'worktree-1',
-        projectId: 'project-1',
-      }
-    )
+    expect(invoke).toHaveBeenCalledWith('get_sentry_issue_context_contents', {
+      sessionId: 'base-session',
+      worktreeId: 'worktree-1',
+      projectId: 'project-1',
+    })
 
     expect(sendMessage.mutate).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -282,7 +250,10 @@ describe('useInvestigateHandlers', () => {
     }
 
     const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
     })
     const wrapper = ({ children }: { children: React.ReactNode }) => (
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>

@@ -432,6 +432,40 @@ describe('ChatInput attachments', () => {
     expect(invokeMock).not.toHaveBeenCalledWith('read_clipboard_image')
   })
 
+  it('processes an image once when web clipboard items and files both expose it', async () => {
+    const textarea = renderInput()
+    const itemImage = new File(['png'], 'image.png', {
+      type: 'image/png',
+      lastModified: 123,
+    })
+    const filesImage = new File(['png'], 'image.png', {
+      type: 'image/png',
+      lastModified: 123,
+    })
+    processAttachmentFile.mockResolvedValue(undefined)
+
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        getData: () => '',
+        items: [
+          {
+            type: 'image/png',
+            getAsFile: () => itemImage,
+          },
+        ],
+        files: [filesImage],
+      },
+    })
+
+    await waitFor(() => {
+      expect(processAttachmentFile).toHaveBeenCalledTimes(1)
+    })
+    expect(processAttachmentFile).toHaveBeenCalledWith(
+      itemImage,
+      'session-1'
+    )
+  })
+
   it('does not request the desktop clipboard for an empty web paste', async () => {
     const textarea = renderInput()
 

@@ -25,6 +25,50 @@ beforeEach(() => {
 })
 
 describe('MobileToolbarMenu', () => {
+  it('uses a full-width two-column layout on mobile', async () => {
+    const user = userEvent.setup()
+    const originalInnerWidth = window.innerWidth
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      value: 390,
+    })
+
+    render(
+      <MobileToolbarMenu
+        isDisabled={false}
+        hasOpenPr={false}
+        hasIssueContexts={false}
+        hasPrContexts={false}
+        onSaveContext={vi.fn()}
+        onLoadContext={vi.fn()}
+        onCommit={vi.fn()}
+        onCommitAndPush={vi.fn()}
+        onRevertLastCommit={vi.fn()}
+        onOpenPr={vi.fn()}
+        onReview={vi.fn()}
+        onMerge={vi.fn()}
+        onMergePr={vi.fn()}
+        handleSyncClick={vi.fn()}
+        handlePullClick={vi.fn()}
+        handlePushClick={vi.fn()}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: /more actions/i }))
+
+    expect(screen.getByRole('menu')).toHaveClass(
+      'w-[calc(100vw-1rem)]',
+      'grid',
+      'grid-cols-2'
+    )
+    expect(screen.getByText('Context')).toHaveClass('col-span-2')
+
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      value: originalInnerWidth,
+    })
+  })
+
   it('renders verb sections only and excludes settings/contexts', async () => {
     const user = userEvent.setup()
 
@@ -226,7 +270,7 @@ describe('MobileToolbarMenu', () => {
     dispatchSpy.mockRestore()
   })
 
-  it('shows smoke test and dispatches the magic command', async () => {
+  it('shows check GitHub issues and dispatches the magic command', async () => {
     const user = userEvent.setup()
     const dispatchSpy = vi.spyOn(window, 'dispatchEvent')
 
@@ -252,12 +296,12 @@ describe('MobileToolbarMenu', () => {
     )
 
     await user.click(screen.getByRole('button', { name: /more actions/i }))
-    await user.click(screen.getByText('Smoke Test'))
+    await user.click(screen.getByText('Check GitHub Issues'))
 
     expect(dispatchSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'magic-command',
-        detail: { command: 'smoke-test' },
+        detail: { command: 'check-github-issues' },
       })
     )
 

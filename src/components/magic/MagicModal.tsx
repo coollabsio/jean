@@ -20,7 +20,6 @@ import {
   Link2,
   ShieldAlert,
   Loader2,
-  FlaskConical,
 } from 'lucide-react'
 import {
   Dialog,
@@ -132,6 +131,7 @@ type MagicOption =
   | 'inject-session'
   | 'linked-projects'
   | 'fork-session'
+  | 'check-github-issues'
   | 'commit'
   | 'commit-and-push'
   | 'pull'
@@ -150,7 +150,6 @@ type MagicOption =
   | 'merge-pr'
   | 'review-comments'
   | 'revert-last-commit'
-  | 'smoke-test'
 
 interface TriggerCodeRabbitPrReviewResponse {
   pr_number: number
@@ -176,14 +175,10 @@ const CANVAS_ALLOWED_OPTIONS = new Set<MagicOption>([
   'merge-pr',
   'resolve-conflicts',
   'linked-projects',
-  'smoke-test',
 ])
 
 /** Canvas options that navigate to worktree chat and dispatch a magic-command event */
-const CANVAS_NAVIGATE_AND_DISPATCH_OPTIONS = new Set<MagicOption>([
-  'merge',
-  'smoke-test',
-])
+const CANVAS_NAVIGATE_AND_DISPATCH_OPTIONS = new Set<MagicOption>(['merge'])
 
 /** Git-only actions should not depend on a mounted ChatWindow event listener. */
 const DIRECT_MAGIC_GIT_OPTIONS = new Set<MagicOption>([
@@ -282,6 +277,12 @@ function buildMagicColumns(hasOpenPr: boolean): MagicColumns {
           icon: GitBranchPlus,
           key: 'W',
         },
+        {
+          id: 'check-github-issues',
+          label: 'Check GitHub Issues',
+          icon: Bug,
+          key: 'Q',
+        },
       ],
     },
     {
@@ -313,12 +314,6 @@ function buildMagicColumns(hasOpenPr: boolean): MagicColumns {
   ]
 
   const right: MagicSection[] = [
-    {
-      header: 'Test',
-      options: [
-        { id: 'smoke-test', label: 'Smoke Test', icon: FlaskConical, key: 'X' },
-      ],
-    },
     {
       header: 'Pull Request',
       options: [
@@ -403,6 +398,7 @@ const KEY_TO_OPTION: Record<string, MagicOption> = {
   j: 'inject-session',
   k: 'linked-projects',
   w: 'fork-session',
+  q: 'check-github-issues',
   c: 'commit',
   p: 'commit-and-push',
   t: 'sync',
@@ -421,7 +417,6 @@ const KEY_TO_OPTION: Record<string, MagicOption> = {
   y: 'investigate-advisory',
   n: 'merge-pr',
   z: 'revert-last-commit',
-  x: 'smoke-test',
 }
 
 export function MagicModal() {
@@ -630,7 +625,7 @@ export function MagicModal() {
                 'commandcode/default')
               : backend === 'kimi'
                 ? (preferences?.selected_kimi_model ?? 'kimi/default')
-                : backend === 'grok'
+              : backend === 'grok'
                   ? (preferences?.selected_grok_model ?? 'grok/grok-4.6')
                   : backend === 'antigravity'
                     ? (preferences?.selected_antigravity_model ??
@@ -666,7 +661,7 @@ export function MagicModal() {
                 'commandcode/default')
               : backend === 'kimi'
                 ? (preferences?.selected_kimi_model ?? 'kimi/default')
-                : backend === 'grok'
+              : backend === 'grok'
                   ? (preferences?.selected_grok_model ?? 'grok/grok-4.6')
                   : backend === 'antigravity'
                     ? (preferences?.selected_antigravity_model ??
@@ -1128,7 +1123,8 @@ export function MagicModal() {
               const result = await gitPush(
                 worktree.path,
                 worktree.pr_number,
-                remote
+                remote,
+                worktree.id
               )
               triggerImmediateGitPoll()
               if (worktree.project_id) fetchWorktreesStatus(worktree.project_id)
@@ -1907,6 +1903,9 @@ ${resolveInstructions}`
                       })
                       queryClient.invalidateQueries({
                         queryKey: ['all-sessions'],
+                      })
+                      queryClient.invalidateQueries({
+                        queryKey: chatQueryKeys.unreadSessionCount(),
                       })
                     })
                     toast.dismiss(toastId)

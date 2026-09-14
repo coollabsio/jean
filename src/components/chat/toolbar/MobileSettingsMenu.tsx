@@ -356,6 +356,7 @@ export function MobileSettingsMenu({
   const { data: ports = [] } = usePorts(worktree?.path ?? null)
   const { data: openPRs } = useGitHubPRs(project?.path ?? null, 'open', {
     enabled: menuOpen && !!project?.path,
+    ownerId: project?.id,
   })
   const stackedOnPR = resolveStackedOnPr(
     worktree?.base_branch && worktree.base_branch !== project?.default_branch

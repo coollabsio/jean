@@ -719,7 +719,8 @@ pub async fn dispatch_command(
             let worktree_ahead_count: Option<u32> =
                 field_opt(&args, "worktreeAheadCount", "worktree_ahead_count")?;
             let unpushed_count: Option<u32> = field_opt(&args, "unpushedCount", "unpushed_count")?;
-            crate::projects::update_worktree_cached_status(
+            let base_branch: Option<String> = field_opt(&args, "baseBranch", "base_branch")?;
+            let changed = crate::projects::update_worktree_cached_status(
                 app.clone(),
                 worktree_id,
                 branch,
@@ -735,9 +736,12 @@ pub async fn dispatch_command(
                 base_branch_behind_count,
                 worktree_ahead_count,
                 unpushed_count,
+                base_branch,
             )
             .await?;
-            emit_cache_invalidation(app, &["projects"]);
+            if changed {
+                emit_cache_invalidation(app, &["projects"]);
+            }
             Ok(Value::Null)
         }
         "list_worktree_files" => {
@@ -813,11 +817,13 @@ pub async fn dispatch_command(
         }
         "remove_issue_context" => {
             let session_id: String = field(&args, "sessionId", "session_id")?;
+            let worktree_id: Option<String> = field_opt(&args, "worktreeId", "worktree_id")?;
             let issue_number: u32 = field(&args, "issueNumber", "issue_number")?;
             let project_path: String = field(&args, "projectPath", "project_path")?;
             crate::projects::remove_issue_context(
                 app.clone(),
                 session_id,
+                worktree_id,
                 issue_number,
                 project_path,
             )
@@ -1116,6 +1122,10 @@ pub async fn dispatch_command(
             let result = crate::chat::list_all_sessions(app.clone()).await?;
             to_value(result)
         }
+        "get_unread_session_count" => {
+            let result = crate::chat::get_unread_session_count(app.clone()).await?;
+            to_value(result)
+        }
         "start_background_investigation" => {
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
             let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
@@ -1135,6 +1145,8 @@ pub async fn dispatch_command(
             )?;
             let execution_mode: Option<String> =
                 field_opt(&args, "executionMode", "execution_mode")?;
+            let force_new_session: Option<bool> =
+                field_opt(&args, "forceNewSession", "force_new_session")?;
             let result = crate::jean_mcp_core::start_background_investigation(
                 app.clone(),
                 worktree_id,
@@ -1149,6 +1161,7 @@ pub async fn dispatch_command(
                 ai_language,
                 parallel_execution_prompt,
                 execution_mode,
+                force_new_session,
             )
             .await?;
             to_value(result)

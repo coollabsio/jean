@@ -427,7 +427,12 @@ export const ChatToolbar = memo(function ChatToolbar({
       setWorktreeLoading(worktreeId, 'push')
       const opToast = dismissibleToast.loading('Pushing changes...')
       try {
-        const result = await gitPush(activeWorktreePath, prNumber, remote)
+        const result = await gitPush(
+          activeWorktreePath,
+          prNumber,
+          remote,
+          worktreeId
+        )
         triggerImmediateGitPoll()
         if (projectId) fetchWorktreesStatus(projectId)
         if (result.permissionDenied) {

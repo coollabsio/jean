@@ -134,7 +134,9 @@ export function useLoadContextData({
     isFetching: isRefetchingIssues,
     error: issuesError,
     refetch: refetchIssues,
-  } = useGitHubIssues(worktreePath, issueState)
+  } = useGitHubIssues(worktreePath, issueState, {
+    ownerId: projectId ?? undefined,
+  })
   const issues = issueResult?.issues
 
   // GitHub security alerts query
@@ -163,7 +165,9 @@ export function useLoadContextData({
     isFetching: isRefetchingPRs,
     error: prsError,
     refetch: refetchPRs,
-  } = useGitHubPRs(worktreePath, prState)
+  } = useGitHubPRs(worktreePath, prState, {
+    ownerId: projectId ?? undefined,
+  })
 
   // Fetch saved contexts
   const {

@@ -894,7 +894,14 @@ export const ChatInput = memo(function ChatInput({
       // iOS can expose an image copied from the share sheet through `files`
       // while leaving `items` empty.
       for (const file of Array.from(e.clipboardData?.files ?? [])) {
-        if (file.type.startsWith('image/') && !imageFiles.includes(file)) {
+        const isAlreadyExposedByItem = imageFiles.some(
+          imageFile =>
+            imageFile.name === file.name &&
+            imageFile.type === file.type &&
+            imageFile.size === file.size &&
+            imageFile.lastModified === file.lastModified
+        )
+        if (file.type.startsWith('image/') && !isAlreadyExposedByItem) {
           e.preventDefault()
           imageFiles.push(file)
         }

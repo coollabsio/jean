@@ -185,7 +185,8 @@ export const projectCommands: AppCommand[] = [
     group: 'sessions',
     keywords: ['session', 'chat', 'clear', 'context', 'history', 'reset'],
 
-    isAvailable: context => context.hasActiveSession(),
+    isAvailable: context =>
+      context.hasActiveSession() && !context.hasCurrentSessionRunning(),
 
     execute: context => context.clearSessionHistory(),
   },
