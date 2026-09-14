@@ -1,16 +1,13 @@
-# Resolve PR #678 merge conflicts
+# Resolve `.ai/todo.md` merge conflict
 
-- [x] Inspect the merge state and compare both sides of each conflict.
-- [x] Preserve main's resolved npm-path detection and the PR's safe host shim launcher.
-- [x] Preserve main's WSL login-environment launcher and the PR's explicit batch modes.
-- [x] Remove all conflict markers and stage each resolved file.
-- [x] Run focused formatting and Rust tests.
-- [x] Continue the merge and verify the branch is ready to push.
+- [x] Inspect the active Git operation and both conflict stages.
+- [x] Identify the modify/delete conflict in `.ai/todo.md`.
+- [x] Reset `.ai/todo.md` with the current task record.
+- [ ] Stage the resolved file and continue the merge.
+- [ ] Resolve any later conflicts.
+- [ ] Verify that the branch is ready to push.
 
 ## Review
 
-- Kept `main`'s resolved npm launcher path and used the PR's `host_cli_command()` for npm installs.
-- Kept `main`'s WSL login-environment launcher and integrated the PR's explicit safe batch launch modes.
-- Removed all conflict markers and staged all eight resolved files.
-- Focused validation passed: 36 WSL tests, 11 Windows shim and audit tests, and 4 prerequisite tests.
-- Scoped Rust formatting and `git diff --check` passed.
+- The branch kept a completed PR conflict-resolution record, while the incoming side deleted the file.
+- Kept the task file because project policy requires it for the current task, and replaced stale content with this record.
