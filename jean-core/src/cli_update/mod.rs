@@ -10,7 +10,15 @@ pub struct CliPathUpdateOutput {
     pub exit_code: Option<i32>,
 }
 
-const ALLOWED_CLI_TYPES: &[&str] = &["claude", "codex", "opencode", "gh", "coderabbit", "pi"];
+const ALLOWED_CLI_TYPES: &[&str] = &[
+    "claude",
+    "codex",
+    "opencode",
+    "gh",
+    "coderabbit",
+    "pi",
+    "commandcode",
+];
 const ALLOWED_COMMANDS: &[&str] = &[
     "brew",
     "npm",
@@ -19,6 +27,8 @@ const ALLOWED_COMMANDS: &[&str] = &[
     "opencode",
     "coderabbit",
     "pi",
+    "cmd",
+    "command-code",
 ];
 
 /// Reduce `command` to the name matched against [`ALLOWED_COMMANDS`].
@@ -69,6 +79,13 @@ mod tests {
     #[test]
     fn arbitrary_cli_type_is_not_allowed_for_path_updates() {
         assert!(!ALLOWED_CLI_TYPES.contains(&"definitely-not-a-cli"));
+    }
+
+    #[test]
+    fn command_code_self_updates_are_allowed() {
+        assert!(ALLOWED_CLI_TYPES.contains(&"commandcode"));
+        assert!(ALLOWED_COMMANDS.contains(&"cmd"));
+        assert!(ALLOWED_COMMANDS.contains(&"command-code"));
     }
 
     #[test]
