@@ -636,17 +636,16 @@ export function useAllSessions(enabled = true) {
  * Load only the unread-session count for the title-bar badge.
  * Full cross-project session data remains an explicit unread-popover query.
  */
+export function fetchUnreadSessionCount(): Promise<number> {
+  // Let TanStack Query handle failures. Returning zero here would replace a
+  // valid cached count during a temporary transport or backend failure.
+  return invoke<number>('get_unread_session_count')
+}
+
 export function useUnreadSessionCount() {
   return useQuery({
     queryKey: chatQueryKeys.unreadSessionCount(),
-    queryFn: async (): Promise<number> => {
-      try {
-        return await invoke<number>('get_unread_session_count')
-      } catch (error) {
-        logger.error('Failed to load unread session count', { error })
-        return 0
-      }
-    },
+    queryFn: fetchUnreadSessionCount,
     staleTime: 1000 * 60,
     gcTime: 1000 * 60 * 2,
   })

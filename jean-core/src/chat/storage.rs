@@ -1268,6 +1268,7 @@ mod tests {
             order: 4,
             message_count: 12,
             archived_at: None,
+            unread_summary: None,
         };
         let remaining_entry = SessionIndexEntry {
             id: "session-stays".to_string(),
@@ -1275,6 +1276,7 @@ mod tests {
             order: 1,
             message_count: 3,
             archived_at: None,
+            unread_summary: None,
         };
         let mut source = WorktreeIndex {
             worktree_id: "source".to_string(),
@@ -1289,6 +1291,7 @@ mod tests {
             order: 0,
             message_count: 0,
             archived_at: None,
+            unread_summary: None,
         };
         let mut target = WorktreeIndex {
             worktree_id: "target".to_string(),
@@ -1331,6 +1334,7 @@ mod tests {
             order: 0,
             message_count: 0,
             archived_at: None,
+            unread_summary: None,
         };
         let source = WorktreeIndex {
             worktree_id: "source".to_string(),

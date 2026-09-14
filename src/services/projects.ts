@@ -195,7 +195,7 @@ export async function fetchAndSeedProjectBootstrap(
 export function useProjectBootstrap(projectId: string | null) {
   const queryClient = useQueryClient()
 
-  return useQuery({
+  const bootstrapQuery = useQuery({
     queryKey: projectsQueryKeys.bootstrap(projectId ?? ''),
     queryFn: async (): Promise<Worktree[]> => {
       if (!hasBackendTransport() || !projectId) {
@@ -237,6 +237,19 @@ export function useProjectBootstrap(projectId: string | null) {
     staleTime: 1000 * 60 * 5,
     gcTime: 1000 * 60 * 2,
   })
+
+  // The normal worktree key is the live source after bootstrap. Worktree
+  // lifecycle events update this key, so the open canvas must observe it
+  // instead of keeping the bootstrap response as a separate stale snapshot.
+  const worktreesQuery = useWorktrees(projectId, {
+    enabled: !!projectId && bootstrapQuery.isSuccess,
+  })
+
+  return {
+    ...worktreesQuery,
+    data: worktreesQuery.data ?? bootstrapQuery.data,
+    isLoading: bootstrapQuery.isLoading || worktreesQuery.isLoading,
+  }
 }
 
 /**
