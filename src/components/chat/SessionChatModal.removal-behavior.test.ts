@@ -185,4 +185,15 @@ describe('SessionChatModal removal behavior', () => {
       /reconnectNativeCliSession\(nativeSession, worktreeId, \{[\s\S]*?openModal: false/
     )
   })
+
+  it('ignores Escape that cancels an IME composition instead of closing the modal', () => {
+    const source = readSource('src/components/chat/SessionChatModal.tsx')
+    const start = source.indexOf('const onEscapeClose = useEffectEvent(')
+    const end = source.indexOf('handleClose()', start)
+    const onEscapeClose =
+      start === -1 || end === -1 ? '' : source.slice(start, end)
+
+    expect(onEscapeClose).toBeTruthy()
+    expect(onEscapeClose).toContain('if (isImeComposingEvent(e)) return')
+  })
 })

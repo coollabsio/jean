@@ -1,13 +1,21 @@
-# Resolve `.ai/todo.md` merge conflict
+# Resolve merge conflicts
 
 - [x] Inspect the active Git operation and both conflict stages.
-- [x] Identify the modify/delete conflict in `.ai/todo.md`.
-- [x] Reset `.ai/todo.md` with the current task record.
-- [ ] Stage the resolved file and continue the merge.
-- [ ] Resolve any later conflicts.
-- [ ] Verify that the branch is ready to push.
+- [x] Resolve `.ai/todo.md` with one accurate current-task record.
+- [x] Stage the resolved file and continue the merge.
+- [x] Confirm that no later conflicts appeared.
+- [x] Verify that the merge is complete and the branch is ready to push.
 
 ## Review
 
-- The branch kept a completed PR conflict-resolution record, while the incoming side deleted the file.
-- Kept the task file because project policy requires it for the current task, and replaced stale content with this record.
+- The current index has an add/add conflict: both merge sides added different
+  records for the same earlier conflict-resolution task.
+- Keep one current task record because repository policy requires `.ai/todo.md`.
+- `git merge --continue` completed the merge. No later conflicts appeared.
+
+## How to test
+
+- Run `git diff --check` and confirm that it reports no errors.
+- Run `git diff --name-only --diff-filter=U` and confirm that it prints nothing.
+- Run `git status --short --branch` and confirm that the worktree is clean and
+  no merge is in progress.
