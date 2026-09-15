@@ -15,9 +15,22 @@ import {
 } from './environment'
 import { generateId } from './uuid'
 import { isServerWindows } from './platform'
-import { getActiveRemoteConnection } from './remote-connections'
+import {
+  getActiveRemoteConnection,
+  getRemoteConnections,
+} from './remote-connections'
 import { prepareRemoteEditorOpenArgs } from './remote-editor'
 import { warnRemoteVersionMismatch } from './remote-version'
+
+/**
+ * Why the browser session is not authenticated yet.
+ *
+ * - `signed-out`  — no token has been presented; this is the normal first
+ *   visit and a sign-in prompt, not a failure.
+ * - `rejected`    — a token was presented and the server refused it.
+ * - `unreachable` — the server could not be reached or dropped the session.
+ */
+export type WsAuthReason = 'signed-out' | 'rejected' | 'unreachable'
 
 export function usesWebSocketBackend(): boolean {
   return !isNativeApp() || getActiveRemoteConnection() !== null
@@ -129,6 +142,41 @@ export function convertProjectFileSrc(filePath: string): string {
   return `${base}/api/project-files/${encodeURIComponent(filePath)}${params}`
 }
 
+/** Build an authenticated file URL for a project owned by a specific server. */
+export function convertServerProjectFileSrc(
+  serverId: string | undefined,
+  filePath: string
+): string {
+  if (!serverId || serverId === 'local') return convertProjectFileSrc(filePath)
+
+  const connection = getRemoteConnections().find(item => item.id === serverId)
+  if (!connection) return filePath
+  const base = connection.url.replace(/\/+$/, '')
+  const token = connection.token
+    ? `?token=${encodeURIComponent(connection.token)}`
+    : ''
+  return `${base}/api/project-files/${encodeURIComponent(filePath)}${token}`
+}
+
+/** Build an authenticated app-data file URL for a specific remote server. */
+export function convertServerFileSrc(
+  serverId: string | undefined,
+  filePath: string
+): string {
+  if (!serverId || serverId === 'local') return convertFileSrc(filePath)
+
+  const connection = getRemoteConnections().find(item => item.id === serverId)
+  if (!connection) return filePath
+  const base = connection.url.replace(/\/+$/, '')
+  const token = connection.token
+    ? `?token=${encodeURIComponent(connection.token)}`
+    : ''
+  const encodedPath = /^[/\\]|^[A-Za-z]:[/\\]/.test(filePath)
+    ? encodeURIComponent(filePath)
+    : encodeURI(filePath.replace(/^\/+/, ''))
+  return `${base}/api/files/${encodedPath}${token}`
+}
+
 /** Unlisten function type — compatible with Tauri's UnlistenFn. */
 export type UnlistenFn = () => void
 
@@ -237,6 +285,39 @@ export async function invoke<T>(
     return null as T
   }
 
+  if (isNativeApp() && args) {
+    const { resolveServerCommand, decorateServerResult } =
+      await import('./server-command-routing')
+    const routed = resolveServerCommand(args)
+    if (routed) {
+      // Editor opens are local desktop actions even when path ownership routes
+      // the remaining worktree commands to a remote Jean server.
+      if (routed.serverId !== 'local' && !isNativeOpenAllowed()) {
+        const remote = getRemoteConnections().find(
+          connection => connection.id === routed.serverId
+        )
+        if (remote) {
+          const remapped = prepareRemoteEditorOpenArgs(
+            command,
+            routed.args,
+            remote
+          )
+          if (remapped) {
+            const { invoke: tauriInvoke } = await import('@tauri-apps/api/core')
+            return tauriInvoke<T>(command, remapped)
+          }
+        }
+      }
+      const { invokeOnServer } = await import('./server-connections')
+      const result = await invokeOnServer<T>(
+        routed.serverId,
+        command,
+        routed.args
+      )
+      return decorateServerResult(routed.serverId, command, result)
+    }
+  }
+
   // Native app + remote Jean: open remote paths in local Zed via ssh://
   // when the remote host cannot launch apps itself. Prefer the backend's
   // native-open path when available (e.g. headless on WSL, --allow-native-open)
@@ -268,6 +349,44 @@ export async function invoke<T>(
   return wsTransport.invoke<T>(command, args)
 }
 
+/** Invoke through the active transport unless a specific server owns the request. */
+export function invokeForOptionalServer<T>(
+  serverId: string | undefined,
+  command: string,
+  args?: Record<string, unknown>
+): Promise<T> {
+  return serverId
+    ? invokeForServer<T>(serverId, command, args)
+    : invoke<T>(command, args)
+}
+
+/** Invoke a server command when no resource id can carry its ownership. */
+export async function invokeForServer<T>(
+  serverId: string,
+  command: string,
+  args?: Record<string, unknown>
+): Promise<T> {
+  if (!isNativeApp()) return invoke<T>(command, args)
+  const { invokeOnServer } = await import('./server-connections')
+  let value: T
+  try {
+    value = await invokeOnServer<T>(serverId, command, args)
+  } catch (error) {
+    const { getActiveConnectionId } = await import('./remote-connections')
+    if (
+      getActiveConnectionId() !== serverId ||
+      !(error instanceof Error) ||
+      !error.message.includes('is not connected')
+    ) {
+      throw error
+    }
+    value = await invoke<T>(command, args)
+  }
+  if (serverId === 'local') return value
+  const { decorateServerResult } = await import('./server-command-routing')
+  return decorateServerResult(serverId, command, value)
+}
+
 /**
  * Listen for backend events. Drop-in replacement for Tauri's listen().
  * Returns an unlisten function.
@@ -285,6 +404,22 @@ export async function listen<T>(
       handler({ payload: (e as CustomEvent).detail })
     et.addEventListener(event, wrapped)
     return () => et.removeEventListener(event, wrapped)
+  }
+
+  if (isNativeApp()) {
+    const { getEnabledServerConnections } = await import('./remote-connections')
+    if (getEnabledServerConnections().length > 0) {
+      const { listen: tauriListen } = await import('@tauri-apps/api/event')
+      const containedLocal = containNativeUnlisten(
+        await tauriListen<T>(event, handler)
+      )
+      const { listenOnRemoteServers } = await import('./server-connections')
+      const unlistenRemotes = listenOnRemoteServers<T>(event, handler)
+      return () => {
+        containedLocal()
+        unlistenRemotes()
+      }
+    }
   }
 
   if (!usesWebSocketBackend()) {
@@ -440,6 +575,13 @@ interface WsMessage {
   seq?: number
 }
 
+export interface WsTransportConfig {
+  serverId: string
+  baseUrl: string
+  getToken: () => string
+  syncGlobalState?: boolean
+}
+
 export interface BootstrapEvent {
   type: 'event'
   event: string
@@ -447,7 +589,7 @@ export interface BootstrapEvent {
   seq?: number
 }
 
-class WsTransport {
+export class WsTransport {
   private ws: WebSocket | null = null
   private pending = new Map<string, PendingRequest>()
   private listeners = new Map<
@@ -475,6 +617,7 @@ class WsTransport {
   private _hasConnectedOnce = false
   private _connecting = false
   private _authError: string | null = null
+  private _authReason: WsAuthReason | null = null
   private _subscribers = new Set<() => void>()
   private _establishedDisconnectListeners = new Set<() => void>()
   private _connectEnabled = false
@@ -483,7 +626,7 @@ class WsTransport {
   /** Track terminal sequence numbers for explicit full-refresh replay. */
   private _lastSeqByTerminal = new Map<string, number>()
 
-  constructor() {
+  constructor(private readonly config?: WsTransportConfig) {
     // Mobile browsers suspend background tabs and freeze JS timers. Check the
     // socket immediately on wake so a stale established connection triggers
     // the app reload without waiting for the periodic liveness timer.
@@ -504,12 +647,18 @@ class WsTransport {
 
   private setConnected(value: boolean): void {
     this._connected = value
-    setWsConnected(value)
+    if (this.config?.syncGlobalState !== false) setWsConnected(value)
     this.notifySubscribers()
   }
 
-  private setAuthError(error: string | null): void {
+  // Overloads force every caller that sets a message to also classify it —
+  // otherwise the UI cannot tell a first visit from a refused token or a
+  // dead server, and silently picks the wrong screen.
+  private setAuthError(error: null): void
+  private setAuthError(error: string, reason: WsAuthReason): void
+  private setAuthError(error: string | null, reason?: WsAuthReason): void {
     this._authError = error
+    this._authReason = error === null ? null : (reason as WsAuthReason)
     this.notifySubscribers()
   }
 
@@ -538,12 +687,17 @@ class WsTransport {
     return this._authError
   }
 
+  /** Get why authentication is pending, for useSyncExternalStore. */
+  getAuthReasonSnapshot(): WsAuthReason | null {
+    return this._authReason
+  }
+
   /** Connect to the WebSocket server (validates token first). */
   connect(): void {
     if (!this._connectEnabled) return
     // Established connections recover through a full page reload, never a
     // second in-memory WebSocket connection.
-    if (this._hasConnectedOnce && !this._connected) return
+    if (!this.config && this._hasConnectedOnce && !this._connected) return
     if (
       this._connecting ||
       this.ws?.readyState === WebSocket.OPEN ||
@@ -551,11 +705,15 @@ class WsTransport {
     )
       return
 
-    const remote = getActiveRemoteConnection()
+    const remote = this.config ? null : getActiveRemoteConnection()
     // Read token from URL query param or localStorage
     const urlToken = new URLSearchParams(window.location.search).get('token')
-    const token =
-      remote?.token || urlToken || localStorage.getItem('jean-http-token') || ''
+    const token = this.config
+      ? this.config.getToken()
+      : remote?.token ||
+        urlToken ||
+        localStorage.getItem('jean-http-token') ||
+        ''
 
     // Persist token from URL to localStorage for future page loads
     if (!remote && urlToken) {
@@ -581,14 +739,14 @@ class WsTransport {
   }
 
   private async validateAndConnect(token: string): Promise<void> {
-    const authBaseUrl = backendUrl('api/auth')
+    const authBaseUrl = this.backendUrl('api/auth')
     const authUrl = token
       ? `${authBaseUrl}?token=${encodeURIComponent(token)}`
       : authBaseUrl
-    const remote = getActiveRemoteConnection()
+    const remote = this.config ? true : getActiveRemoteConnection()
 
     try {
-      const res = await fetchBackend(authUrl)
+      const res = await this.fetchBackend(authUrl)
       if (!res.ok) {
         // Invalid token — clear it and wait for the user to provide another.
         if (!remote) {
@@ -596,15 +754,16 @@ class WsTransport {
         }
         this.setAuthError(
           token
-            ? "Invalid access token. Check the URL in Jean's Web Access settings."
-            : "No access token provided. Use the URL from Jean's Web Access settings."
+            ? "That access token was refused. Check the token in Jean's Web Access settings."
+            : "Enter the access token from Jean's Web Access settings.",
+          token ? 'rejected' : 'signed-out'
         )
         return
       }
 
       // Native desktop UI is bundled with the client; warn (do not block)
       // when remote appVersion differs so users can still connect.
-      if (remote && isNativeApp()) {
+      if (!this.config && remote && isNativeApp()) {
         try {
           const body = (await res.json()) as { appVersion?: string | null }
           warnRemoteVersionMismatch(body.appVersion)
@@ -613,9 +772,10 @@ class WsTransport {
         }
       }
     } catch {
-      if (remote) {
+      if (remote && !this.config) {
         this.setAuthError(
-          "Jean could not reach the server's authentication endpoint. Check that the server is running and the URL and port are correct. If the address opens in a browser, update and restart the remote Jean server so it allows desktop connections (CORS)."
+          "Jean could not reach the server's authentication endpoint. Check that the server is running and the URL and port are correct. If the address opens in a browser, update and restart the remote Jean server so it allows desktop connections (CORS).",
+          'unreachable'
         )
         return
       }
@@ -632,7 +792,7 @@ class WsTransport {
   }
 
   private connectWs(token: string): void {
-    const base = new URL(backendUrl('ws'))
+    const base = new URL(this.backendUrl('ws'))
     base.protocol = base.protocol === 'https:' ? 'wss:' : 'ws:'
     base.searchParams.set('token', token)
     const url = base.toString()
@@ -705,8 +865,11 @@ class WsTransport {
       this.ws = null
 
       this.setConnected(false)
-      if (wasConnected && getActiveRemoteConnection()) {
-        this.setAuthError('Connection to the selected Jean server was lost.')
+      if (wasConnected && !this.config && getActiveRemoteConnection()) {
+        this.setAuthError(
+          'Connection to the selected Jean server was lost.',
+          'unreachable'
+        )
       }
 
       // Clear event buffer — stale events from a dead connection
@@ -726,7 +889,7 @@ class WsTransport {
       // spawn duplicate CLI processes.
       this.queue = []
 
-      if (!wasConnected && !this._hasConnectedOnce) {
+      if (this.config || (!wasConnected && !this._hasConnectedOnce)) {
         this.scheduleConnectRetry()
       }
     }
@@ -968,13 +1131,15 @@ class WsTransport {
   }
 
   private scheduleConnectRetry(): void {
-    if (this.connectRetryTimer || this._hasConnectedOnce) return
+    if (this.connectRetryTimer || (!this.config && this._hasConnectedOnce))
+      return
     // Don't retry if there's an auth error — user needs to fix the token.
     if (this._authError) return
 
     // Exponential backoff while establishing the initial connection.
-    const delay =
-      this.connectRetryAttempt === 0
+    const delay = this.config
+      ? 5_000
+      : this.connectRetryAttempt === 0
         ? 100
         : Math.min(500 * 2 ** (this.connectRetryAttempt - 1), 30_000)
     this.connectRetryAttempt++
@@ -1071,10 +1236,59 @@ class WsTransport {
       this.handleMessage(event)
     }
   }
+
+  dispose(): void {
+    this._connectEnabled = false
+    this.clearConnectWatchdog()
+    this.stopLivenessTimer()
+    if (this.connectRetryTimer) clearTimeout(this.connectRetryTimer)
+    this.connectRetryTimer = null
+    if (typeof window !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.handleWake)
+      window.removeEventListener('online', this.handleWake)
+      window.removeEventListener('pageshow', this.handleWake)
+    }
+    const socket = this.ws
+    this.ws = null
+    if (socket) {
+      socket.onclose = null
+      socket.close()
+    }
+    for (const pending of this.pending.values()) {
+      clearTimeout(pending.timeout)
+      pending.reject(new Error('WebSocket transport disposed'))
+    }
+    this.pending.clear()
+    this.queue = []
+    this.listeners.clear()
+    this.eventBuffer.clear()
+    this._connected = false
+    this._subscribers.clear()
+  }
+
+  private backendUrl(path: string): string {
+    if (!this.config) return backendUrl(path)
+    const base = `${this.config.baseUrl.replace(/\/+$/, '')}/`
+    return new URL(path.replace(/^\/+/, ''), base).toString()
+  }
+
+  private fetchBackend(url: string): Promise<Response> {
+    if (!this.config) return fetchBackend(url)
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 12_000)
+    return fetch(url, { signal: controller.signal }).finally(() =>
+      clearTimeout(timeout)
+    )
+  }
 }
 
 // Singleton instance
 const wsTransport = new WsTransport()
+
+/** Existing selected-server transport used by the native multi-server manager. */
+export function getLegacyWsTransport(): WsTransport {
+  return wsTransport
+}
 
 // ---------------------------------------------------------------------------
 // React hooks for connection status (browser mode only)
@@ -1083,6 +1297,7 @@ const wsTransport = new WsTransport()
 const subscribe = (cb: () => void) => wsTransport.subscribe(cb)
 const getSnapshot = () => wsTransport.getSnapshot()
 const getAuthErrorSnapshot = () => wsTransport.getAuthErrorSnapshot()
+const getAuthReasonSnapshot = () => wsTransport.getAuthReasonSnapshot()
 
 // E2E mock: always report connected, no auth errors
 const isE2eMocked =
@@ -1139,4 +1354,29 @@ export function useWsAuthError(): string | null {
     isE2eMocked ? noopSubscribe : subscribe,
     isE2eMocked ? () => null : getAuthErrorSnapshot
   )
+}
+
+/**
+ * React hook that returns why authentication is pending, or null when the
+ * session is authenticated. Lets the UI tell a first visit apart from a
+ * refused token instead of reporting both as a connection failure.
+ */
+export function useWsAuthReason(): WsAuthReason | null {
+  return useSyncExternalStore(
+    isE2eMocked ? noopSubscribe : subscribe,
+    isE2eMocked ? () => null : getAuthReasonSnapshot
+  )
+}
+
+/**
+ * Forget the access token stored in this browser and return to the sign-in
+ * screen. Only affects this device — the server keeps running and other
+ * browsers stay signed in.
+ */
+export function signOutOfWebAccess(): void {
+  localStorage.removeItem('jean-http-token')
+  // Reload on a bare origin. A bookmarked `?token=...` takes priority over
+  // localStorage on boot, so keeping the current URL would sign us straight
+  // back in and make the button look broken.
+  window.location.replace(`${window.location.origin}/`)
 }

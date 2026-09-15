@@ -8,7 +8,7 @@ import {
   Check,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { invoke } from '@/lib/transport'
+import { invoke, invokeForServer } from '@/lib/transport'
 import type { BrowseDirectoryResult, DirEntry } from '@/types/projects'
 import { cn } from '@/lib/utils'
 import {
@@ -35,6 +35,7 @@ interface DirectoryBrowserProps {
   title?: string
   description?: string
   defaultName?: string
+  serverId?: string
 }
 
 function buildSavePath(currentPath: string, name: string): string {
@@ -52,6 +53,7 @@ export function DirectoryBrowser({
   title,
   description,
   defaultName,
+  serverId,
 }: DirectoryBrowserProps) {
   const [result, setResult] = useState<BrowseDirectoryResult | null>(null)
   const [pathInput, setPathInput] = useState('')
@@ -65,32 +67,39 @@ export function DirectoryBrowser({
     setNameInput(defaultName ?? '')
   }, [defaultName, open])
 
-  const loadDirectory = useCallback(async (path?: string) => {
-    const requestId = ++requestIdRef.current
-    setIsLoading(true)
+  const loadDirectory = useCallback(
+    async (path?: string) => {
+      const requestId = ++requestIdRef.current
+      setIsLoading(true)
 
-    try {
-      const next = await invoke<BrowseDirectoryResult>('browse_directory', {
-        path,
-      })
-      if (requestId !== requestIdRef.current) return
-      setResult(next)
-      setPathInput(next.current_path)
-    } catch (error) {
-      if (requestId !== requestIdRef.current) return
-      const message =
-        typeof error === 'string'
-          ? error
-          : error instanceof Error
-            ? error.message
-            : 'Unknown error occurred'
-      toast.error('Failed to browse directory', { description: message })
-    } finally {
-      if (requestId === requestIdRef.current) {
-        setIsLoading(false)
+      try {
+        const next = serverId
+          ? await invokeForServer<BrowseDirectoryResult>(
+              serverId,
+              'browse_directory',
+              { path }
+            )
+          : await invoke<BrowseDirectoryResult>('browse_directory', { path })
+        if (requestId !== requestIdRef.current) return
+        setResult(next)
+        setPathInput(next.current_path)
+      } catch (error) {
+        if (requestId !== requestIdRef.current) return
+        const message =
+          typeof error === 'string'
+            ? error
+            : error instanceof Error
+              ? error.message
+              : 'Unknown error occurred'
+        toast.error('Failed to browse directory', { description: message })
+      } finally {
+        if (requestId === requestIdRef.current) {
+          setIsLoading(false)
+        }
       }
-    }
-  }, [])
+    },
+    [serverId]
+  )
 
   useEffect(() => {
     if (!open) return

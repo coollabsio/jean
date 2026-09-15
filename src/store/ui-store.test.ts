@@ -85,6 +85,32 @@ describe('UIStore', () => {
     expect(useUIStore.getState().fileBrowserVisible).toBe(false)
   })
 
+  it('toggles zen mode and restores sidebars', () => {
+    useUIStore.setState({
+      zenMode: false,
+      leftSidebarVisible: true,
+      fileBrowserVisible: true,
+    })
+
+    useUIStore.getState().toggleZenMode()
+    expect(useUIStore.getState().zenMode).toBe(true)
+    expect(useUIStore.getState().leftSidebarVisible).toBe(false)
+    expect(useUIStore.getState().fileBrowserVisible).toBe(false)
+
+    useUIStore.getState().toggleZenMode()
+    expect(useUIStore.getState().zenMode).toBe(false)
+    expect(useUIStore.getState().leftSidebarVisible).toBe(true)
+    expect(useUIStore.getState().fileBrowserVisible).toBe(true)
+  })
+
+  it('setZenMode is a no-op when already at the target value', () => {
+    useUIStore.setState({ zenMode: false, leftSidebarVisible: true })
+    const before = useUIStore.getState()
+    useUIStore.getState().setZenMode(false)
+    expect(useUIStore.getState().leftSidebarVisible).toBe(true)
+    expect(useUIStore.getState().zenMode).toBe(before.zenMode)
+  })
+
   it('sets viewing file path for global file modal', () => {
     useUIStore.getState().setViewingFilePath('/tmp/foo.ts')
     expect(useUIStore.getState().viewingFilePath).toBe('/tmp/foo.ts')
@@ -135,6 +161,78 @@ describe('UIStore', () => {
     expect(
       consumedState.pendingAutoOpenSessionIds['worktree-1']
     ).toBeUndefined()
+  })
+
+  it('evicts worktree and session keyed UI state when a worktree is removed', () => {
+    useUIStore.setState({
+      autoInvestigateWorktreeIds: new Set(['worktree-1', 'worktree-2']),
+      autoInvestigatePRWorktreeIds: new Set(['worktree-1', 'worktree-2']),
+      autoInvestigateSecurityAlertWorktreeIds: new Set([
+        'worktree-1',
+        'worktree-2',
+      ]),
+      autoInvestigateAdvisoryWorktreeIds: new Set([
+        'worktree-1',
+        'worktree-2',
+      ]),
+      autoInvestigateLinearIssueWorktreeIds: new Set([
+        'worktree-1',
+        'worktree-2',
+      ]),
+      autoInvestigateSentryIssueWorktreeIds: new Set([
+        'worktree-1',
+        'worktree-2',
+      ]),
+      autoOpenSessionWorktreeIds: new Set(['worktree-1', 'worktree-2']),
+      pendingAutoOpenSessionIds: {
+        'worktree-1': 'session-1',
+        'worktree-2': 'session-2',
+      },
+      sessionPrimarySurface: {
+        'session-1': 'terminal',
+        'session-2': 'chat',
+      },
+      sessionTerminalIds: {
+        'session-1': 'terminal-1',
+        'session-2': 'terminal-2',
+      },
+      sessionChatModalOpen: true,
+      sessionChatModalWorktreeId: 'worktree-1',
+      newSessionModeTarget: {
+        worktreeId: 'worktree-1',
+        worktreePath: '/tmp/worktree-1',
+        origin: 'canvas',
+      },
+    })
+
+    useUIStore
+      .getState()
+      .clearWorktreeState('worktree-1', ['session-1'])
+
+    const state = useUIStore.getState()
+    expect(state.autoInvestigateWorktreeIds).toEqual(new Set(['worktree-2']))
+    expect(state.autoInvestigatePRWorktreeIds).toEqual(new Set(['worktree-2']))
+    expect(state.autoInvestigateSecurityAlertWorktreeIds).toEqual(
+      new Set(['worktree-2'])
+    )
+    expect(state.autoInvestigateAdvisoryWorktreeIds).toEqual(
+      new Set(['worktree-2'])
+    )
+    expect(state.autoInvestigateLinearIssueWorktreeIds).toEqual(
+      new Set(['worktree-2'])
+    )
+    expect(state.autoInvestigateSentryIssueWorktreeIds).toEqual(
+      new Set(['worktree-2'])
+    )
+    expect(state.autoOpenSessionWorktreeIds).toEqual(new Set(['worktree-2']))
+    expect(state.pendingAutoOpenSessionIds).toEqual({
+      'worktree-2': 'session-2',
+    })
+    expect(state.sessionPrimarySurface).toEqual({ 'session-2': 'chat' })
+    expect(state.sessionTerminalIds).toEqual({ 'session-2': 'terminal-2' })
+    expect(state.sessionChatModalOpen).toBe(false)
+    expect(state.sessionChatModalWorktreeId).toBeNull()
+    expect(state.newSessionModeTarget).toBeNull()
   })
 
   it('does not notify subscribers for duplicate auto-open session requests', () => {

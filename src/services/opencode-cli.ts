@@ -3,7 +3,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { invoke } from '@/lib/transport'
+import { invoke, invokeForOptionalServer } from '@/lib/transport'
 import { listen } from '@/lib/transport'
 import { toast } from 'sonner'
 import { useCallback, useEffect, useState } from 'react'
@@ -75,14 +75,18 @@ export function useOpencodePathDetection(options?: { enabled?: boolean }) {
 }
 export const useOpenCodePathDetection = useOpencodePathDetection
 
-export function useOpencodeCliStatus(options?: { enabled?: boolean }) {
+export function useOpencodeCliStatus(options?: {
+  enabled?: boolean
+  serverId?: string
+}) {
   return useQuery({
-    queryKey: opencodeCliQueryKeys.status(),
+    queryKey: [...opencodeCliQueryKeys.status(), options?.serverId ?? 'local'],
     queryFn: async (): Promise<OpencodeCliStatus> => {
       if (!isTauri()) return { installed: false, version: null, path: null }
       try {
         console.debug('[ONBOARDING:SVC] opencode: checking installed status...')
-        const status = await invoke<OpencodeCliStatus>(
+        const status = await invokeForOptionalServer<OpencodeCliStatus>(
+          options?.serverId,
           'check_opencode_cli_installed'
         )
         console.debug('[ONBOARDING:SVC] opencode: status =', status)
@@ -256,7 +260,6 @@ export function useOpencodeCliSetup() {
       onError: error => options?.onError?.(error),
     })
   }
-
 
   return {
     status: status.data,

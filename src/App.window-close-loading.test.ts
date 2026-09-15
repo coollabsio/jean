@@ -34,7 +34,7 @@ describe('window close during loading (#530)', () => {
   it('keeps quit confirmation mounted during preloading', () => {
     expect(appSource).toContain('isPreloading')
     expect(appSource).toMatch(
-      /if \(isPreloading\) \{[\s\S]*?<QuitConfirmationDialog \/>/
+      /if \(isPreloading \|\| blockOnWs\) \{[\s\S]*?<QuitConfirmationDialog \/>/
     )
   })
 

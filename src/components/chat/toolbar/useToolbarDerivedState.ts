@@ -9,6 +9,7 @@ import {
   COMMANDCODE_MODEL_OPTIONS,
   GROK_MODEL_OPTIONS,
   KIMI_MODEL_OPTIONS,
+  ANTIGRAVITY_MODEL_OPTIONS,
   OPENCODE_MODEL_OPTIONS,
   PI_MODEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
@@ -133,6 +134,12 @@ export function buildBackendModelSections({
         backend,
         label: 'Kimi Code',
         options: kimiModelOptions ?? KIMI_MODEL_OPTIONS,
+      })
+    } else if (backend === 'antigravity') {
+      sections.push({
+        backend,
+        label: 'Antigravity CLI',
+        options: ANTIGRAVITY_MODEL_OPTIONS,
       })
     }
   }

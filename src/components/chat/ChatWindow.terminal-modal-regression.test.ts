@@ -81,6 +81,14 @@ describe('terminal primary surface modal regression', () => {
     expect(end).toBeGreaterThan(start)
     expect(handleReviewFixSource).toContain('createSession.mutateAsync')
     expect(handleReviewFixSource).toContain('sendMessage.mutate')
+    // Must not switch the active tab (background fix sessions)
     expect(handleReviewFixSource).not.toContain('setActiveSession')
+    // Issue #630: custom MiniMax/etc. profiles must ride along with the fix turn
+    expect(handleReviewFixSource).toContain('resolveMagicPromptProvider')
+    expect(handleReviewFixSource).toContain('code_review_provider')
+    expect(handleReviewFixSource).toContain('customProfileName')
+    // Prefer multi-review selected reviewer backend/model when provided
+    expect(handleReviewFixSource).toContain('options?.backend')
+    expect(handleReviewFixSource).toContain('options?.model')
   })
 })

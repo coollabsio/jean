@@ -3,6 +3,11 @@ import { createPatch } from 'diff'
 import { parsePatchFiles } from '@pierre/diffs'
 import { FileDiff } from '@pierre/diffs/react'
 import {
+  PierreEditProvider,
+  PIERRE_UNSAFE_CSS,
+  pierreThemePair,
+} from '@/components/ui/pierre-edit'
+import {
   FileText,
   Columns2,
   Rows3,
@@ -31,6 +36,7 @@ import { useIsMobile } from '@/hooks/use-mobile'
 import { usePreferences } from '@/services/preferences'
 import { invoke } from '@/lib/transport'
 import { canOpenInEditor } from '@/lib/environment'
+import { FilePathCopyRow } from './FilePathCopyRow'
 
 function DiffBlock({
   fileName,
@@ -263,19 +269,16 @@ export function MessageDiffModal({
 
   const fileDiffOptions = useMemo(
     () => ({
-      theme: {
-        dark: preferences?.syntax_theme_dark ?? 'vitesse-black',
-        light: preferences?.syntax_theme_light ?? 'github-light',
-      },
+      theme: pierreThemePair(
+        preferences?.syntax_theme_dark,
+        preferences?.syntax_theme_light
+      ),
       themeType: resolvedThemeType,
       diffStyle,
       overflow: 'wrap' as const,
       enableLineSelection: false,
       disableFileHeader: true,
-      unsafeCSS: `
-        pre { font-family: var(--font-family-mono) !important; font-size: calc(var(--ui-font-size) * 0.85) !important; line-height: var(--ui-line-height) !important; }
-        * { user-select: text !important; -webkit-user-select: text !important; cursor: text !important; }
-      `,
+      unsafeCSS: PIERRE_UNSAFE_CSS,
     }),
     [
       resolvedThemeType,
@@ -315,29 +318,46 @@ export function MessageDiffModal({
         style={{ fontSize: 'var(--ui-font-size)' }}
         showCloseButton={false}
       >
-        <div className="flex shrink-0 flex-col gap-2 border-b border-border/60 px-4 pb-3 pt-4 pr-12 sm:flex-row sm:items-center sm:border-0 sm:px-0 sm:pb-0 sm:pt-0 sm:pr-10">
-          <DialogTitle className="flex w-full min-w-0 items-center gap-2 sm:w-auto">
-            <FileText className="h-4 w-4 shrink-0" />
-            <span className="truncate">{getFilename(filePath)}</span>
-            {hasCurrentStats && (
-              <span className="shrink-0 font-mono text-sm font-semibold">
-                <span className="text-green-500">
-                  +{currentStats.additions}
+        <div className="flex shrink-0 flex-col gap-2 border-b border-border/60 px-4 pb-3 pt-4 pr-24 sm:flex-row sm:items-center sm:border-0 sm:px-0 sm:pb-0 sm:pt-0 sm:pr-24">
+          <div className="flex w-full min-w-0 items-center gap-1 sm:w-auto">
+            <DialogTitle className="flex min-w-0 items-center gap-2">
+              <FileText className="h-4 w-4 shrink-0" />
+              <span className="truncate">{getFilename(filePath)}</span>
+              {hasCurrentStats && (
+                <span className="shrink-0 font-mono text-sm font-semibold">
+                  <span className="text-green-500">
+                    +{currentStats.additions}
+                  </span>
+                  <span className="mx-1 text-muted-foreground">/</span>
+                  <span className="text-red-500">
+                    -{currentStats.deletions}
+                  </span>
                 </span>
-                <span className="mx-1 text-muted-foreground">/</span>
-                <span className="text-red-500">-{currentStats.deletions}</span>
-              </span>
-            )}
-          </DialogTitle>
+              )}
+            </DialogTitle>
+            <FilePathCopyRow filePath={filePath} iconOnly />
+          </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="absolute right-4 top-4 inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground sm:right-5"
-          >
-            <X className="h-4 w-4" />
-            <span className="sr-only">Close</span>
-          </button>
+          <div className="absolute right-4 top-4 flex items-center gap-1 sm:right-5">
+            {!isMobile && canOpenInEditor() && (
+              <button
+                type="button"
+                onClick={handleOpenExternal}
+                className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md px-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <ExternalLink className="h-4 w-4" />
+                <span className="sr-only">Open in Editor</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+            >
+              <X className="h-4 w-4" />
+              <span className="sr-only">Close</span>
+            </button>
+          </div>
 
           <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:ml-auto sm:w-auto sm:flex-nowrap">
             {/* Diff style toggle */}
@@ -379,17 +399,6 @@ export function MessageDiffModal({
                 <TooltipContent>Unified view</TooltipContent>
               </Tooltip>
             </div>
-
-            {canOpenInEditor() && (
-              <button
-                type="button"
-                onClick={handleOpenExternal}
-                className="ml-auto flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              >
-                <ExternalLink className="h-4 w-4" />
-                <span className="hidden sm:inline">Open in Editor</span>
-              </button>
-            )}
           </div>
         </div>
 
@@ -405,11 +414,14 @@ export function MessageDiffModal({
             </div>
           ) : currentChangeFile ? (
             <DiffBlock fileName={relativePath}>
-              <FileDiff
-                key={currentChangeKey}
-                fileDiff={currentChangeFile}
-                options={fileDiffOptions}
-              />
+              <PierreEditProvider>
+                <FileDiff
+                  key={currentChangeKey}
+                  fileDiff={currentChangeFile}
+                  options={fileDiffOptions}
+                  edit
+                />
+              </PierreEditProvider>
             </DiffBlock>
           ) : (
             <div className="flex items-center justify-center h-full text-muted-foreground text-sm">

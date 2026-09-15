@@ -16,10 +16,12 @@ import {
   FolderTree,
   Github,
   Heart,
+  Minimize2,
   PanelLeft,
   PanelLeftClose,
   Settings,
   X,
+  Server,
 } from 'lucide-react'
 import { usePreferences } from '@/services/preferences'
 import {
@@ -37,7 +39,9 @@ import { useIsMobile } from '@/hooks/use-mobile'
 import { FALLBACK_APP_VERSION } from '@/lib/app-version'
 import { applyServerUpdate } from '@/hooks/useServerUpdateCheck'
 import { LinuxWindowControls } from './LinuxWindowControls'
-import { RemoteConnectionsDialog } from '@/components/remote/RemoteConnectionsDialog'
+import { useRemoteConnections } from '@/lib/remote-connections'
+import { useProjectsStore } from '@/store/projects-store'
+import { resolveHeaderServerLabel } from './server-context'
 
 interface TitleBarProps {
   className?: string
@@ -54,9 +58,13 @@ export function TitleBar({
   const toggleLeftSidebar = useUIStore(state => state.toggleLeftSidebar)
   const fileBrowserVisible = useUIStore(state => state.fileBrowserVisible)
   const toggleFileBrowser = useUIStore(state => state.toggleFileBrowser)
+  const zenMode = useUIStore(state => state.zenMode)
+  const toggleZenMode = useUIStore(state => state.toggleZenMode)
   const commandContext = useCommandContext()
   const { data: preferences } = usePreferences()
   const isMobile = useIsMobile()
+  /** Mobile zen: single header line in the title bar (name + exit). */
+  const mobileZen = zenMode && isMobile
 
   const sidebarShortcut = formatShortcutDisplay(
     (preferences?.keybindings?.toggle_left_sidebar ||
@@ -67,6 +75,12 @@ export function TitleBar({
       DEFAULT_KEYBINDINGS.toggle_file_browser) as string
   )
   const native = isNativeApp()
+  const selectedProjectId = useProjectsStore(state => state.selectedProjectId)
+  const remoteConnections = useRemoteConnections()
+  const serverLabel = resolveHeaderServerLabel(
+    selectedProjectId,
+    remoteConnections
+  )
 
   const [appVersion, setAppVersion] = useState<string>(FALLBACK_APP_VERSION)
   useEffect(() => {
@@ -88,166 +102,232 @@ export function TitleBar({
         className
       )}
     >
-      {/* Left side - Window Controls + Left Actions */}
+      {/* Left side - Window Controls + Left Actions (hidden in zen mode) */}
       <div
         className="flex items-center"
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
+        {/* macOS traffic-light inset even when action buttons are hidden */}
+        {zenMode && native && isClientMacOS && (
+          <div className="pl-[80px]" aria-hidden />
+        )}
         {/* Left Action Buttons */}
-        <div
-          className={cn(
-            'relative z-10 flex items-center gap-1 pt-1',
-            native && isClientMacOS ? 'pl-[80px]' : 'pl-2'
-          )}
-        >
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                onClick={toggleLeftSidebar}
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6 rounded-none text-foreground/70 hover:text-foreground"
-              >
-                {leftSidebarVisible ? (
-                  <PanelLeftClose className="size-3.5" />
-                ) : (
-                  <PanelLeft className="size-3.5" />
-                )}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {leftSidebarVisible ? 'Hide' : 'Show'} Left Sidebar{' '}
-              <kbd className="ml-1 text-[0.625rem] opacity-60">
-                {sidebarShortcut}
-              </kbd>
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                onClick={toggleFileBrowser}
-                variant="ghost"
-                size="icon"
-                className={cn(
-                  'h-6 w-6 rounded-none text-foreground/70 hover:text-foreground',
-                  fileBrowserVisible && 'text-foreground bg-muted/50'
-                )}
-                aria-pressed={fileBrowserVisible}
-                aria-label={
-                  fileBrowserVisible ? 'Hide file browser' : 'Show file browser'
-                }
-                data-testid="toggle-file-browser"
-              >
-                <FolderTree className="size-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {fileBrowserVisible ? 'Hide' : 'Show'} File Browser{' '}
-              <kbd className="ml-1 text-[0.625rem] opacity-60">
-                {fileBrowserShortcut}
-              </kbd>
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                onClick={commandContext.openPreferences}
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6 rounded-none text-foreground/70 hover:text-foreground"
-              >
-                <Settings className="size-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              Settings{' '}
-              <kbd className="ml-1 text-[0.625rem] opacity-60">
-                {formatShortcutDisplay(
-                  (preferences?.keybindings?.open_preferences ||
-                    DEFAULT_KEYBINDINGS.open_preferences) as string
-                )}
-              </kbd>
-            </TooltipContent>
-          </Tooltip>
-          {!isMobile && (
+        {!zenMode && (
+          <div
+            className={cn(
+              'relative z-10 flex items-center gap-1 pt-1',
+              native && isClientMacOS ? 'pl-[80px]' : 'pl-2'
+            )}
+          >
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  onClick={() =>
-                    openExternal('https://github.com/coollabsio/jean')
-                  }
+                  onClick={toggleLeftSidebar}
                   variant="ghost"
                   size="icon"
                   className="h-6 w-6 rounded-none text-foreground/70 hover:text-foreground"
                 >
-                  <Github className="size-3.5" />
+                  {leftSidebarVisible ? (
+                    <PanelLeftClose className="size-3.5" />
+                  ) : (
+                    <PanelLeft className="size-3.5" />
+                  )}
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>GitHub</TooltipContent>
+              <TooltipContent>
+                {leftSidebarVisible ? 'Hide' : 'Show'} Left Sidebar{' '}
+                <kbd className="ml-1 text-[0.625rem] opacity-60">
+                  {sidebarShortcut}
+                </kbd>
+              </TooltipContent>
             </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  onClick={toggleFileBrowser}
+                  variant="ghost"
+                  size="icon"
+                  className={cn(
+                    'h-6 w-6 rounded-none text-foreground/70 hover:text-foreground',
+                    fileBrowserVisible && 'text-foreground bg-muted/50'
+                  )}
+                  aria-pressed={fileBrowserVisible}
+                  aria-label={
+                    fileBrowserVisible
+                      ? 'Hide file browser'
+                      : 'Show file browser'
+                  }
+                  data-testid="toggle-file-browser"
+                >
+                  <FolderTree className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {fileBrowserVisible ? 'Hide' : 'Show'} File Browser{' '}
+                <kbd className="ml-1 text-[0.625rem] opacity-60">
+                  {fileBrowserShortcut}
+                </kbd>
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  onClick={commandContext.openPreferences}
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 rounded-none text-foreground/70 hover:text-foreground"
+                >
+                  <Settings className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                Settings{' '}
+                <kbd className="ml-1 text-[0.625rem] opacity-60">
+                  {formatShortcutDisplay(
+                    (preferences?.keybindings?.open_preferences ||
+                      DEFAULT_KEYBINDINGS.open_preferences) as string
+                  )}
+                </kbd>
+              </TooltipContent>
+            </Tooltip>
+            {!isMobile && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    onClick={() =>
+                      openExternal('https://github.com/coollabsio/jean')
+                    }
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 rounded-none text-foreground/70 hover:text-foreground"
+                  >
+                    <Github className="size-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>GitHub</TooltipContent>
+              </Tooltip>
+            )}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  onClick={() =>
+                    openExternal('https://jean.build/sponsorships/')
+                  }
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 rounded-none text-pink-500 hover:text-pink-400"
+                >
+                  <Heart className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Sponsor</TooltipContent>
+            </Tooltip>
+          </div>
+        )}
+      </div>
+
+      {/* Center - Title / Unread indicator (inlined left in mobile zen) */}
+      {mobileZen ? (
+        <div
+          className="relative z-10 flex min-w-0 flex-1 items-center pl-3 pr-1"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        >
+          <span className="truncate text-sm font-semibold text-foreground">
+            {hideTitle ? '' : title}
+          </span>
+          {native && (
+            <span className="ml-2 flex shrink-0 items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+              <Server className="size-3" />
+              {serverLabel}
+            </span>
           )}
-          {native && <RemoteConnectionsDialog />}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                onClick={() => openExternal('https://jean.build/sponsorships/')}
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6 rounded-none text-pink-500 hover:text-pink-400"
-              >
-                <Heart className="size-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Sponsor</TooltipContent>
-          </Tooltip>
         </div>
-      </div>
+      ) : (
+        <div
+          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 max-w-[50%] px-2 pt-1"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        >
+          <div className="flex items-center gap-2">
+            <UnreadBell title={title} hideTitle={hideTitle} />
+            {native && (
+              <span
+                className="flex shrink-0 items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+                aria-label={`Current Jean server: ${serverLabel}`}
+              >
+                <Server className="size-3" />
+                {serverLabel}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
-      {/* Center - Title / Unread indicator */}
-      <div
-        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 max-w-[50%] px-2"
-        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-      >
-        <UnreadBell title={title} hideTitle={hideTitle} />
-      </div>
-
-      {/* Right side - Version + Windows/Linux window controls */}
+      {/* Right side - Version + Windows/Linux window controls (hidden in zen) */}
       <div
         className={cn('flex items-center pt-1', isMobile && 'pr-2')}
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
-        {isMobile && (
+        {mobileZen && (
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                onClick={() =>
-                  openExternal('https://github.com/coollabsio/jean')
-                }
+                onClick={toggleZenMode}
                 variant="ghost"
                 size="icon"
                 className="h-6 w-6 rounded-none text-foreground/70 hover:text-foreground"
+                aria-label="Exit zen mode"
+                data-testid="toggle-zen-mode"
               >
-                <Github className="h-3 w-3" />
+                <Minimize2 className="size-3.5" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>GitHub</TooltipContent>
+            <TooltipContent>
+              Exit zen mode{' '}
+              <kbd className="ml-1 text-[0.625rem] opacity-60">
+                {formatShortcutDisplay(
+                  (preferences?.keybindings?.toggle_zen_mode ||
+                    DEFAULT_KEYBINDINGS.toggle_zen_mode) as string
+                )}
+              </kbd>
+            </TooltipContent>
           </Tooltip>
         )}
-        <CliUpdatesIndicator />
-        <ServerUpdateIndicator />
-        {appVersion && <UpdateIndicator />}
-        {appVersion && (
-          <button
-            type="button"
-            onClick={() =>
-              openExternal(
-                `https://github.com/coollabsio/jean/releases/tag/v${appVersion}`
-              )
-            }
-            className="px-1.5 text-[0.625rem] text-foreground/40 transition-colors cursor-pointer hover:text-foreground/60"
-          >
-            v{appVersion}
-          </button>
+        {!zenMode && (
+          <>
+            {isMobile && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    onClick={() =>
+                      openExternal('https://github.com/coollabsio/jean')
+                    }
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 rounded-none text-foreground/70 hover:text-foreground"
+                  >
+                    <Github className="h-3 w-3" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>GitHub</TooltipContent>
+              </Tooltip>
+            )}
+            <CliUpdatesIndicator />
+            <ServerUpdateIndicator />
+            {appVersion && <UpdateIndicator />}
+            {appVersion && (
+              <button
+                type="button"
+                onClick={() =>
+                  openExternal(
+                    `https://github.com/coollabsio/jean/releases/tag/v${appVersion}`
+                  )
+                }
+                className="px-1.5 text-[0.625rem] text-foreground/40 transition-colors cursor-pointer hover:text-foreground/60"
+              >
+                v{appVersion}
+              </button>
+            )}
+          </>
         )}
         {native && isClientLinux && <LinuxWindowControls />}
       </div>
@@ -301,7 +381,10 @@ function CliUpdatesIndicator() {
       <Tooltip>
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
-            <button type="button" className="relative mr-1.5 flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 text-[0.625rem] font-medium text-primary hover:bg-primary/25 transition-colors cursor-pointer">
+            <button
+              type="button"
+              className="relative mr-1.5 flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 text-[0.625rem] font-medium text-primary hover:bg-primary/25 transition-colors cursor-pointer"
+            >
               <Download className="size-3" />
               <span>{updates.length}</span>
             </button>

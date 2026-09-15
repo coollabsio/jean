@@ -78,6 +78,7 @@ export async function processAttachmentFile(
       const svgText = await file.text()
       const result = await invoke<SaveTextResponse>('save_pasted_text', {
         content: svgText,
+        sessionId,
       })
 
       useChatStore.getState().addPendingTextFile(sessionId, {
@@ -129,6 +130,7 @@ export async function processAttachmentFile(
     const result = await invoke<SaveImageResponse>('save_pasted_image', {
       data: base64Data,
       mimeType,
+      sessionId,
     })
 
     updatePendingImage(sessionId, placeholderId, {

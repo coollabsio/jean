@@ -4,6 +4,11 @@ import { parsePatchFiles, type FileDiffMetadata } from '@pierre/diffs'
 import { createPatch } from 'diff'
 import { useTheme } from '@/hooks/use-theme'
 import { usePreferences } from '@/services/preferences'
+import {
+  PierreEditProvider,
+  PIERRE_UNSAFE_CSS,
+  pierreThemePair,
+} from '@/components/ui/pierre-edit'
 
 interface InlineFileDiffBase {
   /** Tailwind max-height utility (e.g. "max-h-64", "max-h-none"). Default: "max-h-64". */
@@ -86,12 +91,17 @@ export function InlineFileDiff(props: InlineFileDiffProps) {
     }
   }, [props])
 
+  /** Full-height inline diffs (e.g. modals) get edit mode; compact chat previews stay read-only. */
+  const editable = props.maxHeightClass === 'max-h-none'
+  /** Chat tool-call previews should match surrounding text-xs chrome, not modal code size. */
+  const compact = !editable
+
   const options = useMemo(
     () => ({
-      theme: {
-        dark: preferences?.syntax_theme_dark ?? 'vitesse-black',
-        light: preferences?.syntax_theme_light ?? 'github-light',
-      },
+      theme: pierreThemePair(
+        preferences?.syntax_theme_dark,
+        preferences?.syntax_theme_light
+      ),
       themeType: resolvedThemeType,
       diffStyle: 'unified' as const,
       overflow: 'wrap' as const,
@@ -101,8 +111,21 @@ export function InlineFileDiff(props: InlineFileDiffProps) {
       disableBackground: neutral,
       lineDiffType: neutral ? ('none' as const) : undefined,
       unsafeCSS: `
-        pre { font-family: var(--font-family-mono) !important; font-size: calc(var(--ui-font-size) * 0.85) !important; line-height: var(--ui-line-height) !important; }
-        * { user-select: text !important; -webkit-user-select: text !important; cursor: text !important; }
+        ${PIERRE_UNSAFE_CSS}
+        ${
+          compact
+            ? `
+        :host, [data-diffs] {
+          --diffs-font-size: calc(var(--chat-font-size) * 0.75);
+          --diffs-line-height: calc(var(--chat-line-height) * 0.95);
+        }
+        pre {
+          font-size: calc(var(--chat-font-size) * 0.75) !important;
+          line-height: calc(var(--chat-line-height) * 0.95) !important;
+        }
+        `
+            : ''
+        }
         ${
           neutral
             ? `
@@ -126,6 +149,7 @@ export function InlineFileDiff(props: InlineFileDiffProps) {
       `,
     }),
     [
+      compact,
       neutral,
       resolvedThemeType,
       preferences?.syntax_theme_dark,
@@ -143,11 +167,15 @@ export function InlineFileDiff(props: InlineFileDiffProps) {
 
   const maxHeightClass = props.maxHeightClass ?? 'max-h-64'
 
+  const diff = (
+    <FileDiff fileDiff={fileDiff} options={options} edit={editable} />
+  )
+
   return (
     <div
       className={`rounded border border-border/30 overflow-auto ${maxHeightClass}`}
     >
-      <FileDiff fileDiff={fileDiff} options={options} />
+      {editable ? <PierreEditProvider>{diff}</PierreEditProvider> : diff}
     </div>
   )
 }

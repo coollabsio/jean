@@ -11,20 +11,16 @@ use super::pty::{
 };
 #[cfg(unix)]
 use super::registry::TERMINAL_SESSIONS;
-use super::registry::{get_all_terminal_ids, has_terminal};
+use super::registry::{get_all_terminal_ids, has_terminal, list_live_terminal_meta};
+use super::run_env::{
+    assemble_run_environments, LiveCommandTerminal, PersistedCommandTerminal, ProjectRef,
+    RunEnvironmentFilter, RunEnvironmentsResult, WorktreeRef,
+};
+use super::types::TerminalPortInfo;
 #[cfg(unix)]
 use crate::platform::silent_command;
-use crate::projects::git::read_jean_config;
-
-/// A TCP port that a terminal's child process is listening on
-#[derive(Clone, Serialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct TerminalPortInfo {
-    pub terminal_id: String,
-    pub port: u16,
-    pub process_name: String,
-    pub local_address: String,
-}
+use crate::projects::git::resolve_jean_config;
+use crate::projects::types::SessionType;
 
 #[derive(Clone, Serialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -86,6 +82,7 @@ pub async fn start_terminal(
         rows,
         command,
         command_args,
+        session_id,
     )?;
     if let Some((session_id, signal_path)) = signal {
         super::attention::spawn_signal_tailer(app, session_id, terminal_id, signal_path);
@@ -116,8 +113,8 @@ pub async fn prepare_backend_terminal_context(
 }
 
 /// Get the run script(s) from jean.json for a worktree
-pub async fn get_run_scripts(worktree_path: String) -> Vec<String> {
-    read_jean_config(&worktree_path)
+pub async fn get_run_scripts(app: AppHandle, worktree_path: String) -> Vec<String> {
+    resolve_jean_config_for_worktree(&app, &worktree_path)
         .and_then(|config| config.scripts.run)
         .map(|r| r.into_vec())
         .unwrap_or_default()
@@ -179,10 +176,127 @@ fn package_manager_binary(manager: &str) -> String {
 }
 
 /// Get configured ports from jean.json for a worktree
-pub async fn get_ports(worktree_path: String) -> Vec<crate::projects::types::PortEntry> {
-    read_jean_config(&worktree_path)
+pub async fn get_ports(
+    app: AppHandle,
+    worktree_path: String,
+) -> Vec<crate::projects::types::PortEntry> {
+    resolve_jean_config_for_worktree(&app, &worktree_path)
         .and_then(|config| config.ports)
         .unwrap_or_default()
+}
+
+fn resolve_jean_config_for_worktree(
+    app: &AppHandle,
+    worktree_path: &str,
+) -> Option<crate::projects::types::JeanConfig> {
+    resolve_jean_config(
+        worktree_path,
+        project_path_for_worktree(app, worktree_path).as_deref(),
+    )
+}
+
+fn project_path_for_worktree(app: &AppHandle, worktree_path: &str) -> Option<String> {
+    let data = crate::projects::storage::load_projects_data(app).ok()?;
+    let normalized = super::run_env::normalize_path(worktree_path);
+    let worktree = data
+        .worktrees
+        .iter()
+        .find(|w| super::run_env::normalize_path(&w.path) == normalized)?;
+    data.projects
+        .iter()
+        .find(|p| p.id == worktree.project_id)
+        .map(|p| p.path.clone())
+}
+
+/// Snapshot of Jean Run-command / panel-command terminals and discovered ports.
+pub async fn get_run_environments(
+    app: AppHandle,
+    worktree_id: Option<String>,
+    project_id: Option<String>,
+) -> Result<RunEnvironmentsResult, String> {
+    let data = crate::projects::storage::load_projects_data(&app)
+        .map_err(|e| format!("load_projects_data: {e}"))?;
+    let ui_state = crate::load_ui_state(app.clone()).await.unwrap_or_default();
+
+    let live: Vec<LiveCommandTerminal> = list_live_terminal_meta()
+        .into_iter()
+        .filter_map(|meta| {
+            let command = meta.command.filter(|c| !c.trim().is_empty())?;
+            Some(LiveCommandTerminal {
+                terminal_id: meta.terminal_id,
+                worktree_path: meta.worktree_path,
+                command,
+                command_args: meta.command_args,
+                session_id: meta.session_id,
+            })
+        })
+        .collect();
+
+    let persisted: Vec<PersistedCommandTerminal> = ui_state
+        .terminal_instances
+        .iter()
+        .flat_map(|(worktree_id, terminals)| {
+            terminals.iter().filter_map(|term| {
+                let command = term
+                    .command
+                    .as_ref()
+                    .map(|c| c.trim().to_string())
+                    .filter(|c| !c.is_empty())?;
+                Some(PersistedCommandTerminal {
+                    worktree_id: worktree_id.clone(),
+                    terminal_id: term.id.clone(),
+                    command,
+                    command_args: term.command_args.clone(),
+                    session_id: term.session_id.clone(),
+                    kind: term.kind.clone(),
+                })
+            })
+        })
+        .collect();
+
+    let worktrees: Vec<WorktreeRef> = data
+        .worktrees
+        .iter()
+        .map(|w| WorktreeRef {
+            id: w.id.clone(),
+            name: w.name.clone(),
+            path: w.path.clone(),
+            project_id: w.project_id.clone(),
+            is_base: w.session_type == SessionType::Base,
+        })
+        .collect();
+    let projects: Vec<ProjectRef> = data
+        .projects
+        .iter()
+        .map(|p| ProjectRef {
+            id: p.id.clone(),
+            name: p.name.clone(),
+        })
+        .collect();
+
+    let mut configured_ports = std::collections::HashMap::new();
+    for worktree in &worktrees {
+        let ports = get_ports(app.clone(), worktree.path.clone()).await;
+        if !ports.is_empty() {
+            configured_ports.insert(worktree.id.clone(), ports);
+        }
+    }
+
+    let listening = get_terminal_listening_ports().await;
+
+    Ok(assemble_run_environments(
+        &live,
+        &persisted,
+        &listening,
+        &worktrees,
+        &projects,
+        &ui_state.active_session_ids,
+        &configured_ports,
+        &RunEnvironmentFilter {
+            worktree_id,
+            project_id,
+        },
+    ))
 }
 
 /// Write data to a terminal (stdin)

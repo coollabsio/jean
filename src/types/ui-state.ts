@@ -72,6 +72,8 @@ export interface UIState {
   file_browser_size?: number
   /** File browser sidebar visibility, defaults to false */
   file_browser_visible?: boolean
+  /** Whether the session chat is using the reduced-chrome zen layout */
+  zen_mode?: boolean
   /** Active session ID per worktree (for restoring open tabs) */
   active_session_ids: Record<string, string>
   /** Unsent chat textarea content per session */
@@ -86,6 +88,8 @@ export interface UIState {
    * Content is optional in persistence; restore re-reads from disk when missing.
    */
   pending_text_files?: Record<string, PendingTextFileDraft[]>
+  /** Worktrees whose setup-script status card was dismissed */
+  dismissed_setup_scripts?: string[]
   /** Whether the review sidebar is visible */
   review_sidebar_visible?: boolean
   /** Modal terminal drawer open state per worktree */
@@ -164,10 +168,12 @@ export const defaultUIState: UIState = {
   left_sidebar_visible: false,
   file_browser_size: 280,
   file_browser_visible: false,
+  zen_mode: false,
   active_session_ids: {},
   input_drafts: {},
   pending_images: {},
   pending_text_files: {},
+  dismissed_setup_scripts: [],
   modal_terminal_open: {},
   modal_terminal_dock_mode: 'floating',
   modal_terminal_width: 400,

@@ -3,7 +3,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { invoke } from '@/lib/transport'
+import { invoke, invokeForOptionalServer } from '@/lib/transport'
 import { logger } from '@/lib/logger'
 import { toast } from 'sonner'
 import { hasBackendTransport } from '@/lib/environment'
@@ -65,13 +65,19 @@ export function useKimiPathDetection(options?: { enabled?: boolean }) {
   })
 }
 
-export function useKimiCliStatus(options?: { enabled?: boolean }) {
+export function useKimiCliStatus(options?: {
+  enabled?: boolean
+  serverId?: string
+}) {
   return useQuery({
-    queryKey: kimiCliQueryKeys.status(),
+    queryKey: [...kimiCliQueryKeys.status(), options?.serverId ?? 'local'],
     queryFn: async (): Promise<KimiCliStatus> => {
       if (!isTauri()) return { installed: false, version: null, path: null }
       try {
-        return await invoke<KimiCliStatus>('check_kimi_cli_installed')
+        return await invokeForOptionalServer<KimiCliStatus>(
+          options?.serverId,
+          'check_kimi_cli_installed'
+        )
       } catch (error) {
         logger.error('Failed to check Kimi CLI status', { error })
         return { installed: false, version: null, path: null }
@@ -205,7 +211,6 @@ export function useKimiCliSetup() {
       onError: error => options?.onError?.(error),
     })
   }
-
 
   return {
     status: status.data,

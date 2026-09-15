@@ -6,9 +6,21 @@ import type {
   DiffLineAnnotation,
   FileDiffMetadata,
 } from '@pierre/diffs'
+import type { EditorOptions } from '@pierre/diffs/edit'
 import { getFileLineStats } from '@/lib/diff-stats'
 import { cn } from '@/lib/utils'
+import {
+  convertProjectFileSrc,
+  convertServerProjectFileSrc,
+} from '@/lib/transport'
+import { parseServerResourceKey } from '@/lib/server-resource'
+import { useUIStore } from '@/store/ui-store'
 import type { SyntaxTheme } from '@/types/preferences'
+import {
+  PierreEditProvider,
+  PIERRE_UNSAFE_CSS,
+  pierreThemePair,
+} from '@/components/ui/pierre-edit'
 
 /** A comment attached to a line range in a diff */
 export interface DiffComment {
@@ -24,6 +36,10 @@ export interface DiffComment {
 export interface MemoizedFileDiffProps {
   fileDiff: FileDiffMetadata
   fileName: string
+  rootPath?: string
+  /** Composite worktree id used to select the server that owns rootPath. */
+  resourceOwnerId?: string
+  isBinary?: boolean
   annotations: DiffLineAnnotation<DiffComment>[]
   selectedLines: SelectedLineRange | null
   themeType: 'dark' | 'light'
@@ -31,6 +47,10 @@ export interface MemoizedFileDiffProps {
   syntaxThemeLight: SyntaxTheme
   diffStyle: 'split' | 'unified'
   enableLineSelection?: boolean
+  /** Enable Pierre edit mode on the new-file side (default true). */
+  edit?: boolean
+  /** Editor callbacks (e.g. onChange) when edit is enabled. */
+  editorOptions?: EditorOptions<DiffComment>
   onLineSelected: (range: SelectedLineRange | null) => void
   onRemoveComment: (id: string) => void
 }
@@ -55,6 +75,9 @@ export const MemoizedFileDiff = memo(
   function MemoizedFileDiff({
     fileDiff,
     fileName,
+    rootPath,
+    resourceOwnerId,
+    isBinary = false,
     annotations,
     selectedLines,
     themeType,
@@ -62,6 +85,8 @@ export const MemoizedFileDiff = memo(
     syntaxThemeLight,
     diffStyle,
     enableLineSelection: enableLineSelectionProp = true,
+    edit = true,
+    editorOptions,
     onLineSelected,
     onRemoveComment,
   }: MemoizedFileDiffProps) {
@@ -71,20 +96,14 @@ export const MemoizedFileDiff = memo(
     // Memoize options to keep reference stable
     const options = useMemo(
       () => ({
-        theme: {
-          dark: syntaxThemeDark,
-          light: syntaxThemeLight,
-        },
+        theme: pierreThemePair(syntaxThemeDark, syntaxThemeLight),
         themeType,
         diffStyle,
         overflow: 'wrap' as const,
         enableLineSelection: enableLineSelectionProp,
         onLineSelected,
         disableFileHeader: true, // We render file info in sidebar
-        unsafeCSS: `
-      pre { font-family: var(--font-family-mono) !important; font-size: calc(var(--ui-font-size) * 0.85) !important; line-height: var(--ui-line-height) !important; }
-      * { user-select: text !important; -webkit-user-select: text !important; cursor: text !important; }
-    `,
+        unsafeCSS: PIERRE_UNSAFE_CSS,
       }),
       [
         themeType,
@@ -120,6 +139,16 @@ export const MemoizedFileDiff = memo(
 
     // Calculate stats from hunks for the header
     const stats = useMemo(() => getFileLineStats(fileDiff), [fileDiff])
+    const absolutePath = rootPath
+      ? `${rootPath.replace(/[\\/]+$/, '')}/${fileName.replace(/^[\\/]+/, '')}`
+      : fileName
+    const isImage = /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(fileName)
+    const serverId = resourceOwnerId
+      ? parseServerResourceKey(resourceOwnerId)?.serverId
+      : undefined
+    const imageSrc = serverId
+      ? convertServerProjectFileSrc(serverId, absolutePath)
+      : convertProjectFileSrc(absolutePath)
 
     return (
       <div className="border border-border">
@@ -147,8 +176,28 @@ export const MemoizedFileDiff = memo(
           </div>
         </div>
         {/* Diff content */}
-        {fileDiff.hunks.length === 0 ||
-        fileDiff.hunks.every(h => h.hunkContent.length === 0) ? (
+        {isBinary && isImage && fileDiff.type !== 'deleted' ? (
+          <button
+            type="button"
+            className="flex w-full cursor-zoom-in justify-center bg-black/5 p-3"
+            onClick={() =>
+              useUIStore.getState().setViewingFilePath(absolutePath)
+            }
+          >
+            <img
+              src={imageSrc}
+              alt={`Preview ${fileName}`}
+              className="max-h-[70vh] max-w-full object-contain"
+            />
+          </button>
+        ) : isBinary ? (
+          <div className="px-4 py-8 text-center text-muted-foreground text-sm">
+            {fileDiff.type === 'deleted'
+              ? 'Binary file deleted'
+              : 'Binary file'}
+          </div>
+        ) : fileDiff.hunks.length === 0 ||
+          fileDiff.hunks.every(h => h.hunkContent.length === 0) ? (
           <div className="px-4 py-8 text-center text-muted-foreground text-sm">
             {fileDiff.type === 'deleted'
               ? 'This file was deleted'
@@ -180,6 +229,18 @@ export const MemoizedFileDiff = memo(
               </>
             )}
           </div>
+        ) : edit ? (
+          <PierreEditProvider>
+            <FileDiff
+              fileDiff={fileDiff}
+              lineAnnotations={annotations}
+              selectedLines={selectedLines}
+              options={options}
+              renderAnnotation={renderAnnotation}
+              edit
+              editorOptions={editorOptions}
+            />
+          </PierreEditProvider>
         ) : (
           <FileDiff
             fileDiff={fileDiff}
@@ -210,11 +271,16 @@ export const MemoizedFileDiff = memo(
     return (
       prevProps.fileDiff === nextProps.fileDiff &&
       prevProps.fileName === nextProps.fileName &&
+      prevProps.rootPath === nextProps.rootPath &&
+      prevProps.resourceOwnerId === nextProps.resourceOwnerId &&
+      prevProps.isBinary === nextProps.isBinary &&
       prevProps.annotations === nextProps.annotations &&
       prevProps.themeType === nextProps.themeType &&
       prevProps.syntaxThemeDark === nextProps.syntaxThemeDark &&
       prevProps.syntaxThemeLight === nextProps.syntaxThemeLight &&
       prevProps.diffStyle === nextProps.diffStyle &&
+      prevProps.edit === nextProps.edit &&
+      prevProps.editorOptions === nextProps.editorOptions &&
       prevProps.onLineSelected === nextProps.onLineSelected &&
       prevProps.onRemoveComment === nextProps.onRemoveComment
     )

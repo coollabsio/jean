@@ -40,11 +40,49 @@ const PLAN_DIALOG_APPROVAL_ACTIONS = new Set<KeybindingAction>([
   'approve_plan_worktree_yolo',
 ])
 
+interface RunEnvironmentStartedEvent {
+  worktreeId: string
+  terminalId: string
+  command: string
+}
+
+export function handleRunEnvironmentStarted(
+  payload: RunEnvironmentStartedEvent
+): void {
+  const terminalStore = useTerminalStore.getState()
+  terminalStore.registerStartedRun(
+    payload.worktreeId,
+    payload.terminalId,
+    payload.command
+  )
+
+  const uiState = useUIStore.getState()
+  if (
+    uiState.sessionChatModalOpen &&
+    uiState.sessionChatModalWorktreeId === payload.worktreeId
+  ) {
+    terminalStore.setModalTerminalOpen(payload.worktreeId, true)
+  }
+}
+
 export function shouldLetPlanDialogHandleAction(
   action: KeybindingAction,
   planDialogOpen: boolean
 ): boolean {
   return planDialogOpen && PLAN_DIALOG_APPROVAL_ACTIONS.has(action)
+}
+
+export function shouldLetChatInputHandleAction(
+  action: KeybindingAction,
+  target: EventTarget | null,
+  planDialogOpen: boolean
+): boolean {
+  return (
+    action === 'approve_plan' &&
+    !planDialogOpen &&
+    target instanceof Element &&
+    target.closest('[data-chat-input]') !== null
+  )
 }
 
 export function findKeybindingAction(
@@ -92,8 +130,8 @@ export function allowsKeybindingRepeat(action: KeybindingAction): boolean {
  * Apply backend `cache:invalidate` keys to the React Query client.
  * Shared by the debounced multi-client sync listener.
  *
- * `sessions` also invalidates `['all-sessions']` (finished/unread bell) which
- * is intentionally outside `chatQueryKeys.all` (`['chat']`).
+ * `sessions` also invalidates the finished/unread badge and popover queries,
+ * which are intentionally outside the normal per-worktree cache.
  */
 export function applyCacheInvalidationKeys(
   queryClient: QueryClient,
@@ -108,6 +146,9 @@ export function applyCacheInvalidationKeys(
         // UnreadBell / useUnreadCount read from this separate key.
         queryClient.invalidateQueries({
           queryKey: ['all-sessions'],
+        })
+        queryClient.invalidateQueries({
+          queryKey: chatQueryKeys.unreadSessionCount(),
         })
         break
       case 'projects':
@@ -199,7 +240,20 @@ export function shouldAllowKeybindingThroughOpenOverlay(
 ): boolean {
   // GitDiffModal is intentionally a full-screen workflow overlay, but users
   // still need the global "Open in..." picker from there (Cmd/Ctrl+O).
+  if (
+    uiState.sessionChatModalOpen &&
+    (action === 'toggle_zen_mode' || action === 'clear_session_context')
+  ) {
+    return true
+  }
+
   return action === 'open_in_modal' && uiState.gitDiffModalOpen
+}
+
+export function hasBlockingOpenOverlay(): boolean {
+  return !!document.querySelector(
+    '[role="dialog"][data-state="open"]:not([data-terminal-host]), [role="alertdialog"][data-state="open"], [role="menu"][data-state="open"], [role="listbox"][data-state="open"]'
+  )
 }
 
 function getFocusedTerminalElement(): HTMLElement | null {
@@ -287,7 +341,7 @@ export function closeActiveTerminalTabForShortcut(): boolean {
   ).filter(isPanelTerminal)
   if (remaining.length === 0) {
     terminalStore.setTerminalPanelOpen(worktreeId, false)
-    terminalStore.setTerminalVisible(false)
+    terminalStore.setTerminalVisibleForWorktree(worktreeId, false)
     terminalStore.setModalTerminalOpen(worktreeId, false)
   }
 
@@ -357,6 +411,15 @@ function executeKeybindingAction(
       setFileBrowserVisible(!fileBrowserVisible)
       break
     }
+    case 'toggle_zen_mode': {
+      logger.debug('Keybinding: toggle_zen_mode')
+      useUIStore.getState().toggleZenMode()
+      break
+    }
+    case 'clear_session_context':
+      logger.debug('Keybinding: clear_session_context')
+      window.dispatchEvent(new CustomEvent('clear-session-context'))
+      break
     case 'open_preferences':
       logger.debug('Keybinding: open_preferences')
       commandContext.openPreferences()
@@ -411,25 +474,21 @@ function executeKeybindingAction(
 
       const resolvedWorktreePath = targetWorktreePath
 
-      // Fetch run scripts - use fetchQuery to handle uncached dashboard worktrees
+      // Always read jean.json from disk. A cached copy stays stale after
+      // the branch is updated from latest or Settings saves a new command.
       ;(async () => {
-        let runScripts = queryClient.getQueryData<string[]>([
-          'run-scripts',
-          resolvedWorktreePath,
-        ])
-
-        if (runScripts === undefined) {
-          try {
-            runScripts = await queryClient.fetchQuery<string[]>({
-              queryKey: ['run-scripts', resolvedWorktreePath],
-              queryFn: () =>
-                invoke<string[]>('get_run_scripts', {
-                  worktreePath: resolvedWorktreePath,
-                }),
-            })
-          } catch {
-            runScripts = []
-          }
+        let runScripts: string[] = []
+        try {
+          runScripts = await queryClient.fetchQuery<string[]>({
+            queryKey: ['run-scripts', resolvedWorktreePath],
+            queryFn: () =>
+              invoke<string[]>('get_run_scripts', {
+                worktreePath: resolvedWorktreePath,
+              }),
+            staleTime: 0,
+          })
+        } catch {
+          runScripts = []
         }
 
         const firstScript = runScripts?.[0]
@@ -776,6 +835,21 @@ export function useMainWindowEventListeners() {
       const keybindings = keybindingsRef.current
       const matchedAction = findKeybindingAction(shortcut, keybindings)
 
+      // Cmd/Ctrl+Enter is also the chat input's explicit steer shortcut. The
+      // global approve-plan binding runs in capture phase, so it must yield or
+      // the textarea never receives Enter. A visible plan dialog still owns
+      // the same shortcut.
+      if (
+        matchedAction &&
+        shouldLetChatInputHandleAction(
+          matchedAction,
+          e.target,
+          useUIStore.getState().planDialogOpen
+        )
+      ) {
+        return
+      }
+
       // OS key-repeat must not re-fire one-shot actions (issue #56: holding
       // Ctrl/Cmd+W cascade-closed every terminal/session under the cursor).
       // Consume the event so the browser does not handle the repeated shortcut.
@@ -802,9 +876,7 @@ export function useMainWindowEventListeners() {
       const uiState = useUIStore.getState()
       if (
         !shouldAllowKeybindingThroughOpenOverlay(matchedAction, uiState) &&
-        document.querySelector(
-          '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], [role="menu"][data-state="open"], [role="listbox"][data-state="open"]'
-        )
+        hasBlockingOpenOverlay()
       )
         return
       if (
@@ -957,6 +1029,9 @@ export function useMainWindowEventListeners() {
     const setupMenuListeners = async () => {
       logger.debug('Setting up menu event listeners')
       const unlisteners = await Promise.all([
+        listen<RunEnvironmentStartedEvent>('run-environment:started', event =>
+          handleRunEnvironmentStarted(event.payload)
+        ),
         listen<{ sessionId: string }>('terminal:working', event => {
           const sessionId = event.payload?.sessionId
           if (!sessionId) return

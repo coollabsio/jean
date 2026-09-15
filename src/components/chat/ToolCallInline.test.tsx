@@ -33,7 +33,6 @@ vi.mock('./InlineFileDiff', async importOriginal => {
   }
 })
 
-
 function clickExpandTrigger() {
   const triggers = document.querySelectorAll(
     '[data-slot="collapsible-trigger"]'
@@ -44,6 +43,75 @@ function clickExpandTrigger() {
 }
 
 describe('ToolCallInline', () => {
+  it('keeps clickable file details at the compact tool-row font size', () => {
+    render(
+      <ToolCallInline
+        toolCall={{
+          id: 'tool-read-font-size',
+          name: 'Read',
+          input: { file_path: '/tmp/example.ts', limit: 20 },
+        }}
+        onFileClick={vi.fn()}
+      />
+    )
+
+    const fileDetail = screen.getByText('example.ts')
+    expect(fileDetail.tagName).toBe('CODE')
+    expect(fileDetail).not.toHaveClass('font-mono')
+    expect(fileDetail).toHaveClass('font-sans')
+  })
+
+  it('expands when the command detail is clicked and does not expose selectable text', () => {
+    render(
+      <ToolCallInline
+        toolCall={{
+          id: 'tool-bash-click-row',
+          name: 'Bash',
+          input: {
+            command: 'php artisan test --compact tests/Unit/DockerStopCo',
+          },
+        }}
+      />
+    )
+
+    const command = screen.getByText(
+      'php artisan test --compact tests/Unit/DockerStopCo'
+    )
+    expect(command.closest('.tool-call-row')).toHaveClass('select-none')
+    expect(
+      screen.queryByText(
+        '$ php artisan test --compact tests/Unit/DockerStopCo'
+      )
+    ).not.toBeInTheDocument()
+
+    fireEvent.click(command)
+
+    expect(
+      screen.getByText('$ php artisan test --compact tests/Unit/DockerStopCo')
+    ).toBeInTheDocument()
+  })
+
+  it('opens the file from the icon without expanding the row', () => {
+    const onFileClick = vi.fn()
+    render(
+      <ToolCallInline
+        toolCall={{
+          id: 'tool-read-open-icon',
+          name: 'Read',
+          input: { file_path: '/tmp/example.ts' },
+        }}
+        onFileClick={onFileClick}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /open example\.ts/i }))
+
+    expect(onFileClick).toHaveBeenCalledWith('/tmp/example.ts')
+    expect(
+      screen.queryByText('Path: /tmp/example.ts')
+    ).not.toBeInTheDocument()
+  })
+
   it('renders Cursor EnterPlanMode instructions', () => {
     render(
       <ToolCallInline
@@ -107,6 +175,42 @@ describe('ToolCallInline', () => {
     )
 
     expect(expandedContent).toBeInTheDocument()
+  })
+
+  it('renders Claude code-review findings without the unhandled fallback', () => {
+    render(
+      <ToolCallInline
+        toolCall={{
+          id: 'tool-report-findings-1',
+          name: 'ReportFindings',
+          input: {
+            findings: [
+              {
+                file: 'src/example.ts',
+                line: 42,
+                category: 'correctness',
+                summary: 'The request can fail silently.',
+              },
+              {
+                file: 'src/other.ts',
+                line: 10,
+                category: 'testing',
+                summary: 'The failure path has no test.',
+              },
+            ],
+          },
+        }}
+      />
+    )
+
+    expect(screen.getByText('Report Findings')).toBeInTheDocument()
+    expect(screen.getByText('2 findings')).toBeInTheDocument()
+    expect(screen.queryByText(/unhandled tool/i)).not.toBeInTheDocument()
+
+    clickExpandTrigger()
+
+    expect(screen.getByText(/The request can fail silently/)).toBeInTheDocument()
+    expect(screen.getByText(/The failure path has no test/)).toBeInTheDocument()
   })
 
   it('renders Command Code read_file calls as file reads', () => {
@@ -293,6 +397,96 @@ describe('ToolCallInline', () => {
       unmount()
     }
   })
+
+  it.each([
+    ['run_command', { CommandLine: 'bun test' }, 'Bash', 'bun test'],
+    [
+      'view_file',
+      { AbsolutePath: '/Users/example/project/src/app.ts' },
+      'Read',
+      'app.ts',
+    ],
+    [
+      'write_to_file',
+      { TargetFile: '/Users/example/project/src/new.ts', CodeContent: 'export {}' },
+      'Write',
+      'new.ts',
+    ],
+    [
+      'replace_file_content',
+      {
+        TargetFile: '/Users/example/project/src/app.ts',
+        TargetContent: 'old',
+        ReplacementContent: 'new',
+      },
+      'Edit',
+      'app.ts',
+    ],
+    [
+      'grep_search',
+      { Query: 'Antigravity', SearchPath: '/Users/example/project' },
+      'Grep',
+      '"Antigravity" in /Users/example/project',
+    ],
+    [
+      'find_by_name',
+      { Pattern: '*.rs', SearchDirectory: '/Users/example/project' },
+      'Glob',
+      '*.rs',
+    ],
+    [
+      'list_dir',
+      { DirectoryPath: '/Users/example/project/src' },
+      'List',
+      '/Users/example/project/src',
+    ],
+    ['search_web', { Query: 'Antigravity CLI docs' }, 'Web Search', 'Antigravity CLI docs'],
+    ['read_url_content', { Url: 'https://antigravity.google' }, 'Web Fetch', 'https://antigravity.google'],
+  ])('renders Antigravity %s with the common renderer', (name, input, label, detail) => {
+    render(
+      <ToolCallInline
+        toolCall={{ id: `antigravity-${name}`, name, input }}
+      />
+    )
+
+    expect(screen.getByText(label)).toBeInTheDocument()
+    expect(screen.getByText(detail)).toBeInTheDocument()
+    expect(screen.queryByText(/unhandled tool/i)).not.toBeInTheDocument()
+  })
+
+  it.each([
+    'browser_click',
+    'browser_get_dom',
+    'command_status',
+    'generate_image',
+    'list_browser_pages',
+    'manage_inbox',
+    'manage_subagents',
+    'manage_task',
+    'notify_user',
+    'open_browser_url',
+    'read_browser_page',
+    'read_knowledge_base_item',
+    'read_terminal',
+    'search_knowledge_base',
+    'send_command_input',
+    'task_boundary',
+  ])(
+    'recognizes native Antigravity tool %s without an unhandled warning',
+    name => {
+      render(
+        <ToolCallInline
+          toolCall={{
+            id: `antigravity-${name}`,
+            name,
+            input: { Description: 'Native Antigravity operation' },
+          }}
+        />
+      )
+
+      expect(screen.queryByText(/unhandled tool/i)).not.toBeInTheDocument()
+    }
+  )
 
   it('renders FileChange diffs without duplicate raw output', () => {
     const { container } = render(
@@ -658,6 +852,44 @@ describe('Jean MCP tool helpers', () => {
 })
 
 describe('StackedGroup', () => {
+  it('keeps nested Read file details at the same compact size as Grep/Bash', () => {
+    render(
+      <StackedGroup
+        items={[
+          {
+            type: 'tool',
+            tool: {
+              id: 'stacked-read-1',
+              name: 'Read',
+              input: { file_path: '/tmp/example.ts', limit: 20 },
+            },
+          },
+          {
+            type: 'tool',
+            tool: {
+              id: 'stacked-grep-1',
+              name: 'Grep',
+              input: { pattern: 'StopApplication' },
+            },
+          },
+        ]}
+        onFileClick={vi.fn()}
+      />
+    )
+
+    clickExpandTrigger()
+
+    const fileDetail = screen.getByText('example.ts')
+    const grepDetail = screen.getByText('"StopApplication"')
+    expect(fileDetail.tagName).toBe('CODE')
+    expect(fileDetail).not.toHaveClass('font-mono')
+    expect(fileDetail).toHaveClass('font-sans')
+    expect(grepDetail).toHaveClass('font-sans')
+    expect(fileDetail.className).toContain('text-[0.625rem]')
+    expect(grepDetail.className).toContain('text-[0.625rem]')
+    expect(fileDetail.closest('.tool-call-row')).toHaveClass('select-none')
+  })
+
   it('uses the wrapped Jean tool name in its summary', () => {
     render(
       <StackedGroup

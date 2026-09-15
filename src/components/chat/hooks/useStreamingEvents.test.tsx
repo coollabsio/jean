@@ -18,10 +18,7 @@ const {
   mockListen: vi.fn(),
   mockSaveWorktreePr: vi.fn(),
   mockPlayNotificationSound: vi.fn(),
-  registeredListeners: new Map<
-    string,
-    (event: { payload: unknown }) => void
-  >(),
+  registeredListeners: new Map<string, (event: { payload: unknown }) => void>(),
 }))
 
 vi.mock('@/lib/transport', () => ({
@@ -550,7 +547,6 @@ describe('useStreamingEvents cancellation sanitization', () => {
         },
       ],
     })
-
     useChatStore.setState({
       streamingContents: { 'session-1': 'Hello. What would you like to do?' },
       streamingContentBlocks: {
@@ -658,6 +654,24 @@ describe('useStreamingEvents cancellation sanitization', () => {
         },
       ],
     })
+    queryClient.setQueryData(
+      ['chat', 'sessions', 'worktree-1', 'with-counts'],
+      {
+        worktree_id: 'worktree-1',
+        sessions: [
+          {
+            id: 'normal-session',
+            name: 'Normal session',
+            order: 0,
+            created_at: 1,
+            updated_at: 1,
+            messages: [],
+            is_reviewing: false,
+            last_run_status: 'running',
+          },
+        ],
+      }
+    )
 
     useChatStore.setState({
       streamingContents: { 'normal-session': 'Done.' },
@@ -704,6 +718,13 @@ describe('useStreamingEvents cancellation sanitization', () => {
     expect(
       useChatStore.getState().reviewingSessions['normal-session']
     ).toBeUndefined()
+    const canvasSessionsCache = queryClient.getQueryData<{
+      sessions: { id: string; last_run_status?: string }[]
+    }>(['chat', 'sessions', 'worktree-1', 'with-counts'])
+    expect(
+      canvasSessionsCache?.sessions.find(s => s.id === 'normal-session')
+        ?.last_run_status
+    ).toBe('completed')
   })
 
   it('keeps the prompt and the partial assistant output (incl tool calls) when cancelling a partial response', async () => {
@@ -898,6 +919,212 @@ describe('useStreamingEvents cancellation sanitization', () => {
     expect(useChatStore.getState().isSessionReviewing('session-1')).toBe(true)
   })
 
+  it('does not restore text or images after an already-running prompt is cancelled', async () => {
+    const queryClient = createQueryClient()
+    const wrapper = createWrapper(queryClient)
+    const hiddenRunSession = {
+      id: 'session-1',
+      name: 'Test',
+      order: 0,
+      created_at: 1,
+      updated_at: 1,
+      messages: [],
+    }
+
+    mockInvoke.mockImplementation((command: string) => {
+      if (command === 'list_pending_wakeups') return Promise.resolve([])
+      if (command === 'get_session') return Promise.resolve(hiddenRunSession)
+      return Promise.resolve(undefined)
+    })
+
+    queryClient.setQueryData(['chat', 'session', 'session-1'], {
+      id: 'session-1',
+      name: 'Test',
+      order: 0,
+      created_at: 1,
+      updated_at: 1,
+      messages: [
+        {
+          id: 'current-user',
+          session_id: 'session-1',
+          role: 'user',
+          content: 'already running',
+          timestamp: 3,
+          tool_calls: [],
+        },
+      ],
+    })
+
+    useChatStore.setState({
+      streamingContents: {},
+      streamingContentBlocks: {},
+      streamingThinkingContent: {},
+      activeToolCalls: {},
+      sendingSessionIds: { 'session-1': true },
+      sendStartedAt: { 'session-1': 1000 },
+      sessionWorktreeMap: { 'session-1': 'worktree-1' },
+      worktreePaths: { 'worktree-1': '/tmp/worktree' },
+      lastSentMessages: { 'session-1': 'already running' },
+      lastSentAttachments: {
+        'session-1': {
+          images: [
+            {
+              id: 'image-1',
+              path: '/tmp/image.png',
+              filename: 'image.png',
+            },
+          ],
+          files: [],
+          textFiles: [],
+          skills: [],
+        },
+      },
+      pendingImages: {},
+      inputDrafts: { 'session-1': '' },
+    })
+
+    renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
+
+    await waitFor(() =>
+      expect(registeredListeners.has('chat:cancelled')).toBe(true)
+    )
+
+    registeredListeners.get('chat:cancelled')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        undo_send: false,
+        emitted_at_ms: 2000,
+      },
+    })
+
+    const session = queryClient.getQueryData<{
+      messages: { id: string; role: string; content: string }[]
+    }>(['chat', 'session', 'session-1'])
+
+    expect(session?.messages.map(message => message.id)).toContain(
+      'current-user'
+    )
+    expect(useChatStore.getState().inputDrafts['session-1']).toBe('')
+    expect(useChatStore.getState().pendingImages['session-1']).toBeUndefined()
+    expect(
+      useChatStore.getState().lastSentAttachments['session-1']
+    ).toBeUndefined()
+    expect(useChatStore.getState().lastSentMessages['session-1']).toBe(
+      undefined
+    )
+    await waitFor(() =>
+      expect(mockInvoke).toHaveBeenCalledWith('get_session', {
+        sessionId: 'session-1',
+        worktreeId: 'worktree-1',
+        worktreePath: '/tmp/worktree',
+      })
+    )
+    expect(useChatStore.getState().inputDrafts['session-1']).toBe('')
+  })
+
+  it('hydrates a persisted cancelled turn without restoring the sent prompt', async () => {
+    const queryClient = createQueryClient()
+    const wrapper = createWrapper(queryClient)
+    const hydratedSession = {
+      id: 'session-1',
+      name: 'Test',
+      order: 0,
+      created_at: 1,
+      updated_at: 4,
+      last_run_status: 'cancelled',
+      messages: [
+        {
+          id: 'current-user',
+          session_id: 'session-1',
+          role: 'user',
+          content: 'already running',
+          timestamp: 3,
+          tool_calls: [],
+        },
+        {
+          id: 'persisted-cancelled-assistant',
+          session_id: 'session-1',
+          role: 'assistant',
+          content: 'Persisted cancelled answer.',
+          timestamp: 4,
+          tool_calls: [],
+          content_blocks: [
+            { type: 'text', text: 'Persisted cancelled answer.' },
+          ],
+          cancelled: true,
+        },
+      ],
+    }
+
+    mockInvoke.mockImplementation((command: string) => {
+      if (command === 'list_pending_wakeups') return Promise.resolve([])
+      if (command === 'get_session') return Promise.resolve(hydratedSession)
+      return Promise.resolve(undefined)
+    })
+
+    queryClient.setQueryData(['chat', 'session', 'session-1'], {
+      id: 'session-1',
+      name: 'Test',
+      order: 0,
+      created_at: 1,
+      updated_at: 3,
+      messages: [
+        {
+          id: 'current-user',
+          session_id: 'session-1',
+          role: 'user',
+          content: 'already running',
+          timestamp: 3,
+          tool_calls: [],
+        },
+      ],
+    })
+
+    useChatStore.setState({
+      streamingContents: {},
+      streamingContentBlocks: {},
+      streamingThinkingContent: {},
+      activeToolCalls: {},
+      sendingSessionIds: { 'session-1': true },
+      sendStartedAt: { 'session-1': 1000 },
+      sessionWorktreeMap: { 'session-1': 'worktree-1' },
+      worktreePaths: { 'worktree-1': '/tmp/worktree' },
+      lastSentMessages: { 'session-1': 'already running' },
+      inputDrafts: { 'session-1': '' },
+    })
+
+    renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
+
+    await waitFor(() =>
+      expect(registeredListeners.has('chat:cancelled')).toBe(true)
+    )
+
+    registeredListeners.get('chat:cancelled')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        undo_send: false,
+        emitted_at_ms: 2000,
+        run_id: 'run-with-persisted-output',
+      },
+    })
+
+    expect(useChatStore.getState().inputDrafts['session-1']).toBe('')
+
+    await waitFor(() => {
+      const session = queryClient.getQueryData<{
+        messages: { id: string }[]
+      }>(['chat', 'session', 'session-1'])
+      expect(session?.messages.map(message => message.id)).toEqual([
+        'current-user',
+        'persisted-cancelled-assistant',
+      ])
+    })
+
+    expect(useChatStore.getState().inputDrafts['session-1'] ?? '').toBe('')
+  })
+
   it('restores an instant-cancelled prompt while keeping prior history visible', async () => {
     const queryClient = createQueryClient()
     const wrapper = createWrapper(queryClient)
@@ -946,6 +1173,21 @@ describe('useStreamingEvents cancellation sanitization', () => {
       sessionWorktreeMap: { 'session-1': 'worktree-1' },
       worktreePaths: { 'worktree-1': '/tmp/worktree' },
       lastSentMessages: { 'session-1': 'cancel this' },
+      lastSentAttachments: {
+        'session-1': {
+          images: [
+            {
+              id: 'image-1',
+              path: '/tmp/image.png',
+              filename: 'image.png',
+            },
+          ],
+          files: [],
+          textFiles: [],
+          skills: [],
+        },
+      },
+      pendingImages: {},
       inputDrafts: { 'session-1': '' },
     })
 
@@ -973,6 +1215,13 @@ describe('useStreamingEvents cancellation sanitization', () => {
       'old-assistant',
     ])
     expect(useChatStore.getState().inputDrafts['session-1']).toBe('cancel this')
+    expect(useChatStore.getState().pendingImages['session-1']).toEqual([
+      {
+        id: 'image-1',
+        path: '/tmp/image.png',
+        filename: 'image.png',
+      },
+    ])
     expect(useChatStore.getState().lastSentMessages['session-1']).toBe(
       undefined
     )
@@ -983,7 +1232,7 @@ describe('useStreamingEvents cancellation sanitization', () => {
     )
   })
 
-  it('hydrates persisted cancelled assistant output when no streaming state remains', async () => {
+  it('hydrates persisted cancelled output without clearing a newer input draft', async () => {
     const queryClient = createQueryClient()
     const wrapper = createWrapper(queryClient)
 
@@ -1086,7 +1335,7 @@ describe('useStreamingEvents cancellation sanitization', () => {
       lastSentMessages: {
         'session-1': 'cancel this after output persisted',
       },
-      inputDrafts: { 'session-1': '' },
+      inputDrafts: { 'session-1': 'keep this draft' },
     })
 
     renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
@@ -1133,7 +1382,9 @@ describe('useStreamingEvents cancellation sanitization', () => {
       expect(session?.messages[3]?.cancelled).toBe(true)
     })
 
-    expect(useChatStore.getState().inputDrafts['session-1']).toBeUndefined()
+    expect(useChatStore.getState().inputDrafts['session-1']).toBe(
+      'keep this draft'
+    )
   })
 
   it('ignores late chunks from a cancelled run after the same session starts a new run', async () => {
@@ -1286,8 +1537,12 @@ describe('useStreamingEvents cancellation sanitization', () => {
       },
     })
 
-    expect(useChatStore.getState().sendingSessionIds['session-1']).toBeUndefined()
-    expect(useChatStore.getState().streamingContents['session-1']).toBeUndefined()
+    expect(
+      useChatStore.getState().sendingSessionIds['session-1']
+    ).toBeUndefined()
+    expect(
+      useChatStore.getState().streamingContents['session-1']
+    ).toBeUndefined()
   })
 
   it('continues ignoring cancelled run chunks after accepting a new run chunk', async () => {
@@ -1698,11 +1953,13 @@ describe('useStreamingEvents replay dedupe', () => {
       },
     })
 
-    expect(useChatStore.getState().streamingContentBlocks['session-1']).toEqual([
-      { type: 'text', text: 'Before steering.' },
-      { type: 'user_input', text: 'Also fix the header.' },
-      { type: 'text', text: 'After steering.' },
-    ])
+    expect(useChatStore.getState().streamingContentBlocks['session-1']).toEqual(
+      [
+        { type: 'text', text: 'Before steering.' },
+        { type: 'user_input', text: 'Also fix the header.' },
+        { type: 'text', text: 'After steering.' },
+      ]
+    )
     expect(
       useChatStore.getState().streamingReplayContentBlocks['session-1']
     ).toBeUndefined()

@@ -85,10 +85,12 @@ interface FlatFile {
   fileDiff: FileDiffMetadata
   additions: number
   deletions: number
+  isBinary: boolean
 }
 
 interface CommitsTabViewProps {
   worktreePath: string
+  worktreeId?: string
   baseBranch: string
   diffStyle: 'split' | 'unified'
   onAddToPrompt?: (reference: string) => void
@@ -108,6 +110,7 @@ const EMPTY_ANNOTATIONS: never[] = []
 
 export function CommitsTabView({
   worktreePath,
+  worktreeId,
   baseBranch,
   diffStyle,
   onAddToPrompt,
@@ -238,6 +241,9 @@ export function CommitsTabView({
             fileDiff,
             additions,
             deletions,
+            isBinary:
+              commitDiff.files.find(file => file.path === fileName)
+                ?.is_binary ?? false,
           }
         })
       )
@@ -579,6 +585,9 @@ export function CommitsTabView({
                       key={selectedFile.key}
                       fileDiff={selectedFile.fileDiff}
                       fileName={selectedFile.fileName}
+                      rootPath={worktreePath}
+                      resourceOwnerId={worktreeId}
+                      isBinary={selectedFile.isBinary}
                       annotations={EMPTY_ANNOTATIONS}
                       selectedLines={null}
                       themeType={resolvedThemeType}

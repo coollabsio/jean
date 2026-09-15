@@ -3,7 +3,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { invoke } from '@/lib/transport'
+import { invoke, invokeForOptionalServer } from '@/lib/transport'
 import { logger } from '@/lib/logger'
 import { toast } from 'sonner'
 import { hasBackendTransport } from '@/lib/environment'
@@ -80,13 +80,19 @@ export function useGrokPathDetection(options?: { enabled?: boolean }) {
   })
 }
 
-export function useGrokCliStatus(options?: { enabled?: boolean }) {
+export function useGrokCliStatus(options?: {
+  enabled?: boolean
+  serverId?: string
+}) {
   return useQuery({
-    queryKey: grokCliQueryKeys.status(),
+    queryKey: [...grokCliQueryKeys.status(), options?.serverId ?? 'local'],
     queryFn: async (): Promise<GrokCliStatus> => {
       if (!isTauri()) return { installed: false, version: null, path: null }
       try {
-        return await invoke<GrokCliStatus>('check_grok_cli_installed')
+        return await invokeForOptionalServer<GrokCliStatus>(
+          options?.serverId,
+          'check_grok_cli_installed'
+        )
       } catch (error) {
         logger.error('Failed to check Grok CLI status', { error })
         return { installed: false, version: null, path: null }
@@ -153,9 +159,14 @@ export function useAvailableGrokModels(options?: { enabled?: boolean }) {
       if (!isTauri()) {
         return [
           {
+            id: 'grok-4.6',
+            label: 'Grok 4.6',
+            isDefault: true,
+          },
+          {
             id: 'grok-4.5',
             label: 'Grok 4.5',
-            isDefault: true,
+            isDefault: false,
           },
         ]
       }
@@ -165,9 +176,14 @@ export function useAvailableGrokModels(options?: { enabled?: boolean }) {
         logger.error('Failed to list Grok models', { error })
         return [
           {
+            id: 'grok-4.6',
+            label: 'Grok 4.6',
+            isDefault: true,
+          },
+          {
             id: 'grok-4.5',
             label: 'Grok 4.5',
-            isDefault: true,
+            isDefault: false,
           },
         ]
       }
@@ -248,7 +264,6 @@ export function useGrokCliSetup() {
       onError: error => options?.onError?.(error),
     })
   }
-
 
   return {
     status: status.data,

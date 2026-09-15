@@ -52,17 +52,14 @@ export function SetupScriptOutput({
             <StatusIcon className={cn('h-4 w-4 shrink-0', statusColor)} />
             <span className="truncate text-muted-foreground">{statusText}</span>
           </CollapsibleTrigger>
-          {/* Only show dismiss button on failure - success messages should persist */}
-          {!result.success && (
-            <button
-              type="button"
-              onClick={onDismiss}
-              className="mr-2 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-              aria-label="Dismiss"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="mr-2 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+            aria-label="Dismiss setup script status"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
         <CollapsibleContent>
           <div className="border-t border-muted px-4 py-3">

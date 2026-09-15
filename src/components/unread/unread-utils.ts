@@ -7,6 +7,7 @@ export function hasPendingSessionApproval(session: Session): boolean {
   return (
     (session.pending_codex_command_approval_requests?.length ?? 0) > 0 ||
     (session.pending_codex_permission_requests?.length ?? 0) > 0 ||
+    (session.pending_opencode_permission_requests?.length ?? 0) > 0 ||
     (session.pending_codex_user_input_requests?.length ?? 0) > 0 ||
     (session.pending_codex_mcp_elicitation_requests?.length ?? 0) > 0 ||
     (session.pending_codex_dynamic_tool_call_requests?.length ?? 0) > 0 ||

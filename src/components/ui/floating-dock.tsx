@@ -72,6 +72,7 @@ import type { WorktreeSessions } from '@/types/chat'
 import { DEFAULT_KEYBINDINGS, formatShortcutDisplay } from '@/types/keybindings'
 import type { KeybindingHint } from '@/components/ui/keybinding-hints'
 import { getResumeCommand } from '@/components/chat/session-card-utils'
+import { shouldHideFloatingDock } from './floating-dock-visibility'
 import { ClaudeIcon } from '@/components/icons/ClaudeIcon'
 import { CodexIcon } from '@/components/icons/CodexIcon'
 import { GrokIcon } from '@/components/icons/GrokIcon'
@@ -174,6 +175,7 @@ const serverLg = () => true
 export function FloatingDock() {
   const chatToolbarMounted = useUIStore(state => state.chatToolbarMounted)
   const reviewSurfaceMounted = useUIStore(state => state.reviewSurfaceMounted)
+  const zenMode = useUIStore(state => state.zenMode)
   const isMobile = useIsMobile()
   const isLg = useSyncExternalStore(subscribeLg, snapshotLg, serverLg)
   const { data: preferences } = usePreferences()
@@ -462,7 +464,12 @@ export function FloatingDock() {
   // bottom input/toolbar, so the corner dock would cover terminal output.
   // Full-width review replaces chat (no toolbar) and puts Send buttons at the
   // bottom — the dock would sit on top of those actions.
-  if (chatToolbarMounted || isTerminalSession || reviewSurfaceMounted)
+  if (
+    chatToolbarMounted ||
+    isTerminalSession ||
+    reviewSurfaceMounted ||
+    shouldHideFloatingDock(isMobile, zenMode)
+  )
     return null
 
   return (

@@ -3,6 +3,7 @@ import { render, screen } from '@/test/test-utils'
 import { FileBrowserSidebar } from './FileBrowserSidebar'
 import type * as FilesService from '@/services/files'
 import type * as ProjectsService from '@/services/projects'
+import { useChatStore } from '@/store/chat-store'
 
 /**
  * Regression for #628: when useWorktreeFiles returns undefined data
@@ -51,5 +52,24 @@ describe('FileBrowserSidebar', () => {
     expect(
       screen.getByText('Select a project or worktree to browse files.')
     ).toBeTruthy()
+  })
+
+  it('shows only the Files title and header actions', () => {
+    useChatStore.setState({ activeWorktreePath: '/repo/main' })
+
+    const { container, unmount } = render(<FileBrowserSidebar />)
+
+    expect(screen.getByText('Files')).toBeVisible()
+    expect(screen.queryByText('main')).not.toBeInTheDocument()
+    expect(container.querySelector('.lucide-folder-tree')).toBeNull()
+    expect(
+      screen.getByRole('button', { name: 'Refresh file list' })
+    ).toBeVisible()
+    expect(
+      screen.getByRole('button', { name: 'Close file browser' })
+    ).toBeVisible()
+
+    unmount()
+    useChatStore.setState({ activeWorktreePath: null })
   })
 })

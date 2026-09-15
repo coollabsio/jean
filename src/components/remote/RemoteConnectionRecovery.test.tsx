@@ -33,11 +33,13 @@ describe('RemoteConnectionRecovery', () => {
     )
 
     expect(dismissTransientUi).toHaveBeenCalledOnce()
-    expect(screen.getByRole('heading', { name: /Couldn't connect to Lab/i })).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: /Couldn't connect to Lab/i })
+    ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
     expect(
-      screen.getByRole('button', { name: 'Switch to Local' })
-    ).toBeInTheDocument()
+      screen.queryByRole('button', { name: 'Switch to Local' })
+    ).not.toBeInTheDocument()
   })
 
   it('uses a z-index above dialogs and menus', () => {
@@ -55,5 +57,26 @@ describe('RemoteConnectionRecovery', () => {
 
     const root = container.firstElementChild as HTMLElement
     expect(root.className).toContain('z-[100]')
+  })
+
+  it('automatically retries the connection every 10 seconds', () => {
+    const setIntervalSpy = vi.spyOn(window, 'setInterval')
+
+    const { unmount } = render(
+      <RemoteConnectionRecovery
+        connection={{
+          id: 'remote-1',
+          name: 'Lab',
+          url: 'https://lab.example',
+          token: 'tok',
+        }}
+        error="lost"
+      />
+    )
+
+    expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 10_000)
+
+    unmount()
+    setIntervalSpy.mockRestore()
   })
 })

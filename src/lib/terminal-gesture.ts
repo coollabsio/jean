@@ -1,7 +1,4 @@
-import {
-  isPanelTerminal,
-  useTerminalStore,
-} from '@/store/terminal-store'
+import { isPanelTerminal, useTerminalStore } from '@/store/terminal-store'
 
 /**
  * Whether the chat terminal surface is open for a worktree.
@@ -17,7 +14,8 @@ export function isChatTerminalOpen(
     return state.modalTerminalOpen[worktreeId] ?? false
   }
   return (
-    (state.terminalPanelOpen[worktreeId] ?? false) && state.terminalVisible
+    (state.terminalPanelOpen[worktreeId] ?? false) &&
+    (state.terminalVisibleByWorktree[worktreeId] ?? false)
   )
 }
 
@@ -37,7 +35,7 @@ export function openChatTerminal(
     store.addTerminal(worktreeId)
   } else {
     store.setTerminalPanelOpen(worktreeId, true)
-    store.setTerminalVisible(true)
+    store.setTerminalVisibleForWorktree(worktreeId, true)
   }
 }
 
@@ -52,5 +50,5 @@ export function closeChatTerminal(
     return
   }
   store.setTerminalPanelOpen(worktreeId, false)
-  store.setTerminalVisible(false)
+  store.setTerminalVisibleForWorktree(worktreeId, false)
 }

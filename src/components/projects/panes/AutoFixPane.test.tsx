@@ -487,10 +487,10 @@ describe('AutoFixPane', () => {
     const expectedBackends = ['Claude', 'Codex', 'Cursor']
     const hiddenBackends = [
       'OpenCode',
-      'PI (Beta)',
-      'Command Code (Beta)',
-      'Grok (Beta)',
-      'Kimi Code (Beta)',
+      'PI',
+      'Command Code',
+      'Grok',
+      'Kimi Code',
     ]
 
     await user.click(

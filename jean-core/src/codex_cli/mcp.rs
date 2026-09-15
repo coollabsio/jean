@@ -138,3 +138,28 @@ fn entry_to_json_map(entry: &CodexMcpServerEntry) -> serde_json::Map<String, ser
 
     map
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn discovers_enabled_oauth_http_server_without_explicit_enabled_flag() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let config = temp.path().join("config.toml");
+        std::fs::write(
+            &config,
+            "[mcp_servers.clickup]\nurl = \"https://mcp.clickup.com/mcp\"\n",
+        )
+        .expect("write config");
+
+        let mut servers = Vec::new();
+        let mut seen = HashSet::new();
+        collect_from_toml(&config, "user", &mut servers, &mut seen);
+
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0].name, "clickup");
+        assert!(!servers[0].disabled);
+        assert_eq!(servers[0].config["url"], "https://mcp.clickup.com/mcp");
+    }
+}

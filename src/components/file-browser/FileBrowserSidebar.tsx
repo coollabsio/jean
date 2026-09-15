@@ -14,7 +14,6 @@ import {
   FileIcon,
   Folder,
   FolderOpen,
-  FolderTree,
   Loader2,
   RefreshCw,
   Search,
@@ -120,7 +119,7 @@ export function FileBrowserSidebar({
   const setViewingFilePath = useUIStore(state => state.setViewingFilePath)
   const viewingFilePath = useUIStore(state => state.viewingFilePath)
 
-  const { rootPath, label } = useFileBrowserRootPath()
+  const { rootPath } = useFileBrowserRootPath()
   const {
     data: files = EMPTY_WORKTREE_FILES,
     isLoading,
@@ -295,18 +294,7 @@ export function FileBrowserSidebar({
     >
       {/* Header */}
       <div className="flex items-center gap-1 border-b border-sidebar-border px-2 py-1.5">
-        <FolderTree className="size-3.5 shrink-0 text-muted-foreground" />
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-xs font-medium">Files</p>
-          {label && (
-            <p
-              className="truncate text-[0.625rem] text-muted-foreground"
-              title={rootPath ?? undefined}
-            >
-              {label}
-            </p>
-          )}
-        </div>
+        <p className="min-w-0 flex-1 truncate text-xs font-medium">Files</p>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button

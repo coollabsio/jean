@@ -1,10 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useEffectEvent,
-  useRef,
-  useState,
-} from 'react'
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   connectTransport,
@@ -12,6 +6,7 @@ import {
   invoke,
   useWsConnectionStatus,
   useWsAuthError,
+  useWsAuthReason,
   preloadInitialData,
   setAppDataDir,
   hasPreloadedData,
@@ -41,6 +36,7 @@ import './App.css'
 import MainWindow from './components/layout/MainWindow'
 import { ThemeProvider } from './components/ThemeProvider'
 import ErrorBoundary from './components/ErrorBoundary'
+import { shouldSurfaceGlobalError } from '@/lib/global-error-utils'
 import { useClaudeCliStatus, useClaudeCliAuth } from './services/claude-cli'
 import {
   useCodexCliStatus,
@@ -91,6 +87,7 @@ import {
 import { scheduleIdleWork } from './lib/idle'
 import { isWindows } from './lib/platform'
 import { checkWebClientVersion } from './lib/web-client-version'
+import { startNativeServerConnections } from './lib/native-server-connections'
 import {
   collectExecutionModes,
   collectWorktreePaths,
@@ -106,6 +103,7 @@ import {
 import { RemoteConnectionRecovery } from './components/remote/RemoteConnectionRecovery'
 import { getStartupOnboardingAction } from './lib/startup-onboarding'
 import { dismissTransientUi } from './lib/dismiss-transient-ui'
+import { JeanLoadingScreen } from './components/shared/JeanLoadingScreen'
 
 interface AutoFixStoppedEvent {
   projectId: string
@@ -114,30 +112,15 @@ interface AutoFixStoppedEvent {
   error: string
 }
 
-function WebLoadingScreen({ label }: { label: string }) {
-  return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-background">
-      <p
-        role="status"
-        className="whitespace-nowrap text-[16px] leading-[26px] text-muted-foreground"
-        style={{
-          fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
-        }}
-      >
-        {label}
-      </p>
-    </div>
-  )
-}
-
 function handleWsAuthTokenSubmit(token: string) {
   localStorage.setItem('jean-http-token', token)
   window.location.reload()
 }
 
-/** Full-screen auth error overlay for web access mode. */
+/** Sign-in surface for web access mode, shown until the session is authorized. */
 function WsAuthErrorOverlay() {
   const authError = useWsAuthError()
+  const authReason = useWsAuthReason()
   const remote = getActiveRemoteConnection()
 
   if (!authError) return null
@@ -147,9 +130,13 @@ function WsAuthErrorOverlay() {
   }
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-background/90">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-background">
       <WebAccessAuthScreen
         authError={authError}
+        // 'unreachable' only arises on remote paths; if one slips through
+        // (remote removed right after a drop), the sign-in form still works —
+        // submitting reloads the page, which is how connections recover.
+        reason={authReason === 'rejected' ? 'rejected' : 'signed-out'}
         onTokenSubmit={handleWsAuthTokenSubmit}
       />
     </div>
@@ -168,6 +155,19 @@ function App() {
   const featureTourOpen = useUIStore(state => state.featureTourOpen)
   const jeanMcpIntroOpen = useUIStore(state => state.jeanMcpIntroOpen)
   const hasStartedTransportRef = useRef(false)
+
+  useEffect(() => {
+    let stopped = false
+    let cleanup: () => void = () => undefined
+    void startNativeServerConnections().then(dispose => {
+      if (stopped) dispose()
+      else cleanup = dispose
+    })
+    return () => {
+      stopped = true
+      cleanup()
+    }
+  }, [])
 
   // Keep quit working during preloading and server-switch overlays (MainWindow
   // may be unmounted). Production-only; uses destroy() so Windows cannot
@@ -286,6 +286,17 @@ function App() {
               break
           }
         })
+
+        // Jean-managed Codex 0.147+ needs a sibling code-mode host. Older Jean
+        // versions did not install it, so repair only that missing helper after
+        // updating Jean instead of downloading the full Codex CLI again.
+        try {
+          await invoke('install_missing_codex_code_mode_host')
+        } catch (codexError) {
+          logger.warn('Failed to install missing Codex code-mode host', {
+            error: codexError,
+          })
+        }
 
         // Package is on disk; app must relaunch. Clear the download handle and
         // record ready state so further UI actions relaunch instead of re-downloading.
@@ -735,9 +746,16 @@ function App() {
     [queryClient]
   )
 
-  // Preload initial data via HTTP for web view (faster than waiting for WebSocket)
+  // Preload initial data via HTTP while opening the WebSocket in parallel.
+  // Previously these were sequential (HTTP → then WS), which doubled the
+  // "Loading Jean..." wall time on web access.
   useEffect(() => {
     if (!webBackend) return
+
+    if (!hasStartedTransportRef.current) {
+      hasStartedTransportRef.current = true
+      connectTransport()
+    }
 
     const initialSelectedProjectId =
       peekWebReloadState()?.projectId ??
@@ -794,6 +812,7 @@ function App() {
         stack: reason instanceof Error ? reason.stack : undefined,
       })
       if (
+        shouldSurfaceGlobalError(message) &&
         !isAlreadySurfacedAuthError(message) &&
         !isTransientTransportError(message)
       ) {
@@ -810,6 +829,7 @@ function App() {
         filename: event.filename,
       })
       if (
+        shouldSurfaceGlobalError(message) &&
         !isAlreadySurfacedAuthError(message) &&
         !isTransientTransportError(message)
       ) {
@@ -853,8 +873,9 @@ function App() {
   // Keep Codex usage UI fresh when the app-server pushes account rate-limit updates.
   useCodexUsageUpdateListener()
 
-  // Browser mode: only open WebSocket after preload + listener registration.
-  // This lets us replay buffered server events before live events start arriving.
+  // Browser mode: WebSocket starts in parallel with HTTP preload (see above).
+  // Bootstrap replay events are ingested into the transport buffer before live
+  // listeners attach; WS buffers events until React listeners register.
   // Native remote clients keep the shell and show RemoteConnectionRecovery —
   // dismiss open overlays so they cannot trap pointer events (issue #623).
   // Pure web-access reloads so in-memory UI state is rebuilt cleanly.
@@ -871,12 +892,6 @@ function App() {
       window.location.reload()
     })
   }, [captureWebReloadState, webBackend])
-
-  useEffect(() => {
-    if (!webBackend || isPreloading || hasStartedTransportRef.current) return
-    hasStartedTransportRef.current = true
-    connectTransport()
-  }, [isPreloading, webBackend])
 
   // Global queue processor - must be at App level so queued messages execute
   // even when the worktree is not focused (ChatWindow unmounted)
@@ -967,10 +982,12 @@ function App() {
   })
   const { data: commandcodeStatus, isLoading: isCommandcodeStatusLoading } =
     useCommandCodeCliStatus({ enabled: nativeCli })
-  const { data: grokStatus, isLoading: isGrokStatusLoading } =
-    useGrokCliStatus({ enabled: nativeCli })
-  const { data: kimiStatus, isLoading: isKimiStatusLoading } =
-    useKimiCliStatus({ enabled: nativeCli })
+  const { data: grokStatus, isLoading: isGrokStatusLoading } = useGrokCliStatus(
+    { enabled: nativeCli }
+  )
+  const { data: kimiStatus, isLoading: isKimiStatusLoading } = useKimiCliStatus(
+    { enabled: nativeCli }
+  )
   const { data: ghStatus, isLoading: isGhStatusLoading } = useGhCliStatus({
     enabled: nativeCli,
   })
@@ -986,10 +1003,11 @@ function App() {
     useOpencodeCliAuth({
       enabled: nativeCli && !!opencodeStatus?.installed,
     })
-  const { data: cursorAuth, isLoading: isCursorAuthLoading } =
-    useCursorCliAuth({
+  const { data: cursorAuth, isLoading: isCursorAuthLoading } = useCursorCliAuth(
+    {
       enabled: nativeCli && !!cursorStatus?.installed,
-    })
+    }
+  )
   const { data: piAuth, isLoading: isPiAuthLoading } = usePiCliAuth({
     enabled: nativeCli && !!piStatus?.installed,
   })
@@ -1190,8 +1208,7 @@ function App() {
 
     const ghReady = !!ghStatus?.installed && !!ghAuth?.authenticated
     const hasAiBackendReady = aiStatuses.some(
-      (status, index) =>
-        !!status?.installed && !!aiAuth[index]?.authenticated
+      (status, index) => !!status?.installed && !!aiAuth[index]?.authenticated
     )
 
     // If setup is incomplete, onboarding owns the startup surface.
@@ -1382,16 +1399,15 @@ function App() {
       if (ui.isUpdateInstalling) return
 
       // Web / remote: ask the host to install (desktop event or jean-server binary)
-      const version =
-        ui.pendingUpdateVersion || ui.updateModalVersion
+      const version = ui.pendingUpdateVersion || ui.updateModalVersion
       if (!version) {
         logger.warn(
           'install-pending-update fired with no version or update object'
         )
         return
       }
-      void import('@/hooks/useServerUpdateCheck').then(({ applyServerUpdate }) =>
-        applyServerUpdate(version)
+      void import('@/hooks/useServerUpdateCheck').then(
+        ({ applyServerUpdate }) => applyServerUpdate(version)
       )
     }
     window.addEventListener('install-pending-update', handleInstallPending)
@@ -1628,10 +1644,26 @@ function App() {
   // Show loading screen while preloading initial data (web view only).
   // QuitConfirmationDialog stays mounted so X/quit can still confirm or
   // destroy the native window while the overlay is up.
-  if (isPreloading) {
+  //
+  // When HTTP preload succeeds we render the shell immediately — invokes queue
+  // until the WebSocket finishes connecting (started in parallel). Only block
+  // on WS when preload failed and we have nothing to show.
+  const blockOnWs =
+    webBackend && !wsConnected && !wsAuthError && !hasPreloadedData()
+
+  // A browser session that has not authenticated yet has nothing to show
+  // behind the sign-in prompt. Render it alone instead of booting the whole
+  // app underneath and covering it with an overlay. Native remote clients keep
+  // the overlay: their local UI stays usable while a remote is unreachable.
+  if (webBackend && wsAuthError && !getActiveRemoteConnection()) {
+    return <WsAuthErrorOverlay />
+  }
+
+  if (isPreloading || blockOnWs) {
     return (
       <>
-        <WebLoadingScreen label="Loading Jean..." />
+        <JeanLoadingScreen />
+        {webBackend && <WsAuthErrorOverlay />}
         {isNativeApp() && <QuitConfirmationDialog />}
       </>
     )
@@ -1641,9 +1673,6 @@ function App() {
     <ErrorBoundary>
       <ThemeProvider>
         <MainWindow />
-        {webBackend && !wsConnected && !wsAuthError && (
-          <WebLoadingScreen label="Loading Jean..." />
-        )}
         {webBackend && <WsAuthErrorOverlay />}
         {/* App-level dialog so quit confirmation wins over loading overlay
             even if MainWindow's copy is covered / not yet mounted. */}

@@ -1,13 +1,39 @@
+import { useSyncExternalStore } from 'react'
 import { useBrowserStore } from '@/store/browser-store'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { isNativeApp } from '@/lib/environment'
+import {
+  getChatComposerBottomOffset,
+  subscribeChatComposerMetrics,
+} from '@/lib/chat-composer-metrics'
 
 const BASE = 52
 const GUTTER = 12
 
-export function useToasterOffset() {
+export type ToasterOffsetValue =
+  | number
+  | string
+  | {
+      top?: number | string
+      right?: number | string
+      bottom?: number | string
+      left?: number | string
+    }
+
+export function useChatComposerToasterOffset(): number {
+  return useSyncExternalStore(
+    subscribeChatComposerMetrics,
+    getChatComposerBottomOffset,
+    () => 0
+  )
+}
+
+export function useToasterOffset(): {
+  offset: ToasterOffsetValue
+  mobileOffset: ToasterOffsetValue
+} {
   const activeWorktreeId = useChatStore(s => s.activeWorktreeId)
   const sessionChatModalOpen = useUIStore(s => s.sessionChatModalOpen)
   const sessionChatModalWorktreeId = useUIStore(
@@ -35,8 +61,21 @@ export function useToasterOffset() {
   const modalDockMode = useBrowserStore(s => s.modalDockMode)
   const modalWidth = useBrowserStore(s => s.modalWidth)
   const modalHeight = useBrowserStore(s => s.modalHeight)
+  const composerBottom = useChatComposerToasterOffset()
 
-  if (!isNativeApp()) return `${BASE}px`
+  const mobileBottom = composerBottom > 0 ? composerBottom : BASE
+
+  if (!isNativeApp()) {
+    return {
+      offset: `${BASE}px`,
+      mobileOffset: {
+        top: BASE,
+        right: BASE,
+        left: BASE,
+        bottom: mobileBottom,
+      },
+    }
+  }
 
   let right = BASE
   let bottom = BASE
@@ -52,5 +91,13 @@ export function useToasterOffset() {
     }
   }
 
-  return { top: BASE, right, bottom, left: BASE }
+  return {
+    offset: { top: BASE, right, bottom, left: BASE },
+    mobileOffset: {
+      top: BASE,
+      right,
+      left: BASE,
+      bottom: mobileBottom,
+    },
+  }
 }

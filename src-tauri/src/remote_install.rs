@@ -73,9 +73,7 @@ pub fn validate_ssh_user(user: &str) -> Result<(), String> {
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.' || c == '$')
     {
-        return Err(
-            "SSH user may only contain letters, numbers, ., _, -, or $.".to_string(),
-        );
+        return Err("SSH user may only contain letters, numbers, ., _, -, or $.".to_string());
     }
     Ok(())
 }
@@ -207,12 +205,7 @@ fn run_ssh(
     Ok((code, stdout, stderr))
 }
 
-fn run_ssh_ok(
-    user: &str,
-    host: &str,
-    ssh_port: u16,
-    remote_cmd: &str,
-) -> Result<String, String> {
+fn run_ssh_ok(user: &str, host: &str, ssh_port: u16, remote_cmd: &str) -> Result<String, String> {
     let (code, stdout, stderr) = run_ssh(user, host, ssh_port, remote_cmd)?;
     if code != 0 {
         let detail = [stderr.trim(), stdout.trim()]
@@ -226,9 +219,9 @@ fn run_ssh_ok(
 
 /// Parse `http://host:port/path?query` without the url crate.
 fn parse_http_url(url: &str) -> Result<(String, u16, String), String> {
-    let rest = url
-        .strip_prefix("http://")
-        .ok_or_else(|| format!("Only http:// URLs are supported for remote install probes: {url}"))?;
+    let rest = url.strip_prefix("http://").ok_or_else(|| {
+        format!("Only http:// URLs are supported for remote install probes: {url}")
+    })?;
 
     let (authority, path_and_query) = match rest.split_once('/') {
         Some((auth, path)) => (auth, format!("/{path}")),
@@ -394,11 +387,7 @@ fn wait_until_ready(app: &AppHandle, url: &str, token: &str) -> Result<(), Strin
     ))
 }
 
-fn try_read_existing_token(
-    user: &str,
-    host: &str,
-    ssh_port: u16,
-) -> Option<(String, String)> {
+fn try_read_existing_token(user: &str, host: &str, ssh_port: u16) -> Option<(String, String)> {
     // Prefer system env, then user env.
     let system_cmd = "sudo -n cat /etc/jean-server.env 2>/dev/null || true";
     if let Ok(body) = run_ssh_ok(user, host, ssh_port, system_cmd) {
@@ -420,9 +409,7 @@ fn try_read_existing_token(
 /// Build the remote bash install script.
 pub fn build_install_remote_script(jean_port: u16, user_install: bool) -> String {
     let install_args = if user_install {
-        format!(
-            "--user-install --host 0.0.0.0 --port {jean_port} --token \"$TOKEN\" -y"
-        )
+        format!("--user-install --host 0.0.0.0 --port {jean_port} --token \"$TOKEN\" -y")
     } else {
         format!("--host 0.0.0.0 --port {jean_port} --token \"$TOKEN\" -y")
     };
@@ -593,14 +580,8 @@ pub fn install_remote_jean_server(
     }
 
     // 3) Install
-    let (token, mode, install_log) = run_install(
-        &app,
-        &user,
-        &host,
-        ssh_port,
-        jean_port,
-        input.user_install,
-    )?;
+    let (token, mode, install_log) =
+        run_install(&app, &user, &host, ssh_port, jean_port, input.user_install)?;
     log.push_str(&install_log);
 
     // 4) Wait until healthy from this client
@@ -689,8 +670,7 @@ JEAN_INSTALL_TOKEN=abc123+/=
 
     #[test]
     fn parse_http_url_basic() {
-        let (host, port, path) =
-            parse_http_url("http://10.0.0.1:3456/api/auth?token=x").unwrap();
+        let (host, port, path) = parse_http_url("http://10.0.0.1:3456/api/auth?token=x").unwrap();
         assert_eq!(host, "10.0.0.1");
         assert_eq!(port, 3456);
         assert_eq!(path, "/api/auth?token=x");

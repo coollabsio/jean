@@ -1,0 +1,125 @@
+use serde::Serialize;
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemPrerequisites {
+    pub git_installed: bool,
+    pub git_version: Option<String>,
+    pub node_installed: bool,
+    pub node_version: Option<String>,
+    pub npm_installed: bool,
+    pub npm_version: Option<String>,
+    pub platform: String,
+    pub automatic_install_supported: bool,
+    pub automatic_install_command: Option<String>,
+    pub manual_install_url: String,
+}
+
+/// Read `<command> --version`.
+///
+/// Uses shared CLI detection so Windows finds `npm.cmd` and callers can reuse
+/// the resolved launcher path.
+fn version(command: &str) -> Option<String> {
+    crate::platform::detect_cli_in_path(command, None, None).version
+}
+
+pub fn check_system_prerequisites() -> SystemPrerequisites {
+    let git_version = version("git");
+    let node_version = version("node");
+    let npm_version = version("npm");
+
+    #[cfg(target_os = "linux")]
+    let automatic_install_command = Some(
+        "set -e; if ! command -v git >/dev/null; then if command -v apt-get >/dev/null; then sudo apt-get update && sudo apt-get install -y git; elif command -v dnf >/dev/null; then sudo dnf install -y git; elif command -v pacman >/dev/null; then sudo pacman -S --needed git; else echo 'Install Git from https://git-scm.com/download/linux'; exit 1; fi; fi; if ! command -v node >/dev/null || ! command -v npm >/dev/null; then printf '\\nInstalling the current Node.js LTS with the official nvm installer (not the often outdated distro Node.js package)...\\n'; export NVM_DIR=\"$HOME/.nvm\"; curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash; . \"$NVM_DIR/nvm.sh\"; nvm install --lts; nvm alias default 'lts/*'; fi; git --version; node --version; npm --version".to_string(),
+    );
+    #[cfg(not(target_os = "linux"))]
+    let automatic_install_command = None;
+
+    SystemPrerequisites {
+        git_installed: git_version.is_some(),
+        git_version,
+        node_installed: node_version.is_some(),
+        node_version,
+        npm_installed: npm_version.is_some(),
+        npm_version,
+        platform: crate::server_platform_name().to_string(),
+        automatic_install_supported: automatic_install_command.is_some(),
+        automatic_install_command,
+        manual_install_url: "https://nodejs.org/en/download".to_string(),
+    }
+}
+
+const NPM_REQUIREMENT_HINT: &str = "requires Node.js and npm. Install a supported Node.js LTS using the official instructions at https://nodejs.org/en/download (distribution packages can be outdated), then retry. Jean onboarding can also install it automatically on supported Linux servers.";
+
+fn require_npm_from_detection(
+    tool: &str,
+    node_version: Option<&str>,
+    npm: &crate::platform::CliDetection,
+) -> Result<String, String> {
+    match (node_version, npm.version.as_deref(), npm.path.as_deref()) {
+        (Some(_), Some(_), Some(path)) if !path.is_empty() => Ok(path.to_string()),
+        _ => Err(format!("{tool} {NPM_REQUIREMENT_HINT}")),
+    }
+}
+
+/// Confirm Node.js and npm are available and return the resolved npm launcher.
+///
+/// On Windows this path prefers `npm.cmd` over an extensionless version-manager
+/// shim so later `host_cli_command()` launches can succeed.
+pub fn require_npm(tool: &str) -> Result<String, String> {
+    let node_version = version("node");
+    let npm = crate::platform::detect_cli_in_path("npm", None, None);
+    require_npm_from_detection(tool, node_version.as_deref(), &npm)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::platform::CliDetection;
+
+    #[test]
+    fn prerequisite_status_has_official_node_url() {
+        assert_eq!(
+            check_system_prerequisites().manual_install_url,
+            "https://nodejs.org/en/download"
+        );
+    }
+
+    fn npm_detection(path: Option<&str>, version: Option<&str>) -> CliDetection {
+        CliDetection {
+            found: path.is_some(),
+            path: path.map(str::to_string),
+            version: version.map(str::to_string),
+            package_manager: None,
+        }
+    }
+
+    #[test]
+    fn require_npm_returns_windows_cmd_shim_when_node_and_npm_are_present() {
+        let npm = npm_detection(
+            Some(r"C:\Users\u\AppData\Local\nvs\default\npm.cmd"),
+            Some("10.9.2"),
+        );
+
+        assert_eq!(
+            require_npm_from_detection("Command Code CLI", Some("v22.14.0"), &npm).unwrap(),
+            r"C:\Users\u\AppData\Local\nvs\default\npm.cmd"
+        );
+    }
+
+    #[test]
+    fn require_npm_errors_when_npm_is_missing() {
+        let err =
+            require_npm_from_detection("Grok CLI", Some("v22.14.0"), &npm_detection(None, None))
+                .unwrap_err();
+        assert!(err.contains("Grok CLI"), "{err}");
+        assert!(err.contains("Node.js and npm"), "{err}");
+    }
+
+    #[test]
+    fn require_npm_errors_when_npm_path_exists_but_version_check_failed() {
+        let npm = npm_detection(Some(r"C:\Users\u\AppData\Roaming\nvm\nodejs\npm"), None);
+        let err = require_npm_from_detection("PI CLI", Some("v22.14.0"), &npm).unwrap_err();
+        assert!(err.contains("PI CLI"), "{err}");
+    }
+}

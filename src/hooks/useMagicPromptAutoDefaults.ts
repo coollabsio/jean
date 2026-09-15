@@ -1,6 +1,9 @@
 import { useEffect, useRef } from 'react'
 import { usePreferences, usePatchPreferences } from '@/services/preferences'
-import { useInstalledBackends } from '@/hooks/useInstalledBackends'
+import {
+  useBackendAuthStatuses,
+  useInstalledBackends,
+} from '@/hooks/useInstalledBackends'
 import {
   CODEX_DEFAULT_MAGIC_PROMPT_MODELS,
   OPENCODE_DEFAULT_MAGIC_PROMPT_MODELS,
@@ -14,75 +17,138 @@ import {
   GROK_DEFAULT_MAGIC_PROMPT_BACKENDS,
   KIMI_DEFAULT_MAGIC_PROMPT_MODELS,
   KIMI_DEFAULT_MAGIC_PROMPT_BACKENDS,
+  ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_MODELS,
+  ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_BACKENDS,
+  DEFAULT_MAGIC_PROMPT_MODELS,
+  DEFAULT_MAGIC_PROMPT_BACKENDS,
+  type CliBackend,
+  type MagicPromptBackends,
+  type MagicPromptModels,
 } from '@/types/preferences'
 
-/**
- * One-time auto-detection: if magic prompt models haven't been initialized yet,
- * detect installed backends and apply the appropriate defaults.
- * Runs once per app lifetime (guarded by magic_models_auto_initialized flag).
- */
+const MAGIC_DEFAULTS: Partial<
+  Record<
+    CliBackend,
+    { models: MagicPromptModels; backends: MagicPromptBackends }
+  >
+> = {
+  codex: {
+    models: CODEX_DEFAULT_MAGIC_PROMPT_MODELS,
+    backends: CODEX_DEFAULT_MAGIC_PROMPT_BACKENDS,
+  },
+  opencode: {
+    models: OPENCODE_DEFAULT_MAGIC_PROMPT_MODELS,
+    backends: OPENCODE_DEFAULT_MAGIC_PROMPT_BACKENDS,
+  },
+  pi: {
+    models: PI_DEFAULT_MAGIC_PROMPT_MODELS,
+    backends: PI_DEFAULT_MAGIC_PROMPT_BACKENDS,
+  },
+  commandcode: {
+    models: COMMANDCODE_DEFAULT_MAGIC_PROMPT_MODELS,
+    backends: COMMANDCODE_DEFAULT_MAGIC_PROMPT_BACKENDS,
+  },
+  grok: {
+    models: GROK_DEFAULT_MAGIC_PROMPT_MODELS,
+    backends: GROK_DEFAULT_MAGIC_PROMPT_BACKENDS,
+  },
+  kimi: {
+    models: KIMI_DEFAULT_MAGIC_PROMPT_MODELS,
+    backends: KIMI_DEFAULT_MAGIC_PROMPT_BACKENDS,
+  },
+  antigravity: {
+    models: ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_MODELS,
+    backends: ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_BACKENDS,
+  },
+}
+
+export function getFirstInstalledMagicDefaults(
+  installedBackends: CliBackend[]
+) {
+  for (const backend of installedBackends) {
+    const defaults = MAGIC_DEFAULTS[backend]
+    if (defaults) return defaults
+    if (backend === 'claude') return null
+  }
+  return null
+}
+
+export function getReadyBackends(
+  installedBackends: CliBackend[],
+  authByBackend: Partial<Record<CliBackend, boolean | undefined>>
+) {
+  return installedBackends.filter(backend => authByBackend[backend] === true)
+}
+
+export function hasUntouchedClaudeMagicDefaults(
+  models: MagicPromptModels,
+  backends: MagicPromptBackends
+) {
+  return (
+    Object.keys(DEFAULT_MAGIC_PROMPT_MODELS).every(
+      key =>
+        models[key as keyof MagicPromptModels] ===
+        DEFAULT_MAGIC_PROMPT_MODELS[key as keyof MagicPromptModels]
+    ) &&
+    Object.keys(DEFAULT_MAGIC_PROMPT_BACKENDS).every(
+      key =>
+        backends[key as keyof MagicPromptBackends] ===
+        DEFAULT_MAGIC_PROMPT_BACKENDS[key as keyof MagicPromptBackends]
+    )
+  )
+}
+
+/** Set magic prompts from the first installed AI CLI after detection completes. */
 export function useMagicPromptAutoDefaults() {
   const { data: preferences } = usePreferences()
-  const { installedBackends, isLoading } = useInstalledBackends()
+  const { installedBackends, isLoading: isStatusLoading } =
+    useInstalledBackends()
+  const { authByBackend, isLoading: isAuthLoading } = useBackendAuthStatuses()
   const patchPreferences = usePatchPreferences()
   const didRun = useRef(false)
 
   useEffect(() => {
-    if (!preferences || isLoading || didRun.current) return
-    if (preferences.magic_models_auto_initialized) return
-    didRun.current = true
+    if (!preferences || isStatusLoading || isAuthLoading || didRun.current)
+      return
 
-    const hasClaude = installedBackends.includes('claude')
-    const hasCodex = installedBackends.includes('codex')
-    const hasOpencode = installedBackends.includes('opencode')
-    const hasPi = installedBackends.includes('pi')
-    const hasCommandcode = installedBackends.includes('commandcode')
-    const hasGrok = installedBackends.includes('grok')
-    const hasKimi = installedBackends.includes('kimi')
+    const readyBackends = getReadyBackends(installedBackends, authByBackend)
 
-    // If claude is installed (or nothing detected yet), keep Claude defaults
-    if (hasClaude || installedBackends.length === 0) {
-      patchPreferences.mutate({ magic_models_auto_initialized: true })
+    // Do not finalize detection before onboarding installs a CLI. The status
+    // queries will refresh after installation and this effect can then select it.
+    if (readyBackends.length === 0) return
+
+    // Repair onboarding from older versions that finalized detection before a
+    // CLI was installed, leaving untouched Claude choices without Claude.
+    if (
+      preferences.magic_models_auto_initialized &&
+      (readyBackends.includes('claude') ||
+        !hasUntouchedClaudeMagicDefaults(
+          preferences.magic_prompt_models,
+          preferences.magic_prompt_backends
+        ))
+    ) {
       return
     }
 
-    // Only non-Claude backends installed — pick the first one
-    if (hasCodex) {
-      patchPreferences.mutate({
-        magic_prompt_models: CODEX_DEFAULT_MAGIC_PROMPT_MODELS,
-        magic_prompt_backends: CODEX_DEFAULT_MAGIC_PROMPT_BACKENDS,
-        magic_models_auto_initialized: true,
-      })
-    } else if (hasOpencode) {
-      patchPreferences.mutate({
-        magic_prompt_models: OPENCODE_DEFAULT_MAGIC_PROMPT_MODELS,
-        magic_prompt_backends: OPENCODE_DEFAULT_MAGIC_PROMPT_BACKENDS,
-        magic_models_auto_initialized: true,
-      })
-    } else if (hasPi) {
-      patchPreferences.mutate({
-        magic_prompt_models: PI_DEFAULT_MAGIC_PROMPT_MODELS,
-        magic_prompt_backends: PI_DEFAULT_MAGIC_PROMPT_BACKENDS,
-        magic_models_auto_initialized: true,
-      })
-    } else if (hasCommandcode) {
-      patchPreferences.mutate({
-        magic_prompt_models: COMMANDCODE_DEFAULT_MAGIC_PROMPT_MODELS,
-        magic_prompt_backends: COMMANDCODE_DEFAULT_MAGIC_PROMPT_BACKENDS,
-        magic_models_auto_initialized: true,
-      })
-    } else if (hasGrok) {
-      patchPreferences.mutate({
-        magic_prompt_models: GROK_DEFAULT_MAGIC_PROMPT_MODELS,
-        magic_prompt_backends: GROK_DEFAULT_MAGIC_PROMPT_BACKENDS,
-        magic_models_auto_initialized: true,
-      })
-    } else if (hasKimi) {
-      patchPreferences.mutate({
-        magic_prompt_models: KIMI_DEFAULT_MAGIC_PROMPT_MODELS,
-        magic_prompt_backends: KIMI_DEFAULT_MAGIC_PROMPT_BACKENDS,
-        magic_models_auto_initialized: true,
-      })
-    }
-  }, [preferences, installedBackends, isLoading, patchPreferences])
+    didRun.current = true
+    const [firstBackend] = readyBackends
+    const defaults = getFirstInstalledMagicDefaults(readyBackends)
+    patchPreferences.mutate({
+      default_backend: firstBackend,
+      ...(defaults
+        ? {
+            magic_prompt_models: defaults.models,
+            magic_prompt_backends: defaults.backends,
+          }
+        : {}),
+      magic_models_auto_initialized: true,
+    })
+  }, [
+    preferences,
+    installedBackends,
+    authByBackend,
+    isStatusLoading,
+    isAuthLoading,
+    patchPreferences,
+  ])
 }

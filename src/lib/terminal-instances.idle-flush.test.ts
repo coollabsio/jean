@@ -37,4 +37,19 @@ describe('terminal idle-freeze regression', () => {
     expect(drainIndex).toBeGreaterThan(-1)
     expect(refreshIndex).toBeGreaterThan(drainIndex)
   })
+
+  it('bounds detached renderer retention and rehydrates idle running PTYs', () => {
+    const source = readSource('src/lib/terminal-instances.ts')
+
+    expect(source).toContain('MAX_DETACHED_TERMINAL_INSTANCES = 20')
+    expect(source).toContain('TERMINAL_SCROLLBACK_LINES = 2_000')
+    expect(source).toContain('RUNNING_RENDERER_IDLE_MS = 5 * 60 * 1000')
+    expect(source).toContain('DETACHED_OUTPUT_BUFFER_CHARS = 512 * 1024')
+    expect(source).toContain('!runningTerminals.has(instance.terminalId)')
+    expect(source).toContain('rendererEvicted')
+    expect(source).toContain('appendDetachedOutput')
+    expect(source).toContain('snapshotTerminalBuffer')
+    expect(source).toContain('restoreDetachedOutput(instance)')
+    expect(source).toContain('trimDetachedTerminalRenderers')
+  })
 })

@@ -3,7 +3,7 @@
  */
 
 import { useQuery } from '@tanstack/react-query'
-import { invoke } from '@/lib/transport'
+import { invoke, invokeForOptionalServer } from '@/lib/transport'
 import { logger } from '@/lib/logger'
 import type {
   CursorAuthStatus,
@@ -63,16 +63,22 @@ export function useCursorPathDetection(options?: { enabled?: boolean }) {
   })
 }
 
-export function useCursorCliStatus(options?: { enabled?: boolean }) {
+export function useCursorCliStatus(options?: {
+  enabled?: boolean
+  serverId?: string
+}) {
   return useQuery({
-    queryKey: cursorCliQueryKeys.status(),
+    queryKey: [...cursorCliQueryKeys.status(), options?.serverId ?? 'local'],
     queryFn: async (): Promise<CursorCliStatus> => {
       if (!isTauri()) {
         return { installed: false, version: null, path: null }
       }
 
       try {
-        return await invoke<CursorCliStatus>('check_cursor_cli_installed')
+        return await invokeForOptionalServer<CursorCliStatus>(
+          options?.serverId,
+          'check_cursor_cli_installed'
+        )
       } catch (error) {
         logger.error('Failed to check Cursor CLI status', { error })
         return { installed: false, version: null, path: null }

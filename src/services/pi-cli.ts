@@ -4,7 +4,7 @@
 
 import { useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { invoke } from '@/lib/transport'
+import { invoke, invokeForOptionalServer } from '@/lib/transport'
 import { toast } from 'sonner'
 import { logger } from '@/lib/logger'
 import type {
@@ -62,13 +62,19 @@ export function usePiPathDetection(options?: { enabled?: boolean }) {
   })
 }
 
-export function usePiCliStatus(options?: { enabled?: boolean }) {
+export function usePiCliStatus(options?: {
+  enabled?: boolean
+  serverId?: string
+}) {
   return useQuery({
-    queryKey: piCliQueryKeys.status(),
+    queryKey: [...piCliQueryKeys.status(), options?.serverId ?? 'local'],
     queryFn: async (): Promise<PiCliStatus> => {
       if (!isTauri()) return { installed: false, version: null, path: null }
       try {
-        return await invoke<PiCliStatus>('check_pi_cli_installed')
+        return await invokeForOptionalServer<PiCliStatus>(
+          options?.serverId,
+          'check_pi_cli_installed'
+        )
       } catch (error) {
         logger.error('Failed to check PI CLI status', { error })
         return { installed: false, version: null, path: null }
@@ -207,7 +213,6 @@ export function usePiCliSetup() {
       onError: error => options?.onError?.(error),
     })
   }
-
 
   return {
     status: status.data,
