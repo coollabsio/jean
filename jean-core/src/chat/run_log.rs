@@ -354,8 +354,12 @@ fn reconcile_completed_running_runs(
     metadata: &mut SessionMetadata,
     ended_at: u64,
     mut has_result: impl FnMut(&str) -> bool,
+    mut extract_provider_session_id: impl FnMut(&str) -> Option<String>,
 ) -> bool {
+    let metadata_backend = metadata.backend.clone();
     let mut reconciled = false;
+    let mut claude_session_id = metadata.claude_session_id.clone();
+    let mut kimi_session_id = metadata.kimi_session_id.clone();
 
     for run in &mut metadata.runs {
         if run.status != RunStatus::Running || !has_result(&run.run_id) {
@@ -368,7 +372,31 @@ fn reconcile_completed_running_runs(
         if run.assistant_message_id.is_none() {
             run.assistant_message_id = Some(Uuid::new_v4().to_string());
         }
+        if run.backend.as_ref().unwrap_or(&metadata_backend) == &Backend::Kimi {
+            if run.kimi_session_id.is_none() {
+                run.kimi_session_id = extract_provider_session_id(&run.run_id);
+            }
+            if let Some(session_id) = run.kimi_session_id.clone() {
+                kimi_session_id = Some(session_id);
+            }
+        } else {
+            if run.claude_session_id.is_none() {
+                run.claude_session_id = extract_provider_session_id(&run.run_id);
+            }
+            if let Some(session_id) = run.claude_session_id.clone() {
+                claude_session_id = Some(session_id);
+            }
+        }
         reconciled = true;
+    }
+
+    if reconciled {
+        metadata.claude_session_id = claude_session_id;
+        metadata.kimi_session_id = kimi_session_id;
+        metadata.is_reviewing = false;
+        if metadata.status_override.as_deref() == Some("review") {
+            metadata.status_override = None;
+        }
     }
 
     reconciled
@@ -463,14 +491,12 @@ pub fn start_run(
             // The JSONL journal is the source of truth. If final metadata
             // persistence was interrupted after a result was written, repair
             // the stale Running status before applying the duplicate guard.
-            if reconcile_completed_running_runs(metadata, now, |run_id| {
-                jsonl_has_result_line(app, session_id, run_id)
-            }) {
-                metadata.is_reviewing = false;
-                if metadata.status_override.as_deref() == Some("review") {
-                    metadata.status_override = None;
-                }
-            }
+            reconcile_completed_running_runs(
+                metadata,
+                now,
+                |run_id| jsonl_has_result_line(app, session_id, run_id),
+                |run_id| extract_session_id_from_jsonl(app, session_id, run_id),
+            );
 
             // Guard: if there's already a Running run, reject to prevent duplicates.
             // This is a safety net — the primary guard is in send_chat_message.
@@ -1682,9 +1708,15 @@ mod tests {
         run.ended_at = None;
         run.assistant_message_id = None;
         metadata.runs.push(run);
+        metadata.is_reviewing = true;
+        metadata.status_override = Some("review".to_string());
 
-        let reconciled =
-            reconcile_completed_running_runs(&mut metadata, 42, |run_id| run_id == "run-123");
+        let reconciled = reconcile_completed_running_runs(
+            &mut metadata,
+            42,
+            |run_id| run_id == "run-123",
+            |_| None,
+        );
 
         assert!(reconciled);
         let run = metadata.find_run("run-123").unwrap();
@@ -1692,10 +1724,59 @@ mod tests {
         assert_eq!(run.ended_at, Some(42));
         assert!(run.recovered);
         assert!(run.assistant_message_id.is_some());
+        assert!(!metadata.is_reviewing);
+        assert!(metadata.status_override.is_none());
         assert!(!metadata
             .runs
             .iter()
             .any(|run| run.status == RunStatus::Running));
+    }
+
+    #[test]
+    fn running_jsonl_without_result_still_blocks_reconciliation() {
+        let mut metadata = SessionMetadata::new(
+            "session-123".to_string(),
+            "worktree-123".to_string(),
+            "Test session".to_string(),
+            0,
+        );
+        let mut run = sample_run();
+        run.status = RunStatus::Running;
+        run.ended_at = None;
+        metadata.runs.push(run);
+
+        let reconciled = reconcile_completed_running_runs(&mut metadata, 42, |_| false, |_| None);
+
+        assert!(!reconciled);
+        let run = metadata.find_run("run-123").unwrap();
+        assert_eq!(run.status, RunStatus::Running);
+        assert_eq!(run.ended_at, None);
+        assert!(!run.recovered);
+    }
+
+    #[test]
+    fn reconciled_run_preserves_provider_session_context() {
+        let mut metadata = SessionMetadata::new(
+            "session-123".to_string(),
+            "worktree-123".to_string(),
+            "Test session".to_string(),
+            0,
+        );
+        let mut run = sample_run();
+        run.status = RunStatus::Running;
+        metadata.runs.push(run);
+
+        reconcile_completed_running_runs(
+            &mut metadata,
+            42,
+            |_| true,
+            |_| Some("claude-session-123".to_string()),
+        );
+
+        assert_eq!(
+            metadata.claude_session_id.as_deref(),
+            Some("claude-session-123")
+        );
     }
 
     #[test]
