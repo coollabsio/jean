@@ -164,6 +164,12 @@ describe('useInvestigateHandlers', () => {
       await result.current.handleInvestigate('sentry-issue')
     })
 
+    expect(invoke).toHaveBeenCalledWith('get_sentry_issue_context_contents', {
+      sessionId: 'base-session',
+      worktreeId: 'worktree-1',
+      projectId: 'project-1',
+    })
+
     expect(sendMessage.mutate).toHaveBeenCalledWith(
       expect.objectContaining({
         message: expect.stringContaining(
@@ -244,7 +250,10 @@ describe('useInvestigateHandlers', () => {
     }
 
     const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
     })
     const wrapper = ({ children }: { children: React.ReactNode }) => (
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
@@ -304,6 +313,58 @@ describe('useInvestigateHandlers', () => {
       expect.any(Object)
     )
     expect(useChatStore.getState().effortLevels['wf-session-1']).toBe('medium')
+  })
+
+  it('uses magic prompt effort for Antigravity Sentry investigation and drops thinking levels', async () => {
+    vi.mocked(invoke).mockImplementation(async command => {
+      if (command === 'get_sentry_issue_context_contents') {
+        return [
+          {
+            id: '456',
+            shortId: 'COOLIFY-AGY',
+            title: 'Antigravity crash',
+            permalink: 'https://sentry.io/issues/456',
+            content: '# Sentry context\n\nStack trace',
+          },
+        ] as never
+      }
+      return undefined as never
+    })
+    const preferences: AppPreferences = {
+      ...defaultPreferences,
+      magic_prompt_models: {
+        ...defaultPreferences.magic_prompt_models,
+        investigate_sentry_issue_model: 'antigravity/auto',
+      },
+      magic_prompt_backends: {
+        ...defaultPreferences.magic_prompt_backends,
+        investigate_sentry_issue_backend: 'antigravity',
+      },
+      magic_prompt_modes: {
+        ...defaultPreferences.magic_prompt_modes,
+        investigate_sentry_issue_mode: 'yolo',
+      },
+      magic_prompt_efforts: {
+        ...defaultPreferences.magic_prompt_efforts,
+        investigate_sentry_issue_effort: 'medium',
+      },
+    }
+    const { result, sendMessage } = renderHandlers({ preferences })
+
+    await act(async () => {
+      await result.current.handleInvestigate('sentry-issue')
+    })
+
+    expect(sendMessage.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'antigravity/auto',
+        backend: 'antigravity',
+        executionMode: 'yolo',
+        effortLevel: 'medium',
+        thinkingLevel: undefined,
+      }),
+      expect.any(Object)
+    )
   })
 
   it('keeps the session UI execution mode in sync with separate review comment send mode', async () => {

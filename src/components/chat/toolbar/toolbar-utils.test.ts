@@ -24,15 +24,15 @@ describe('getSessionProviderDisplayName', () => {
       'OpenCode'
     )
     expect(getSessionProviderDisplayName('grok', null)).toBe('xAI')
+    expect(getSessionProviderDisplayName('kimi', null)).toBe('Kimi Code')
+    expect(getSessionProviderDisplayName('antigravity', null)).toBe('Google')
   })
 
   it('shows custom Codex provider names when selected', () => {
     expect(getSessionProviderDisplayName('codex', 'OpenRouter')).toBe(
       'OpenRouter'
     )
-    expect(getSessionProviderDisplayName('codex', '__default__')).toBe(
-      'OpenAI'
-    )
+    expect(getSessionProviderDisplayName('codex', '__default__')).toBe('OpenAI')
   })
 
   it('falls back to provider selection for claude sessions', () => {

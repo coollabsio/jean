@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useState } from 'react'
 import { toast } from 'sonner'
-import { invoke } from '@/lib/transport'
+import { invoke, invokeForOptionalServer } from '@/lib/transport'
 import { logger } from '@/lib/logger'
 import type {
   CommandCodeAuthStatus,
@@ -60,13 +60,17 @@ export function useCommandCodePathDetection(options?: { enabled?: boolean }) {
   })
 }
 
-export function useCommandCodeCliStatus(options?: { enabled?: boolean }) {
+export function useCommandCodeCliStatus(options?: {
+  enabled?: boolean
+  serverId?: string
+}) {
   return useQuery({
-    queryKey: commandcodeCliQueryKeys.status(),
+    queryKey: [...commandcodeCliQueryKeys.status(), options?.serverId],
     queryFn: async (): Promise<CommandCodeCliStatus> => {
       if (!isTauri()) return { installed: false, version: null, path: null }
       try {
-        return await invoke<CommandCodeCliStatus>(
+        return await invokeForOptionalServer<CommandCodeCliStatus>(
+          options?.serverId,
           'check_commandcode_cli_installed'
         )
       } catch (error) {
@@ -212,7 +216,6 @@ export function useCommandCodeCliSetup() {
       onError: error => options?.onError?.(error),
     })
   }
-
 
   return {
     status: status.data,

@@ -595,11 +595,18 @@ export function WorktreeItem({
           const result = await gitPush(
             worktree.path,
             worktree.pr_number,
-            remote
+            remote,
+            worktree.id
           )
           triggerImmediateGitPoll()
           fetchWorktreesStatus(projectId)
-          if (result.fellBack) {
+          if (result.permissionDenied) {
+            opToast.error('Push failed', {
+              duration: Infinity,
+              description:
+                result.output.trim() || 'The remote rejected the push.',
+            })
+          } else if (result.fellBack) {
             opToast.warning(
               'Could not push to PR branch, pushed to new branch instead'
             )
@@ -620,7 +627,7 @@ export function WorktreeItem({
     [pickRemoteOrRun, worktree.path, worktree.pr_number, projectId]
   )
 
-  const gitSyncButton = preferences?.git_sync_button ?? false
+  const gitSyncButton = preferences?.git_sync_button ?? true
 
   const handleSync = useCallback(
     (e: React.MouseEvent) => {
@@ -730,7 +737,9 @@ export function WorktreeItem({
               {/* Chevron for expand/collapse sessions */}
               <button
                 type="button"
-                aria-label={isExpanded ? 'Collapse sessions' : 'Expand sessions'}
+                aria-label={
+                  isExpanded ? 'Collapse sessions' : 'Expand sessions'
+                }
                 className="flex size-4 shrink-0 items-center justify-center rounded opacity-0 transition-opacity group-hover:opacity-50 hover:!opacity-100 hover:bg-accent-foreground/10"
                 onClick={handleChevronClick}
               >

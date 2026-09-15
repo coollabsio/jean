@@ -30,6 +30,7 @@ fn backend_label(backend: &Backend) -> &'static str {
         Backend::Commandcode => "commandcode",
         Backend::Grok => "grok",
         Backend::Kimi => "kimi",
+        Backend::Antigravity => "antigravity",
     }
 }
 
@@ -87,6 +88,14 @@ pub(crate) fn latest_completed_backend(metadata: &SessionMetadata) -> Option<Bac
                 || run.model.as_deref().is_some_and(crate::is_kimi_model)
             {
                 return Some(Backend::Kimi);
+            }
+            if run.antigravity_session_id.is_some()
+                || run
+                    .model
+                    .as_deref()
+                    .is_some_and(crate::is_antigravity_model)
+            {
+                return Some(Backend::Antigravity);
             }
             if run.claude_session_id.is_some() {
                 return Some(Backend::Claude);
@@ -245,6 +254,7 @@ pub(crate) fn format_handoff_history_from_runs(runs: &[RunEntry], max_chars: usi
                 cancelled: false,
                 plan_approved: false,
                 model: run.model.clone(),
+                backend: None,
                 execution_mode: run.execution_mode.clone(),
                 thinking_level: run.thinking_level.clone(),
                 effort_level: run.effort_level.clone(),
@@ -276,6 +286,7 @@ pub(crate) fn format_handoff_history_from_runs(runs: &[RunEntry], max_chars: usi
                 cancelled: run.cancelled,
                 plan_approved: false,
                 model: run.model.clone(),
+                backend: None,
                 execution_mode: run.execution_mode.clone(),
                 thinking_level: run.thinking_level.clone(),
                 effort_level: run.effort_level.clone(),
@@ -383,6 +394,7 @@ mod tests {
             cancelled: false,
             plan_approved: false,
             model: None,
+            backend: None,
             execution_mode: None,
             thinking_level: None,
             effort_level: None,
@@ -476,6 +488,7 @@ mod tests {
                 cursor_chat_id: None,
                 grok_session_id: None,
                 kimi_session_id: None,
+                antigravity_session_id: None,
                 checkpoint_id: None,
             },
             RunEntry {
@@ -502,6 +515,7 @@ mod tests {
                 cursor_chat_id: None,
                 grok_session_id: None,
                 kimi_session_id: None,
+                antigravity_session_id: None,
                 checkpoint_id: None,
             },
         ];
@@ -575,6 +589,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         });
 
@@ -635,6 +650,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         });
         metadata.runs.push(RunEntry {
@@ -661,6 +677,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         });
 

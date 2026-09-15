@@ -82,6 +82,7 @@ function getDefaultModelForBackend(
         selected_commandcode_model?: string | null
         selected_grok_model?: string | null
         selected_kimi_model?: string | null
+        selected_antigravity_model?: string | null
       }
     | undefined
 ): string {
@@ -101,10 +102,13 @@ function getDefaultModelForBackend(
     return preferences?.selected_commandcode_model ?? 'commandcode/default'
   }
   if (backend === 'grok') {
-    return preferences?.selected_grok_model ?? 'grok/grok-4.5'
+    return preferences?.selected_grok_model ?? 'grok/grok-4.6'
   }
   if (backend === 'kimi') {
     return preferences?.selected_kimi_model ?? 'kimi/default'
+  }
+  if (backend === 'antigravity') {
+    return preferences?.selected_antigravity_model ?? 'antigravity/auto'
   }
   return preferences?.selected_model ?? 'claude-opus-4-8[1m]'
 }
@@ -398,6 +402,10 @@ export function useWorktreeApproval({
           ) ?? 'high'
         effortLevel =
           mapCodexReasoningToEffort(modeEffortPref) ?? defaultGrokEffort
+      } else if (backend === 'antigravity') {
+        // Antigravity has no per-backend default effort pref; adaptive lets
+        // the CLI use its native model default when no level is forced.
+        effortLevel = mapCodexReasoningToEffort(modeEffortPref) ?? 'adaptive'
       } else {
         const fallbackThinking = isThinkingLevel(preferences?.thinking_level)
           ? preferences.thinking_level

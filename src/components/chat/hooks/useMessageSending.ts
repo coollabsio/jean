@@ -533,7 +533,8 @@ export function useMessageSending({
         isCodexBackendRef.current ||
         selectedBackend === 'pi' ||
         selectedBackend === 'grok' ||
-        selectedBackend === 'kimi'
+        selectedBackend === 'kimi' ||
+        selectedBackend === 'antigravity'
       const queuedMessage: QueuedMessage = {
         id: generateId(),
         message,
@@ -553,7 +554,7 @@ export function useMessageSending({
           enabledMcpServersRef.current,
           selectedBackendRef.current
         ),
-        backend: selectedBackend !== 'claude' ? selectedBackend : undefined,
+        backend: selectedBackend,
         queuedAt: Date.now(),
       }
 

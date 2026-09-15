@@ -628,9 +628,9 @@ export function ReviewCommentsDialog() {
       if (sendShortcut) {
         event.preventDefault()
         if (event.shiftKey) {
-          handleSendSeparately()
-        } else {
           handleSendToChat()
+        } else {
+          handleSendSeparately()
         }
         return
       }
@@ -1070,22 +1070,6 @@ export function ReviewCommentsDialog() {
                 variant="outline"
                 size="sm"
                 disabled={activeSelectedCount === 0 || isSending}
-                onClick={handleSendSeparately}
-              >
-                {isSending ? (
-                  <Loader2 className="size-3.5 mr-1.5 animate-spin" />
-                ) : (
-                  <MessagesSquare className="size-3.5 mr-1.5" />
-                )}
-                Send Separately ({activeSelectedCount})
-                <KbdGroup className="ml-1.5 hidden sm:inline-flex">
-                  <Kbd className="h-4 min-w-4 px-1 text-[10px]">⇧</Kbd>
-                  <Kbd className="h-4 min-w-4 px-1 text-[10px]">⌘↵</Kbd>
-                </KbdGroup>
-              </Button>
-              <Button
-                size="sm"
-                disabled={activeSelectedCount === 0 || isSending}
                 onClick={handleSendToChat}
               >
                 {isSending ? (
@@ -1094,6 +1078,22 @@ export function ReviewCommentsDialog() {
                   <MessageSquare className="size-3.5 mr-1.5" />
                 )}
                 Send to Chat ({activeSelectedCount})
+                <KbdGroup className="ml-1.5 hidden sm:inline-flex">
+                  <Kbd className="h-4 min-w-4 px-1 text-[10px]">⇧</Kbd>
+                  <Kbd className="h-4 min-w-4 px-1 text-[10px]">⌘↵</Kbd>
+                </KbdGroup>
+              </Button>
+              <Button
+                size="sm"
+                disabled={activeSelectedCount === 0 || isSending}
+                onClick={handleSendSeparately}
+              >
+                {isSending ? (
+                  <Loader2 className="size-3.5 mr-1.5 animate-spin" />
+                ) : (
+                  <MessagesSquare className="size-3.5 mr-1.5" />
+                )}
+                Send Separately ({activeSelectedCount})
                 <KbdGroup className="ml-1.5 hidden sm:inline-flex">
                   <Kbd className="h-4 min-w-4 px-1 text-[10px]">⌘</Kbd>
                   <Kbd className="h-4 min-w-4 px-1 text-[10px]">↵</Kbd>

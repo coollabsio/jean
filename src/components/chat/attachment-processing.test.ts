@@ -100,6 +100,7 @@ describe('attachment-processing', () => {
     expect(invoke).toHaveBeenCalledWith('save_pasted_image', {
       data: expect.any(String),
       mimeType: 'image/png',
+      sessionId: 'session-1',
     })
     expect(storeState.updatePendingImage).toHaveBeenCalledWith(
       'session-1',
@@ -131,6 +132,7 @@ describe('attachment-processing', () => {
     expect(invoke).toHaveBeenCalledWith('save_pasted_image', {
       data: expect.any(String),
       mimeType: 'image/jpeg',
+      sessionId: 'session-1',
     })
   })
 
@@ -152,6 +154,7 @@ describe('attachment-processing', () => {
 
     expect(invoke).toHaveBeenCalledWith('save_pasted_text', {
       content: '<svg></svg>',
+      sessionId: 'session-1',
     })
     expect(storeState.addPendingTextFile).toHaveBeenCalledWith('session-1', {
       id: 'txt-1',

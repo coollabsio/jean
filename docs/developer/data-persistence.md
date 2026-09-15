@@ -111,24 +111,32 @@ async fn save_preferences(app: AppHandle, preferences: AppPreferences) -> Result
     let json_content = serde_json::to_string_pretty(&preferences)
         .map_err(|e| format!("Failed to serialize preferences: {e}"))?;
 
-    // Write to temporary file with UUID for safety, then rename (atomic operation)
-    let temp_path = prefs_path.with_file_name(format!(
-        "{}.{}.tmp",
-        prefs_path.file_name().unwrap().to_string_lossy(),
-        uuid::Uuid::new_v4()
-    ));
-
-    std::fs::write(&temp_path, json_content)
-        .map_err(|e| format!("Failed to write preferences file: {e}"))?;
-
-    std::fs::rename(&temp_path, &prefs_path)
-        .map_err(|e| format!("Failed to finalize preferences file: {e}"))?;
+    crate::platform::write_file_atomically(&prefs_path, json_content.as_bytes())?;
 
     Ok(())
 }
 ```
 
-**Note:** Using UUID in temp filenames (instead of just `.tmp`) prevents conflicts when multiple writes happen concurrently.
+`write_file_atomically` creates a unique sibling temp file, flushes it, and replaces the destination. It uses the native Windows replacement APIs because `std::fs::rename` cannot overwrite an existing file on Windows; using `std::fs::rename` directly causes every save after the first one to fail.
+
+### Durable Writes and Recovery for Critical Data
+
+For user data where losing the file can make the application appear empty, an atomic
+rename alone is not sufficient: the temporary file must be flushed before it becomes
+the live file. The project registry (`projects.json`) uses the stronger pattern in
+`jean-core/src/projects/storage.rs`:
+
+- Write to a unique sibling temporary file with `create_new`.
+- Call `sync_all` before atomically replacing the destination; also sync the parent
+  directory on Unix and use write-through replacement on Windows.
+- Keep three rotating backups (`projects.json.bak`, `.bak.1`, and `.bak.2`).
+- If the primary JSON is invalid, validate backups and leftover temporary files,
+  preserve the corrupt primary, and restore the first valid candidate.
+- If recovery is impossible, return an error. Never convert a failed read into an
+  empty collection in the UI or an API response.
+
+Use this pattern for other critical persisted data instead of silently falling back
+to defaults after a parse failure.
 
 ### Loading with Defaults
 
@@ -215,14 +223,7 @@ async fn save_emergency_data(
     let json_content = serde_json::to_string_pretty(&data)
         .map_err(|e| format!("Failed to serialize emergency data: {e}"))?;
 
-    // Atomic write pattern
-    let temp_path = file_path.with_extension("tmp");
-
-    std::fs::write(&temp_path, json_content)
-        .map_err(|e| format!("Failed to write emergency data file: {e}"))?;
-
-    std::fs::rename(&temp_path, &file_path)
-        .map_err(|e| format!("Failed to finalize emergency data file: {e}"))?;
+    crate::platform::write_file_atomically(&file_path, json_content.as_bytes())?;
 
     Ok(())
 }
@@ -562,7 +563,7 @@ function migrateKeybindings(
 
 ## Best Practices
 
-1. **Use atomic writes**: Always write to temp file then rename
+1. **Use durable atomic writes**: Flush the temp file before replacing the destination, and sync the parent directory where supported
 2. **Validate inputs**: Check filenames and data before writing
 3. **Handle defaults**: Provide sensible defaults when files don't exist
 4. **Log operations**: Log all file operations for debugging

@@ -232,22 +232,36 @@ function findLatestAssistantText(
     if (!message || message.role !== 'assistant') continue
 
     const blocks = coalesceContentBlocks(message.content_blocks ?? [])
-    const texts: string[] = []
-    for (const block of blocks) {
-      if (block?.type === 'text' && block.text.trim()) {
-        texts.push(block.text)
+    let lastMeaningfulBlock: ContentBlock | undefined
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      const block = blocks[i]
+      if (!block) continue
+      const isEmpty =
+        (block.type === 'text' && !block.text.trim()) ||
+        (block.type === 'thinking' && !block.thinking.trim()) ||
+        (block.type === 'user_input' && !block.text.trim())
+      if (!isEmpty) {
+        lastMeaningfulBlock = block
+        break
       }
     }
-    if (texts.length === 0 && message.content?.trim()) {
-      texts.push(message.content)
-    }
-    if (texts.length === 0) continue
 
-    const combined = texts.join('\n\n')
+    // Only prose that follows all activity is a conclusion. Surfacing an
+    // earlier intro below later tool calls changes the visible timeline and
+    // duplicates that intro when the activity row is expanded after reload.
+    if (lastMeaningfulBlock && lastMeaningfulBlock.type !== 'text') return null
+
+    const text =
+      lastMeaningfulBlock?.type === 'text'
+        ? lastMeaningfulBlock.text
+        : message.content?.trim()
+    if (!text) continue
+
+    const combined = text
     if (!combined.trim()) continue
     const recap = extractRecapSection(combined)
     if (recap) return recap
-    return texts[texts.length - 1] ?? null
+    return text
   }
   return null
 }
@@ -1196,7 +1210,8 @@ export const CompactMessageList = memo(
               Boolean(item.latestText) &&
               !(latestTextIsRecap && latestRunHasPlan)
             const surfaceRecap = latestTextIsRecap && showLatestText
-            const surfacedLatestToolCalls = showLatestText
+            const surfacedLatestToolCalls =
+              isLatestCompact && (showLatestText || hasCancelledMessage)
               ? item.messages.flatMap(({ message }) => message.tool_calls ?? [])
               : []
             return (
@@ -1209,15 +1224,17 @@ export const CompactMessageList = memo(
                   durationFor={durationFor}
                   recapShownExternally={surfaceRecap}
                 />
-                {showLatestText && (
+                {(showLatestText || surfacedLatestToolCalls.length > 0) && (
                   <div className="pb-4">
-                    <Markdown
-                      streaming={false}
-                      messageId={item.key}
-                      sessionId={sessionId}
-                    >
-                      {item.latestText ?? ''}
-                    </Markdown>
+                    {showLatestText && (
+                      <Markdown
+                        streaming={false}
+                        messageId={item.key}
+                        sessionId={sessionId}
+                      >
+                        {item.latestText ?? ''}
+                      </Markdown>
+                    )}
                     {surfacedLatestToolCalls.length > 0 && (
                       <EditedFilesDisplay
                         toolCalls={surfacedLatestToolCalls}

@@ -1,28 +1,5 @@
 import type { SessionCardData } from './session-card-utils'
 
-const STATUS_PRIORITY: Record<string, number> = {
-  // Actionable waiting — highest priority in tab order
-  permission: 0,
-  command_approval: 0,
-  tool_approval: 0,
-  mcp_input: 0,
-  input_required: 0,
-  plan_approval: 0,
-  waiting: 0,
-  // Active runs
-  planning: 1,
-  scheduled: 1,
-  vibing: 2,
-  yoloing: 3,
-  reviewing: 4,
-  // Terminal / review
-  review: 4,
-  completed: 4,
-  cancelled: 4,
-  crashed: 4,
-  idle: 5,
-}
-
 export function sortSessionCardsForTabs(
   cards: SessionCardData[]
 ): SessionCardData[] {
@@ -31,53 +8,25 @@ export function sortSessionCardsForTabs(
     const bIsCodeReview = b.session.name.startsWith('Code Review')
     if (aIsCodeReview !== bIsCodeReview) return aIsCodeReview ? -1 : 1
 
-    const pa = STATUS_PRIORITY[a.status] ?? 1
-    const pb = STATUS_PRIORITY[b.status] ?? 1
-    if (pa !== pb) return pa - pb
-    if (a.session.order !== b.session.order) {
-      return a.session.order - b.session.order
+    if (a.session.updated_at !== b.session.updated_at) {
+      return b.session.updated_at - a.session.updated_at
     }
-    return a.session.created_at - b.session.created_at
+    return b.session.created_at - a.session.created_at
   })
-}
-
-export function buildReorderedSessionIdsWithinStatus(
-  sortedCards: SessionCardData[],
-  draggedSessionId: string,
-  targetSessionId: string
-): string[] | null {
-  if (draggedSessionId === targetSessionId) return null
-
-  const dragged = sortedCards.find(card => card.session.id === draggedSessionId)
-  const target = sortedCards.find(card => card.session.id === targetSessionId)
-  if (!dragged || !target || dragged.status !== target.status) return null
-
-  const ids = sortedCards.map(card => card.session.id)
-  const fromIndex = ids.indexOf(draggedSessionId)
-  const toIndex = ids.indexOf(targetSessionId)
-  if (fromIndex === -1 || toIndex === -1) return null
-
-  ids.splice(fromIndex, 1)
-  ids.splice(toIndex, 0, draggedSessionId)
-  return ids
 }
 
 /**
  * Resolve which session ChatWindow should mount in SessionChatModal.
  *
- * When the sessions query is transiently empty (invalidate after send, web
- * reconnect), keep the store's active session so ChatWindow is not unmounted —
- * unmounting blanks the modal and shows FloatingDock instead of chat input.
+ * Keep the store's active session while session-list queries refresh. A
+ * transient response can be empty or omit the active session. Selecting the
+ * first returned session here would move the user without an explicit action.
+ * Removal handlers select the next session before they clear the old one.
  */
 export function resolveModalSessionId(
   activeSessionId: string | undefined,
   sessionIds: readonly string[]
 ): string | null {
-  if (
-    activeSessionId &&
-    (sessionIds.length === 0 || sessionIds.includes(activeSessionId))
-  ) {
-    return activeSessionId
-  }
+  if (activeSessionId) return activeSessionId
   return sessionIds[0] ?? null
 }

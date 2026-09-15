@@ -232,7 +232,9 @@ fn merge_todo_snapshot(existing: &[Value], incoming: &Value, merge: bool) -> Vec
             .is_none_or(|s| s.is_empty());
 
         if let Some(id) = id {
-            if let Some(pos) = result.iter().position(|existing_item| existing_item.get("id") == Some(&id))
+            if let Some(pos) = result
+                .iter()
+                .position(|existing_item| existing_item.get("id") == Some(&id))
             {
                 let prev = result[pos].as_object().cloned().unwrap_or_default();
                 let mut merged = prev;
@@ -242,10 +244,7 @@ fn merge_todo_snapshot(existing: &[Value], incoming: &Value, merge: bool) -> Vec
                 if !new_content_empty {
                     if let Some(content) = item.get("content").cloned() {
                         merged.insert("content".to_string(), content.clone());
-                        let active = item
-                            .get("activeForm")
-                            .cloned()
-                            .unwrap_or(content);
+                        let active = item.get("activeForm").cloned().unwrap_or(content);
                         merged.insert("activeForm".to_string(), active);
                     }
                 }
@@ -323,10 +322,7 @@ fn extract_acp_plan_todo_write(update: &Value) -> Option<ParsedToolCall> {
 
 /// Apply Grok TodoWrite / ACP plan state onto a running snapshot and rewrite the
 /// tool call input so the UI always sees a full merged list.
-fn apply_todo_write_snapshot(
-    tool: &mut ParsedToolCall,
-    todo_snapshot: &mut Vec<Value>,
-) {
+fn apply_todo_write_snapshot(tool: &mut ParsedToolCall, todo_snapshot: &mut Vec<Value>) {
     if tool.name != "TodoWrite" {
         return;
     }
@@ -635,7 +631,7 @@ fn strip_ansi(input: &str) -> String {
 }
 
 /// Default Grok model used when no Grok-specific model is supplied.
-pub const GROK_DEFAULT_MODEL: &str = "grok-4.5";
+pub const GROK_DEFAULT_MODEL: &str = "grok-4.6";
 
 fn raw_grok_model(model: Option<&str>) -> Option<&str> {
     match model.map(|value| value.strip_prefix("grok/").unwrap_or(value)) {
@@ -2939,6 +2935,7 @@ pub(crate) fn parse_grok_run_to_message(
         cancelled: run.cancelled || response.cancelled,
         plan_approved: false,
         model: run.model.clone(),
+        backend: None,
         execution_mode: run.execution_mode.clone(),
         thinking_level: run.thinking_level.clone(),
         effort_level: run.effort_level.clone(),
@@ -4776,9 +4773,14 @@ mod tests {
         assert_eq!(resolve_one_shot_grok_model("sonnet"), GROK_DEFAULT_MODEL);
         // Grok models pass through unchanged.
         assert_eq!(resolve_one_shot_grok_model("grok-build"), "grok-build");
+        assert_eq!(GROK_DEFAULT_MODEL, "grok-4.6");
         assert_eq!(
             resolve_one_shot_grok_model("grok/grok-4.5"),
             "grok/grok-4.5"
+        );
+        assert_eq!(
+            resolve_one_shot_grok_model("grok/grok-4.6"),
+            "grok/grok-4.6"
         );
     }
 
@@ -5288,6 +5290,7 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
             cursor_chat_id: None,
             grok_session_id: Some("grok-hist-err".to_string()),
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
         let message = parse_grok_run_to_message(&lines, &run).unwrap();
@@ -6118,6 +6121,7 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
             cursor_chat_id: None,
             grok_session_id: Some("grok-hist-1".to_string()),
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
         let message = parse_grok_run_to_message(&lines, &run).unwrap();
@@ -6195,6 +6199,7 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
             cursor_chat_id: None,
             grok_session_id: Some("s".to_string()),
             kimi_session_id: None,
+            antigravity_session_id: None,
             checkpoint_id: None,
         };
         let message = parse_grok_run_to_message(&lines, &run).unwrap();

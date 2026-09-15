@@ -378,7 +378,7 @@ export function useInvestigateHandlers({
             content: string
           }[]
         >('get_sentry_issue_context_contents', {
-          sessionId: activeWorktreeId,
+          sessionId: activeSessionId ?? activeWorktreeId,
           worktreeId: activeWorktreeId,
           projectId: worktreeProjectId ?? '',
         })
@@ -483,6 +483,7 @@ export function useInvestigateHandlers({
         investigateBackend === 'pi' ||
         investigateBackend === 'grok' ||
         investigateBackend === 'kimi' ||
+        investigateBackend === 'antigravity' ||
         investigateUseAdaptive
       const investigateThinkingLevel = usesEffortBackend
         ? undefined
@@ -737,6 +738,7 @@ export function useInvestigateHandlers({
         investigateBackend === 'pi' ||
         investigateBackend === 'grok' ||
         investigateBackend === 'kimi' ||
+        investigateBackend === 'antigravity' ||
         investigateUseAdaptive
       const investigateThinkingLevel = usesEffortBackend
         ? undefined

@@ -1,10 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useEffectEvent,
-  useRef,
-  useState,
-} from 'react'
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   connectTransport,
@@ -12,6 +6,7 @@ import {
   invoke,
   useWsConnectionStatus,
   useWsAuthError,
+  useWsAuthReason,
   preloadInitialData,
   setAppDataDir,
   hasPreloadedData,
@@ -41,6 +36,7 @@ import './App.css'
 import MainWindow from './components/layout/MainWindow'
 import { ThemeProvider } from './components/ThemeProvider'
 import ErrorBoundary from './components/ErrorBoundary'
+import { shouldSurfaceGlobalError } from '@/lib/global-error-utils'
 import { useClaudeCliStatus, useClaudeCliAuth } from './services/claude-cli'
 import {
   useCodexCliStatus,
@@ -91,6 +87,7 @@ import {
 import { scheduleIdleWork } from './lib/idle'
 import { isWindows } from './lib/platform'
 import { checkWebClientVersion } from './lib/web-client-version'
+import { startNativeServerConnections } from './lib/native-server-connections'
 import {
   collectExecutionModes,
   collectWorktreePaths,
@@ -106,6 +103,7 @@ import {
 import { RemoteConnectionRecovery } from './components/remote/RemoteConnectionRecovery'
 import { getStartupOnboardingAction } from './lib/startup-onboarding'
 import { dismissTransientUi } from './lib/dismiss-transient-ui'
+import { JeanLoadingScreen } from './components/shared/JeanLoadingScreen'
 
 interface AutoFixStoppedEvent {
   projectId: string
@@ -114,30 +112,15 @@ interface AutoFixStoppedEvent {
   error: string
 }
 
-function WebLoadingScreen({ label }: { label: string }) {
-  return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-background">
-      <p
-        role="status"
-        className="whitespace-nowrap text-[16px] leading-[26px] text-muted-foreground"
-        style={{
-          fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
-        }}
-      >
-        {label}
-      </p>
-    </div>
-  )
-}
-
 function handleWsAuthTokenSubmit(token: string) {
   localStorage.setItem('jean-http-token', token)
   window.location.reload()
 }
 
-/** Full-screen auth error overlay for web access mode. */
+/** Sign-in surface for web access mode, shown until the session is authorized. */
 function WsAuthErrorOverlay() {
   const authError = useWsAuthError()
+  const authReason = useWsAuthReason()
   const remote = getActiveRemoteConnection()
 
   if (!authError) return null
@@ -147,9 +130,13 @@ function WsAuthErrorOverlay() {
   }
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-background/90">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-background">
       <WebAccessAuthScreen
         authError={authError}
+        // 'unreachable' only arises on remote paths; if one slips through
+        // (remote removed right after a drop), the sign-in form still works —
+        // submitting reloads the page, which is how connections recover.
+        reason={authReason === 'rejected' ? 'rejected' : 'signed-out'}
         onTokenSubmit={handleWsAuthTokenSubmit}
       />
     </div>
@@ -168,6 +155,19 @@ function App() {
   const featureTourOpen = useUIStore(state => state.featureTourOpen)
   const jeanMcpIntroOpen = useUIStore(state => state.jeanMcpIntroOpen)
   const hasStartedTransportRef = useRef(false)
+
+  useEffect(() => {
+    let stopped = false
+    let cleanup: () => void = () => undefined
+    void startNativeServerConnections().then(dispose => {
+      if (stopped) dispose()
+      else cleanup = dispose
+    })
+    return () => {
+      stopped = true
+      cleanup()
+    }
+  }, [])
 
   // Keep quit working during preloading and server-switch overlays (MainWindow
   // may be unmounted). Production-only; uses destroy() so Windows cannot
@@ -812,6 +812,7 @@ function App() {
         stack: reason instanceof Error ? reason.stack : undefined,
       })
       if (
+        shouldSurfaceGlobalError(message) &&
         !isAlreadySurfacedAuthError(message) &&
         !isTransientTransportError(message)
       ) {
@@ -828,6 +829,7 @@ function App() {
         filename: event.filename,
       })
       if (
+        shouldSurfaceGlobalError(message) &&
         !isAlreadySurfacedAuthError(message) &&
         !isTransientTransportError(message)
       ) {
@@ -980,10 +982,12 @@ function App() {
   })
   const { data: commandcodeStatus, isLoading: isCommandcodeStatusLoading } =
     useCommandCodeCliStatus({ enabled: nativeCli })
-  const { data: grokStatus, isLoading: isGrokStatusLoading } =
-    useGrokCliStatus({ enabled: nativeCli })
-  const { data: kimiStatus, isLoading: isKimiStatusLoading } =
-    useKimiCliStatus({ enabled: nativeCli })
+  const { data: grokStatus, isLoading: isGrokStatusLoading } = useGrokCliStatus(
+    { enabled: nativeCli }
+  )
+  const { data: kimiStatus, isLoading: isKimiStatusLoading } = useKimiCliStatus(
+    { enabled: nativeCli }
+  )
   const { data: ghStatus, isLoading: isGhStatusLoading } = useGhCliStatus({
     enabled: nativeCli,
   })
@@ -999,10 +1003,11 @@ function App() {
     useOpencodeCliAuth({
       enabled: nativeCli && !!opencodeStatus?.installed,
     })
-  const { data: cursorAuth, isLoading: isCursorAuthLoading } =
-    useCursorCliAuth({
+  const { data: cursorAuth, isLoading: isCursorAuthLoading } = useCursorCliAuth(
+    {
       enabled: nativeCli && !!cursorStatus?.installed,
-    })
+    }
+  )
   const { data: piAuth, isLoading: isPiAuthLoading } = usePiCliAuth({
     enabled: nativeCli && !!piStatus?.installed,
   })
@@ -1203,8 +1208,7 @@ function App() {
 
     const ghReady = !!ghStatus?.installed && !!ghAuth?.authenticated
     const hasAiBackendReady = aiStatuses.some(
-      (status, index) =>
-        !!status?.installed && !!aiAuth[index]?.authenticated
+      (status, index) => !!status?.installed && !!aiAuth[index]?.authenticated
     )
 
     // If setup is incomplete, onboarding owns the startup surface.
@@ -1395,16 +1399,15 @@ function App() {
       if (ui.isUpdateInstalling) return
 
       // Web / remote: ask the host to install (desktop event or jean-server binary)
-      const version =
-        ui.pendingUpdateVersion || ui.updateModalVersion
+      const version = ui.pendingUpdateVersion || ui.updateModalVersion
       if (!version) {
         logger.warn(
           'install-pending-update fired with no version or update object'
         )
         return
       }
-      void import('@/hooks/useServerUpdateCheck').then(({ applyServerUpdate }) =>
-        applyServerUpdate(version)
+      void import('@/hooks/useServerUpdateCheck').then(
+        ({ applyServerUpdate }) => applyServerUpdate(version)
       )
     }
     window.addEventListener('install-pending-update', handleInstallPending)
@@ -1648,10 +1651,18 @@ function App() {
   const blockOnWs =
     webBackend && !wsConnected && !wsAuthError && !hasPreloadedData()
 
+  // A browser session that has not authenticated yet has nothing to show
+  // behind the sign-in prompt. Render it alone instead of booting the whole
+  // app underneath and covering it with an overlay. Native remote clients keep
+  // the overlay: their local UI stays usable while a remote is unreachable.
+  if (webBackend && wsAuthError && !getActiveRemoteConnection()) {
+    return <WsAuthErrorOverlay />
+  }
+
   if (isPreloading || blockOnWs) {
     return (
       <>
-        <WebLoadingScreen label="Loading Jean..." />
+        <JeanLoadingScreen />
         {webBackend && <WsAuthErrorOverlay />}
         {isNativeApp() && <QuitConfirmationDialog />}
       </>

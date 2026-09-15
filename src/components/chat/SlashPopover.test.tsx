@@ -16,6 +16,7 @@ vi.mock('@/components/ui/backend-label', () => ({
     if (backend === 'grok') return 'Grok'
     if (backend === 'codex') return 'Codex'
     if (backend === 'claude') return 'Claude'
+    if (backend === 'antigravity') return 'Antigravity CLI'
     return backend
   },
 }))
@@ -71,6 +72,14 @@ describe('SlashPopover /goal built-in', () => {
 
     expect(screen.getByText('/goal')).toBeInTheDocument()
     expect(screen.getByText('Grok Commands')).toBeInTheDocument()
+  })
+
+  it('does not show /goal for Antigravity sessions (Codex/Grok-native built-in)', async () => {
+    const { SlashPopover } = await import('./SlashPopover')
+
+    render(<SlashPopover {...baseProps} sessionBackend="antigravity" />)
+
+    expect(screen.queryByText('/goal')).not.toBeInTheDocument()
   })
 })
 

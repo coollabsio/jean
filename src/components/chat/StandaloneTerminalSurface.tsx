@@ -5,14 +5,19 @@
  * emulator and Termius-style extra-keys bar below, with soft-keyboard inset.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { useTerminal } from '@/hooks/useTerminal'
 import { useTerminalBackgroundColor } from '@/hooks/useTerminalThemeSync'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useVisualViewportBottomInset } from '@/hooks/useVisualViewportBottomInset'
 import { isNativeApp } from '@/lib/environment'
 import { isLoginTerminalContainerReady } from '@/lib/terminal-dimensions'
-import { focusTerminal } from '@/lib/terminal-instances'
+import { focusTerminal, writeTerminalInput } from '@/lib/terminal-instances'
+import {
+  normalizeClipboardForTerminal,
+  readFromClipboard,
+} from '@/lib/clipboard'
+import { isModKeyEvent } from '@/types/keybindings'
 import { cn } from '@/lib/utils'
 import { TerminalArrowGesture } from './TerminalArrowGesture'
 import { TerminalExtraKeysBar } from './TerminalExtraKeysBar'
@@ -55,6 +60,23 @@ export function StandaloneTerminalSurface({
     (forceExtraKeys !== false && (!isNativeApp() || isMobile))
   const keyboardInset = useVisualViewportBottomInset(rootRef, showExtraKeys)
   const terminalBg = useTerminalBackgroundColor()
+
+  const handleNativePaste = async (event: KeyboardEvent) => {
+    if (
+      !isNativeApp() ||
+      event.code !== 'KeyV' ||
+      event.shiftKey ||
+      event.altKey ||
+      !isModKeyEvent(event.nativeEvent)
+    ) {
+      return
+    }
+
+    event.preventDefault()
+    event.stopPropagation()
+    const text = normalizeClipboardForTerminal(await readFromClipboard())
+    writeTerminalInput(terminalId, text)
+  }
 
   const { initTerminal, fit, focus } = useTerminal({
     terminalId,
@@ -127,6 +149,7 @@ export function StandaloneTerminalSurface({
         focus()
         focusTerminal(terminalId)
       }}
+      onKeyDownCapture={event => void handleNativePaste(event)}
     >
       {/* Pad chrome sits above the emulator so long-press arrows never cover text. */}
       {showExtraKeys && (

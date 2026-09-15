@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@/test/test-utils'
 import { ChatInput } from './ChatInput'
 import { invoke } from '@/lib/transport'
+import type * as EnvironmentModule from '@/lib/environment'
 import { useUIStore } from '@/store/ui-store'
 import {
   appendPromptMetadataToPlainText,
@@ -12,8 +13,9 @@ import {
 
 const processAttachmentFile = vi.fn()
 const invokeMock = invoke as unknown as ReturnType<typeof vi.fn>
-const { mobileState, slashPopoverMock } = vi.hoisted(() => ({
+const { mobileState, nativeState, slashPopoverMock } = vi.hoisted(() => ({
   mobileState: { value: false },
+  nativeState: { value: false },
   slashPopoverMock: vi.fn(() => null),
 }))
 
@@ -25,11 +27,18 @@ const storeState = {
   addPendingFile: vi.fn(),
   addPendingSkill: vi.fn(),
   addPendingImage: vi.fn(),
+  updatePendingImage: vi.fn(),
+  removePendingImage: vi.fn(),
   addPendingTextFile: vi.fn(),
 }
 
 vi.mock('@/hooks/use-mobile', () => ({
   useIsMobile: () => mobileState.value,
+}))
+
+vi.mock('@/lib/environment', async importOriginal => ({
+  ...(await importOriginal<typeof EnvironmentModule>()),
+  isNativeApp: () => nativeState.value,
 }))
 
 vi.mock('./attachment-processing', () => ({
@@ -56,13 +65,13 @@ vi.mock('@/store/chat-store', () => ({
 }))
 
 describe('ChatInput attachments', () => {
-  const renderInput = () => {
+  const renderInput = (activeSessionId = 'session-1') => {
     const formRef = createRef<HTMLFormElement>()
     const inputRef = createRef<HTMLTextAreaElement>()
 
     render(
       <ChatInput
-        activeSessionId="session-1"
+        activeSessionId={activeSessionId}
         activeWorktreePath="/tmp/worktree"
         isSending={false}
         executionMode="build"
@@ -79,6 +88,7 @@ describe('ChatInput attachments', () => {
 
   beforeEach(() => {
     mobileState.value = false
+    nativeState.value = false
     useUIStore.setState({ zenMode: false })
     processAttachmentFile.mockReset()
     invokeMock.mockReset()
@@ -89,6 +99,8 @@ describe('ChatInput attachments', () => {
     storeState.addPendingFile.mockReset()
     storeState.addPendingSkill.mockReset()
     storeState.addPendingImage.mockReset()
+    storeState.updatePendingImage.mockReset()
+    storeState.removePendingImage.mockReset()
     storeState.addPendingTextFile.mockReset()
     storeState.inputDrafts = {}
     slashPopoverMock.mockClear()
@@ -243,7 +255,7 @@ describe('ChatInput attachments', () => {
 
     const textarea = renderInput()
 
-    expect(textarea).toHaveClass('h-10', 'max-h-10')
+    expect(textarea).toHaveClass('h-12', 'max-h-12')
     expect(textarea).not.toHaveClass('max-h-[50vh]')
   })
 
@@ -252,7 +264,7 @@ describe('ChatInput attachments', () => {
 
     const textarea = renderInput()
 
-    expect(textarea).toHaveClass('h-10', 'max-h-10')
+    expect(textarea).toHaveClass('h-12', 'max-h-12')
     expect(textarea).not.toHaveClass('max-h-[50vh]')
     expect(screen.queryByText('to focus')).not.toBeInTheDocument()
   })
@@ -405,6 +417,111 @@ describe('ChatInput attachments', () => {
     expect(textarea.value).toBe('caption text')
   })
 
+  it('uses clipboard files when iOS omits the image from clipboard items', async () => {
+    const textarea = renderInput()
+    const image = new File(['png'], 'image.png', { type: 'image/png' })
+    processAttachmentFile.mockResolvedValue(undefined)
+
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        getData: () => '',
+        items: [],
+        files: [image],
+      },
+    })
+
+    await waitFor(() => {
+      expect(processAttachmentFile).toHaveBeenCalledWith(image, 'session-1')
+    })
+    expect(invokeMock).not.toHaveBeenCalledWith('read_clipboard_image')
+  })
+
+  it('processes an image once when web clipboard items and files both expose it', async () => {
+    const textarea = renderInput()
+    const itemImage = new File(['png'], 'image.png', {
+      type: 'image/png',
+      lastModified: 123,
+    })
+    const filesImage = new File(['png'], 'image.png', {
+      type: 'image/png',
+      lastModified: 123,
+    })
+    processAttachmentFile.mockResolvedValue(undefined)
+
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        getData: () => '',
+        items: [
+          {
+            type: 'image/png',
+            getAsFile: () => itemImage,
+          },
+        ],
+        files: [filesImage],
+      },
+    })
+
+    await waitFor(() => {
+      expect(processAttachmentFile).toHaveBeenCalledTimes(1)
+    })
+    expect(processAttachmentFile).toHaveBeenCalledWith(itemImage, 'session-1')
+  })
+
+  it('does not request the desktop clipboard for an empty web paste', async () => {
+    const textarea = renderInput()
+
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        getData: () => '',
+        items: [],
+        files: [],
+      },
+    })
+
+    await waitFor(() => {
+      expect(invokeMock).not.toHaveBeenCalledWith('read_clipboard_image')
+    })
+  })
+
+  it('uploads a native clipboard image to the active remote backend', async () => {
+    nativeState.value = true
+    invokeMock
+      .mockResolvedValueOnce({ data: 'clipboard-png', mimeType: 'image/png' })
+      .mockResolvedValueOnce({
+        id: 'remote-image',
+        path: '/remote/pasted-images/image.png',
+        filename: 'image.png',
+      })
+    const textarea = renderInput('remote-a:session-1')
+
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        getData: () => '',
+        items: [],
+        files: [],
+      },
+    })
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenNthCalledWith(1, 'read_clipboard_image')
+      expect(invokeMock).toHaveBeenNthCalledWith(2, 'save_pasted_image', {
+        data: 'clipboard-png',
+        mimeType: 'image/png',
+        sessionId: 'remote-a:session-1',
+      })
+    })
+    expect(storeState.updatePendingImage).toHaveBeenCalledWith(
+      'remote-a:session-1',
+      expect.any(String),
+      {
+        id: 'remote-image',
+        path: '/remote/pasted-images/image.png',
+        filename: 'image.png',
+        loading: false,
+      }
+    )
+  })
+
   it('saves large text as an attachment when pasted with an image', async () => {
     const textarea = renderInput()
     const image = new File(['png'], 'clip.png', { type: 'image/png' })
@@ -433,6 +550,7 @@ describe('ChatInput attachments', () => {
       expect(processAttachmentFile).toHaveBeenCalledWith(image, 'session-1')
       expect(invokeMock).toHaveBeenCalledWith('save_pasted_text', {
         content: largeText,
+        sessionId: 'session-1',
       })
       expect(storeState.addPendingTextFile).toHaveBeenCalledWith(
         'session-1',
@@ -522,6 +640,26 @@ describe('ChatInput IME composition (issue #584)', () => {
       forceSteer: true,
     })
     expect(onSteerModifierChange).toHaveBeenCalledWith(true)
+  })
+
+  it('submits as a steer when Command+Enter is held', () => {
+    const { textarea, onSubmit } = renderWithSubmit({
+      isSending: true,
+      selectedBackend: 'codex',
+    })
+    textarea.value = 'steer this'
+    fireEvent.change(textarea, { target: { value: 'steer this' } })
+
+    fireEvent.keyDown(textarea, {
+      key: 'Enter',
+      code: 'Enter',
+      keyCode: 13,
+      metaKey: true,
+    })
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.anything(), {
+      forceSteer: true,
+    })
   })
 
   it('does not submit when Enter confirms IME composition (isComposing)', () => {

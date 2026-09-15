@@ -1,6 +1,10 @@
+import { renderHook } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { extractCodexAgents } from './useActiveTodosAndAgents'
-import type { ToolCall } from '@/types/chat'
+import {
+  extractCodexAgents,
+  useActiveTodosAndAgents,
+} from './useActiveTodosAndAgents'
+import type { ChatMessage, ToolCall } from '@/types/chat'
 
 function toolCall(
   name: string,
@@ -96,7 +100,7 @@ describe('extractCodexAgents', () => {
     ])
   })
 
-  it('does not convert unresolved in_progress agents to completed when parent stream ends', () => {
+  it('completes unresolved agents when the parent turn finishes normally', () => {
     const tools = [
       toolCall('SpawnAgent', {
         receiver_thread_ids: ['agent-a'],
@@ -111,12 +115,57 @@ describe('extractCodexAgents', () => {
       {
         id: 'agent-a',
         prompt: 'Still working',
-        status: 'interrupted',
-        message: 'Interrupted before completion',
+        status: 'completed',
+        message: undefined,
       },
     ])
 
     // While parent is still sending, leave as in_progress
     expect(extractCodexAgents(tools, true)[0]?.status).toBe('in_progress')
+
+    expect(extractCodexAgents(tools, false, true)).toEqual([
+      {
+        id: 'agent-a',
+        prompt: 'Still working',
+        status: 'interrupted',
+        message: 'Interrupted before completion',
+      },
+    ])
+  })
+})
+
+describe('useActiveTodosAndAgents', () => {
+  it('clears agents from the finished turn when a new prompt starts', () => {
+    const lastAssistantMessage = {
+      id: 'assistant-1',
+      role: 'assistant',
+      content: 'Finished',
+      tool_calls: [
+        toolCall('SpawnAgent', {
+          receiver_thread_ids: ['agent-a'],
+          prompt: 'Investigate the bug',
+          agents_states: {
+            'agent-a': { status: 'running', message: null },
+          },
+        }),
+      ],
+    } as ChatMessage
+
+    const { result, rerender } = renderHook(
+      ({ isSending }) =>
+        useActiveTodosAndAgents({
+          activeSessionId: 'session-1',
+          isSending,
+          currentToolCalls: [],
+          lastAssistantMessage,
+        }),
+      { initialProps: { isSending: false } }
+    )
+
+    expect(result.current.activeAgents[0]?.status).toBe('completed')
+
+    rerender({ isSending: true })
+
+    expect(result.current.activeAgents).toEqual([])
   })
 })

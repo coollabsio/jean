@@ -43,6 +43,9 @@ const PLUGINS: PluginDefinition[] = [
     backends: ['Claude', 'Codex', 'OpenCode', 'Cursor', 'all CLIs'],
     usage: [
       {
+        note: "On Linux and macOS, installs through RTK's documented curl installer into ~/.local/bin.",
+      },
+      {
         note: 'Runs transparently — once installed, use your normal CLI commands (git, npm, docker, cargo, etc.) and RTK auto-rewrites them to token-optimized versions.',
       },
       {
@@ -77,7 +80,7 @@ const PLUGINS: PluginDefinition[] = [
     ],
     usage: [
       {
-        note: "Installs through Caveman's unified installer where supported, then mirrors skills into each backend's CLI path (including ~/.grok/skills for Grok) plus Jean-global mirrors.",
+        note: "On Linux and macOS, installs through Caveman's documented curl installer. Jean then mirrors skills into each backend's CLI path (including ~/.grok/skills for Grok) plus Jean-global mirrors.",
       },
       {
         note: 'Claude and OpenCode can auto-activate. Codex and Cursor expose skills for per-session activation with /caveman; Cursor also gets an always-on rule when the installer can write one.',
@@ -131,6 +134,32 @@ const PLUGINS: PluginDefinition[] = [
       {
         label: 'Request code review',
         command: '/superpowers:requesting-code-review',
+      },
+    ],
+  },
+  {
+    id: 'pstack',
+    name: 'pstack',
+    description:
+      'Poteto\'s cross-backend engineering skill pack. Adds Poteto Mode, architecture and investigation workflows, TDD, concise writing, verification, and focused parallel work.',
+    githubUrl: 'https://github.com/cursor/plugins/tree/main/pstack',
+    scope: 'ai-backends',
+    backends: [
+      'Claude',
+      'Codex',
+      'OpenCode',
+      'Cursor',
+      'Pi',
+      'Command Code',
+      'Grok',
+    ],
+    usage: [
+      {
+        note: 'Downloads the current pstack workflow skills from the Cursor plugins repository, then installs them into each backend path and Jean-global mirror. Jean omits the Cursor-only setup-pstack configuration skill.',
+      },
+      {
+        label: 'Start rigorous engineering mode',
+        command: '/poteto-mode',
       },
     ],
   },

@@ -543,6 +543,8 @@ export function CheckpointsTabView({
                           key={selectedFile.key}
                           fileDiff={selectedFile.fileDiff}
                           fileName={selectedFile.fileName}
+                          rootPath={worktreePath}
+                          resourceOwnerId={worktreeId}
                           annotations={EMPTY_ANNOTATIONS}
                           selectedLines={null}
                           themeType={resolvedThemeType}

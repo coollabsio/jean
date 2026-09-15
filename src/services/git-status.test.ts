@@ -16,12 +16,15 @@ import {
   getRemotePollInterval,
   triggerImmediateRemotePoll,
   getGitDiff,
+  areGitStatusValuesEqual,
   useGitStatus,
+  useGitStatusEvents,
   useAppFocusTracking,
   useWorktreePolling,
   performGitPull,
   performGitSync,
   type WorktreePollingInfo,
+  type GitStatusEvent,
 } from './git-status'
 
 const mockInvoke = vi.fn()
@@ -82,6 +85,28 @@ const createWrapper = (queryClient: QueryClient) => {
   return Wrapper
 }
 
+const createGitStatus = (
+  overrides: Partial<GitStatusEvent> = {}
+): GitStatusEvent => ({
+  worktree_id: 'wt-123',
+  current_branch: 'feature/test',
+  base_branch: 'main',
+  base_remote: undefined,
+  behind_count: 0,
+  ahead_count: 1,
+  has_updates: false,
+  checked_at: 100,
+  uncommitted_added: 0,
+  uncommitted_removed: 0,
+  branch_diff_added: 10,
+  branch_diff_removed: 2,
+  base_branch_ahead_count: 0,
+  base_branch_behind_count: 0,
+  worktree_ahead_count: 1,
+  unpushed_count: 1,
+  ...overrides,
+})
+
 describe('git-status service', () => {
   let queryClient: QueryClient
 
@@ -93,11 +118,16 @@ describe('git-status service', () => {
       value: 1024,
     })
     mockToast.loading.mockReturnValue('toast-1')
+    mockListen.mockResolvedValue(vi.fn())
     mockIsWorktreeRunningNonPlan.mockReturnValue(false)
     mockWsConnected = true
     // Mock Tauri environment
     const { isTauri } = vi.mocked(await import('@/services/projects'))
     isTauri.mockReturnValue(true)
+    const { updateWorktreeCachedStatus } = vi.mocked(
+      await import('@/services/projects')
+    )
+    updateWorktreeCachedStatus.mockResolvedValue(undefined)
   })
 
   afterEach(() => {
@@ -114,6 +144,26 @@ describe('git-status service', () => {
         'git-status',
         'wt-123',
       ])
+    })
+  })
+
+  describe('areGitStatusValuesEqual', () => {
+    it('ignores polling timestamps when status values are unchanged', () => {
+      expect(
+        areGitStatusValuesEqual(
+          createGitStatus({ checked_at: 100 }),
+          createGitStatus({ checked_at: 200 })
+        )
+      ).toBe(true)
+    })
+
+    it('detects repository status changes', () => {
+      expect(
+        areGitStatusValuesEqual(
+          createGitStatus(),
+          createGitStatus({ uncommitted_added: 1 })
+        )
+      ).toBe(false)
     })
   })
 
@@ -470,9 +520,10 @@ describe('git-status service', () => {
       expect(mockToast.loading).not.toHaveBeenCalledWith('Pushing changes...')
     })
 
-    it('uses sync toast for pull-only sync', async () => {
+    it('pushes after a pull even when the branch was not ahead before syncing', async () => {
       mockInvoke.mockImplementation(async (cmd: string) => {
         if (cmd === 'git_pull') return 'Already up to date.'
+        if (cmd === 'git_push') return { fellBack: false, remote: 'origin' }
         return undefined
       })
 
@@ -487,6 +538,12 @@ describe('git-status service', () => {
       })
 
       expect(mockToast.loading).toHaveBeenCalledWith('Syncing feature...')
+      expect(mockInvoke).toHaveBeenCalledWith(
+        'git_push',
+        expect.objectContaining({
+          worktreePath: '/path/to/repo',
+        })
+      )
       expect(mockToast.success).toHaveBeenCalledWith(
         'Synced with remote',
         expect.objectContaining({ id: 'toast-1' })
@@ -513,6 +570,39 @@ describe('git-status service', () => {
       expect(mockToast.loading).toHaveBeenCalledWith('Syncing main...')
       expect(mockInvoke).toHaveBeenCalledWith('git_pull', expect.anything())
       expect(mockInvoke).not.toHaveBeenCalledWith('git_push', expect.anything())
+    })
+
+    it('reports a denied push as a sync failure', async () => {
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'git_push') {
+          return {
+            output: 'remote: error: GH013: Repository rule violations found',
+            fellBack: false,
+            permissionDenied: true,
+          }
+        }
+        return undefined
+      })
+
+      await performGitSync({
+        needsPull: false,
+        needsPush: true,
+        pull: {
+          worktreeId: 'wt-123',
+          worktreePath: '/path/to/repo',
+          baseBranch: 'v4.x',
+        },
+      })
+
+      expect(mockToast.error).toHaveBeenCalledWith(
+        'Sync failed',
+        expect.objectContaining({
+          id: 'toast-1',
+          duration: Infinity,
+          description: 'remote: error: GH013: Repository rule violations found',
+        })
+      )
+      expect(mockToast.success).not.toHaveBeenCalled()
     })
   })
 
@@ -543,6 +633,39 @@ describe('git-status service', () => {
 
       expect(result.current.data?.behind_count).toBe(5)
       expect(result.current.data?.ahead_count).toBe(2)
+    })
+  })
+
+  describe('useGitStatusEvents', () => {
+    it('updates the live UI cache for status already persisted by the backend', async () => {
+      const staleStatus = createGitStatus({ uncommitted_added: 12 })
+      const freshStatus = createGitStatus({
+        uncommitted_added: 0,
+        cache_persisted: true,
+      })
+      queryClient.setQueryData(
+        gitStatusQueryKeys.worktree('wt-123'),
+        staleStatus
+      )
+
+      renderHook(() => useGitStatusEvents(), {
+        wrapper: createWrapper(queryClient),
+      })
+
+      await waitFor(() => expect(mockListen).toHaveBeenCalled())
+      const statusHandler = mockListen.mock.calls.find(
+        ([eventName]) => eventName === 'git:status-update'
+      )?.[1] as (event: { payload: GitStatusEvent }) => void
+
+      statusHandler({ payload: freshStatus })
+
+      expect(
+        queryClient.getQueryData(gitStatusQueryKeys.worktree('wt-123'))
+      ).toEqual(freshStatus)
+      const { updateWorktreeCachedStatus } = vi.mocked(
+        await import('@/services/projects')
+      )
+      expect(updateWorktreeCachedStatus).not.toHaveBeenCalled()
     })
   })
 

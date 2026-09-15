@@ -11,10 +11,28 @@ jean-server has no embedded WebView. For an AI-controlled browser where you log
 in manually once and agents reuse cookies, Jean uses **vercel-labs/agent-browser**
 with a Jean-managed Chromium profile (`AGENT_BROWSER_PROFILE` under app data).
 
-- Settings → **MCP Servers** → **Agent Browser** → **Install agent-browser**, then install MCP into backends
+- Settings → **MCP Servers** → **Agent Browser** → **Install agent-browser** (this also installs MCP into supported installed backends)
 - Host prerequisite: `npm` on PATH (Jean downloads agent-browser + Chromium into app data)
 - Manual fallback: `npm install -g agent-browser && agent-browser install`
 - Design: `docs/developer/server-agent-browser.md`
+
+## Host prerequisites
+
+Jean checks shared host prerequisites instead of treating them as a Grok-only
+concern. Git is required for project and worktree operations. Node.js and npm
+are required by Jean-managed npm tools such as Grok, PI, Command Code, Kimi
+Code, and agent-browser.
+
+On a new server, use the setup prompt to install missing prerequisites
+automatically or follow the linked manual instructions. Jean intentionally does
+not recommend Debian/Ubuntu's `nodejs` package because it can lag supported
+Node.js releases. Install a current LTS using the official Node.js installation
+page instead: https://nodejs.org/en/download.
+
+Automatic installation always requires explicit confirmation. On supported
+Linux hosts it installs Git with the detected system package manager and
+Node.js LTS with the installer recommended by the official Node.js download
+flow, then verifies `git`, `node`, and `npm` versions.
 
 ## Start locally
 

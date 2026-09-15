@@ -136,13 +136,16 @@ export function useCommandContext(
 
     try {
       await invoke('rebase_worktree', { worktreeId: selectedWorktreeId })
+      queryClient.invalidateQueries({ queryKey: ['run-scripts'] })
+      queryClient.invalidateQueries({ queryKey: ['ports'] })
+      queryClient.invalidateQueries({ queryKey: ['jean-config'] })
       notify('Rebase completed successfully!', undefined, { type: 'success' })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       logger.error('Failed to rebase worktree:', { error: message })
       notify(message, undefined, { type: 'error' })
     }
-  }, [])
+  }, [queryClient])
 
   // Sessions - Create new session
   const createSession = useCallback(() => {
@@ -188,6 +191,16 @@ export function useCommandContext(
 
     const sessionId = getActiveSession(activeWorktreeId)
     if (!sessionId) return
+    if (useChatStore.getState().isSending(sessionId)) {
+      notify(
+        'Wait for the current session to finish before clearing context.',
+        undefined,
+        {
+          type: 'info',
+        }
+      )
+      return
+    }
     const worktreePath =
       useChatStore.getState().getWorktreePath(activeWorktreeId) ??
       useChatStore.getState().activeWorktreePath
@@ -675,7 +688,7 @@ export function useCommandContext(
       return
     }
 
-    const { addTerminal, setTerminalPanelOpen, setTerminalVisible } =
+    const { addTerminal, setTerminalPanelOpen, setTerminalVisibleForWorktree } =
       useTerminalStore.getState()
     const terminals = useTerminalStore
       .getState()
@@ -688,7 +701,7 @@ export function useCommandContext(
     } else {
       // Just show the panel
       setTerminalPanelOpen(selectedWorktreeId, true)
-      setTerminalVisible(true)
+      setTerminalVisibleForWorktree(selectedWorktreeId, true)
     }
   }, [])
 
@@ -888,6 +901,18 @@ export function useCommandContext(
     return true
   }, [])
 
+  const hasCurrentSessionRunning = useCallback(() => {
+    const chatState = useChatStore.getState()
+    const uiState = useUIStore.getState()
+    const worktreeId = uiState.sessionChatModalOpen
+      ? uiState.sessionChatModalWorktreeId
+      : chatState.activeWorktreeId
+    if (!worktreeId) return false
+
+    const sessionId = chatState.getActiveSession(worktreeId)
+    return sessionId ? chatState.isSending(sessionId) : false
+  }, [])
+
   return useMemo(
     () => ({
       // Query client
@@ -976,6 +1001,7 @@ export function useCommandContext(
 
       // State getters
       hasActiveSession,
+      hasCurrentSessionRunning,
       hasActiveWorktree,
       hasSelectedProject,
       hasInstalledBackend,
@@ -1041,6 +1067,7 @@ export function useCommandContext(
       hasMultipleSessions,
       hasMultipleWorktrees,
       hasRunScript,
+      hasCurrentSessionRunning,
       getCurrentTheme,
       getCurrentModel,
       getCurrentThinkingLevel,

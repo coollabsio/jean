@@ -119,6 +119,7 @@ export const ChatToolbar = memo(function ChatToolbar({
   loadedSecurityContexts,
   loadedAdvisoryContexts,
   loadedLinearContexts,
+  loadedSentryContexts,
   attachedSavedContexts,
   onOpenMagicModal,
   onSaveContext,
@@ -244,8 +245,8 @@ export const ChatToolbar = memo(function ChatToolbar({
     const values = new Set(
       selectedModelReasoning.levels.map(level => level.value)
     )
-    // Adaptive/Default is only valid for Gemini models.
-    if (selectedModel?.toLowerCase().includes('gemini')) {
+    // Adaptive/Default is only valid for Antigravity models.
+    if (selectedModel?.toLowerCase().includes('antigravity')) {
       values.add('adaptive')
     }
     if (selectedModelReasoning.type === 'effort') {
@@ -303,6 +304,7 @@ export const ChatToolbar = memo(function ChatToolbar({
     handleViewSecurityAlert,
     handleViewAdvisory,
     handleViewLinear,
+    handleViewSentry,
   } = useContextViewer({
     activeSessionId,
     activeWorktreePath,
@@ -425,10 +427,21 @@ export const ChatToolbar = memo(function ChatToolbar({
       setWorktreeLoading(worktreeId, 'push')
       const opToast = dismissibleToast.loading('Pushing changes...')
       try {
-        const result = await gitPush(activeWorktreePath, prNumber, remote)
+        const result = await gitPush(
+          activeWorktreePath,
+          prNumber,
+          remote,
+          worktreeId
+        )
         triggerImmediateGitPoll()
         if (projectId) fetchWorktreesStatus(projectId)
-        if (result.fellBack) {
+        if (result.permissionDenied) {
+          opToast.error('Push failed', {
+            duration: Infinity,
+            description:
+              result.output.trim() || 'The remote rejected the push.',
+          })
+        } else if (result.fellBack) {
           opToast.warning(
             'Could not push to PR branch, pushed to new branch instead'
           )
@@ -507,6 +520,7 @@ export const ChatToolbar = memo(function ChatToolbar({
               isDisabled={false}
               hasOpenPr={hasOpenPr}
               hasIssueContexts={loadedIssueContexts.length > 0}
+              hasSentryContexts={loadedSentryContexts.length > 0}
               hasPrContexts={loadedPRContexts.length > 0}
               onSaveContext={onSaveContext}
               onLoadContext={onLoadContext}
@@ -551,12 +565,14 @@ export const ChatToolbar = memo(function ChatToolbar({
               loadedSecurityContexts={loadedSecurityContexts}
               loadedAdvisoryContexts={loadedAdvisoryContexts}
               loadedLinearContexts={loadedLinearContexts}
+              loadedSentryContexts={loadedSentryContexts}
               attachedSavedContexts={attachedSavedContexts}
               handleViewIssue={handleViewIssue}
               handleViewPR={handleViewPR}
               handleViewSecurityAlert={handleViewSecurityAlert}
               handleViewAdvisory={handleViewAdvisory}
               handleViewLinear={handleViewLinear}
+              handleViewSentry={handleViewSentry}
               handleViewSavedContext={handleViewSavedContext}
               availableMcpServers={availableMcpServers}
               enabledMcpServers={enabledMcpServers}
@@ -634,6 +650,7 @@ export const ChatToolbar = memo(function ChatToolbar({
               loadedSecurityContexts={loadedSecurityContexts}
               loadedAdvisoryContexts={loadedAdvisoryContexts}
               loadedLinearContexts={loadedLinearContexts}
+              loadedSentryContexts={loadedSentryContexts}
               attachedSavedContexts={attachedSavedContexts}
               providerDropdownOpen={providerDropdownOpen}
               thinkingDropdownOpen={thinkingDropdownOpen}
@@ -660,6 +677,7 @@ export const ChatToolbar = memo(function ChatToolbar({
               handleViewSecurityAlert={handleViewSecurityAlert}
               handleViewAdvisory={handleViewAdvisory}
               handleViewLinear={handleViewLinear}
+              handleViewSentry={handleViewSentry}
               handleViewSavedContext={handleViewSavedContext}
             />
 

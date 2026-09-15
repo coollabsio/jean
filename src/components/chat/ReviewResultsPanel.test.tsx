@@ -267,6 +267,12 @@ describe('ReviewResultsPanel', () => {
     expect(
       screen.getByRole('button', { name: /send separately/i })
     ).toBeInTheDocument()
+    expect(
+      screen.getAllByRole('button', { name: /send (to chat|separately)/i })
+    ).toEqual([
+      screen.getByRole('button', { name: /send to chat/i }),
+      screen.getByRole('button', { name: /send separately/i }),
+    ])
   })
 
   it('sends selected findings combined or separately', async () => {
@@ -327,6 +333,38 @@ describe('ReviewResultsPanel', () => {
     expect(separateMessages[0]).toContain('Second finding')
     expect(separateMessages[1]).toContain('First finding')
     expect(separateCall?.[1]).toBe('plan')
+  })
+
+  it('uses cmd+enter for separate chats and shift+cmd+enter for one chat', async () => {
+    const onSendFix = vi.fn()
+    useChatStore.getState().setReviewResults('session-1', {
+      summary: 'Two issues found.',
+      approval_status: 'changes_requested',
+      findings: [
+        {
+          severity: 'warning',
+          file: 'src/first.ts',
+          title: 'First',
+          description: 'First details.',
+        },
+        {
+          severity: 'warning',
+          file: 'src/second.ts',
+          title: 'Second',
+          description: 'Second details.',
+        },
+      ],
+    })
+
+    render(<ReviewResultsPanel sessionId="session-1" onSendFix={onSendFix} />)
+
+    screen.getByRole('region', { name: /review findings/i }).focus()
+    await userEvent.keyboard('{Meta>}{Enter}{/Meta}')
+    expect(Array.isArray(onSendFix.mock.calls[0]?.[0])).toBe(true)
+
+    onSendFix.mockClear()
+    await userEvent.keyboard('{Shift>}{Meta>}{Enter}{/Meta}{/Shift}')
+    expect(typeof onSendFix.mock.calls[0]?.[0]).toBe('string')
   })
 
   it('uses the selected reviewer fix_mode when sending findings', async () => {
