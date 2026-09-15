@@ -178,6 +178,7 @@ import { MobileLeftSidebar } from './MobileLeftSidebar'
 import { BrowserSidePane } from '@/components/browser/BrowserSidePane'
 import { BrowserPanel } from '@/components/browser/BrowserPanel'
 import { useBrowserEvents } from '@/hooks/useBrowserPane'
+import { parseServerResourceKey } from '@/lib/server-resource'
 import { useToasterOffset } from '@/hooks/useToasterOffset'
 import { useWindowMaximized } from '@/hooks/use-window-maximized'
 import { useTerminalThemeSync } from '@/hooks/useTerminalThemeSync'
@@ -190,7 +191,6 @@ import { useGlobalInputSanitizer } from '@/hooks/useGlobalInputSanitizer'
 import { useCloseSessionOrWorktreeKeybinding } from '@/services/chat'
 import { useUIStatePersistence } from '@/hooks/useUIStatePersistence'
 import { useSessionStatePersistence } from '@/hooks/useSessionStatePersistence'
-import { useSessionPrefetch } from '@/hooks/useSessionPrefetch'
 import { useRestoreLastArchived } from '@/hooks/useRestoreLastArchived'
 import { useArchiveCleanup } from '@/hooks/useArchiveCleanup'
 import { usePrWorktreeSweep } from '@/hooks/usePrWorktreeSweep'
@@ -231,7 +231,8 @@ function useRetainedMount(active: boolean) {
 export function MainWindow() {
   useTerminalThemeSync()
   const isMaximized = useWindowMaximized()
-  const toasterOffset = useToasterOffset()
+  const { offset: toasterOffset, mobileOffset: toasterMobileOffset } =
+    useToasterOffset()
   const leftSidebarVisible = useUIStore(state => state.leftSidebarVisible)
   const leftSidebarSize = useUIStore(state => state.leftSidebarSize)
   const setLeftSidebarSize = useUIStore(state => state.setLeftSidebarSize)
@@ -242,6 +243,8 @@ export function MainWindow() {
   const setFileBrowserVisible = useUIStore(state => state.setFileBrowserVisible)
   const viewingFilePath = useUIStore(state => state.viewingFilePath)
   const setViewingFilePath = useUIStore(state => state.setViewingFilePath)
+  const activeWorktreeId = useChatStore(state => state.activeWorktreeId)
+  const selectedProjectId = useProjectsStore(state => state.selectedProjectId)
   const preferencesOpen = useUIStore(state => state.preferencesOpen)
   const commitModalOpen = useUIStore(state => state.commitModalOpen)
   const onboardingOpen = useUIStore(state => state.onboardingOpen)
@@ -342,10 +345,6 @@ export function MainWindow() {
 
   // Persist session-specific state (answered questions, fixed findings, etc.)
   useSessionStatePersistence()
-
-  // Prefetch sessions for the selected or expanded projects after the UI state
-  // is restored so the first render path stays light.
-  useSessionPrefetch(isInitialized ? projects : undefined)
 
   // Ref for the sidebar element to update width directly during drag
   const sidebarRef = useRef<HTMLDivElement>(null)
@@ -666,6 +665,10 @@ export function MainWindow() {
       <Suspense fallback={null}>
         <FileContentModal
           filePath={viewingFilePath}
+          serverId={
+            parseServerResourceKey(activeWorktreeId ?? selectedProjectId ?? '')
+              ?.serverId
+          }
           onClose={() => setViewingFilePath(null)}
         />
       </Suspense>
@@ -823,7 +826,7 @@ export function MainWindow() {
       <Toaster
         position="bottom-right"
         offset={toasterOffset}
-        mobileOffset={toasterOffset}
+        mobileOffset={toasterMobileOffset}
         expand={true}
         swipeDirections={['left', 'right', 'top', 'bottom']}
         style={{ '--width': '400px' } as CSSProperties}

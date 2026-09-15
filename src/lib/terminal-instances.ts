@@ -5,7 +5,8 @@
  * Terminals persist across component mount/unmount cycles, preserving
  * buffer content, cursor position, and running processes.
  *
- * Only disposed when user explicitly closes the terminal.
+ * Normally disposed when user explicitly closes the terminal. Detached,
+ * non-running renderers may also be evicted by the bounded memory policy.
  */
 
 import { Terminal as XtermTerminal } from '@xterm/xterm'
@@ -46,6 +47,7 @@ import {
 } from '@/lib/terminal-theme'
 import { isArrowGestureActive } from '@/lib/terminal-arrow-gesture'
 import { resolveSafeTerminalDimensions } from '@/lib/terminal-dimensions'
+import { shouldAutoCloseTerminal } from '@/lib/terminal-lifecycle'
 
 type TerminalRenderer = 'xterm' | 'ghostty-web'
 type EmbeddedTerminal = XtermTerminal | GhosttyWebTerminal
@@ -74,12 +76,19 @@ interface PersistentTerminal {
   readyForOutput: boolean // Ghostty Web needs one settled paint before writes
   outputReadyPromise: Promise<void> | null
   pendingOutput: string[]
+  /** Renderer was evicted while its PTY continued running. */
+  rendererEvicted: boolean
+  /** Bounded output received while an evicted renderer is being rehydrated. */
+  detachedOutput: string
+  detachedOutputTruncated: boolean
   lastAppearance: TerminalAppearance | null
   appearanceLoadVersion: number
   appearanceResizeTimer: ReturnType<typeof setTimeout> | null
   touchScrollCleanup: (() => void) | null
   compositionGuardCleanup: (() => void) | null
   onStopped?: (exitCode: number | null, signal: string | null) => void
+  /** Last time the renderer was detached; used for the detached LRU. */
+  lastDetachedAt: number
 }
 
 // Module-level Map - persists across React mount/unmount cycles
@@ -97,6 +106,7 @@ const pendingOnStopped = new Map<
 
 let ghosttyWebReady: Promise<void> | null = null
 let preferencesSubscriptionRegistered = false
+let detachedRendererTrimTimer: ReturnType<typeof setTimeout> | null = null
 
 const terminalFontFamilyMap: Record<TerminalFont, string> = {
   'jetbrains-mono':
@@ -447,6 +457,9 @@ function ensureWakeHandler(): void {
       }
       const inst = instances.get(terminalId)
       if (!inst?.terminal) {
+        if (inst?.rendererEvicted) {
+          appendDetachedOutput(inst, buffer.data)
+        }
         outputBuffers.delete(terminalId)
         continue
       }
@@ -575,6 +588,171 @@ function shouldLetAppHandleShortcut(event: KeyboardEvent): boolean {
   }
   // Mod+Alt+Backspace → cancel prompt
   return event.altKey && (code === 'Backspace' || code === 'Delete')
+}
+
+/**
+ * Terminals send the same carriage return for Enter and Shift+Enter, so a CLI
+ * that submits on Enter (Claude Code, Codex, …) sends the message instead of
+ * inserting a newline. Terminals that can tell them apart encode the modifier
+ * with CSI u (kitty keyboard protocol): `CSI 13 ; 2 u` is Enter with Shift.
+ * xterm.js does not implement that protocol, so the sequence is injected here.
+ * https://code.claude.com/docs/en/terminal-config
+ */
+export const SHIFT_ENTER_SEQUENCE = '\x1b[13;2u'
+
+/**
+ * True for every event of a Shift+Enter press. The renderer calls its key
+ * handler for keydown, keypress and keyup, so all three must be suppressed —
+ * letting keypress through makes the terminal send its own carriage return in
+ * addition to the sequence, which the CLI reads as submit.
+ */
+export function isShiftEnterEvent(event: KeyboardEvent): boolean {
+  return (
+    event.key === 'Enter' &&
+    event.shiftKey &&
+    !event.ctrlKey &&
+    !event.altKey &&
+    !event.metaKey &&
+    // An Enter that confirms IME composition belongs to the composition, not
+    // to the terminal (issue #584; WKWebView reports keyCode 229 instead).
+    !event.isComposing &&
+    event.keyCode !== 229
+  )
+}
+
+/**
+ * Handle one key event of a possible Shift+Enter press for a terminal.
+ *
+ * Returns true when the renderer must not process the event itself: emitting
+ * the sequence AND letting the renderer run would send a carriage return too,
+ * which the CLI reads as submit. Callers map that to their own convention.
+ */
+export function handleShiftEnterKey(
+  terminalId: string,
+  event: KeyboardEvent
+): boolean {
+  if (!isShiftEnterEvent(event)) return false
+  if (!acceptsModifierEncodedKeys(terminalId)) return false
+  if (shouldSendShiftEnterSequence(event)) {
+    queueTerminalInput(terminalId, SHIFT_ENTER_SEQUENCE)
+  }
+  return true
+}
+
+/** Only the keydown of that press may emit the sequence, or it repeats. */
+export function shouldSendShiftEnterSequence(event: KeyboardEvent): boolean {
+  return event.type === 'keydown' && isShiftEnterEvent(event)
+}
+
+/**
+ * Whether the foreground program can read modifier-encoded keys, tracked from
+ * its own output. Two signals:
+ *
+ * - The kitty keyboard protocol: a program pushes flags with `CSI > flags u`,
+ *   restores them with `CSI < number u`, or sets them with `CSI = flags ; n u`.
+ *   This is the only signal a real terminal acts on.
+ * - Focus reporting (`CSI ? 1004 h`). Claude Code negotiates no keyboard
+ *   protocol at all, yet parses CSI u input; focus reporting is the narrowest
+ *   mode it does enable. Trusting it is deliberately more aggressive than any
+ *   terminal emulator, so keep it as tight as possible: the alternate screen
+ *   buffer is NOT trusted, because `less`, `htop`, `fzf` and classic `vim` use
+ *   it without reading CSI u — and in vim's insert mode a stray `\x1b[13;2u`
+ *   leaves insert, repeats a search and then undoes two changes.
+ *
+ * A plain shell prompt enables neither, which is what keeps Shift+Enter from
+ * spraying `;2u` into a command line that cannot read it.
+ *
+ * ponytail: a program killed before it restores the mode leaves the verdict
+ * stuck on until the terminal is closed. Track the foreground process if that
+ * ever matters.
+ */
+interface TerminalKeyboardState {
+  kittyFlags: number
+  /** Saved flag values from kitty keyboard protocol pushes. */
+  kittyStack: number[]
+  focusReporting: boolean
+  /** Trailing partial escape sequence carried over between output chunks. */
+  tail: string
+}
+
+const keyboardStates = new Map<string, TerminalKeyboardState>()
+// eslint-disable-next-line no-control-regex -- ESC starts every CSI sequence
+const KITTY_KEYBOARD_SEQUENCE = /\x1b\[([<>=])([0-9;]*)u/g
+// eslint-disable-next-line no-control-regex -- ESC starts every CSI sequence
+const PRIVATE_MODE_SEQUENCE = /\x1b\[\?([0-9;]+)([hl])/g
+// eslint-disable-next-line no-control-regex -- ESC starts every CSI sequence
+const PARTIAL_TAIL = /\x1b\[?[<>=?]?[0-9;]*$/
+/** A CSI introducer is a handful of bytes; never carry more than this. */
+const MAX_TAIL_LENGTH = 32
+/** Match kitty's requirement that terminals use a bounded flag stack. */
+const MAX_KITTY_STACK_DEPTH = 64
+
+function getKeyboardState(terminalId: string): TerminalKeyboardState {
+  const existing = keyboardStates.get(terminalId)
+  if (existing) return existing
+  const created = {
+    kittyFlags: 0,
+    kittyStack: [],
+    focusReporting: false,
+    tail: '',
+  }
+  keyboardStates.set(terminalId, created)
+  return created
+}
+
+export function trackTerminalKeyboardMode(
+  terminalId: string,
+  data: string
+): void {
+  const existing = keyboardStates.get(terminalId)
+  if (!existing?.tail && !data.includes('\x1b')) return
+
+  const state = getKeyboardState(terminalId)
+  const text = state.tail + data
+
+  for (const [, kind, params] of text.matchAll(KITTY_KEYBOARD_SEQUENCE)) {
+    if (kind === '>') {
+      state.kittyStack.push(state.kittyFlags)
+      if (state.kittyStack.length > MAX_KITTY_STACK_DEPTH) {
+        state.kittyStack.shift()
+      }
+      state.kittyFlags = Number(params) || 0
+    } else if (kind === '<') {
+      const count = Number(params) || 1
+      const restoreCount = Math.min(count, state.kittyStack.length)
+      for (let index = 0; index < restoreCount; index += 1) {
+        state.kittyFlags = state.kittyStack.pop() ?? 0
+      }
+      if (count > restoreCount) state.kittyFlags = 0
+    } else {
+      const [flagsParam, modeParam] = (params ?? '').split(';')
+      const flags = Number(flagsParam) || 0
+      const mode = Number(modeParam) || 1
+      if (mode === 2) state.kittyFlags |= flags
+      else if (mode === 3) state.kittyFlags &= ~flags
+      else state.kittyFlags = flags
+    }
+  }
+
+  for (const [, params, action] of text.matchAll(PRIVATE_MODE_SEQUENCE)) {
+    const enabled = action === 'h'
+    for (const mode of (params ?? '').split(';')) {
+      if (mode === '1004') state.focusReporting = enabled
+    }
+  }
+
+  state.tail = (text.match(PARTIAL_TAIL)?.[0] ?? '').slice(-MAX_TAIL_LENGTH)
+}
+
+export function acceptsModifierEncodedKeys(terminalId: string): boolean {
+  const state = keyboardStates.get(terminalId)
+  if (!state) return false
+  // Disambiguation (bit 1) and report-all-keys (bit 8) encode Shift+Enter.
+  return Boolean(state.kittyFlags & 0b1001) || state.focusReporting
+}
+
+function forgetTerminalKeyboardMode(terminalId: string): void {
+  keyboardStates.delete(terminalId)
 }
 
 const INPUT_FLUSH_DELAY_MS = 5
@@ -706,7 +884,13 @@ export function writeTerminalInput(terminalId: string, data: string): void {
 }
 
 function queueTerminalOutput(instance: PersistentTerminal, data: string): void {
-  if (!instance.terminal) return
+  if (!data) return
+  if (!instance.terminal) {
+    if (instance.rendererEvicted) {
+      appendDetachedOutput(instance, data)
+    }
+    return
+  }
   if (instance.renderer === 'ghostty-web' && !instance.readyForOutput) {
     instance.pendingOutput.push(data)
     return
@@ -744,7 +928,8 @@ function queueTerminalOutput(instance: PersistentTerminal, data: string): void {
 
 async function createTerminalForRenderer(
   renderer: TerminalRenderer,
-  worktreePath: string
+  worktreePath: string,
+  terminalId: string
 ): Promise<{
   terminal: EmbeddedTerminal
   fitAddon: EmbeddedFitAddon
@@ -753,6 +938,7 @@ async function createTerminalForRenderer(
   const appearance = await getLoadedTerminalAppearance()
   const terminalOptions = {
     cursorBlink: true,
+    scrollback: TERMINAL_SCROLLBACK_LINES,
     fontSize: appearance.fontSize,
     fontFamily: appearance.fontFamily,
     fontWeight: 400,
@@ -766,6 +952,7 @@ async function createTerminalForRenderer(
     terminal.attachCustomKeyEventHandler(event => {
       // ghostty-web uses the inverse convention from xterm.js:
       // true means "custom handler consumed/prevented default".
+      if (handleShiftEnterKey(terminalId, event)) return true
       return shouldLetAppHandleShortcut(event)
     })
     const fitAddon = new GhosttyWebFitAddon()
@@ -778,6 +965,12 @@ async function createTerminalForRenderer(
     allowProposedApi: true,
   })
   terminal.attachCustomKeyEventHandler(event => {
+    // Returning false keeps xterm from also sending its own carriage return.
+    // xterm skips its own cancel() on that path, so prevent the default here.
+    if (handleShiftEnterKey(terminalId, event)) {
+      event.preventDefault()
+      return false
+    }
     if (shouldLetAppHandleShortcut(event)) return false
     // All other CMD shortcuts: xterm consumes them (prevents app actions)
     return true
@@ -813,7 +1006,8 @@ async function ensureTerminalCreated(
   try {
     const { terminal, fitAddon, appearance } = await createTerminalForRenderer(
       instance.renderer,
-      instance.worktreePath
+      instance.worktreePath,
+      terminalId
     )
 
     if (!isCurrentInstance(terminalId, instance)) {
@@ -856,12 +1050,17 @@ function ensureTerminalBackendListeners(): Promise<void> {
         const terminalId = event.payload.terminal_id
         const inst = instances.get(terminalId)
         if (!inst) return
+        // Track here, not in queueTerminalOutput: buffered output re-enters
+        // that function, which would count a kitty push twice and leave the
+        // stack permanently non-empty.
+        trackTerminalKeyboardMode(terminalId, event.payload.data)
         queueTerminalOutput(inst, event.payload.data)
       }),
       listen<TerminalStartedEvent>('terminal:started', event => {
         useTerminalStore
           .getState()
           .setTerminalRunning(event.payload.terminal_id, true)
+        trimDetachedTerminalRenderers()
       }),
       listen<TerminalStoppedEvent>('terminal:stopped', event => {
         handleTerminalStopped(event.payload)
@@ -918,10 +1117,8 @@ function handleTerminalStopped(event: TerminalStoppedEvent): void {
     inst.onStopped?.(exitCode, signal)
   }
 
-  // Auto-close terminal tab on clean exit:
-  // - code 0 — any terminal
-  // - SIGINT (Ctrl+C) or SIGTERM (graceful stop) — user or system stop
-  // SIGKILL, SIGSEGV, SIGABRT, etc. are NOT clean → mark as failed.
+  // Keep run-command output visible after exit so errors and logs remain
+  // available for inspection. Normal shell tabs still close on a clean exit.
   const storeTerminal =
     inst &&
     (useTerminalStore.getState().terminals[inst.worktreeId] ?? []).find(
@@ -929,12 +1126,14 @@ function handleTerminalStopped(event: TerminalStoppedEvent): void {
     )
   const isPanel = storeTerminal ? isPanelTerminal(storeTerminal) : true
   const isRunTerminal = inst?.command != null && isPanel
-  const isIntentionalSignal =
-    signal != null &&
-    (signal.includes('Interrupt') || signal.includes('Terminated'))
-  const isCleanExit = exitCode === 0 || isIntentionalSignal
+  const shouldAutoClose = shouldAutoCloseTerminal({
+    exitCode,
+    signal,
+    isPanel,
+    isRunTerminal,
+  })
 
-  if (isCleanExit && inst && isPanel) {
+  if (shouldAutoClose && inst) {
     const wId = inst.worktreeId
     setTimeout(() => {
       if (!instances.has(terminalId)) return // Already disposed
@@ -949,7 +1148,9 @@ function handleTerminalStopped(event: TerminalStoppedEvent): void {
       ).filter(isPanelTerminal)
       if (remaining.length === 0) {
         setTerminalPanelOpen(wId, false)
-        useTerminalStore.getState().setTerminalVisible(false)
+        useTerminalStore
+          .getState()
+          .setTerminalVisibleForWorktree(wId, false)
         useTerminalStore.getState().setModalTerminalOpen(wId, false)
       }
     }, 0)
@@ -976,8 +1177,198 @@ export function applyThemeToAllTerminals(): void {
   }
 }
 
-// TODO: Add memory cap for detached terminals (e.g., 20 max)
-// For now, typical usage won't hit memory limits
+/** Maximum detached, non-running renderer instances retained in memory. */
+export const MAX_DETACHED_TERMINAL_INSTANCES = 20
+/** Bound per-terminal renderer history so long-running shells stay compact. */
+export const TERMINAL_SCROLLBACK_LINES = 2_000
+/** Evict a detached running renderer after this idle period. */
+export const RUNNING_RENDERER_IDLE_MS = 5 * 60 * 1000
+/** Bound output retained while an evicted renderer is rehydrated. */
+export const DETACHED_OUTPUT_BUFFER_CHARS = 512 * 1024
+
+function appendDetachedOutput(
+  instance: PersistentTerminal,
+  data: string
+): void {
+  if (!data) return
+
+  if (data.length >= DETACHED_OUTPUT_BUFFER_CHARS) {
+    instance.detachedOutput = data.slice(-DETACHED_OUTPUT_BUFFER_CHARS)
+    instance.detachedOutputTruncated = true
+    return
+  }
+
+  const availableChars = DETACHED_OUTPUT_BUFFER_CHARS - data.length
+  if (instance.detachedOutput.length > availableChars) {
+    instance.detachedOutput = instance.detachedOutput.slice(-availableChars)
+    instance.detachedOutputTruncated = true
+  }
+  instance.detachedOutput += data
+}
+
+function clearDetachedOutput(instance: PersistentTerminal): void {
+  instance.detachedOutput = ''
+  instance.detachedOutputTruncated = false
+}
+
+function snapshotTerminalBuffer(instance: PersistentTerminal): string {
+  const terminal = instance.terminal
+  if (!terminal) return ''
+
+  try {
+    // Both renderers expose the xterm-compatible buffer API at runtime, but
+    // their published TypeScript declarations do not share that interface.
+    const snapshotTerminal = terminal as unknown as {
+      rows: number
+      buffer: {
+        active: {
+          viewportY: number
+          length: number
+          getLine(row: number):
+            | { translateToString(trimRight?: boolean): string }
+            | undefined
+        }
+      }
+    }
+    const buffer = snapshotTerminal.buffer.active
+    const firstVisibleRow = Math.max(0, buffer.viewportY)
+    const lastVisibleRow = Math.min(
+      buffer.length,
+      firstVisibleRow + snapshotTerminal.rows
+    )
+    const lines: string[] = []
+
+    for (let row = firstVisibleRow; row < lastVisibleRow; row += 1) {
+      lines.push(buffer.getLine(row)?.translateToString(true) ?? '')
+    }
+
+    return lines.join('\r\n')
+  } catch {
+    // Renderer-specific buffer APIs should never prevent PTY cleanup.
+    return ''
+  }
+}
+
+function restoreDetachedOutput(instance: PersistentTerminal): void {
+  if (!instance.rendererEvicted) return
+
+  const bufferedOutput = instance.detachedOutput
+  const wasTruncated = instance.detachedOutputTruncated
+  clearDetachedOutput(instance)
+  instance.rendererEvicted = false
+
+  if (!bufferedOutput && !wasTruncated) return
+
+  const truncationMarker = wasTruncated
+    ? '\r\n\x1b[90m[Earlier terminal output was truncated while idle]\x1b[0m\r\n'
+    : ''
+  queueTerminalOutput(
+    instance,
+    `\x1b[2J\x1b[H${truncationMarker}${bufferedOutput}`
+  )
+}
+
+function scheduleDetachedRendererTrim(): void {
+  if (detachedRendererTrimTimer) return
+
+  const runningTerminals = useTerminalStore.getState().runningTerminals
+  const nextExpiry = [...instances.values()]
+    .filter(instance => instance.terminal)
+    .filter(instance => !instance.hostElement?.isConnected)
+    .filter(instance => runningTerminals.has(instance.terminalId))
+    .filter(instance => instance.lastDetachedAt > 0)
+    .map(instance => instance.lastDetachedAt + RUNNING_RENDERER_IDLE_MS)
+    .sort((left, right) => left - right)[0]
+
+  if (nextExpiry == null) return
+
+  detachedRendererTrimTimer = setTimeout(() => {
+    detachedRendererTrimTimer = null
+    trimDetachedTerminalRenderers()
+  }, Math.max(1_000, nextExpiry - Date.now()))
+}
+
+function disposeDetachedRenderer(
+  instance: PersistentTerminal,
+  preserveRunningPty = false
+): void {
+  const keepPty = preserveRunningPty && instance.initialized
+  const bufferedFrame = outputBuffers.get(instance.terminalId)?.data
+  if (keepPty) {
+    clearDetachedOutput(instance)
+    appendDetachedOutput(instance, snapshotTerminalBuffer(instance))
+    if (bufferedFrame) appendDetachedOutput(instance, bufferedFrame)
+    for (const pendingOutput of instance.pendingOutput) {
+      appendDetachedOutput(instance, pendingOutput)
+    }
+  } else {
+    clearDetachedOutput(instance)
+  }
+
+  discardTerminalInput(instance.terminalId)
+  outputBuffers.delete(instance.terminalId)
+  instance.pendingOutput = []
+  instance.readyForOutput = false
+  instance.outputReadyPromise = null
+  instance.appearanceLoadVersion += 1
+  if (instance.appearanceResizeTimer) {
+    clearTimeout(instance.appearanceResizeTimer)
+    instance.appearanceResizeTimer = null
+  }
+  instance.touchScrollCleanup?.()
+  instance.touchScrollCleanup = null
+  instance.compositionGuardCleanup?.()
+  instance.compositionGuardCleanup = null
+  instance.terminal?.dispose()
+  instance.hostElement?.remove()
+
+  // Keep the logical terminal entry so the store can reattach it later. A
+  // running PTY stays initialized; a stopped terminal follows the existing
+  // replay/start path on its next attach.
+  instance.terminal = null
+  instance.fitAddon = null
+  instance.hostElement = null
+  instance.opened = false
+  instance.initialized = keepPty
+  instance.replayRequested = false
+  instance.rendererEvicted = keepPty
+  instance.lastAppearance = null
+  instance.lastDetachedAt = 0
+}
+
+function trimDetachedTerminalRenderers(protectedTerminalId?: string): void {
+  const now = Date.now()
+  const runningTerminals = useTerminalStore.getState().runningTerminals
+  const candidates = [...instances.values()]
+    .filter(instance => instance.terminal)
+    .filter(instance => instance.terminalId !== protectedTerminalId)
+    .filter(instance => !runningTerminals.has(instance.terminalId))
+    .filter(instance => !instance.hostElement?.isConnected)
+    .sort((left, right) => left.lastDetachedAt - right.lastDetachedAt)
+
+  const excess = candidates.length - MAX_DETACHED_TERMINAL_INSTANCES
+  for (const instance of excess > 0 ? candidates.slice(0, excess) : []) {
+    disposeDetachedRenderer(instance)
+  }
+
+  const idleRunningCandidates = [...instances.values()]
+    .filter(instance => instance.terminal)
+    .filter(instance => instance.terminalId !== protectedTerminalId)
+    .filter(instance => runningTerminals.has(instance.terminalId))
+    .filter(instance => !instance.hostElement?.isConnected)
+    .filter(
+      instance =>
+        instance.lastDetachedAt > 0 &&
+        now - instance.lastDetachedAt >= RUNNING_RENDERER_IDLE_MS
+    )
+    .sort((left, right) => left.lastDetachedAt - right.lastDetachedAt)
+
+  for (const instance of idleRunningCandidates) {
+    disposeDetachedRenderer(instance, true)
+  }
+
+  scheduleDetachedRendererTrim()
+}
 
 /**
  * Get existing terminal instance or create a new one.
@@ -1036,11 +1427,15 @@ export function getOrCreateTerminal(
     readyForOutput: renderer !== 'ghostty-web',
     outputReadyPromise: renderer === 'ghostty-web' ? null : Promise.resolve(),
     pendingOutput: [],
+    rendererEvicted: false,
+    detachedOutput: '',
+    detachedOutputTruncated: false,
     lastAppearance: null,
     appearanceLoadVersion: 0,
     appearanceResizeTimer: null,
     touchScrollCleanup: null,
     compositionGuardCleanup: null,
+    lastDetachedAt: Date.now(),
   }
 
   // Apply any pending onStopped callback registered before creation
@@ -1051,6 +1446,7 @@ export function getOrCreateTerminal(
   }
 
   instances.set(terminalId, instance)
+  trimDetachedTerminalRenderers(terminalId)
   return instance
 }
 
@@ -1104,6 +1500,7 @@ export async function attachToContainer(
     }
     container.replaceChildren(hostElement)
   }
+  instance.lastDetachedAt = 0
 
   const wasOpened = instance.opened
   if (!wasOpened) {
@@ -1126,10 +1523,12 @@ export async function attachToContainer(
         data => xterm.input(data, true)
       )
     }
-    if (!instance.initialized) {
+    if (!instance.initialized || instance.rendererEvicted) {
       // A brand-new visible terminal should never show stale renderer/DOM
-      // contents from a previously attached terminal. Do not clear when a PTY
-      // was started headlessly: its buffered output is real session output.
+      // contents from a previously attached terminal. An evicted renderer
+      // also needs a clean surface before its bounded output is restored.
+      // Do not clear when a PTY was started headlessly: its buffered output
+      // is real session output.
       clearFreshTerminalDisplay(instance)
     }
     void scheduleGhosttyOutputReady(instance)
@@ -1155,6 +1554,10 @@ export async function attachToContainer(
     )
 
     if (!(await waitForTerminalReady(terminalId, instance))) return
+
+    // A long-idle running PTY may have had its renderer evicted to release
+    // xterm/Ghostty memory. Restore the bounded live output before resizing.
+    restoreDetachedOutput(instance)
 
     if (!instance.initialized) {
       // First time - check if PTY already exists (reattaching after app restart)
@@ -1297,6 +1700,8 @@ export function detachFromContainer(terminalId: string): void {
   if (hostElement?.parentNode) {
     hostElement.parentNode.removeChild(hostElement)
   }
+  instance.lastDetachedAt = Date.now()
+  trimDetachedTerminalRenderers()
 }
 
 /**
@@ -1350,7 +1755,10 @@ export async function disposeTerminal(terminalId: string): Promise<void> {
   instances.delete(terminalId)
   discardTerminalInput(terminalId)
   outputBuffers.delete(terminalId)
+  forgetTerminalKeyboardMode(terminalId)
   instance.pendingOutput = []
+  clearDetachedOutput(instance)
+  instance.rendererEvicted = false
   instance.readyForOutput = false
   instance.outputReadyPromise = null
   pendingOnStopped.delete(terminalId)

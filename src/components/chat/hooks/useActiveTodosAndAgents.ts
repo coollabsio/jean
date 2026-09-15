@@ -263,10 +263,11 @@ export function useActiveTodosAndAgents({
     if (!activeSessionId)
       return { agents: [], sourceMessageId: null, isFromStreaming: false }
 
-    const toolCalls =
-      isSending && currentToolCalls.length > 0
-        ? currentToolCalls
-        : (lastAssistantMessage?.tool_calls ?? [])
+    // A new turn starts with no tool calls. Do not reuse the previous turn's
+    // agents in that gap, or their persisted running state appears active again.
+    const toolCalls = isSending
+      ? currentToolCalls
+      : (lastAssistantMessage?.tool_calls ?? [])
 
     const agents = extractCodexAgents(
       toolCalls,
@@ -274,14 +275,11 @@ export function useActiveTodosAndAgents({
       lastAssistantMessage?.cancelled === true
     )
 
-    const sourceId =
-      isSending && currentToolCalls.length > 0
-        ? null
-        : (lastAssistantMessage?.id ?? null)
+    const sourceId = isSending ? null : (lastAssistantMessage?.id ?? null)
     return {
       agents,
       sourceMessageId: sourceId,
-      isFromStreaming: isSending && currentToolCalls.length > 0,
+      isFromStreaming: isSending && agents.length > 0,
     }
   }, [activeSessionId, isSending, currentToolCalls, lastAssistantMessage])
 

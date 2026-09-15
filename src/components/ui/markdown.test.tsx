@@ -1,8 +1,22 @@
 import { describe, expect, it } from 'vitest'
-import { render, screen } from '@/test/test-utils'
+import { fireEvent, render, screen } from '@/test/test-utils'
 import { Markdown } from './markdown'
+import { useChatStore } from '@/store/chat-store'
+import { useUIStore } from '@/store/ui-store'
 
 describe('Markdown', () => {
+  it('opens relative file links in the active worktree viewer', () => {
+    useChatStore.setState({ activeWorktreePath: '/repo/worktree' })
+    useUIStore.getState().setViewingFilePath(null)
+
+    render(<Markdown>{'[screenshot](coolify-sponsors.png)'}</Markdown>)
+    fireEvent.click(screen.getByRole('link', { name: 'screenshot' }))
+
+    expect(useUIStore.getState().viewingFilePath).toBe(
+      '/repo/worktree/coolify-sponsors.png'
+    )
+  })
+
   it('preserves ordered-list start attributes from parsed markdown', () => {
     const { container } = render(
       <Markdown>{'1. First\n\nInterlude\n\n2. Second'}</Markdown>

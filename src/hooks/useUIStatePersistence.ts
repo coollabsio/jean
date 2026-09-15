@@ -68,22 +68,37 @@ function serializePendingTextFiles(
 function debounce<T extends (...args: Parameters<T>) => void>(
   fn: T,
   delay: number
-): T & { cancel: () => void } {
+): T & { cancel: () => void; flush: () => void } {
   let timeoutId: ReturnType<typeof setTimeout> | null = null
+  let pendingArgs: Parameters<T> | null = null
 
   const debounced = ((...args: Parameters<T>) => {
-    if (timeoutId) clearTimeout(timeoutId)
+    if (timeoutId !== null) clearTimeout(timeoutId)
+    pendingArgs = args
     timeoutId = setTimeout(() => {
-      fn(...args)
       timeoutId = null
+      const argsToApply = pendingArgs
+      pendingArgs = null
+      if (argsToApply) fn(...(argsToApply as Parameters<T>))
     }, delay)
-  }) as T & { cancel: () => void }
+  }) as T & { cancel: () => void; flush: () => void }
 
   debounced.cancel = () => {
-    if (timeoutId) {
+    if (timeoutId !== null) {
       clearTimeout(timeoutId)
       timeoutId = null
     }
+    pendingArgs = null
+  }
+
+  debounced.flush = () => {
+    if (timeoutId === null || pendingArgs === null) return
+
+    clearTimeout(timeoutId)
+    timeoutId = null
+    const argsToApply = pendingArgs
+    pendingArgs = null
+    fn(...(argsToApply as Parameters<T>))
   }
 
   return debounced
@@ -114,9 +129,27 @@ export function useUIStatePersistence() {
     }, 500)
 
     return () => {
+      debouncedSaveRef.current?.flush()
       debouncedSaveRef.current?.cancel()
     }
   }, [saveUIState])
+
+  // The last active session is part of the debounced UI-state snapshot. Flush
+  // it when the native window is closing so a recent session switch is not
+  // lost before the next 500ms timer fires.
+  useEffect(() => {
+    const flushPendingSave = () => {
+      debouncedSaveRef.current?.flush()
+    }
+
+    window.addEventListener('beforeunload', flushPendingSave)
+    window.addEventListener('pagehide', flushPendingSave)
+
+    return () => {
+      window.removeEventListener('beforeunload', flushPendingSave)
+      window.removeEventListener('pagehide', flushPendingSave)
+    }
+  }, [])
 
   // Helper to get current UI state from stores
   // NOTE: Durable session-specific state is stored in Session files. Unsent
@@ -131,6 +164,7 @@ export function useUIStatePersistence() {
       inputDrafts,
       pendingImages,
       pendingTextFiles,
+      dismissedSetupScripts,
       reviewSidebarVisible,
       lastOpenedPerProject,
     } = useChatStore.getState()
@@ -209,6 +243,7 @@ export function useUIStatePersistence() {
       input_drafts: inputDrafts,
       pending_images: serializePendingImages(pendingImages),
       pending_text_files: serializePendingTextFiles(pendingTextFiles),
+      dismissed_setup_scripts: Object.keys(dismissedSetupScripts),
       // Review sidebar visibility
       review_sidebar_visible: reviewSidebarVisible,
       // Modal terminal drawer state
@@ -431,6 +466,16 @@ export function useUIStatePersistence() {
       useChatStore.setState({ inputDrafts })
     }
 
+    const dismissedSetupScripts = Object.fromEntries(
+      (uiState.dismissed_setup_scripts ?? []).map(worktreeId => [
+        worktreeId,
+        true,
+      ])
+    )
+    if (Object.keys(dismissedSetupScripts).length > 0) {
+      useChatStore.setState({ dismissedSetupScripts })
+    }
+
     // Restore unsent image attachments (files already on disk)
     const pendingImagesDraft = uiState.pending_images ?? {}
     if (Object.keys(pendingImagesDraft).length > 0) {
@@ -598,6 +643,12 @@ export function useUIStatePersistence() {
           ...persistedModalOpen,
         },
         terminalVisible: uiState.terminal_visible ?? state.terminalVisible,
+        terminalVisibleByWorktree: Object.fromEntries(
+          Object.keys(persistedPanelOpen).map(worktreeId => [
+            worktreeId,
+            uiState.terminal_visible ?? false,
+          ])
+        ),
         terminalHeight: uiState.terminal_height ?? state.terminalHeight,
       }))
 
@@ -670,6 +721,7 @@ export function useUIStatePersistence() {
           modalTerminalOpen: {},
           terminalPanelOpen: {},
           terminalVisible: false,
+          terminalVisibleByWorktree: {},
         })
         // Clear any persisted session-terminal mappings — those PTYs are dead.
         // Drop both `sessionTerminalIds[sessionId]` and `sessionPrimarySurface`
@@ -807,6 +859,12 @@ export function useUIStatePersistence() {
         runningTerminals: new Set(restoredTerminalIds),
         terminalPanelOpen: restoredPanelOpen,
         terminalVisible: uiState.terminal_visible ?? state.terminalVisible,
+        terminalVisibleByWorktree: Object.fromEntries(
+          Object.keys(restoredPanelOpen).map(worktreeId => [
+            worktreeId,
+            uiState.terminal_visible ?? false,
+          ])
+        ),
         terminalHeight: uiState.terminal_height ?? state.terminalHeight,
         modalTerminalOpen: restoredModalOpen,
       }))
@@ -1063,6 +1121,8 @@ export function useUIStatePersistence() {
     let prevInputDrafts = useChatStore.getState().inputDrafts
     let prevPendingImages = useChatStore.getState().pendingImages
     let prevPendingTextFiles = useChatStore.getState().pendingTextFiles
+    let prevDismissedSetupScripts =
+      useChatStore.getState().dismissedSetupScripts
     let prevReviewSidebarVisible = useChatStore.getState().reviewSidebarVisible
     let prevLastOpenedPerProject = useChatStore.getState().lastOpenedPerProject
     let prevTerminalInstances = useTerminalStore.getState().terminals
@@ -1184,6 +1244,8 @@ export function useUIStatePersistence() {
       const pendingImagesChanged = state.pendingImages !== prevPendingImages
       const pendingTextFilesChanged =
         state.pendingTextFiles !== prevPendingTextFiles
+      const dismissedSetupScriptsChanged =
+        state.dismissedSetupScripts !== prevDismissedSetupScripts
       const reviewSidebarChanged =
         state.reviewSidebarVisible !== prevReviewSidebarVisible
       const lastOpenedChanged =
@@ -1195,6 +1257,7 @@ export function useUIStatePersistence() {
         inputDraftsChanged ||
         pendingImagesChanged ||
         pendingTextFilesChanged ||
+        dismissedSetupScriptsChanged ||
         reviewSidebarChanged ||
         lastOpenedChanged
       ) {
@@ -1205,6 +1268,7 @@ export function useUIStatePersistence() {
         prevInputDrafts = state.inputDrafts
         prevPendingImages = state.pendingImages
         prevPendingTextFiles = state.pendingTextFiles
+        prevDismissedSetupScripts = state.dismissedSetupScripts
         prevReviewSidebarVisible = state.reviewSidebarVisible
         prevLastOpenedPerProject = state.lastOpenedPerProject
         const currentState = getCurrentUIState()
@@ -1316,6 +1380,7 @@ export function useUIStatePersistence() {
       unsubChat()
       unsubTerminal()
       unsubBrowser()
+      debouncedSaveRef.current?.flush()
       debouncedSaveRef.current?.cancel()
       logger.debug('UI state persistence subscriptions cleaned up')
     }

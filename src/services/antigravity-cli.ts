@@ -1,7 +1,7 @@
 /** Antigravity CLI management service. */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { invoke } from '@/lib/transport'
+import { invoke, invokeForOptionalServer } from '@/lib/transport'
 import { logger } from '@/lib/logger'
 import { toast } from 'sonner'
 import { hasBackendTransport } from '@/lib/environment'
@@ -21,7 +21,8 @@ export const antigravityCliQueryKeys = {
   auth: () => [...antigravityCliQueryKeys.all, 'auth'] as const,
   models: () => [...antigravityCliQueryKeys.all, 'models'] as const,
   versions: () => [...antigravityCliQueryKeys.all, 'versions'] as const,
-  installCommand: () => [...antigravityCliQueryKeys.all, 'install-command'] as const,
+  installCommand: () =>
+    [...antigravityCliQueryKeys.all, 'install-command'] as const,
 }
 
 const fallbackAntigravityVersions: AntigravityReleaseInfo[] = [
@@ -63,13 +64,19 @@ export function useAntigravityPathDetection(options?: { enabled?: boolean }) {
   })
 }
 
-export function useAntigravityCliStatus(options?: { enabled?: boolean }) {
+export function useAntigravityCliStatus(options?: {
+  enabled?: boolean
+  serverId?: string
+}) {
   return useQuery({
-    queryKey: antigravityCliQueryKeys.status(),
+    queryKey: [...antigravityCliQueryKeys.status(), options?.serverId],
     queryFn: async (): Promise<AntigravityCliStatus> => {
       if (!isTauri()) return { installed: false, version: null, path: null }
       try {
-        return await invoke<AntigravityCliStatus>('check_antigravity_cli_installed')
+        return await invokeForOptionalServer<AntigravityCliStatus>(
+          options?.serverId,
+          'check_antigravity_cli_installed'
+        )
       } catch (error) {
         logger.error('Failed to check Antigravity CLI status', { error })
         return { installed: false, version: null, path: null }
@@ -118,7 +125,9 @@ export function useAvailableAntigravityModels(options?: { enabled?: boolean }) {
         return [{ id: 'default', label: 'Configured default', isDefault: true }]
       }
       try {
-        const models = await invoke<AntigravityModelInfo[]>('list_antigravity_models')
+        const models = await invoke<AntigravityModelInfo[]>(
+          'list_antigravity_models'
+        )
         return models.length
           ? models
           : [{ id: 'default', label: 'Configured default', isDefault: true }]
@@ -133,7 +142,9 @@ export function useAvailableAntigravityModels(options?: { enabled?: boolean }) {
   })
 }
 
-export function useAvailableAntigravityVersions(options?: { enabled?: boolean }) {
+export function useAvailableAntigravityVersions(options?: {
+  enabled?: boolean
+}) {
   return useQuery({
     queryKey: antigravityCliQueryKeys.versions(),
     queryFn: async (): Promise<AntigravityReleaseInfo[]> => {
@@ -222,7 +233,9 @@ export function useAntigravityCliSetup() {
   return {
     status: status.data,
     isStatusLoading: status.isLoading,
-    versions: versions.data?.length ? versions.data : fallbackAntigravityVersions,
+    versions: versions.data?.length
+      ? versions.data
+      : fallbackAntigravityVersions,
     isVersionsLoading: versions.isFetching,
     isVersionsError: versions.isError,
     refetchVersions: versions.refetch,

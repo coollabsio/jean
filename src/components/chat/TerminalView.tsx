@@ -258,7 +258,7 @@ export function TerminalView({
     removeTerminal,
     reorderPanelTerminals,
     setActiveTerminal,
-    setTerminalVisible,
+    setTerminalVisibleForWorktree,
     setTerminalPanelOpen,
   } = useTerminalStore.getState()
   const uiStateInitialized = useUIStore(state => state.uiStateInitialized)
@@ -310,11 +310,16 @@ export function TerminalView({
       ).filter(isPanelTerminal)
       if (remaining.length === 0) {
         setTerminalPanelOpen(worktreeId, false)
-        setTerminalVisible(false)
+        setTerminalVisibleForWorktree(worktreeId, false)
         useTerminalStore.getState().setModalTerminalOpen(worktreeId, false)
       }
     },
-    [worktreeId, removeTerminal, setTerminalPanelOpen, setTerminalVisible]
+    [
+      worktreeId,
+      removeTerminal,
+      setTerminalPanelOpen,
+      setTerminalVisibleForWorktree,
+    ]
   )
 
   const handleCloseTerminal = useCallback(
@@ -377,8 +382,8 @@ export function TerminalView({
   )
 
   const handleMinimize = useCallback(() => {
-    setTerminalVisible(false)
-  }, [setTerminalVisible])
+    setTerminalVisibleForWorktree(worktreeId, false)
+  }, [setTerminalVisibleForWorktree, worktreeId])
 
   const handleCloseAll = useCallback(() => {
     const panelTerminals = (

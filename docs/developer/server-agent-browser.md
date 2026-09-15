@@ -116,9 +116,8 @@ Settings → **MCP Servers** → **Agent Browser** (`AgentBrowserSection.tsx`):
 
 - Status (installed / missing binary; Jean-managed vs PATH)
 - Profile path
-- **Install agent-browser** (npm into app data + Chromium download)
+- **Install agent-browser** (npm into app data + Chromium download + MCP setup for installed backends)
 - Create profile
-- Install MCP into installed backends
 - Copy Claude / Codex snippets
 - Operator fallback: `npm install -g agent-browser && agent-browser install`
 
@@ -126,10 +125,9 @@ Settings → **MCP Servers** → **Agent Browser** (`AgentBrowserSection.tsx`):
 
 ### A. Display available
 
-1. Install agent-browser + Chromium.
-2. Install MCP from Settings.
-3. Headed first run: user logs in (2FA, CAPTCHA).
-4. Later turns reuse the profile (including headless).
+1. Install agent-browser, Chromium, and MCP from Settings.
+2. Headed first run: user logs in (2FA, CAPTCHA).
+3. Later turns reuse the profile (including headless).
 
 ### B. Headless VPS
 
@@ -176,7 +174,7 @@ agent-browser install          # Chrome for Testing
 agent-browser install --with-deps
 ```
 
-Then: **Install MCP into backends**.
+Then use the Claude or Codex snippet only if you need to configure a backend manually.
 
 In chat (after first manual login):
 

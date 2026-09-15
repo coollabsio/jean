@@ -142,6 +142,7 @@ pub fn spawn_terminal(
     rows: u16,
     command: Option<String>,
     command_args: Option<Vec<String>>,
+    session_id: Option<String>,
 ) -> Result<(), String> {
     log::info!(
         "spawn_terminal {terminal_id}: cols={cols}, rows={rows}, cwd={worktree_path}, command={:?}, args={:?}",
@@ -330,6 +331,10 @@ pub fn spawn_terminal(
         child,
         cols,
         rows,
+        worktree_path: worktree_path.clone(),
+        command: command.clone(),
+        command_args: command_args.clone(),
+        session_id,
     };
     register_terminal(session);
 

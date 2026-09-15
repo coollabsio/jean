@@ -6,7 +6,11 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { invoke, useWsConnectionStatus } from '@/lib/transport'
+import {
+  invoke,
+  invokeForOptionalServer,
+  useWsConnectionStatus,
+} from '@/lib/transport'
 import { listen } from '@/lib/transport'
 import { toast } from 'sonner'
 import { useCallback, useEffect, useState } from 'react'
@@ -93,9 +97,12 @@ function getUsageRefetchInterval(snapshot?: ClaudeUsageSnapshot): number {
 /**
  * Hook to check if Claude CLI is installed and get its status
  */
-export function useClaudeCliStatus(options?: { enabled?: boolean }) {
+export function useClaudeCliStatus(options?: {
+  enabled?: boolean
+  serverId?: string
+}) {
   return useQuery({
-    queryKey: claudeCliQueryKeys.status(),
+    queryKey: [...claudeCliQueryKeys.status(), options?.serverId ?? 'local'],
     queryFn: async (): Promise<ClaudeCliStatus> => {
       if (!isTauri()) {
         logger.debug('Not in Tauri context, returning mock CLI status')
@@ -109,7 +116,8 @@ export function useClaudeCliStatus(options?: { enabled?: boolean }) {
 
       try {
         console.debug('[ONBOARDING:SVC] claude: checking installed status...')
-        const status = await invoke<ClaudeCliStatus>(
+        const status = await invokeForOptionalServer<ClaudeCliStatus>(
+          options?.serverId,
           'check_claude_cli_installed'
         )
         console.debug('[ONBOARDING:SVC] claude: status =', status)
@@ -346,7 +354,6 @@ export function useClaudeCliSetup() {
       },
     })
   }
-
 
   return {
     status: status.data,

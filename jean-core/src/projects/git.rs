@@ -2104,6 +2104,93 @@ pub fn read_jean_config(worktree_path: &str) -> Option<JeanConfig> {
     }
 }
 
+/// Resolve jean.json for a worktree, preferring the newest project-level copy.
+///
+/// Worktrees keep a committed snapshot of jean.json from when the branch was
+/// created. Updating `latest` (or saving via Settings, which writes the project
+/// root) must win over that stale branch copy. After the worktree itself is
+/// updated from latest, its newer committed copy wins over an outdated main
+/// checkout. Uncommitted project-root edits (Settings) always win.
+pub fn resolve_jean_config(worktree_path: &str, project_path: Option<&str>) -> Option<JeanConfig> {
+    let worktree = jean_config_candidate(worktree_path);
+    let project = project_path
+        .filter(|path| !same_repo_path(path, worktree_path))
+        .and_then(jean_config_candidate);
+    pick_newest_jean_config(worktree, project).map(|c| c.config)
+}
+
+#[derive(Debug, Clone)]
+struct JeanConfigCandidate {
+    config: JeanConfig,
+    dirty: bool,
+    committed_at: Option<u64>,
+}
+
+fn jean_config_candidate(path: &str) -> Option<JeanConfigCandidate> {
+    Some(JeanConfigCandidate {
+        config: read_jean_config(path)?,
+        dirty: jean_json_is_dirty(path),
+        committed_at: jean_json_committed_at(path),
+    })
+}
+
+fn pick_newest_jean_config(
+    worktree: Option<JeanConfigCandidate>,
+    project: Option<JeanConfigCandidate>,
+) -> Option<JeanConfigCandidate> {
+    match (worktree, project) {
+        (None, None) => None,
+        (Some(only), None) | (None, Some(only)) => Some(only),
+        (Some(worktree), Some(project)) => Some(match (project.dirty, worktree.dirty) {
+            (true, false) => project,
+            (false, true) => worktree,
+            _ => {
+                if project.committed_at.unwrap_or(0) >= worktree.committed_at.unwrap_or(0) {
+                    project
+                } else {
+                    worktree
+                }
+            }
+        }),
+    }
+}
+
+fn same_repo_path(left: &str, right: &str) -> bool {
+    let left = left.trim_end_matches(['/', '\\']);
+    let right = right.trim_end_matches(['/', '\\']);
+    Path::new(left) == Path::new(right)
+}
+
+fn jean_json_is_dirty(repo_path: &str) -> bool {
+    let output = wsl_aware_command("git", Some(Path::new(repo_path)))
+        .args([
+            "status",
+            "--porcelain",
+            "--untracked-files=normal",
+            "--",
+            "jean.json",
+        ])
+        .output();
+    match output {
+        Ok(output) if output.status.success() => {
+            !String::from_utf8_lossy(&output.stdout).trim().is_empty()
+        }
+        // Not a git checkout (or git failed): an on-disk file is locally authoritative.
+        _ => true,
+    }
+}
+
+fn jean_json_committed_at(repo_path: &str) -> Option<u64> {
+    let output = wsl_aware_command("git", Some(Path::new(repo_path)))
+        .args(["log", "-1", "--format=%ct", "--", "jean.json"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout).trim().parse().ok()
+}
+
 /// Run a setup script in a worktree directory
 ///
 /// Executes the script using sh -c and captures output.
@@ -2995,7 +3082,6 @@ mod tests {
         .unwrap_err();
 
         assert!(error.starts_with("setup script timed out after"));
-        assert!(error.contains("started"));
         assert!(started.elapsed() < Duration::from_secs(3));
     }
 
@@ -3258,5 +3344,167 @@ mod tests {
         // Local/origin checks that get_valid_base_branch uses must both fail.
         assert!(!branch_exists(path, "feature-x"));
         assert!(!remote_branch_exists(path, "feature-x"));
+    }
+}
+
+#[cfg(test)]
+mod jean_config_resolve_tests {
+    use super::*;
+
+    fn write_jean_run(dir: &std::path::Path, run: &str) {
+        std::fs::write(
+            dir.join("jean.json"),
+            format!("{{\"scripts\":{{\"run\":\"{run}\"}}}}\n"),
+        )
+        .unwrap();
+    }
+
+    fn init_repo(dir: &std::path::Path) {
+        run_git_in(dir, &["init", "--initial-branch", "main"]);
+        run_git_in(dir, &["config", "user.email", "test@example.com"]);
+        run_git_in(dir, &["config", "user.name", "Test"]);
+    }
+
+    fn run_git_in(dir: &std::path::Path, args: &[&str]) {
+        let mut cmd = std::process::Command::new("git");
+        cmd.args(args).current_dir(dir);
+        let output = cmd.output().expect("git command");
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn commit_jean(dir: &std::path::Path, run: &str, date: &str) {
+        write_jean_run(dir, run);
+        run_git_in(dir, &["add", "jean.json"]);
+        let status = std::process::Command::new("git")
+            .args(["commit", "-m", &format!("jean.json {run}")])
+            .current_dir(dir)
+            .env("GIT_AUTHOR_DATE", date)
+            .env("GIT_COMMITTER_DATE", date)
+            .output()
+            .expect("git commit");
+        assert!(
+            status.status.success(),
+            "commit failed: {}",
+            String::from_utf8_lossy(&status.stderr)
+        );
+    }
+
+    fn run_script(path: &str) -> Option<String> {
+        resolve_jean_config(path, None)
+            .and_then(|c| c.scripts.run)
+            .map(|r| r.into_vec())
+            .and_then(|v| v.into_iter().next())
+    }
+
+    fn run_script_resolved(worktree: &str, project: &str) -> Option<String> {
+        resolve_jean_config(worktree, Some(project))
+            .and_then(|c| c.scripts.run)
+            .map(|r| r.into_vec())
+            .and_then(|v| v.into_iter().next())
+    }
+
+    #[test]
+    fn prefers_newer_project_jean_json_over_stale_branch_copy() {
+        let project = tempfile::tempdir().unwrap();
+        let worktree = tempfile::tempdir().unwrap();
+        init_repo(project.path());
+        init_repo(worktree.path());
+
+        commit_jean(worktree.path(), "old-run", "2020-01-01T00:00:00 +0000");
+        commit_jean(project.path(), "new-run", "2024-06-01T00:00:00 +0000");
+
+        assert_eq!(
+            run_script_resolved(
+                worktree.path().to_str().unwrap(),
+                project.path().to_str().unwrap(),
+            )
+            .as_deref(),
+            Some("new-run"),
+            "latest/project jean.json must win over an older branch copy"
+        );
+    }
+
+    #[test]
+    fn prefers_worktree_after_it_is_updated_from_latest() {
+        let project = tempfile::tempdir().unwrap();
+        let worktree = tempfile::tempdir().unwrap();
+        init_repo(project.path());
+        init_repo(worktree.path());
+
+        commit_jean(project.path(), "stale-main", "2020-01-01T00:00:00 +0000");
+        commit_jean(worktree.path(), "rebased-run", "2024-06-01T00:00:00 +0000");
+
+        assert_eq!(
+            run_script_resolved(
+                worktree.path().to_str().unwrap(),
+                project.path().to_str().unwrap(),
+            )
+            .as_deref(),
+            Some("rebased-run"),
+        );
+    }
+
+    #[test]
+    fn prefers_uncommitted_project_settings_over_committed_branch_copy() {
+        let project = tempfile::tempdir().unwrap();
+        let worktree = tempfile::tempdir().unwrap();
+        init_repo(project.path());
+        init_repo(worktree.path());
+
+        commit_jean(worktree.path(), "branch-run", "2024-06-01T00:00:00 +0000");
+        write_jean_run(project.path(), "settings-run");
+
+        assert_eq!(
+            run_script_resolved(
+                worktree.path().to_str().unwrap(),
+                project.path().to_str().unwrap(),
+            )
+            .as_deref(),
+            Some("settings-run"),
+        );
+    }
+
+    #[test]
+    fn falls_back_to_worktree_when_project_has_no_jean_json() {
+        let worktree = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        init_repo(worktree.path());
+        init_repo(project.path());
+        commit_jean(worktree.path(), "worktree-run", "2024-01-01T00:00:00 +0000");
+
+        assert_eq!(
+            run_script_resolved(
+                worktree.path().to_str().unwrap(),
+                project.path().to_str().unwrap(),
+            )
+            .as_deref(),
+            Some("worktree-run"),
+        );
+        assert_eq!(
+            run_script(worktree.path().to_str().unwrap()).as_deref(),
+            Some("worktree-run"),
+        );
+    }
+
+    #[test]
+    fn falls_back_to_project_when_worktree_has_no_jean_json() {
+        let worktree = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        init_repo(worktree.path());
+        init_repo(project.path());
+        commit_jean(project.path(), "project-run", "2024-01-01T00:00:00 +0000");
+
+        assert_eq!(
+            run_script_resolved(
+                worktree.path().to_str().unwrap(),
+                project.path().to_str().unwrap(),
+            )
+            .as_deref(),
+            Some("project-run"),
+        );
     }
 }

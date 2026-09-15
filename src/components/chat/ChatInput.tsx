@@ -14,6 +14,7 @@ import type {
   PendingFile,
   PendingSkill,
   ClaudeCommand,
+  ClipboardImageData,
   SaveImageResponse,
   SaveTextResponse,
   ReadTextResponse,
@@ -55,6 +56,7 @@ import {
 } from './message-content-utils'
 import { isModKeyEvent } from '@/types/keybindings'
 import { isSteerCapableBackend } from '@/lib/backend-auto-steer'
+import { isNativeApp } from '@/lib/environment'
 
 /** Threshold for saving pasted text as file (2000 chars) */
 const TEXT_PASTE_THRESHOLD = 2000
@@ -710,6 +712,7 @@ export const ChatInput = memo(function ChatInput({
         try {
           const result = await invoke<SaveTextResponse>('save_pasted_text', {
             content: text,
+            sessionId: activeSessionId,
           })
 
           useChatStore.getState().addPendingTextFile(activeSessionId, {
@@ -876,8 +879,7 @@ export const ChatInput = memo(function ChatInput({
         return
       }
 
-      const items = e.clipboardData?.items
-      if (!items) return
+      const items = e.clipboardData?.items ?? []
 
       // First, check for image items in the clipboard
       const imageFiles: File[] = []
@@ -890,6 +892,21 @@ export const ChatInput = memo(function ChatInput({
         const file = item.getAsFile()
         if (!file) continue
         imageFiles.push(file)
+      }
+      // iOS can expose an image copied from the share sheet through `files`
+      // while leaving `items` empty.
+      for (const file of Array.from(e.clipboardData?.files ?? [])) {
+        const isAlreadyExposedByItem = imageFiles.some(
+          imageFile =>
+            imageFile.name === file.name &&
+            imageFile.type === file.type &&
+            imageFile.size === file.size &&
+            imageFile.lastModified === file.lastModified
+        )
+        if (file.type.startsWith('image/') && !isAlreadyExposedByItem) {
+          e.preventDefault()
+          imageFiles.push(file)
+        }
       }
       const hasImage = imageFiles.length > 0
       // Independent per-image save; process in parallel
@@ -915,7 +932,7 @@ export const ChatInput = memo(function ChatInput({
       // Native clipboard fallback (Linux/WebKitGTK doesn't expose image items via Web API)
       const clipboardText = plainText
       const clipboardHtml = e.clipboardData?.getData('text/html')
-      if (!clipboardText && !clipboardHtml) {
+      if (isNativeApp() && !clipboardText && !clipboardHtml) {
         e.preventDefault()
         const placeholderId = `clipboard-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
         const { addPendingImage, updatePendingImage, removePendingImage } =
@@ -927,10 +944,20 @@ export const ChatInput = memo(function ChatInput({
           loading: true,
         })
         try {
-          const result = await invoke<SaveImageResponse | null>(
+          const clipboardImage = await invoke<ClipboardImageData | null>(
             'read_clipboard_image'
           )
-          if (result) {
+          if (clipboardImage) {
+            // Clipboard access stays on the native client. Save the bytes via
+            // the active backend so the resulting path exists on that server.
+            const result = await invoke<SaveImageResponse>(
+              'save_pasted_image',
+              {
+                data: clipboardImage.data,
+                mimeType: clipboardImage.mimeType,
+                sessionId: activeSessionId,
+              }
+            )
             updatePendingImage(activeSessionId, placeholderId, {
               id: result.id,
               path: result.path,

@@ -27,6 +27,7 @@ import {
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { invoke, listen } from '@/lib/transport'
 import { hydrateRunningSnapshot } from '@/lib/hydrate-running-snapshot'
+import { generateId } from '@/lib/uuid'
 import { GitBranch, GitMerge, Layers, Loader2 } from 'lucide-react'
 import {
   useSession,
@@ -66,6 +67,7 @@ import {
   useAttachedSavedContexts,
 } from '@/services/github'
 import { useLoadedLinearIssueContexts } from '@/services/linear'
+import { useLoadedSentryContexts } from '@/services/sentry'
 import { useChatStore, DEFAULT_THINKING_LEVEL } from '@/store/chat-store'
 import { usePreferences, usePatchPreferences } from '@/services/preferences'
 import { getLabelTextColor } from '@/lib/label-colors'
@@ -104,6 +106,7 @@ import {
   normalizeCodexQuestions,
 } from '@/types/chat'
 import { getFilename, normalizePath } from '@/lib/path-utils'
+import { registerChatComposer } from '@/lib/chat-composer-metrics'
 import { cn } from '@/lib/utils'
 import { PermissionApproval } from './PermissionApproval'
 import { AskUserQuestion } from './AskUserQuestion'
@@ -114,6 +117,11 @@ import { OpenCodePermissionsRequest } from './OpenCodePermissionsRequest'
 import { CodexMcpElicitationRequest as CodexMcpElicitationRequestCard } from './CodexMcpElicitationRequest'
 import { CodexDynamicToolCallRequest as CodexDynamicToolCallRequestCard } from './CodexDynamicToolCallRequest'
 import { SetupScriptOutput } from './SetupScriptOutput'
+import {
+  selectSessionRenderTarget,
+  shouldClearStaleSessionStream,
+} from './session-render-target'
+import { isFirstWorktreeSession } from './setup-script-visibility'
 import { TodoWidget } from './TodoWidget'
 import { AgentWidget } from './AgentWidget'
 import { normalizeTodosForDisplay } from './tool-call-utils'
@@ -163,6 +171,7 @@ import {
 } from './message-content-utils'
 import { useUIStore } from '@/store/ui-store'
 import { buildMcpConfigJson } from '@/services/mcp'
+import { CHECK_GITHUB_ISSUES_PROMPT } from '@/lib/github-discovery-prompt'
 import type { McpServerInfo } from '@/types/chat'
 import { useGitStatus } from '@/services/git-status'
 import { useRemotePicker } from '@/hooks/useRemotePicker'
@@ -330,7 +339,11 @@ export function ChatWindow({
   // Review sidebar state
   const reviewSidebarVisible = useChatStore(state => state.reviewSidebarVisible)
   // Terminal panel visibility (per-worktree)
-  const terminalVisible = useTerminalStore(state => state.terminalVisible)
+  const terminalVisible = useTerminalStore(state =>
+    activeWorktreeId
+      ? (state.terminalVisibleByWorktree[activeWorktreeId] ?? false)
+      : false
+  )
   const terminalPanelOpen = useTerminalStore(state =>
     activeWorktreeId
       ? (state.terminalPanelOpen[activeWorktreeId] ?? false)
@@ -344,7 +357,7 @@ export function ChatWindow({
   const sessionTerminalId = useUIStore(state =>
     activeSessionId ? state.sessionTerminalIds[activeSessionId] : undefined
   )
-  const { setTerminalVisible } = useTerminalStore.getState()
+  const { setTerminalVisibleForWorktree } = useTerminalStore.getState()
 
   // Sync terminal panel with terminalVisible state
   useEffect(() => {
@@ -360,12 +373,16 @@ export function ChatWindow({
 
   // Terminal panel collapse/expand handlers
   const handleTerminalCollapse = useCallback(() => {
-    setTerminalVisible(false)
-  }, [setTerminalVisible])
+    if (activeWorktreeId) {
+      setTerminalVisibleForWorktree(activeWorktreeId, false)
+    }
+  }, [activeWorktreeId, setTerminalVisibleForWorktree])
 
   const handleTerminalExpand = useCallback(() => {
-    setTerminalVisible(true)
-  }, [setTerminalVisible])
+    if (activeWorktreeId) {
+      setTerminalVisibleForWorktree(activeWorktreeId, true)
+    }
+  }, [activeWorktreeId, setTerminalVisibleForWorktree])
 
   // Review sidebar collapse/expand handlers
   const handleReviewSidebarCollapse = useCallback(() => {
@@ -382,7 +399,7 @@ export function ChatWindow({
     clearInputDraft,
     setExecutionMode,
     setError,
-    clearSetupScriptResult,
+    dismissSetupScript,
   } = useChatStore.getState()
 
   const queryClient = useQueryClient()
@@ -393,6 +410,11 @@ export function ChatWindow({
     isLoading: isSessionsLoading,
     isFetching: isSessionsFetching,
   } = useSessions(activeWorktreeId, activeWorktreePath)
+
+  const isFirstSession = isFirstWorktreeSession(
+    activeSessionId,
+    sessionsData?.sessions
+  )
 
   const uiStateInitialized = useUIStore(state => state.uiStateInitialized)
 
@@ -427,19 +449,52 @@ export function ChatWindow({
       sessionsData.active_session_id ?? sessionsData.sessions[0]?.id
   }
 
-  // PERFORMANCE: Defer the session ID used for content rendering
-  // This allows React to show old session content while rendering new session in background
-  // The activeSessionId is used for immediate feedback (tab highlighting, sending messages)
-  // The deferredSessionId is used for content that can be rendered concurrently
-  const deferredSessionId = useDeferredValue(activeSessionId)
-  const isSessionSwitching = deferredSessionId !== activeSessionId
+  // Defer tab changes only inside one worktree. Deferring the session ID alone
+  // combined the prior server's session with the newly selected worktree and
+  // path during a sidebar change. That could route an invalid mixed-server
+  // request and keep the previous transcript visible from the query cache.
+  const activeSessionTarget = useMemo(
+    () => ({
+      sessionId: activeSessionId ?? null,
+      worktreeId: activeWorktreeId,
+      worktreePath: activeWorktreePath,
+    }),
+    [activeSessionId, activeWorktreeId, activeWorktreePath]
+  )
+  const deferredSessionTarget = useDeferredValue(activeSessionTarget)
+  const sessionRenderTarget = selectSessionRenderTarget(
+    activeSessionTarget,
+    deferredSessionTarget
+  )
+  const deferredSessionId = sessionRenderTarget.sessionId
+  const isSessionSwitching = sessionRenderTarget !== activeSessionTarget
 
   // Load the active session's messages (uses deferred ID for concurrent rendering)
   const { data: session, isLoading } = useSession(
-    deferredSessionId ?? null,
-    activeWorktreeId,
-    activeWorktreePath
+    deferredSessionId,
+    sessionRenderTarget.worktreeId,
+    sessionRenderTarget.worktreePath
   )
+
+  // A background remote socket reconnects without reloading the desktop UI.
+  // If chat:done was missed during that gap, persisted history is complete but
+  // the old Zustand stream remains mounted. Reconcile it when the authoritative
+  // session response proves that the assistant turn finished.
+  useEffect(() => {
+    if (!deferredSessionId || !session || isSessionSwitching) return
+    const lastMessage = session.messages.at(-1)
+    const store = useChatStore.getState()
+    if (
+      shouldClearStaleSessionStream({
+        isSending: !!store.sendingSessionIds[deferredSessionId],
+        lastRunStatus: session.last_run_status,
+        lastMessageRole: lastMessage?.role,
+        lastMessageId: lastMessage?.id,
+      })
+    ) {
+      store.completeSession(deferredSessionId)
+    }
+  }, [deferredSessionId, session, isSessionSwitching])
 
   const hasReviewResults = useChatStore(state =>
     deferredSessionId ? !!state.reviewResults[deferredSessionId] : false
@@ -691,6 +746,11 @@ export function ChatWindow({
     activeWorktreeId ?? null,
     worktree?.project_id ?? null
   )
+  const { data: loadedSentryContexts } = useLoadedSentryContexts(
+    activeSessionId ?? null,
+    activeWorktreeId ?? null,
+    worktree?.project_id ?? null
+  )
 
   // Attached saved contexts for indicator
   const { data: attachedSavedContexts } = useAttachedSavedContexts(
@@ -914,7 +974,7 @@ export function ChatWindow({
   // Fetches from ALL installed backends so toolbar shows grouped sections
   const { availableMcpServers, enabledMcpServers } = useMcpServerResolution({
     activeWorktreePath,
-    deferredSessionId,
+    deferredSessionId: deferredSessionId ?? undefined,
     project,
     preferences,
     selectedBackend,
@@ -1028,6 +1088,11 @@ export function ChatWindow({
   // Per-worktree setup script result (stays at worktree level)
   const setupScriptResult = useChatStore(state =>
     activeWorktreeId ? state.setupScriptResults[activeWorktreeId] : undefined
+  )
+  const isSetupScriptDismissed = useChatStore(state =>
+    activeWorktreeId
+      ? (state.dismissedSetupScripts[activeWorktreeId] ?? false)
+      : false
   )
   // PERFORMANCE: Input-related selectors use activeSessionId for immediate feedback
   // When user switches tabs, attachments should reflect the NEW session immediately
@@ -1176,6 +1241,11 @@ export function ChatWindow({
 
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const formRef = useRef<HTMLFormElement>(null)
+  const unregisterChatComposerRef = useRef<(() => void) | null>(null)
+  const setChatComposerNode = useCallback((node: HTMLDivElement | null) => {
+    unregisterChatComposerRef.current?.()
+    unregisterChatComposerRef.current = node ? registerChatComposer(node) : null
+  }, [])
   const clearChatInputStateRef = useRef<(() => void) | null>(null)
   // PERFORMANCE: Refs for session/worktree IDs and settings to avoid recreating callbacks when session changes
   // This enables stable callback references that read current values from refs
@@ -1440,7 +1510,7 @@ export function ChatWindow({
                   ? (preferences?.selected_commandcode_model ??
                     'commandcode/default')
                   : yoloBackend === 'grok'
-                    ? (preferences?.selected_grok_model ?? 'grok/grok-4.5')
+                    ? (preferences?.selected_grok_model ?? 'grok/grok-4.6')
                     : yoloBackend === 'kimi'
                       ? (preferences?.selected_kimi_model ?? 'kimi/default')
                       : selectedModelRef.current)
@@ -1630,7 +1700,7 @@ export function ChatWindow({
                   ? (preferences?.selected_commandcode_model ??
                     'commandcode/default')
                   : buildBackend === 'grok'
-                    ? (preferences?.selected_grok_model ?? 'grok/grok-4.5')
+                    ? (preferences?.selected_grok_model ?? 'grok/grok-4.6')
                     : buildBackend === 'kimi'
                       ? (preferences?.selected_kimi_model ?? 'kimi/default')
                       : selectedModelRef.current)
@@ -1903,7 +1973,7 @@ export function ChatWindow({
                   ? (preferences?.selected_commandcode_model ??
                     'commandcode/default')
                   : modeBackend === 'grok'
-                    ? (preferences?.selected_grok_model ?? 'grok/grok-4.5')
+                    ? (preferences?.selected_grok_model ?? 'grok/grok-4.6')
                     : modeBackend === 'kimi'
                       ? (preferences?.selected_kimi_model ?? 'kimi/default')
                       : selectedModelRef.current)
@@ -2244,6 +2314,27 @@ export function ChatWindow({
     clearChatInputState: () => clearChatInputStateRef.current?.(),
   })
 
+  const handleCheckGitHubIssues = useCallback(() => {
+    sendMessageNow({
+      id: generateId(),
+      message: CHECK_GITHUB_ISSUES_PROMPT,
+      pendingImages: [],
+      pendingFiles: [],
+      pendingSkills: [],
+      pendingTextFiles: [],
+      model: selectedModelRef.current,
+      provider: selectedProviderRef.current,
+      executionMode: executionModeRef.current,
+      thinkingLevel: selectedThinkingLevelRef.current,
+      effortLevel: useAdaptiveThinkingRef.current
+        ? selectedEffortLevelRef.current
+        : undefined,
+      mcpConfig: getMcpConfig(),
+      backend: selectedBackendRef.current,
+      queuedAt: Date.now(),
+    })
+  }, [getMcpConfig, sendMessageNow])
+
   // Note: Queue processing moved to useQueueProcessor hook in App.tsx
   // This ensures queued messages execute even when the worktree is unfocused
 
@@ -2256,7 +2347,6 @@ export function ChatWindow({
     handleRevertLastCommit,
     handleOpenPr,
     handleReview,
-    handleFinalReview,
     handleCodeRabbitReview,
     handleCodeRabbitPrReview,
     handleMerge,
@@ -2506,6 +2596,7 @@ export function ChatWindow({
     handleLoadContext,
     handleLinkedProjects,
     handleForkSession,
+    handleCheckGitHubIssues,
     handleCommit,
     handleCommitAndPush: handleCommitAndPushWithPicker,
     handlePull: handlePullWithPicker,
@@ -2953,7 +3044,6 @@ export function ChatWindow({
           open={reviewMethodModalOpen}
           onOpenChange={setReviewMethodModalOpen}
           onAiReview={handleReview}
-          onFinalReview={handleFinalReview}
           onCodeRabbitCliReview={handleCodeRabbitReview}
           onCodeRabbitPrReview={handleCodeRabbitPrReview}
           codeRabbitPrAvailable={Boolean(worktree?.pr_number)}
@@ -3086,7 +3176,9 @@ export function ChatWindow({
                             {/* Setup script running indicator */}
                             {worktree?.setup_script &&
                               worktree.setup_success == null &&
-                              !setupScriptResult && (
+                              !setupScriptResult &&
+                              isFirstSession &&
+                              !isSetupScriptDismissed && (
                                 <div className="my-2 flex items-center gap-2 rounded border border-muted bg-muted/30 px-3 py-2 font-mono text-sm text-muted-foreground">
                                   <Loader2 className="h-4 w-4 animate-spin shrink-0" />
                                   <span>
@@ -3098,14 +3190,17 @@ export function ChatWindow({
                                 </div>
                               )}
                             {/* Setup script output from jean.json */}
-                            {setupScriptResult && activeWorktreeId && (
-                              <SetupScriptOutput
-                                result={setupScriptResult}
-                                onDismiss={() =>
-                                  clearSetupScriptResult(activeWorktreeId)
-                                }
-                              />
-                            )}
+                            {setupScriptResult &&
+                              activeWorktreeId &&
+                              isFirstSession &&
+                              !isSetupScriptDismissed && (
+                                <SetupScriptOutput
+                                  result={setupScriptResult}
+                                  onDismiss={() =>
+                                    dismissSetupScript(activeWorktreeId)
+                                  }
+                                />
+                              )}
                             <CodexGoalBanner
                               sessionId={activeSessionId ?? null}
                               worktreeId={activeWorktreeId ?? null}
@@ -3348,6 +3443,7 @@ export function ChatWindow({
                                   restoredExecutionMode={
                                     session?.last_run_execution_mode
                                   }
+                                  completedDurationMs={completedDurationMs}
                                 />
                               </div>
                             )}
@@ -3545,7 +3641,11 @@ export function ChatWindow({
                     {/* Input container - full width, centered content */}
                     <div className="bg-background">
                       <div className="mx-auto max-w-7xl">
-                        <div className="relative sm:mx-auto sm:mb-3 sm:max-w-3xl xl:max-w-4xl">
+                        <div
+                          ref={setChatComposerNode}
+                          data-chat-composer=""
+                          className="relative sm:mx-auto sm:mb-3 sm:max-w-3xl xl:max-w-4xl"
+                        >
                           {/* Queued prompts - rendered as an extension above the chat input */}
                           {activeSessionId &&
                             currentQueuedMessages.length > 0 && (
@@ -3587,6 +3687,7 @@ export function ChatWindow({
                             <ImagePreview
                               images={currentPendingImages}
                               onRemove={handleRemovePendingImage}
+                              sessionId={activeSessionId}
                             />
 
                             {/* Pending text file preview */}
@@ -3612,7 +3713,8 @@ export function ChatWindow({
                             )}
 
                             {/* Task widget - inline fallback for narrow screens */}
-                            {activeTodos.length > 0 &&
+                            {!zenMode &&
+                              activeTodos.length > 0 &&
                               (dismissedTodoMessageId === null ||
                                 (todoSourceMessageId !== null &&
                                   todoSourceMessageId !==
@@ -3627,7 +3729,9 @@ export function ChatWindow({
                                   <TodoWidget
                                     todos={normalizeTodosForDisplay(
                                       activeTodos,
-                                      isFromStreaming
+                                      isFromStreaming,
+                                      false,
+                                      isGrokBackend
                                     )}
                                     isStreaming={isSending}
                                     onClose={() =>
@@ -3640,7 +3744,8 @@ export function ChatWindow({
                               )}
 
                             {/* Agent widget - inline fallback for narrow screens */}
-                            {activeAgents.length > 0 &&
+                            {!zenMode &&
+                              activeAgents.length > 0 &&
                               (dismissedAgentMessageId === null ||
                                 (agentSourceMessageId !== null &&
                                   agentSourceMessageId !==
@@ -3802,6 +3907,9 @@ export function ChatWindow({
                                     loadedLinearContexts={
                                       loadedLinearContexts ?? []
                                     }
+                                    loadedSentryContexts={
+                                      loadedSentryContexts ?? []
+                                    }
                                     attachedSavedContexts={
                                       attachedSavedContexts ?? []
                                     }
@@ -3893,7 +4001,8 @@ export function ChatWindow({
                           </form>
 
                           {/* Side panel widgets (Tasks + Agents) for wide screens */}
-                          {!terminalPanelOpen &&
+                          {!zenMode &&
+                            !terminalPanelOpen &&
                             (activeTodos.length > 0 ||
                               activeAgents.length > 0) && (
                               <div className="hidden xl:flex flex-col gap-2 absolute left-full bottom-0 ml-3 w-64 z-20">
@@ -3905,7 +4014,9 @@ export function ChatWindow({
                                     <TodoWidget
                                       todos={normalizeTodosForDisplay(
                                         activeTodos,
-                                        isFromStreaming
+                                        isFromStreaming,
+                                        false,
+                                        isGrokBackend
                                       )}
                                       isStreaming={isSending}
                                       onClose={() =>

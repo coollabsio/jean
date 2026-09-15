@@ -18,12 +18,19 @@ let grokInstalled: boolean
 let kimiInstalled: boolean
 let isMobile: boolean
 let defaultExecutionMode: 'plan' | 'build' | 'yolo'
+let defaultBackend: 'claude' | 'codex'
+const cliStatusTargets = new Map<string, string | undefined>()
 
 vi.mock('@/services/preferences', () => ({
   usePreferences: () => ({
     data: {
       default_new_session_kind: 'chat',
       default_execution_mode: defaultExecutionMode,
+      default_backend: defaultBackend,
+      selected_model: 'claude-opus-4-8[1m]',
+      selected_codex_model: 'gpt-5.6-sol',
+      default_effort_level: 'max',
+      default_codex_reasoning_effort: 'xhigh',
     },
   }),
 }))
@@ -52,17 +59,23 @@ vi.mock('@/hooks/use-mobile', () => ({
 }))
 
 vi.mock('@/services/claude-cli', () => ({
-  useClaudeCliStatus: () => ({
-    data: { installed: true, path: '/usr/local/bin/claude' },
-    isLoading: false,
-  }),
+  useClaudeCliStatus: (options?: { serverId?: string }) => {
+    cliStatusTargets.set('claude', options?.serverId)
+    return {
+      data: { installed: true, path: '/usr/local/bin/claude' },
+      isLoading: false,
+    }
+  },
 }))
 
 vi.mock('@/services/codex-cli', () => ({
-  useCodexCliStatus: () => ({
-    data: { installed: true, path: '/usr/local/bin/codex' },
-    isLoading: false,
-  }),
+  useCodexCliStatus: (options?: { serverId?: string }) => {
+    cliStatusTargets.set('codex', options?.serverId)
+    return {
+      data: { installed: true, path: '/usr/local/bin/codex' },
+      isLoading: false,
+    }
+  },
 }))
 
 vi.mock('@/services/opencode-cli', () => ({
@@ -128,6 +141,7 @@ vi.mock('@/services/kimi-cli', () => ({
 describe('NewSessionModeModal', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    cliStatusTargets.clear()
     mutate.mockReset()
     invoke.mockReset()
     sessionsData = { sessions: [] }
@@ -140,6 +154,7 @@ describe('NewSessionModeModal', () => {
     kimiInstalled = false
     isMobile = false
     defaultExecutionMode = 'plan'
+    defaultBackend = 'claude'
     invoke.mockResolvedValue({
       commandArgs: ['--context-arg', 'context-value'],
     })
@@ -158,6 +173,20 @@ describe('NewSessionModeModal', () => {
       terminalPanelOpen: {},
       modalTerminalOpen: {},
     })
+  })
+
+  it('checks CLI availability on the worktree owning server', () => {
+    useUIStore.getState().openNewSessionModeModal({
+      worktreeId: 'remote-1:worktree-1',
+      worktreePath: '/remote/project',
+      origin: 'canvas',
+      intent: 'picker',
+    })
+
+    render(<NewSessionModeModal />)
+
+    expect(cliStatusTargets.get('claude')).toBe('remote-1')
+    expect(cliStatusTargets.get('codex')).toBe('remote-1')
   })
 
   it('defaults Enter to a normal Jean chat session', () => {
@@ -180,7 +209,11 @@ describe('NewSessionModeModal', () => {
     fireEvent.keyDown(window, { key: 'Enter' })
 
     expect(mutate).toHaveBeenCalledWith(
-      { worktreeId: 'worktree-1', worktreePath: '/tmp/worktree-1' },
+      {
+        worktreeId: 'worktree-1',
+        worktreePath: '/tmp/worktree-1',
+        backend: 'claude',
+      },
       expect.any(Object)
     )
     expect(useChatStore.getState().activeSessionIds['worktree-1']).toBe(
@@ -188,6 +221,37 @@ describe('NewSessionModeModal', () => {
     )
     expect(useUIStore.getState().sessionPrimarySurface['session-1']).toBe(
       'chat'
+    )
+  })
+
+  it('applies the configured model and effort to a new chat session', () => {
+    defaultBackend = 'codex'
+    mutate.mockImplementation(
+      (
+        _args: unknown,
+        opts?: { onSuccess?: (session: { id: string }) => void }
+      ) => opts?.onSuccess?.({ id: 'session-defaults' })
+    )
+    useUIStore.getState().openNewSessionModeModal({
+      worktreeId: 'worktree-1',
+      worktreePath: '/tmp/worktree-1',
+      origin: 'chat',
+    })
+
+    render(<NewSessionModeModal />)
+    fireEvent.keyDown(window, { key: 'Enter' })
+
+    expect(mutate).toHaveBeenCalledWith(
+      expect.objectContaining({ backend: 'codex' }),
+      expect.any(Object)
+    )
+    expect(invoke).toHaveBeenCalledWith(
+      'update_session_state',
+      expect.objectContaining({
+        sessionId: 'session-defaults',
+        selectedModel: 'gpt-5.6-sol',
+        selectedEffortLevel: 'xhigh',
+      })
     )
   })
 
@@ -211,7 +275,11 @@ describe('NewSessionModeModal', () => {
 
     await waitFor(() => {
       expect(mutate).toHaveBeenCalledWith(
-        { worktreeId: 'worktree-1', worktreePath: '/tmp/worktree-1' },
+        {
+          worktreeId: 'worktree-1',
+          worktreePath: '/tmp/worktree-1',
+          backend: 'claude',
+        },
         expect.any(Object)
       )
     })
@@ -221,7 +289,7 @@ describe('NewSessionModeModal', () => {
     )
   })
 
-  it('marks Command Code and Grok, not Cursor, as beta in backend choices', () => {
+  it('does not mark Command Code or Grok as beta in backend choices', () => {
     cursorInstalled = true
     commandCodeInstalled = true
     grokInstalled = true
@@ -235,13 +303,15 @@ describe('NewSessionModeModal', () => {
 
     expect(screen.getByText('Cursor')).toBeInTheDocument()
     expect(screen.queryByText('Cursor (Beta)')).toBeNull()
-    expect(screen.getByText('Command Code (Beta)')).toBeInTheDocument()
-    expect(screen.getByText('Grok (Beta)')).toBeInTheDocument()
+    expect(screen.getByText('Command Code')).toBeInTheDocument()
+    expect(screen.queryByText('Command Code (Beta)')).toBeNull()
+    expect(screen.getByText('Grok')).toBeInTheDocument()
+    expect(screen.queryByText('Grok (Beta)')).toBeNull()
     expect(
-      screen.getByText('Open native Command Code (Beta) in a terminal session')
+      screen.getByText('Open native Command Code in a terminal session')
     ).toBeInTheDocument()
     expect(
-      screen.getByText('Open native Grok (Beta) in a terminal session')
+      screen.getByText('Open native Grok in a terminal session')
     ).toBeInTheDocument()
   })
 
@@ -256,8 +326,8 @@ describe('NewSessionModeModal', () => {
 
     render(<NewSessionModeModal />)
 
-    expect(screen.getByText('Grok (Beta)')).toBeInTheDocument()
-    expect(screen.queryByText('Kimi Code (Beta)')).toBeNull()
+    expect(screen.getByText('Grok')).toBeInTheDocument()
+    expect(screen.queryByText('Kimi Code')).toBeNull()
     expect(screen.queryByText(/Kimi/)).toBeNull()
   })
 
@@ -271,9 +341,9 @@ describe('NewSessionModeModal', () => {
 
     render(<NewSessionModeModal />)
 
-    expect(screen.getByText('Kimi Code (Beta)')).toBeInTheDocument()
+    expect(screen.getByText('Kimi Code')).toBeInTheDocument()
     expect(
-      screen.getByText('Open native Kimi Code (Beta) in a terminal session')
+      screen.getByText('Open native Kimi Code in a terminal session')
     ).toBeInTheDocument()
   })
 
@@ -1045,12 +1115,15 @@ describe('NewSessionModeModal', () => {
     fireEvent.keyDown(window, { key: 'Enter' })
 
     expect(useChatStore.getState().executionModes['session-yolo']).toBe('yolo')
-    expect(invoke).toHaveBeenCalledWith('update_session_state', {
-      worktreeId: 'worktree-1',
-      worktreePath: '/tmp/worktree-1',
-      sessionId: 'session-yolo',
-      selectedExecutionMode: 'yolo',
-    })
+    expect(invoke).toHaveBeenCalledWith(
+      'update_session_state',
+      expect.objectContaining({
+        worktreeId: 'worktree-1',
+        worktreePath: '/tmp/worktree-1',
+        sessionId: 'session-yolo',
+        selectedExecutionMode: 'yolo',
+      })
+    )
   })
 
   it('shows fixed option descriptions without truncation', () => {

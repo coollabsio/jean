@@ -102,9 +102,7 @@ pub async fn send_native_notification(
 }
 
 #[tauri::command]
-pub async fn read_clipboard_image(
-    runtime: State<'_, CoreRuntime>,
-) -> Result<Option<Value>, String> {
+pub async fn read_clipboard_image() -> Result<Option<Value>, String> {
     let encoded = tokio::task::spawn_blocking(|| -> Result<Option<String>, String> {
         let mut clipboard = arboard::Clipboard::new().map_err(|error| error.to_string())?;
         let image = match clipboard.get_image() {
@@ -135,16 +133,7 @@ pub async fn read_clipboard_image(
     .await
     .map_err(|error| error.to_string())??;
 
-    match encoded {
-        Some(data) => core_command(
-            &runtime,
-            "save_pasted_image",
-            json!({ "data": data, "mimeType": "image/png" }),
-        )
-        .await
-        .map(Some),
-        None => Ok(None),
-    }
+    Ok(encoded.map(|data| json!({ "data": data, "mimeType": "image/png" })))
 }
 
 #[tauri::command]

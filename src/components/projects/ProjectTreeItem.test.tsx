@@ -4,6 +4,7 @@ import { render, screen } from '@/test/test-utils'
 import {
   ProjectTreeItem,
   resolveProjectRowClickAction,
+  shouldShowProjectStatusBadges,
 } from './ProjectTreeItem'
 import type { Project, Worktree } from '@/types/projects'
 import { useProjectsStore } from '@/store/projects-store'
@@ -11,6 +12,7 @@ import { useChatStore } from '@/store/chat-store'
 
 const mocks = vi.hoisted(() => ({
   worktrees: [] as Worktree[],
+  worktreeQueryOptions: [] as { enabled?: boolean }[],
   updateSettingsMutate: vi.fn(),
 }))
 
@@ -23,7 +25,10 @@ vi.mock('@/hooks/useRemotePicker', () => ({
 }))
 
 vi.mock('@/services/projects', () => ({
-  useWorktrees: () => ({ data: mocks.worktrees }),
+  useWorktrees: (_projectId: string, options?: { enabled?: boolean }) => {
+    mocks.worktreeQueryOptions.push(options ?? {})
+    return { data: mocks.worktrees }
+  },
   useAppDataDir: () => ({ data: '' }),
   useUpdateProjectSettings: () => ({
     mutate: mocks.updateSettingsMutate,
@@ -93,9 +98,20 @@ describe('resolveProjectRowClickAction', () => {
   })
 })
 
+describe('shouldShowProjectStatusBadges', () => {
+  it('hides GitHub status badges when the sidebar is narrow', () => {
+    expect(shouldShowProjectStatusBadges(280, false, true, false)).toBe(false)
+  })
+
+  it('shows GitHub status badges in a wide expanded project row', () => {
+    expect(shouldShowProjectStatusBadges(360, false, true, false)).toBe(true)
+  })
+})
+
 describe('ProjectTreeItem', () => {
   beforeEach(() => {
     mocks.worktrees = [worktree]
+    mocks.worktreeQueryOptions = []
     mocks.updateSettingsMutate.mockReset()
     useProjectsStore.setState({
       selectedProjectId: 'project-1',
@@ -137,6 +153,21 @@ describe('ProjectTreeItem', () => {
     expect(useChatStore.getState().activeWorktreePath).toBe('/tmp/jean-feature')
   })
 
+  it('disables worktree loading for collapsed, unselected projects', () => {
+    useProjectsStore.setState({
+      selectedProjectId: null,
+      selectedWorktreeId: null,
+      expandedProjectIds: new Set(),
+    })
+
+    render(<ProjectTreeItem project={project} />)
+
+    expect(mocks.worktreeQueryOptions.at(-1)).toEqual({ enabled: false })
+    expect(
+      screen.getByRole('button', { name: 'Expand project' })
+    ).toBeInTheDocument()
+  })
+
   it('opens project canvas when the project has no worktrees', async () => {
     mocks.worktrees = []
     const user = userEvent.setup()
@@ -166,5 +197,27 @@ describe('ProjectTreeItem', () => {
       projectId: 'project-1',
       name: 'jean-app',
     })
+  })
+
+  it('keeps cached offline projects read-only without a repeated server badge', async () => {
+    mocks.worktrees = []
+    useProjectsStore.setState({ selectedProjectId: null })
+    const user = userEvent.setup()
+    render(
+      <ProjectTreeItem
+        project={{
+          ...project,
+          id: 'remote:project-1',
+          serverId: 'remote',
+          serverName: 'Build',
+          offline: true,
+        }}
+      />
+    )
+
+    expect(screen.queryByText('Build')).toBeNull()
+    expect(screen.getByText('Offline')).toBeInTheDocument()
+    await user.click(screen.getByTestId('project-row-remote:project-1'))
+    expect(useProjectsStore.getState().selectedProjectId).toBeNull()
   })
 })

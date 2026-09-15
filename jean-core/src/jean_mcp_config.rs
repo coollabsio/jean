@@ -557,20 +557,7 @@ fn write_atomic_with_backup(path: &Path, content: &str) -> Result<Option<PathBuf
         None
     };
 
-    let tmp = path.with_extension(format!(
-        "{}.tmp",
-        path.extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("config")
-    ));
-    std::fs::write(&tmp, content).map_err(|e| format!("Failed to write {}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, path).map_err(|e| {
-        format!(
-            "Failed to replace {} with {}: {e}",
-            path.display(),
-            tmp.display()
-        )
-    })?;
+    crate::platform::write_file_atomically(path, content.as_bytes())?;
     Ok(backup)
 }
 

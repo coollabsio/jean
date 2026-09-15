@@ -183,7 +183,7 @@ export function ResolveConflictsDialog({
                 ? (preferences?.selected_kimi_model ?? 'kimi/default')
                 : backend === 'grok'
                   ? (preferences?.selected_grok_model ??
-                    'grok/grok-4.5')
+                    'grok/grok-4.6')
                   : backend === 'antigravity'
                     ? (preferences?.selected_antigravity_model ??
                       'antigravity/auto')

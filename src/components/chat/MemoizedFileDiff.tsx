@@ -9,6 +9,12 @@ import type {
 import type { EditorOptions } from '@pierre/diffs/edit'
 import { getFileLineStats } from '@/lib/diff-stats'
 import { cn } from '@/lib/utils'
+import {
+  convertProjectFileSrc,
+  convertServerProjectFileSrc,
+} from '@/lib/transport'
+import { parseServerResourceKey } from '@/lib/server-resource'
+import { useUIStore } from '@/store/ui-store'
 import type { SyntaxTheme } from '@/types/preferences'
 import {
   PierreEditProvider,
@@ -30,6 +36,10 @@ export interface DiffComment {
 export interface MemoizedFileDiffProps {
   fileDiff: FileDiffMetadata
   fileName: string
+  rootPath?: string
+  /** Composite worktree id used to select the server that owns rootPath. */
+  resourceOwnerId?: string
+  isBinary?: boolean
   annotations: DiffLineAnnotation<DiffComment>[]
   selectedLines: SelectedLineRange | null
   themeType: 'dark' | 'light'
@@ -65,6 +75,9 @@ export const MemoizedFileDiff = memo(
   function MemoizedFileDiff({
     fileDiff,
     fileName,
+    rootPath,
+    resourceOwnerId,
+    isBinary = false,
     annotations,
     selectedLines,
     themeType,
@@ -126,6 +139,16 @@ export const MemoizedFileDiff = memo(
 
     // Calculate stats from hunks for the header
     const stats = useMemo(() => getFileLineStats(fileDiff), [fileDiff])
+    const absolutePath = rootPath
+      ? `${rootPath.replace(/[\\/]+$/, '')}/${fileName.replace(/^[\\/]+/, '')}`
+      : fileName
+    const isImage = /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(fileName)
+    const serverId = resourceOwnerId
+      ? parseServerResourceKey(resourceOwnerId)?.serverId
+      : undefined
+    const imageSrc = serverId
+      ? convertServerProjectFileSrc(serverId, absolutePath)
+      : convertProjectFileSrc(absolutePath)
 
     return (
       <div className="border border-border">
@@ -153,8 +176,28 @@ export const MemoizedFileDiff = memo(
           </div>
         </div>
         {/* Diff content */}
-        {fileDiff.hunks.length === 0 ||
-        fileDiff.hunks.every(h => h.hunkContent.length === 0) ? (
+        {isBinary && isImage && fileDiff.type !== 'deleted' ? (
+          <button
+            type="button"
+            className="flex w-full cursor-zoom-in justify-center bg-black/5 p-3"
+            onClick={() =>
+              useUIStore.getState().setViewingFilePath(absolutePath)
+            }
+          >
+            <img
+              src={imageSrc}
+              alt={`Preview ${fileName}`}
+              className="max-h-[70vh] max-w-full object-contain"
+            />
+          </button>
+        ) : isBinary ? (
+          <div className="px-4 py-8 text-center text-muted-foreground text-sm">
+            {fileDiff.type === 'deleted'
+              ? 'Binary file deleted'
+              : 'Binary file'}
+          </div>
+        ) : fileDiff.hunks.length === 0 ||
+          fileDiff.hunks.every(h => h.hunkContent.length === 0) ? (
           <div className="px-4 py-8 text-center text-muted-foreground text-sm">
             {fileDiff.type === 'deleted'
               ? 'This file was deleted'
@@ -228,6 +271,9 @@ export const MemoizedFileDiff = memo(
     return (
       prevProps.fileDiff === nextProps.fileDiff &&
       prevProps.fileName === nextProps.fileName &&
+      prevProps.rootPath === nextProps.rootPath &&
+      prevProps.resourceOwnerId === nextProps.resourceOwnerId &&
+      prevProps.isBinary === nextProps.isBinary &&
       prevProps.annotations === nextProps.annotations &&
       prevProps.themeType === nextProps.themeType &&
       prevProps.syntaxThemeDark === nextProps.syntaxThemeDark &&

@@ -1,17 +1,21 @@
 import { useSyncExternalStore } from 'react'
+import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import { generateId } from './uuid'
 
-export const LOCAL_CONNECTION_ID = 'local'
+export const LOCAL_CONNECTION_ID = LOCAL_SERVER_ID
 
 const CONNECTIONS_KEY = 'jean-remote-connections'
 const ACTIVE_CONNECTION_KEY = 'jean-active-connection'
 const SWITCHING_CONNECTION_KEY = 'jean-switching-connection-at'
+const LOCAL_DASHBOARD_ENABLED_KEY = 'jean-local-dashboard-enabled'
 
 export interface RemoteConnection {
   id: string
   name: string
   url: string
   token: string
+  /** Missing on legacy profiles; missing means enabled. */
+  enabled?: boolean
   /** SSH user for local editors that open remote paths (Zed `ssh://`). */
   sshUser?: string
   /** SSH host/IP; falls back to Web Access URL hostname when omitted. */
@@ -51,9 +55,13 @@ let activeConnectionSnapshot =
   )
     ? savedActiveConnection
     : LOCAL_CONNECTION_ID
+let localDashboardEnabledSnapshot =
+  storage()?.getItem(LOCAL_DASHBOARD_ENABLED_KEY) !== 'false'
 
 function storage(): Storage | null {
-  return typeof window === 'undefined' ? null : window.localStorage
+  return typeof globalThis.localStorage === 'undefined'
+    ? null
+    : globalThis.localStorage
 }
 
 function normalizeOptionalString(value: unknown): string | undefined {
@@ -85,6 +93,7 @@ function normalizeConnection(item: unknown): RemoteConnection | null {
     name: record.name,
     url: record.url,
     token: record.token,
+    enabled: record.enabled !== false,
   }
 
   const sshUser = normalizeOptionalString(record.sshUser)
@@ -173,6 +182,7 @@ export function addRemoteConnection(
   const connection: RemoteConnection = {
     id: generateId(),
     name: input.name.trim() || new URL(normalized.url).hostname,
+    enabled: true,
     ...normalized,
     ...sshFieldsFromInput(input),
   }
@@ -185,20 +195,56 @@ export function updateRemoteConnection(
   input: RemoteConnectionInput
 ): RemoteConnection {
   const normalized = parseRemoteConnectionInput(input.url, input.token)
+  const existing = getRemoteConnections().find(
+    connection => connection.id === id
+  )
+  if (!existing) {
+    throw new Error('Remote connection not found.')
+  }
   const updated: RemoteConnection = {
     id,
     name: input.name.trim() || new URL(normalized.url).hostname,
+    enabled: existing.enabled !== false,
     ...normalized,
     ...sshFieldsFromInput(input),
   }
+  const connections = getRemoteConnections()
+  writeConnections(
+    connections.map(connection => (connection.id === id ? updated : connection))
+  )
+  return updated
+}
+
+export function getEnabledServerConnections(): RemoteConnection[] {
+  return getRemoteConnections().filter(
+    connection => connection.enabled !== false
+  )
+}
+
+export function setRemoteConnectionEnabled(id: string, enabled: boolean): void {
   const connections = getRemoteConnections()
   if (!connections.some(connection => connection.id === id)) {
     throw new Error('Remote connection not found.')
   }
   writeConnections(
-    connections.map(connection => (connection.id === id ? updated : connection))
+    connections.map(connection =>
+      connection.id === id ? { ...connection, enabled } : connection
+    )
   )
-  return updated
+  if (!enabled && getActiveConnectionId() === id) {
+    selectConnection(LOCAL_CONNECTION_ID)
+  }
+}
+
+export function getLocalDashboardEnabled(): boolean {
+  return localDashboardEnabledSnapshot
+}
+
+export function setLocalDashboardEnabled(enabled: boolean): void {
+  storage()?.setItem(LOCAL_DASHBOARD_ENABLED_KEY, String(enabled))
+  if (localDashboardEnabledSnapshot === enabled) return
+  localDashboardEnabledSnapshot = enabled
+  for (const subscriber of subscribers) subscriber()
 }
 
 export function removeRemoteConnection(id: string): void {
@@ -232,6 +278,13 @@ export function selectConnection(id: string): void {
   for (const subscriber of subscribers) subscriber()
 }
 
+/** Native Jean always uses its local core; remote profiles are parallel adapters. */
+export function selectLocalConnectionForNativeClient(native: boolean): void {
+  if (native && getActiveConnectionId() !== LOCAL_CONNECTION_ID) {
+    selectConnection(LOCAL_CONNECTION_ID)
+  }
+}
+
 export function markConnectionSwitch(): void {
   if (typeof window !== 'undefined') {
     window.sessionStorage.setItem(SWITCHING_CONNECTION_KEY, String(Date.now()))
@@ -261,4 +314,20 @@ export function useRemoteConnections(): RemoteConnection[] {
     () => connectionsSnapshot,
     () => []
   )
+}
+
+export function useLocalDashboardEnabled(): boolean {
+  return useSyncExternalStore(
+    callback => {
+      subscribers.add(callback)
+      return () => subscribers.delete(callback)
+    },
+    () => localDashboardEnabledSnapshot,
+    () => true
+  )
+}
+
+export function subscribeRemoteConnections(callback: () => void): () => void {
+  subscribers.add(callback)
+  return () => subscribers.delete(callback)
 }

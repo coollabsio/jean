@@ -49,7 +49,6 @@ import type {
 } from '@/types/chat'
 import {
   DEFAULT_PARALLEL_EXECUTION_PROMPT,
-  DEFAULT_FINAL_REVIEW_PROMPT,
   DEFAULT_RESOLVE_CONFLICTS_PROMPT,
   DEFAULT_MAGIC_PROMPT_MODES,
   resolveMagicPromptBackend,
@@ -63,7 +62,6 @@ import {
   resolveCodeReviewConfigs,
   startCodeReviewsSequentially,
 } from '@/lib/code-review-configs'
-import { resolveDefaultModelForBackend } from '@/lib/session-defaults'
 
 interface SessionMutation<T> {
   mutate: (args: T) => void
@@ -122,8 +120,6 @@ interface UseGitOperationsReturn {
   handleOpenPr: () => Promise<void>
   /** Runs AI code review. */
   handleReview: () => Promise<void>
-  /** Starts an audit-only final review in a new session. */
-  handleFinalReview: () => Promise<void>
   /** Runs CodeRabbit CLI code review. */
   handleCodeRabbitReview: () => Promise<void>
   /** Triggers CodeRabbit by commenting on the open PR. */
@@ -404,130 +400,6 @@ export function useGitOperations({
     [project?.default_backend, preferences]
   )
 
-  const handleFinalReview = useCallback(async () => {
-    if (!activeWorktreeId || !activeWorktreePath) return
-
-    const defaultBackend = (project?.default_backend ??
-      preferences?.default_backend ??
-      'claude') as CliBackend
-    const backend = (resolveMagicPromptBackend(
-      preferences?.magic_prompt_backends,
-      'final_review_backend',
-      defaultBackend
-    ) ?? defaultBackend) as CliBackend
-    const model =
-      preferences?.magic_prompt_models?.final_review_model ??
-      resolveDefaultModelForBackend(backend, preferences)
-    const provider =
-      backend === 'claude'
-        ? resolveMagicPromptProvider(
-            preferences?.magic_prompt_providers,
-            'final_review_provider',
-            preferences?.default_provider
-          )
-        : null
-    const executionMode =
-      preferences?.magic_prompt_modes?.final_review_mode ??
-      DEFAULT_MAGIC_PROMPT_MODES.final_review_mode
-    const prompt =
-      preferences?.magic_prompts?.final_review ?? DEFAULT_FINAL_REVIEW_PROMPT
-
-    try {
-      const session = await invoke<Session>('create_session', {
-        worktreeId: activeWorktreeId,
-        worktreePath: activeWorktreePath,
-        name: 'Final review',
-        backend,
-      })
-      cacheCreatedSession(activeWorktreeId, session)
-      const store = useChatStore.getState()
-
-      store.setSelectedBackend(session.id, backend)
-      store.setSelectedModel(session.id, model)
-      store.setSelectedProvider(session.id, provider)
-      store.setActiveSession(activeWorktreeId, session.id)
-      store.setExecutionMode(session.id, executionMode)
-      store.setExecutingMode(session.id, executionMode)
-      store.setLastSentMessage(session.id, prompt)
-      store.setError(session.id, null)
-      store.clearInputDraft(session.id)
-
-      setSessionBackend.mutate({
-        sessionId: session.id,
-        worktreeId: activeWorktreeId,
-        worktreePath: activeWorktreePath,
-        backend,
-      })
-      setSessionModel.mutate({
-        sessionId: session.id,
-        worktreeId: activeWorktreeId,
-        worktreePath: activeWorktreePath,
-        model,
-      })
-      setSessionProvider.mutate({
-        sessionId: session.id,
-        worktreeId: activeWorktreeId,
-        worktreePath: activeWorktreePath,
-        provider,
-      })
-      await invoke('update_session_state', {
-        worktreeId: activeWorktreeId,
-        worktreePath: activeWorktreePath,
-        sessionId: session.id,
-        selectedExecutionMode: executionMode,
-      })
-
-      sendMessage.mutate(
-        {
-          sessionId: session.id,
-          worktreeId: activeWorktreeId,
-          worktreePath: activeWorktreePath,
-          message: prompt,
-          model,
-          executionMode,
-          effortLevel:
-            preferences?.magic_prompt_efforts?.final_review_effort ?? undefined,
-          mcpConfig: buildMcpConfigJson(
-            mcpServersDataRef.current ?? [],
-            enabledMcpServersRef.current,
-            backend
-          ),
-          customProfileName:
-            provider && provider !== '__anthropic__' ? provider : undefined,
-          parallelExecutionPrompt:
-            preferences?.parallel_execution_prompt_enabled
-              ? (preferences.magic_prompts?.parallel_execution ??
-                DEFAULT_PARALLEL_EXECUTION_PROMPT)
-              : undefined,
-          chromeEnabled: preferences?.chrome_enabled ?? false,
-          aiLanguage: preferences?.ai_language,
-          backend: backend !== 'claude' ? backend : undefined,
-        },
-        { onSettled: () => inputRef.current?.focus() }
-      )
-
-      queryClient.invalidateQueries({
-        queryKey: chatQueryKeys.sessions(activeWorktreeId),
-      })
-    } catch (error) {
-      toast.error(`Failed to start final review: ${error}`)
-    }
-  }, [
-    activeWorktreeId,
-    activeWorktreePath,
-    cacheCreatedSession,
-    enabledMcpServersRef,
-    inputRef,
-    mcpServersDataRef,
-    preferences,
-    project?.default_backend,
-    queryClient,
-    sendMessage,
-    setSessionBackend,
-    setSessionModel,
-    setSessionProvider,
-  ])
-
   const handleCommit = useCallback(async () => {
     if (!activeWorktreePath || !activeWorktreeId) return
 
@@ -695,8 +567,7 @@ export function useGitOperations({
       await performGitPull({
         worktreeId: activeWorktreeId,
         worktreePath: activeWorktreePath,
-        baseBranch:
-          worktree?.base_branch ?? project?.default_branch ?? 'main',
+        baseBranch: worktree?.base_branch ?? project?.default_branch ?? 'main',
         branchLabel: worktree?.branch,
         remote: remote ?? worktree?.base_remote,
         onMergeConflict: () => {
@@ -733,13 +604,17 @@ export function useGitOperations({
         const result = await gitPush(
           activeWorktreePath,
           worktree?.pr_number,
-          remote
+          remote,
+          activeWorktreeId ?? undefined
         )
         triggerImmediateGitPoll()
         if (result.permissionDenied) {
           opToast.error(
             `No permission to push to PR #${worktree?.pr_number}. Create a separate PR instead.`,
             {
+              duration: Infinity,
+              description:
+                result.output.trim() || 'The remote rejected the push.',
               action: {
                 label: toastActionLabel('Open PR'),
                 onClick: () =>
@@ -1100,6 +975,9 @@ export function useGitOperations({
             ).finally(() => {
               queryClient.invalidateQueries({
                 queryKey: chatQueryKeys.sessions(activeWorktreeId),
+              })
+              queryClient.invalidateQueries({
+                queryKey: chatQueryKeys.unreadSessionCount(),
               })
               queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
             })
@@ -1763,7 +1641,6 @@ ${resolveInstructions}`
     handleRevertLastCommit,
     handleOpenPr,
     handleReview,
-    handleFinalReview,
     handleCodeRabbitReview,
     handleCodeRabbitPrReview,
     handleMerge,

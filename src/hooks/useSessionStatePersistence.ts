@@ -582,10 +582,15 @@ export function useSessionStatePersistence() {
         }
       }
 
-      // NOTE: Do NOT load queued_messages from session data into Zustand here.
-      // Queue state is synced in real-time via the queue:updated Tauri event
-      // (useMainWindowEventListeners). Loading from TanStack cache is redundant
-      // and can restore stale data, causing double execution.
+      // Hydrate the initial queue after startup/reconnect. Live queue:updated
+      // events remain authoritative once this session has a local queue entry;
+      // this guard prevents a later stale query result from overwriting them.
+      if (!(activeSessionId in currentState.messageQueues)) {
+        updates.messageQueues = {
+          ...currentState.messageQueues,
+          [activeSessionId]: session.queued_messages ?? [],
+        }
+      }
 
       // Apply all updates at once
       if (Object.keys(updates).length > 0) {

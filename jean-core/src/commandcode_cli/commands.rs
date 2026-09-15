@@ -10,8 +10,6 @@ use super::config::{
     ensure_cli_dir, find_system_commandcode_binary, get_cli_binary_path, get_cli_dir,
     resolve_cli_binary,
 };
-use crate::platform::silent_command;
-
 const AUTH_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 const COMMANDCODE_NPM_REGISTRY_URL: &str = "https://registry.npmjs.org/command-code";
 const COMMANDCODE_VERSIONS_CACHE_FILE: &str = "commandcode-versions-cache.json";
@@ -703,10 +701,10 @@ pub async fn install_commandcode_cli(
     app: AppHandle,
     version: Option<String>,
 ) -> Result<(), String> {
-    crate::prerequisites::require_npm("Command Code CLI")?;
+    let npm_path = crate::prerequisites::require_npm("Command Code CLI")?;
     let cli_dir = ensure_cli_dir(&app)?;
     let package = commandcode_package(version.as_deref());
-    let output = silent_command("npm")
+    let output = crate::platform::host_cli_command(&npm_path, None)
         .args(["install", "--prefix"])
         .arg(&cli_dir)
         .arg(package)

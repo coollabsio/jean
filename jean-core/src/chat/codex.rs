@@ -38,6 +38,8 @@ pub struct CodexResponse {
     pub cancelled: bool,
     /// Whether a chat:error event was emitted during execution
     pub error_emitted: bool,
+    /// Whether the completed turn must wait for plan approval
+    pub waiting_for_plan: bool,
     /// Token usage for this response
     pub usage: Option<UsageData>,
 }
@@ -1009,6 +1011,12 @@ pub fn build_turn_steer_params_with_input(
 // Execution via app-server
 // =============================================================================
 
+fn reload_mcp_servers_before_thread_start(
+    send_request: impl FnOnce(&str, serde_json::Value) -> Result<serde_json::Value, String>,
+) -> Result<(), String> {
+    send_request("config/mcpServer/reload", serde_json::Value::Null).map(|_| ())
+}
+
 /// Execute a Codex chat message via the persistent app-server.
 ///
 /// Handles thread creation/resume, turn execution, event mapping, and approvals.
@@ -1052,6 +1060,13 @@ pub fn execute_codex_via_server(
 
     // Ensure the app-server is running
     codex_server::ensure_running(app)?;
+    // The app-server outlives individual Jean sessions, so its MCP registry may
+    // predate changes to ~/.codex/config.toml. Refresh it before starting or
+    // resuming a thread so configured servers match a fresh Codex CLI process.
+    if let Err(error) = reload_mcp_servers_before_thread_start(codex_server::send_request) {
+        codex_server::decrement_usage_count();
+        return Err(format!("Failed to reload Codex MCP servers: {error}"));
+    }
 
     // Start or resume thread
     // Wrapped in a closure so we can decrement USAGE_COUNT on failure
@@ -1433,13 +1448,18 @@ fn append_codex_thread_snapshot_to_history_file(
     Ok(())
 }
 
-fn emit_codex_done(app: &tauri::AppHandle, session_id: &str, worktree_id: &str) {
+fn emit_codex_done(
+    app: &tauri::AppHandle,
+    session_id: &str,
+    worktree_id: &str,
+    waiting_for_plan: bool,
+) {
     let _ = app.emit_all(
         "chat:done",
         &DoneEvent {
             session_id: session_id.to_string(),
             worktree_id: worktree_id.to_string(),
-            waiting_for_plan: false,
+            waiting_for_plan,
         },
     );
 }
@@ -1653,6 +1673,10 @@ pub fn resume_codex_after_crash(
                     }
                 }
 
+                if !response.cancelled && !response.error_emitted {
+                    emit_codex_done(app, session_id, worktree_id, response.waiting_for_plan);
+                }
+
                 return Ok(true);
             }
 
@@ -1715,7 +1739,7 @@ pub fn resume_codex_after_crash(
                         );
                     }
                 }
-                emit_codex_done(app, session_id, worktree_id);
+                emit_codex_done(app, session_id, worktree_id, false);
                 return Ok(true);
             }
 
@@ -1732,7 +1756,7 @@ pub fn resume_codex_after_crash(
                         log::error!("Failed to persist Codex recovered completion state: {e}");
                     }
                 }
-                emit_codex_done(app, session_id, worktree_id);
+                emit_codex_done(app, session_id, worktree_id, false);
                 return Ok(true);
             }
 
@@ -1767,7 +1791,7 @@ pub fn resume_codex_after_crash(
                         );
                     }
                 }
-                emit_codex_done(app, session_id, worktree_id);
+                emit_codex_done(app, session_id, worktree_id, false);
                 return Ok(true);
             }
 
@@ -1782,7 +1806,7 @@ pub fn resume_codex_after_crash(
                     log::error!("Failed to persist Codex recovered completion state: {e}");
                 }
             }
-            emit_codex_done(app, session_id, worktree_id);
+            emit_codex_done(app, session_id, worktree_id, false);
             Ok(true)
         }
     }
@@ -1911,6 +1935,9 @@ fn process_turn_events(
     let mut error_emitted = false;
     let mut usage: Option<UsageData> = None;
     let mut received_completed_agent_message = false;
+    let mut recovered_connection = false;
+    let mut status_poll_interval = status_poll_interval;
+    let mut recovery_turn_id = recovery_turn_id.map(str::to_owned);
 
     // Coalesce token-rate text/thinking deltas into fewer, larger
     // chat:chunk / chat:thinking events. Flushed before any other event is
@@ -1969,8 +1996,11 @@ fn process_turn_events(
                         );
                         match snapshot {
                             Ok(snapshot) => {
-                                let disposition =
-                                    classify_codex_resume(&snapshot, recovery_turn_id, true);
+                                let disposition = classify_codex_resume(
+                                    &snapshot,
+                                    recovery_turn_id.as_deref(),
+                                    true,
+                                );
                                 if disposition == CodexResumeDisposition::Active {
                                     continue;
                                 }
@@ -1981,7 +2011,7 @@ fn process_turn_events(
                                 if let Err(e) = append_codex_thread_snapshot_to_history_file(
                                     output_file,
                                     &snapshot,
-                                    recovery_turn_id,
+                                    recovery_turn_id.as_deref(),
                                     false,
                                 ) {
                                     log::warn!(
@@ -1991,9 +2021,10 @@ fn process_turn_events(
 
                                 match disposition {
                                     CodexResumeDisposition::Failed => {
-                                        if let Some(turn) =
-                                            select_codex_recovery_turn(&snapshot, recovery_turn_id)
-                                        {
+                                        if let Some(turn) = select_codex_recovery_turn(
+                                            &snapshot,
+                                            recovery_turn_id.as_deref(),
+                                        ) {
                                             let raw_error = codex_turn_error_message(turn)
                                                 .unwrap_or_else(|| {
                                                     "Unknown Codex error".to_string()
@@ -2084,6 +2115,7 @@ fn process_turn_events(
                         .and_then(|t| t.get("id"))
                         .and_then(|v| v.as_str())
                     {
+                        recovery_turn_id = Some(turn_id.to_string());
                         super::registry::register_codex_turn(
                             session_id.to_string(),
                             thread_id.to_string(),
@@ -2144,6 +2176,70 @@ fn process_turn_events(
                     is_yolo_mode,
                 );
             }
+            ServerEvent::Reconnected { snapshot } => {
+                recovered_connection = true;
+                if status_poll_interval.is_none() {
+                    status_poll_interval = Some(std::time::Duration::from_secs(15));
+                }
+                log::info!(
+                    "Codex app-server connection recovered during turn for session {session_id}"
+                );
+                flush_stream_coalescers(
+                    app,
+                    session_id,
+                    worktree_id,
+                    run_id,
+                    &mut chunk_coalescer,
+                    &mut thinking_coalescer,
+                );
+                if let Some(ref mut writer) = output_writer {
+                    let _ = writer.flush();
+                }
+
+                let disposition =
+                    classify_codex_resume(&snapshot, recovery_turn_id.as_deref(), true);
+                if disposition != CodexResumeDisposition::Active {
+                    if let Err(error) = append_codex_thread_snapshot_to_history_file(
+                        output_file,
+                        &snapshot,
+                        recovery_turn_id.as_deref(),
+                        disposition == CodexResumeDisposition::Idle,
+                    ) {
+                        log::warn!("Failed to backfill Codex reconnect snapshot: {error}");
+                    }
+                }
+
+                match disposition {
+                    CodexResumeDisposition::Active => continue,
+                    CodexResumeDisposition::Idle => {
+                        completed = true;
+                        break 'outer;
+                    }
+                    CodexResumeDisposition::Interrupted => {
+                        cancelled = true;
+                        server_interrupted = true;
+                        break 'outer;
+                    }
+                    CodexResumeDisposition::Failed => {
+                        if let Some(turn) =
+                            select_codex_recovery_turn(&snapshot, recovery_turn_id.as_deref())
+                        {
+                            let raw_error = codex_turn_error_message(turn)
+                                .unwrap_or_else(|| "Unknown Codex error".to_string());
+                            let _ = app.emit_all(
+                                "chat:error",
+                                &ErrorEvent {
+                                    session_id: session_id.to_string(),
+                                    worktree_id: worktree_id.to_string(),
+                                    error: format_codex_user_error(&raw_error),
+                                },
+                            );
+                        }
+                        error_emitted = true;
+                        break 'outer;
+                    }
+                }
+            }
             ServerEvent::ServerDied => {
                 log::error!("Codex app-server died during turn for session {session_id}");
                 flush_stream_coalescers(
@@ -2173,6 +2269,31 @@ fn process_turn_events(
 
         if completed {
             break 'outer;
+        }
+    }
+
+    // A reconnect snapshot can contain in-progress items. Do not persist those
+    // as completed. Once the turn finishes, read one authoritative snapshot
+    // and backfill everything emitted during the connection gap.
+    if recovered_connection && completed {
+        if let Some(ref mut writer) = output_writer {
+            let _ = writer.flush();
+        }
+        match super::codex_server::send_request(
+            "thread/read",
+            serde_json::json!({"threadId": thread_id, "includeTurns": true}),
+        ) {
+            Ok(snapshot) => {
+                if let Err(error) = append_codex_thread_snapshot_to_history_file(
+                    output_file,
+                    &snapshot,
+                    recovery_turn_id.as_deref(),
+                    true,
+                ) {
+                    log::warn!("Failed to backfill completed Codex reconnect snapshot: {error}");
+                }
+            }
+            Err(error) => log::warn!("Failed to read completed Codex reconnect snapshot: {error}"),
         }
     }
 
@@ -2223,24 +2344,19 @@ fn process_turn_events(
         enrich_thin_codex_plan(&mut tool_calls, &mut content_blocks, &full_content);
     }
 
-    // Emit chat:done unless error was emitted
-    if !cancelled && !error_emitted {
-        let has_plan_tool = has_codex_plan_tool(&tool_calls);
+    let waiting_for_plan = !cancelled
+        && !error_emitted
+        && is_plan_mode
+        && (has_codex_plan_tool(&tool_calls) || detected_plain_text_plan);
 
+    // The caller emits chat:done after it persists the run and session state.
+    // If this event is early, a client refetch can restore a stale running state.
+    if !cancelled && !error_emitted {
         // Write result marker for crash-recovery compatibility
         // (jsonl_has_result_line() in run_log.rs checks for this)
         if let Some(ref mut writer) = output_writer {
             let _ = writeln!(writer, r#"{{"type":"result"}}"#);
         }
-
-        let _ = app.emit_all(
-            "chat:done",
-            &DoneEvent {
-                session_id: session_id.to_string(),
-                worktree_id: worktree_id.to_string(),
-                waiting_for_plan: is_plan_mode && (has_plan_tool || detected_plain_text_plan),
-            },
-        );
     } else if server_interrupted && !error_emitted {
         // Server-initiated interruption (e.g., Codex ended the turn while an
         // approval request was still pending). User-initiated cancellation is
@@ -2271,6 +2387,7 @@ fn process_turn_events(
         content_blocks,
         cancelled,
         error_emitted,
+        waiting_for_plan,
         usage,
     }
 }
@@ -5283,6 +5400,25 @@ fn build_one_shot_codex_args(
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reloads_mcp_servers_with_app_server_protocol_before_thread_start() {
+        let result = reload_mcp_servers_before_thread_start(|method, params| {
+            assert_eq!(method, "config/mcpServer/reload");
+            assert_eq!(params, serde_json::Value::Null);
+            Ok(serde_json::json!({}))
+        });
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn fails_thread_start_when_mcp_reload_fails() {
+        let error = reload_mcp_servers_before_thread_start(|_, _| Err("reload failed".into()))
+            .expect_err("reload failure must block thread start");
+
+        assert_eq!(error, "reload failed");
+    }
 
     #[cfg(unix)]
     #[test]

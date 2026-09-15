@@ -64,13 +64,7 @@ export function getBackendLabel(backend: CliBackend): string {
 }
 
 export function isBetaBackend(backend: CliBackend): boolean {
-  return (
-    backend === 'pi' ||
-    backend === 'commandcode' ||
-    backend === 'grok' ||
-    backend === 'kimi' ||
-    backend === 'antigravity'
-  )
+  return backend === 'antigravity'
 }
 
 export function getBackendPlainLabel(backend: CliBackend): string {

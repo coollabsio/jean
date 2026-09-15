@@ -2,6 +2,22 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 describe('GeneralPane settings structure', () => {
+  it('shows the combined git sync setting in General instead of Experimental', () => {
+    const generalSource = readFileSync(
+      'src/components/preferences/panes/GeneralPane.tsx',
+      'utf8'
+    )
+    const experimentalSource = readFileSync(
+      'src/components/preferences/panes/ExperimentalPane.tsx',
+      'utf8'
+    )
+
+    expect(generalSource).toContain('label="Combined git sync button"')
+    expect(generalSource).toContain('git_sync_button')
+    expect(experimentalSource).not.toContain('Combined git sync button')
+    expect(experimentalSource).not.toContain('git_sync_button')
+  })
+
   it('uses the Kimi-style header and cards for every AI backend pane', () => {
     const source = readFileSync(
       'src/components/preferences/panes/GeneralPane.tsx',
@@ -234,5 +250,22 @@ describe('GeneralPane settings structure', () => {
     expect(source.slice(versionSectionIndex, generalSettingsEnd)).not.toContain(
       '<SettingsSection'
     )
+  })
+
+  it('offers a browser sign-out only when running as web access', () => {
+    const source = readFileSync(
+      'src/components/preferences/panes/GeneralPane.tsx',
+      'utf8'
+    )
+
+    const sectionIndex = source.indexOf('pref-general-section-session')
+    expect(sectionIndex).toBeGreaterThan(-1)
+
+    // The control must be gated on web access: the desktop app manages its
+    // connection from the title bar, not from a token in localStorage. Match
+    // the exact guard expression so an inverted or loosened condition fails.
+    const guard = source.slice(Math.max(0, sectionIndex - 400), sectionIndex)
+    expect(guard).toContain('isGeneralScope && isWebAccessView && (')
+    expect(source).toContain('signOutOfWebAccess')
   })
 })

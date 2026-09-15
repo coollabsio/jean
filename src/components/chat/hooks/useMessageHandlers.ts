@@ -265,7 +265,7 @@ function getDefaultModelForBackend(
     return preferences?.selected_commandcode_model ?? 'commandcode/default'
   }
   if (backend === 'grok') {
-    return preferences?.selected_grok_model ?? 'grok/grok-4.5'
+    return preferences?.selected_grok_model ?? 'grok/grok-4.6'
   }
   if (backend === 'kimi') {
     return preferences?.selected_kimi_model ?? 'kimi/default'
@@ -3012,13 +3012,13 @@ export function useMessageHandlers({
 
       const answerMap = buildCodexUserInputAnswerMap(request.questions, answers)
 
+      // Record the answer before replying to Codex. Codex can finish the turn and
+      // emit chat:done before the invoke promise resolves, so delaying this made
+      // the completed plan snapshot contain an unanswered question tool.
+      store.markQuestionAnswered(sessionId, toolCallId, answers)
+      store.updateToolCallOutput(sessionId, toolCallId, JSON.stringify(answers))
+
       const completeResponse = () => {
-        store.markQuestionAnswered(sessionId, toolCallId, answers)
-        store.updateToolCallOutput(
-          sessionId,
-          toolCallId,
-          JSON.stringify(answers)
-        )
         const remainingRequests = store
           .getPendingCodexUserInputRequests(sessionId)
           .filter(item => getCodexUserInputRequestId(item) !== toolCallId)
@@ -3057,6 +3057,8 @@ export function useMessageHandlers({
         })
         .catch(err => {
           respondingCodexUserInputRequests.delete(responseKey)
+          store.clearQuestionAnswer(sessionId, toolCallId)
+          store.updateToolCallOutput(sessionId, toolCallId, '')
           console.error(
             '[useMessageHandlers] Failed to answer Codex user-input request:',
             err

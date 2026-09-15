@@ -14,6 +14,7 @@ import {
   Rabbit,
   Sparkles,
   Terminal,
+  Server,
   type LucideIcon,
 } from 'lucide-react'
 import {
@@ -93,6 +94,13 @@ import {
 } from './preferences-search'
 import { PreferencesSearchBar } from './PreferencesSearchBar'
 import { BackendLabel } from '@/components/ui/backend-label'
+import { isNativeApp } from '@/lib/environment'
+import { useRemoteConnections } from '@/lib/remote-connections'
+import { useServerConnectionSnapshots } from '@/lib/server-connections'
+import { LOCAL_SERVER_ID } from '@/types/server-resource'
+import { SettingsTargetProvider } from '@/lib/settings-target'
+
+const SETTINGS_TARGET_KEY = 'jean-settings-target-server'
 
 interface NavigationItem {
   type: 'item'
@@ -422,6 +430,31 @@ export function PreferencesDialog() {
   const searchContainerRef = useRef<HTMLDivElement>(null)
   const mobileSearchContainerRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const remoteConnections = useRemoteConnections()
+  const serverSnapshots = useServerConnectionSnapshots()
+  const showServerTarget = isNativeApp() && remoteConnections.length > 0
+  const [settingsServerId, setSettingsServerId] = useState(() => {
+    if (!isNativeApp() || typeof window === 'undefined') return LOCAL_SERVER_ID
+    const saved = window.localStorage.getItem(SETTINGS_TARGET_KEY)
+    return saved && remoteConnections.some(connection => connection.id === saved)
+      ? saved
+      : LOCAL_SERVER_ID
+  })
+
+  const handleSettingsServerChange = useCallback((serverId: string) => {
+    setSettingsServerId(serverId)
+    window.localStorage.setItem(SETTINGS_TARGET_KEY, serverId)
+  }, [])
+
+  useEffect(() => {
+    if (
+      settingsServerId !== LOCAL_SERVER_ID &&
+      !remoteConnections.some(connection => connection.id === settingsServerId)
+    ) {
+      setSettingsServerId(LOCAL_SERVER_ID)
+      window.localStorage.setItem(SETTINGS_TARGET_KEY, LOCAL_SERVER_ID)
+    }
+  }, [remoteConnections, settingsServerId])
 
   const searchResults = useMemo(
     () => searchPreferenceEntries(searchValue, 30),
@@ -725,6 +758,7 @@ export function PreferencesDialog() {
   )
 
   return (
+    <SettingsTargetProvider serverId={settingsServerId}>
     <Dialog open={preferencesOpen} onOpenChange={handleOpenChange}>
       <DialogContent
         showCloseButton={false}
@@ -738,6 +772,39 @@ export function PreferencesDialog() {
 
         <SidebarProvider className="!min-h-0 !h-full items-stretch overflow-hidden">
           <Sidebar collapsible="none" className="hidden lg:flex">
+            {showServerTarget && (
+              <div className="px-3 pb-1 pt-3">
+                <Select
+                  value={settingsServerId}
+                  onValueChange={handleSettingsServerChange}
+                >
+                  <SelectTrigger
+                    size="sm"
+                    aria-label="Settings server"
+                    className="w-full rounded-lg border-border/50 bg-muted/50 px-2 text-xs text-muted-foreground shadow-none hover:bg-muted/80 hover:text-foreground"
+                  >
+                    <Server className="size-3.5" />
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent align="start">
+                    <SelectItem value={LOCAL_SERVER_ID}>Local</SelectItem>
+                    {remoteConnections.map(connection => {
+                      const status = serverSnapshots.get(connection.id)?.status
+                      const statusLabel =
+                        status && status !== 'online'
+                          ? ` (${status.replace('-', ' ')})`
+                          : ''
+                      return (
+                        <SelectItem key={connection.id} value={connection.id}>
+                          {connection.name}
+                          {statusLabel}
+                        </SelectItem>
+                      )
+                    })}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <SidebarContent>
               <SidebarGroup>
                 <SidebarGroupContent>
@@ -1007,6 +1074,7 @@ export function PreferencesDialog() {
         </SidebarProvider>
       </DialogContent>
     </Dialog>
+    </SettingsTargetProvider>
   )
 }
 

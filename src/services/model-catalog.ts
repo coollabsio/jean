@@ -116,15 +116,18 @@ function getBundledReasoning(
   model: string
 ): ModelReasoningCapability | undefined {
   if (backend === 'codex') {
+    const isAstra = model === 'gpt-6-astra'
     const isGpt56 = model.startsWith('gpt-5.6')
-    const levels = isGpt56
+    const levels = isAstra
+      ? GPT_5_6_EFFORT_LEVELS
+      : isGpt56
       ? model.includes('luna')
         ? GPT_5_6_LUNA_EFFORT_LEVELS
         : GPT_5_6_EFFORT_LEVELS
       : STANDARD_EFFORT_LEVELS
     return {
       type: 'effort',
-      default: isGpt56 ? 'medium' : 'high',
+      default: isAstra || isGpt56 ? 'medium' : 'high',
       levels,
     }
   }
@@ -167,7 +170,7 @@ const fallbackModelCatalog: ModelCatalog = {
     claude: 'claude-opus-4-8[1m]',
     codex: 'gpt-5.6-sol',
     opencode: 'opencode/gpt-5.6-sol',
-    grok: 'grok/grok-4.5',
+    grok: 'grok/grok-4.6',
   },
   backends: {
     claude: {

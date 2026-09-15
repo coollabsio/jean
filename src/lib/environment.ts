@@ -27,6 +27,10 @@ export const isNativeApp = (): boolean =>
 export const isLocalBackend = (): boolean =>
   isNativeApp() && getActiveRemoteConnection() === null
 
+/** Label for the Jean server a web access session talks to, so people running
+ * several servers can tell which one is asking for or holding a token. */
+export const webAccessServerLabel = (): string => window.location.host
+
 /**
  * Whether the connected Jean backend can open host apps (editor/finder/terminal).
  * Set from `/api/init` (`nativeOpenAllowed`) for web/remote clients. Local

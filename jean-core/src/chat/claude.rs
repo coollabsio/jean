@@ -46,16 +46,19 @@ Always use ASD-STE100 Simplified Technical English when you talk to me.\n\
 - One task per subagent for focused execution\n\
 \n\
 ### 4. Self-Improvement Loop\n\
-- After ANY correction from the user: update '.ai/lessons.md' with the pattern\n\
-- Write rules for yourself that prevent the same mistake\n\
-- Ruthlessly iterate on these lessons until mistake rate drops\n\
+- Only update '.ai/lessons.md' for general, project-wide learning that applies across features\n\
+- Do not add feature-specific, bug-fix-specific, or small/local lessons\n\
+- Remove narrow or specific entries when you detect them\n\
 - Review lessons at session start for relevant project\n\
+- Keep '.ai/lessons.md' concise by merging duplicate rules and removing obsolete entries\n\
 \n\
 ### 5. Verification Before Done\n\
 - Never mark a task complete without proving it works\n\
 - Diff behavior between main and your changes when relevant\n\
 - Ask yourself: \"Would a staff engineer approve this?\"\n\
 - Run tests, check logs, demonstrate correctness\n\
+- Before UI, HTTP, browser, or end-to-end verification, call Jean MCP `get_run_environments` and test against the returned url/port/command when a Run environment is available.\n\
+- For the current selected project, if there is no other browser testing method, use the Agent Browser when it is available.\n\
 \n\
 ### 6. Demand Elegance (Balanced)\n\
 - For non-trivial changes: pause and ask \"is there a more elegant way?\"\n\
@@ -70,12 +73,13 @@ Always use ASD-STE100 Simplified Technical English when you talk to me.\n\
 - Go fix failing CI tests without being told how\n\
 \n\
 ## Task Management\n\
-1. **Plan First**: Write plan to '.ai/todo.md' with checkable items\n\
-2. **Verify Plan**: Check in before starting implementation\n\
-3. **Track Progress**: Mark items complete as you go\n\
-4. **Explain Changes**: High-level summary at each step\n\
-5. **Document Results**: Add review to '.ai/todo.md'\n\
-6. **Capture Lessons**: Update '.ai/lessons.md' after corrections\n\
+1. **Reset Task File**: At the start of a new task, replace '.ai/todo.md' instead of appending to it\n\
+2. **Plan First**: Write plan to '.ai/todo.md' with checkable items\n\
+3. **Verify Plan**: Check in before starting implementation\n\
+4. **Track Progress**: Mark items complete as you go\n\
+5. **Explain Changes**: High-level summary at each step\n\
+6. **Document Results**: Add review to '.ai/todo.md'\n\
+7. **Capture Lessons**: Update '.ai/lessons.md' only for general, project-wide learning; remove narrow entries\n\
 \n\
 ## Core Principles\n\
 - **Simplicity First**: Make every change as simple as possible. Impact minimal code.\n\
@@ -84,15 +88,16 @@ Always use ASD-STE100 Simplified Technical English when you talk to me.\n\
 - **No Laziness**: Find root causes. No temporary fixes. Senior developer standards.\n\
 - **Minimal Impact**: Changes should only touch what's necessary. Avoid introducing bugs.\n\
 \n\
-## GitHub Issue and Discussion Discovery\n\
-- After making changes and before the final response, search the current repository's existing GitHub issues and discussions for items completely fixed by the changes, related items, and similar reports or discussions.\n\
-- Include the results in both the main response and the `## Recap`, with clickable links when available, and label each item as fully fixed, related, or similar. If no matches are found or the search is unavailable, say so explicitly.\n\
-- Do not claim an issue is fixed unless the changes fully satisfy it. Do not close or update issues or discussions unless the user explicitly asks.\n\
-\n\
 ## Jean Worktree Policy\n\
 - Do NOT create git worktrees manually (`git worktree add`, Superpowers `using-git-worktrees`, or similar) unless the user explicitly asks for a new worktree.\n\
 - If a new worktree is explicitly required, use Jean's worktree features through Jean MCP/tools, not raw git worktree commands.\n\
 - If already in a Jean worktree or base/main workspace, continue in the current workspace.\n\
+\n\
+## Jean Run Environment\n\
+- When you need to test a running app (UI, HTTP, browser, smoke, e2e), call Jean MCP `get_run_environments` first (pass this worktreeId when known).\n\
+- If an environment is running, test against its `url`, port, and startup command. Do not guess localhost ports or start a second dev server when Jean already has one.\n\
+- If nothing is running and verification needs a live server, say so and use the returned/startup command rather than inventing a different command or port.\n\
+- In how-to-test notes, include the exact URL/port you used.\n\
 \n\
 ## Important!\n\
 \n\
@@ -184,7 +189,7 @@ pub struct ErrorEvent {
 pub struct CancelledEvent {
     pub session_id: String,
     pub worktree_id: String, // Kept for backward compatibility
-    pub undo_send: bool, // True only when the prompt never started (restore to input)
+    pub undo_send: bool,     // True when the user turn should be removed from history
     pub emitted_at_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
@@ -405,6 +410,10 @@ fn claude_permission_mode(execution_mode: Option<&str>, running_as_root: bool) -
     }
 }
 
+fn claude_allows_all_bash(execution_mode: Option<&str>) -> bool {
+    execution_mode == Some("yolo")
+}
+
 fn is_running_as_root() -> bool {
     #[cfg(unix)]
     {
@@ -436,6 +445,7 @@ fn build_claude_args(
     mcp_config: Option<&str>,
     chrome_enabled: bool,
     custom_profile_name: Option<&str>,
+    include_recap: bool,
 ) -> (Vec<String>, Vec<(String, String)>) {
     let mut args = Vec::new();
     let mut env_vars = Vec::new();
@@ -521,7 +531,8 @@ fn build_claude_args(
     };
 
     // Permission mode
-    let perm_mode = claude_permission_mode(execution_mode, is_running_as_root());
+    let running_as_root = is_running_as_root();
+    let perm_mode = claude_permission_mode(execution_mode, running_as_root);
     args.push("--permission-mode".to_string());
     args.push(perm_mode.to_string());
 
@@ -614,6 +625,12 @@ fn build_claude_args(
     }
 
     // Allowed tools
+    // Make unrestricted shell access explicit for every YOLO session. This is
+    // also required when root uses the acceptEdits compatibility fallback.
+    if claude_allows_all_bash(execution_mode) {
+        args.push("--allowedTools".to_string());
+        args.push("Bash(*)".to_string());
+    }
     if let Some(tools) = allowed_tools {
         for tool in tools {
             args.push("--allowedTools".to_string());
@@ -743,8 +760,9 @@ fn build_claude_args(
         }
     }
 
-    // End-of-turn recap instruction (compact view surfaces this block)
-    if super::should_add_recap_instruction(app) {
+    // End-of-turn recap instruction (compact view surfaces this block).
+    // Magic release notes skip this — the recap would cover the actual notes.
+    if super::should_include_recap_instruction(app, include_recap) {
         system_prompt_parts.push(super::RECAP_INSTRUCTION.to_string());
     }
 
@@ -1158,6 +1176,7 @@ pub fn execute_claude_detached(
     mcp_config: Option<&str>,
     chrome_enabled: bool,
     custom_profile_name: Option<&str>,
+    include_recap: bool,
     pid_callback: Option<Box<dyn FnOnce(u32) + Send>>,
 ) -> Result<(u32, ClaudeResponse), String> {
     use super::detached::spawn_detached_claude;
@@ -1202,6 +1221,7 @@ pub fn execute_claude_detached(
         mcp_config,
         chrome_enabled,
         custom_profile_name,
+        include_recap,
     );
 
     // Log the full Claude CLI command for debugging
@@ -2626,6 +2646,7 @@ mod tests {
     #[test]
     fn yolo_uses_accept_edits_when_running_as_root() {
         assert_eq!(claude_permission_mode(Some("yolo"), true), "acceptEdits");
+        assert!(claude_allows_all_bash(Some("yolo")));
     }
 
     #[test]
@@ -2634,6 +2655,8 @@ mod tests {
             claude_permission_mode(Some("yolo"), false),
             "bypassPermissions"
         );
+        assert!(claude_allows_all_bash(Some("yolo")));
+        assert!(!claude_allows_all_bash(Some("build")));
     }
 
     #[test]
@@ -2671,20 +2694,32 @@ mod tests {
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("Jean Worktree Policy"));
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("Do NOT create git worktrees manually"));
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("Jean MCP/tools"));
+        assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("Jean Run Environment"));
+        assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("get_run_environments"));
+        assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT
+            .contains("test against its `url`, port, and startup command"));
+        assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("use the Agent Browser when it is available"));
+        assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("no other browser testing method"));
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("VERY IMPORTANT: Keep Code Simple"));
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT
             .contains("Always implement the simplest maintainable solution"));
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("Clickable References"));
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("include clickable links when available"));
+        assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains(
+            "At the start of a new task, replace '.ai/todo.md' instead of appending to it"
+        ));
+        assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT
+            .contains("Only update '.ai/lessons.md' for general, project-wide learning"));
+        assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT
+            .contains("Do not add feature-specific, bug-fix-specific, or small/local lessons"));
+        assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT
+            .contains("Remove narrow or specific entries when you detect them"));
+        assert!(!DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("After ANY correction from the user"));
     }
 
     #[test]
-    fn default_global_system_prompt_requires_github_discovery_after_changes() {
-        assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("GitHub Issue and Discussion Discovery"));
-        assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT
-            .contains("search the current repository's existing GitHub issues and discussions"));
-        assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT
-            .contains("Include the results in both the main response and the `## Recap`"));
+    fn default_global_system_prompt_does_not_require_github_discovery() {
+        assert!(!DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("GitHub Issue and Discussion Discovery"));
     }
 
     #[test]

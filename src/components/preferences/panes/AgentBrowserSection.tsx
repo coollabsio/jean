@@ -1,12 +1,6 @@
 import React, { useCallback, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import {
-  CheckCircle,
-  Copy,
-  Globe,
-  Loader2,
-  XCircle,
-} from 'lucide-react'
+import { CheckCircle, Copy, Globe, Loader2, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -49,14 +43,11 @@ const INSTALLABLE_BACKENDS = [
   'antigravity',
 ] as const satisfies readonly CliBackend[]
 
-type InstallState = 'idle' | 'installing' | 'success' | 'error'
 type BinaryInstallState = 'idle' | 'installing' | 'success' | 'error'
 
 export const AgentBrowserSection: React.FC = () => {
   const queryClient = useQueryClient()
   const { installedBackends } = useInstalledBackends()
-  const [installState, setInstallState] = useState<InstallState>('idle')
-  const [installMessage, setInstallMessage] = useState('')
   const [binaryInstallState, setBinaryInstallState] =
     useState<BinaryInstallState>('idle')
   const [binaryInstallMessage, setBinaryInstallMessage] = useState('')
@@ -91,63 +82,33 @@ export const AgentBrowserSection: React.FC = () => {
     setBinaryInstallMessage(
       'Installing agent-browser (npm) and Chromium — this may take a few minutes…'
     )
-    const toastId = toast.loading(
-      'Installing agent-browser and Chromium…'
-    )
+    const toastId = toast.loading('Installing agent-browser and Chromium…')
     try {
       const next = await invoke<AgentBrowserStatus>('install_agent_browser')
       queryClient.setQueryData(['agentBrowserStatus'], next)
-      await refetch()
-      setBinaryInstallState('success')
-      setBinaryInstallMessage(
-        next.version
-          ? `Installed agent-browser ${next.version}`
-          : 'Installed agent-browser and Chromium'
-      )
-      toast.success('agent-browser installed', { id: toastId })
-    } catch (e) {
-      setBinaryInstallState('error')
-      setBinaryInstallMessage(`Install failed: ${e}`)
-      toast.error(`agent-browser install failed: ${e}`, { id: toastId })
-    }
-  }, [queryClient, refetch])
-
-  const handleInstall = useCallback(async () => {
-    if (installableBackends.length === 0) {
-      setInstallState('error')
-      setInstallMessage(
-        'Install a supported CLI first (Claude, Codex, Cursor, Grok, Kimi, Antigravity, or OpenCode)'
-      )
-      return
-    }
-    setInstallState('installing')
-    setInstallMessage('')
-    try {
       const results = await invoke<AgentBrowserInstallResult[]>(
         'install_agent_browser_mcp',
         { backends: installableBackends }
       )
-      const successes = results.filter(r => r.status === 'installed')
-      const failures = results.filter(r => r.status === 'error')
+      const failures = results.filter(result => result.status === 'error')
+      if (failures.length > 0) {
+        throw new Error(
+          `Installed the browser, but MCP setup failed for ${failures.length} backend${failures.length === 1 ? '' : 's'}`
+        )
+      }
+
       invalidateAllMcpServers(undefined, installableBackends)
       queryClient.invalidateQueries({ queryKey: ['preferences'] })
       await refetch()
-      if (failures.length > 0) {
-        setInstallState('error')
-        setInstallMessage(
-          `Added ${successes.length}/${results.length}; ${failures.length} failed`
-        )
-      } else {
-        setInstallState('success')
-        setInstallMessage(
-          `Added agent-browser MCP to ${successes.length} backend${successes.length === 1 ? '' : 's'}`
-        )
-        toast.success('Agent browser MCP installed')
-      }
+      setBinaryInstallState('success')
+      setBinaryInstallMessage(
+        `${next.version ? `Installed agent-browser ${next.version}` : 'Installed agent-browser and Chromium'}${results.length > 0 ? ` and added MCP to ${results.length} backend${results.length === 1 ? '' : 's'}` : ''}`
+      )
+      toast.success('Agent browser ready', { id: toastId })
     } catch (e) {
-      setInstallState('error')
-      setInstallMessage('Failed to install agent-browser MCP')
-      toast.error(`Install failed: ${e}`)
+      setBinaryInstallState('error')
+      setBinaryInstallMessage(`Setup failed: ${e}`)
+      toast.error(`Agent browser setup failed: ${e}`, { id: toastId })
     }
   }, [installableBackends, queryClient, refetch])
 
@@ -209,7 +170,9 @@ export const AgentBrowserSection: React.FC = () => {
                 </div>
                 {status.binaryPath && (
                   <div className="break-all">
-                    <span className="font-medium text-foreground">Binary: </span>
+                    <span className="font-medium text-foreground">
+                      Binary:{' '}
+                    </span>
                     {status.binaryPath}
                   </div>
                 )}
@@ -249,29 +212,6 @@ export const AgentBrowserSection: React.FC = () => {
           >
             Create profile
           </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            onClick={() => void handleInstall()}
-            disabled={
-              installState === 'installing' || status?.installed === false
-            }
-          >
-            {installState === 'installing' ? (
-              <>
-                <Loader2 className="size-3.5 animate-spin" />
-                Installing MCP…
-              </>
-            ) : installState === 'success' ? (
-              <>
-                <CheckCircle className="size-3.5" />
-                MCP installed
-              </>
-            ) : (
-              'Install MCP into backends'
-            )}
-          </Button>
           {status && (
             <>
               <Button
@@ -307,26 +247,14 @@ export const AgentBrowserSection: React.FC = () => {
             {binaryInstallMessage}
           </p>
         )}
-        {installMessage && (
-          <p
-            className={
-              installState === 'error'
-                ? 'text-xs text-red-600 dark:text-red-400'
-                : 'text-xs text-muted-foreground'
-            }
-          >
-            {installMessage}
-          </p>
-        )}
-
         <div className="space-y-1 text-xs text-muted-foreground">
           <Label className="text-xs text-foreground">How to use</Label>
           <ol className="list-decimal space-y-0.5 pl-4">
             <li>
-              Click <strong>Install agent-browser</strong> (npm package +
-              Chromium into Jean app data). Requires <code>npm</code> on PATH.
+              Click <strong>Install agent-browser</strong> to install the npm
+              package, Chromium, and MCP configuration for installed backends.
+              Requires <code>npm</code> on PATH.
             </li>
-            <li>Click Install MCP into backends (or paste a snippet).</li>
             <li>
               First login: run headed (or under VNC) and sign in manually.
             </li>

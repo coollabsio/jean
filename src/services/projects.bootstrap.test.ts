@@ -62,6 +62,13 @@ describe('fetchAndSeedProjectBootstrap', () => {
       worktrees
     )
     expect(
+      queryClient.getQueryData(['projects', 'worktree', 'wt-1'])
+    ).toMatchObject({
+      id: 'wt-1',
+      name: 'main',
+      status: 'ready',
+    })
+    expect(
       queryClient.getQueryData(['chat', 'sessions', 'wt-1', 'with-counts'])
     ).toMatchObject({
       worktree_id: 'wt-1',
