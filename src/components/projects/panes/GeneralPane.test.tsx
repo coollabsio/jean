@@ -46,7 +46,7 @@ describe('GeneralPane project avatar', () => {
     mocks.projects = [project('avatars/project-1-old.png')]
   })
 
-  it('reloads the avatar when a replacement keeps the same persisted path', () => {
+  it('reloads the avatar when the persisted path changes', () => {
     const { rerender } = render(
       <GeneralPane projectId="project-1" projectPath="/projects/jean" />
     )
