@@ -101,7 +101,14 @@ export function useWindowKeyboardFocusRestore() {
 
   useEffect(() => {
     if (!isNativeApp() || isMobile) return
-    return installWindowKeyboardFocusRestore()
+    return installWindowKeyboardFocusRestore({
+      subscribeToNativeFocus: async handler => {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window')
+        return getCurrentWindow().onFocusChanged(event => {
+          handler(event.payload)
+        })
+      },
+    })
   }, [isMobile])
 }
 
