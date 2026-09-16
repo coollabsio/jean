@@ -23,6 +23,8 @@ import { ServerTargetSelect } from './ServerTargetSelect'
 import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import { parseServerResourceKey } from '@/lib/server-resource'
 import { useActiveConnectionId } from '@/lib/remote-connections'
+import { isClientMacOS } from '@/lib/platform'
+import { shouldUseDirectoryBrowser } from './project-dialog-routing'
 import {
   buildProjectDestination,
   getLastProjectDestination,
@@ -71,9 +73,15 @@ export function AddProjectDialog() {
   const isPending = addProject.isPending || initProject.isPending
 
   const handleAddExisting = useCallback(async () => {
-    // Remote backends (and pure web) must browse the server filesystem via
-    // DirectoryBrowser — the native OS picker only sees the local machine.
-    if (!isLocalBackend() || effectiveServerId !== LOCAL_SERVER_ID) {
+    // The rfd-backed native folder picker aborted Jean on macOS in issue #734.
+    // DirectoryBrowser provides the same selection without the AppKit path.
+    if (
+      shouldUseDirectoryBrowser({
+        isLocalBackend: isLocalBackend(),
+        isClientMacOS,
+        isLocalTarget: effectiveServerId === LOCAL_SERVER_ID,
+      })
+    ) {
       setBrowserMode('select')
       return
     }
@@ -130,9 +138,13 @@ export function AddProjectDialog() {
   ])
 
   const handleInitNew = useCallback(async () => {
-    // Remote backends (and pure web) must browse the server filesystem via
-    // DirectoryBrowser — the native OS picker only sees the local machine.
-    if (!isLocalBackend() || effectiveServerId !== LOCAL_SERVER_ID) {
+    if (
+      shouldUseDirectoryBrowser({
+        isLocalBackend: isLocalBackend(),
+        isClientMacOS,
+        isLocalTarget: effectiveServerId === LOCAL_SERVER_ID,
+      })
+    ) {
       setBrowserMode('save')
       return
     }
