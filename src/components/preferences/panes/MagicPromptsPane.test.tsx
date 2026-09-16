@@ -174,6 +174,29 @@ describe('MagicPromptsPane', () => {
     expect(screen.getByText('Fable 5')).toBeInTheDocument()
   })
 
+  it('lets a magic prompt select GPT 6 Astra from the Codex catalog', async () => {
+    preferencesMock = {
+      ...defaultPreferences,
+      magic_prompt_backends: {
+        ...defaultPreferences.magic_prompt_backends,
+        investigate_issue_backend: 'codex',
+      },
+    }
+    const user = userEvent.setup()
+    render(<MagicPromptsPane />)
+
+    await user.click(screen.getByRole('combobox', { name: 'Model' }))
+    await user.click(screen.getByRole('option', { name: 'GPT 6 Astra' }))
+
+    expect(mutateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        magic_prompt_models: expect.objectContaining({
+          investigate_issue_model: 'gpt-6-astra',
+        }),
+      })
+    )
+  })
+
   it('lets magic prompts choose Pi, Command Code, and Grok backends', async () => {
     installedBackendsMock = ['claude', 'pi', 'commandcode', 'grok']
     const user = userEvent.setup()
