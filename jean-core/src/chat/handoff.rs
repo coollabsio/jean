@@ -258,6 +258,7 @@ pub(crate) fn format_handoff_history_from_runs(runs: &[RunEntry], max_chars: usi
                 execution_mode: run.execution_mode.clone(),
                 thinking_level: run.thinking_level.clone(),
                 effort_level: run.effort_level.clone(),
+                custom_profile_name: None,
                 recovered: false,
                 usage: None,
             });
@@ -290,6 +291,7 @@ pub(crate) fn format_handoff_history_from_runs(runs: &[RunEntry], max_chars: usi
                 execution_mode: run.execution_mode.clone(),
                 thinking_level: run.thinking_level.clone(),
                 effort_level: run.effort_level.clone(),
+                custom_profile_name: None,
                 recovered: false,
                 usage: None,
             });
@@ -398,6 +400,7 @@ mod tests {
             execution_mode: None,
             thinking_level: None,
             effort_level: None,
+            custom_profile_name: None,
             recovered: false,
             usage: None,
         }
