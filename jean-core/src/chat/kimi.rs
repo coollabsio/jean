@@ -1188,7 +1188,7 @@ fn execute_kimi_attached(
         callback(pid);
     }
     if !super::registry::register_process(options.jean_session_id.to_string(), pid) {
-        let _ = child.kill();
+        crate::platform::kill_and_reap(&mut child);
         return Ok(KimiResponse {
             content: String::new(),
             session_id: options
@@ -1205,8 +1205,7 @@ fn execute_kimi_attached(
     let result = execute_kimi_child(&mut child, options);
     let cancelled = !super::registry::is_process_running(options.jean_session_id);
     super::registry::unregister_process(options.jean_session_id);
-    let _ = child.kill();
-    let _ = child.wait();
+    crate::platform::kill_and_reap(&mut child);
 
     match result {
         Ok(mut response) => {

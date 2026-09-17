@@ -15316,6 +15316,7 @@ mod tests {
             linear_api_key: None,
             linear_team_id: None,
             sentry_auth_token: None,
+            sentry_base_url: None,
             sentry_organization_slug: None,
             sentry_project_slug: None,
             sentry_base_url: None,

@@ -545,7 +545,7 @@ pub fn execute_antigravity(
             callback(pid);
         }
         if !super::registry::register_process(options.jean_session_id.to_string(), pid) {
-            let _ = child.kill();
+            crate::platform::kill_and_reap(&mut child);
             return Err("Antigravity run cancelled before it started".to_string());
         }
         let stdout = child

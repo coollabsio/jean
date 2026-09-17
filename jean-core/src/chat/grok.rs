@@ -3395,7 +3395,7 @@ fn handle_acp_client_request(
             };
             if let Some(terminal) = terminals.get(terminal_id) {
                 if let Ok(mut child) = terminal.child.lock() {
-                    let _ = child.kill();
+                    crate::platform::kill_and_reap(&mut child);
                 }
             }
             send_acp_response(stdin, id, serde_json::json!({}))
