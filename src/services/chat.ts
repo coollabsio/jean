@@ -2948,7 +2948,10 @@ export async function persistRequeueFront(
  */
 export function isDuplicateSendError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error ?? '')
-  return message.includes('already has an active request')
+  return (
+    message.includes('already has an active request') ||
+    message.includes('already has a Running run')
+  )
 }
 
 /**

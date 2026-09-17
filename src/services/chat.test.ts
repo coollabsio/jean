@@ -20,6 +20,7 @@ vi.mock('sonner', () => ({
 
 import {
   canReconnectSession,
+  isDuplicateSendError,
   prefetchSessions,
   reconnectNativeCliSession,
 } from './chat'
@@ -35,6 +36,26 @@ const toastMock = toast as unknown as {
   success: ReturnType<typeof vi.fn>
   error: ReturnType<typeof vi.fn>
 }
+
+describe('isDuplicateSendError', () => {
+  it('recognizes the run-log duplicate guard error', () => {
+    expect(
+      isDuplicateSendError(
+        'Session session-1 already has a Running run — refusing to create duplicate'
+      )
+    ).toBe(true)
+  })
+
+  it('recognizes the active-request duplicate guard error', () => {
+    expect(
+      isDuplicateSendError(new Error('Session already has an active request'))
+    ).toBe(true)
+  })
+
+  it('does not classify unrelated send errors as duplicates', () => {
+    expect(isDuplicateSendError('CLI process failed')).toBe(false)
+  })
+})
 
 describe('transient WebSocket query failures', () => {
   it('rethrows disconnects so TanStack Query preserves cached session data', () => {
