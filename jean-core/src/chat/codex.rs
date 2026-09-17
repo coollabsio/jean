@@ -5065,6 +5065,7 @@ pub fn parse_codex_run_to_message(
         execution_mode: None,
         thinking_level: None,
         effort_level: None,
+        custom_profile_name: None,
         recovered: run.recovered,
         usage: run.usage.clone(),
     })
