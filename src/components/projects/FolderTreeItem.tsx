@@ -147,7 +147,7 @@ export function FolderTreeItem({
               onBlur={() => handleSubmitRename(true)}
               onKeyDown={handleKeyDown}
               aria-label="Rename folder"
-              className="flex-1 bg-transparent text-base outline-none ring-1 ring-primary/50 rounded px-1 md:text-sm"
+              className="min-w-0 flex-1 bg-transparent text-base outline-none ring-1 ring-primary/50 rounded px-1 md:text-sm"
               onClick={e => e.stopPropagation()}
               autoFocus
             />
