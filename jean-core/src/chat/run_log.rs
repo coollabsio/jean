@@ -1151,6 +1151,7 @@ pub fn parse_run_to_message(lines: &[String], run: &RunEntry) -> Result<ChatMess
         execution_mode: None,
         thinking_level: None,
         effort_level: None,
+        custom_profile_name: None,
         recovered: run.recovered,
         usage: run.usage.clone(), // Token usage from metadata
     })
@@ -1379,6 +1380,28 @@ fn cancelled_codex_run_has_visible_artifacts(
     )
 }
 
+fn user_message_from_run(session_id: &str, run: &RunEntry) -> ChatMessage {
+    ChatMessage {
+        id: run.user_message_id.clone(),
+        session_id: session_id.to_string(),
+        role: MessageRole::User,
+        content: run.user_message.clone(),
+        timestamp: run.started_at,
+        tool_calls: vec![],
+        content_blocks: vec![],
+        cancelled: false,
+        plan_approved: false,
+        model: run.model.clone(),
+        backend: run.backend.clone(),
+        execution_mode: run.execution_mode.clone(),
+        thinking_level: run.thinking_level.clone(),
+        effort_level: run.effort_level.clone(),
+        custom_profile_name: run.custom_profile_name.clone(),
+        recovered: false,
+        usage: None,
+    }
+}
+
 /// Load a window of messages for a session by parsing JSONL files.
 ///
 /// - `limit`: max number of renderable runs (most recent within window) to parse. `None` = all.
@@ -1433,24 +1456,7 @@ pub fn load_session_messages_window(
         let run = &metadata.runs[*run_index];
 
         // Add user message
-        messages.push(ChatMessage {
-            id: run.user_message_id.clone(),
-            session_id: session_id.to_string(),
-            role: MessageRole::User,
-            content: run.user_message.clone(),
-            timestamp: run.started_at,
-            tool_calls: vec![],
-            content_blocks: vec![],
-            cancelled: false,
-            plan_approved: false,
-            model: run.model.clone(),
-            backend: run.backend.clone(),
-            execution_mode: run.execution_mode.clone(),
-            thinking_level: run.thinking_level.clone(),
-            effort_level: run.effort_level.clone(),
-            recovered: false,
-            usage: None, // User messages don't have token usage
-        });
+        messages.push(user_message_from_run(session_id, run));
 
         // Add assistant message for every run that should render assistant output.
         // Running logs contain partial JSONL snapshots that we can surface on reload.
@@ -1486,6 +1492,7 @@ pub fn load_session_messages_window(
                         execution_mode: run.execution_mode.clone(),
                         thinking_level: run.thinking_level.clone(),
                         effort_level: run.effort_level.clone(),
+                        custom_profile_name: None,
                         recovered: run.recovered,
                         usage: run.usage.clone(),
                     };
@@ -1540,6 +1547,7 @@ pub fn load_session_messages_window(
                         execution_mode: run.execution_mode.clone(),
                         thinking_level: run.thinking_level.clone(),
                         effort_level: run.effort_level.clone(),
+                        custom_profile_name: None,
                         recovered: run.recovered,
                         usage: run.usage.clone(),
                     }
@@ -1654,6 +1662,18 @@ mod tests {
     }
 
     #[test]
+    fn user_message_exposes_effective_provider_metadata() {
+        let mut run = sample_run();
+        run.custom_profile_name = Some("OpenRouter".to_string());
+
+        let message = user_message_from_run("session-1", &run);
+
+        assert_eq!(message.custom_profile_name.as_deref(), Some("OpenRouter"));
+        assert_eq!(message.backend, Some(Backend::Codex));
+        assert_eq!(message.model.as_deref(), Some("gpt-5.4"));
+    }
+
+    #[test]
     fn antigravity_history_uses_stream_json_parser() {
         let mut run = sample_run();
         run.backend = Some(Backend::Antigravity);
@@ -1690,6 +1710,7 @@ mod tests {
             execution_mode: None,
             thinking_level: None,
             effort_level: None,
+            custom_profile_name: None,
             recovered: false,
             usage: None,
         }

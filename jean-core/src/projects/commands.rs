@@ -15319,6 +15319,7 @@ mod tests {
             sentry_base_url: None,
             sentry_organization_slug: None,
             sentry_project_slug: None,
+            sentry_base_url: None,
             linked_project_ids: Vec::new(),
             auto_fix_settings: None,
         };
