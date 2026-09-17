@@ -102,7 +102,7 @@ fn check_auth(binary: &std::path::Path) -> KimiAuthStatus {
         };
     };
     let Some(mut stdin) = child.stdin.take() else {
-        let _ = child.kill();
+        crate::platform::kill_and_reap(&mut child);
         return KimiAuthStatus {
             authenticated: false,
             error: Some("Failed to open Kimi Code ACP stdin".to_string()),
@@ -110,7 +110,7 @@ fn check_auth(binary: &std::path::Path) -> KimiAuthStatus {
         };
     };
     let Some(stdout) = child.stdout.take() else {
-        let _ = child.kill();
+        crate::platform::kill_and_reap(&mut child);
         return KimiAuthStatus {
             authenticated: false,
             error: Some("Failed to read Kimi Code ACP stdout".to_string()),
@@ -130,7 +130,7 @@ fn check_auth(binary: &std::path::Path) -> KimiAuthStatus {
         "params": {"protocolVersion": 1, "clientCapabilities": {}}
     });
     if writeln!(stdin, "{initialize}").is_err() || stdin.flush().is_err() {
-        let _ = child.kill();
+        crate::platform::kill_and_reap(&mut child);
         return KimiAuthStatus {
             authenticated: false,
             error: Some("Failed to initialize Kimi Code ACP".to_string()),
@@ -148,7 +148,7 @@ fn check_auth(binary: &std::path::Path) -> KimiAuthStatus {
                 }
             }
             Err(RecvTimeoutError::Timeout) => {
-                let _ = child.kill();
+                crate::platform::kill_and_reap(&mut child);
                 return KimiAuthStatus {
                     authenticated: false,
                     error: Some("Kimi Code auth check timed out".to_string()),
@@ -156,7 +156,7 @@ fn check_auth(binary: &std::path::Path) -> KimiAuthStatus {
                 };
             }
             Err(RecvTimeoutError::Disconnected) => {
-                let _ = child.kill();
+                crate::platform::kill_and_reap(&mut child);
                 return KimiAuthStatus {
                     authenticated: false,
                     error: Some("Kimi Code ACP exited during auth check".to_string()),
@@ -177,7 +177,7 @@ fn check_auth(binary: &std::path::Path) -> KimiAuthStatus {
         "params": {"methodId": method_id, "_meta": {"headless": true}}
     });
     if writeln!(stdin, "{authenticate}").is_err() || stdin.flush().is_err() {
-        let _ = child.kill();
+        crate::platform::kill_and_reap(&mut child);
         return KimiAuthStatus {
             authenticated: false,
             error: Some("Failed to authenticate Kimi Code ACP".to_string()),
@@ -189,7 +189,7 @@ fn check_auth(binary: &std::path::Path) -> KimiAuthStatus {
             Ok(line) => {
                 if let Ok(value) = serde_json::from_str::<Value>(&line) {
                     if value.get("id").and_then(Value::as_i64) == Some(2) {
-                        let _ = child.kill();
+                        crate::platform::kill_and_reap(&mut child);
                         let error = value.get("error").map(|error| {
                             error
                                 .get("message")
@@ -212,7 +212,7 @@ fn check_auth(binary: &std::path::Path) -> KimiAuthStatus {
                 }
             }
             Err(RecvTimeoutError::Timeout) => {
-                let _ = child.kill();
+                crate::platform::kill_and_reap(&mut child);
                 return KimiAuthStatus {
                     authenticated: false,
                     error: Some("Kimi Code auth check timed out".to_string()),
@@ -220,7 +220,7 @@ fn check_auth(binary: &std::path::Path) -> KimiAuthStatus {
                 };
             }
             Err(RecvTimeoutError::Disconnected) => {
-                let _ = child.kill();
+                crate::platform::kill_and_reap(&mut child);
                 return KimiAuthStatus {
                     authenticated: false,
                     error: Some("Run `kimi login` first".to_string()),
@@ -462,6 +462,43 @@ pub async fn login_kimi_cli_device(app: AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn auth_check_reaps_its_cli_child() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().expect("temp dir");
+        let pid_file = temp.path().join("pid");
+        let cli = temp.path().join("fake-kimi");
+        std::fs::write(
+            &cli,
+            format!(
+                "#!/bin/sh\necho $$ > '{}'\nread _\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{{\"authMethods\":[{{\"id\":\"login\"}}]}}}}'\nread _\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{{}}}}'\nsleep 120\n",
+                pid_file.display()
+            ),
+        )
+        .expect("write fake Kimi CLI");
+        let mut permissions = std::fs::metadata(&cli).expect("CLI metadata").permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&cli, permissions).expect("make fake CLI executable");
+
+        for _ in 0..3 {
+            let status = check_auth(&cli);
+            assert!(status.authenticated, "{status:?}");
+            let pid: libc::pid_t = std::fs::read_to_string(&pid_file)
+                .expect("read child pid")
+                .trim()
+                .parse()
+                .expect("parse child pid");
+            let result = unsafe { libc::waitpid(pid, std::ptr::null_mut(), libc::WNOHANG) };
+            assert_eq!(result, -1, "Kimi auth child {pid} was not reaped");
+            assert_eq!(
+                std::io::Error::last_os_error().raw_os_error(),
+                Some(libc::ECHILD)
+            );
+        }
+    }
 
     #[test]
     fn package_uses_official_kimi_code_package() {
