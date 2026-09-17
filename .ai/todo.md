@@ -1,24 +1,36 @@
-# Issue #734 — crash when adding a folder
+# Issue #716 investigation and fix
 
-- [x] Locate issue context and trace the add-folder code path.
-- [x] Identify the macOS abort root cause and regression history.
+- [x] Read issue context and trace Load Context data flow.
+- [x] Check history and identify the regression.
 - [x] Add a failing regression test.
-- [x] Implement the smallest root-cause fix.
-- [x] Run focused tests and `bun run check:all`.
-- [x] Record investigation and verification results.
+- [x] Implement the minimal fix.
+- [x] Run focused tests and quality checks.
+- [x] Record review and test instructions.
 
 ## Review
 
-- The crash is in the native macOS folder-picker path (`tauri-plugin-dialog`
-  -> `rfd` -> `NSOpenPanel`). Release builds use `panic = "abort"`, so a panic
-  in that native path terminates Jean instead of returning an error to React.
-- Local macOS project selection now uses the existing backend-driven
-  `DirectoryBrowser`. Windows and Linux keep their native picker, and remote
-  targets keep the existing in-app browser behavior.
-- Added routing tests for local macOS, local non-macOS, remote backend, and
-  remote target cases. The regression test failed before implementation because
-  the routing helper did not exist, then passed after the fix.
-- `bun run check:all` passed typecheck, lint, Rust formatting, clippy, and all
-  2,393 frontend tests. Its Rust-test phase is blocked by an existing unrelated
-  `Project` test fixture at `jean-core/src/projects/commands.rs:15299` that omits
-  the required `sentry_base_url` field.
+- Root cause: `list_all_sessions` returns metadata-only sessions whose
+  `messages` arrays are empty, but Load Context used that array both as its
+  non-empty guard and as its message-search source.
+- History: the mismatch was already present when `useLoadContextData` was
+  extracted in `e672fb861` (2026-02-20). It is not a recent regression in the
+  current metadata/run-log architecture.
+- Fix: use `message_count` for the empty-session guard and perform debounced
+  content search in Rust against run logs. Keep fast name/project/worktree
+  matching in the frontend.
+- Tests: the regression test failed before implementation because the filter
+  module did not exist, then passed after the fix. All 2,399 frontend tests,
+  TypeScript, ESLint, Rust formatting, `cargo check`, and Clippy pass.
+- Known baseline issue: `cargo test --manifest-path jean-core/Cargo.toml
+  chat::search` cannot compile the existing Rust test suite because
+  `jean-core/src/projects/commands.rs:15299` initializes `Project` without the
+  existing required `sentry_base_url` field. This is unrelated to this change.
+
+## How to test
+
+- Open Magic → Load Context and confirm sessions with `message_count > 0` are
+  listed although their `messages` arrays are not loaded.
+- Confirm sessions with zero messages, the active session, and attached session
+  references stay hidden.
+- Search for text from a session message that is not in its session, project,
+  or worktree name; confirm the session appears after the debounce.

@@ -16,6 +16,7 @@ import {
 } from '@/lib/session-state-hydration'
 import type {
   AllSessionsResponse,
+  SessionSearchResponse,
   ArchivedSessionEntry,
   ChatMessage,
   ChatHistory,
@@ -613,6 +614,24 @@ export async function prefetchSessions(
  */
 export function useAllSessions(enabled = true) {
   return useConsolidatedAllSessions(enabled)
+}
+
+export const MIN_SESSION_SEARCH_LEN = 3
+
+/** Search message bodies, which are stored in backend run logs. */
+export function useSessionMessageSearch(query: string, enabled = true) {
+  const trimmed = query.trim()
+
+  return useQuery({
+    queryKey: ['session-message-search', trimmed],
+    queryFn: () =>
+      invoke<SessionSearchResponse>('search_session_messages', {
+        query: trimmed,
+      }),
+    enabled: enabled && trimmed.length >= MIN_SESSION_SEARCH_LEN,
+    staleTime: 30_000,
+    gcTime: 60_000,
+  })
 }
 
 /**

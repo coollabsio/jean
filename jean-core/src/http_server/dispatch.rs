@@ -1122,6 +1122,13 @@ pub async fn dispatch_command(
             let result = crate::chat::list_all_sessions(app.clone()).await?;
             to_value(result)
         }
+        "search_session_messages" => {
+            let query: String = from_field(&args, "query")?;
+            let limit: Option<usize> = from_field_opt(&args, "limit")?;
+            let result =
+                crate::chat::search::search_session_messages(app.clone(), query, limit).await?;
+            to_value(result)
+        }
         "get_unread_session_count" => {
             let result = crate::chat::get_unread_session_count(app.clone()).await?;
             to_value(result)

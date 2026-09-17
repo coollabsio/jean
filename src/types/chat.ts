@@ -1688,6 +1688,25 @@ export interface AllSessionsResponse {
   entries: AllSessionsEntry[]
 }
 
+export interface SessionSearchHit {
+  session_id: string
+  session_name: string
+  project_id: string
+  project_name: string
+  worktree_id: string
+  worktree_name: string
+  worktree_path: string
+  snippet: string
+  message_id?: string
+  match_count: number
+  updated_at: number
+}
+
+export interface SessionSearchResponse {
+  hits: SessionSearchHit[]
+  truncated: boolean
+}
+
 // ============================================================================
 // Debug Info Types (for SessionDebugPanel)
 // ============================================================================
