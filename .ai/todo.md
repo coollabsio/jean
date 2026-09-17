@@ -1,24 +1,25 @@
-# Issue #734 — crash when adding a folder
+# Issue #709: Antigravity installation
 
-- [x] Locate issue context and trace the add-folder code path.
-- [x] Identify the macOS abort root cause and regression history.
-- [x] Add a failing regression test.
-- [x] Implement the smallest root-cause fix.
+- [x] Read all available issue context and trace install/status code paths.
+- [x] Check history to identify whether this is a regression.
+- [x] Reproduce with a focused failing test or confirm an existing regression test.
+- [x] Implement the smallest root-cause fix for shell invocation and installed-binary detection.
 - [x] Run focused tests and `bun run check:all`.
-- [x] Record investigation and verification results.
+- [x] Review the diff and document findings, risks, and test steps.
 
 ## Review
 
-- The crash is in the native macOS folder-picker path (`tauri-plugin-dialog`
-  -> `rfd` -> `NSOpenPanel`). Release builds use `panic = "abort"`, so a panic
-  in that native path terminates Jean instead of returning an error to React.
-- Local macOS project selection now uses the existing backend-driven
-  `DirectoryBrowser`. Windows and Linux keep their native picker, and remote
-  targets keep the existing in-app browser behavior.
-- Added routing tests for local macOS, local non-macOS, remote backend, and
-  remote target cases. The regression test failed before implementation because
-  the routing helper did not exist, then passed after the fix.
-- `bun run check:all` passed typecheck, lint, Rust formatting, clippy, and all
-  2,393 frontend tests. Its Rust-test phase is blocked by an existing unrelated
-  `Project` test fixture at `jean-core/src/projects/commands.rs:15299` that omits
-  the required `sentry_base_url` field.
+- The original installer defect came from the first Antigravity integration:
+  Google's Bash script was piped into `sh`, which is `dash` in the server image.
+- Commit `12b55491` already changed the pipeline to `bash`, preserved safe path
+  quoting, surfaced installer output, and added regression tests.
+- Commit `66b8b6af` later added login-shell fallback detection for Unix CLIs.
+  This can find user-profile paths, but the headless process and its subprocesses
+  still did not inherit `$HOME/.local/bin` in the official images.
+- Added `/home/jean/.local/bin` to `PATH` in both server Dockerfiles. Added a
+  server-image regression assertion and observed it fail before the Dockerfile fix.
+- Focused server-image tests pass (8/8). `bun run check:all` passed typecheck,
+  lint, formatting, clippy, and all 2,397 frontend tests. Its Rust test phase is
+  blocked by a pre-existing compile error in
+  `jean-core/src/projects/commands.rs:15299`: a test `Project` initializer is
+  missing the unrelated `sentry_base_url` field.

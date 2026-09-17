@@ -36,7 +36,8 @@ COPY --from=builder /app/src-server/target/release/jean-server /usr/local/bin/je
 COPY scripts/docker-entrypoint.sh /usr/local/bin/jean-server-entrypoint
 RUN chmod +x /usr/local/bin/jean-server-entrypoint
 USER jean
-ENV JEAN_HOST=0.0.0.0 \
+ENV PATH="/home/jean/.local/bin:${PATH}" \
+    JEAN_HOST=0.0.0.0 \
     JEAN_PORT=3456
 EXPOSE 3456
 VOLUME ["/home/jean/.local/share/com.jean.desktop"]

@@ -60,12 +60,24 @@ function assertServerImageInstallsGh(dockerfile) {
   )
 }
 
+function assertServerImageIncludesUserLocalBin(dockerfile) {
+  assert.match(
+    dockerfile,
+    /PATH="\/home\/jean\/\.local\/bin:\$\{PATH\}"/,
+    'the running server must find CLIs installed in the jean user local bin directory'
+  )
+}
+
 test('Dockerfile.server installs GitHub CLI for onboarding and PATH tools', () => {
-  assertServerImageInstallsGh(read('Dockerfile.server'))
+  const dockerfile = read('Dockerfile.server')
+  assertServerImageInstallsGh(dockerfile)
+  assertServerImageIncludesUserLocalBin(dockerfile)
 })
 
 test('Dockerfile.server-runtime installs GitHub CLI for onboarding and PATH tools', () => {
-  assertServerImageInstallsGh(read('Dockerfile.server-runtime'))
+  const dockerfile = read('Dockerfile.server-runtime')
+  assertServerImageInstallsGh(dockerfile)
+  assertServerImageIncludesUserLocalBin(dockerfile)
 })
 
 test('jean-server depends only on the Tauri-free shared core', () => {
