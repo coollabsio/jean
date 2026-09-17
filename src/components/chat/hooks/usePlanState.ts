@@ -5,6 +5,7 @@ import { findPlanFilePath, resolvePlanContent } from '../tool-call-utils'
 
 interface UsePlanStateParams {
   sessionMessages: ChatMessage[] | undefined
+  pendingPlanMessageId?: string | null
   currentToolCalls: ToolCall[]
   currentStreamingContent: string
   currentStreamingContentBlocks: ContentBlock[]
@@ -16,6 +17,7 @@ interface UsePlanStateParams {
  */
 export function usePlanState({
   sessionMessages,
+  pendingPlanMessageId,
   currentToolCalls,
   currentStreamingContent,
   currentStreamingContentBlocks,
@@ -26,10 +28,12 @@ export function usePlanState({
     const messages = sessionMessages ?? []
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i]
+      const isPendingPlainTextPlan = m?.id === pendingPlanMessageId
       if (
         m &&
         m.role === 'assistant' &&
-        m.tool_calls?.some(tc => isPlanToolCall(tc))
+        (isPendingPlainTextPlan ||
+          m.tool_calls?.some(tc => isPlanToolCall(tc)))
       ) {
         let hasFollowUp = false
         for (let j = i + 1; j < messages.length; j++) {
@@ -45,7 +49,7 @@ export function usePlanState({
       }
     }
     return null
-  }, [sessionMessages])
+  }, [sessionMessages, pendingPlanMessageId])
 
   const hasPendingPlanApproval = useMemo(
     () => !!pendingPlanMessage && !isSending,

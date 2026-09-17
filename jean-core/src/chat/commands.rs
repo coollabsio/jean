@@ -1879,8 +1879,10 @@ fn plan_mode_content_waits_for_approval(
     // rejected WebFetch in plan mode) must not park the session on plan approval.
     // Grok waits only when a real/synthetic ExitPlanMode tool is present
     // (`has_blocking_tool` path via inject_synthetic_plan on plan-like content).
-    matches!(backend, Backend::Codex | Backend::Opencode | Backend::Kimi)
-        && execution_mode == Some("plan")
+    matches!(
+        backend,
+        Backend::Claude | Backend::Codex | Backend::Opencode | Backend::Kimi
+    ) && execution_mode == Some("plan")
         && has_content
         && !has_plan_tool
 }
@@ -3608,6 +3610,10 @@ pub async fn send_chat_message(
                                 );
                             }
 
+                            let waiting_for_plan = thread_execution_mode.as_deref() == Some("plan")
+                                && !response.content.is_empty()
+                                && !response.tool_calls.iter().any(is_pending_plan_tool_call);
+
                             break Ok((
                                 pid,
                                 UnifiedResponse {
@@ -3616,7 +3622,7 @@ pub async fn send_chat_message(
                                     tool_calls: response.tool_calls,
                                     content_blocks: response.content_blocks,
                                     cancelled: response.cancelled,
-                                    waiting_for_plan: false,
+                                    waiting_for_plan,
                                     error_emitted: false,
                                     usage: response.usage,
                                     backend: Backend::Claude,
@@ -5588,14 +5594,18 @@ pub async fn send_chat_message(
                     }
                     .to_string(),
                 );
+                if !has_question_tool {
+                    session.pending_plan_message_id = Some(assistant_msg_id.clone());
+                }
             } else if is_plan_mode_with_content {
-                // Codex/OpenCode plan-mode with content → waiting for plan approval
+                // Plain-text plan-mode response → waiting for plan approval
                 session.waiting_for_input = true;
                 session.is_reviewing = false;
                 if session.status_override.as_deref() == Some("review") {
                     session.status_override = None;
                 }
                 session.waiting_for_input_type = Some("plan".to_string());
+                session.pending_plan_message_id = Some(assistant_msg_id.clone());
             } else {
                 // Normal completion
                 apply_non_waiting_completion_state(session);
@@ -5611,9 +5621,9 @@ pub async fn send_chat_message(
     // Emit cache invalidation so all clients (native + web) refetch authoritative state
     emit_sessions_cache_invalidation(&app);
 
-    // Codex delays its completion event until the run log and session metadata
-    // are authoritative. This prevents a refetch from restoring `running`.
-    if response_backend == Backend::Codex && !was_cancelled {
+    // Claude and Codex send the authoritative completion event after the run log
+    // and session metadata are persisted. This also carries plain-text plan state.
+    if matches!(response_backend, Backend::Claude | Backend::Codex) && !was_cancelled {
         let _ = app.emit_all(
             "chat:done",
             &serde_json::json!({
@@ -11063,7 +11073,7 @@ mod tests {
             true,
             false
         ));
-        assert!(!plan_mode_content_waits_for_approval(
+        assert!(plan_mode_content_waits_for_approval(
             &Backend::Claude,
             Some("plan"),
             true,

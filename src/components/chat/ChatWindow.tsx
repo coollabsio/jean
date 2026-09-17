@@ -1410,6 +1410,7 @@ function ChatWindowContent({
     latestPlanFilePath,
   } = usePlanState({
     sessionMessages: session?.messages,
+    pendingPlanMessageId: session?.pending_plan_message_id,
     currentToolCalls,
     currentStreamingContent: streamingContent,
     currentStreamingContentBlocks,

@@ -1174,7 +1174,8 @@ fn should_inject_synthetic_exit_plan(
             .any(|tc| tc.name == "ExitPlanMode" || tc.name == "CodexPlan");
 
     match backend {
-        Backend::Opencode
+        Backend::Claude
+        | Backend::Opencode
         | Backend::Pi
         | Backend::Commandcode
         | Backend::Kimi
@@ -1812,6 +1813,24 @@ mod tests {
         ));
 
         inject_synthetic_exit_plan(&Backend::Opencode, &run.run_id, &mut msg);
+
+        assert_eq!(msg.tool_calls.len(), 1);
+        assert_eq!(msg.tool_calls[0].name, "ExitPlanMode");
+        assert_eq!(msg.tool_calls[0].id, "synthetic-exit-plan-run-123");
+    }
+
+    #[test]
+    fn injects_synthetic_exit_plan_for_completed_claude_plan_runs() {
+        let run = sample_run();
+        let mut msg = sample_assistant_message();
+
+        assert!(should_inject_synthetic_exit_plan(
+            &Backend::Claude,
+            &run,
+            &msg,
+        ));
+
+        inject_synthetic_exit_plan(&Backend::Claude, &run.run_id, &mut msg);
 
         assert_eq!(msg.tool_calls.len(), 1);
         assert_eq!(msg.tool_calls[0].name, "ExitPlanMode");

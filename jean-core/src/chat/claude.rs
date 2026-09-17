@@ -167,15 +167,6 @@ struct ToolUseEvent {
     parent_tool_use_id: Option<String>,
 }
 
-/// Payload for done events sent to frontend
-#[derive(serde::Serialize, Clone)]
-struct DoneEvent {
-    session_id: String,
-    worktree_id: String, // Kept for backward compatibility
-    /// Always false for Claude (uses ExitPlanMode tool calls instead)
-    waiting_for_plan: bool,
-}
-
 /// Payload for error events sent to frontend
 #[derive(serde::Serialize, Clone)]
 pub struct ErrorEvent {
@@ -1625,15 +1616,6 @@ pub fn tail_claude_output(
                                 .output();
                         }
 
-                        let done_event = DoneEvent {
-                            session_id: session_id.to_string(),
-                            worktree_id: worktree_id.to_string(),
-                            waiting_for_plan: false,
-                        };
-                        if let Err(e) = app.emit_all("chat:done", &done_event) {
-                            log::error!("Failed to emit done event: {e}");
-                        }
-
                         return Ok(ClaudeResponse {
                             content: full_content,
                             session_id: claude_session_id,
@@ -1923,16 +1905,6 @@ pub fn tail_claude_output(
                                                 let _ = crate::platform::silent_command("taskkill")
                                                     .args(["/F", "/PID", &pid.to_string()])
                                                     .output();
-                                            }
-
-                                            // Emit done event so frontend knows streaming is complete
-                                            let done_event = DoneEvent {
-                                                session_id: session_id.to_string(),
-                                                worktree_id: worktree_id.to_string(),
-                                                waiting_for_plan: false,
-                                            };
-                                            if let Err(e) = app.emit_all("chat:done", &done_event) {
-                                                log::error!("Failed to emit done event: {e}");
                                             }
 
                                             // Return partial response (blocking tool is already in tool_calls)
@@ -2538,22 +2510,6 @@ pub fn tail_claude_output(
                 error: format!("Claude CLI failed: {error_text}"),
             },
         );
-    }
-
-    // Emit done event unless the user explicitly cancelled (cancel_process
-    // already emitted chat:cancelled in that case, avoid double event).
-    // When the process died naturally (not user cancel) but produced content,
-    // we still emit chat:done so the frontend properly transitions from
-    // streaming to persisted state (#209).
-    if !user_cancelled {
-        let done_event = DoneEvent {
-            session_id: session_id.to_string(),
-            worktree_id: worktree_id.to_string(),
-            waiting_for_plan: false,
-        };
-        if let Err(e) = app.emit_all("chat:done", &done_event) {
-            log::error!("Failed to emit done event: {e}");
-        }
     }
 
     log::trace!(
