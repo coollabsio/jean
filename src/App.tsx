@@ -72,6 +72,7 @@ import { useExternalDisplayZoomTip } from './hooks/use-external-display-zoom-tip
 import { useImmediateSessionStateSave } from './hooks/useImmediateSessionStateSave'
 import { useCliVersionCheck } from './hooks/useCliVersionCheck'
 import { useServerUpdateCheck } from './hooks/useServerUpdateCheck'
+import { useCodexCodeModeHostRepair } from './hooks/useCodexCodeModeHostRepair'
 import { useServerQuerySync } from './hooks/useServerQuerySync'
 import { useQueueProcessor } from './hooks/useQueueProcessor'
 import { useBackgroundInvestigation } from './hooks/useBackgroundInvestigation'
@@ -976,6 +977,7 @@ function App() {
     useClaudeCliStatus({ enabled: nativeCli })
   const { data: codexStatus, isLoading: isCodexStatusLoading } =
     useCodexCliStatus({ enabled: nativeCli })
+  useCodexCodeModeHostRepair(nativeCli && !!codexStatus?.installed)
   const { data: opencodeStatus, isLoading: isOpencodeStatusLoading } =
     useOpencodeCliStatus({ enabled: nativeCli })
   const { data: cursorStatus, isLoading: isCursorStatusLoading } =
