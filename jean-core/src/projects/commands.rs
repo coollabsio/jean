@@ -13581,6 +13581,8 @@ fn collect_skills_from_dir_inner(
             continue;
         }
 
+        // Discovery must not filter on skill frontmatter. In particular,
+        // `disable-model-invocation` keeps a skill user-invocable via `/`.
         let description = std::fs::read_to_string(&skill_file)
             .ok()
             .and_then(|content| {
@@ -14306,6 +14308,23 @@ mod tests {
         );
 
         assert!(collect_test_skills(&root.join("missing")).is_empty());
+    }
+
+    #[test]
+    fn skill_discovery_includes_nested_user_invocable_skills() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path().join("skills");
+        let user_invocable = root.join("engineering/to-spec");
+        std::fs::create_dir_all(&user_invocable).expect("user-invocable skill dir");
+        std::fs::write(
+            user_invocable.join("SKILL.md"),
+            "---\nname: to-spec\ndescription: Create a specification\ndisable-model-invocation: true\n---\n",
+        )
+        .expect("user-invocable skill");
+
+        let skills = collect_test_skills(&root);
+
+        assert!(skills.contains_key("to-spec"));
     }
 
     #[test]
