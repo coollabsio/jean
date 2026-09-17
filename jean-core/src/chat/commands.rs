@@ -410,6 +410,50 @@ fn normalize_optional_string(value: Option<String>) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// Whether a backend's CLI loads a user-scope rules file of its own.
+///
+/// Claude Code reads `~/.claude/CLAUDE.md` and Codex reads `~/.codex/AGENTS.md`,
+/// so shared rules already reach them without Jean doing anything. The Cursor CLI
+/// is the exception: it globs rule files relative to the workspace only
+/// (`.cursor/rules/**/*.mdc`, `AGENTS.md`, `CLAUDE.md`, `.cursorrules`) and never
+/// reads `~/.cursor/rules`, which only the Cursor IDE consults. Without help, a
+/// Cursor session is governed by account-level rules instead of the user's own.
+///
+/// Backends are listed explicitly rather than defaulted, so adding one is a
+/// deliberate claim about that CLI rather than an accident.
+fn backend_reads_user_scope_rules(backend: &str) -> bool {
+    matches!(backend, "claude" | "codex")
+}
+
+/// Rules to inject for a backend that has no user-scope rules path of its own.
+///
+/// Read at send time so editing the file takes effect on the next session: the
+/// alternative, copying the text into preferences or into every repository, goes
+/// stale the moment the source changes.
+fn global_rules_for_backend(backend: &str, path: Option<&str>) -> Option<String> {
+    if backend_reads_user_scope_rules(backend) {
+        return None;
+    }
+    let path = path.map(str::trim).filter(|value| !value.is_empty())?;
+    match std::fs::read_to_string(shellexpand_home(path)) {
+        Ok(contents) if !contents.trim().is_empty() => Some(contents.trim().to_string()),
+        Ok(_) => None,
+        Err(error) => {
+            log::warn!("global_rules_file {path} could not be read: {error}");
+            None
+        }
+    }
+}
+
+fn shellexpand_home(path: &str) -> std::path::PathBuf {
+    if let Some(rest) = path.strip_prefix("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(rest);
+        }
+    }
+    std::path::PathBuf::from(path)
+}
+
 fn resolve_global_system_prompt(preferences_prompt: Option<&str>) -> String {
     preferences_prompt
         .map(str::trim)
@@ -4552,6 +4596,19 @@ pub async fn send_chat_message(
                     }
 
                     let preferences = crate::load_preferences_sync(&thread_app).ok();
+
+                    // Shared rules first: this backend's CLI has no user-scope rules
+                    // path, so without this the session runs on whatever rules the
+                    // provider account carries.
+                    if let Some(rules) = global_rules_for_backend(
+                        "cursor",
+                        preferences
+                            .as_ref()
+                            .and_then(|prefs| prefs.global_rules_file.as_deref()),
+                    ) {
+                        parts.push(rules);
+                    }
+
                     parts.push(resolve_global_system_prompt(preferences.as_ref().and_then(
                         |prefs| prefs.magic_prompts.global_system_prompt.as_deref(),
                     )));
@@ -10345,6 +10402,52 @@ pub async fn respond_opencode_permission(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn backends_with_their_own_user_scope_rules_are_not_injected() {
+        // Claude Code reads ~/.claude/CLAUDE.md and Codex reads ~/.codex/AGENTS.md,
+        // so injecting here would duplicate what the CLI already loaded.
+        assert!(backend_reads_user_scope_rules("claude"));
+        assert!(backend_reads_user_scope_rules("codex"));
+        assert!(!backend_reads_user_scope_rules("cursor"));
+    }
+
+    #[test]
+    fn global_rules_are_skipped_for_a_backend_that_loads_them_itself() {
+        let file = std::env::temp_dir().join("jean-global-rules-skip.md");
+        std::fs::write(&file, "shared rules").unwrap();
+        let path = file.to_string_lossy().to_string();
+
+        assert_eq!(global_rules_for_backend("claude", Some(&path)), None);
+        assert_eq!(global_rules_for_backend("codex", Some(&path)), None);
+        assert_eq!(
+            global_rules_for_backend("cursor", Some(&path)).as_deref(),
+            Some("shared rules")
+        );
+
+        std::fs::remove_file(&file).ok();
+    }
+
+    #[test]
+    fn an_unset_or_unreadable_global_rules_file_injects_nothing() {
+        assert_eq!(global_rules_for_backend("cursor", None), None);
+        assert_eq!(global_rules_for_backend("cursor", Some("   ")), None);
+        assert_eq!(
+            global_rules_for_backend("cursor", Some("/nonexistent/rules.md")),
+            None
+        );
+    }
+
+    #[test]
+    fn an_empty_global_rules_file_injects_nothing() {
+        let file = std::env::temp_dir().join("jean-global-rules-empty.md");
+        std::fs::write(&file, "   \n\n").unwrap();
+        let path = file.to_string_lossy().to_string();
+
+        assert_eq!(global_rules_for_backend("cursor", Some(&path)), None);
+
+        std::fs::remove_file(&file).ok();
+    }
 
     #[test]
     fn resumed_grok_host_error_uses_chat_error_event() {
