@@ -631,6 +631,9 @@ pub struct ChatMessage {
     /// Effort level when this message was sent (user messages only, Opus 4.6)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort_level: Option<String>,
+    /// Provider/custom profile used when this message was sent (user messages only)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_profile_name: Option<String>,
     /// True if this message was recovered from a crash
     #[serde(default)]
     pub recovered: bool,
@@ -656,6 +659,7 @@ impl Default for ChatMessage {
             execution_mode: None,
             thinking_level: None,
             effort_level: None,
+            custom_profile_name: None,
             recovered: false,
             usage: None,
         }
