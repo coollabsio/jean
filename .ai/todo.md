@@ -1,24 +1,16 @@
-# Issue #734 — crash when adding a folder
+# Issue #712: Codex commit failure
 
-- [x] Locate issue context and trace the add-folder code path.
-- [x] Identify the macOS abort root cause and regression history.
-- [x] Add a failing regression test.
-- [x] Implement the smallest root-cause fix.
-- [x] Run focused tests and `bun run check:all`.
-- [x] Record investigation and verification results.
+- [x] Read the issue body, screenshot, and comments (no comments)
+- [x] Trace the Git diff commit action through the background commit job
+- [x] Reproduce the incompatible backend/model state in a regression test
+- [x] Review history and identify the regression window
+- [x] Implement backend-side Codex model normalization
+- [x] Run focused and repository quality checks
 
 ## Review
 
-- The crash is in the native macOS folder-picker path (`tauri-plugin-dialog`
-  -> `rfd` -> `NSOpenPanel`). Release builds use `panic = "abort"`, so a panic
-  in that native path terminates Jean instead of returning an error to React.
-- Local macOS project selection now uses the existing backend-driven
-  `DirectoryBrowser`. Windows and Linux keep their native picker, and remote
-  targets keep the existing in-app browser behavior.
-- Added routing tests for local macOS, local non-macOS, remote backend, and
-  remote target cases. The regression test failed before implementation because
-  the routing helper did not exist, then passed after the fix.
-- `bun run check:all` passed typecheck, lint, Rust formatting, clippy, and all
-  2,393 frontend tests. Its Rust-test phase is blocked by an existing unrelated
-  `Project` test fixture at `jean-core/src/projects/commands.rs:15299` that omits
-  the required `sentry_base_url` field.
+- Root cause: the commit action passed the saved commit-message model (`sonnet`) while backend resolution selected Codex. Codex rejected the Claude model before Git could create the commit.
+- Fix: when commit generation resolves to Codex, keep a valid explicit Codex model; otherwise use the user's selected Codex model, with a valid built-in fallback.
+- Coverage: added tests for stale Claude-model fallback and preservation of an explicit Codex model.
+- Verification: `cargo check --lib`, Rust formatting, TypeScript typecheck, ESLint, Rust Clippy, and all 2,397 frontend tests passed through `bun run check:all`.
+- Known baseline blocker: the Rust test phase cannot compile because an existing `Project` test fixture at `jean-core/src/projects/commands.rs:15349` lacks the required `sentry_base_url` field. This is outside this change.

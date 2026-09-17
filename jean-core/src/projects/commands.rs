@@ -9250,6 +9250,26 @@ fn pick_fallback_commit_message(
     }
 }
 
+fn resolve_commit_message_model(
+    backend: crate::chat::types::Backend,
+    requested_model: Option<&str>,
+    preferences: &crate::AppPreferences,
+) -> String {
+    let requested_model = requested_model.filter(|model| !model.trim().is_empty());
+
+    if backend != crate::chat::types::Backend::Codex
+        || requested_model.is_some_and(crate::is_codex_model)
+    {
+        return requested_model.unwrap_or("sonnet").to_string();
+    }
+
+    if crate::is_codex_model(&preferences.selected_codex_model) {
+        preferences.selected_codex_model.clone()
+    } else {
+        "gpt-5.6-sol".to_string()
+    }
+}
+
 /// Generate commit message using Claude CLI with JSON schema
 #[allow(clippy::too_many_arguments)]
 fn generate_commit_message_once(
@@ -9262,10 +9282,11 @@ fn generate_commit_message_once(
     magic_backend: Option<&str>,
     reasoning_effort: Option<&str>,
 ) -> Result<CommitMessageResponse, String> {
-    let model_str = model.unwrap_or("sonnet");
-
     // Per-operation backend > project/global default_backend
     let backend = crate::chat::resolve_magic_prompt_backend(app, magic_backend, worktree_id);
+    let preferences = crate::load_preferences_sync(app).unwrap_or_default();
+    let model = resolve_commit_message_model(backend.clone(), model, &preferences);
+    let model_str = model.as_str();
 
     if backend == crate::chat::types::Backend::Opencode {
         log::trace!("Generating commit message with OpenCode");
@@ -14184,6 +14205,34 @@ mod tests {
     use crate::projects::types::ProjectsData;
     use std::path::Path;
 
+    #[test]
+    fn commit_message_uses_selected_codex_model_when_claude_model_is_stale() {
+        let mut preferences = crate::AppPreferences::default();
+        preferences.selected_codex_model = "gpt-5.4".to_string();
+
+        assert_eq!(
+            resolve_commit_message_model(
+                crate::chat::types::Backend::Codex,
+                Some("sonnet"),
+                &preferences,
+            ),
+            "gpt-5.4"
+        );
+    }
+
+    #[test]
+    fn commit_message_keeps_explicit_codex_model() {
+        let preferences = crate::AppPreferences::default();
+
+        assert_eq!(
+            resolve_commit_message_model(
+                crate::chat::types::Backend::Codex,
+                Some("gpt-5.6-terra"),
+                &preferences,
+            ),
+            "gpt-5.6-terra"
+        );
+    }
     #[test]
     fn provided_cached_value_changed_ignores_missing_updates() {
         assert!(!provided_cached_value_changed(&None::<u32>, &Some(1)));
