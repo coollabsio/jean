@@ -68,6 +68,31 @@ test('Dockerfile.server-runtime installs GitHub CLI for onboarding and PATH tool
   assertServerImageInstallsGh(read('Dockerfile.server-runtime'))
 })
 
+/** Shared assertions: all mutable state below the server user's home persists. */
+function assertServerImagePersistsJeanHome(dockerfile) {
+  assert.match(dockerfile, /VOLUME \["\/home\/jean"\]/)
+  assert.doesNotMatch(
+    dockerfile,
+    /VOLUME \["\/home\/jean\/\.local\/share\/com\.jean\.desktop"\]/
+  )
+}
+
+test('server images persist worktrees, credentials, and CLI state', () => {
+  assertServerImagePersistsJeanHome(read('Dockerfile.server'))
+  assertServerImagePersistsJeanHome(read('Dockerfile.server-runtime'))
+})
+
+test('headless Docker example mounts the complete Jean home directory', () => {
+  const documentation = read('docs/headless-server.md')
+
+  assert.match(documentation, /-v jean-home:\/home\/jean/)
+  assert.match(documentation, /chown -R 1000:1000 \/home\/jean/)
+  assert.doesNotMatch(
+    documentation,
+    /-v jean-data:\/home\/jean\/\.local\/share\/com\.jean\.desktop/
+  )
+})
+
 test('jean-server depends only on the Tauri-free shared core', () => {
   const cargoToml = read('src-tauri/Cargo.toml')
   const coreCargoToml = read('jean-core/Cargo.toml')

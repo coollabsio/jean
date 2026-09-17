@@ -271,7 +271,8 @@ browser terminals can find tools installed by shell setup scripts (for example
   without a separate install step. Prefer the **System PATH** CLI source in
   onboarding/Settings when using the container image.
 - Bind to `0.0.0.0` inside the container, but keep token auth enabled.
-- Mount Jean's app-data directory as a volume so projects, preferences, and sessions persist.
+- Mount `/home/jean` as one volume. This volume keeps app data, repositories,
+  worktrees, Git and SSH configuration, CLI authentication, and agent settings.
 - Put TLS/auth in front of the container for internet exposure.
 - For Tailscale access from a browser, prefer `tailscale serve` (HTTPS) in front
   of `127.0.0.1` rather than plain `http://100.x.y.z` — browsers block the
@@ -286,9 +287,33 @@ docker run --rm \
   -e JEAN_PORT=3456 \
   -e JEAN_TOKEN=change-me-long-random-token \
   -p 127.0.0.1:3456:3456 \
-  -v jean-data:/home/jean/.local/share/com.jean.desktop \
+  -v jean-home:/home/jean \
   ghcr.io/OWNER/REPO-server:latest
 ```
+
+### Migrate an existing Docker volume
+
+Older Jean images and examples mounted `jean-data` directly at
+`/home/jean/.local/share/com.jean.desktop`. Do not mount that volume at
+`/home/jean`: its files have the wrong relative path for a home volume.
+
+Before you replace the old container, create a new home volume and copy the old
+app data into its expected directory:
+
+```bash
+docker volume create jean-home
+docker run --rm \
+  -v jean-data:/from:ro \
+  -v jean-home:/home/jean \
+  alpine sh -c 'mkdir -p /home/jean/.local/share/com.jean.desktop && cp -a /from/. /home/jean/.local/share/com.jean.desktop/ && chown -R 1000:1000 /home/jean'
+```
+
+Then use `-v jean-home:/home/jean` when you create the new Jean container.
+The Jean user in the image has UID and GID `1000`; the final `chown` makes the
+new home volume writable by that user.
+Data that exists only in the old container writable layer is not in
+`jean-data`. Copy repositories, credentials, or configuration from the old
+container into `jean-home` before you remove that container.
 
 ## Reverse proxy
 

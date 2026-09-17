@@ -39,5 +39,5 @@ USER jean
 ENV JEAN_HOST=0.0.0.0 \
     JEAN_PORT=3456
 EXPOSE 3456
-VOLUME ["/home/jean/.local/share/com.jean.desktop"]
+VOLUME ["/home/jean"]
 ENTRYPOINT ["/usr/local/bin/jean-server-entrypoint"]
