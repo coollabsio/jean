@@ -180,6 +180,8 @@ export interface ChatMessage {
   thinking_level?: ThinkingLevel
   /** Effort level when this message was sent (user messages only, Opus 4.6) */
   effort_level?: EffortLevel
+  /** Provider/custom profile used when this message was sent (user messages only) */
+  custom_profile_name?: string
   /** True if this message was recovered from a crash */
   recovered?: boolean
   /** Token usage for this message (assistant messages only) */

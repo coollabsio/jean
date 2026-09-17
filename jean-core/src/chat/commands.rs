@@ -5341,6 +5341,7 @@ pub async fn send_chat_message(
             execution_mode: None,
             thinking_level: None,
             effort_level: None,
+            custom_profile_name: None,
             recovered: false,
             usage: None,
         });
@@ -5436,6 +5437,7 @@ pub async fn send_chat_message(
             execution_mode: None,
             thinking_level: None,
             effort_level: None,
+            custom_profile_name: None,
             recovered: false,
             usage: None,
         });
@@ -5484,6 +5486,7 @@ pub async fn send_chat_message(
         execution_mode: None,
         thinking_level: None,
         effort_level: None,
+        custom_profile_name: None,
         recovered: false,
         usage: unified_response.usage.clone(),
     };
@@ -5746,6 +5749,28 @@ pub async fn set_session_effort_level(
         if let Some(session) = sessions.find_session_mut(&session_id) {
             session.selected_effort_level = Some(effort_level);
             log::trace!("Effort level selection saved");
+            Ok(())
+        } else {
+            Err(format!("Session not found: {session_id}"))
+        }
+    })
+}
+
+/// Set the selected execution mode for a session.
+pub async fn set_session_execution_mode(
+    app: AppHandle,
+    worktree_id: String,
+    worktree_path: String,
+    session_id: String,
+    execution_mode: String,
+) -> Result<(), String> {
+    if !matches!(execution_mode.as_str(), "plan" | "build" | "yolo") {
+        return Err(format!("Unsupported execution mode: {execution_mode}"));
+    }
+
+    with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
+        if let Some(session) = sessions.find_session_mut(&session_id) {
+            session.selected_execution_mode = Some(execution_mode);
             Ok(())
         } else {
             Err(format!("Session not found: {session_id}"))
