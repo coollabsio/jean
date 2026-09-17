@@ -541,7 +541,7 @@ pub fn spawn_detached_claude(
                     .map_err(|e| format!("Failed to write WSL launch command: {e}"))
             });
         if let Err(error) = write_result {
-            let _ = child.kill();
+            crate::platform::kill_and_reap(&mut child);
             return Err(error);
         }
 
@@ -551,7 +551,7 @@ pub fn spawn_detached_claude(
         if let Some(stdout) = child.stdout.take() {
             let mut reader = BufReader::new(stdout);
             if let Err(e) = reader.read_line(&mut pid_str) {
-                let _ = child.kill();
+                crate::platform::kill_and_reap(&mut child);
                 let _ = std::fs::remove_file(&pid_file);
                 return Err(format!("Failed to read WSL PID: {e}"));
             }
@@ -563,7 +563,7 @@ pub fn spawn_detached_claude(
             Err(e) => {
                 // No pid printed: the session never came up (e.g. the working
                 // directory could not be entered). Fail loudly.
-                let _ = child.kill();
+                crate::platform::kill_and_reap(&mut child);
                 let _ = std::fs::remove_file(&pid_file);
                 return Err(format!("Failed to parse WSL PID '{pid_str}': {e}"));
             }
@@ -572,7 +572,7 @@ pub fn spawn_detached_claude(
         // `kill -0 0` targets the current process group and can falsely report
         // success, so never allow an invalid PID into recovery state.
         if pid == 0 {
-            let _ = child.kill();
+            crate::platform::kill_and_reap(&mut child);
             let _ = std::fs::remove_file(&pid_file);
             return Err(
                 "WSL spawn produced no process (pid 0) — the working directory \
