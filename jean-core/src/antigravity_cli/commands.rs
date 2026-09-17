@@ -127,7 +127,7 @@ fn run_with_timeout(mut command: std::process::Command) -> Result<std::process::
             return child.wait_with_output().map_err(|error| error.to_string());
         }
         if Instant::now() >= deadline {
-            let _ = child.kill();
+            crate::platform::kill_and_reap(&mut child);
             return Err("Antigravity CLI status check timed out".to_string());
         }
         std::thread::sleep(Duration::from_millis(50));

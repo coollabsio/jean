@@ -1,6 +1,18 @@
 // Cross-platform process management
 
-use std::process::Command;
+use std::process::{Child, Command};
+
+/// Stop a child process and wait for its exit so Unix does not retain a zombie.
+///
+/// `Child::kill` only sends the termination signal. Dropping the handle without
+/// `Child::wait` leaves the exited process in the process table on Unix.
+pub fn kill_and_reap(child: &mut Child) {
+    let pid = child.id();
+    let _ = child.kill();
+    if let Err(error) = child.wait() {
+        log::warn!("Failed to reap child process {pid}: {error}");
+    }
+}
 
 /// Escape a string for safe use in a shell command.
 /// Wraps in single quotes and escapes any embedded single quotes.
@@ -655,7 +667,7 @@ pub fn terminate_process(pid: u32) -> Result<(), String> {
 
 #[cfg(all(test, unix))]
 mod process_tree_tests {
-    use super::{collect_descendant_pids, kill_process_tree};
+    use super::{collect_descendant_pids, kill_and_reap, kill_process_tree};
     use std::process::{Command, Stdio};
     use std::thread;
     use std::time::Duration;
@@ -710,6 +722,26 @@ mod process_tree_tests {
                 "descendant pid {pid} should be dead after tree kill"
             );
         }
+    }
+
+    #[test]
+    fn kill_and_reap_removes_the_child_from_the_process_table() {
+        let mut child = Command::new("sleep")
+            .arg("120")
+            .spawn()
+            .expect("spawn sleep child");
+        let pid = child.id();
+
+        kill_and_reap(&mut child);
+
+        let result =
+            unsafe { libc::waitpid(pid as libc::pid_t, std::ptr::null_mut(), libc::WNOHANG) };
+        assert_eq!(result, -1, "child pid {pid} was not reaped");
+        assert_eq!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::ECHILD),
+            "waitpid should report that no unreaped child remains"
+        );
     }
 }
 

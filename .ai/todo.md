@@ -13,4 +13,3 @@
 - Fix: when commit generation resolves to Codex, keep a valid explicit Codex model; otherwise use the user's selected Codex model, with a valid built-in fallback.
 - Coverage: added tests for stale Claude-model fallback and preservation of an explicit Codex model.
 - Verification: `cargo check --lib`, Rust formatting, TypeScript typecheck, ESLint, Rust Clippy, and all 2,397 frontend tests passed through `bun run check:all`.
-- Known baseline blocker: the Rust test phase cannot compile because an existing `Project` test fixture at `jean-core/src/projects/commands.rs:15349` lacks the required `sentry_base_url` field. This is outside this change.
