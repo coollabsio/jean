@@ -5965,10 +5965,17 @@ pub fn flush_pending_codex_goal(app: &AppHandle, session_id: &str, thread_id: &s
 }
 
 fn codex_goal_set_params(thread_id: &str, objective: &str) -> serde_json::Value {
+    // Keep the app-server goal paused. An active native goal owns a sequence
+    // of autonomous turns, but Jean tracks one RunEntry and one cancellable
+    // turn at a time. Starting the native runner here makes Jean report idle
+    // after its first turn while Codex continues in the background. It also
+    // makes later prompts conflict with that hidden turn. Jean sends the goal
+    // as a normal managed turn instead, which preserves streaming,
+    // cancellation, and crash recovery.
     serde_json::json!({
         "threadId": thread_id,
         "objective": objective,
-        "status": "active",
+        "status": "paused",
     })
 }
 
@@ -11219,7 +11226,7 @@ mod tests {
             serde_json::json!({
                 "threadId": "thread-123",
                 "objective": "Ship the goal UI",
-                "status": "active",
+                "status": "paused",
             })
         );
         assert!(params.get("goal").is_none());

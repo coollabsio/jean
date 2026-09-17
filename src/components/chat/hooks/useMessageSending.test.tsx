@@ -306,7 +306,7 @@ describe('useMessageSending Codex /goal', () => {
     expect(sendMessage.mutate).toHaveBeenCalledWith(
       expect.objectContaining({
         executionMode: 'build',
-        message: 'Work toward the active goal:\n\nShip the feature',
+        message: 'Complete this goal in the current turn:\n\nShip the feature',
         backend: 'codex',
       }),
       expect.any(Object)
@@ -329,7 +329,7 @@ describe('useMessageSending Codex /goal', () => {
     expect(sendMessage.mutate).toHaveBeenCalledWith(
       expect.objectContaining({
         executionMode: 'yolo',
-        message: 'Work toward the active goal:\n\nShip the feature',
+        message: 'Complete this goal in the current turn:\n\nShip the feature',
       }),
       expect.any(Object)
     )
