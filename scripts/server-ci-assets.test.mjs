@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { mkdtempSync } from 'node:fs'
 import test from 'node:test'
 
 const read = path => readFileSync(path, 'utf8')
@@ -47,7 +51,10 @@ test('Dockerfile builds and runs jean-server headlessly as non-root user', () =>
 
 /** Shared assertions: server images ship GitHub CLI from the official apt repo. */
 function assertServerImageInstallsGh(dockerfile) {
-  assert.match(dockerfile, /cli\.github\.com\/packages\/githubcli-archive-keyring\.gpg/)
+  assert.match(
+    dockerfile,
+    /cli\.github\.com\/packages\/githubcli-archive-keyring\.gpg/
+  )
   assert.match(dockerfile, /cli\.github\.com\/packages stable main/)
   assert.match(
     dockerfile,
@@ -81,11 +88,69 @@ test('jean-server depends only on the Tauri-free shared core', () => {
   assert.doesNotMatch(coreCargoToml, /tauri|wry|webkit|gtk/i)
 })
 
-test('Docker entrypoint starts jean-server directly without a display server', () => {
+test('Docker entrypoint bootstraps the packaged GitHub CLI as Jean-managed', () => {
   const entrypoint = read('scripts/docker-entrypoint.sh')
 
   assert.doesNotMatch(entrypoint, /Xvfb|DISPLAY|WAYLAND|sleep/i)
+  assert.match(entrypoint, /\.local\/share\/com\.jean\.desktop/)
+  assert.match(entrypoint, /managed_gh="\$data_dir\/gh-cli\/gh"/)
+  assert.match(entrypoint, /command -v gh/)
+  assert.match(entrypoint, /install -m 0755/)
   assert.match(entrypoint, /exec jean-server "\$@"/)
+})
+
+test('Docker entrypoint preserves an updated Jean-managed GitHub CLI', () => {
+  const root = mkdtempSync(join(tmpdir(), 'jean-entrypoint-'))
+  const binDir = join(root, 'bin')
+  const dataDir = join(root, 'data')
+  const managedDir = join(dataDir, 'gh-cli')
+  mkdirSync(binDir, { recursive: true })
+  mkdirSync(managedDir, { recursive: true })
+  writeFileSync(join(binDir, 'gh'), '#!/bin/sh\necho image-gh\n', {
+    mode: 0o755,
+  })
+  writeFileSync(join(binDir, 'jean-server'), '#!/bin/sh\nexit 0\n', {
+    mode: 0o755,
+  })
+  const managedGh = join(managedDir, 'gh')
+  writeFileSync(managedGh, '#!/bin/sh\necho updated-gh\n', { mode: 0o755 })
+
+  execFileSync('sh', ['scripts/docker-entrypoint.sh'], {
+    env: {
+      ...process.env,
+      HOME: root,
+      JEAN_DATA_DIR: dataDir,
+      PATH: `${binDir}:${process.env.PATH}`,
+    },
+  })
+
+  assert.match(readFileSync(managedGh, 'utf8'), /updated-gh/)
+})
+
+test('Docker entrypoint seeds the packaged GitHub CLI in the managed location', () => {
+  const root = mkdtempSync(join(tmpdir(), 'jean-entrypoint-'))
+  const binDir = join(root, 'bin')
+  const dataDir = join(root, 'data')
+  mkdirSync(binDir, { recursive: true })
+  writeFileSync(join(binDir, 'gh'), '#!/bin/sh\necho image-gh\n', {
+    mode: 0o755,
+  })
+  writeFileSync(join(binDir, 'jean-server'), '#!/bin/sh\nexit 0\n', {
+    mode: 0o755,
+  })
+
+  execFileSync('sh', ['scripts/docker-entrypoint.sh'], {
+    env: {
+      ...process.env,
+      HOME: root,
+      JEAN_DATA_DIR: dataDir,
+      PATH: `${binDir}:${process.env.PATH}`,
+    },
+  })
+
+  const managedGh = join(dataDir, 'gh-cli', 'gh')
+  assert.equal(existsSync(managedGh), true)
+  assert.match(readFileSync(managedGh, 'utf8'), /image-gh/)
 })
 
 test('shared dispatcher is owned by jean-core and used by the desktop adapter', () => {
