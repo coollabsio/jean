@@ -12,7 +12,8 @@
  */
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { CheckCircle2 } from 'lucide-react'
+import { CheckCircle2, Minus } from 'lucide-react'
+import { toast } from 'sonner'
 import {
   Dialog,
   DialogContent,
@@ -31,6 +32,7 @@ import { useCommandCodeCliSetup } from '@/services/commandcode-cli'
 import { useGrokCliSetup } from '@/services/grok-cli'
 import { useKimiCliSetup } from '@/services/kimi-cli'
 import { logger } from '@/lib/logger'
+import { useUIStore } from '@/store/ui-store'
 import {
   SetupState,
   InstallingState,
@@ -316,8 +318,25 @@ function CliReinstallModalUI({
   const [selectedVersion, setSelectedVersion] = useState<string | null>(null)
   const [step, setStep] = useState<ModalStep>('setup')
   const [installError, setInstallError] = useState<Error | null>(null)
+  const minimized = useUIStore(
+    state =>
+      state.minimizedCliUpdate?.kind === 'reinstall' &&
+      state.minimizedCliUpdate.type === cliType
+  )
   // Guard against double-invocation
   const isInstallingRef = useRef(false)
+  const minimizedRef = useRef(minimized)
+  useEffect(() => {
+    minimizedRef.current = minimized
+  }, [minimized])
+
+  useEffect(() => {
+    if (minimized && setup.progress) {
+      useUIStore
+        .getState()
+        .updateMinimizedCliUpdateProgress(setup.progress.percent)
+    }
+  }, [minimized, setup.progress])
 
   // Filter to stable releases only
   const stableVersions = useMemo(
@@ -381,7 +400,14 @@ function CliReinstallModalUI({
         logger.info('[CliReinstallModal] Installation succeeded', { cliType })
         isInstallingRef.current = false
         setupRef.current.refetchStatus()
-        setStep('complete')
+        if (minimizedRef.current) {
+          toast.success(
+            `${cliName} ${setupRef.current.status?.installed ? 'updated' : 'installed'} successfully`
+          )
+          onOpenChange(false)
+        } else {
+          setStep('complete')
+        }
       },
       onError: error => {
         logger.error('[CliReinstallModal] Installation failed', {
@@ -389,11 +415,30 @@ function CliReinstallModalUI({
           error,
         })
         isInstallingRef.current = false
-        setInstallError(error)
-        setStep('setup')
+        if (minimizedRef.current) {
+          toast.error(
+            `Failed to ${setupRef.current.status?.installed ? 'update' : 'install'} ${cliName}`,
+            {
+              description: error.message,
+            }
+          )
+          onOpenChange(false)
+        } else {
+          setInstallError(error)
+          setStep('setup')
+        }
       },
     })
-  }, [selectedVersion, cliType])
+  }, [selectedVersion, cliType, cliName, onOpenChange])
+
+  const handleMinimize = useCallback(() => {
+    useUIStore.getState().setMinimizedCliUpdate({
+      type: cliType,
+      name: cliName,
+      kind: 'reinstall',
+      progress: setup.progress?.percent ?? 0,
+    })
+  }, [cliType, cliName, setup.progress?.percent])
 
   const handleComplete = useCallback(() => {
     onOpenChange(false)
@@ -402,8 +447,24 @@ function CliReinstallModalUI({
   const isReinstall = setup.status?.installed
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[450px]" preventClose>
+    <Dialog open={open && !minimized} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="sm:max-w-[450px]"
+        preventClose
+        showCloseButton={step !== 'installing'}
+      >
+        {step === 'installing' && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={handleMinimize}
+            aria-label={`Minimize ${cliName} update`}
+            className="absolute right-5 top-4 h-7 w-7"
+          >
+            <Minus className="size-4" />
+          </Button>
+        )}
         <DialogHeader>
           <DialogTitle>
             {step === 'complete'

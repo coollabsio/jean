@@ -44,6 +44,7 @@ import { useProjectsStore } from '@/store/projects-store'
 import { resolveHeaderServerLabel } from './server-context'
 import { resolveHeaderRemoteServer } from './server-context'
 import { RemoteServerRefreshButton } from '@/components/remote/RemoteServerRefreshButton'
+import { MinimizedCliUpdate } from './MinimizedCliUpdate'
 
 interface TitleBarProps {
   className?: string
@@ -331,6 +332,7 @@ export function TitleBar({
                 <TooltipContent>GitHub</TooltipContent>
               </Tooltip>
             )}
+            <MinimizedCliUpdate />
             <CliUpdatesIndicator />
             <ServerUpdateIndicator />
             {appVersion && <UpdateIndicator />}

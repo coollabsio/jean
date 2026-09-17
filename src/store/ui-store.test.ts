@@ -17,6 +17,42 @@ describe('Command Code CLI update modal', () => {
   })
 })
 
+describe('minimized CLI updates', () => {
+  beforeEach(() => {
+    useUIStore.setState({ minimizedCliUpdate: null })
+  })
+
+  it('stores progress and restores the active modal', () => {
+    const store = useUIStore.getState()
+    store.openCliUpdateModal('codex')
+    store.setMinimizedCliUpdate({
+      type: 'codex',
+      name: 'Codex CLI',
+      kind: 'reinstall',
+      progress: 25,
+    })
+
+    store.updateMinimizedCliUpdateProgress(60)
+    expect(useUIStore.getState().minimizedCliUpdate?.progress).toBe(60)
+
+    store.restoreMinimizedCliUpdate()
+    expect(useUIStore.getState().minimizedCliUpdate).toBeNull()
+    expect(useUIStore.getState().cliUpdateModalOpen).toBe(true)
+  })
+
+  it('clears minimized state when the active update closes', () => {
+    useUIStore.getState().setMinimizedCliUpdate({
+      type: 'gh',
+      name: 'GitHub CLI',
+      kind: 'terminal',
+      progress: null,
+    })
+
+    useUIStore.getState().closeCliLoginModal()
+    expect(useUIStore.getState().minimizedCliUpdate).toBeNull()
+  })
+})
+
 describe('UIStore', () => {
   beforeEach(() => {
     // Reset store state before each test
@@ -171,10 +207,7 @@ describe('UIStore', () => {
         'worktree-1',
         'worktree-2',
       ]),
-      autoInvestigateAdvisoryWorktreeIds: new Set([
-        'worktree-1',
-        'worktree-2',
-      ]),
+      autoInvestigateAdvisoryWorktreeIds: new Set(['worktree-1', 'worktree-2']),
       autoInvestigateLinearIssueWorktreeIds: new Set([
         'worktree-1',
         'worktree-2',
@@ -205,9 +238,7 @@ describe('UIStore', () => {
       },
     })
 
-    useUIStore
-      .getState()
-      .clearWorktreeState('worktree-1', ['session-1'])
+    useUIStore.getState().clearWorktreeState('worktree-1', ['session-1'])
 
     const state = useUIStore.getState()
     expect(state.autoInvestigateWorktreeIds).toEqual(new Set(['worktree-2']))

@@ -36,6 +36,7 @@ import { disposeTerminal, setOnStopped } from '@/lib/terminal-instances'
 import { BackendLabel } from '@/components/ui/backend-label'
 import { generateId } from '@/lib/uuid'
 import { StandaloneTerminalSurface } from '@/components/chat/StandaloneTerminalSurface'
+import { Minus } from 'lucide-react'
 
 export function CliLoginModal() {
   const [retryKey, setRetryKey] = useState(0)
@@ -101,6 +102,15 @@ function CliLoginModalContent({
     exitCode: number | null
     signal: string | null
   } | null>(null)
+  const minimized = useUIStore(
+    state =>
+      state.minimizedCliUpdate?.kind === 'terminal' &&
+      state.minimizedCliUpdate.type === cliType
+  )
+  const minimizedRef = useRef(minimized)
+  useEffect(() => {
+    minimizedRef.current = minimized
+  }, [minimized])
 
   const cliName =
     cliType === 'claude'
@@ -210,7 +220,9 @@ function CliLoginModalContent({
         } else if (cliType === 'kimi') {
           queryClient.invalidateQueries({ queryKey: kimiCliQueryKeys.all })
         } else if (cliType === 'antigravity') {
-          queryClient.invalidateQueries({ queryKey: antigravityCliQueryKeys.all })
+          queryClient.invalidateQueries({
+            queryKey: antigravityCliQueryKeys.all,
+          })
         } else if (cliType === 'coderabbit') {
           queryClient.invalidateQueries({
             queryKey: coderabbitCliQueryKeys.all,
@@ -243,18 +255,62 @@ function CliLoginModalContent({
 
       if (exitCode === 0) {
         logger.debug(logBase + logOutput)
-        setTimeout(() => onLoginSuccessClose(), 1500)
+        if (minimizedRef.current) {
+          toast.success(
+            `${cliName} ${action === 'install' ? 'installed' : 'updated'} successfully`
+          )
+          onLoginSuccessClose()
+        } else {
+          setTimeout(() => onLoginSuccessClose(), 1500)
+        }
       } else {
         logger.error(logBase + logOutput)
-        setExitStatus({ exitCode, signal })
+        if (minimizedRef.current) {
+          toast.error(
+            `Failed to ${action === 'install' ? 'install' : 'update'} ${cliName}`,
+            {
+              description: signal
+                ? `Process stopped by signal ${signal}`
+                : `Process exited with code ${exitCode ?? 'unknown'}`,
+            }
+          )
+          onLoginSuccessClose()
+        } else {
+          setExitStatus({ exitCode, signal })
+        }
       }
     })
     return () => setOnStopped(terminalId, undefined)
-  }, [terminalId, cliName, command, commandArgs])
+  }, [terminalId, cliName, command, commandArgs, action])
+
+  const handleMinimize = useCallback(() => {
+    if (!cliType) return
+    useUIStore.getState().setMinimizedCliUpdate({
+      type: cliType,
+      name: cliName,
+      kind: 'terminal',
+      progress: null,
+    })
+  }, [cliType, cliName])
 
   return (
-    <Dialog open={true} onOpenChange={handleOpenChange}>
-      <DialogContent className="!w-screen !h-dvh !max-w-screen !rounded-none sm:!w-[calc(100vw-64px)] sm:!max-w-[calc(100vw-64px)] sm:!h-[calc(100vh-64px)] sm:!rounded-lg flex flex-col">
+    <Dialog open={!minimized} onOpenChange={handleOpenChange}>
+      <DialogContent
+        className="!w-screen !h-dvh !max-w-screen !rounded-none sm:!w-[calc(100vw-64px)] sm:!max-w-[calc(100vw-64px)] sm:!h-[calc(100vh-64px)] sm:!rounded-lg flex flex-col"
+        showCloseButton={action === 'login'}
+      >
+        {action !== 'login' && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={handleMinimize}
+            aria-label={`Minimize ${cliName} update`}
+            className="absolute right-5 top-4 h-7 w-7"
+          >
+            <Minus className="size-4" />
+          </Button>
+        )}
         <DialogHeader>
           <DialogTitle>
             {cliTitle}{' '}

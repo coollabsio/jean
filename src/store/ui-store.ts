@@ -95,6 +95,13 @@ export type CliLoginModalType =
   | 'coderabbit'
   | null
 
+export interface MinimizedCliUpdate {
+  type: Exclude<CliLoginModalType, null>
+  name: string
+  kind: 'reinstall' | 'terminal'
+  progress: number | null
+}
+
 interface UIState {
   leftSidebarVisible: boolean
   leftSidebarSize: number // Width in pixels, persisted across sessions
@@ -148,6 +155,8 @@ interface UIState {
   cliLoginModalCommand: string | null
   cliLoginModalCommandArgs: string[] | null
   cliLoginModalAction: 'login' | 'update' | 'install'
+  /** Active CLI update hidden from its modal while the process keeps running. */
+  minimizedCliUpdate: MinimizedCliUpdate | null
   /** Worktree IDs that should auto-trigger investigate-issue when created */
   autoInvestigateWorktreeIds: Set<string>
   /** Worktree IDs that should auto-trigger investigate-pr when created */
@@ -274,6 +283,9 @@ interface UIState {
     action?: 'login' | 'update' | 'install'
   ) => void
   closeCliLoginModal: () => void
+  setMinimizedCliUpdate: (update: MinimizedCliUpdate | null) => void
+  updateMinimizedCliUpdateProgress: (progress: number) => void
+  restoreMinimizedCliUpdate: () => void
   incrementPendingBackgroundCreations: () => void
   consumePendingBackgroundCreation: () => boolean
   markWorktreeForAutoInvestigate: (
@@ -399,6 +411,7 @@ export const useUIStore = create<UIState>()(
       cliLoginModalCommand: null,
       cliLoginModalCommandArgs: null,
       cliLoginModalAction: 'login',
+      minimizedCliUpdate: null,
       autoInvestigateWorktreeIds: new Set(),
       autoInvestigatePRWorktreeIds: new Set(),
       autoInvestigateSecurityAlertWorktreeIds: new Set(),
@@ -768,14 +781,22 @@ export const useUIStore = create<UIState>()(
 
       openCliUpdateModal: type =>
         set(
-          { cliUpdateModalOpen: true, cliUpdateModalType: type },
+          {
+            cliUpdateModalOpen: true,
+            cliUpdateModalType: type,
+            minimizedCliUpdate: null,
+          },
           undefined,
           'openCliUpdateModal'
         ),
 
       closeCliUpdateModal: () =>
         set(
-          { cliUpdateModalOpen: false, cliUpdateModalType: null },
+          {
+            cliUpdateModalOpen: false,
+            cliUpdateModalType: null,
+            minimizedCliUpdate: null,
+          },
           undefined,
           'closeCliUpdateModal'
         ),
@@ -788,6 +809,7 @@ export const useUIStore = create<UIState>()(
             cliLoginModalCommand: command,
             cliLoginModalCommandArgs: commandArgs ?? null,
             cliLoginModalAction: action ?? 'login',
+            minimizedCliUpdate: null,
           },
           undefined,
           'openCliLoginModal'
@@ -801,9 +823,39 @@ export const useUIStore = create<UIState>()(
             cliLoginModalCommand: null,
             cliLoginModalCommandArgs: null,
             cliLoginModalAction: 'login',
+            minimizedCliUpdate: null,
           },
           undefined,
           'closeCliLoginModal'
+        ),
+
+      setMinimizedCliUpdate: update =>
+        set(
+          state =>
+            state.minimizedCliUpdate === update
+              ? state
+              : { minimizedCliUpdate: update },
+          undefined,
+          'setMinimizedCliUpdate'
+        ),
+
+      updateMinimizedCliUpdateProgress: progress =>
+        set(
+          state => {
+            const update = state.minimizedCliUpdate
+            if (!update || update.progress === progress) return state
+            return { minimizedCliUpdate: { ...update, progress } }
+          },
+          undefined,
+          'updateMinimizedCliUpdateProgress'
+        ),
+
+      restoreMinimizedCliUpdate: () =>
+        set(
+          state =>
+            state.minimizedCliUpdate ? { minimizedCliUpdate: null } : state,
+          undefined,
+          'restoreMinimizedCliUpdate'
         ),
 
       incrementPendingBackgroundCreations: () =>
@@ -1162,7 +1214,7 @@ export const useUIStore = create<UIState>()(
               if (next.delete(worktreeId)) changed = true
               return changed ? next : values
             }
-            const removeRecordEntries = <T,>(
+            const removeRecordEntries = <T>(
               record: Record<string, T>,
               predicate: (key: string, value: T) => boolean
             ): Record<string, T> => {
@@ -1213,8 +1265,7 @@ export const useUIStore = create<UIState>()(
             )
 
             const worktreeStateChanged =
-              autoInvestigateWorktreeIds !==
-                state.autoInvestigateWorktreeIds ||
+              autoInvestigateWorktreeIds !== state.autoInvestigateWorktreeIds ||
               autoInvestigatePRWorktreeIds !==
                 state.autoInvestigatePRWorktreeIds ||
               autoInvestigateSecurityAlertWorktreeIds !==
