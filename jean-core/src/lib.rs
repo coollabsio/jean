@@ -242,6 +242,11 @@ pub struct AppPreferences {
     pub file_edit_mode: String, // How to edit files: inline (Pierre) or external (VS Code, etc.)
     #[serde(default)]
     pub ai_language: String, // Preferred language for AI responses (empty = default)
+    #[serde(default)]
+    // Rules file supplied to backends whose CLI has no user-scope rules path of its
+    // own. Read at session start, so editing the file takes effect on the next
+    // session without touching this file. See backend_reads_user_scope_rules().
+    pub global_rules_file: Option<String>,
     #[serde(default = "default_allow_web_tools_in_plan_mode")]
     pub allow_web_tools_in_plan_mode: bool, // Allow WebFetch/WebSearch in plan mode without prompts
     #[serde(default = "default_waiting_sound")]
@@ -2758,6 +2763,7 @@ impl Default for AppPreferences {
             magic_models_auto_initialized: false,
             file_edit_mode: default_file_edit_mode(),
             ai_language: String::new(),
+            global_rules_file: None,
             allow_web_tools_in_plan_mode: default_allow_web_tools_in_plan_mode(),
             waiting_sound: default_waiting_sound(),
             review_sound: default_review_sound(),

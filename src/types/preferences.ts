@@ -1188,6 +1188,9 @@ export interface AppPreferences {
   magic_prompt_modes: MagicPromptModes // Per-prompt execution modes for magic prompts that send chat turns
   file_edit_mode: FileEditMode // How to edit files: inline (Pierre) or external (VS Code, etc.)
   ai_language: string // Preferred language for AI responses (empty = default)
+  // Rules file supplied to backends whose CLI has no user-scope rules path of
+  // its own (today: Cursor). Read at session start.
+  global_rules_file: string | null
   allow_web_tools_in_plan_mode: boolean // Allow WebFetch/WebSearch in plan mode without prompts
   waiting_sound: NotificationSound // Sound when session is waiting for input
   review_sound: NotificationSound // Sound when session finishes reviewing
@@ -2330,6 +2333,7 @@ export const defaultPreferences: AppPreferences = {
   magic_prompt_modes: DEFAULT_MAGIC_PROMPT_MODES,
   file_edit_mode: 'inline',
   ai_language: '', // Default: empty (Claude's default behavior)
+  global_rules_file: null,
   allow_web_tools_in_plan_mode: true, // Default: enabled
   waiting_sound: 'none',
   review_sound: 'none',
