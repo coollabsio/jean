@@ -907,6 +907,7 @@ export const MessageItem = memo(function MessageItem({
                   executionMode={message.execution_mode}
                   thinkingLevel={message.thinking_level}
                   effortLevel={message.effort_level}
+                  provider={message.custom_profile_name}
                   isCursor={message.model.startsWith('cursor/')}
                 />
               </div>

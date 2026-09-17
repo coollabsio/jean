@@ -1,24 +1,17 @@
-# Issue #734 — crash when adding a folder
+# Issue #699: MCP session controls
 
-- [x] Locate issue context and trace the add-folder code path.
-- [x] Identify the macOS abort root cause and regression history.
-- [x] Add a failing regression test.
-- [x] Implement the smallest root-cause fix.
+- [x] Trace MCP schemas, session persistence, send resolution, and message reconstruction.
+- [x] Check git history to classify the regression or missing feature.
+- [x] Add failing tests for MCP settings schema and message provider metadata.
+- [x] Implement the smallest complete fix across MCP, persistence, and history APIs.
 - [x] Run focused tests and `bun run check:all`.
-- [x] Record investigation and verification results.
+- [x] Review the diff and document findings, risks, and test steps.
 
 ## Review
 
-- The crash is in the native macOS folder-picker path (`tauri-plugin-dialog`
-  -> `rfd` -> `NSOpenPanel`). Release builds use `panic = "abort"`, so a panic
-  in that native path terminates Jean instead of returning an error to React.
-- Local macOS project selection now uses the existing backend-driven
-  `DirectoryBrowser`. Windows and Linux keep their native picker, and remote
-  targets keep the existing in-app browser behavior.
-- Added routing tests for local macOS, local non-macOS, remote backend, and
-  remote target cases. The regression test failed before implementation because
-  the routing helper did not exist, then passed after the fix.
-- `bun run check:all` passed typecheck, lint, Rust formatting, clippy, and all
-  2,393 frontend tests. Its Rust-test phase is blocked by an existing unrelated
-  `Project` test fixture at `jean-core/src/projects/commands.rs:15299` that omits
-  the required `sentry_base_url` field.
+- Root cause: the shared send path already inherited persisted session choices, but the MCP registry only exposed model and execution mode. Existing session setters were not available as one complete MCP control surface.
+- Added `set_session_settings` for persistent backend, provider, model, fast mode, effort, thinking, and execution mode selection. Added `get_session_capabilities` and one-turn send overrides with synchronous enum validation.
+- Added run provider/profile metadata to reconstructed user messages and displayed it with the existing message setting badges.
+- Expanded MCP session creation to all current chat backends and documented status polling for asynchronous send failures.
+- Added the missing `sentry_base_url` field to an existing Project test fixture so the required Rust test gate can compile.
+- Verification: `bun run check:all` passed (353 frontend files / 2398 tests, 1204 jean-core tests, 14 Tauri library tests).

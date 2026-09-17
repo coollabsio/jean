@@ -43,6 +43,7 @@ const RATE_LIMITED_TOOLS: &[&str] = &[
     "run_review",
     "send_chat_message",
     "set_session_model",
+    "set_session_settings",
     "start_run_environment",
     "unarchive_session",
     "unarchive_worktree",
@@ -241,8 +242,8 @@ fn tool_registry_core() -> Value {
 fn tool_registry_session() -> Value {
     json!([
         {"name":"list_sessions","description":"List chat sessions in a worktree without loading full message history. Use before creating a session to avoid duplicates.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"includeArchived":{"type":"boolean","default":false}},"required":["worktreeId"],"additionalProperties":false}},
-        {"name":"create_session","description":"Create a new chat session in an existing non-archived worktree. Returns the session id needed for send_chat_message. Fails if the worktree is archived — call unarchive_worktree first.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"name":{"type":"string"},"backend":{"type":"string","enum":["claude","codex","cursor","opencode"]}},"required":["worktreeId"],"additionalProperties":false}},
-        {"name":"send_chat_message","description":"Send a message to an existing non-archived session. Fire-and-forget: returns immediately as the session begins processing. Fails immediately if the session or its worktree is archived — call unarchive_session / unarchive_worktree first. Use this to kick off investigations. When model/executionMode are omitted, Jean uses the session's selected model and execution mode (set via set_session_model or the Jean UI). Pass model for a one-shot override of this turn only.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"message":{"type":"string"},"model":{"type":"string","description":"Optional one-shot model override. When omitted, uses the session selected model (set_session_model / UI)."},"executionMode":{"type":"string","enum":["plan","build","yolo"],"description":"Optional one-shot execution mode. When omitted, uses the session selected execution mode."}},"required":["sessionId","message"],"additionalProperties":false}},
+        {"name":"create_session","description":"Create a new chat session in an existing non-archived worktree. Returns the session id needed for send_chat_message. Fails if the worktree is archived — call unarchive_worktree first.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"name":{"type":"string"},"backend":{"type":"string","enum":["claude","codex","cursor","opencode","pi","commandcode","grok","kimi","antigravity"]}},"required":["worktreeId"],"additionalProperties":false}},
+        {"name":"send_chat_message","description":"Send a message to an existing non-archived session. Fire-and-forget: returns immediately as the session begins processing; poll get_session_status with the returned sessionId for completion or failure. Omitted settings inherit the session selections. Supplied settings override one turn only.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"message":{"type":"string"},"model":{"type":"string"},"backend":{"type":"string","enum":["claude","codex","cursor","opencode","pi","commandcode","grok","kimi","antigravity"]},"customProfileName":{"type":"string","description":"Optional one-turn provider/profile override."},"effortLevel":{"type":"string","enum":["off","adaptive","minimal","low","medium","high","xhigh","max","ultracode"]},"thinkingLevel":{"type":"string","enum":["off","adaptive","think","megathink","ultrathink"]},"executionMode":{"type":"string","enum":["plan","build","yolo"]}},"required":["sessionId","message"],"additionalProperties":false}},
         {"name":"archive_session","description":"Archive a chat session (hide it from the active session list). Prefer this over delete when history may still be useful. Cannot run send_chat_message on an archived session until unarchive_session is called.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"}},"required":["sessionId"],"additionalProperties":false}},
         {"name":"unarchive_session","description":"Restore an archived chat session so it can run again. Also unarchives the parent worktree when it is archived. Call this before send_chat_message if a previous attempt failed because the session was archived.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"}},"required":["sessionId"],"additionalProperties":false}},
         {"name":"move_session","description":"Move a Jean session to another active worktree while preserving its session id, complete message/run history, attachments, settings, and backend resume context. An idle session moves immediately. A running session is scheduled to move automatically after its current turn finishes; do not cancel the run or retry the move.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"targetWorktreeId":{"type":"string"}},"required":["sessionId","targetWorktreeId"],"additionalProperties":false}},
@@ -250,6 +251,8 @@ fn tool_registry_session() -> Value {
         {"name":"cancel_session_run","description":"Cancel the currently running request for a session. Returns whether Jean found an active process/turn/flag to cancel.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"}},"required":["sessionId"],"additionalProperties":false}},
         {"name":"read_session_messages","description":"Read recent messages from a session (most recent first). Use limit to cap returned messages.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":200,"default":50}},"required":["sessionId"],"additionalProperties":false}},
         {"name":"set_session_model","description":"Persist the selected model (and optionally backend) on a Jean session without sending a message. Prefer this when switching models for later turns; pass model on send_chat_message for a one-shot override only. When backend is omitted, Jean infers it from the model id when possible (e.g. grok/*, gpt-*, cursor/*). Returns sessionId, model, backend.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"model":{"type":"string","description":"Model id as used in Jean (e.g. claude-sonnet-4-6[1m], gpt-5.6-sol, grok/grok-4.6)."},"backend":{"type":"string","enum":["claude","codex","cursor","opencode","pi","commandcode","grok","kimi","antigravity"],"description":"Optional backend override. Inferred from model when omitted."}},"required":["sessionId","model"],"additionalProperties":false}},
+        {"name":"set_session_settings","description":"Persist session settings used by later messages. Omitted fields stay unchanged. fastMode adds or removes the supported fast model variant.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"backend":{"type":"string","enum":["claude","codex","cursor","opencode","pi","commandcode","grok","kimi","antigravity"]},"provider":{"type":"string","description":"Provider/custom profile name."},"model":{"type":"string"},"fastMode":{"type":"boolean"},"effortLevel":{"type":"string","enum":["off","adaptive","minimal","low","medium","high","xhigh","max","ultracode"]},"thinkingLevel":{"type":"string","enum":["off","adaptive","think","megathink","ultrathink"]},"executionMode":{"type":"string","enum":["plan","build","yolo"]}},"required":["sessionId"],"additionalProperties":false}},
+        {"name":"get_session_capabilities","description":"Describe the session controls supported by a backend, including effort, thinking, execution, and fast-mode behavior.","inputSchema":{"type":"object","properties":{"backend":{"type":"string","enum":["claude","codex","cursor","opencode","pi","commandcode","grok","kimi","antigravity"]}},"required":["backend"],"additionalProperties":false}},
         {"name":"get_usage","description":"Fetch subscription/usage snapshots for Claude, Codex, and/or Grok (same data as Jean Settings → Usage). Use to decide whether to switch models when a plan is near limits. Optional backend filters to one provider; omit or pass \"all\" for every available snapshot. Per-backend failures are reported in errors without failing the whole call.","inputSchema":{"type":"object","properties":{"backend":{"type":"string","enum":["claude","codex","grok","all"],"default":"all","description":"Which provider usage to fetch. Default all."}},"additionalProperties":false}},
         {"name":"get_worktree_changes","description":"Get a bounded summary of a worktree's git changes: porcelain status, ahead/behind counts, diff stats, and changed files. Does not return full diffs.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"maxFiles":{"type":"integer","minimum":1,"maximum":500,"default":100}},"required":["worktreeId"],"additionalProperties":false}},
         {"name":"get_worktree_diff","description":"Get a bounded unified git diff for a worktree. diffType is uncommitted (HEAD vs working tree) or branch (origin/base...HEAD). Optional path limits to one pathspec; maxBytes is capped.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"diffType":{"type":"string","enum":["uncommitted","branch"],"default":"uncommitted"},"path":{"type":"string"},"maxBytes":{"type":"integer","minimum":1,"maximum":200000,"default":60000}},"required":["worktreeId"],"additionalProperties":false}},
@@ -882,16 +885,46 @@ async fn run_tool(
             // Validate archive status before fire-and-forget so agents get an
             // immediate error instead of a silent log-only failure after "started".
             ensure_mcp_session_can_run(app, &session_id, &worktree_id)?;
+            if let Some(value) = optional_str(&args, "backend") {
+                normalize_backend_name(&value)?;
+            }
+            validate_optional_enum(&args, "executionMode", &["plan", "build", "yolo"])?;
+            validate_optional_enum(
+                &args,
+                "thinkingLevel",
+                &["off", "adaptive", "think", "megathink", "ultrathink"],
+            )?;
+            validate_optional_enum(
+                &args,
+                "effortLevel",
+                &[
+                    "off",
+                    "adaptive",
+                    "minimal",
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max",
+                    "ultracode",
+                ],
+            )?;
             let mut payload = serde_json::Map::new();
             payload.insert("sessionId".to_string(), Value::String(session_id.clone()));
             payload.insert("worktreeId".to_string(), Value::String(worktree_id));
             payload.insert("worktreePath".to_string(), Value::String(worktree_path));
             payload.insert("message".to_string(), Value::String(message));
-            if let Some(m) = args.get("model").and_then(|v| v.as_str()) {
-                payload.insert("model".to_string(), Value::String(m.to_string()));
-            }
-            if let Some(em) = args.get("executionMode").and_then(|v| v.as_str()) {
-                payload.insert("executionMode".to_string(), Value::String(em.to_string()));
+            for key in [
+                "model",
+                "backend",
+                "customProfileName",
+                "effortLevel",
+                "thinkingLevel",
+                "executionMode",
+            ] {
+                if let Some(value) = args.get(key) {
+                    payload.insert(key.to_string(), value.clone());
+                }
             }
             let app_clone = app.clone();
             let payload_clone = Value::Object(payload);
@@ -1128,6 +1161,177 @@ async fn run_tool(
                 "sessionId": session_id,
                 "model": model,
                 "backend": backend,
+            }))
+        }
+        "set_session_settings" => {
+            let session_id = require_str(&args, "sessionId")?;
+            let (worktree_id, worktree_path) = resolve_session_worktree(app, &session_id)?;
+            let mut backend = optional_str(&args, "backend")
+                .map(|value| normalize_backend_name(&value))
+                .transpose()?;
+            let mut model = optional_str(&args, "model");
+            let fast_mode = args.get("fastMode").and_then(Value::as_bool);
+            validate_optional_enum(&args, "executionMode", &["plan", "build", "yolo"])?;
+            validate_optional_enum(
+                &args,
+                "thinkingLevel",
+                &["off", "adaptive", "think", "megathink", "ultrathink"],
+            )?;
+            validate_optional_enum(
+                &args,
+                "effortLevel",
+                &[
+                    "off",
+                    "adaptive",
+                    "minimal",
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max",
+                    "ultracode",
+                ],
+            )?;
+            if backend.is_none() {
+                backend = model
+                    .as_deref()
+                    .map(infer_backend_from_model)
+                    .map(str::to_string);
+            }
+            if backend.is_none()
+                && model.is_none()
+                && fast_mode.is_none()
+                && optional_str(&args, "provider").is_none()
+                && args.get("thinkingLevel").is_none()
+                && args.get("effortLevel").is_none()
+                && optional_str(&args, "executionMode").is_none()
+            {
+                return Err(ToolError::invalid_params(
+                    "At least one session setting is required",
+                ));
+            }
+            if let Some(enabled) = fast_mode {
+                let current_model = model.clone().or_else(|| {
+                    crate::chat::storage::load_sessions(app, &worktree_path, &worktree_id)
+                        .ok()
+                        .and_then(|sessions| {
+                            sessions
+                                .sessions
+                                .into_iter()
+                                .find(|session| session.id == session_id)
+                                .and_then(|session| session.selected_model)
+                        })
+                });
+                let current_model = current_model.ok_or_else(|| {
+                    ToolError::invalid_params("fastMode requires a model or a session model")
+                })?;
+                let base = current_model
+                    .strip_suffix("-fast")
+                    .unwrap_or(&current_model);
+                let effective_backend = backend
+                    .clone()
+                    .unwrap_or_else(|| infer_backend_from_model(base).to_string());
+                let supports_fast = (effective_backend == "codex"
+                    && crate::chat::codex::split_fast_model(&format!("{base}-fast")).1)
+                    || (effective_backend == "claude" && base.contains("opus"));
+                if enabled && !supports_fast {
+                    return Err(ToolError::invalid_params(format!(
+                        "Fast mode is not supported for model {base}"
+                    )));
+                }
+                model = Some(if enabled {
+                    format!("{base}-fast")
+                } else {
+                    base.to_string()
+                });
+            }
+
+            if let Some(value) = model.clone() {
+                crate::chat::set_session_model(
+                    app.clone(),
+                    worktree_id.clone(),
+                    worktree_path.clone(),
+                    session_id.clone(),
+                    value,
+                )
+                .await
+                .map_err(ToolError::internal)?;
+            }
+            if let Some(value) = backend.clone() {
+                crate::chat::set_session_backend(
+                    app.clone(),
+                    worktree_id.clone(),
+                    worktree_path.clone(),
+                    session_id.clone(),
+                    value,
+                )
+                .await
+                .map_err(ToolError::internal)?;
+            }
+            if let Some(value) = optional_str(&args, "provider") {
+                crate::chat::set_session_provider(
+                    app.clone(),
+                    worktree_id.clone(),
+                    worktree_path.clone(),
+                    session_id.clone(),
+                    Some(value),
+                )
+                .await
+                .map_err(ToolError::internal)?;
+            }
+            if let Some(value) = args.get("thinkingLevel") {
+                let value = serde_json::from_value(value.clone()).map_err(|error| {
+                    ToolError::invalid_params(format!("Invalid thinkingLevel: {error}"))
+                })?;
+                crate::chat::set_session_thinking_level(
+                    app.clone(),
+                    worktree_id.clone(),
+                    worktree_path.clone(),
+                    session_id.clone(),
+                    value,
+                )
+                .await
+                .map_err(ToolError::internal)?;
+            }
+            if let Some(value) = args.get("effortLevel") {
+                let value = serde_json::from_value(value.clone()).map_err(|error| {
+                    ToolError::invalid_params(format!("Invalid effortLevel: {error}"))
+                })?;
+                crate::chat::set_session_effort_level(
+                    app.clone(),
+                    worktree_id.clone(),
+                    worktree_path.clone(),
+                    session_id.clone(),
+                    value,
+                )
+                .await
+                .map_err(ToolError::internal)?;
+            }
+            if let Some(value) = optional_str(&args, "executionMode") {
+                crate::chat::set_session_execution_mode(
+                    app.clone(),
+                    worktree_id,
+                    worktree_path,
+                    session_id.clone(),
+                    value,
+                )
+                .await
+                .map_err(ToolError::internal)?;
+            }
+            Ok(
+                json!({"sessionId": session_id, "model": model, "backend": backend, "status": "updated"}),
+            )
+        }
+        "get_session_capabilities" => {
+            let backend = normalize_backend_name(&require_str(&args, "backend")?)?;
+            let fast_mode = matches!(backend.as_str(), "claude" | "codex");
+            Ok(json!({
+                "backend": backend,
+                "executionModes": ["plan", "build", "yolo"],
+                "effortLevels": ["off", "adaptive", "minimal", "low", "medium", "high", "xhigh", "max", "ultracode"],
+                "thinkingLevels": ["off", "adaptive", "think", "megathink", "ultrathink"],
+                "fastMode": fast_mode,
+                "fastModelConvention": if fast_mode { Some("append -fast to a supported model id") } else { None },
             }))
         }
         "get_usage" => {
@@ -1564,6 +1768,20 @@ fn optional_str(args: &Value, key: &str) -> Option<String> {
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string)
+}
+
+fn validate_optional_enum(args: &Value, key: &str, allowed: &[&str]) -> Result<(), ToolError> {
+    let Some(value) = optional_str(args, key) else {
+        return Ok(());
+    };
+    if allowed.contains(&value.as_str()) {
+        Ok(())
+    } else {
+        Err(ToolError::invalid_params(format!(
+            "Invalid {key}: {value}. Supported values: {}",
+            allowed.join(", ")
+        )))
+    }
 }
 
 fn parse_label_arg(args: &Value) -> Result<LabelData, ToolError> {
@@ -2985,6 +3203,8 @@ mod tests {
             "get_worktree_diff",
             "get_usage",
             "set_session_model",
+            "set_session_settings",
+            "get_session_capabilities",
             "archive_session",
             "unarchive_session",
             "move_session",
@@ -3017,8 +3237,8 @@ mod tests {
             "send_chat_message description should mention archive rejection"
         );
         assert!(
-            send_desc.contains("selected model"),
-            "send_chat_message description should mention session model fallback"
+            send_desc.contains("inherit"),
+            "send_chat_message description should mention session setting fallback"
         );
 
         let run_envs = find_tool(&tools, "get_run_environments");
@@ -3092,6 +3312,43 @@ mod tests {
             RATE_LIMITED_TOOLS.contains(&"set_session_model"),
             "set_session_model mutates session state and should be rate-limited"
         );
+
+        let settings = find_tool(&tools, "set_session_settings");
+        assert_eq!(settings["inputSchema"]["required"], json!(["sessionId"]));
+        for property in [
+            "backend",
+            "provider",
+            "model",
+            "fastMode",
+            "effortLevel",
+            "thinkingLevel",
+            "executionMode",
+        ] {
+            assert!(
+                settings["inputSchema"]["properties"]
+                    .get(property)
+                    .is_some(),
+                "missing persistent session setting {property}"
+            );
+        }
+        assert!(RATE_LIMITED_TOOLS.contains(&"set_session_settings"));
+
+        let send = find_tool(&tools, "send_chat_message");
+        for property in [
+            "backend",
+            "customProfileName",
+            "effortLevel",
+            "thinkingLevel",
+        ] {
+            assert!(
+                send["inputSchema"]["properties"].get(property).is_some(),
+                "send_chat_message does not expose {property}"
+            );
+        }
+
+        let capabilities = find_tool(&tools, "get_session_capabilities");
+        assert_eq!(capabilities["inputSchema"]["required"], json!(["backend"]));
+        assert!(!RATE_LIMITED_TOOLS.contains(&"get_session_capabilities"));
     }
 
     #[test]

@@ -3,6 +3,21 @@ import { render, screen } from '@/test/test-utils'
 import { MessageSettingsBadges } from './MessageSettingsBadges'
 
 describe('MessageSettingsBadges', () => {
+  it('renders the provider stored on a user message', () => {
+    render(
+      <MessageSettingsBadges
+        model="claude-sonnet-4-6[1m]"
+        provider="OpenRouter"
+        executionMode="build"
+        thinkingLevel={undefined}
+        effortLevel="high"
+        isCursor={false}
+      />
+    )
+
+    expect(screen.getByText('· OpenRouter')).toBeVisible()
+  })
+
   it('renders Codex fast model labels instead of raw ids', () => {
     render(
       <MessageSettingsBadges
