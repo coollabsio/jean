@@ -4038,8 +4038,8 @@ pub async fn send_chat_message(
                     }
                 };
 
-                // Read the instructions file content to pass inline via baseInstructions
-                let codex_base_instructions_content: Option<String> = codex_instructions_file
+                // Read the instructions file content to pass inline via developerInstructions
+                let codex_developer_instructions_content: Option<String> = codex_instructions_file
                     .and_then(|path| {
                         std::fs::read_to_string(&path)
                             .map_err(|e| {
@@ -4063,7 +4063,7 @@ pub async fn send_chat_message(
                     thread_codex_search,
                     &codex_add_dirs,
                     &thread_message,
-                    codex_base_instructions_content.as_deref(),
+                    codex_developer_instructions_content.as_deref(),
                     thread_codex_multi_agent,
                     thread_codex_max_threads,
                     thread_codex_provider.as_ref(),
