@@ -20,6 +20,7 @@ import {
 import { openExternal } from '@/lib/platform'
 import { attachOrphanCompositionEndGuard } from '@/lib/terminal-composition-guard'
 import { LocalTerminalLinkProvider } from '@/lib/terminal-local-links'
+import { registerOsc52ClipboardHandler } from '@/lib/terminal-osc52'
 import { ensureTerminalFontLoaded } from '@/lib/terminal-font-loading'
 import {
   invoke,
@@ -991,6 +992,7 @@ async function createTerminalForRenderer(
       return preferences?.editor
     })
   )
+  registerOsc52ClipboardHandler(terminal)
   return { terminal, fitAddon, appearance }
 }
 
