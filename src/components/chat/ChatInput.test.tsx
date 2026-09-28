@@ -787,6 +787,7 @@ describe('ChatInput IME composition (issue #584)', () => {
   }) => {
     const formRef = createRef<HTMLFormElement>()
     const inputRef = createRef<HTMLTextAreaElement>()
+    let clearInput: (() => void) | null = null
     const onSubmit = vi.fn()
 
     render(
@@ -797,6 +798,9 @@ describe('ChatInput IME composition (issue #584)', () => {
         executionMode="build"
         focusChatShortcut="⌘K"
         onSubmit={onSubmit}
+        onRegisterClearHandler={handler => {
+          clearInput = handler
+        }}
         onCancel={vi.fn()}
         formRef={formRef}
         inputRef={inputRef}
@@ -806,7 +810,7 @@ describe('ChatInput IME composition (issue #584)', () => {
     )
 
     const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
-    return { textarea, onSubmit }
+    return { textarea, onSubmit, acceptSubmit: () => clearInput?.() }
   }
 
   it('submits on normal Enter when not composing', () => {
@@ -817,6 +821,27 @@ describe('ChatInput IME composition (issue #584)', () => {
     fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', keyCode: 13 })
 
     expect(onSubmit).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps text visible when the submit handler does not accept the message', () => {
+    const { textarea, onSubmit } = renderWithSubmit()
+    fireEvent.change(textarea, { target: { value: 'keep this draft' } })
+
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', keyCode: 13 })
+
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+    expect(textarea.value).toBe('keep this draft')
+  })
+
+  it('clears accepted messages through the registered submit handler', () => {
+    const { textarea, onSubmit, acceptSubmit } = renderWithSubmit()
+    onSubmit.mockImplementation(acceptSubmit)
+    fireEvent.change(textarea, { target: { value: 'send this message' } })
+
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', keyCode: 13 })
+
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+    expect(textarea.value).toBe('')
   })
 
   it('submits as a steer when the primary modifier is held', () => {

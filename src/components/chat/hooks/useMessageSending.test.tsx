@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useChatStore } from '@/store/chat-store'
 import { useMessageSending } from './useMessageSending'
 import {
+  chatQueryKeys,
   persistEnqueue,
   steerCodexTurn,
   steerGrokTurn,
@@ -94,6 +95,7 @@ function renderUseMessageSending({
   selectedBackend = 'codex',
   selectedModel = 'gpt-5.5',
   selectedEffortLevel = 'high',
+  sessionsData = { sessions: [{ id: 'session-1' }] },
   createSession = {
     mutateAsync: vi.fn(async () => ({
       id: 'new-session',
@@ -124,6 +126,7 @@ function renderUseMessageSending({
     | 'antigravity'
   selectedModel?: string
   selectedEffortLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+  sessionsData?: { sessions: { id: string }[] }
   createSession?: {
     mutateAsync: (args: {
       worktreeId: string
@@ -135,6 +138,7 @@ function renderUseMessageSending({
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
+  queryClient.setQueryData(chatQueryKeys.sessions('worktree-1'), sessionsData)
   const inputRef = {
     current: { value: inputValue } as HTMLTextAreaElement,
   }
@@ -167,7 +171,6 @@ function renderUseMessageSending({
       createSession,
       queryClient,
       markAtBottom: vi.fn(),
-      sessionsData: { sessions: [{ id: 'session-1' }] },
       clearInputDraft: vi.fn(),
       clearChatInputState: vi.fn(),
     })
@@ -260,6 +263,27 @@ describe('useMessageSending Codex /goal', () => {
       'codex'
     )
     expect(sendMessage.mutate).not.toHaveBeenCalled()
+  })
+
+  it('sends through the backend when the cached session list is stale', async () => {
+    const { result, sendMessage } = renderUseMessageSending({
+      inputValue: 'keep this message',
+      sessionsData: { sessions: [] },
+    })
+
+    await act(async () => {
+      await result.current.handleSubmit({
+        preventDefault: vi.fn(),
+      } as unknown as React.FormEvent)
+    })
+
+    expect(sendMessage.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'session-1',
+        message: 'keep this message',
+      }),
+      expect.any(Object)
+    )
   })
 
   it('queues direct magic prompts without clearing an active turn', () => {
@@ -790,9 +814,7 @@ describe('useMessageSending Codex auto-steer', () => {
 
 [Image attached: /tmp/img.png - Use the Read tool to view this image]`,
       expect.objectContaining({
-        pendingImages: [
-          expect.objectContaining({ path: '/tmp/img.png' }),
-        ],
+        pendingImages: [expect.objectContaining({ path: '/tmp/img.png' })],
       })
     )
     expect(persistEnqueue).not.toHaveBeenCalled()

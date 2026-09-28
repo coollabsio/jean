@@ -1609,7 +1609,6 @@ function ChatWindowContent({
     createSession,
     queryClient,
     markAtBottom,
-    sessionsData,
     clearInputDraft,
     clearChatInputState: () => clearChatInputStateRef.current?.(),
   })

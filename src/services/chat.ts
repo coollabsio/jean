@@ -2162,6 +2162,13 @@ export function useSendMessage() {
       // Real errors with no streamed content — rollback to previous state
       setError(sessionId, errorMessage || 'Unknown error occurred')
 
+      // The composer is cleared before the async mutation starts. Restore the
+      // submitted text after a rejected send, but never replace newer typing.
+      const { inputDrafts, setInputDraft } = useChatStore.getState()
+      if (!inputDrafts[sessionId]) {
+        setInputDraft(sessionId, variables.message)
+      }
+
       if (context?.previous) {
         queryClient.setQueryData(
           chatQueryKeys.session(sessionId),

@@ -655,12 +655,8 @@ export const ChatInput = memo(function ChatInput({
             .setInputDraft(activeSessionId, valueRef.current)
         }
         onSubmit(e, forceSteer ? { forceSteer: true } : undefined)
-        // Clear input immediately (don't wait for store subscription)
-        valueRef.current = ''
-        setShowHint(true)
-        const textarea = e.target as HTMLTextAreaElement
-        textarea.value = ''
-        resizeTextarea()
+        // The submit handler clears accepted messages through the registered
+        // clear handler. A blocked submit must keep the visible draft intact.
       }
       // Shift+Enter adds a new line (default behavior)
     },
