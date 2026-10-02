@@ -1015,6 +1015,8 @@ export const GROK_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
 export const KIMI_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
   makeMagicPromptModelsPreset('kimi/default')
 
+export const DEVIN_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
+  makeMagicPromptModelsPreset('devin/default')
 /** Antigravity preset for all magic prompts */
 export const ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
   makeMagicPromptModelsPreset('antigravity/auto')
@@ -1224,6 +1226,7 @@ export const COMMANDCODE_DEFAULT_MAGIC_PROMPT_BACKENDS =
   makeBackendsPreset('commandcode')
 export const GROK_DEFAULT_MAGIC_PROMPT_BACKENDS = makeBackendsPreset('grok')
 export const KIMI_DEFAULT_MAGIC_PROMPT_BACKENDS = makeBackendsPreset('kimi')
+export const DEVIN_DEFAULT_MAGIC_PROMPT_BACKENDS = makeBackendsPreset('devin')
 export const ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_BACKENDS =
   makeBackendsPreset('antigravity')
 
@@ -1361,6 +1364,7 @@ export interface AppPreferences {
   selected_commandcode_model?: string // Default Command Code model (CLI default)
   selected_grok_model: GrokModel // Default Grok model
   selected_kimi_model?: KimiModel // Default Kimi Code model
+  selected_devin_model?: DevinModel // Default Devin model
   selected_antigravity_model?: AntigravityModel // Default Antigravity CLI model
   default_codex_reasoning_effort: CodexReasoningEffort // Default reasoning effort for Codex: 'low' | 'medium' | 'high' | 'xhigh'
   default_codex_model_verbosity: CodexModelVerbosity // Default model verbosity for Codex chat: 'low' | 'medium' | 'high'
@@ -1371,6 +1375,7 @@ export interface AppPreferences {
   pi_auto_steer_enabled: boolean // Steer prompts into a running PI turn instead of queueing (default: false)
   grok_auto_steer_enabled: boolean // Steer prompts into a running Grok turn instead of queueing (default: false)
   kimi_auto_steer_enabled?: boolean // Reserved for Kimi Code steering support
+  devin_auto_steer_enabled?: boolean // Reserved for Devin steering support
   antigravity_auto_steer_enabled?: boolean // Reserved until Antigravity headless mode supports steering
   close_original_on_clear_context: boolean // Close original session when using Clear Context and yolo (default: true)
   build_model: string | null // Model override for plan approval (build mode), null = use session model
@@ -1389,6 +1394,7 @@ export interface AppPreferences {
   opencode_cli_source: 'jean' | 'path' // OpenCode CLI source: 'jean' (managed) or 'path' (system PATH)
   grok_cli_source: 'jean' | 'path' // Grok CLI source: 'jean' (managed) or 'path' (system PATH)
   kimi_cli_source?: 'jean' | 'path' // Kimi Code CLI source: 'jean' (managed) or 'path' (system PATH)
+  devin_cli_source?: 'jean' | 'path' // Devin CLI source: 'jean' (managed) or 'path' (system PATH)
   antigravity_cli_source?: 'jean' | 'path' // Antigravity CLI source: 'jean' (managed) or 'path' (system PATH)
   gh_cli_source: 'jean' | 'path' // GitHub CLI source: 'jean' (managed) or 'path' (system PATH)
   pi_cli_source: 'jean' | 'path' // PI CLI source: 'jean' (managed) or 'path' (system PATH)
@@ -1971,6 +1977,7 @@ export type PiModel = `pi/${string}`
 export type CommandCodeModel = `commandcode/${string}`
 export type GrokModel = `grok/${string}`
 export type KimiModel = `kimi/${string}`
+export type DevinModel = `devin/${string}`
 export type AntigravityModel = `antigravity/${string}`
 export type MagicPromptModel =
   | ClaudeModel
@@ -1981,6 +1988,7 @@ export type MagicPromptModel =
   | CommandCodeModel
   | GrokModel
   | KimiModel
+  | DevinModel
   | AntigravityModel
 
 /** Check if a model string identifies an OpenCode model */
@@ -2015,6 +2023,11 @@ export function isAntigravityCliModel(
   model: string
 ): model is AntigravityModel {
   return model.startsWith('antigravity/')
+}
+
+/** Check if a model string identifies a Devin model */
+export function isDevinModel(model: string): model is DevinModel {
+  return model.startsWith('devin/')
 }
 
 /** Check if a model string identifies a Codex model */
@@ -2079,6 +2092,7 @@ export type CliBackend =
   | 'commandcode'
   | 'grok'
   | 'kimi'
+  | 'devin'
   | 'antigravity'
 
 export const backendOptions: { value: CliBackend; label: string }[] = [
@@ -2091,6 +2105,7 @@ export const backendOptions: { value: CliBackend; label: string }[] = [
   { value: 'grok', label: 'Grok' },
   { value: 'kimi', label: 'Kimi Code' },
   { value: 'antigravity', label: 'Antigravity CLI (Beta)' },
+  { value: 'devin', label: 'Devin (Beta)' },
 ]
 
 export type TerminalApp =
@@ -2203,6 +2218,7 @@ export const newSessionKindOptions: {
   { value: 'grok', label: 'Grok' },
   { value: 'kimi', label: 'Kimi Code' },
   { value: 'antigravity', label: 'Antigravity CLI (Beta)' },
+  { value: 'devin', label: 'Devin (Beta)' },
 ]
 
 export function getNewSessionKindLabel(
@@ -2509,6 +2525,7 @@ export const defaultPreferences: AppPreferences = {
   selected_commandcode_model: 'commandcode/default', // Default Command Code model
   selected_grok_model: 'grok/grok-4.6', // Default Grok model
   selected_kimi_model: 'kimi/default', // Use Kimi Code's configured default model
+  selected_devin_model: 'devin/default', // Use Devin's configured default model
   selected_antigravity_model: 'antigravity/auto', // Use Antigravity CLI automatic model routing
   default_codex_reasoning_effort: 'high', // Default: high reasoning
   default_codex_model_verbosity: 'medium', // Default: medium verbosity (not low — Jean #535)
@@ -2519,6 +2536,7 @@ export const defaultPreferences: AppPreferences = {
   pi_auto_steer_enabled: false, // Default: queue while PI is running
   grok_auto_steer_enabled: false, // Default: queue while Grok is running
   kimi_auto_steer_enabled: false,
+  devin_auto_steer_enabled: false,
   antigravity_auto_steer_enabled: false,
   close_original_on_clear_context: true, // Default: enabled
   build_model: null, // Default: use session model
@@ -2537,6 +2555,7 @@ export const defaultPreferences: AppPreferences = {
   opencode_cli_source: 'jean', // Default: Jean-managed
   grok_cli_source: 'jean', // Default: Jean-managed
   kimi_cli_source: 'jean', // Default: Jean-managed
+  devin_cli_source: 'path', // Default: official Devin CLI install on PATH
   antigravity_cli_source: 'jean', // Default: Jean-managed
   gh_cli_source: 'jean', // Default: Jean-managed
   pi_cli_source: 'jean', // Default: Jean-managed

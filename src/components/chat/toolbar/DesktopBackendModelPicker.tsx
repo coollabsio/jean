@@ -21,6 +21,7 @@ import { useAvailablePiModels } from '@/services/pi-cli'
 import { useAvailableCommandCodeModels } from '@/services/commandcode-cli'
 import { useAvailableGrokModels } from '@/services/grok-cli'
 import { useAvailableKimiModels } from '@/services/kimi-cli'
+import { useAvailableDevinModels } from '@/services/devin-cli'
 import { useAvailableAntigravityModels } from '@/services/antigravity-cli'
 import { cn } from '@/lib/utils'
 import { Kbd } from '@/components/ui/kbd'
@@ -93,6 +94,9 @@ export function DesktopBackendModelPicker({
   const { data: availableKimiModels } = useAvailableKimiModels({
     enabled: installedBackends.includes('kimi'),
   })
+  const { data: availableDevinModels } = useAvailableDevinModels({
+    enabled: installedBackends.includes('devin'),
+  })
   const { data: availableAntigravityModels } = useAvailableAntigravityModels({
     enabled: installedBackends.includes('antigravity'),
   })
@@ -147,6 +151,14 @@ export function DesktopBackendModelPicker({
       })),
     [availableKimiModels]
   )
+  const devinModelOptions = useMemo(
+    () =>
+      availableDevinModels?.map(model => ({
+        value: `devin/${model.id}`,
+        label: model.label,
+      })),
+    [availableDevinModels]
+  )
   const antigravityModelOptions = useMemo(
     () =>
       availableAntigravityModels?.map(model => ({
@@ -169,6 +181,7 @@ export function DesktopBackendModelPicker({
     commandcodeModelOptions,
     grokModelOptions,
     kimiModelOptions,
+    devinModelOptions,
     customCliProfiles,
     installedBackends,
   })

@@ -13,7 +13,11 @@ import {
 } from '@/services/commandcode-cli'
 import { useGrokCliStatus, useGrokCliAuth } from '@/services/grok-cli'
 import { useKimiCliStatus, useKimiCliAuth } from '@/services/kimi-cli'
-import { useAntigravityCliStatus, useAntigravityCliAuth } from '@/services/antigravity-cli'
+import { useDevinCliStatus, useDevinCliAuth } from '@/services/devin-cli'
+import {
+  useAntigravityCliStatus,
+  useAntigravityCliAuth,
+} from '@/services/antigravity-cli'
 import type { CliBackend } from '@/types/preferences'
 
 /**
@@ -67,6 +71,7 @@ export function useInstalledBackends(options?: {
   const grok = useGrokCliStatus({ enabled, serverId })
   const kimi = useKimiCliStatus({ enabled, serverId })
   const antigravity = useAntigravityCliStatus({ enabled, serverId })
+  const devin = useDevinCliStatus({ enabled, serverId })
 
   const installedBackends = useMemo(() => {
     const backends: CliBackend[] = []
@@ -78,6 +83,7 @@ export function useInstalledBackends(options?: {
     if (commandcode.data?.installed) backends.push('commandcode')
     if (grok.data?.installed) backends.push('grok')
     if (kimi.data?.installed) backends.push('kimi')
+    if (devin.data?.installed) backends.push('devin')
     if (antigravity.data?.installed) backends.push('antigravity')
     return backends
   }, [
@@ -89,6 +95,7 @@ export function useInstalledBackends(options?: {
     commandcode.data?.installed,
     grok.data?.installed,
     kimi.data?.installed,
+    devin.data?.installed,
     antigravity.data?.installed,
   ])
 
@@ -101,6 +108,7 @@ export function useInstalledBackends(options?: {
     commandcode.isLoading ||
     grok.isLoading ||
     kimi.isLoading ||
+    devin.isLoading ||
     antigravity.isLoading
 
   return {
@@ -123,6 +131,7 @@ export function useBackendAuthStatuses(options?: { enabled?: boolean }) {
   const commandcode = useCommandCodeCliStatus({ enabled })
   const grok = useGrokCliStatus({ enabled })
   const kimi = useKimiCliStatus({ enabled })
+  const devin = useDevinCliStatus({ enabled })
   const antigravity = useAntigravityCliStatus({ enabled })
 
   const claudeAuth = useClaudeCliAuth({
@@ -149,6 +158,9 @@ export function useBackendAuthStatuses(options?: { enabled?: boolean }) {
   const kimiAuth = useKimiCliAuth({
     enabled: enabled && !!kimi.data?.installed,
   })
+  const devinAuth = useDevinCliAuth({
+    enabled: enabled && !!devin.data?.installed,
+  })
   const antigravityAuth = useAntigravityCliAuth({
     enabled: enabled && !!antigravity.data?.installed,
   })
@@ -170,6 +182,7 @@ export function useBackendAuthStatuses(options?: { enabled?: boolean }) {
         antigravity.data?.installed,
         antigravityAuth.data
       ),
+      devin: resolvedAuth(devin.data?.installed, devinAuth.data),
     }
     return map
   }, [
@@ -191,6 +204,8 @@ export function useBackendAuthStatuses(options?: { enabled?: boolean }) {
     kimiAuth.data,
     antigravity.data?.installed,
     antigravityAuth.data,
+    devin.data?.installed,
+    devinAuth.data,
   ])
 
   const isStatusLoading =
@@ -202,6 +217,7 @@ export function useBackendAuthStatuses(options?: { enabled?: boolean }) {
     commandcode.isLoading ||
     grok.isLoading ||
     kimi.isLoading ||
+    devin.isLoading ||
     antigravity.isLoading
 
   const isAuthLoading =
@@ -213,6 +229,7 @@ export function useBackendAuthStatuses(options?: { enabled?: boolean }) {
     (!!commandcode.data?.installed && commandcodeAuth.isLoading) ||
     (!!grok.data?.installed && grokAuth.isLoading) ||
     (!!kimi.data?.installed && kimiAuth.isLoading) ||
+    (!!devin.data?.installed && devinAuth.isLoading) ||
     (!!antigravity.data?.installed && antigravityAuth.isLoading)
 
   return {

@@ -360,6 +360,7 @@ fn reconcile_completed_running_runs(
     let mut reconciled = false;
     let mut claude_session_id = metadata.claude_session_id.clone();
     let mut kimi_session_id = metadata.kimi_session_id.clone();
+    let mut devin_session_id = metadata.devin_session_id.clone();
 
     for run in &mut metadata.runs {
         if run.status != RunStatus::Running || !has_result(&run.run_id) {
@@ -372,7 +373,14 @@ fn reconcile_completed_running_runs(
         if run.assistant_message_id.is_none() {
             run.assistant_message_id = Some(Uuid::new_v4().to_string());
         }
-        if run.backend.as_ref().unwrap_or(&metadata_backend) == &Backend::Kimi {
+        if run_uses_devin_history_parser(&metadata_backend, run) {
+            if run.devin_session_id.is_none() {
+                run.devin_session_id = extract_provider_session_id(&run.run_id);
+            }
+            if let Some(session_id) = run.devin_session_id.clone() {
+                devin_session_id = Some(session_id);
+            }
+        } else if run.backend.as_ref().unwrap_or(&metadata_backend) == &Backend::Kimi {
             if run.kimi_session_id.is_none() {
                 run.kimi_session_id = extract_provider_session_id(&run.run_id);
             }
@@ -393,6 +401,7 @@ fn reconcile_completed_running_runs(
     if reconciled {
         metadata.claude_session_id = claude_session_id;
         metadata.kimi_session_id = kimi_session_id;
+        metadata.devin_session_id = devin_session_id;
         metadata.is_reviewing = false;
         if metadata.status_override.as_deref() == Some("review") {
             metadata.status_override = None;
@@ -538,6 +547,7 @@ pub fn start_run(
         cursor_chat_id: None,
         grok_session_id: None,
         kimi_session_id: None,
+        devin_session_id: None,
         antigravity_session_id: None,
         checkpoint_id: None,
     };
@@ -1358,6 +1368,7 @@ fn should_inject_synthetic_exit_plan(
         | Backend::Pi
         | Backend::Commandcode
         | Backend::Kimi
+        | Backend::Devin
         | Backend::Antigravity => base_match,
         // Grok owns live injection in grok.rs; recover plan tool on history reload
         // only when assistant text looks like a real plan (not research preamble).
@@ -1394,6 +1405,14 @@ fn inject_synthetic_exit_plan(backend: &Backend, run_id: &str, assistant_msg: &m
             serde_json::json!({
                 "plan": assistant_msg.content,
                 "source": "codex",
+            }),
+        )
+    } else if matches!(backend, Backend::Devin) {
+        (
+            "ExitPlanMode",
+            serde_json::json!({
+                "plan": assistant_msg.content,
+                "source": "devin",
             }),
         )
     } else if matches!(backend, Backend::Kimi) {
@@ -1528,6 +1547,21 @@ fn run_uses_kimi_history_parser(metadata_backend: &Backend, run: &RunEntry) -> b
             .map(crate::is_kimi_model)
             .unwrap_or(false)
         || (run.model.is_none() && metadata_backend == &Backend::Kimi)
+}
+
+fn run_can_resume_process(metadata_backend: &Backend, run: &RunEntry, process_alive: bool) -> bool {
+    // Devin has an attached ACP process, not a host that Jean can reconnect to.
+    process_alive && !run_uses_devin_history_parser(metadata_backend, run)
+}
+
+fn run_uses_devin_history_parser(metadata_backend: &Backend, run: &RunEntry) -> bool {
+    if let Some(backend) = run.backend.as_ref() {
+        return backend == &Backend::Devin;
+    }
+    run.model
+        .as_deref()
+        .map(crate::is_devin_model)
+        .unwrap_or(metadata_backend == &Backend::Devin)
 }
 
 fn run_uses_antigravity_history_parser(metadata_backend: &Backend, run: &RunEntry) -> bool {
@@ -1690,7 +1724,9 @@ pub fn load_session_messages_window(
             // Per-run model is authoritative when present. Only fall back to
             // session-level metadata.backend for legacy runs with no model stored.
             let use_codex_parser = run_uses_codex_history_parser(&metadata.backend, run);
-            let parse_result = if use_codex_parser {
+            let parse_result = if run_uses_devin_history_parser(&metadata.backend, run) {
+                super::devin::parse_devin_run_to_message(&lines, run)
+            } else if use_codex_parser {
                 super::codex::parse_codex_run_to_message(&lines, run)
             } else if run_uses_pi_history_parser(&metadata.backend, run) {
                 super::pi::parse_pi_run_to_message(&lines, run)
@@ -1838,9 +1874,89 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            devin_session_id: None,
             antigravity_session_id: None,
             checkpoint_id: None,
         }
+    }
+
+    #[test]
+    fn attached_devin_process_is_not_resumable_after_restart() {
+        let mut run = sample_run();
+        run.backend = Some(Backend::Devin);
+        assert!(!run_can_resume_process(&Backend::Devin, &run, true));
+        assert!(!run_can_resume_process(&Backend::Devin, &run, false));
+        run.backend = Some(Backend::Codex);
+        assert!(run_can_resume_process(&Backend::Devin, &run, true));
+        assert!(!run_can_resume_process(&Backend::Devin, &run, false));
+    }
+
+    #[test]
+    fn devin_history_parser_respects_run_backend_before_model_and_session() {
+        let mut run = sample_run();
+        run.backend = Some(Backend::Devin);
+        assert!(run_uses_devin_history_parser(&Backend::Claude, &run));
+        run.backend = Some(Backend::Claude);
+        run.model = Some("devin/default".to_string());
+        assert!(!run_uses_devin_history_parser(&Backend::Devin, &run));
+        run.backend = None;
+        assert!(run_uses_devin_history_parser(&Backend::Claude, &run));
+        run.model = Some("sonnet".to_string());
+        assert!(!run_uses_devin_history_parser(&Backend::Devin, &run));
+        run.model = None;
+        assert!(run_uses_devin_history_parser(&Backend::Devin, &run));
+    }
+
+    #[test]
+    fn reconciled_devin_run_restores_devin_not_claude_session_id() {
+        let mut metadata = SessionMetadata::new(
+            "session".to_string(),
+            "worktree".to_string(),
+            "Devin".to_string(),
+            0,
+        );
+        let mut run = sample_run();
+        run.backend = Some(Backend::Devin);
+        run.status = RunStatus::Running;
+        metadata.runs.push(run);
+        reconcile_completed_running_runs(
+            &mut metadata,
+            42,
+            |_| true,
+            |_| Some("devin-session".to_string()),
+        );
+        assert_eq!(metadata.devin_session_id.as_deref(), Some("devin-session"));
+        assert_eq!(
+            metadata.runs[0].devin_session_id.as_deref(),
+            Some("devin-session")
+        );
+        assert!(metadata.claude_session_id.is_none());
+    }
+
+    #[test]
+    fn restores_devin_plan_approval_only_after_success() {
+        let mut run = sample_run();
+        let mut message = sample_assistant_message();
+        assert!(should_inject_synthetic_exit_plan(
+            &Backend::Devin,
+            &run,
+            &message
+        ));
+        run.status = RunStatus::Cancelled;
+        assert!(!should_inject_synthetic_exit_plan(
+            &Backend::Devin,
+            &run,
+            &message
+        ));
+        run.status = RunStatus::Completed;
+        inject_synthetic_exit_plan(&Backend::Devin, &run.run_id, &mut message);
+        assert_eq!(message.tool_calls[0].input["source"], "devin");
+        assert_eq!(message.tool_calls[0].input["plan"], message.content);
+        assert!(!should_inject_synthetic_exit_plan(
+            &Backend::Devin,
+            &run,
+            &message
+        ));
     }
 
     #[test]
@@ -2803,6 +2919,7 @@ Move services between instances without downtime.
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            devin_session_id: None,
             antigravity_session_id: None,
             checkpoint_id: None,
         };
@@ -3157,7 +3274,7 @@ pub fn recover_incomplete_runs(app: &tauri::AppHandle) -> Result<Vec<RecoveredRu
             if run.status == RunStatus::Running || run.status == RunStatus::Resumable {
                 let process_alive = run.pid.map(is_process_alive).unwrap_or(false);
 
-                if process_alive {
+                if run_can_resume_process(&metadata_backend, run, process_alive) {
                     run.status = RunStatus::Resumable;
                     modified = true;
 
@@ -3178,7 +3295,7 @@ pub fn recover_incomplete_runs(app: &tauri::AppHandle) -> Result<Vec<RecoveredRu
                         run.pid
                     );
                 } else {
-                    // Process is dead - check if it completed successfully.
+                    // No resumable process - check if the run completed successfully.
                     // A Grok cancel marker is `type:result` plus `cancelled:true`.
                     // That is not a successful completion: keep the partial reply
                     // and mark the run cancelled instead of "content was not captured".
@@ -3198,7 +3315,12 @@ pub fn recover_incomplete_runs(app: &tauri::AppHandle) -> Result<Vec<RecoveredRu
                         if let Some(sid) =
                             extract_session_id_from_jsonl(app, &session_id, &run.run_id)
                         {
-                            if run.backend.as_ref().unwrap_or(&metadata_backend) == &Backend::Kimi {
+                            if run_uses_devin_history_parser(&metadata_backend, run) {
+                                run.devin_session_id = Some(sid.clone());
+                                metadata.devin_session_id = Some(sid);
+                            } else if run.backend.as_ref().unwrap_or(&metadata_backend)
+                                == &Backend::Kimi
+                            {
                                 run.kimi_session_id = Some(sid.clone());
                                 metadata.kimi_session_id = Some(sid);
                             } else if run.claude_session_id.is_none() {
@@ -3376,7 +3498,7 @@ pub(crate) fn jsonl_line_is_cancelled_result(line: &str) -> bool {
         || line.contains("\"canceled\": true")
 }
 
-/// Extract the Claude session ID from a run's JSONL file.
+/// Extract the provider session ID from a run's JSONL file.
 /// Looks for the `"session_id"` field in the result line (last ~8KB of file).
 /// Returns None if the file doesn't exist, can't be read, or has no session ID.
 pub fn extract_session_id_from_jsonl(

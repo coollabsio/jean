@@ -965,6 +965,26 @@ export default function useStreamingEvents({
         }
       )
 
+    const unlistenDevinPermissionResolved = listen<{
+      session_id: string
+      worktree_id: string
+      rpc_id: number
+    }>('chat:devin_permission_resolved', event => {
+      const { session_id, worktree_id, rpc_id } = event.payload
+      const store = useChatStore.getState()
+      const current = store.getPendingCodexCommandApprovalRequests(session_id)
+      const next = current.filter(request => request.rpc_id !== rpc_id)
+      // A late response from a cancelled turn must not clear a newer request.
+      if (next.length === current.length) return
+      store.setPendingCodexCommandApprovalRequests(session_id, next)
+      const waiting = next.length > 0
+      store.setWaitingForInput(session_id, waiting)
+      persistCodexPendingState(session_id, worktree_id, {
+        pendingCodexCommandApprovalRequests: next,
+        waitingForInput: waiting,
+      })
+    })
+
     const unlistenCodexUserInputRequest = listen<CodexUserInputRequestEvent>(
       'chat:codex_user_input_request',
       event => {
@@ -2513,6 +2533,7 @@ export default function useStreamingEvents({
       unlistenOpencodePermissionRequest.then(f => f())
       unlistenOpencodePermissionReplied.then(f => f())
       unlistenCodexCommandApprovalRequest.then(f => f())
+      unlistenDevinPermissionResolved.then(f => f())
       unlistenCodexUserInputRequest.then(f => f())
       unlistenCodexMcpElicitation.then(f => f())
       unlistenCodexDynamicToolCall.then(f => f())

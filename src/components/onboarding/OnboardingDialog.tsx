@@ -62,6 +62,11 @@ import {
   useKimiPathDetection,
 } from '@/services/kimi-cli'
 import {
+  useDevinCliSetup,
+  useDevinCliAuth,
+  useDevinPathDetection,
+} from '@/services/devin-cli'
+import {
   useAntigravityCliSetup,
   useAntigravityCliAuth,
   useAntigravityPathDetection,
@@ -124,6 +129,7 @@ type AIBackend =
   | 'commandcode'
   | 'grok'
   | 'kimi'
+  | 'devin'
   | 'antigravity'
 type CliType = AIBackend | 'gh'
 
@@ -142,6 +148,7 @@ export const AI_BACKENDS: AIBackend[] = [
   'grok',
   'kimi',
   'antigravity',
+  'devin',
 ]
 
 type OnboardingStep =
@@ -181,6 +188,10 @@ type OnboardingStep =
   | 'kimi-installing'
   | 'kimi-auth-checking'
   | 'kimi-auth-login'
+  | 'devin-setup'
+  | 'devin-installing'
+  | 'devin-auth-checking'
+  | 'devin-auth-login'
   | 'antigravity-setup'
   | 'antigravity-installing'
   | 'antigravity-auth-checking'
@@ -218,6 +229,8 @@ const BACK_NAVIGABLE_STEPS: readonly OnboardingStep[] = [
   'grok-auth-login',
   'kimi-setup',
   'kimi-auth-login',
+  'devin-setup',
+  'devin-auth-login',
   'antigravity-setup',
   'antigravity-auth-login',
   'gh-setup',
@@ -260,11 +273,12 @@ const backendLabel: Record<CliType, string> = {
   commandcode: 'Command Code CLI',
   grok: 'Grok CLI',
   kimi: 'Kimi Code CLI',
+  devin: 'Devin CLI',
   antigravity: 'Antigravity CLI',
   gh: 'GitHub CLI',
 }
 
-const BETA_BACKENDS = new Set<AIBackend>(['antigravity'])
+const BETA_BACKENDS = new Set<AIBackend>(['devin', 'antigravity'])
 
 function magicDefaultsForBackend(
   backend: AIBackend
@@ -323,6 +337,7 @@ function stepToBackend(step: OnboardingStep): AIBackend | null {
   if (step.startsWith('commandcode-')) return 'commandcode'
   if (step.startsWith('grok-')) return 'grok'
   if (step.startsWith('kimi-')) return 'kimi'
+  if (step.startsWith('devin-')) return 'devin'
   if (step.startsWith('antigravity-')) return 'antigravity'
   return null
 }
@@ -373,6 +388,7 @@ function OnboardingDialogContent() {
   const commandcodePathDetection = useCommandCodePathDetection()
   const grokPathDetection = useGrokPathDetection()
   const kimiPathDetection = useKimiPathDetection()
+  const devinPathDetection = useDevinPathDetection()
   const antigravityPathDetection = useAntigravityPathDetection()
   const codexSetup = useCodexCliSetup()
   const opencodeSetup = useOpenCodeCliSetup()
@@ -381,6 +397,7 @@ function OnboardingDialogContent() {
   const commandcodeSetup = useCommandCodeCliSetup()
   const grokSetup = useGrokCliSetup()
   const kimiSetup = useKimiCliSetup()
+  const devinSetup = useDevinCliSetup()
   const antigravitySetup = useAntigravityCliSetup()
   const ghPathDetection = useGhPathDetection()
   const ghSetup = useGhCliSetup()
@@ -401,6 +418,9 @@ function OnboardingDialogContent() {
   })
   const grokAuth = useGrokCliAuth({ enabled: !!grokSetup.status?.installed })
   const kimiAuth = useKimiCliAuth({ enabled: !!kimiSetup.status?.installed })
+  const devinAuth = useDevinCliAuth({
+    enabled: !!devinSetup.status?.installed,
+  })
   const antigravityAuth = useAntigravityCliAuth({
     enabled: !!antigravitySetup.status?.installed,
   })
@@ -443,6 +463,7 @@ function OnboardingDialogContent() {
   )
   const [grokVersion, setGrokVersion] = useState<string | null>(null)
   const [kimiVersion, setKimiVersion] = useState<string | null>(null)
+  const [devinVersion, setDevinVersion] = useState<string | null>(null)
   const [antigravityVersion, setAntigravityVersion] = useState<string | null>(
     null
   )
@@ -456,6 +477,7 @@ function OnboardingDialogContent() {
     useState(false)
   const [grokInstallFailed, setGrokInstallFailed] = useState(false)
   const [kimiInstallFailed, setKimiInstallFailed] = useState(false)
+  const [devinInstallFailed, setDevinInstallFailed] = useState(false)
   const [antigravityInstallFailed, setAntigravityInstallFailed] =
     useState(false)
   const [ghInstallFailed, setGhInstallFailed] = useState(false)
@@ -466,6 +488,7 @@ function OnboardingDialogContent() {
   const [commandcodePathSelected, setCommandcodePathSelected] = useState(false)
   const [grokPathSelected, setGrokPathSelected] = useState(false)
   const [kimiPathSelected, setKimiPathSelected] = useState(false)
+  const [devinPathSelected, setDevinPathSelected] = useState(false)
   const [antigravityPathSelected, setAntigravityPathSelected] = useState(false)
   const [ghPathSelected, setGhPathSelected] = useState(false)
   const [claudeLoginAttempt, setClaudeLoginAttempt] = useState(0)
@@ -477,6 +500,7 @@ function OnboardingDialogContent() {
   const [commandcodeLoginAttempt, setCommandcodeLoginAttempt] = useState(0)
   const [grokLoginAttempt, setGrokLoginAttempt] = useState(0)
   const [kimiLoginAttempt, setKimiLoginAttempt] = useState(0)
+  const [devinLoginAttempt, setDevinLoginAttempt] = useState(0)
   const [antigravityLoginAttempt, setAntigravityLoginAttempt] = useState(0)
   const [ghLoginAttempt, setGhLoginAttempt] = useState(0)
 
@@ -526,6 +550,11 @@ function OnboardingDialogContent() {
       setKimiInstallFailed(false)
       return
     }
+    if (current === 'devin-setup' && devinPathSelected) {
+      setDevinPathSelected(false)
+      setDevinInstallFailed(false)
+      return
+    }
     if (current === 'antigravity-setup' && antigravityPathSelected) {
       setAntigravityPathSelected(false)
       setAntigravityInstallFailed(false)
@@ -565,6 +594,9 @@ function OnboardingDialogContent() {
     } else if (prev === 'kimi-setup') {
       setKimiPathSelected(false)
       setKimiInstallFailed(false)
+    } else if (prev === 'devin-setup') {
+      setDevinPathSelected(false)
+      setDevinInstallFailed(false)
     } else if (prev === 'antigravity-setup') {
       setAntigravityPathSelected(false)
       setAntigravityInstallFailed(false)
@@ -584,6 +616,7 @@ function OnboardingDialogContent() {
     commandcodePathSelected,
     grokPathSelected,
     kimiPathSelected,
+    devinPathSelected,
     antigravityPathSelected,
     ghPathSelected,
   ])
@@ -598,6 +631,7 @@ function OnboardingDialogContent() {
     (step === 'commandcode-setup' && commandcodePathSelected) ||
     (step === 'grok-setup' && grokPathSelected) ||
     (step === 'kimi-setup' && kimiPathSelected) ||
+    (step === 'devin-setup' && devinPathSelected) ||
     (step === 'antigravity-setup' && antigravityPathSelected) ||
     (step === 'gh-setup' && ghPathSelected)
   const canGoBack =
@@ -622,6 +656,7 @@ function OnboardingDialogContent() {
   const commandcodeLoginTerminalId = `onboarding-commandcode-login-${loginSessionSeed}-${commandcodeLoginAttempt}`
   const grokLoginTerminalId = `onboarding-grok-login-${loginSessionSeed}-${grokLoginAttempt}`
   const kimiLoginTerminalId = `onboarding-kimi-login-${loginSessionSeed}-${kimiLoginAttempt}`
+  const devinLoginTerminalId = `onboarding-devin-login-${loginSessionSeed}-${devinLoginAttempt}`
   const antigravityLoginTerminalId = `onboarding-antigravity-login-${loginSessionSeed}-${antigravityLoginAttempt}`
   const ghLoginTerminalId = `onboarding-gh-login-${loginSessionSeed}-${ghLoginAttempt}`
 
@@ -636,6 +671,7 @@ function OnboardingDialogContent() {
   )
   const stableGrokVersions = grokSetup.versions.filter(v => !v.prerelease)
   const stableKimiVersions = kimiSetup.versions.filter(v => !v.prerelease)
+  const stableDevinVersions = devinSetup.versions.filter(v => !v.prerelease)
   const stableAntigravityVersions = antigravitySetup.versions.filter(
     v => !v.prerelease
   )
@@ -696,6 +732,14 @@ function OnboardingDialogContent() {
   }, [kimiVersion, stableKimiVersions])
 
   useEffect(() => {
+    if (!devinVersion && stableDevinVersions.length > 0) {
+      queueMicrotask(() =>
+        setDevinVersion(stableDevinVersions[0]?.version ?? null)
+      )
+    }
+  }, [devinVersion, stableDevinVersions])
+
+  useEffect(() => {
     if (!antigravityVersion && stableAntigravityVersions.length > 0) {
       queueMicrotask(() =>
         setAntigravityVersion(stableAntigravityVersions[0]?.version ?? null)
@@ -735,6 +779,9 @@ function OnboardingDialogContent() {
         ready = !!grokSetup.status?.installed && !!grokAuth.data?.authenticated
       } else if (backend === 'kimi') {
         ready = !!kimiSetup.status?.installed && !!kimiAuth.data?.authenticated
+      } else if (backend === 'devin') {
+        ready =
+          !!devinSetup.status?.installed && !!devinAuth.data?.authenticated
       } else {
         ready =
           !!antigravitySetup.status?.installed &&
@@ -760,6 +807,8 @@ function OnboardingDialogContent() {
       grokAuth.data?.authenticated,
       kimiSetup.status?.installed,
       kimiAuth.data?.authenticated,
+      devinSetup.status?.installed,
+      devinAuth.data?.authenticated,
       antigravitySetup.status?.installed,
       antigravityAuth.data?.authenticated,
     ]
@@ -825,6 +874,7 @@ function OnboardingDialogContent() {
     commandcodeSetup.isStatusLoading ||
     grokSetup.isStatusLoading ||
     kimiSetup.isStatusLoading ||
+    devinSetup.isStatusLoading ||
     antigravitySetup.isStatusLoading ||
     (claudeSetup.status?.installed &&
       (claudeAuth.isLoading || claudeAuth.isFetching)) ||
@@ -841,6 +891,8 @@ function OnboardingDialogContent() {
       (grokAuth.isLoading || grokAuth.isFetching)) ||
     (kimiSetup.status?.installed &&
       (kimiAuth.isLoading || kimiAuth.isFetching)) ||
+    (devinSetup.status?.installed &&
+      (devinAuth.isLoading || devinAuth.isFetching)) ||
     (antigravitySetup.status?.installed &&
       (antigravityAuth.isLoading || antigravityAuth.isFetching))
 
@@ -853,6 +905,7 @@ function OnboardingDialogContent() {
     commandcodeSetup.isStatusLoading ||
     grokSetup.isStatusLoading ||
     kimiSetup.isStatusLoading ||
+    devinSetup.isStatusLoading ||
     antigravitySetup.isStatusLoading ||
     ghSetup.isStatusLoading ||
     (claudeSetup.status?.installed &&
@@ -870,6 +923,8 @@ function OnboardingDialogContent() {
       (grokAuth.isLoading || grokAuth.isFetching)) ||
     (kimiSetup.status?.installed &&
       (kimiAuth.isLoading || kimiAuth.isFetching)) ||
+    (devinSetup.status?.installed &&
+      (devinAuth.isLoading || devinAuth.isFetching)) ||
     (antigravitySetup.status?.installed &&
       (antigravityAuth.isLoading || antigravityAuth.isFetching)) ||
     (ghSetup.status?.installed && (ghAuth.isLoading || ghAuth.isFetching))
@@ -883,6 +938,7 @@ function OnboardingDialogContent() {
     commandcodeStatusLoading: commandcodeSetup.isStatusLoading,
     grokStatusLoading: grokSetup.isStatusLoading,
     kimiStatusLoading: kimiSetup.isStatusLoading,
+    devinStatusLoading: devinSetup.isStatusLoading,
     antigravityStatusLoading: antigravitySetup.isStatusLoading,
     ghStatusLoading: ghSetup.isStatusLoading,
     claudeInstalled: claudeSetup.status?.installed,
@@ -893,6 +949,7 @@ function OnboardingDialogContent() {
     commandcodeInstalled: commandcodeSetup.status?.installed,
     grokInstalled: grokSetup.status?.installed,
     kimiInstalled: kimiSetup.status?.installed,
+    devinInstalled: devinSetup.status?.installed,
     antigravityInstalled: antigravitySetup.status?.installed,
     ghInstalled: ghSetup.status?.installed,
     claudeAuthLoading: claudeAuth.isLoading,
@@ -903,6 +960,7 @@ function OnboardingDialogContent() {
     commandcodeAuthLoading: commandcodeAuth.isLoading,
     grokAuthLoading: grokAuth.isLoading,
     kimiAuthLoading: kimiAuth.isLoading,
+    devinAuthLoading: devinAuth.isLoading,
     antigravityAuthLoading: antigravityAuth.isLoading,
     ghAuthLoading: ghAuth.isLoading,
   })
@@ -936,6 +994,7 @@ function OnboardingDialogContent() {
       setCommandcodeInstallFailed(false)
       setGrokInstallFailed(false)
       setKimiInstallFailed(false)
+      setDevinInstallFailed(false)
       setAntigravityInstallFailed(false)
       setGhInstallFailed(false)
       setClaudePathSelected(false)
@@ -946,6 +1005,7 @@ function OnboardingDialogContent() {
       setCommandcodePathSelected(false)
       setGrokPathSelected(false)
       setKimiPathSelected(false)
+      setDevinPathSelected(false)
       setAntigravityPathSelected(false)
       setGhPathSelected(false)
       setClaudeLoginAttempt(0)
@@ -957,6 +1017,7 @@ function OnboardingDialogContent() {
       setCommandcodeLoginAttempt(0)
       setGrokLoginAttempt(0)
       setKimiLoginAttempt(0)
+      setDevinLoginAttempt(0)
       setAntigravityLoginAttempt(0)
       setGhLoginAttempt(0)
     })
@@ -1273,6 +1334,24 @@ function OnboardingDialogContent() {
     kimiAuth.isLoading,
     kimiAuth.isFetching,
     kimiAuth.data?.authenticated,
+    moveToNextBackendOrGh,
+    setStep,
+  ])
+
+  useEffect(() => {
+    if (step !== 'devin-auth-checking') return
+    if (devinAuth.isLoading || devinAuth.isFetching) return
+
+    if (devinAuth.data?.authenticated) {
+      queueMicrotask(() => moveToNextBackendOrGh('devin'))
+    } else {
+      queueMicrotask(() => setStep('devin-auth-login'))
+    }
+  }, [
+    step,
+    devinAuth.isLoading,
+    devinAuth.isFetching,
+    devinAuth.data?.authenticated,
     moveToNextBackendOrGh,
     setStep,
   ])
@@ -1611,6 +1690,32 @@ function OnboardingDialogContent() {
     setStep,
   ])
 
+  const handleDevinJeanSelect = useCallback(() => {
+    setDevinPathSelected(true)
+    if (!preferences) return
+    patchPreferences.mutate(
+      { devin_cli_source: 'jean' },
+      {
+        onSuccess: () => {
+          if (devinSetup.status?.installed) {
+            setStep('devin-auth-checking')
+            devinAuth.refetch()
+          }
+        },
+        onError: () => {
+          setDevinPathSelected(false)
+          toast.error('Failed to save CLI source preference')
+        },
+      }
+    )
+  }, [
+    preferences,
+    patchPreferences,
+    devinSetup.status?.installed,
+    devinAuth,
+    setStep,
+  ])
+
   const handleAntigravityJeanSelect = useCallback(() => {
     setAntigravityPathSelected(true)
     if (!preferences) return
@@ -1818,6 +1923,24 @@ function OnboardingDialogContent() {
     )
   }, [preferences, patchPreferences, kimiAuth, setStep])
 
+  const handleDevinPathSelect = useCallback(() => {
+    setDevinPathSelected(true)
+    if (!preferences) return
+    patchPreferences.mutate(
+      { devin_cli_source: 'path' },
+      {
+        onSuccess: () => {
+          setStep('devin-auth-checking')
+          devinAuth.refetch()
+        },
+        onError: () => {
+          setDevinPathSelected(false)
+          toast.error('Failed to save CLI source preference')
+        },
+      }
+    )
+  }, [preferences, patchPreferences, devinAuth, setStep])
+
   const handleAntigravityPathSelect = useCallback(() => {
     setAntigravityPathSelected(true)
     if (!preferences) return
@@ -1954,6 +2077,20 @@ function OnboardingDialogContent() {
     })
   }, [kimiVersion, kimiSetup, kimiAuth])
 
+  const handleDevinInstall = useCallback(() => {
+    if (!devinVersion) return
+    setStep('devin-installing')
+    devinSetup.install(devinVersion, {
+      onSuccess: () => {
+        setStep('devin-auth-checking')
+        devinAuth.refetch()
+      },
+      onError: () => {
+        setDevinInstallFailed(true)
+        setStep('devin-setup')
+      },
+    })
+  }, [devinVersion, devinSetup, devinAuth])
   const handleAntigravityInstall = useCallback(() => {
     if (!antigravityVersion) return
     setStep('antigravity-installing')
@@ -2033,6 +2170,10 @@ function OnboardingDialogContent() {
     await kimiAuth.refetch()
   }, [kimiAuth, setStep])
 
+  const handleDevinLoginComplete = useCallback(async () => {
+    setStep('devin-auth-checking')
+    await devinAuth.refetch()
+  }, [devinAuth, setStep])
   const handleAntigravityLoginComplete = useCallback(async () => {
     setStep('antigravity-auth-checking')
     await antigravityAuth.refetch()
@@ -2077,6 +2218,10 @@ function OnboardingDialogContent() {
     setKimiLoginAttempt(prev => prev + 1)
   }, [])
 
+  const handleDevinLoginRetry = useCallback(() => {
+    setDevinLoginAttempt(prev => prev + 1)
+  }, [])
+
   const handleAntigravityLoginRetry = useCallback(() => {
     setAntigravityLoginAttempt(prev => prev + 1)
   }, [])
@@ -2094,6 +2239,7 @@ function OnboardingDialogContent() {
     commandcodeSetup.refetchStatus()
     grokSetup.refetchStatus()
     kimiSetup.refetchStatus()
+    devinSetup.refetchStatus()
     antigravitySetup.refetchStatus()
     ghSetup.refetchStatus()
     // Set the first selected backend as the default so the preference
@@ -2142,6 +2288,7 @@ function OnboardingDialogContent() {
     commandcodeSetup,
     grokSetup,
     kimiSetup,
+    devinSetup,
     antigravitySetup,
     ghSetup,
     claudeAuth.data?.authenticated,
@@ -2297,6 +2444,23 @@ function OnboardingDialogContent() {
       }
     }
 
+    if (step === 'devin-setup' || step === 'devin-installing') {
+      return {
+        type: 'devin',
+        title: 'Devin CLI',
+        description: 'Devin CLI enables Devin-backed AI sessions.',
+        versions: stableDevinVersions,
+        isVersionsLoading: devinSetup.isVersionsLoading,
+        isVersionsError: devinSetup.isVersionsError,
+        onRetryVersions: devinSetup.refetchVersions,
+        isInstalling: devinSetup.isInstalling,
+        installError: devinInstallFailed ? devinSetup.installError : null,
+        progress: devinSetup.progress,
+        install: devinSetup.install,
+        currentVersion: devinSetup.status?.version,
+      }
+    }
+
     if (step === 'antigravity-setup' || step === 'antigravity-installing') {
       return {
         type: 'antigravity',
@@ -2349,6 +2513,8 @@ function OnboardingDialogContent() {
     commandcodeSetup.status?.installed && step === 'commandcode-setup'
   const isGrokReinstall = grokSetup.status?.installed && step === 'grok-setup'
   const isKimiReinstall = kimiSetup.status?.installed && step === 'kimi-setup'
+  const isDevinReinstall =
+    devinSetup.status?.installed && step === 'devin-setup'
   const isAntigravityReinstall =
     antigravitySetup.status?.installed && step === 'antigravity-setup'
   const isGhReinstall = ghSetup.status?.installed && step === 'gh-setup'
@@ -2395,6 +2561,11 @@ function OnboardingDialogContent() {
       ? kimiPathDetection.data.path
       : (kimiSetup.status?.path ?? '')
   const kimiLoginArgs = SIMPLE_LOGIN_ARGS
+  const devinLoginCommand =
+    devinPathSelected && devinPathDetection.data?.path
+      ? devinPathDetection.data.path
+      : (devinSetup.status?.path ?? '')
+  const devinLoginArgs = AUTH_LOGIN_ARGS
   const antigravityLoginCommand =
     antigravityPathSelected && antigravityPathDetection.data?.path
       ? antigravityPathDetection.data.path
@@ -2461,6 +2632,13 @@ function OnboardingDialogContent() {
       path: kimiSetup.status?.path,
       pathSelected: kimiPathSelected,
       detectedPath: kimiPathDetection.data?.path,
+    },
+    devin: {
+      cmd: devinLoginCommand,
+      args: devinLoginArgs,
+      path: devinSetup.status?.path,
+      pathSelected: devinPathSelected,
+      detectedPath: devinPathDetection.data?.path,
     },
     antigravity: {
       cmd: antigravityLoginCommand,
@@ -2683,6 +2861,19 @@ function OnboardingDialogContent() {
       }
     }
 
+    if (dialogStep === 'devin-setup' || dialogStep === 'devin-installing') {
+      return {
+        title: isDevinReinstall
+          ? `Change ${backendName} Version`
+          : `Setup ${backendName}`,
+        description: isDevinReinstall
+          ? 'Select a version to install. This will replace the current installation.'
+          : devinPathDetection.data?.found
+            ? 'Choose to use your system Devin CLI or install with Jean.'
+            : 'Select a version to install.',
+      }
+    }
+
     if (
       dialogStep === 'antigravity-setup' ||
       dialogStep === 'antigravity-installing'
@@ -2716,6 +2907,8 @@ function OnboardingDialogContent() {
       dialogStep === 'grok-auth-login' ||
       dialogStep === 'kimi-auth-checking' ||
       dialogStep === 'kimi-auth-login' ||
+      dialogStep === 'devin-auth-checking' ||
+      dialogStep === 'devin-auth-login' ||
       dialogStep === 'antigravity-auth-checking' ||
       dialogStep === 'antigravity-auth-login'
     ) {
@@ -2741,6 +2934,7 @@ function OnboardingDialogContent() {
       step.startsWith('commandcode-') ||
       step.startsWith('grok-') ||
       step.startsWith('kimi-') ||
+      step.startsWith('devin-') ||
       step.startsWith('antigravity-')
     const isGhStep = step.startsWith('gh-')
 
@@ -2909,6 +3103,7 @@ function OnboardingDialogContent() {
                 commandcodeVersion={commandcodeSetup.status?.version}
                 grokVersion={grokSetup.status?.version}
                 kimiVersion={kimiSetup.status?.version}
+                devinVersion={devinSetup.status?.version}
                 antigravityVersion={antigravitySetup.status?.version}
                 ghVersion={ghSetup.status?.version}
                 onContinue={handleComplete}
@@ -2953,6 +3148,11 @@ function OnboardingDialogContent() {
                 cliName="Kimi Code CLI"
                 progress={cliData.progress}
               />
+            ) : step === 'devin-installing' && cliData ? (
+              <InstallingState
+                cliName="Devin CLI"
+                progress={cliData.progress}
+              />
             ) : step === 'antigravity-installing' && cliData ? (
               <InstallingState
                 cliName="Antigravity CLI"
@@ -2979,6 +3179,8 @@ function OnboardingDialogContent() {
               <AuthCheckingState cliName="Grok CLI" />
             ) : step === 'kimi-auth-checking' ? (
               <AuthCheckingState cliName="Kimi Code CLI" />
+            ) : step === 'devin-auth-checking' ? (
+              <AuthCheckingState cliName="Devin CLI" />
             ) : step === 'antigravity-auth-checking' ? (
               <AuthCheckingState cliName="Antigravity CLI" />
             ) : step === 'gh-auth-checking' ? (
@@ -3085,6 +3287,18 @@ function OnboardingDialogContent() {
                 jeanInstalled={!!kimiSetup.status?.installed}
                 onSelectPath={handleKimiPathSelect}
                 onSelectJean={handleKimiJeanSelect}
+              />
+            ) : step === 'devin-setup' && !devinPathSelected ? (
+              <CliPathSelector
+                cliName="Devin CLI"
+                pathFound={!!devinPathDetection.data?.found}
+                pathVersion={devinPathDetection.data?.version ?? null}
+                pathPath={devinPathDetection.data?.path ?? null}
+                isLoading={devinPathSelected}
+                currentSource={preferences?.devin_cli_source ?? null}
+                jeanInstalled={!!devinSetup.status?.installed}
+                onSelectPath={handleDevinPathSelect}
+                onSelectJean={handleDevinJeanSelect}
               />
             ) : step === 'antigravity-setup' && !antigravityPathSelected ? (
               <CliPathSelector
@@ -3210,6 +3424,20 @@ function OnboardingDialogContent() {
               ) : (
                 <AuthCheckingState cliName="Kimi Code CLI" />
               )
+            ) : step === 'devin-auth-login' ? (
+              devinLoginCommand ? (
+                <AuthLoginState
+                  key={devinLoginTerminalId}
+                  cliName="Devin CLI"
+                  terminalId={devinLoginTerminalId}
+                  command={devinLoginCommand}
+                  commandArgs={devinLoginArgs}
+                  onComplete={handleDevinLoginComplete}
+                  onRetry={handleDevinLoginRetry}
+                />
+              ) : (
+                <AuthCheckingState cliName="Devin CLI" />
+              )
             ) : step === 'antigravity-auth-login' ? (
               antigravityLoginCommand ? (
                 <AuthLoginState
@@ -3270,9 +3498,11 @@ function OnboardingDialogContent() {
                                 ? handleGrokInstall
                                 : cliData.type === 'kimi'
                                   ? handleKimiInstall
-                                  : cliData.type === 'antigravity'
-                                    ? handleAntigravityInstall
-                                    : handleGhInstall
+                                  : cliData.type === 'devin'
+                                    ? handleDevinInstall
+                                    : cliData.type === 'antigravity'
+                                      ? handleAntigravityInstall
+                                      : handleGhInstall
                   }
                 />
               ) : (
@@ -3294,9 +3524,11 @@ function OnboardingDialogContent() {
                                 ? grokVersion
                                 : cliData.type === 'kimi'
                                   ? kimiVersion
-                                  : cliData.type === 'antigravity'
-                                    ? antigravityVersion
-                                    : ghVersion
+                                  : cliData.type === 'devin'
+                                    ? devinVersion
+                                    : cliData.type === 'antigravity'
+                                      ? antigravityVersion
+                                      : ghVersion
                   }
                   currentVersion={
                     (cliData.type === 'claude' && isClaudeReinstall) ||
@@ -3307,6 +3539,7 @@ function OnboardingDialogContent() {
                       isCommandcodeReinstall) ||
                     (cliData.type === 'grok' && isGrokReinstall) ||
                     (cliData.type === 'kimi' && isKimiReinstall) ||
+                    (cliData.type === 'devin' && isDevinReinstall) ||
                     (cliData.type === 'antigravity' &&
                       isAntigravityReinstall) ||
                     (cliData.type === 'gh' && isGhReinstall)
@@ -3331,9 +3564,11 @@ function OnboardingDialogContent() {
                                 ? setGrokVersion
                                 : cliData.type === 'kimi'
                                   ? setKimiVersion
-                                  : cliData.type === 'antigravity'
-                                    ? setAntigravityVersion
-                                    : setGhVersion
+                                  : cliData.type === 'devin'
+                                    ? setDevinVersion
+                                    : cliData.type === 'antigravity'
+                                      ? setAntigravityVersion
+                                      : setGhVersion
                   }
                   onInstall={
                     cliData.type === 'claude'
@@ -3350,9 +3585,11 @@ function OnboardingDialogContent() {
                                 ? handleGrokInstall
                                 : cliData.type === 'kimi'
                                   ? handleKimiInstall
-                                  : cliData.type === 'antigravity'
-                                    ? handleAntigravityInstall
-                                    : handleGhInstall
+                                  : cliData.type === 'devin'
+                                    ? handleDevinInstall
+                                    : cliData.type === 'antigravity'
+                                      ? handleAntigravityInstall
+                                      : handleGhInstall
                   }
                 />
               )
@@ -3595,6 +3832,7 @@ interface SuccessStateProps {
   commandcodeVersion: string | null | undefined
   grokVersion: string | null | undefined
   kimiVersion: string | null | undefined
+  devinVersion: string | null | undefined
   antigravityVersion: string | null | undefined
   ghVersion: string | null | undefined
   onContinue: () => void
@@ -3610,6 +3848,7 @@ function SuccessState({
   commandcodeVersion,
   grokVersion,
   kimiVersion,
+  devinVersion,
   antigravityVersion,
   ghVersion,
   onContinue,
@@ -3631,6 +3870,7 @@ function SuccessState({
           {commandcodeVersion && <p>Command Code CLI: v{commandcodeVersion}</p>}
           {grokVersion && <p>Grok CLI: v{grokVersion}</p>}
           {kimiVersion && <p>Kimi Code CLI: v{kimiVersion}</p>}
+          {devinVersion && <p>Devin CLI: v{devinVersion}</p>}
           {antigravityVersion && <p>Antigravity CLI: v{antigravityVersion}</p>}
           {ghVersion && <p>GitHub CLI: v{ghVersion}</p>}
           {!claudeVersion &&
@@ -3641,6 +3881,7 @@ function SuccessState({
             !commandcodeVersion &&
             !grokVersion &&
             !kimiVersion &&
+            !devinVersion &&
             !antigravityVersion &&
             !ghVersion && <p>Setup complete</p>}
         </div>

@@ -716,6 +716,10 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
   const { data: availableAntigravityModels } = useAvailableAntigravityModels()
   const { data: modelCatalog } = useModelCatalog()
   const { installedBackends } = useInstalledBackends()
+  const magicPromptBackends = useMemo(
+    () => installedBackends.filter(backend => backend !== 'devin'),
+    [installedBackends]
+  )
 
   const claudeModelOptions = useMemo(
     () =>
@@ -867,8 +871,10 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
       DEFAULT_MAGIC_PROMPT_MODES[selectedConfig.modeKey])
     : undefined
   // Resolve effective backend for model filtering: per-operation override > global default_backend
-  const effectiveBackend =
+  const rawEffectiveBackend =
     currentBackend ?? preferences?.default_backend ?? 'claude'
+  const effectiveBackend =
+    rawEffectiveBackend === 'devin' ? 'claude' : rawEffectiveBackend
   const modelMatchesEffectiveBackend = (model: string | undefined): boolean => {
     if (!model) return false
     switch (effectiveBackend) {
@@ -1121,8 +1127,12 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
       codeReviewConfigs.map(config => config.backend)
     )
     const orderedBackends = [
-      ...installedBackends.filter(backend => !representedBackends.has(backend)),
-      ...installedBackends.filter(backend => representedBackends.has(backend)),
+      ...magicPromptBackends.filter(
+        backend => !representedBackends.has(backend)
+      ),
+      ...magicPromptBackends.filter(backend =>
+        representedBackends.has(backend)
+      ),
     ]
     for (const backend of orderedBackends) {
       const model = getReviewModelOptions(backend).find(
@@ -1151,7 +1161,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     codeReviewConfigs,
     getReviewModelOptions,
     getReviewReasoning,
-    installedBackends,
+    magicPromptBackends,
     saveCodeReviewConfigs,
   ])
 
@@ -1486,7 +1496,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
   const handleApplyToAll = useCallback(() => {
     if (!preferences || !bulkSelection) return
     const { backend } = bulkSelection
-    if (!installedBackends.includes(backend)) return
+    if (backend === 'devin' || !magicPromptBackends.includes(backend)) return
     const model = ((bulkFast && bulkFastModel) ||
       bulkSelection.model) as MagicPromptModel
     const models = { ...currentModels }
@@ -1520,7 +1530,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     bulkFast,
     bulkFastModel,
     bulkMode,
-    installedBackends,
+    magicPromptBackends,
     currentModels,
     currentBackends,
     currentModes,
@@ -1595,7 +1605,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
               <CommandInput placeholder="Search backends and models..." />
               <CommandList>
                 <CommandEmpty>No available models found.</CommandEmpty>
-                {installedBackends.map(backend => (
+                {magicPromptBackends.map(backend => (
                   <CommandGroup
                     key={backend}
                     heading={getBackendPlainLabel(backend)}
@@ -1846,7 +1856,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            {installedBackends.map(backend => (
+                            {magicPromptBackends.map(backend => (
                               <SelectItem key={backend} value={backend}>
                                 <BackendLabel backend={backend} />
                               </SelectItem>
@@ -1993,26 +2003,26 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                     aria-label="Backend"
                     size="sm"
                     className="w-full min-w-0 text-xs"
-                    hideIcon={installedBackends.length <= 1}
+                    hideIcon={magicPromptBackends.length <= 1}
                   >
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {installedBackends.includes('claude') && (
+                    {magicPromptBackends.includes('claude') && (
                       <SelectItem value="claude">Claude</SelectItem>
                     )}
-                    {installedBackends.includes('codex') && (
+                    {magicPromptBackends.includes('codex') && (
                       <SelectItem value="codex">Codex</SelectItem>
                     )}
-                    {installedBackends.includes('opencode') && (
+                    {magicPromptBackends.includes('opencode') && (
                       <SelectItem value="opencode">OpenCode</SelectItem>
                     )}
-                    {installedBackends.includes('cursor') && (
+                    {magicPromptBackends.includes('cursor') && (
                       <SelectItem value="cursor">
                         <BackendLabel backend="cursor" />
                       </SelectItem>
                     )}
-                    {installedBackends.includes('pi') && (
+                    {magicPromptBackends.includes('pi') && (
                       <SelectItem
                         value="pi"
                         aria-label={getBackendPlainLabel('pi')}
@@ -2020,7 +2030,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                         <BackendLabel backend="pi" />
                       </SelectItem>
                     )}
-                    {installedBackends.includes('commandcode') && (
+                    {magicPromptBackends.includes('commandcode') && (
                       <SelectItem
                         value="commandcode"
                         aria-label={getBackendPlainLabel('commandcode')}
@@ -2028,7 +2038,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                         <BackendLabel backend="commandcode" />
                       </SelectItem>
                     )}
-                    {installedBackends.includes('grok') && (
+                    {magicPromptBackends.includes('grok') && (
                       <SelectItem
                         value="grok"
                         aria-label={getBackendPlainLabel('grok')}
@@ -2036,7 +2046,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                         <BackendLabel backend="grok" />
                       </SelectItem>
                     )}
-                    {installedBackends.includes('kimi') && (
+                    {magicPromptBackends.includes('kimi') && (
                       <SelectItem
                         value="kimi"
                         aria-label={getBackendPlainLabel('kimi')}
@@ -2044,7 +2054,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                         <BackendLabel backend="kimi" />
                       </SelectItem>
                     )}
-                    {installedBackends.includes('antigravity') && (
+                    {magicPromptBackends.includes('antigravity') && (
                       <SelectItem
                         value="antigravity"
                         aria-label={getBackendPlainLabel('antigravity')}

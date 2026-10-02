@@ -1040,11 +1040,17 @@ mod tests {
 
     #[cfg(not(windows))]
     #[test]
-    fn test_wsl_aware_command_non_windows_ignores_enabled_config() {
-        init_wsl_config(true, "Ubuntu".to_string());
-
+    fn test_cli_launch_non_windows_ignores_enabled_config() {
+        // Do not mutate WSL_CONFIG: parallel CLI resolution tests use it too.
         let cwd = std::path::Path::new("/tmp");
-        let cmd = wsl_aware_command("git", Some(cwd));
+        let cmd = command_from_cli_launch_plan(cli_launch_plan(
+            "git",
+            Some(cwd),
+            false,
+            true,
+            "Ubuntu",
+            BatchLaunch::CmdWrap,
+        ));
         let program = format!("{:?}", cmd.get_program());
 
         assert!(program.contains("git"));

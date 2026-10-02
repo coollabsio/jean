@@ -586,6 +586,57 @@ describe('useStreamingEvents mid-run waiting sounds', () => {
     })
   })
 
+  it('removes only the resolved Devin permission and preserves newer requests', async () => {
+    const queryClient = createQueryClient()
+    const wrapper = createWrapper(queryClient)
+    renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
+    await waitFor(() =>
+      expect(registeredListeners.has('chat:devin_permission_resolved')).toBe(
+        true
+      )
+    )
+    const request = (rpc_id: number) => ({
+      rpc_id,
+      item_id: 'tool',
+      thread_id: 'thread',
+      turn_id: '',
+    })
+    useChatStore
+      .getState()
+      .setPendingCodexCommandApprovalRequests('session-1', [
+        request(100),
+        request(101),
+      ])
+    useChatStore.getState().setWaitingForInput('session-1', true)
+    const resolve = (rpc_id: number) =>
+      registeredListeners.get('chat:devin_permission_resolved')?.({
+        payload: { session_id: 'session-1', worktree_id: 'worktree-1', rpc_id },
+      })
+    resolve(100)
+    expect(
+      useChatStore
+        .getState()
+        .getPendingCodexCommandApprovalRequests('session-1')
+        .map(item => item.rpc_id)
+    ).toEqual([101])
+    expect(useChatStore.getState().waitingForInputSessionIds['session-1']).toBe(
+      true
+    )
+    resolve(100)
+    expect(useChatStore.getState().waitingForInputSessionIds['session-1']).toBe(
+      true
+    )
+    resolve(101)
+    expect(
+      useChatStore
+        .getState()
+        .getPendingCodexCommandApprovalRequests('session-1')
+    ).toEqual([])
+    expect(
+      useChatStore.getState().waitingForInputSessionIds['session-1']
+    ).toBeFalsy()
+  })
+
   it('plays waiting sound on Codex dynamic tool call request', async () => {
     const queryClient = createQueryClient()
     seedWaitingSoundPrefs(queryClient)

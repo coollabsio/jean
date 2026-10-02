@@ -200,6 +200,7 @@ This decouples UI triggers from implementations and enables consistent behavior.
 
 Each major system has focused documentation:
 
+- **[Devin Integration](./devin.md)** - Local/cloud ACP sessions, permissions, and MCP
 - **[Command System](./command-system.md)** - Unified action dispatch
 - **[Keyboard Shortcuts](./keyboard-shortcuts.md)** - Native event handling
 - **[Native Menus](./menus.md)** - Cross-platform menu integration

@@ -137,6 +137,12 @@ vi.mock('@/services/kimi-cli', () => ({
   useKimiPathDetection: () => pathResult(),
 }))
 
+vi.mock('@/services/devin-cli', () => ({
+  useDevinCliSetup: () => setupResult(),
+  useDevinCliAuth: () => authResult(),
+  useDevinPathDetection: () => pathResult(),
+}))
+
 vi.mock('@/services/antigravity-cli', () => ({
   useAntigravityCliSetup: () => setupResult(),
   useAntigravityCliAuth: () => authResult(),
@@ -175,6 +181,7 @@ vi.mock('@/services/preferences', () => ({
       commandcode_cli_source: 'path',
       grok_cli_source: 'path',
       kimi_cli_source: 'path',
+      devin_cli_source: 'path',
       antigravity_cli_source: 'path',
       gh_cli_source: 'path',
     },

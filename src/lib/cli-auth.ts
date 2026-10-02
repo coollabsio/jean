@@ -33,6 +33,7 @@ export function isCliAuthError(error: string): boolean {
     lower.includes('run `claude`') ||
     lower.includes('run `codex`') ||
     lower.includes('run `opencode`') ||
+    lower.includes('run `devin`') ||
     lower.includes('run `agy`') ||
     lower.includes('launch the cli without arguments to sign in')
   ) {
@@ -110,6 +111,8 @@ export function loginArgsForBackend(
       return ['login']
     case 'kimi':
       return ['login']
+    case 'devin':
+      return ['auth', 'login']
     case 'antigravity':
       // Antigravity authentication is selected from its interactive start screen.
       return []
@@ -129,6 +132,7 @@ const STATUS_COMMANDS: Partial<
   commandcode: { command: 'check_commandcode_cli_installed' },
   grok: { command: 'check_grok_cli_installed' },
   kimi: { command: 'check_kimi_cli_installed' },
+  devin: { command: 'check_devin_cli_installed' },
   antigravity: { command: 'check_antigravity_cli_installed' },
 }
 
@@ -173,6 +177,7 @@ export async function openBackendLoginModal(
       backend === 'commandcode' ||
       backend === 'grok' ||
       backend === 'kimi' ||
+      backend === 'devin' ||
       backend === 'antigravity'
         ? backend
         : null
@@ -180,7 +185,9 @@ export async function openBackendLoginModal(
       toast.error(`Login is not supported for ${backend}`)
       return false
     }
-    useUIStore.getState().openCliLoginModal(loginType, path, args, 'login')
+    useUIStore
+      .getState()
+      .openCliLoginModal(loginType as never, path, args, 'login')
     return true
   } catch (err) {
     toast.error(`Failed to start login: ${err}`)

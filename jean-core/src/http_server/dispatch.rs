@@ -2614,6 +2614,34 @@ pub async fn dispatch_command(
             crate::grok_cli::login_grok_cli_device(app.clone()).await?;
             Ok(Value::Null)
         }
+        "check_devin_cli_installed" => {
+            to_value(crate::devin_cli::check_devin_cli_installed(app.clone()).await?)
+        }
+        "detect_devin_in_path" => {
+            to_value(crate::devin_cli::detect_devin_in_path(app.clone()).await?)
+        }
+        "check_devin_cli_auth" => {
+            to_value(crate::devin_cli::check_devin_cli_auth(app.clone()).await?)
+        }
+        "list_devin_models" => to_value(crate::devin_cli::list_devin_models(app.clone()).await?),
+        "get_available_devin_versions" => {
+            to_value(crate::devin_cli::get_available_devin_versions(app.clone()).await?)
+        }
+        "check_devin_cli_version_exists" => {
+            let version: String = from_field(&args, "version")?;
+            to_value(crate::devin_cli::check_devin_cli_version_exists(app.clone(), version).await?)
+        }
+        "get_devin_cli_binary_path" => {
+            to_value(crate::devin_cli::get_devin_cli_binary_path(app.clone()).await?)
+        }
+        "get_devin_install_command" => {
+            to_value(crate::devin_cli::get_devin_install_command(app.clone()).await?)
+        }
+        "install_devin_cli" => {
+            let version: Option<String> = from_field_opt(&args, "version")?;
+            crate::devin_cli::install_devin_cli(app.clone(), version).await?;
+            Ok(Value::Null)
+        }
         "check_kimi_cli_installed" => {
             to_value(crate::kimi_cli::check_kimi_cli_installed(app.clone()).await?)
         }
@@ -3282,6 +3310,40 @@ pub async fn dispatch_command(
             )
             .await?;
             emit_cache_invalidation(app, &["sessions"]);
+            Ok(Value::Null)
+        }
+        "set_session_devin_config" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let config_id: String = field(&args, "configId", "config_id")?;
+            let value: String = from_field(&args, "value")?;
+            crate::chat::set_session_devin_config(
+                app.clone(),
+                worktree_id,
+                worktree_path,
+                session_id,
+                config_id,
+                value,
+            )
+            .await?;
+            emit_cache_invalidation(app, &["session", "sessions"]);
+            Ok(Value::Null)
+        }
+        "set_session_devin_location" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let location = from_field(&args, "location")?;
+            crate::chat::set_session_devin_location(
+                app.clone(),
+                worktree_id,
+                worktree_path,
+                session_id,
+                location,
+            )
+            .await?;
+            emit_cache_invalidation(app, &["session", "sessions"]);
             Ok(Value::Null)
         }
         "set_session_backend" => {

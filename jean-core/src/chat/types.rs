@@ -91,7 +91,16 @@ pub struct UsageData {
 // Message Types
 // ============================================================================
 
-/// Backend for a chat session (Claude CLI, Codex CLI, OpenCode, Cursor, PI, or Command Code)
+/// Execution location is part of a Devin session's identity.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DevinLocation {
+    #[default]
+    Local,
+    Cloud,
+}
+
+/// Backend for a chat session (Claude CLI, Codex CLI, OpenCode, Cursor, PI, Command Code, or Devin)
 #[derive(Debug, Clone, Serialize, PartialEq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Backend {
@@ -104,6 +113,7 @@ pub enum Backend {
     Commandcode,
     Grok,
     Kimi,
+    Devin,
     Antigravity,
 }
 
@@ -126,6 +136,7 @@ impl<'de> Deserialize<'de> for Backend {
             "commandcode" => Backend::Commandcode,
             "grok" => Backend::Grok,
             "kimi" => Backend::Kimi,
+            "devin" => Backend::Devin,
             "antigravity" | "gemini" => Backend::Antigravity,
             "claude" | "" => Backend::Claude,
             other => {
@@ -151,6 +162,12 @@ mod backend_tests {
     fn backend_deserializes_kimi() {
         let backend: Backend = serde_json::from_str("\"kimi\"").unwrap();
         assert_eq!(backend, Backend::Kimi);
+    }
+
+    #[test]
+    fn backend_deserializes_devin() {
+        let backend: Backend = serde_json::from_str("\"devin\"").unwrap();
+        assert_eq!(backend, Backend::Devin);
     }
 
     #[test]
@@ -833,6 +850,15 @@ pub struct Session {
     /// Kimi Code ACP session ID for resuming conversations
     #[serde(default)]
     pub kimi_session_id: Option<String>,
+    /// Devin CLI ACP session ID for resuming conversations
+    #[serde(default)]
+    pub devin_session_id: Option<String>,
+    #[serde(default)]
+    pub devin_location: DevinLocation,
+    #[serde(default)]
+    pub devin_config_options: Option<serde_json::Value>,
+    #[serde(default)]
+    pub devin_config_overrides: HashMap<String, String>,
     /// Antigravity CLI conversation ID for resuming conversations.
     #[serde(
         default,
@@ -1027,6 +1053,89 @@ pub struct LoadedMessages {
 }
 
 impl Session {
+    /// Cloud models come from the remote session, not the local CLI catalog.
+    pub fn devin_cloud_model(&self) -> String {
+        let option = self
+            .devin_config_options
+            .as_ref()
+            .and_then(serde_json::Value::as_array)
+            .and_then(|options| {
+                options.iter().find(|option| {
+                    option.get("category").and_then(serde_json::Value::as_str) == Some("model")
+                })
+            });
+        let id = option
+            .and_then(|option| option.get("id"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("model");
+        let model = self
+            .devin_config_overrides
+            .get(id)
+            .map(String::as_str)
+            .or_else(|| {
+                option
+                    .and_then(|option| option.get("currentValue"))
+                    .and_then(serde_json::Value::as_str)
+            })
+            .filter(|model| !model.trim().is_empty())
+            .unwrap_or("default");
+        format!("devin/{}", model.strip_prefix("devin/").unwrap_or(model))
+    }
+
+    pub fn set_devin_config(&mut self, config_id: String, value: String) -> Result<(), String> {
+        fn contains_value(options: &serde_json::Value, value: &str) -> bool {
+            options.as_array().is_some_and(|items| {
+                items.iter().any(|item| {
+                    item.get("value").and_then(serde_json::Value::as_str) == Some(value)
+                        || item
+                            .get("options")
+                            .is_some_and(|nested| contains_value(nested, value))
+                })
+            })
+        }
+        if self.backend != Backend::Devin {
+            return Err("Configuration is only available for Devin sessions".to_string());
+        }
+        let valid = self
+            .devin_config_options
+            .as_ref()
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|options| {
+                options.iter().any(|option| {
+                    option.get("id").and_then(serde_json::Value::as_str) == Some(config_id.as_str())
+                        && option.get("category").and_then(serde_json::Value::as_str)
+                            != Some("mode")
+                        && option
+                            .get("options")
+                            .is_some_and(|options| contains_value(options, &value))
+                })
+            });
+        if !valid {
+            return Err("Devin does not advertise this configuration value".to_string());
+        }
+        self.devin_config_overrides.insert(config_id, value);
+        Ok(())
+    }
+
+    pub fn set_devin_location(&mut self, location: DevinLocation) -> Result<(), String> {
+        if self.devin_location == location {
+            return Ok(());
+        }
+        if self.backend != Backend::Devin {
+            return Err("Location is only available for Devin sessions".to_string());
+        }
+        if self.devin_session_id.is_some()
+            || !self.messages.is_empty()
+            || self.message_count.unwrap_or(0) > 0
+        {
+            return Err("Start a new session to change the Devin location".to_string());
+        }
+        self.devin_location = location;
+        self.devin_config_options = None;
+        self.devin_config_overrides.clear();
+        Ok(())
+    }
+
     /// Create a new session with the given name and backend
     pub fn new(name: String, order: u32, backend: Backend) -> Self {
         Self {
@@ -1054,6 +1163,10 @@ impl Session {
             commandcode_session_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            devin_session_id: None,
+            devin_location: DevinLocation::Local,
+            devin_config_options: None,
+            devin_config_overrides: HashMap::new(),
             antigravity_session_id: None,
             selected_model: None,
             selected_thinking_level: None,
@@ -1399,6 +1512,10 @@ impl SessionMetadata {
             commandcode_session_id: self.commandcode_session_id.clone(),
             grok_session_id: self.grok_session_id.clone(),
             kimi_session_id: self.kimi_session_id.clone(),
+            devin_session_id: self.devin_session_id.clone(),
+            devin_location: self.devin_location,
+            devin_config_options: self.devin_config_options.clone(),
+            devin_config_overrides: self.devin_config_overrides.clone(),
             antigravity_session_id: self.antigravity_session_id.clone(),
             selected_model: self.selected_model.clone(),
             selected_thinking_level: self.selected_thinking_level.clone(),
@@ -1467,6 +1584,10 @@ impl SessionMetadata {
         self.commandcode_session_id = session.commandcode_session_id.clone();
         self.grok_session_id = session.grok_session_id.clone();
         self.kimi_session_id = session.kimi_session_id.clone();
+        self.devin_session_id = session.devin_session_id.clone();
+        self.devin_location = session.devin_location;
+        self.devin_config_options = session.devin_config_options.clone();
+        self.devin_config_overrides = session.devin_config_overrides.clone();
         self.antigravity_session_id = session.antigravity_session_id.clone();
         self.selected_model = session.selected_model.clone();
         self.selected_thinking_level = session.selected_thinking_level.clone();
@@ -1747,6 +1868,9 @@ pub struct RunEntry {
     /// Kimi Code ACP session ID — persisted per-run for conversation continuity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kimi_session_id: Option<String>,
+    /// Devin CLI ACP session ID — persisted per-run for conversation continuity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub devin_session_id: Option<String>,
     /// Antigravity CLI conversation ID for resuming conversations.
     #[serde(
         default,
@@ -1844,6 +1968,15 @@ pub struct SessionMetadata {
     /// Kimi Code ACP session ID for resuming conversations
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kimi_session_id: Option<String>,
+    /// Devin CLI ACP session ID for resuming conversations
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub devin_session_id: Option<String>,
+    #[serde(default)]
+    pub devin_location: DevinLocation,
+    #[serde(default)]
+    pub devin_config_options: Option<serde_json::Value>,
+    #[serde(default)]
+    pub devin_config_overrides: HashMap<String, String>,
     /// Antigravity CLI conversation ID for resuming conversations.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub antigravity_session_id: Option<String>,
@@ -2031,6 +2164,8 @@ pub struct SessionDebugInfo {
     pub grok_session_id: Option<String>,
     /// Kimi Code ACP session ID (if any)
     pub kimi_session_id: Option<String>,
+    /// Devin CLI ACP session ID (if any)
+    pub devin_session_id: Option<String>,
     /// Antigravity CLI conversation ID for resuming conversations.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub antigravity_session_id: Option<String>,
@@ -2065,6 +2200,10 @@ impl SessionMetadata {
             commandcode_session_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            devin_session_id: None,
+            devin_location: DevinLocation::Local,
+            devin_config_options: None,
+            devin_config_overrides: HashMap::new(),
             antigravity_session_id: None,
             selected_model: None,
             selected_thinking_level: None,
@@ -2644,6 +2783,92 @@ mod tests {
     }
 
     #[test]
+    fn test_devin_session_id_roundtrip_via_update_from_session() {
+        let mut session = Session::new("Devin ACP support".to_string(), 0, Backend::Devin);
+        session.devin_location = DevinLocation::Cloud;
+        session.devin_session_id = Some("devin-acp-1".to_string());
+
+        let mut metadata = SessionMetadata::new(
+            session.id.clone(),
+            "wt-devin".to_string(),
+            session.name.clone(),
+            session.order,
+        );
+        metadata.update_from_session(&session);
+
+        assert_eq!(metadata.devin_session_id.as_deref(), Some("devin-acp-1"));
+        let restored = metadata.to_session();
+        assert_eq!(restored.devin_session_id.as_deref(), Some("devin-acp-1"));
+        assert_eq!(restored.backend, Backend::Devin);
+        assert_eq!(restored.devin_location, DevinLocation::Cloud);
+        let mut legacy = serde_json::to_value(&metadata).unwrap();
+        legacy.as_object_mut().unwrap().remove("devin_location");
+        let legacy: SessionMetadata = serde_json::from_value(legacy).unwrap();
+        assert_eq!(legacy.devin_location, DevinLocation::Local);
+    }
+
+    #[test]
+    fn devin_cloud_model_ignores_local_selection_and_prefers_remote_override() {
+        let mut session = Session::new("Devin".to_string(), 0, Backend::Devin);
+        session.selected_model = Some("devin/local-model".into());
+        assert_eq!(session.devin_cloud_model(), "devin/default");
+        session.devin_config_options = Some(serde_json::json!([
+            {"id":"model", "category":"model", "currentValue":"remote-model"}
+        ]));
+        assert_eq!(session.devin_cloud_model(), "devin/remote-model");
+        session
+            .devin_config_overrides
+            .insert("model".into(), "remote-choice".into());
+        assert_eq!(session.devin_cloud_model(), "devin/remote-choice");
+    }
+
+    #[test]
+    fn devin_config_accepts_only_advertised_values_and_persists() {
+        let mut session = Session::new("Devin".to_string(), 0, Backend::Devin);
+        session.devin_config_options = Some(serde_json::json!([
+            {"id":"thought_level", "category":"thought_level", "options":[{"value":"high"}]},
+            {"id":"mode", "category":"mode", "options":[{"value":"bypass"}]}
+        ]));
+        assert!(session
+            .set_devin_config("thought_level".into(), "high".into())
+            .is_ok());
+        assert!(session
+            .set_devin_config("thought_level".into(), "unknown".into())
+            .is_err());
+        assert!(session
+            .set_devin_config("mode".into(), "bypass".into())
+            .is_err());
+        assert!(session
+            .set_devin_config("unknown".into(), "high".into())
+            .is_err());
+        let mut metadata =
+            SessionMetadata::new(session.id.clone(), "wt".into(), session.name.clone(), 0);
+        metadata.update_from_session(&session);
+        let restored = metadata.to_session();
+        assert_eq!(
+            restored
+                .devin_config_overrides
+                .get("thought_level")
+                .map(String::as_str),
+            Some("high")
+        );
+        assert_eq!(restored.devin_config_options, session.devin_config_options);
+    }
+
+    #[test]
+    fn devin_location_cannot_change_after_session_starts() {
+        let mut session = Session::new("Devin".to_string(), 0, Backend::Devin);
+        session.set_devin_location(DevinLocation::Cloud).unwrap();
+        session.devin_session_id = Some("remote-id".to_string());
+        assert!(session.set_devin_location(DevinLocation::Local).is_err());
+        assert_eq!(session.devin_location, DevinLocation::Cloud);
+        assert!(session.set_devin_location(DevinLocation::Cloud).is_ok());
+        session.devin_session_id = None;
+        session.message_count = Some(1);
+        assert!(session.set_devin_location(DevinLocation::Local).is_err());
+    }
+
+    #[test]
     fn test_antigravity_session_id_roundtrip_via_update_from_session() {
         let mut session = Session::new(
             "Antigravity conversation support".to_string(),
@@ -2709,6 +2934,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            devin_session_id: None,
             antigravity_session_id: None,
             checkpoint_id: None,
         });
@@ -2754,6 +2980,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            devin_session_id: None,
             antigravity_session_id: None,
             checkpoint_id: None,
         });
@@ -2788,6 +3015,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            devin_session_id: None,
             antigravity_session_id: None,
             checkpoint_id: None,
         };
@@ -2857,6 +3085,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            devin_session_id: None,
             antigravity_session_id: None,
             checkpoint_id: None,
         });
@@ -2884,6 +3113,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            devin_session_id: None,
             antigravity_session_id: None,
             checkpoint_id: None,
         });
@@ -2929,6 +3159,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            devin_session_id: None,
             antigravity_session_id: None,
             checkpoint_id: None,
         });
@@ -2960,6 +3191,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            devin_session_id: None,
             antigravity_session_id: None,
             checkpoint_id: None,
         });

@@ -11,6 +11,7 @@ interface BackendModelPreferences {
   selected_commandcode_model?: string
   selected_grok_model?: string
   selected_kimi_model?: string
+  selected_devin_model?: string
   selected_antigravity_model?: string
 }
 
@@ -66,6 +67,9 @@ export function resolveDefaultModelForBackend(
   }
   if (backend === 'kimi') {
     return preferences?.selected_kimi_model ?? 'kimi/default'
+  }
+  if (backend === 'devin') {
+    return preferences?.selected_devin_model ?? 'devin/default'
   }
   if (backend === 'antigravity') {
     return preferences?.selected_antigravity_model ?? 'antigravity/auto'
