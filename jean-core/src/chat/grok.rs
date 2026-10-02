@@ -5713,6 +5713,7 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
             cursor_chat_id: None,
             grok_session_id: Some("grok-hist-err".to_string()),
             kimi_session_id: None,
+            devin_session_id: None,
             antigravity_session_id: None,
             checkpoint_id: None,
         };
@@ -6650,6 +6651,7 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
             cursor_chat_id: None,
             grok_session_id: Some("grok-hist-1".to_string()),
             kimi_session_id: None,
+            devin_session_id: None,
             antigravity_session_id: None,
             checkpoint_id: None,
         };
@@ -6688,6 +6690,7 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
             cursor_chat_id: None,
             grok_session_id: Some("s".to_string()),
             kimi_session_id: None,
+            devin_session_id: None,
             antigravity_session_id: None,
             checkpoint_id: None,
         };
@@ -6766,6 +6769,7 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
             cursor_chat_id: None,
             grok_session_id: Some("s".to_string()),
             kimi_session_id: None,
+            devin_session_id: None,
             antigravity_session_id: None,
             checkpoint_id: None,
         };

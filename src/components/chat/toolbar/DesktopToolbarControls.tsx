@@ -89,6 +89,7 @@ interface DesktopToolbarControlsProps {
   executionMode: ExecutionMode
   useAdaptiveThinking: boolean
   hideThinkingLevel?: boolean
+  hideModelPicker?: boolean
   sessionHasMessages?: boolean
   providerLocked?: boolean
   customCliProfiles: CustomCliProfile[]
@@ -157,6 +158,7 @@ export function DesktopToolbarControls({
   executionMode,
   useAdaptiveThinking,
   hideThinkingLevel,
+  hideModelPicker = false,
   sessionHasMessages,
   providerLocked,
   customCliProfiles,
@@ -757,19 +759,21 @@ export function DesktopToolbarControls({
 
       <div className="hidden @xl:block h-4 w-px bg-border/50" />
 
-      <DesktopBackendModelPicker
-        disabled={false}
-        sessionHasMessages={sessionHasMessages}
-        providerLocked={providerLocked}
-        triggerClassName="rounded-none border-0 bg-transparent px-3"
-        selectedBackend={selectedBackend}
-        selectedModel={selectedModel}
-        selectedProvider={selectedProvider}
-        installedBackends={installedBackends}
-        customCliProfiles={customCliProfiles}
-        onModelChange={handleModelChange}
-        onBackendModelChange={handleBackendModelChange}
-      />
+      {!hideModelPicker && (
+        <DesktopBackendModelPicker
+          disabled={false}
+          sessionHasMessages={sessionHasMessages}
+          providerLocked={providerLocked}
+          triggerClassName="rounded-none border-0 bg-transparent px-3"
+          selectedBackend={selectedBackend}
+          selectedModel={selectedModel}
+          selectedProvider={selectedProvider}
+          installedBackends={installedBackends}
+          customCliProfiles={customCliProfiles}
+          onModelChange={handleModelChange}
+          onBackendModelChange={handleBackendModelChange}
+        />
+      )}
 
       {!hideReasoningControl && (
         <div className="hidden @xl:block h-4 w-px bg-border/50" />

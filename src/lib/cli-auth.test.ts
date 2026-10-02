@@ -62,6 +62,10 @@ describe('loginArgsForBackend', () => {
     expect(loginArgsForBackend('codex')).toEqual(['login', '--device-auth'])
     expect(loginArgsForBackend('opencode')).toEqual(['auth', 'login'])
   })
+
+  it('uses auth login for Devin', () => {
+    expect(loginArgsForBackend('devin')).toEqual(['auth', 'login'])
+  })
 })
 
 describe('isCodexBubblewrapError', () => {

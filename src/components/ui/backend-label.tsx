@@ -10,6 +10,7 @@ import { PiIcon } from '@/components/icons/PiIcon'
 import { CommandCodeIcon } from '@/components/icons/CommandCodeIcon'
 import { GrokIcon } from '@/components/icons/GrokIcon'
 import { KimiIcon } from '@/components/icons/KimiIcon'
+import { DevinIcon } from '@/components/icons/DevinIcon'
 import { AntigravityIcon } from '@/components/icons/AntigravityIcon'
 import type { CliBackend } from '@/types/preferences'
 
@@ -35,6 +36,8 @@ export function getBackendIcon(backend: CliBackend): BackendIconComponent {
       return GrokIcon
     case 'kimi':
       return KimiIcon
+    case 'devin':
+      return DevinIcon
     case 'antigravity':
       return AntigravityIcon
   }
@@ -58,13 +61,15 @@ export function getBackendLabel(backend: CliBackend): string {
       return 'Grok'
     case 'kimi':
       return 'Kimi Code'
+    case 'devin':
+      return 'Devin'
     case 'antigravity':
       return 'Antigravity CLI'
   }
 }
 
 export function isBetaBackend(backend: CliBackend): boolean {
-  return backend === 'antigravity'
+  return backend === 'antigravity' || backend === 'devin'
 }
 
 export function getBackendPlainLabel(backend: CliBackend): string {

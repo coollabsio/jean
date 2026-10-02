@@ -2898,6 +2898,11 @@ function ChatWindowContent({
                             {activeCodexCommandApprovalRequest && (
                               <CodexCommandApprovalRequestCard
                                 request={activeCodexCommandApprovalRequest}
+                                title={
+                                  selectedBackend === 'devin'
+                                    ? 'Devin requests permission'
+                                    : undefined
+                                }
                                 onApprove={() =>
                                   handleCodexCommandApproval(
                                     activeCodexCommandApprovalRequest,
@@ -3340,6 +3345,10 @@ function ChatWindowContent({
                                     hasInputValue={hasInputValue}
                                     executionMode={executionMode}
                                     selectedBackend={selectedBackend}
+                                    isDevinCloud={
+                                      selectedBackend === 'devin' &&
+                                      session?.devin_location === 'cloud'
+                                    }
                                     sessionHasMessages={
                                       (session?.messages?.length ?? 0) > 0
                                     }
@@ -3472,7 +3481,12 @@ function ChatWindowContent({
                                     queuedMessageCount={
                                       currentQueuedMessages.length
                                     }
-                                    availableMcpServers={availableMcpServers}
+                                    availableMcpServers={
+                                      selectedBackend === 'devin' &&
+                                      session?.devin_location === 'cloud'
+                                        ? []
+                                        : availableMcpServers
+                                    }
                                     enabledMcpServers={enabledMcpServers}
                                     onToggleMcpServer={handleToggleMcpServer}
                                     onOpenProjectSettings={

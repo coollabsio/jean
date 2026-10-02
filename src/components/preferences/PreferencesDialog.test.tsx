@@ -209,6 +209,7 @@ describe('PreferencesDialog', () => {
       'Command Code',
       'Grok',
       'Kimi Code',
+      'DevinBeta',
       'Antigravity CLIBeta',
       'GitHub CLI',
       'CodeRabbit CLI',
@@ -271,6 +272,15 @@ describe('PreferencesDialog', () => {
     expect(within(kimiButton).getByLabelText('Kimi Code')).toHaveClass(
       'translate-x-0.5'
     )
+
+    const devinButton = within(navigationMenu)
+      .getByText('Devin')
+      .closest('button')
+    if (!devinButton) {
+      throw new Error('Expected Devin navigation button to be rendered')
+    }
+
+    expect(within(devinButton).getByLabelText('Devin')).toBeInTheDocument()
   })
 
   it('shows Web Access but hides Keybindings in the mobile pane selector', async () => {

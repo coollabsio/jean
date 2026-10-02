@@ -30,6 +30,7 @@ fn backend_label(backend: &Backend) -> &'static str {
         Backend::Commandcode => "commandcode",
         Backend::Grok => "grok",
         Backend::Kimi => "kimi",
+        Backend::Devin => "devin",
         Backend::Antigravity => "antigravity",
     }
 }
@@ -491,6 +492,7 @@ mod tests {
                 cursor_chat_id: None,
                 grok_session_id: None,
                 kimi_session_id: None,
+                devin_session_id: None,
                 antigravity_session_id: None,
                 checkpoint_id: None,
             },
@@ -518,6 +520,7 @@ mod tests {
                 cursor_chat_id: None,
                 grok_session_id: None,
                 kimi_session_id: None,
+                devin_session_id: None,
                 antigravity_session_id: None,
                 checkpoint_id: None,
             },
@@ -592,6 +595,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            devin_session_id: None,
             antigravity_session_id: None,
             checkpoint_id: None,
         });
@@ -653,6 +657,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            devin_session_id: None,
             antigravity_session_id: None,
             checkpoint_id: None,
         });
@@ -680,6 +685,7 @@ mod tests {
             cursor_chat_id: None,
             grok_session_id: None,
             kimi_session_id: None,
+            devin_session_id: None,
             antigravity_session_id: None,
             checkpoint_id: None,
         });

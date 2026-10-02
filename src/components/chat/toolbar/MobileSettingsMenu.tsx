@@ -131,6 +131,7 @@ interface MobileSettingsMenuProps {
   selectedBackend: CliBackend
   selectedModel: string
   selectedProvider: string | null
+  hideModelPicker?: boolean
   backendModelLabel: ReactNode
   backendModelLabelText: string
   hasMultipleBackendModelChoices: boolean
@@ -193,6 +194,7 @@ export function MobileSettingsMenu({
   selectedBackend,
   selectedModel,
   selectedProvider,
+  hideModelPicker = false,
   backendModelLabel,
   backendModelLabelText,
   hasMultipleBackendModelChoices,
@@ -625,19 +627,21 @@ export function MobileSettingsMenu({
             </DropdownMenuSub>
           )}
 
-          <DropdownMenuItem onSelect={openBackendModelPicker}>
-            <Sparkles className="h-4 w-4" />
-            <span>Model</span>
-            <span
-              className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-1 truncate text-right text-xs text-muted-foreground"
-              title={backendModelLabelText}
-            >
-              {backendModelLabel}
-            </span>
-            {hasMultipleBackendModelChoices && (
-              <ChevronRight className="ml-2 h-4 w-4 shrink-0 text-foreground" />
-            )}
-          </DropdownMenuItem>
+          {!hideModelPicker && (
+            <DropdownMenuItem onSelect={openBackendModelPicker}>
+              <Sparkles className="h-4 w-4" />
+              <span>Model</span>
+              <span
+                className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-1 truncate text-right text-xs text-muted-foreground"
+                title={backendModelLabelText}
+              >
+                {backendModelLabel}
+              </span>
+              {hasMultipleBackendModelChoices && (
+                <ChevronRight className="ml-2 h-4 w-4 shrink-0 text-foreground" />
+              )}
+            </DropdownMenuItem>
+          )}
 
           {hideReasoningControl ? null : usesEffortControl && isMobile ? (
             <DropdownMenuItem onSelect={openEffortPicker}>

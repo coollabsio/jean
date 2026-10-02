@@ -4,6 +4,7 @@ import { isCodexDecisionAvailable } from './codex-command-approval-utils'
 
 interface CodexCommandApprovalRequestProps {
   request: CodexCommandApprovalRequest
+  title?: string
   onApprove: () => void
   /** Jean-level promote-to-YOLO (always offered, even if Codex omits acceptForSession). */
   onApproveYolo: () => void
@@ -13,6 +14,7 @@ interface CodexCommandApprovalRequestProps {
 
 export function CodexCommandApprovalRequestCard({
   request,
+  title = 'Codex wants to run a command',
   onApprove,
   onApproveYolo,
   onDecline,
@@ -23,7 +25,7 @@ export function CodexCommandApprovalRequestCard({
 
   return (
     <div className="my-3 rounded border border-muted bg-muted/30 p-4 font-mono text-sm">
-      <div className="mb-2 font-semibold">Codex wants to run a command</div>
+      <div className="mb-2 font-semibold">{title}</div>
       {request.reason ? (
         <div className="mb-3 text-muted-foreground">{request.reason}</div>
       ) : null}

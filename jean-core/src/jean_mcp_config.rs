@@ -273,6 +273,7 @@ pub async fn install_jean_mcp_config_impl(
             "cursor".to_string(),
             "grok".to_string(),
             "kimi".to_string(),
+            "devin".to_string(),
             "antigravity".to_string(),
         ]
     });
@@ -286,6 +287,7 @@ pub async fn install_jean_mcp_config_impl(
             "cursor" => install_cursor(&entry),
             "grok" => install_grok(&entry),
             "kimi" => install_kimi(&entry),
+            "devin" => install_devin(&entry),
             "antigravity" => install_antigravity(&entry),
             other => Err(format!("Unsupported MCP config backend: {other}")),
         };
@@ -338,6 +340,17 @@ fn install_cursor(entry: &JeanMcpEntry) -> Result<(PathBuf, Option<PathBuf>), St
         "mcpServers",
         entry,
         JeanMcpEntry::cursor_server_json,
+    )
+}
+
+fn install_devin(entry: &JeanMcpEntry) -> Result<(PathBuf, Option<PathBuf>), String> {
+    let dir = crate::devin_cli::mcp::user_config_dir()
+        .ok_or_else(|| "Devin config directory unavailable".to_string())?;
+    install_jsonc_server(
+        dir.join("mcp_config.json"),
+        "mcpServers",
+        entry,
+        JeanMcpEntry::claude_server_json,
     )
 }
 

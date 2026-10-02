@@ -20,6 +20,7 @@ import { piCliQueryKeys } from '@/services/pi-cli'
 import { commandcodeCliQueryKeys } from '@/services/commandcode-cli'
 import { grokCliQueryKeys } from '@/services/grok-cli'
 import { kimiCliQueryKeys } from '@/services/kimi-cli'
+import { devinCliQueryKeys } from '@/services/devin-cli'
 import { antigravityCliQueryKeys } from '@/services/antigravity-cli'
 import { coderabbitCliQueryKeys } from '@/services/coderabbit-cli'
 import { githubQueryKeys } from '@/services/github'
@@ -90,6 +91,7 @@ interface CliLoginModalContentProps {
     | 'commandcode'
     | 'grok'
     | 'kimi'
+    | 'devin'
     | 'antigravity'
     | 'coderabbit'
     | null
@@ -144,9 +146,11 @@ function CliLoginModalContent({
                     ? 'Grok CLI'
                     : cliType === 'kimi'
                       ? 'Kimi Code'
-                      : cliType === 'antigravity'
-                        ? 'Antigravity CLI'
-                        : 'GitHub CLI'
+                      : cliType === 'devin'
+                        ? 'Devin CLI'
+                        : cliType === 'antigravity'
+                          ? 'Antigravity CLI'
+                          : 'GitHub CLI'
   const cliTitle =
     cliType === 'cursor' ||
     cliType === 'pi' ||
@@ -156,7 +160,9 @@ function CliLoginModalContent({
         <BackendLabel backend={cliType} />
         <span>CLI</span>
       </span>
-    ) : cliType === 'kimi' || cliType === 'antigravity' ? (
+    ) : cliType === 'kimi' ||
+      cliType === 'devin' ||
+      cliType === 'antigravity' ? (
       <BackendLabel backend={cliType} />
     ) : (
       cliName
@@ -244,6 +250,8 @@ function CliLoginModalContent({
           queryClient.invalidateQueries({ queryKey: grokCliQueryKeys.all })
         } else if (cliType === 'kimi') {
           queryClient.invalidateQueries({ queryKey: kimiCliQueryKeys.all })
+        } else if (cliType === 'devin') {
+          queryClient.invalidateQueries({ queryKey: devinCliQueryKeys.all })
         } else if (cliType === 'antigravity') {
           queryClient.invalidateQueries({
             queryKey: antigravityCliQueryKeys.all,

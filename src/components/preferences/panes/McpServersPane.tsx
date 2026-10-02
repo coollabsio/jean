@@ -36,6 +36,7 @@ import type { CliBackend } from '@/types/preferences'
 import { SettingsSection } from '../SettingsSection'
 import { AgentBrowserSection } from './AgentBrowserSection'
 import { JeanMcpSection } from './JeanMcpSection'
+import { DevinMcpSection } from './DevinMcpSection'
 
 function mcpAuthHint(backend: CliBackend): string {
   switch (backend) {
@@ -45,6 +46,8 @@ function mcpAuthHint(backend: CliBackend): string {
       return "Run 'opencode mcp auth' in your terminal to authenticate"
     case 'cursor':
       return "Run 'cursor-agent mcp login <server>' in your terminal to authenticate"
+    case 'devin':
+      return "Run 'devin mcp login <server>' for OAuth, or check the server API key headers"
     case 'grok':
       return "Run 'grok mcp doctor <server>' or open /mcps in the Grok TUI to authenticate"
     default:
@@ -236,6 +239,7 @@ export const McpServersPane: React.FC = () => {
     <div className="space-y-6">
       <JeanMcpSection mcpServers={mcpServers ?? []} />
       <AgentBrowserSection />
+      <DevinMcpSection />
       <SettingsSection
         title="Default MCP Servers"
         anchorId="pref-mcp-section-default-servers"
