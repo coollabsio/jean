@@ -105,6 +105,10 @@ export const KIMI_MODEL_OPTIONS: { value: string; label: string }[] = [
   { value: 'kimi/default', label: 'Configured default' },
 ]
 
+export const DEVIN_MODEL_OPTIONS: { value: string; label: string }[] = [
+  { value: 'devin/default', label: 'Configured default' },
+]
+
 export const ANTIGRAVITY_MODEL_OPTIONS: { value: string; label: string }[] = [
   { value: 'antigravity/auto', label: 'Auto' },
   {

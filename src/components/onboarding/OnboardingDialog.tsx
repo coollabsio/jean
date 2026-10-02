@@ -40,6 +40,8 @@ import {
   ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_MODELS,
   MUSE_DEFAULT_MAGIC_PROMPT_BACKENDS,
   MUSE_DEFAULT_MAGIC_PROMPT_MODELS,
+  DEVIN_DEFAULT_MAGIC_PROMPT_BACKENDS,
+  DEVIN_DEFAULT_MAGIC_PROMPT_MODELS,
   type MagicPromptBackends,
   type MagicPromptModels,
 } from '@/types/preferences'
@@ -132,6 +134,11 @@ function magicDefaultsForBackend(
       return {
         models: MUSE_DEFAULT_MAGIC_PROMPT_MODELS,
         backends: MUSE_DEFAULT_MAGIC_PROMPT_BACKENDS,
+      }
+    case 'devin':
+      return {
+        models: DEVIN_DEFAULT_MAGIC_PROMPT_MODELS,
+        backends: DEVIN_DEFAULT_MAGIC_PROMPT_BACKENDS,
       }
     default:
       return null

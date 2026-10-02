@@ -16,6 +16,7 @@ const BACKENDS: CliBackend[] = [
   'commandcode',
   'grok',
   'kimi',
+  'devin',
   'antigravity',
   'muse',
 ]
@@ -77,6 +78,10 @@ vi.mock('@/services/kimi-cli', () => ({
   useKimiCliStatus: () => statusQuery('kimi'),
   useKimiCliAuth: () => authQuery('kimi'),
 }))
+vi.mock('@/services/devin-cli', () => ({
+  useDevinCliStatus: () => statusQuery('devin'),
+  useDevinCliAuth: () => authQuery('devin'),
+}))
 vi.mock('@/services/antigravity-cli', () => ({
   useAntigravityCliStatus: () => statusQuery('antigravity'),
   useAntigravityCliAuth: () => authQuery('antigravity'),
@@ -124,6 +129,8 @@ describe('useInstalledBackends', () => {
     auth.claude.authenticated = true
     status.opencode.installed = true
     auth.opencode.authenticated = true
+    status.devin.installed = true
+    auth.devin.authenticated = true
     status.cursor.installed = true
     // cursor not authenticated — still listed
 
@@ -133,6 +140,7 @@ describe('useInstalledBackends', () => {
       'claude',
       'opencode',
       'cursor',
+      'devin',
     ])
   })
 

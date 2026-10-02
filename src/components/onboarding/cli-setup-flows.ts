@@ -59,6 +59,11 @@ import {
   useMusePathDetection,
 } from '@/services/muse-cli'
 import {
+  useDevinCliAuth,
+  useDevinCliSetup,
+  useDevinPathDetection,
+} from '@/services/devin-cli'
+import {
   useGhCliAuth,
   useGhCliSetup,
   useGhPathDetection,
@@ -82,6 +87,7 @@ export type AIBackend =
   | 'kimi'
   | 'antigravity'
   | 'muse'
+  | 'devin'
 export type CliType = AIBackend | 'gh' | 'glab'
 
 export const AI_BACKENDS: AIBackend[] = [
@@ -95,6 +101,7 @@ export const AI_BACKENDS: AIBackend[] = [
   'kimi',
   'antigravity',
   'muse',
+  'devin',
 ]
 
 export interface CliProgress {
@@ -204,6 +211,7 @@ const SOURCE_KEYS: Record<Exclude<CliType, 'cursor'>, SourceKey> = {
   kimi: 'kimi_cli_source',
   antigravity: 'antigravity_cli_source',
   muse: 'muse_cli_source',
+  devin: 'devin_cli_source',
   gh: 'gh_cli_source',
   glab: 'glab_cli_source',
 }
@@ -355,6 +363,7 @@ export function useCliSetupFlows(): Record<CliType, CliFlow> {
   const kimiSetup = useKimiCliSetup()
   const antigravitySetup = useAntigravityCliSetup()
   const museSetup = useMuseCliSetup()
+  const devinSetup = useDevinCliSetup()
   const ghSetup = useGhCliSetup()
   const glabSetup = useGlabCliSetup()
 
@@ -368,6 +377,7 @@ export function useCliSetupFlows(): Record<CliType, CliFlow> {
   const kimiPath = useKimiPathDetection()
   const antigravityPath = useAntigravityPathDetection()
   const musePath = useMusePathDetection()
+  const devinPath = useDevinPathDetection()
   const ghPath = useGhPathDetection()
   const glabPath = useGlabPathDetection()
 
@@ -391,6 +401,7 @@ export function useCliSetupFlows(): Record<CliType, CliFlow> {
     enabled: !!antigravitySetup.status?.installed,
   })
   const museAuth = useMuseCliAuth({ enabled: !!museSetup.status?.installed })
+  const devinAuth = useDevinCliAuth({ enabled: !!devinSetup.status?.installed })
   const ghAuth = useGhCliAuth({ enabled: !!ghSetup.status?.installed })
   const glabAuth = useGlabCliAuth({ enabled: !!glabSetup.status?.installed })
 
@@ -422,6 +433,7 @@ export function useCliSetupFlows(): Record<CliType, CliFlow> {
       antigravityPath
     ),
     muse: m('muse', museSetup, museAuth, musePath),
+    devin: m('devin', devinSetup, devinAuth, devinPath),
     gh: m('gh', ghSetup, ghAuth, ghPath),
     glab: m('glab', glabSetup, glabAuth, glabPath),
   }

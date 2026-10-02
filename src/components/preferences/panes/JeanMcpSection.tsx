@@ -53,6 +53,7 @@ const INSTALLABLE_BACKENDS = [
   'cursor',
   'grok',
   'kimi',
+  'devin',
   'antigravity',
 ] as const satisfies readonly CliBackend[]
 
@@ -63,6 +64,7 @@ const BACKEND_LABELS: Record<(typeof INSTALLABLE_BACKENDS)[number], string> = {
   cursor: 'Cursor',
   grok: 'Grok',
   kimi: 'Kimi',
+  devin: 'Devin',
   antigravity: 'Antigravity',
 }
 

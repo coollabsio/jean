@@ -144,6 +144,23 @@ vi.mock('@/services/kimi-cli', () => ({
   }),
 }))
 
+vi.mock('@/services/devin-cli', () => ({
+  useDevinCliStatus: (options?: { serverId?: string }) => {
+    cliStatusTargets.set('devin', options?.serverId)
+    return {
+      data: { installed: false, path: null },
+      isLoading: false,
+    }
+  },
+}))
+
+vi.mock('@/services/antigravity-cli', () => ({
+  useAntigravityCliStatus: () => ({
+    data: { installed: false, path: null },
+    isLoading: false,
+  }),
+}))
+
 describe('NewSessionModeModal', () => {
   beforeEach(() => {
     vi.clearAllMocks()

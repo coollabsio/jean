@@ -51,6 +51,7 @@ export interface ChatToolbarProps {
   selectedEffortLevel: EffortLevel
   useAdaptiveThinking: boolean
   hideThinkingLevel?: boolean
+  isDevinCloud?: boolean
   sessionHasMessages?: boolean
   providerLocked?: boolean
 

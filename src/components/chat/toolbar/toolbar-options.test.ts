@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DEVIN_MODEL_OPTIONS,
   ANTIGRAVITY_EFFORT_LEVEL_OPTIONS,
   EFFORT_LEVEL_OPTIONS,
   MUSE_EFFORT_LEVEL_OPTIONS,
@@ -10,12 +11,9 @@ import {
 
 describe('ANTIGRAVITY_EFFORT_LEVEL_OPTIONS', () => {
   it('matches the agy --effort contract', () => {
-    expect(ANTIGRAVITY_EFFORT_LEVEL_OPTIONS.map(option => option.value)).toEqual([
-      'adaptive',
-      'low',
-      'medium',
-      'high',
-    ])
+    expect(
+      ANTIGRAVITY_EFFORT_LEVEL_OPTIONS.map(option => option.value)
+    ).toEqual(['adaptive', 'low', 'medium', 'high'])
   })
 })
 
@@ -47,6 +45,14 @@ describe('PI_EFFORT_LEVEL_OPTIONS', () => {
   })
 })
 
+describe('DEVIN_MODEL_OPTIONS', () => {
+  it('exposes the Devin configured default model', () => {
+    expect(DEVIN_MODEL_OPTIONS).toEqual([
+      { value: 'devin/default', label: 'Configured default' },
+    ])
+  })
+})
+
 describe('Adaptive/Default thinking/effort option (Antigravity only)', () => {
   it('does not include Adaptive/Default in default non-Antigravity option lists', () => {
     expect(EFFORT_LEVEL_OPTIONS.map(option => option.value)).not.toContain(
@@ -63,7 +69,9 @@ describe('Adaptive/Default thinking/effort option (Antigravity only)', () => {
       { value: 'high', label: 'High', description: 'Deep' },
     ]
     expect(
-      withAdaptiveEffortOption(base, 'claude-opus-4-8').map(level => level.value)
+      withAdaptiveEffortOption(base, 'claude-opus-4-8').map(
+        level => level.value
+      )
     ).toEqual(['medium', 'high'])
     const antigravityLevels = withAdaptiveEffortOption(
       base,

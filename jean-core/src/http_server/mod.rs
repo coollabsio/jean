@@ -42,6 +42,7 @@ fn is_replayable_chat_event(event: &str) -> bool {
             | "chat:thinking"
             | "chat:permission_denied"
             | "chat:codex_command_approval_request"
+            | "chat:devin_permission_resolved"
             | "chat:codex_permission_request"
             | "chat:opencode_permission_request"
             | "chat:opencode_permission_replied"

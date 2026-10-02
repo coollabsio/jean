@@ -58,6 +58,7 @@ import { PiIcon } from '@/components/icons/PiIcon'
 import { CommandCodeIcon } from '@/components/icons/CommandCodeIcon'
 import { GrokIcon } from '@/components/icons/GrokIcon'
 import { KimiIcon } from '@/components/icons/KimiIcon'
+import { DevinIcon } from '@/components/icons/DevinIcon'
 import { AntigravityIcon } from '@/components/icons/AntigravityIcon'
 import { MuseIcon } from '@/components/icons/MuseIcon'
 import type { CliBackend, MagicPrompts } from '@/types/preferences'
@@ -70,6 +71,7 @@ import { PiPane } from './panes/PiPane'
 import { CommandCodePane } from './panes/CommandCodePane'
 import { GrokPane } from './panes/GrokPane'
 import { KimiPane } from './panes/KimiPane'
+import { DevinPane } from './panes/DevinPane'
 import { AntigravityPane } from './panes/AntigravityPane'
 import { MusePane } from './panes/MusePane'
 import { GitHubPane } from './panes/GitHubPane'
@@ -189,6 +191,13 @@ const navigationEntries: NavigationEntry[] = [
     name: 'Kimi Code',
     icon: KimiIcon,
     backend: 'kimi',
+  },
+  {
+    type: 'item',
+    id: 'devin',
+    name: 'Devin',
+    icon: DevinIcon,
+    backend: 'devin',
   },
   {
     type: 'item',
@@ -313,6 +322,7 @@ const paneIconMap: Record<PreferencePane, LucideIcon> = {
   commandcode: CommandCodeIcon,
   grok: GrokIcon,
   kimi: KimiIcon,
+  devin: DevinIcon,
   antigravity: AntigravityIcon,
   muse: MuseIcon,
   github: GitBranch,
@@ -354,6 +364,8 @@ const getPaneTitle = (pane: PreferencePane): string => {
       return 'Antigravity CLI'
     case 'muse':
       return 'Muse'
+    case 'devin':
+      return 'Devin'
     case 'github':
       return 'Git Provider'
     case 'coderabbit':
@@ -822,35 +834,24 @@ export function PreferencesDialog() {
                     aria-label="Settings server"
                     className="w-full rounded-lg border-border/50 bg-muted/50 px-2 text-xs text-muted-foreground shadow-none hover:bg-muted/80 hover:text-foreground"
                   >
-                    <Server className="size-3.5" />
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent align="start">
-                    <SelectItem value={LOCAL_SERVER_ID}>Local</SelectItem>
-                    {remoteConnections.map(connection => {
-                      const status = serverSnapshots.get(connection.id)?.status
-                      const statusLabel =
-                        status && status !== 'online'
-                          ? ` (${status.replace('-', ' ')})`
-                          : ''
-                      return (
-                        <SelectItem key={connection.id} value={connection.id}>
-                          {connection.name}
-                          {statusLabel}
-                        </SelectItem>
-                      )
-                    })}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-            <SidebarContent>
-              <SidebarGroup>
-                <SidebarGroupContent>
-                  <SidebarMenu>
-                    {navigationEntries.map((entry, index) => {
-                      if (entry.type === 'section') {
-                        const isFirst = index === 0
+                    <SelectTrigger
+                      size="sm"
+                      aria-label="Settings server"
+                      className="w-full rounded-lg border-border/50 bg-muted/50 px-2 text-xs text-muted-foreground shadow-none hover:bg-muted/80 hover:text-foreground"
+                    >
+                      <Server className="size-3.5" />
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent align="start">
+                      <SelectItem value={LOCAL_SERVER_ID}>Local</SelectItem>
+                      {remoteConnections.map(connection => {
+                        const status = serverSnapshots.get(
+                          connection.id
+                        )?.status
+                        const statusLabel =
+                          status && status !== 'online'
+                            ? ` (${status.replace('-', ' ')})`
+                            : ''
                         return (
                           <li
                             key={entry.id}
@@ -960,10 +961,216 @@ export function PreferencesDialog() {
 
                 <div className="ml-auto hidden md:flex items-center gap-2">
                   <ModalCloseButton
-                    className="relative z-10 shrink-0"
+                    size="lg"
+                    className="lg:hidden"
                     onClick={() => handleOpenChange(false)}
                   />
+                  <Breadcrumb className="hidden lg:block">
+                    <BreadcrumbList>
+                      <BreadcrumbItem>
+                        <BreadcrumbLink href="#">Settings</BreadcrumbLink>
+                      </BreadcrumbItem>
+                      <BreadcrumbSeparator />
+                      <BreadcrumbItem>
+                        <BreadcrumbPage>
+                          {getPaneTitle(activePane)}
+                        </BreadcrumbPage>
+                      </BreadcrumbItem>
+                    </BreadcrumbList>
+                  </Breadcrumb>
+
+                  <div className="ml-auto hidden lg:flex items-center gap-2">
+                    <PreferencesSearchBar
+                      variant="desktop"
+                      searchValue={searchValue}
+                      onSearchValueChange={setSearchValue}
+                      searchOpen={searchOpen}
+                      onSearchOpenChange={setSearchOpen}
+                      selectedId={effectiveSearchSelection}
+                      onSelectedIdChange={setSearchSelection}
+                      isSearching={isSearching}
+                      searchResults={searchResults}
+                      groupedResults={groupedResults}
+                      paneIconMap={paneIconMap}
+                      onResultSelect={handleSearchResultSelect}
+                      inputRef={searchInputRef}
+                      containerRef={searchContainerRef}
+                    />
+
+                    <ModalCloseButton
+                      className="relative z-10 shrink-0"
+                      onClick={() => handleOpenChange(false)}
+                    />
+                  </div>
                 </div>
+              </header>
+
+              <div
+                ref={scrollContainerRef}
+                className="flex min-w-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto p-4 min-h-0"
+              >
+                <PreferencesSearchBar
+                  variant="mobile"
+                  searchValue={searchValue}
+                  onSearchValueChange={setSearchValue}
+                  searchOpen={searchOpen}
+                  onSearchOpenChange={setSearchOpen}
+                  selectedId={effectiveSearchSelection}
+                  onSelectedIdChange={setSearchSelection}
+                  isSearching={isSearching}
+                  searchResults={searchResults}
+                  groupedResults={groupedResults}
+                  paneIconMap={paneIconMap}
+                  onResultSelect={handleSearchResultSelect}
+                  containerRef={mobileSearchContainerRef}
+                />
+
+                {activePane === 'general' && (
+                  <div id="pref-pane-general" className="min-w-0 max-w-full">
+                    <GeneralPane />
+                  </div>
+                )}
+                {activePane === 'claude' && (
+                  <div id="pref-pane-claude" className="min-w-0 max-w-full">
+                    <ClaudePane />
+                  </div>
+                )}
+                {activePane === 'codex' && (
+                  <div id="pref-pane-codex" className="min-w-0 max-w-full">
+                    <CodexPane />
+                  </div>
+                )}
+                {activePane === 'opencode' && (
+                  <div id="pref-pane-opencode" className="min-w-0 max-w-full">
+                    <OpenCodePane />
+                  </div>
+                )}
+                {activePane === 'cursor' && (
+                  <div id="pref-pane-cursor" className="min-w-0 max-w-full">
+                    <CursorPane />
+                  </div>
+                )}
+                {activePane === 'pi' && (
+                  <div id="pref-pane-pi" className="min-w-0 max-w-full">
+                    <PiPane />
+                  </div>
+                )}
+                {activePane === 'commandcode' && (
+                  <div
+                    id="pref-pane-commandcode"
+                    className="min-w-0 max-w-full"
+                  >
+                    <CommandCodePane />
+                  </div>
+                )}
+                {activePane === 'grok' && (
+                  <div id="pref-pane-grok">
+                    <GrokPane />
+                  </div>
+                )}
+                {activePane === 'kimi' && (
+                  <div id="pref-pane-kimi" className="min-w-0 max-w-full">
+                    <KimiPane />
+                  </div>
+                )}
+                {activePane === 'devin' && (
+                  <div id="pref-pane-devin" className="min-w-0 max-w-full">
+                    <DevinPane />
+                  </div>
+                )}
+                {activePane === 'antigravity' && (
+                  <div
+                    id="pref-pane-antigravity"
+                    className="min-w-0 max-w-full"
+                  >
+                    <AntigravityPane />
+                  </div>
+                )}
+                {activePane === 'github' && (
+                  <div id="pref-pane-github" className="min-w-0 max-w-full">
+                    <GitHubPane />
+                  </div>
+                )}
+                {activePane === 'coderabbit' && (
+                  <div id="pref-pane-coderabbit" className="min-w-0 max-w-full">
+                    <CodeRabbitPane />
+                  </div>
+                )}
+                {activePane === 'appearance' && (
+                  <div id="pref-pane-appearance" className="min-w-0 max-w-full">
+                    <AppearancePane />
+                  </div>
+                )}
+                {activePane === 'keybindings' && (
+                  <div
+                    id="pref-pane-keybindings"
+                    className="min-w-0 max-w-full"
+                  >
+                    <KeybindingsPane searchTargetAction={searchTargetAction} />
+                  </div>
+                )}
+                {activePane === 'terminal' && (
+                  <div id="pref-pane-terminal" className="min-w-0 max-w-full">
+                    <TerminalPane />
+                  </div>
+                )}
+                {activePane === 'magic-prompts' && (
+                  <div
+                    id="pref-pane-magic-prompts"
+                    className="min-w-0 max-w-full"
+                  >
+                    <MagicPromptsPane
+                      searchTargetPromptKey={searchTargetPromptKey}
+                    />
+                  </div>
+                )}
+                {activePane === 'mcp-servers' && (
+                  <div
+                    id="pref-pane-mcp-servers"
+                    className="min-w-0 max-w-full"
+                  >
+                    <McpServersPane />
+                  </div>
+                )}
+                {activePane === 'providers' && (
+                  <div id="pref-pane-providers" className="min-w-0 max-w-full">
+                    <ProvidersPane />
+                  </div>
+                )}
+                {activePane === 'usage' && (
+                  <div id="pref-pane-usage" className="min-w-0 max-w-full">
+                    <UsagePane />
+                  </div>
+                )}
+                {activePane === 'integrations' && (
+                  <div
+                    id="pref-pane-integrations"
+                    className="min-w-0 max-w-full"
+                  >
+                    <IntegrationsPane />
+                  </div>
+                )}
+                {activePane === 'experimental' && (
+                  <div
+                    id="pref-pane-experimental"
+                    className="min-w-0 max-w-full"
+                  >
+                    <ExperimentalPane />
+                  </div>
+                )}
+                {activePane === 'opinionated' && (
+                  <div
+                    id="pref-pane-opinionated"
+                    className="min-w-0 max-w-full"
+                  >
+                    <OpinionatedPane />
+                  </div>
+                )}
+                {activePane === 'web-access' && (
+                  <div id="pref-pane-web-access" className="min-w-0 max-w-full">
+                    <WebAccessPane />
+                  </div>
+                )}
               </div>
             </header>
 

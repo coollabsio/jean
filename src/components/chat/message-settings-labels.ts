@@ -8,6 +8,7 @@ import {
   PI_MODEL_OPTIONS,
   KIMI_MODEL_OPTIONS,
   MUSE_MODEL_OPTIONS,
+  DEVIN_MODEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
 import {
   formatCommandCodeModelLabel,
@@ -30,6 +31,7 @@ import {
   isOpenCodeModel,
   isPiModel,
   isKimiModel,
+  isDevinModel,
   isAntigravityCliModel,
   isMuseModel,
 } from '@/types/preferences'
@@ -43,6 +45,7 @@ const ALL_MODEL_OPTIONS = [
   ...PI_MODEL_OPTIONS,
   ...GROK_MODEL_OPTIONS,
   ...KIMI_MODEL_OPTIONS,
+  ...DEVIN_MODEL_OPTIONS,
   ...ANTIGRAVITY_MODEL_OPTIONS,
   ...MUSE_MODEL_OPTIONS,
 ]
@@ -70,6 +73,8 @@ export function getMessageModelLabel(model: string): string {
       /\bFOR\b/g,
       'for'
     )
+  if (model.startsWith('devin/'))
+    return formatModelIdTailLabel(model.slice('devin/'.length))
   if (model.startsWith('antigravity/'))
     return formatModelIdTailLabel(model.slice('antigravity/'.length))
   if (isMuseModel(model))
@@ -98,6 +103,7 @@ export function getMessagePromptModelLabel(model: string): string {
   if (isPiModel(model)) return `PI · ${getMessageModelLabel(model)}`
   if (isGrokModel(model)) return `Grok · ${formatGrokPromptModelLabel(model)}`
   if (isKimiModel(model)) return `Kimi Code · ${getMessageModelLabel(model)}`
+  if (isDevinModel(model)) return `Devin · ${getMessageModelLabel(model)}`
   if (isAntigravityCliModel(model))
     return `Antigravity CLI · ${getMessageModelLabel(model)}`
   if (isMuseModel(model)) return `Muse · ${getMessageModelLabel(model)}`

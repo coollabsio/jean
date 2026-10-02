@@ -25,6 +25,11 @@ describe('getModelImpliedBackend', () => {
     expect(getModelImpliedBackend('muse/default')).toBe('muse')
     expect(resolveBackend('muse/muse-spark-1.2')).toBe('muse')
   })
+
+  it('treats Devin model ids as Devin', () => {
+    expect(getModelImpliedBackend('devin/default')).toBe('devin')
+    expect(resolveBackend('devin/default')).toBe('devin')
+  })
 })
 
 describe('isGeminiModel', () => {

@@ -357,6 +357,11 @@ pub(crate) fn import_legacy_profile(app: &AppHandle) -> Result<(), String> {
     })
 }
 
+/// Required per-run MCP entry with the same profile as the installed server.
+pub(crate) fn runtime_mcp_entry(app: &AppHandle) -> Result<Value, String> {
+    Ok(build_entry(app).claude_server_json())
+}
+
 /// Status for Settings UI / operators.
 pub async fn get_agent_browser_status(app: AppHandle) -> Result<AgentBrowserStatus, String> {
     let managed_dir = managed_cli_dir(&app)?;
@@ -558,13 +563,14 @@ pub(crate) fn install_agent_browser_sync(app: &AppHandle) -> Result<AgentBrowser
 }
 
 /// CLI backends whose config files hold an agent-browser MCP entry.
-const CONFIG_BACKENDS: [&str; 8] = [
+const CONFIG_BACKENDS: [&str; 9] = [
     "claude",
     "codex",
     "opencode",
     "cursor",
     "grok",
     "kimi",
+    "devin",
     "antigravity",
     "muse",
 ];
@@ -591,6 +597,7 @@ pub async fn install_agent_browser_mcp(
             "cursor" => install_cursor(&entry),
             "grok" => install_grok(&entry),
             "kimi" => install_kimi(&entry),
+            "devin" => install_devin(&entry),
             "antigravity" => install_antigravity(&entry),
             "muse" => install_muse(&entry),
             other => Err(format!("Unsupported MCP config backend: {other}")),
@@ -823,6 +830,16 @@ fn install_cursor(entry: &McpEntry) -> Result<(PathBuf, Option<PathBuf>), String
         home.join(".cursor").join("mcp.json"),
         "mcpServers",
         entry.cursor_server_json(),
+    )
+}
+
+fn install_devin(entry: &McpEntry) -> Result<(PathBuf, Option<PathBuf>), String> {
+    let dir = crate::devin_cli::mcp::user_config_dir()
+        .ok_or_else(|| "Devin config directory unavailable".to_string())?;
+    install_json_server(
+        dir.join("mcp_config.json"),
+        "mcpServers",
+        entry.claude_server_json(),
     )
 }
 

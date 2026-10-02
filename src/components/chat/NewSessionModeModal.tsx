@@ -32,6 +32,7 @@ import { usePiCliStatus } from '@/services/pi-cli'
 import { useCommandCodeCliStatus } from '@/services/commandcode-cli'
 import { useGrokCliStatus } from '@/services/grok-cli'
 import { useKimiCliStatus } from '@/services/kimi-cli'
+import { useDevinCliStatus } from '@/services/devin-cli'
 import { useAntigravityCliStatus } from '@/services/antigravity-cli'
 import { useMuseCliStatus } from '@/services/muse-cli'
 import { useChatStore } from '@/store/chat-store'
@@ -59,6 +60,7 @@ const BACKEND_ORDER: CliBackend[] = [
   'commandcode',
   'grok',
   'kimi',
+  'devin',
   'antigravity',
   'muse',
 ]
@@ -72,6 +74,7 @@ const backendCommands: Record<CliBackend, string> = {
   commandcode: 'commandcode',
   grok: 'grok',
   kimi: 'kimi',
+  devin: 'devin',
   antigravity: 'antigravity',
   muse: 'muse',
 }
@@ -82,6 +85,7 @@ const YOLO_ARGS_BY_BACKEND: Partial<Record<CliBackend, string[]>> = {
   cursor: ['--yolo', '--sandbox', 'disabled'],
   grok: ['--always-approve', '--sandbox', 'off'],
   kimi: ['--yolo'],
+  devin: ['--permission-mode', 'dangerous'],
   antigravity: ['--approval-mode', 'yolo'],
   muse: ['--yolo'],
 }
@@ -105,6 +109,7 @@ export function NewSessionModeModal() {
   })
   const grokStatus = useGrokCliStatus(statusOptions)
   const kimiStatus = useKimiCliStatus(statusOptions)
+  const devinStatus = useDevinCliStatus(statusOptions)
   const antigravityStatus = useAntigravityCliStatus(statusOptions)
   const museStatus = useMuseCliStatus(statusOptions)
   const { data: preferences } = usePreferences(targetServerId)
@@ -155,6 +160,10 @@ export function NewSessionModeModal() {
         installed: kimiStatus.data?.installed,
         path: kimiStatus.data?.path,
       },
+      devin: {
+        installed: devinStatus.data?.installed,
+        path: devinStatus.data?.path,
+      },
       antigravity: {
         installed: antigravityStatus.data?.installed,
         path: antigravityStatus.data?.path,
@@ -183,6 +192,8 @@ export function NewSessionModeModal() {
     commandcodeStatus.data?.path,
     cursorStatus.data?.installed,
     cursorStatus.data?.path,
+    devinStatus.data?.installed,
+    devinStatus.data?.path,
     grokStatus.data?.installed,
     grokStatus.data?.path,
     kimiStatus.data?.installed,
@@ -207,7 +218,8 @@ export function NewSessionModeModal() {
     grokStatus.isLoading ||
     kimiStatus.isLoading ||
     antigravityStatus.isLoading ||
-    museStatus.isLoading
+    museStatus.isLoading ||
+    devinStatus.isLoading
 
   const nativePickerCommand = useMemo(() => {
     if (nativePickerKind === null || nativePickerKind === 'terminal') {

@@ -60,6 +60,7 @@ export type Backend =
   | 'commandcode'
   | 'grok'
   | 'kimi'
+  | 'devin'
   | 'antigravity'
   | 'muse'
 
@@ -197,7 +198,14 @@ export interface PlanToolInput {
   plan_preview?: string
   explanation?: string
   steps?: PlanStep[]
-  source?: 'claude' | 'codex' | 'grok' | 'kimi' | 'antigravity' | 'muse'
+  source?:
+    | 'claude'
+    | 'codex'
+    | 'grok'
+    | 'kimi'
+    | 'antigravity'
+    | 'muse'
+    | 'devin'
 }
 
 /**
@@ -318,6 +326,11 @@ export interface Session {
   grok_session_id?: string
   /** Kimi Code ACP session ID for resuming conversations */
   kimi_session_id?: string
+  /** Devin session ID for resuming conversations */
+  devin_session_id?: string
+  devin_location?: 'local' | 'cloud'
+  devin_config_options?: DevinConfigOption[] | null
+  devin_config_overrides?: Record<string, string>
   /** Antigravity CLI conversation ID used for conversation continuity. */
   antigravity_session_id?: string
   /** Muse Code MSP session ID for resuming conversations */
@@ -1901,4 +1914,17 @@ export interface LabelData {
   color: string
   /** Show this worktree label as a project-view filter tab when used in the current project */
   pinned?: boolean
+}
+
+/** ACP-advertised controls; Jean must not invent supported values. */
+export interface DevinConfigOption {
+  id: string
+  name: string
+  category?: string
+  type: string
+  currentValue: string
+  options: (
+    | { value: string; name: string }
+    | { name: string; options: { value: string; name: string }[] }
+  )[]
 }

@@ -2,11 +2,16 @@ import { render, screen } from '@/test/test-utils'
 import { describe, expect, it } from 'vitest'
 import {
   BackendLabel,
+  getBackendIcon,
   getBackendPlainLabel,
 } from '@/components/ui/backend-label'
 
 describe('backend labels', () => {
-  it('marks Antigravity and Muse as beta in plain labels', () => {
+  it('uses the Devin icon for Devin backends', () => {
+    expect(getBackendIcon('devin').displayName).toBe('DevinIcon')
+  })
+
+  it('marks Antigravity, Muse, and Devin as beta in plain labels', () => {
     expect(getBackendPlainLabel('cursor')).toBe('Cursor')
     expect(getBackendPlainLabel('pi')).toBe('PI')
     expect(getBackendPlainLabel('commandcode')).toBe('Command Code')
@@ -14,9 +19,10 @@ describe('backend labels', () => {
     expect(getBackendPlainLabel('kimi')).toBe('Kimi Code')
     expect(getBackendPlainLabel('muse')).toBe('Muse (Beta)')
     expect(getBackendPlainLabel('antigravity')).toBe('Antigravity CLI (Beta)')
+    expect(getBackendPlainLabel('devin')).toBe('Devin (Beta)')
   })
 
-  it('renders the beta badge only on Antigravity and Muse', () => {
+  it('renders the beta badge on Antigravity, Muse, and Devin', () => {
     const { rerender } = render(<BackendLabel backend="cursor" />)
 
     expect(screen.getByText('Cursor')).toBeInTheDocument()
@@ -45,6 +51,11 @@ describe('backend labels', () => {
     rerender(<BackendLabel backend="antigravity" />)
 
     expect(screen.getByText('Antigravity CLI')).toBeInTheDocument()
+    expect(screen.getByText('Beta')).toBeInTheDocument()
+
+    rerender(<BackendLabel backend="devin" />)
+
+    expect(screen.getByText('Devin')).toBeInTheDocument()
     expect(screen.getByText('Beta')).toBeInTheDocument()
   })
 })

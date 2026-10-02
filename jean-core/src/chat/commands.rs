@@ -232,6 +232,7 @@ pub(crate) fn resolve_default_backend(app: &AppHandle, worktree_id: Option<&str>
         "commandcode" => Backend::Commandcode,
         "grok" => Backend::Grok,
         "kimi" => Backend::Kimi,
+        "devin" => Backend::Devin,
         "antigravity" => Backend::Antigravity,
         "muse" => Backend::Muse,
         _ => Backend::Claude,
@@ -256,6 +257,7 @@ pub(crate) fn resolve_default_backend(app: &AppHandle, worktree_id: Option<&str>
                         "commandcode" => Backend::Commandcode,
                         "grok" => Backend::Grok,
                         "kimi" => Backend::Kimi,
+                        "devin" => Backend::Devin,
                         "antigravity" => Backend::Antigravity,
                         "muse" => Backend::Muse,
                         "claude" => Backend::Claude,
@@ -284,6 +286,10 @@ pub(crate) fn resolve_magic_prompt_backend(
             "commandcode" => return Backend::Commandcode,
             "grok" => return Backend::Grok,
             "kimi" => return Backend::Kimi,
+            // Devin ACP is wired for interactive chat. One-shot JSON magic
+            // prompts need a separate `devin --print` extractor before they
+            // can safely be enabled.
+            "devin" => return Backend::Claude,
             "antigravity" => return Backend::Antigravity,
             "muse" => return Backend::Muse,
             "codex" => return Backend::Codex,
@@ -291,7 +297,10 @@ pub(crate) fn resolve_magic_prompt_backend(
             _ => {}
         }
     }
-    resolve_default_backend(app, worktree_id)
+    match resolve_default_backend(app, worktree_id) {
+        Backend::Devin => Backend::Claude,
+        backend => backend,
+    }
 }
 
 fn infer_backend_from_model(model: &str, fallback: Backend) -> Backend {
@@ -307,6 +316,8 @@ fn infer_backend_from_model(model: &str, fallback: Backend) -> Backend {
         Backend::Grok
     } else if model.starts_with("kimi/") {
         Backend::Kimi
+    } else if model.starts_with("devin/") {
+        Backend::Devin
     } else if model.starts_with("antigravity/") {
         Backend::Antigravity
     } else if crate::is_muse_model(model) {
@@ -371,6 +382,20 @@ fn should_clear_stale_resumed_claude_session(
         && !has_usage
 }
 
+/// Undo only this turn's input: cancellation can finish after a replacement send.
+fn undo_cancelled_user_message(session: &mut Session, user_message_id: &str) -> bool {
+    if session
+        .messages
+        .last()
+        .is_some_and(|message| message.role == MessageRole::User && message.id == user_message_id)
+    {
+        session.messages.pop();
+        true
+    } else {
+        false
+    }
+}
+
 pub(crate) fn default_model_for_backend(
     backend: &Backend,
     preferences: &crate::AppPreferences,
@@ -383,6 +408,7 @@ pub(crate) fn default_model_for_backend(
         Backend::Commandcode => &preferences.selected_commandcode_model,
         Backend::Grok => &preferences.selected_grok_model,
         Backend::Kimi => &preferences.selected_kimi_model,
+        Backend::Devin => &preferences.selected_devin_model,
         Backend::Antigravity => &preferences.selected_antigravity_model,
         Backend::Muse => &preferences.selected_muse_model,
         Backend::Claude => &preferences.selected_model,
@@ -512,6 +538,7 @@ fn build_kimi_system_prompt(
     parallel_prompt: Option<&str>,
     agent_prompt: Option<&str>,
     include_recap: bool,
+    local_files_available: bool,
 ) -> Option<String> {
     let mut parts = Vec::new();
     if let Some(language) = ai_language.map(str::trim).filter(|value| !value.is_empty()) {
@@ -543,7 +570,7 @@ fn build_kimi_system_prompt(
                     .filter(|path| !path.is_empty())
                     .map(|path| format!("- {path}"))
                     .collect::<Vec<_>>();
-                if !paths.is_empty() {
+                if local_files_available && !paths.is_empty() {
                     parts.push(format!(
                         "This project is linked to other projects for cross-project context. Check these directories for instructions and documentation:\n{}",
                         paths.join("\n")
@@ -1060,6 +1087,7 @@ pub async fn create_session(
         Some("commandcode") => Backend::Commandcode,
         Some("grok") => Backend::Grok,
         Some("kimi") => Backend::Kimi,
+        Some("devin") => Backend::Devin,
         Some("antigravity") => Backend::Antigravity,
         Some("muse") => Backend::Muse,
         Some("claude") => Backend::Claude,
@@ -1081,6 +1109,8 @@ pub async fn create_session(
                     resolved = Backend::Grok;
                 } else if prefs.default_backend == "kimi" {
                     resolved = Backend::Kimi;
+                } else if prefs.default_backend == "devin" {
+                    resolved = Backend::Devin;
                 } else if prefs.default_backend == "antigravity" {
                     resolved = Backend::Antigravity;
                 } else if prefs.default_backend == "muse" {
@@ -1107,6 +1137,7 @@ pub async fn create_session(
                             "commandcode" => Backend::Commandcode,
                             "grok" => Backend::Grok,
                             "kimi" => Backend::Kimi,
+                            "devin" => Backend::Devin,
                             "antigravity" => Backend::Antigravity,
                             "muse" => Backend::Muse,
                             "claude" => Backend::Claude,
@@ -1988,7 +2019,7 @@ fn plan_mode_content_waits_for_approval(
     // (`has_blocking_tool` path via inject_synthetic_plan on plan-like content).
     matches!(
         backend,
-        Backend::Claude | Backend::Codex | Backend::Opencode | Backend::Kimi | Backend::Muse
+        Backend::Claude | Backend::Codex | Backend::Opencode | Backend::Kimi | Backend::Muse | Backend::Devin
     ) && execution_mode == Some("plan")
         && has_content
         && !has_plan_tool
@@ -2892,6 +2923,7 @@ fn persist_salvaged_resume_id(session: &mut Session, backend: &Backend, sid: &st
         Backend::Commandcode => session.commandcode_session_id = Some(sid.to_string()),
         Backend::Grok => session.grok_session_id = Some(sid.to_string()),
         Backend::Kimi => session.kimi_session_id = Some(sid.to_string()),
+        Backend::Devin => session.devin_session_id = Some(sid.to_string()),
         Backend::Antigravity => session.antigravity_session_id = Some(sid.to_string()),
         Backend::Muse => session.muse_session_id = Some(sid.to_string()),
     }
@@ -3176,6 +3208,7 @@ pub async fn send_chat_message(
         Some("commandcode") => Backend::Commandcode,
         Some("grok") => Backend::Grok,
         Some("kimi") => Backend::Kimi,
+        Some("devin") => Backend::Devin,
         Some("antigravity") => Backend::Antigravity,
         Some("muse") => Backend::Muse,
         Some("claude") => Backend::Claude,
@@ -3199,6 +3232,11 @@ pub async fn send_chat_message(
         if let Some(prefs) = prefs.as_ref() {
             model = default_model_for_backend(&effective_backend, prefs);
         }
+    }
+    if effective_backend == Backend::Devin
+        && session.devin_location == super::types::DevinLocation::Cloud
+    {
+        model = Some(session.devin_cloud_model());
     }
     log::info!(
         "[SendChat] resolved session={session_id} model={model:?} backend={effective_backend:?} execution_mode={execution_mode:?}"
@@ -3273,6 +3311,17 @@ pub async fn send_chat_message(
     let kimi_session_id = sessions
         .find_session(&session_id)
         .and_then(|s| s.kimi_session_id.clone());
+    let devin_config_overrides = sessions
+        .find_session(&session_id)
+        .map(|session| session.devin_config_overrides.clone())
+        .unwrap_or_default();
+    let devin_location = sessions
+        .find_session(&session_id)
+        .map(|session| session.devin_location)
+        .unwrap_or_default();
+    let devin_session_id = sessions
+        .find_session(&session_id)
+        .and_then(|s| s.devin_session_id.clone());
     let antigravity_session_id = sessions
         .find_session(&session_id)
         .and_then(|s| s.antigravity_session_id.clone());
@@ -3423,6 +3472,11 @@ pub async fn send_chat_message(
         None
     } else {
         kimi_session_id
+    };
+    let devin_session_id = if clear_target_resume && effective_backend == Backend::Devin {
+        None
+    } else {
+        devin_session_id
     };
     let antigravity_session_id = if clear_target_resume && effective_backend == Backend::Antigravity
     {
@@ -3595,6 +3649,7 @@ pub async fn send_chat_message(
             Backend::Commandcode => {}
             Backend::Grok => {}
             Backend::Kimi => {}
+            Backend::Devin => {}
             Backend::Antigravity => {}
             Backend::Muse => {}
         }
@@ -3638,6 +3693,7 @@ pub async fn send_chat_message(
     let thread_pi_session_id = pi_session_id.clone();
     let thread_grok_session_id = grok_session_id.clone();
     let thread_kimi_session_id = kimi_session_id.clone();
+    let thread_devin_session_id = devin_session_id.clone();
     let thread_antigravity_session_id = antigravity_session_id.clone();
     let thread_muse_session_id = muse_session_id.clone();
     let thread_commandcode_resume_id = commandcode_resume_id.clone();
@@ -3670,6 +3726,12 @@ pub async fn send_chat_message(
                 .await
                 .or_else(|| mcp_config.clone())
         }
+        Backend::Devin if devin_location == super::types::DevinLocation::Local => {
+            super::jean_mcp::merge_into_mcp_config(&app, &session_id, mcp_config.as_deref())
+                .await
+                .or_else(|| mcp_config.clone())
+        }
+        Backend::Devin => None,
         _ => mcp_config.clone(),
     };
     let thread_custom_profile = custom_profile_name.clone();
@@ -5163,6 +5225,7 @@ pub async fn send_chat_message(
                     thread_parallel_prompt.as_deref(),
                     thread_agent_prompt.as_deref(),
                     thread_include_recap,
+                    true,
                 );
                 let effort = thread_effort_level
                     .as_ref()
@@ -5198,6 +5261,60 @@ pub async fn send_chat_message(
                     Err(error) => Err(error),
                 }
             }
+            Backend::Devin => {
+                let system_prompt = build_kimi_system_prompt(
+                    &thread_app,
+                    &thread_worktree_id,
+                    thread_ai_language.as_deref(),
+                    thread_parallel_prompt.as_deref(),
+                    thread_include_recap,
+                    devin_location == super::types::DevinLocation::Local,
+                );
+                let loaded_context = super::context_instructions::build_loaded_context_content(
+                    &thread_app,
+                    &thread_session_id,
+                    &thread_worktree_id,
+                );
+                let system_prompt = Some(
+                    [system_prompt.unwrap_or_default(), loaded_context]
+                        .into_iter()
+                        .filter(|part| !part.is_empty())
+                        .collect::<Vec<_>>()
+                        .join("\n\n"),
+                );
+                match super::devin::execute_devin(super::devin::DevinExecutionOptions {
+                    app: &thread_app,
+                    jean_session_id: &thread_session_id,
+                    worktree_id: &thread_worktree_id,
+                    working_dir: std::path::Path::new(&thread_working_dir),
+                    existing_devin_session_id: thread_devin_session_id.as_deref(),
+                    location: devin_location,
+                    config_overrides: &devin_config_overrides,
+                    mcp_config: thread_mcp_config.as_deref(),
+                    output_file: &thread_output_file,
+                    model: thread_model.as_deref(),
+                    execution_mode: thread_execution_mode.as_deref(),
+                    message: &thread_message,
+                    system_prompt: system_prompt.as_deref(),
+                    pid_callback: Some(make_pid_callback()),
+                }) {
+                    Ok(response) => Ok((
+                        0,
+                        UnifiedResponse {
+                            content: response.content,
+                            resume_id: response.session_id,
+                            tool_calls: response.tool_calls,
+                            content_blocks: response.content_blocks,
+                            cancelled: response.cancelled,
+                            waiting_for_plan: false,
+                            error_emitted: false,
+                            usage: response.usage,
+                            backend: Backend::Devin,
+                        },
+                    )),
+                    Err(error) => Err(error),
+                }
+            }
             Backend::Antigravity => {
                 let system_prompt = build_kimi_system_prompt(
                     &thread_app,
@@ -5206,6 +5323,7 @@ pub async fn send_chat_message(
                     thread_parallel_prompt.as_deref(),
                     thread_agent_prompt.as_deref(),
                     thread_include_recap,
+                    true,
                 );
                 let effort = thread_effort_level
                     .as_ref()
@@ -5426,11 +5544,14 @@ pub async fn send_chat_message(
     // Clear registry state owned by this send. After cancel, a newer send may
     // already own ACTIVE_SENDS / CANCEL_FLAGS / PROCESS_REGISTRY for this session,
     // so only remove entries that still match this run (#329).
-    super::registry::cleanup_owned_session_registrations(
-        &session_id,
-        Some(pid),
-        opencode_cancel_flag.as_ref(),
-    );
+    // Devin cleans its own per-turn flag. Do not remove a replacement turn's flag.
+    if effective_backend != Backend::Devin {
+        super::registry::cleanup_owned_session_registrations(
+            &session_id,
+            Some(pid),
+            opencode_cancel_flag.as_ref(),
+        );
+    }
 
     // PID is now persisted via pid_callback immediately after spawn (before tailing).
     // No need to set_pid here — it was already saved for crash recovery.
@@ -5442,11 +5563,12 @@ pub async fn send_chat_message(
     // but are intentionally excluded from visible chat history on reload.
     // Unix Grok/Kimi hosts already write ACP stream JSONL + a result marker — synthetic
     // assistant lines would double content when parse_grok_run_to_message reloads.
-    let skip_synthetic_history = cfg!(unix)
-        && matches!(
-            unified_response.backend,
-            Backend::Grok | Backend::Kimi | Backend::Muse
-        );
+    let skip_synthetic_history = unified_response.backend == Backend::Devin
+        || (cfg!(unix)
+            && matches!(
+                unified_response.backend,
+                Backend::Grok | Backend::Kimi | Backend::Muse
+            ));
     if matches!(
         unified_response.backend,
         Backend::Opencode
@@ -5456,6 +5578,7 @@ pub async fn send_chat_message(
             | Backend::Grok
             | Backend::Kimi
             | Backend::Muse
+            | Backend::Devin
     ) && !unified_response.cancelled
         && !skip_synthetic_history
     {
@@ -5662,6 +5785,9 @@ pub async fn send_chat_message(
                         Backend::Kimi => {
                             session.kimi_session_id = Some(resume_id_for_log.clone());
                         }
+                        // Devin saves its ID before prompting. A cancelled worker
+                        // must not replace a newer turn's ID.
+                        Backend::Devin => {}
                         Backend::Antigravity => {
                             session.antigravity_session_id = Some(resume_id_for_log.clone());
                         }
@@ -5671,12 +5797,7 @@ pub async fn send_chat_message(
                     }
                 }
                 // Remove user message (undo send) - allows frontend to restore to input field
-                if session
-                    .messages
-                    .last()
-                    .is_some_and(|m| m.role == MessageRole::User)
-                {
-                    session.messages.pop();
+                if undo_cancelled_user_message(session, &user_message_id) {
                     log::trace!("Removed user message for undo send in session: {session_id}");
                 }
             }
@@ -5821,6 +5942,8 @@ pub async fn send_chat_message(
                     Backend::Kimi => {
                         session.kimi_session_id = Some(resume_id_for_log.clone());
                     }
+                    // Already persisted by the ACP worker before prompting.
+                    Backend::Devin => {}
                     Backend::Antigravity => {
                         session.antigravity_session_id = Some(resume_id_for_log.clone());
                     }
@@ -5896,7 +6019,11 @@ pub async fn send_chat_message(
 
     // Claude and Codex send the authoritative completion event after the run log
     // and session metadata are persisted. This also carries plain-text plan state.
-    if matches!(response_backend, Backend::Claude | Backend::Codex) && !was_cancelled {
+    if matches!(
+        response_backend,
+        Backend::Claude | Backend::Codex | Backend::Devin
+    ) && !was_cancelled
+    {
         let _ = app.emit_all(
             "chat:done",
             &serde_json::json!({
@@ -5965,6 +6092,7 @@ pub async fn clear_session_history(
             session.commandcode_session_id = None;
             session.grok_session_id = None;
             session.kimi_session_id = None;
+            session.devin_session_id = None;
             session.antigravity_session_id = None;
             session.muse_session_id = None;
             session.selected_model = selected_model;
@@ -6147,6 +6275,45 @@ pub async fn set_session_provider(
     })
 }
 
+/// Save an advertised Devin control for the next turn.
+pub async fn set_session_devin_config(
+    app: AppHandle,
+    worktree_id: String,
+    worktree_path: String,
+    session_id: String,
+    config_id: String,
+    value: String,
+) -> Result<(), String> {
+    if super::registry::get_actively_managed_sessions().contains(&session_id) {
+        return Err("Wait for the Devin turn to finish before changing configuration".to_string());
+    }
+    with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
+        sessions
+            .find_session_mut(&session_id)
+            .ok_or_else(|| format!("Session not found: {session_id}"))?
+            .set_devin_config(config_id, value)
+    })
+}
+
+/// Select local or cloud before a Devin session starts.
+pub async fn set_session_devin_location(
+    app: AppHandle,
+    worktree_id: String,
+    worktree_path: String,
+    session_id: String,
+    location: super::types::DevinLocation,
+) -> Result<(), String> {
+    if super::registry::get_actively_managed_sessions().contains(&session_id) {
+        return Err("Wait for the Devin turn to finish before changing location".to_string());
+    }
+    with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
+        sessions
+            .find_session_mut(&session_id)
+            .ok_or_else(|| format!("Session not found: {session_id}"))?
+            .set_devin_location(location)
+    })
+}
+
 /// Set the backend for a session
 pub async fn set_session_backend(
     app: AppHandle,
@@ -6167,6 +6334,7 @@ pub async fn set_session_backend(
                 "commandcode" => super::types::Backend::Commandcode,
                 "grok" => super::types::Backend::Grok,
                 "kimi" => super::types::Backend::Kimi,
+                "devin" => super::types::Backend::Devin,
                 "antigravity" => super::types::Backend::Antigravity,
                 "muse" => super::types::Backend::Muse,
                 _ => super::types::Backend::Claude,
@@ -8429,6 +8597,8 @@ pub async fn get_session_debug_info(
     let cursor_chat_id = session.and_then(|s| s.cursor_chat_id.clone());
     let pi_session_id = session.and_then(|s| s.pi_session_id.clone());
     let grok_session_id = session.and_then(|s| s.grok_session_id.clone());
+    let kimi_session_id = session.and_then(|s| s.kimi_session_id.clone());
+    let devin_session_id = session.and_then(|s| s.devin_session_id.clone());
 
     // Try to find Claude CLI's JSONL file
     let claude_jsonl_file = claude_session_id.as_ref().and_then(|sid| {
@@ -8514,7 +8684,8 @@ pub async fn get_session_debug_info(
         pi_session_id,
         commandcode_session_id: None,
         grok_session_id,
-        kimi_session_id: session.and_then(|s| s.kimi_session_id.clone()),
+        kimi_session_id,
+        devin_session_id,
         antigravity_session_id: session.and_then(|s| s.antigravity_session_id.clone()),
         muse_session_id: session.and_then(|s| s.muse_session_id.clone()),
         claude_jsonl_file,
@@ -9442,6 +9613,7 @@ pub async fn get_mcp_servers(
         Some("opencode") => crate::opencode_cli::mcp::get_mcp_servers(wt),
         Some("cursor") => crate::cursor_cli::mcp::get_mcp_servers(wt),
         Some("kimi") => crate::kimi_cli::mcp::get_mcp_servers(wt),
+        Some("devin") => crate::devin_cli::mcp::get_mcp_servers(wt),
         Some("antigravity") => crate::antigravity_cli::mcp::get_mcp_servers(wt),
         Some("muse") => crate::muse_cli::mcp::get_mcp_servers(wt),
         Some("grok") => crate::grok_cli::mcp::get_mcp_servers(wt),
@@ -9522,6 +9694,19 @@ pub async fn check_mcp_health(
         Some("codex") => check_mcp_health_codex(&app, worktree_path.as_deref()),
         Some("opencode") => check_mcp_health_opencode(&app, worktree_path.as_deref()),
         Some("cursor") => check_mcp_health_cursor(&app, worktree_path.as_deref()),
+        Some("devin") => Ok(McpHealthResult {
+            statuses: crate::devin_cli::mcp::get_mcp_servers(worktree_path.as_deref())
+                .into_iter()
+                .map(|server| {
+                    let status = if server.disabled {
+                        McpHealthStatus::Disabled
+                    } else {
+                        McpHealthStatus::Unknown
+                    };
+                    (server.name, status)
+                })
+                .collect(),
+        }),
         Some("kimi") => Ok(McpHealthResult {
             statuses: crate::kimi_cli::mcp::get_mcp_servers(worktree_path.as_deref())
                 .into_iter()
@@ -9752,6 +9937,9 @@ pub fn respond_codex_command_approval(
     rpc_id: u64,
     mut response: serde_json::Value,
 ) -> Result<(), String> {
+    if let Some(result) = super::devin_permissions::respond(&session_id, rpc_id, response.clone()) {
+        return result;
+    }
     if prepare_codex_command_approval_response(&mut response) {
         // Approve (yolo) / acceptForSession: auto-accept residual sandbox/command
         // prompts for the rest of this session without waiting for the next turn
@@ -11594,6 +11782,21 @@ mod tests {
             has_usage,
             was_cancelled,
         ));
+    }
+
+    #[test]
+    fn devin_cancelled_turn_does_not_remove_replacement_input() {
+        let mut session = Session::new("Devin".into(), 0, Backend::Devin);
+        session.messages.push(ChatMessage {
+            id: "new-user".into(),
+            role: MessageRole::User,
+            ..Default::default()
+        });
+        assert!(!undo_cancelled_user_message(&mut session, "old-user"));
+        assert_eq!(session.messages[0].id, "new-user");
+        assert!(undo_cancelled_user_message(&mut session, "new-user"));
+        assert!(session.messages.is_empty());
+        assert!(!undo_cancelled_user_message(&mut session, "new-user"));
     }
 
     #[test]

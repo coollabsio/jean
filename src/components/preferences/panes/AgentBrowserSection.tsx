@@ -39,6 +39,7 @@ const INSTALLABLE_BACKENDS = [
   'cursor',
   'grok',
   'kimi',
+  'devin',
   'antigravity',
 ] as const satisfies readonly CliBackend[]
 

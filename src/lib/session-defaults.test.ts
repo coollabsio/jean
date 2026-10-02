@@ -12,6 +12,7 @@ const preferences = {
   selected_cursor_model: 'cursor/auto',
   selected_commandcode_model: 'commandcode/deepseek/deepseek-v4-flash',
   selected_kimi_model: 'kimi/custom-coding-model',
+  selected_devin_model: 'devin/custom-coding-model',
   selected_antigravity_model: 'antigravity/flash',
   selected_muse_model: 'muse/muse-spark-1.2',
 } as unknown as AppPreferences
@@ -52,6 +53,18 @@ describe('resolveDefaultModelForBackend', () => {
   it('falls back to the Kimi Code configured default model', () => {
     expect(resolveDefaultModelForBackend('kimi', {} as AppPreferences)).toBe(
       'kimi/default'
+    )
+  })
+
+  it('uses the Devin model preference for Devin sessions', () => {
+    expect(resolveDefaultModelForBackend('devin', preferences)).toBe(
+      'devin/custom-coding-model'
+    )
+  })
+
+  it('falls back to the Devin configured default model', () => {
+    expect(resolveDefaultModelForBackend('devin', {} as AppPreferences)).toBe(
+      'devin/default'
     )
   })
 

@@ -99,6 +99,7 @@ export function useAllBackendsMcpServers(
   const cursor = useMcpServers(worktreePath, 'cursor', serverId)
   const grok = useMcpServers(worktreePath, 'grok', serverId)
   const kimi = useMcpServers(worktreePath, 'kimi', serverId)
+  const devin = useMcpServers(worktreePath, 'devin', serverId)
   const antigravity = useMcpServers(worktreePath, 'antigravity', serverId)
   const muse = useMcpServers(worktreePath, 'muse', serverId)
 
@@ -112,6 +113,7 @@ export function useAllBackendsMcpServers(
     if (has.has('cursor') && cursor.data) result.push(...cursor.data)
     if (has.has('grok') && grok.data) result.push(...grok.data)
     if (has.has('kimi') && kimi.data) result.push(...kimi.data)
+    if (has.has('devin') && devin.data) result.push(...devin.data)
     if (has.has('antigravity') && antigravity.data)
       result.push(...antigravity.data)
     if (has.has('muse') && muse.data) result.push(...muse.data)
@@ -125,6 +127,7 @@ export function useAllBackendsMcpServers(
     grok.data,
     kimi.data,
     muse.data,
+    devin.data,
     opencode.data,
   ])
 
@@ -136,7 +139,8 @@ export function useAllBackendsMcpServers(
     (has.has('grok') && grok.isLoading) ||
     (has.has('kimi') && kimi.isLoading) ||
     (has.has('antigravity') && antigravity.isLoading) ||
-    (has.has('muse') && muse.isLoading)
+    (has.has('muse') && muse.isLoading) ||
+    (has.has('devin') && devin.isLoading)
 
   return { data: servers, isLoading }
 }
@@ -188,6 +192,7 @@ export function useAllBackendsMcpHealth(
   const cursor = useMcpHealthCheck('cursor', worktreePath, serverId)
   const grok = useMcpHealthCheck('grok', worktreePath, serverId)
   const kimi = useMcpHealthCheck('kimi', worktreePath, serverId)
+  const devin = useMcpHealthCheck('devin', worktreePath, serverId)
   const antigravity = useMcpHealthCheck('antigravity', worktreePath, serverId)
   const muse = useMcpHealthCheck('muse', worktreePath, serverId)
 
@@ -202,6 +207,7 @@ export function useAllBackendsMcpHealth(
       ['cursor', cursor.data],
       ['grok', grok.data],
       ['kimi', kimi.data],
+      ['devin', devin.data],
       ['antigravity', antigravity.data],
       ['muse', muse.data],
     ]
@@ -222,6 +228,7 @@ export function useAllBackendsMcpHealth(
     grok.data,
     kimi.data,
     muse.data,
+    devin.data,
     opencode.data,
   ])
 
@@ -233,7 +240,8 @@ export function useAllBackendsMcpHealth(
     (has.has('grok') && grok.isFetching) ||
     (has.has('kimi') && kimi.isFetching) ||
     (has.has('antigravity') && antigravity.isFetching) ||
-    (has.has('muse') && muse.isFetching)
+    (has.has('muse') && muse.isFetching) ||
+    (has.has('devin') && devin.isFetching)
 
   const refetchAll = useMemo(
     () => () => {
@@ -243,6 +251,7 @@ export function useAllBackendsMcpHealth(
       if (has.has('cursor')) cursor.refetch()
       if (has.has('grok')) grok.refetch()
       if (has.has('kimi')) kimi.refetch()
+      if (has.has('devin')) devin.refetch()
       if (has.has('antigravity')) antigravity.refetch()
       if (has.has('muse')) muse.refetch()
     },
@@ -255,6 +264,7 @@ export function useAllBackendsMcpHealth(
       grok.refetch,
       kimi.refetch,
       muse.refetch,
+      devin.refetch,
       opencode.refetch,
     ] // eslint-disable-line react-hooks/exhaustive-deps
   )
@@ -474,6 +484,7 @@ export const BACKEND_LABELS: Record<CliBackend, string> = {
   commandcode: 'Command Code',
   grok: 'Grok',
   kimi: 'Kimi Code',
+  devin: 'Devin',
   antigravity: 'Antigravity CLI',
   muse: 'Muse',
 }

@@ -12,6 +12,7 @@ const nativeOnlyEntryIds = [
   'pi-cli',
   'kimi-cli',
   'muse-cli',
+  'devin-cli',
   'github-cli',
   'coderabbit-cli',
   'general-troubleshooting',
@@ -80,6 +81,7 @@ describe('preferences search index', () => {
     expect(searchPreferenceEntries('kimi model')[0]?.pane).toBe('kimi')
     expect(searchPreferenceEntries('muse model')[0]?.pane).toBe('muse')
     expect(searchPreferenceEntries('META_API_KEY')[0]?.pane).toBe('muse')
+    expect(searchPreferenceEntries('devin login')[0]?.pane).toBe('devin')
     expect(searchPreferenceEntries('github login')[0]?.pane).toBe('github')
     expect(searchPreferenceEntries('coderabbit login')[0]?.pane).toBe(
       'coderabbit'
