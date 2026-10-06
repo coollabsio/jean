@@ -229,7 +229,7 @@ export function ProjectsSidebar() {
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="flex items-center border-b border-border/40 px-2 pt-1">
           <div
-            className="grid flex-1 grid-cols-3"
+            className="@container grid min-w-0 flex-1 grid-cols-3"
             role="tablist"
             aria-label="Sidebar view"
           >
@@ -239,19 +239,20 @@ export function ProjectsSidebar() {
                 type="button"
                 role="tab"
                 aria-selected={activeTab === tab}
-                className={`relative h-8 text-xs font-medium capitalize transition-colors ${
+                title={tab}
+                className={`relative h-8 min-w-0 px-1 text-xs font-medium capitalize transition-colors ${
                   activeTab === tab
                     ? 'text-foreground after:absolute after:inset-x-2 after:bottom-0 after:h-px after:bg-foreground'
                     : 'text-muted-foreground hover:text-foreground'
                 }`}
                 onClick={() => setActiveTab(tab)}
               >
-                <span className="inline-flex items-center justify-center gap-1">
-                  {tab}
+                <span className="inline-flex max-w-full items-center justify-center gap-1">
+                  <span className="truncate">{tab}</span>
                   {tab === 'servers' && (
                     <Badge
                       variant="outline"
-                      className="rounded-sm border-warning/40 bg-warning/10 px-1 py-0 text-[9px] leading-3.5 tracking-wide text-warning uppercase"
+                      className="hidden shrink-0 rounded-sm border-warning/40 bg-warning/10 px-1 py-0 text-[9px] leading-3.5 tracking-wide text-warning uppercase @[17rem]:inline-flex"
                     >
                       Beta
                     </Badge>
