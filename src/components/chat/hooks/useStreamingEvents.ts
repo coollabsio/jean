@@ -25,6 +25,10 @@ import {
 } from '@/types/chat'
 import { playNotificationSound } from '@/lib/sounds'
 import {
+  markSessionOpened,
+  markSessionOpenedWhenSeen,
+} from '@/lib/session-read'
+import {
   notifyIfBackground,
   notifySessionNeedsAttention,
 } from '@/lib/session-notifications'
@@ -1142,17 +1146,17 @@ export default function useStreamingEvents({
 
       const isCurrentlyViewing = isViewingInFullView || isViewingInModal
 
-      // If user is currently viewing this session, bump last_opened_at so it
+      // If user is viewing this session (window focused), bump last_opened_at so it
       // doesn't appear as "unread" (updated_at will be newer after the run ends).
       // Also auto-mark user-initiated sessions (e.g. Clear Context & YOLO) as opened.
       const { userInitiatedSessionIds, removeUserInitiatedSession } =
         useChatStore.getState()
       const isUserInitiated = !!userInitiatedSessionIds[sessionId]
-      if (isCurrentlyViewing || isUserInitiated) {
-        if (isUserInitiated) removeUserInitiatedSession(sessionId)
-        invoke('set_session_last_opened', { sessionId })
-          .then(() => window.dispatchEvent(new CustomEvent('session-opened')))
-          .catch(() => undefined)
+      if (isUserInitiated) {
+        removeUserInitiatedSession(sessionId)
+        markSessionOpened(sessionId)
+      } else if (isCurrentlyViewing) {
+        markSessionOpenedWhenSeen(sessionId)
       }
 
       const preferences = queryClient.getQueryData<AppPreferences>(
@@ -1825,7 +1829,7 @@ export default function useStreamingEvents({
 
       const isCurrentlyViewing = isViewingInFullView || isViewingInModal
 
-      // If user is currently viewing this session, bump last_opened_at so it
+      // If user is viewing this session (window focused), bump last_opened_at so it
       // doesn't appear as "unread" (updated_at will be newer after the run ends).
       // Also auto-mark user-initiated sessions (e.g. Clear Context & YOLO) as opened.
       const {
@@ -1833,11 +1837,11 @@ export default function useStreamingEvents({
         removeUserInitiatedSession: rusErr,
       } = useChatStore.getState()
       const isUserInitiatedErr = !!uisErr[session_id]
-      if (isCurrentlyViewing || isUserInitiatedErr) {
-        if (isUserInitiatedErr) rusErr(session_id)
-        invoke('set_session_last_opened', { sessionId: session_id })
-          .then(() => window.dispatchEvent(new CustomEvent('session-opened')))
-          .catch(() => undefined)
+      if (isUserInitiatedErr) {
+        rusErr(session_id)
+        markSessionOpened(session_id)
+      } else if (isCurrentlyViewing) {
+        markSessionOpenedWhenSeen(session_id)
       }
 
       // Auth failures from headless CLIs (e.g. Claude "Please run /login")
@@ -2027,7 +2031,7 @@ export default function useStreamingEvents({
 
         const isCurrentlyViewing = isViewingInFullView || isViewingInModal
 
-        // If user is currently viewing this session, bump last_opened_at so it
+        // If user is viewing this session (window focused), bump last_opened_at so it
         // doesn't appear as "unread" (updated_at will be newer after the run ends).
         // Also auto-mark user-initiated sessions (e.g. Clear Context & YOLO) as opened.
         const {
@@ -2035,11 +2039,11 @@ export default function useStreamingEvents({
           removeUserInitiatedSession: rusCan,
         } = useChatStore.getState()
         const isUserInitiatedCan = !!uisCan[session_id]
-        if (isCurrentlyViewing || isUserInitiatedCan) {
-          if (isUserInitiatedCan) rusCan(session_id)
-          invoke('set_session_last_opened', { sessionId: session_id })
-            .then(() => window.dispatchEvent(new CustomEvent('session-opened')))
-            .catch(() => undefined)
+        if (isUserInitiatedCan) {
+          rusCan(session_id)
+          markSessionOpened(session_id)
+        } else if (isCurrentlyViewing) {
+          markSessionOpenedWhenSeen(session_id)
         }
 
         // Clear compacting state (safety net)

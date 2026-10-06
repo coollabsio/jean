@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/button'
+import { ApprovalCard } from './ApprovalCard'
 import type { CodexCommandApprovalRequest } from '@/types/chat'
 import { isCodexDecisionAvailable } from './codex-command-approval-utils'
 
@@ -22,12 +23,37 @@ export function CodexCommandApprovalRequestCard({
     isCodexDecisionAvailable(request.available_decisions, decision)
 
   return (
-    <div className="my-3 rounded border border-muted bg-muted/30 p-4 font-mono text-sm">
-      <div className="mb-2 font-semibold">Codex wants to run a command</div>
-      {request.reason ? (
-        <div className="mb-3 text-muted-foreground">{request.reason}</div>
-      ) : null}
-
+    <ApprovalCard
+      title="Codex wants to run a command"
+      description={request.reason}
+      actions={
+        <>
+          {isDecisionAvailable('accept') ? (
+            <Button size="sm" onClick={onApprove}>
+              Approve
+            </Button>
+          ) : null}
+          {/*
+          Always offer Jean-level Full access promote. Codex may omit acceptForSession
+          for unknown commands (issue #626); Jean still switches the session to
+          Full access and auto-accepts residual mid-turn prompts.
+        */}
+          <Button size="sm" variant="destructive" onClick={onApproveYolo}>
+            Approve (Full access)
+          </Button>
+          {isDecisionAvailable('decline') ? (
+            <Button size="sm" variant="secondary" onClick={onDecline}>
+              Decline
+            </Button>
+          ) : null}
+          {onCancel && isDecisionAvailable('cancel') ? (
+            <Button size="sm" variant="ghost" onClick={onCancel}>
+              Cancel turn
+            </Button>
+          ) : null}
+        </>
+      }
+    >
       {request.command ? (
         <pre className="mb-3 overflow-x-auto rounded bg-background px-3 py-2 text-xs">
           {request.command}
@@ -77,32 +103,6 @@ export function CodexCommandApprovalRequestCard({
           </div>
         ) : null}
       </div>
-
-      <div className="mt-4 flex flex-wrap gap-2">
-        {isDecisionAvailable('accept') ? (
-          <Button size="sm" onClick={onApprove}>
-            Approve
-          </Button>
-        ) : null}
-        {/*
-          Always offer Jean-level Full access promote. Codex may omit acceptForSession
-          for unknown commands (issue #626); Jean still switches the session to
-          Full access and auto-accepts residual mid-turn prompts.
-        */}
-        <Button size="sm" variant="destructive" onClick={onApproveYolo}>
-          Approve (Full access)
-        </Button>
-        {isDecisionAvailable('decline') ? (
-          <Button size="sm" variant="secondary" onClick={onDecline}>
-            Decline
-          </Button>
-        ) : null}
-        {onCancel && isDecisionAvailable('cancel') ? (
-          <Button size="sm" variant="ghost" onClick={onCancel}>
-            Cancel turn
-          </Button>
-        ) : null}
-      </div>
-    </div>
+    </ApprovalCard>
   )
 }

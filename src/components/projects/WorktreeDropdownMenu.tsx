@@ -41,7 +41,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Button } from '@/components/ui/button'
-import type { Worktree } from '@/types/projects'
+import type { Project, Worktree } from '@/types/projects'
 import { getEditorLabel, getTerminalLabel } from '@/types/preferences'
 import { ghCliQueryKeys, useGhCliAuth } from '@/services/gh-cli'
 import {
@@ -60,7 +60,6 @@ import {
 import { cn } from '@/lib/utils'
 import { usePatchPreferences } from '@/services/preferences'
 import { useProjectsStore } from '@/store/projects-store'
-import type { ProjectServer } from '@/types/projects'
 import {
   canOpenServerInFinder,
   openServerIn,
@@ -88,7 +87,7 @@ interface WorktreeDropdownMenuProps {
   packageScripts?: PackageScript[]
   onRunPackageScript?: (script: PackageScript) => void
   /** Server project (Servers tab): no git, GitHub, browser or project settings */
-  server?: ProjectServer | null
+  serverProject?: Project | null
 }
 
 const BADGE_STALE_TIME = 5 * 60 * 1000
@@ -107,8 +106,9 @@ export function WorktreeDropdownMenu({
   onToggleBrowser,
   packageScripts = [],
   onRunPackageScript,
-  server,
+  serverProject,
 }: WorktreeDropdownMenuProps) {
+  const server = serverProject?.server
   const isServer = !!server
   const queryClient = useQueryClient()
   const {
@@ -356,6 +356,19 @@ export function WorktreeDropdownMenu({
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
             )}
+
+          {serverProject && (
+            <DropdownMenuItem
+              onClick={() =>
+                useProjectsStore
+                  .getState()
+                  .setServerDialog({ project: serverProject })
+              }
+            >
+              <Settings className="mr-2 h-4 w-4" />
+              Server Settings
+            </DropdownMenuItem>
+          )}
 
           {!isServer && (
             <>

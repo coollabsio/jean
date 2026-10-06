@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/button'
+import { ApprovalCard } from './ApprovalCard'
 import type { CodexPermissionRequest } from '@/types/chat'
 
 interface CodexPermissionsRequestProps {
@@ -29,12 +30,27 @@ export function CodexPermissionsRequest({
   const entries = fileSystem?.entries ?? []
 
   return (
-    <div className="my-3 rounded border border-muted bg-muted/30 p-4 font-mono text-sm">
-      <div className="mb-2 font-semibold">Codex needs more permissions</div>
-      {request.reason && (
-        <div className="mb-3 text-muted-foreground">{request.reason}</div>
-      )}
-
+    <ApprovalCard
+      title="Codex needs more permissions"
+      description={request.reason}
+      actions={
+        <>
+          <Button size="sm" onClick={() => onGrant('turn')}>
+            Grant for turn
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => onGrant('session')}
+          >
+            Grant for session
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onDecline}>
+            Decline
+          </Button>
+        </>
+      }
+    >
       <div className="space-y-2 text-xs text-muted-foreground">
         {request.cwd ? (
           <div>
@@ -73,22 +89,6 @@ export function CodexPermissionsRequest({
           </div>
         ) : null}
       </div>
-
-      <div className="mt-4 flex flex-wrap gap-2">
-        <Button size="sm" onClick={() => onGrant('turn')}>
-          Grant for turn
-        </Button>
-        <Button
-          size="sm"
-          variant="secondary"
-          onClick={() => onGrant('session')}
-        >
-          Grant for session
-        </Button>
-        <Button size="sm" variant="ghost" onClick={onDecline}>
-          Decline
-        </Button>
-      </div>
-    </div>
+    </ApprovalCard>
   )
 }

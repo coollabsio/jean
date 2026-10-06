@@ -3052,9 +3052,10 @@ pub async fn dispatch_command(
         }
 
         "respond_claude_permission" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
             let rpc_id: u64 = field(&args, "rpcId", "rpc_id")?;
             let approved: bool = from_field(&args, "approved")?;
-            crate::chat::respond_claude_permission(rpc_id, approved)?;
+            crate::chat::respond_claude_permission(session_id, rpc_id, approved)?;
             Ok(Value::Null)
         }
 

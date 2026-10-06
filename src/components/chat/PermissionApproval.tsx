@@ -1,15 +1,9 @@
 import { useState, useCallback, useMemo, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
+import { ApprovalCard } from './ApprovalCard'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
-import { Kbd } from '@/components/ui/kbd'
-import {
-  ShieldAlert,
-  Play,
-  ChevronRight,
-  CheckCircle2,
-} from '@/components/icons/reicon'
-import { formatShortcutDisplay, DEFAULT_KEYBINDINGS } from '@/types/keybindings'
+import { ChevronRight, CheckCircle2 } from '@/components/icons/reicon'
 import {
   Collapsible,
   CollapsibleContent,
@@ -268,103 +262,71 @@ export function PermissionApproval({
     )
   }
 
-  // Interactive approval UI
+  // Interactive approval UI (matches CodexCommandApprovalRequestCard styling)
   return (
-    <div className="my-3 rounded border border-warning/30 bg-warning/5 p-4 font-mono text-sm">
-      <div className="mb-3 flex items-center gap-2">
-        <ShieldAlert className="h-5 w-5 text-warning" />
-        <span className="font-semibold text-foreground">
-          Permission Required
-        </span>
-        <span className="rounded bg-warning/20 px-1.5 py-0.5 text-xs text-warning">
-          {uniqueDenials.length} tool{uniqueDenials.length !== 1 ? 's' : ''}{' '}
-          blocked
-        </span>
-      </div>
-
-      <div className="mb-4 text-muted-foreground">
-        Jean wants to use the following tools. Select which to allow:
-      </div>
-
-      <div className="mb-4 space-y-2.5">
+    <ApprovalCard
+      title={`Claude wants to use ${uniqueDenials.length} tool${uniqueDenials.length !== 1 ? 's' : ''}`}
+      description="Select which tools to allow."
+      actions={
+        <>
+          <Button
+            size="sm"
+            onClick={handleApprove}
+            disabled={selectedIndices.size === 0}
+          >
+            Approve
+          </Button>
+          {onApproveYolo && (
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={handleApproveYolo}
+              disabled={selectedIndices.size === 0}
+            >
+              Approve (Full access)
+            </Button>
+          )}
+          {onDeny && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => onDeny(sessionId)}
+            >
+              Decline
+            </Button>
+          )}
+        </>
+      }
+    >
+      <div className="space-y-3">
         {uniqueDenials.map((denial, index) => {
           const command = getToolCommand(denial)
           return (
-            <div
-              key={denial.tool_use_id}
-              className="flex items-start gap-2.5 rounded border border-border/30 bg-muted/30 p-2.5"
-            >
+            <div key={denial.tool_use_id} className="flex items-start gap-2.5">
               <Checkbox
                 id={`permission-${sessionId}-${index}`}
                 checked={selectedIndices.has(index)}
                 onCheckedChange={() => toggleSelection(index)}
-                className="mt-3"
+                className="mt-0.5"
               />
               <Label
                 htmlFor={`permission-${sessionId}-${index}`}
-                className="flex-1 cursor-pointer"
+                className="block min-w-0 flex-1 cursor-pointer font-mono"
               >
-                {command && (
-                  <div className="mt-1 rounded bg-muted/50 px-2 py-1 font-mono text-xs text-foreground/80">
-                    {command}
-                  </div>
-                )}
-                <div className="mt-1">
-                  <div className="font-medium">{denial.tool_name}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {getToolDescription(denial)}
-                  </div>
+                <div className="font-medium">{denial.tool_name}</div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {getToolDescription(denial)}
                 </div>
+                {command && (
+                  <pre className="mt-2 overflow-x-auto rounded bg-background px-3 py-2 text-xs">
+                    {command}
+                  </pre>
+                )}
               </Label>
             </div>
           )
         })}
       </div>
-
-      <div className="flex gap-2">
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={handleApprove}
-          disabled={selectedIndices.size === 0}
-          className="gap-1 !bg-primary/80 !border-primary !text-primary-foreground hover:!bg-primary/90"
-        >
-          <Play className="h-3 w-3" />
-          Approve & Continue
-          <Kbd className="ml-1.5 h-4 text-[10px] bg-primary-foreground/20 text-primary-foreground">
-            {formatShortcutDisplay(
-              DEFAULT_KEYBINDINGS.approve_plan ?? 'mod+enter'
-            )}
-          </Kbd>
-        </Button>
-        {onApproveYolo && (
-          <Button
-            size="sm"
-            variant="destructive"
-            onClick={handleApproveYolo}
-            disabled={selectedIndices.size === 0}
-            className="gap-1"
-          >
-            <Play className="h-3 w-3" />
-            Approve (Full access)
-            <Kbd className="ml-1.5 h-4 text-[10px] bg-white/20 text-white">
-              {formatShortcutDisplay(
-                DEFAULT_KEYBINDINGS.approve_plan_yolo ?? 'mod+y'
-              )}
-            </Kbd>
-          </Button>
-        )}
-        {onDeny && (
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => onDeny(sessionId)}
-            className="text-muted-foreground"
-          >
-            Cancel
-          </Button>
-        )}
-      </div>
-    </div>
+    </ApprovalCard>
   )
 }

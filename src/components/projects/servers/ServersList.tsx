@@ -1,6 +1,13 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { Pencil, Plus, Server, Shield, Trash2 } from '@/components/icons/reicon'
+import {
+  Pencil,
+  Plus,
+  Search,
+  Server,
+  Shield,
+  Trash2,
+} from '@/components/icons/reicon'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -12,6 +19,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import {
   Tooltip,
   TooltipContent,
@@ -48,6 +56,17 @@ export function ServersList({ servers }: ServersListProps) {
   const removeServer = useRemoveServerProject()
   const [removing, setRemoving] = useState<Project | null>(null)
   const [settingUp, setSettingUp] = useState<Project | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+
+  const filteredServers = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    if (!query) return servers
+    return servers.filter(
+      project =>
+        project.name.toLowerCase().includes(query) ||
+        serverSubtitle(project).toLowerCase().includes(query)
+    )
+  }, [servers, searchQuery])
 
   const handleOpen = useCallback(
     (project: Project) => {
@@ -68,23 +87,33 @@ export function ServersList({ servers }: ServersListProps) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
-      <div className="flex items-center justify-between px-3 pb-1 pt-2">
-        <span className="text-xs text-muted-foreground">
-          Jean machines and SSH servers
-        </span>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              className={cn(iconButtonClass, 'size-8 rounded-md')}
-              onClick={() => openServerDialog()}
-              aria-label="Add server"
-            >
-              <Plus className="size-3.5" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>Add server</TooltipContent>
-        </Tooltip>
+      <div className="border-b border-border/40 pb-2 pt-[3px]">
+        <div className="flex gap-1 px-3 pt-2">
+          <div className="relative min-w-0 flex-1">
+            <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              type="search"
+              value={searchQuery}
+              onChange={event => setSearchQuery(event.target.value)}
+              placeholder="Search servers…"
+              aria-label="Search servers"
+              className="h-8 border-transparent bg-transparent pl-7 pr-2 text-xs shadow-none focus-visible:border-transparent dark:bg-transparent"
+            />
+          </div>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className="flex size-8 shrink-0 items-center justify-center rounded-md border border-transparent bg-transparent text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                onClick={() => openServerDialog()}
+                aria-label="Add server"
+              >
+                <Plus className="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Add Jean machine or SSH server</TooltipContent>
+          </Tooltip>
+        </div>
       </div>
       {servers.length === 0 ? (
         <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
@@ -98,9 +127,13 @@ export function ServersList({ servers }: ServersListProps) {
             Add server
           </Button>
         </div>
+      ) : filteredServers.length === 0 ? (
+        <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+          No matching servers
+        </div>
       ) : (
-        <ul className="flex flex-col gap-px px-1.5 pb-2">
-          {servers.map(project => {
+        <ul className="flex flex-col gap-px px-1.5 py-2">
+          {filteredServers.map(project => {
             return (
               <li key={project.id} className="group relative">
                 <button

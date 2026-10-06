@@ -325,7 +325,9 @@ function respondLiveClaudePermissions(
     denials.filter(d => !isLivePermissionRequest(d))
   )
   for (const denial of live) {
+    // sessionId routes the answer to the Jean server that owns the run
     invoke('respond_claude_permission', {
+      sessionId,
       rpcId: denial.rpc_id,
       approved,
     }).catch(err => {

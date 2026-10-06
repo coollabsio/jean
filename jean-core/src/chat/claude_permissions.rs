@@ -23,7 +23,8 @@ use crate::http_server::EmitExt;
 /// versions default to 60s (or less), which would deny a slow answer.
 pub const LIVE_PROMPT_MCP_TIMEOUT_MS: &str = "86400000";
 
-static PENDING: Lazy<Mutex<HashMap<u64, oneshot::Sender<bool>>>> =
+/// rpc_id -> (Jean session id, answer channel)
+static PENDING: Lazy<Mutex<HashMap<u64, (String, oneshot::Sender<bool>)>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 /// Tool uses the user denied live. The CLI still lists them in the final
 /// `permission_denials`; skip them there so the card does not show twice.
@@ -56,7 +57,7 @@ pub async fn ask_user(
 ) -> bool {
     let rpc_id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     let (tx, mut rx) = oneshot::channel();
-    lock(&PENDING).insert(rpc_id, tx);
+    lock(&PENDING).insert(rpc_id, (session_id.to_string(), tx));
 
     let event = PermissionDeniedEvent {
         session_id: session_id.to_string(),
@@ -93,11 +94,16 @@ pub async fn ask_user(
     approved
 }
 
-/// Answer a pending live permission request.
-pub fn respond(rpc_id: u64, approved: bool) -> Result<(), String> {
-    let tx = lock(&PENDING)
-        .remove(&rpc_id)
-        .ok_or_else(|| format!("No pending Claude permission request {rpc_id}"))?;
+/// Answer a pending live permission request of a session.
+pub fn respond(session_id: &str, rpc_id: u64, approved: bool) -> Result<(), String> {
+    let mut pending = lock(&PENDING);
+    if pending.get(&rpc_id).map(|(owner, _)| owner.as_str()) != Some(session_id) {
+        return Err(format!(
+            "No pending Claude permission request {rpc_id} for this session"
+        ));
+    }
+    let (_, tx) = pending.remove(&rpc_id).expect("checked above");
+    drop(pending);
     tx.send(approved)
         .map_err(|_| format!("Claude permission request {rpc_id} is no longer waiting"))
 }
@@ -118,14 +124,15 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn respond_delivers_answer_once() {
+    async fn respond_delivers_answer_once_to_owning_session() {
         let (tx, rx) = oneshot::channel();
         let rpc_id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-        lock(&PENDING).insert(rpc_id, tx);
+        lock(&PENDING).insert(rpc_id, ("session-a".to_string(), tx));
 
-        respond(rpc_id, true).unwrap();
+        assert!(respond("session-b", rpc_id, true).is_err());
+        respond("session-a", rpc_id, true).unwrap();
         assert!(rx.await.unwrap());
-        assert!(respond(rpc_id, true).is_err());
+        assert!(respond("session-a", rpc_id, true).is_err());
     }
 
     #[test]

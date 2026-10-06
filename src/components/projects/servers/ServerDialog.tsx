@@ -34,7 +34,7 @@ export function ServerDialog({
 }: ServerDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-xl">
         {open && (
           <ServerForm project={project} onDone={() => onOpenChange(false)} />
         )}
@@ -122,13 +122,9 @@ function ServerForm({
         <DialogTitle>{project ? 'Edit server' : 'Add server'}</DialogTitle>
         <DialogDescription>
           {isLocal ? (
-            'The machine that runs this Jean. Commands run directly, without SSH. Sessions start in Supervised mode, so you approve each command.'
+            'This machine. No SSH. You approve each command.'
           ) : (
-            <>
-              The AI connects with <code>ssh</code> from the machine that runs
-              Jean. Use SSH key auth (no password prompt). Sessions start in
-              Supervised mode, so you approve each command.
-            </>
+            <>Connects with SSH key auth. You approve each command.</>
           )}
         </DialogDescription>
       </DialogHeader>
@@ -144,10 +140,8 @@ function ServerForm({
       {!isLocal && (
         <>
           <p className="rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-            Recommended: give Jean its own user with restricted sudo, not root.
-            After you add the server, use the shield button in the Servers list.
-            Jean connects once as root, creates the user, and adds your public
-            key.
+            Tip: use a non-root user. After you add the server, click the shield
+            button to create one.
           </p>
           <div className="grid grid-cols-[1fr_1.5fr] gap-3">
             <div className="space-y-1.5">
@@ -209,16 +203,13 @@ function ServerForm({
           </div>
           {showRunFrom && (
             <p className="text-xs text-muted-foreground">
-              The Jean you pick stores the server, connects with its own SSH
-              keys, and runs the chat with its own AI backends.
+              This Jean uses its own SSH keys and AI backends.
             </p>
           )}
         </>
       )}
       <div className="space-y-1.5">
-        <Label htmlFor="server-system-prompt">
-          System prompt for this server
-        </Label>
+        <Label htmlFor="server-system-prompt">System prompt</Label>
         <Textarea
           id="server-system-prompt"
           value={form.systemPrompt}
@@ -227,7 +218,7 @@ function ServerForm({
           rows={4}
         />
         <p className="text-xs text-muted-foreground">
-          Added after the Server System Prompt in every session of this server.
+          Added to every session on this server.
         </p>
       </div>
       {error && <p className="text-sm text-destructive">{error}</p>}

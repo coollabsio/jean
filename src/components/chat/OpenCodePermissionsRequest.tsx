@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/button'
+import { ApprovalCard } from './ApprovalCard'
 import type { OpenCodePermissionRequest } from '@/types/chat'
 
 interface OpenCodePermissionsRequestProps {
@@ -52,11 +53,22 @@ export function OpenCodePermissionsRequest({
       alwaysPatterns.some((p, i) => p !== patterns[i]))
 
   return (
-    <div className="my-3 rounded border border-muted bg-muted/30 p-4 font-mono text-sm">
-      <div className="mb-2 font-semibold">
-        OpenCode needs permission: {formatPermissionLabel(request.permission)}
-      </div>
-
+    <ApprovalCard
+      title={`OpenCode needs permission: ${formatPermissionLabel(request.permission)}`}
+      actions={
+        <>
+          <Button size="sm" onClick={onOnce}>
+            Allow once
+          </Button>
+          <Button size="sm" variant="secondary" onClick={onAlways}>
+            Allow always
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onReject}>
+            Deny
+          </Button>
+        </>
+      }
+    >
       <div className="space-y-2 text-xs text-muted-foreground">
         {request.working_dir ? (
           <div>
@@ -97,18 +109,6 @@ export function OpenCodePermissionsRequest({
           </div>
         ) : null}
       </div>
-
-      <div className="mt-4 flex flex-wrap gap-2">
-        <Button size="sm" onClick={onOnce}>
-          Allow once
-        </Button>
-        <Button size="sm" variant="secondary" onClick={onAlways}>
-          Allow always
-        </Button>
-        <Button size="sm" variant="ghost" onClick={onReject}>
-          Deny
-        </Button>
-      </div>
-    </div>
+    </ApprovalCard>
   )
 }
