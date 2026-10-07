@@ -54,6 +54,18 @@ describe('MermaidBlock', () => {
       })
     )
   })
+  it('freezes font-relative SVG text positions for native page zoom', async () => {
+    renderDiagram.mockResolvedValue({
+      svg: '<svg><text style="font-size:16px"><tspan y="-0.1em" dy="1.1em" style="font-size:16px">Zoom label</tspan><tspan y="24" dy="2">Numeric label</tspan></text></svg>',
+    })
+    render(<MermaidBlock source="flowchart TD; A --> B" />)
+    const label = await screen.findByText('Zoom label')
+    expect(label).toHaveAttribute('y', '-1.6')
+    expect(label).toHaveAttribute('dy', '17.6')
+    expect(screen.getByText('Numeric label')).toHaveAttribute('y', '24')
+    expect(screen.getByText('Numeric label')).toHaveAttribute('dy', '2')
+  })
+
   it('reports clipboard errors without claiming success', async () => {
     copy.mockRejectedValue(new Error('denied'))
     render(<MermaidBlock source="flowchart TD; A --> B" />)

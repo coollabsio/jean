@@ -87,7 +87,24 @@ export function MermaidBlock({ source }: { source: string }) {
             'foreignObject',
           ],
         })
-        if (!disposed) setResult({ source, dark, svg: safeSvg })
+        // WKWebView pageZoom scales em-based SVG text offsets differently from
+        // the surrounding geometry. Freeze them in SVG user units while the
+        // sanitized diagram is attached and its font metrics are available.
+        container.innerHTML = safeSvg
+        container.querySelectorAll('text, tspan').forEach(element => {
+          const fontSize = parseFloat(getComputedStyle(element).fontSize)
+          if (!Number.isFinite(fontSize) || fontSize <= 0) return
+          for (const attribute of ['x', 'y', 'dx', 'dy']) {
+            const value = element.getAttribute(attribute)
+            if (value && /^-?(?:\d+(?:\.\d*)?|\.\d+)em$/.test(value)) {
+              element.setAttribute(
+                attribute,
+                String(parseFloat(value) * fontSize)
+              )
+            }
+          }
+        })
+        if (!disposed) setResult({ source, dark, svg: container.innerHTML })
       } catch {
         if (!disposed) setResult({ source, dark, error: true })
       } finally {

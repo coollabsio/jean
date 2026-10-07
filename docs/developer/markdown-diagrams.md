@@ -28,3 +28,10 @@ Tests: `markdown-mermaid.test.tsx` covers routing and streaming;
 `mermaid-block.test.tsx` covers controls, failures, sanitization, themes, and
 stale render handling. These mock Mermaid and do not replace real-browser
 checks of diagram layout.
+
+Native macOS page zoom: WKWebView scales `em`-based SVG text positions
+inconsistently with node geometry. After sanitization, font-relative text
+coordinates are resolved to SVG user units in the attached off-screen container.
+This preserves text/node alignment across zoom changes without rerendering the
+diagram or enabling HTML labels. Verify layout with actual WKWebView `pageZoom`,
+not CSS zoom alone; mocked Mermaid tests only cover the normalization contract.
