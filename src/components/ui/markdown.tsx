@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   memo,
   useState,
   useEffect,
@@ -39,6 +41,11 @@ import { useIsMobile } from '@/hooks/use-mobile'
 import { convertServerFileSrc, invokeForOptionalServer } from '@/lib/transport'
 import { parseServerResourceKey } from '@/lib/server-resource'
 import { tableToMarkdown, setTableRowInPrompt } from '@/lib/table-rows-prompt'
+
+const MermaidBlock = lazy(() =>
+  import('./mermaid-block').then(module => ({ default: module.MermaidBlock }))
+)
+const MarkdownStreamingContext = createContext(false)
 
 interface MarkdownProps {
   children: string
@@ -132,6 +139,11 @@ function handleFilePathClick(event: React.MouseEvent<HTMLElement>) {
 
 function CodeBlock({ children }: { children: ReactNode }) {
   const [copied, setCopied] = useState(false)
+  const streaming = useContext(MarkdownStreamingContext)
+  const code = Children.toArray(children)[0]
+  const isMermaid =
+    isValidElement<{ className?: string }>(code) &&
+    code.props.className?.split(/\s+/).includes('language-mermaid')
 
   const handleCopy = useCallback(() => {
     const text = extractText(children)
@@ -140,6 +152,20 @@ function CodeBlock({ children }: { children: ReactNode }) {
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }, [children])
+
+  if (isMermaid && !streaming) {
+    return (
+      <Suspense
+        fallback={
+          <pre className="my-5 overflow-x-auto rounded-lg bg-muted p-4 text-sm">
+            {children}
+          </pre>
+        }
+      >
+        <MermaidBlock source={extractText(children)} />
+      </Suspense>
+    )
+  }
 
   return (
     <div className="relative my-5 min-w-0 max-w-full">
@@ -1035,15 +1061,17 @@ const Markdown = memo(function Markdown({
 
   return (
     <div className={cn('markdown leading-relaxed break-words', className)}>
-      <MarkdownTableContext.Provider value={contextValue}>
-        <ReactMarkdown
-          components={componentsToUse}
-          remarkPlugins={remarkPlugins}
-          rehypePlugins={streaming ? undefined : rehypePlugins}
-        >
-          {content}
-        </ReactMarkdown>
-      </MarkdownTableContext.Provider>
+      <MarkdownStreamingContext.Provider value={streaming}>
+        <MarkdownTableContext.Provider value={contextValue}>
+          <ReactMarkdown
+            components={componentsToUse}
+            remarkPlugins={remarkPlugins}
+            rehypePlugins={streaming ? undefined : rehypePlugins}
+          >
+            {content}
+          </ReactMarkdown>
+        </MarkdownTableContext.Provider>
+      </MarkdownStreamingContext.Provider>
     </div>
   )
 })
