@@ -49,7 +49,7 @@ interface FloatingButtonsProps {
 }
 
 /**
- * Floating action buttons (approve, findings)
+ * Composer tab buttons (approve, findings)
  * Memoized to prevent re-renders when parent state changes
  */
 export const FloatingButtons = memo(function FloatingButtons({
@@ -84,136 +84,131 @@ export const FloatingButtons = memo(function FloatingButtons({
 
   return (
     <>
-      {/* Right side - Approve, Findings buttons */}
-      <div className="absolute bottom-[calc(var(--chat-composer-height,0px)+1rem)] right-4 flex gap-2">
-        {/* Floating approval buttons with dropdowns - shown when main approve buttons are not visible */}
-        {showApproveButton && (
-          <div className="flex gap-2">
-            <div className="inline-flex shadow-md rounded-lg">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    size="sm"
-                    className="h-8 gap-1.5 rounded-r-none text-sm"
-                    onClick={withScroll(onYoloApprove)}
-                  >
-                    Full access
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  Approve with Full access (
-                  {formatShortcutDisplay(DEFAULT_KEYBINDINGS.approve_plan_yolo)}
-                  )
-                </TooltipContent>
-              </Tooltip>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    size="sm"
-                    className="h-8 px-1.5 rounded-l-none border-l border-l-primary-foreground/20"
-                  >
-                    <ChevronDown className="h-3.5 w-3.5" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <ApprovalActionMenu
-                    yoloDefaultModelLabel={yoloDefaultModelLabel}
-                    clearContextShortcut={formatShortcutDisplay(
-                      DEFAULT_KEYBINDINGS.approve_plan_clear_context
-                    )}
-                    worktreeYoloShortcut={formatShortcutDisplay(
-                      DEFAULT_KEYBINDINGS.approve_plan_worktree_yolo
-                    )}
-                    onClearContextApprove={
-                      onClearContextApprove
-                        ? (override?: ApprovalModelOverride) => {
-                            onClearContextApprove(override)
-                            onScrollToBottom()
-                          }
-                        : undefined
-                    }
-                    onWorktreeYoloApprove={
-                      onWorktreeYoloApprove
-                        ? (override?: ApprovalModelOverride) => {
-                            onWorktreeYoloApprove(override)
-                            onScrollToBottom()
-                          }
-                        : undefined
-                    }
-                  />
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-            <div className="inline-flex shadow-md rounded-lg">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-8 gap-1.5 rounded-r-none text-sm"
-                    onClick={withScroll(onApprove)}
-                  >
-                    <Check className="h-3.5 w-3.5" />
-                    Approve
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  Approve plan ({approveShortcut})
-                </TooltipContent>
-              </Tooltip>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-8 px-1.5 rounded-l-none border-l border-l-border"
-                  >
-                    <ChevronDown className="h-3.5 w-3.5" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <ApprovalActionMenu
-                    buildDefaultModelLabel={buildDefaultModelLabel}
-                    clearContextBuildShortcut={formatShortcutDisplay(
-                      DEFAULT_KEYBINDINGS.approve_plan_clear_context_build
-                    )}
-                    worktreeBuildShortcut={formatShortcutDisplay(
-                      DEFAULT_KEYBINDINGS.approve_plan_worktree_build
-                    )}
-                    onClearContextBuildApprove={
-                      onClearContextBuildApprove
-                        ? (override?: ApprovalModelOverride) => {
-                            onClearContextBuildApprove(override)
-                            onScrollToBottom()
-                          }
-                        : undefined
-                    }
-                    onWorktreeBuildApprove={
-                      onWorktreeBuildApprove
-                        ? (override?: ApprovalModelOverride) => {
-                            onWorktreeBuildApprove(override)
-                            onScrollToBottom()
-                          }
-                        : undefined
-                    }
-                  />
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
+      {/* Approve, Findings tabs - rendered inside the composer tab row */}
+      {/* Floating approval buttons with dropdowns - shown when main approve buttons are not visible */}
+      {showApproveButton && (
+        <div className="flex items-end gap-1">
+          <div className="inline-flex">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  className="h-6 gap-1 rounded-none rounded-tl-md px-2 text-xs"
+                  onClick={withScroll(onYoloApprove)}
+                >
+                  Full access
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                Approve with Full access (
+                {formatShortcutDisplay(DEFAULT_KEYBINDINGS.approve_plan_yolo)})
+              </TooltipContent>
+            </Tooltip>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="sm"
+                  className="h-6 rounded-none rounded-tr-md border-l border-l-primary-foreground/20 px-1.5"
+                >
+                  <ChevronDown className="h-3.5 w-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <ApprovalActionMenu
+                  yoloDefaultModelLabel={yoloDefaultModelLabel}
+                  clearContextShortcut={formatShortcutDisplay(
+                    DEFAULT_KEYBINDINGS.approve_plan_clear_context
+                  )}
+                  worktreeYoloShortcut={formatShortcutDisplay(
+                    DEFAULT_KEYBINDINGS.approve_plan_worktree_yolo
+                  )}
+                  onClearContextApprove={
+                    onClearContextApprove
+                      ? (override?: ApprovalModelOverride) => {
+                          onClearContextApprove(override)
+                          onScrollToBottom()
+                        }
+                      : undefined
+                  }
+                  onWorktreeYoloApprove={
+                    onWorktreeYoloApprove
+                      ? (override?: ApprovalModelOverride) => {
+                          onWorktreeYoloApprove(override)
+                          onScrollToBottom()
+                        }
+                      : undefined
+                  }
+                />
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
-        )}
-        {/* Go to findings button - shown when findings exist and are not visible */}
-        {showFindingsButton && (
-          <button
-            type="button"
-            onClick={onScrollToFindings}
-            className="flex h-8 items-center gap-1.5 rounded-lg bg-muted/90 px-3 text-sm text-muted-foreground shadow-md transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <AlertCircle className="h-3.5 w-3.5" />
-            <span>Findings</span>
-          </button>
-        )}
-      </div>
+          <div className="inline-flex">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 gap-1 rounded-none rounded-tl-md border-b-0 bg-card px-2 text-xs"
+                  onClick={withScroll(onApprove)}
+                >
+                  <Check className="h-3.5 w-3.5" />
+                  Approve
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Approve plan ({approveShortcut})</TooltipContent>
+            </Tooltip>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 rounded-none rounded-tr-md border-b-0 border-l-0 bg-card px-1.5"
+                >
+                  <ChevronDown className="h-3.5 w-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <ApprovalActionMenu
+                  buildDefaultModelLabel={buildDefaultModelLabel}
+                  clearContextBuildShortcut={formatShortcutDisplay(
+                    DEFAULT_KEYBINDINGS.approve_plan_clear_context_build
+                  )}
+                  worktreeBuildShortcut={formatShortcutDisplay(
+                    DEFAULT_KEYBINDINGS.approve_plan_worktree_build
+                  )}
+                  onClearContextBuildApprove={
+                    onClearContextBuildApprove
+                      ? (override?: ApprovalModelOverride) => {
+                          onClearContextBuildApprove(override)
+                          onScrollToBottom()
+                        }
+                      : undefined
+                  }
+                  onWorktreeBuildApprove={
+                    onWorktreeBuildApprove
+                      ? (override?: ApprovalModelOverride) => {
+                          onWorktreeBuildApprove(override)
+                          onScrollToBottom()
+                        }
+                      : undefined
+                  }
+                />
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+      )}
+      {/* Go to findings button - shown when findings exist and are not visible */}
+      {showFindingsButton && (
+        <button
+          type="button"
+          onClick={onScrollToFindings}
+          className="flex h-6 items-center gap-1 rounded-t-md border border-b-0 border-border bg-card px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        >
+          <AlertCircle className="h-3.5 w-3.5" />
+          <span>Findings</span>
+        </button>
+      )}
     </>
   )
 })

@@ -3108,34 +3108,6 @@ const ChatWindowContent = memo(function ChatWindowContent({
                           </div>
                         </div>
                       </ScrollArea>
-
-                      {/* Floating scroll buttons */}
-                      <FloatingButtons
-                        showApproveButton={hasPendingPlanApproval}
-                        showFindingsButton={!areFindingsVisible}
-                        isAtBottom={isAtBottom || messages.length === 0}
-                        approveShortcut={approveShortcut}
-                        buildDefaultModelLabel={buildNewContextLabel}
-                        yoloDefaultModelLabel={yoloNewContextLabel}
-                        onApprove={floatingApprove}
-                        onYoloApprove={floatingYoloApprove}
-                        onClearContextBuildApprove={
-                          floatingClearContextBuildApprove
-                        }
-                        onClearContextApprove={floatingClearContextApprove}
-                        onWorktreeBuildApprove={
-                          worktree?.project_id
-                            ? floatingWorktreeBuildApprove
-                            : undefined
-                        }
-                        onWorktreeYoloApprove={
-                          worktree?.project_id
-                            ? floatingWorktreeYoloApprove
-                            : undefined
-                        }
-                        onScrollToFindings={scrollToFindings}
-                        onScrollToBottom={scrollToBottom}
-                      />
                     </div>
 
                     {/* Input container - floats over the messages so the sides stay see-through */}
@@ -3188,6 +3160,34 @@ const ChatWindowContent = memo(function ChatWindowContent({
                             <PinnedTablesButton
                               sessionId={activeSessionId}
                               onShowInChat={handleShowTableInChat}
+                            />
+                            <FloatingButtons
+                              showApproveButton={hasPendingPlanApproval}
+                              showFindingsButton={!areFindingsVisible}
+                              isAtBottom={isAtBottom || messages.length === 0}
+                              approveShortcut={approveShortcut}
+                              buildDefaultModelLabel={buildNewContextLabel}
+                              yoloDefaultModelLabel={yoloNewContextLabel}
+                              onApprove={floatingApprove}
+                              onYoloApprove={floatingYoloApprove}
+                              onClearContextBuildApprove={
+                                floatingClearContextBuildApprove
+                              }
+                              onClearContextApprove={
+                                floatingClearContextApprove
+                              }
+                              onWorktreeBuildApprove={
+                                worktree?.project_id
+                                  ? floatingWorktreeBuildApprove
+                                  : undefined
+                              }
+                              onWorktreeYoloApprove={
+                                worktree?.project_id
+                                  ? floatingWorktreeYoloApprove
+                                  : undefined
+                              }
+                              onScrollToFindings={scrollToFindings}
+                              onScrollToBottom={scrollToBottom}
                             />
                             {!isAtBottom && messages.length > 0 && (
                               <button
