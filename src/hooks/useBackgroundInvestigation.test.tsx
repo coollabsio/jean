@@ -30,6 +30,7 @@ describe('useBackgroundInvestigation', () => {
     preferencesData = {}
     useChatStore.setState({
       activeWorktreeId: null,
+      executionModes: {},
       worktreePaths: { 'worktree-1': '/tmp/worktree-1' },
     })
     useUIStore.setState({
@@ -509,6 +510,10 @@ describe('useBackgroundInvestigation', () => {
     const args = call?.[1] as { message: string }
     expect(args.message).toContain('After investigation, fix the issue')
     expect(args.message).not.toMatch(/If you are in yolo mode/i)
+    // Session toolbar mode must match the magic prompt mode, not the default
+    await waitFor(() => {
+      expect(useChatStore.getState().executionModes['session-1']).toBe('yolo')
+    })
   })
 
   it('starts PR investigation when client status was wiped by a remote refetch', async () => {

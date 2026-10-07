@@ -2559,6 +2559,16 @@ pub async fn start_background_investigation_impl(
     let execution_mode = execution_mode
         .filter(|mode| matches!(mode.as_str(), "plan" | "yolo"))
         .unwrap_or_else(|| "plan".to_string());
+    // Persist the magic prompt mode on the session; otherwise the toolbar and
+    // follow-up turns fall back to the session's default policy.
+    crate::chat::set_session_execution_mode(
+        app.clone(),
+        worktree_id.clone(),
+        worktree_path.clone(),
+        session_id.clone(),
+        execution_mode.clone(),
+    )
+    .await?;
     // Detect yolo and append an unconditional fix-after-investigation directive
     // (also strips weak "if yolo" / anti-fix lines). Idempotent if the UI
     // already applied the same transform.

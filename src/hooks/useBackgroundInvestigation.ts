@@ -639,6 +639,7 @@ async function processBackgroundInvestigation(
     setSelectedModel,
     setSelectedProvider,
     setSelectedBackend,
+    setExecutionMode,
     setExecutingMode,
     clearStreamingContent,
     clearToolCalls,
@@ -667,6 +668,7 @@ async function processBackgroundInvestigation(
   setSelectedModel(sessionId, selectedModel)
   setSelectedProvider(sessionId, provider)
   setSelectedBackend(sessionId, backend)
+  setExecutionMode(sessionId, executionMode)
   setExecutingMode(sessionId, executionMode)
   clearStreamingContent(sessionId)
   clearToolCalls(sessionId)
