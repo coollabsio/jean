@@ -98,6 +98,8 @@ struct StartCommitJobRequest {
     custom_profile_name: Option<String>,
     reasoning_effort: Option<String>,
     specific_files: Option<Vec<String>>,
+    #[serde(default)]
+    session_id: Option<String>,
 }
 
 fn selected_project_id_for_init(
@@ -450,6 +452,7 @@ async fn start_commit_job_handler(
         request.custom_profile_name,
         request.reasoning_effort,
         request.specific_files,
+        request.session_id,
         Some(request.job_id),
     )
     .await

@@ -82,6 +82,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { useTheme } from '@/hooks/use-theme'
 import { useUIStore } from '@/store/ui-store'
+import { useChatStore } from '@/store/chat-store'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { usePreferences } from '@/services/preferences'
 import { CommitsTabView } from './CommitsTabView'
@@ -392,6 +393,11 @@ export function GitDiffModal({
           reasoningEffort:
             preferences?.magic_prompt_efforts?.commit_message_effort ?? null,
           specificFiles,
+          sessionId: diffRequest.worktreeId
+            ? (useChatStore.getState().activeSessionIds[
+                diffRequest.worktreeId
+              ] ?? null)
+            : null,
         },
         job => {
           setIsCommitting(false)

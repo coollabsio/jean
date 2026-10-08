@@ -611,6 +611,7 @@ pub async fn dispatch_command(
                 field_opt(&args, "reasoningEffort", "reasoning_effort")?;
             let specific_files: Option<Vec<String>> =
                 field_opt(&args, "specificFiles", "specific_files")?;
+            let session_id: Option<String> = field_opt(&args, "sessionId", "session_id")?;
             let result = crate::projects::create_commit_with_ai(
                 app.clone(),
                 worktree_path,
@@ -622,6 +623,7 @@ pub async fn dispatch_command(
                 custom_profile_name,
                 reasoning_effort,
                 specific_files,
+                session_id,
             )
             .await?;
             to_value(result)
@@ -639,6 +641,7 @@ pub async fn dispatch_command(
                 field_opt(&args, "reasoningEffort", "reasoning_effort")?;
             let specific_files: Option<Vec<String>> =
                 field_opt(&args, "specificFiles", "specific_files")?;
+            let session_id: Option<String> = field_opt(&args, "sessionId", "session_id")?;
             let job_id: Option<String> = field_opt(&args, "jobId", "job_id")?;
             let result = crate::projects::start_commit_job(
                 app.clone(),
@@ -651,6 +654,7 @@ pub async fn dispatch_command(
                 custom_profile_name,
                 reasoning_effort,
                 specific_files,
+                session_id,
                 job_id,
             )
             .await?;

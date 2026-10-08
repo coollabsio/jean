@@ -9164,6 +9164,37 @@ fn get_recent_commits(repo_path: &str, count: u32) -> Result<String, String> {
 }
 
 /// Stage only specific files. Resets the index first to ensure a clean state.
+/// Uncommitted files that a session's AI turns changed (from its checkpoints).
+fn session_changed_files(
+    app: &AppHandle,
+    worktree_id: &str,
+    session_id: &str,
+    status: &str,
+) -> Result<Vec<String>, String> {
+    let session_paths: std::collections::HashSet<String> =
+        super::checkpoints::list_checkpoints(app, worktree_id)?
+            .into_iter()
+            .filter(|c| c.session_id == session_id)
+            .flat_map(|c| c.files_changed.into_iter().map(|f| f.path))
+            .collect();
+    Ok(parse_porcelain_files(status)
+        .into_iter()
+        .map(|(_, path)| path)
+        .filter(|path| session_paths.contains(path))
+        .collect())
+}
+
+/// Insert an extra rule into the prompt's "Rules:" list, or append it.
+fn add_commit_prompt_rule(prompt: &str, rule: &str) -> String {
+    match prompt.find("Rules:\n") {
+        Some(index) => {
+            let insert_at = index + "Rules:\n".len();
+            format!("{}- {rule}\n{}", &prompt[..insert_at], &prompt[insert_at..])
+        }
+        None => format!("{prompt}\n\nAdditional rule:\n- {rule}"),
+    }
+}
+
 fn stage_specific_files(repo_path: &str, files: &[String]) -> Result<(), String> {
     // Reset staging area to ensure only the specified files are staged
     let reset_output = wsl_aware_command("git", Some(Path::new(repo_path)))
@@ -9562,8 +9593,14 @@ pub async fn create_commit_with_ai(
     custom_profile_name: Option<String>,
     reasoning_effort: Option<String>,
     specific_files: Option<Vec<String>>,
+    session_id: Option<String>,
 ) -> Result<CreateCommitResponse, String> {
     log::trace!("Creating commit for: {worktree_path}");
+
+    let preferences = crate::load_preferences_sync(&app).unwrap_or_default();
+    let worktree = load_projects_data(&app)
+        .ok()
+        .and_then(|d| d.worktrees.into_iter().find(|w| w.path == worktree_path));
 
     // 1. Check for uncommitted changes
     let status = get_git_status(&worktree_path)?;
@@ -9587,7 +9624,18 @@ pub async fn create_commit_with_ai(
         return Err("No changes to commit".to_string());
     }
 
-    // 2. Stage changes (specific files or all)
+    // 2. Stage changes (specific files, current session files, or all)
+    let specific_files = match (&specific_files, &session_id, &worktree) {
+        (Some(files), _, _) if !files.is_empty() => specific_files,
+        (_, Some(session_id), Some(worktree)) if preferences.commit_session_changes_only => {
+            let files = session_changed_files(&app, &worktree.id, session_id, &status)?;
+            if files.is_empty() {
+                return Err("No uncommitted changes from this session".to_string());
+            }
+            Some(files)
+        }
+        _ => specific_files,
+    };
     match &specific_files {
         Some(files) if !files.is_empty() => stage_specific_files(&worktree_path, files)?,
         _ => stage_all_changes(&worktree_path)?,
@@ -9616,19 +9664,20 @@ pub async fn create_commit_with_ai(
         .replace("{diff}", &diff)
         .replace("{recent_commits}", &recent_commits)
         .replace("{remote_info}", "");
+    let prompt = match worktree.as_ref().and_then(|w| w.issue_number) {
+        Some(issue_number) if preferences.commit_close_issue => add_commit_prompt_rule(
+            &prompt,
+            &format!("Add a \"Closes #{issue_number}\" footer line so the commit closes GitHub issue #{issue_number}."),
+        ),
+        _ => prompt,
+    };
 
     // 6. Generate commit message with Claude CLI
-    let commit_magic_backend = crate::get_preferences_path(&app)
-        .ok()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|c| serde_json::from_str::<crate::AppPreferences>(&c).ok())
-        .and_then(|p| p.magic_prompt_backends.commit_message_backend);
-    let worktree_id = load_projects_data(&app).ok().and_then(|d| {
-        d.worktrees
-            .iter()
-            .find(|w| w.path == worktree_path)
-            .map(|w| w.id.clone())
-    });
+    let commit_magic_backend = preferences
+        .magic_prompt_backends
+        .commit_message_backend
+        .clone();
+    let worktree_id = worktree.as_ref().map(|w| w.id.clone());
     let response = generate_commit_message(
         &app,
         &prompt,
@@ -9681,6 +9730,7 @@ pub async fn start_commit_job(
     custom_profile_name: Option<String>,
     reasoning_effort: Option<String>,
     specific_files: Option<Vec<String>>,
+    session_id: Option<String>,
     job_id: Option<String>,
 ) -> Result<StartCommitJobResponse, String> {
     let job_id = job_id.unwrap_or_else(|| Uuid::new_v4().to_string());
@@ -9712,6 +9762,7 @@ pub async fn start_commit_job(
                 custom_profile_name,
                 reasoning_effort,
                 specific_files,
+                session_id,
             ))
         })
         .await
@@ -15778,6 +15829,18 @@ Body
             "Claude CLI failed: reached max turns before producing structured output"
         );
         assert!(!result.contains("Looking at the diff"));
+    }
+
+    #[test]
+    fn add_commit_prompt_rule_inserts_into_rules_or_appends() {
+        let with_rules = add_commit_prompt_rule("Intro\n\nRules:\n- Existing\n\nDiff", "New rule");
+        assert_eq!(
+            with_rules,
+            "Intro\n\nRules:\n- New rule\n- Existing\n\nDiff"
+        );
+
+        let custom = add_commit_prompt_rule("Custom prompt", "New rule");
+        assert_eq!(custom, "Custom prompt\n\nAdditional rule:\n- New rule");
     }
 
     #[test]

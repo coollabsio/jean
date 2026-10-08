@@ -1401,6 +1401,8 @@ export interface AppPreferences {
   linear_api_key: string | null // Global Linear personal API key (inherited by all projects)
   sentry_auth_token?: string | null // Global Sentry auth token (inherited by all projects)
   magic_models_auto_initialized: boolean // Whether magic prompt models were auto-set based on installed backends
+  commit_close_issue?: boolean // Commit magic: add "Closes #N" for the worktree's linked GitHub issue
+  commit_session_changes_only?: boolean // Commit magic: stage only files changed by the active session
   claude_cli_source: 'jean' | 'path' // Claude CLI source: 'jean' (managed) or 'path' (system PATH)
   codex_cli_source: 'jean' | 'path' // Codex CLI source: 'jean' (managed) or 'path' (system PATH)
   opencode_cli_source: 'jean' | 'path' // OpenCode CLI source: 'jean' (managed) or 'path' (system PATH)
@@ -2551,6 +2553,8 @@ export const defaultPreferences: AppPreferences = {
   linear_api_key: null, // Default: no global Linear API key
   sentry_auth_token: null, // Default: no global Sentry auth token
   magic_models_auto_initialized: false, // Default: not yet auto-set
+  commit_close_issue: false,
+  commit_session_changes_only: false,
   claude_cli_source: 'jean', // Default: Jean-managed
   codex_cli_source: 'jean', // Default: Jean-managed
   opencode_cli_source: 'jean', // Default: Jean-managed

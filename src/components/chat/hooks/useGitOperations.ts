@@ -428,6 +428,7 @@ export function useGitOperations({
           reasoningEffort:
             preferences?.magic_prompt_efforts?.commit_message_effort ?? null,
           specificFiles,
+          sessionId: activeSessionId ?? null,
         },
         job => {
           clearWorktreeLoading(activeWorktreeId)
@@ -449,6 +450,7 @@ export function useGitOperations({
   }, [
     activeWorktreeId,
     activeWorktreePath,
+    activeSessionId,
     project?.name,
     worktree?.name,
     preferences?.magic_prompts?.commit_message,
@@ -496,6 +498,7 @@ export function useGitOperations({
             reasoningEffort:
               preferences?.magic_prompt_efforts?.commit_message_effort ?? null,
             specificFiles,
+            sessionId: activeSessionId ?? null,
           },
           job => {
             clearWorktreeLoading(activeWorktreeId)
@@ -543,6 +546,7 @@ export function useGitOperations({
     [
       activeWorktreeId,
       activeWorktreePath,
+      activeSessionId,
       project?.name,
       worktree?.name,
       worktree?.pr_number,

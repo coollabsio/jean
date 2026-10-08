@@ -825,6 +825,7 @@ export function MagicModal() {
                 preferences?.magic_prompt_efforts?.commit_message_effort ??
                 null,
               specificFiles,
+              sessionId: activeSessionId ?? null,
             },
             job => {
               clearWorktreeLoading(selectedWorktreeId)
@@ -1804,6 +1805,7 @@ ${resolveInstructions}`
     },
     [
       selectedWorktreeId,
+      activeSessionId,
       worktree,
       preferences,
       project,
