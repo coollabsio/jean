@@ -76,7 +76,13 @@
       "signingIdentity": "Developer ID Application: coolLabs Solutions Korlatolt Felelossegu Tarsasag (8D3F6CQFS8)",
       "providerShortName": "8D3F6CQFS8",
       "entitlements": null,
-      "exceptionDomain": ""
+      "exceptionDomain": "",
+      "dmg": {
+        "background": "dmg/background.png",
+        "windowSize": { "width": 660, "height": 400 },
+        "appPosition": { "x": 180, "y": 210 },
+        "applicationFolderPosition": { "x": 480, "y": 210 }
+      }
     },
     "linux": {
       "appimage": {
