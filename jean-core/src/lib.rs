@@ -4765,7 +4765,7 @@ pub async fn start_runtime_services(context: RuntimeContext) -> Result<(), Strin
             }
         }
 
-        match agent_browser::install_agent_browser_mcp(context, None).await {
+        match agent_browser::install_agent_browser_mcp(context.clone(), None).await {
             Ok(results) => {
                 for result in results
                     .into_iter()
@@ -4779,6 +4779,14 @@ pub async fn start_runtime_services(context: RuntimeContext) -> Result<(), Strin
                 }
             }
             Err(error) => log::warn!("Failed to activate required agent-browser MCP: {error}"),
+        }
+
+        match async_runtime::spawn_blocking(move || agent_browser::import_legacy_profile(&context))
+            .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => log::warn!("{error}"),
+            Err(error) => log::warn!("Legacy agent-browser profile import task failed: {error}"),
         }
     });
 

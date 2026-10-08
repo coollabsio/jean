@@ -1341,6 +1341,10 @@ fn build_claude_args(
 
     // Debug env vars
     env_vars.push(("JEAN_SESSION_ID".to_string(), session_id.to_string()));
+    env_vars.push((
+        crate::agent_browser::SESSION_ENV.to_string(),
+        crate::agent_browser::session_name(session_id),
+    ));
     env_vars.push(("JEAN_WORKTREE_ID".to_string(), worktree_id.to_string()));
     // Jean MCP recursion-depth chain. Always set so a Claude spawned by another
     // Jean-spawned Claude can be capped at the configured depth.

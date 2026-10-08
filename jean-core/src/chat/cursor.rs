@@ -1145,6 +1145,10 @@ pub fn execute_cursor(
 
     // Jean session/depth context for Jean MCP server (when called back).
     cmd.env("JEAN_SESSION_ID", session_id);
+    cmd.env(
+        crate::agent_browser::SESSION_ENV,
+        crate::agent_browser::session_name(session_id),
+    );
     cmd.env("JEAN_WORKTREE_ID", worktree_id);
     let (depth_key, depth_val) = super::jean_mcp::child_depth_env();
     cmd.env(depth_key, depth_val);

@@ -1,9 +1,13 @@
-//! Jean agent browser: persistent Chromium profile + agent-browser MCP install.
+//! Jean agent browser: agent-browser install + MCP config for CLI backends.
 //!
 //! Engine: [vercel-labs/agent-browser](https://github.com/vercel-labs/agent-browser)
-//! (Vercel Labs). Jean owns the profile directory under app data and writes
-//! backend MCP configs so Claude/Codex/etc. can drive a browser the user logged
-//! into manually. The browser itself is Chromium / Chrome for Testing.
+//! (Vercel Labs). The browser itself is Chromium / Chrome for Testing.
+//!
+//! Each Jean session gets its own agent-browser session (`AGENT_BROWSER_SESSION`
+//! set per run), so parallel sessions get separate Chrome instances with
+//! temporary profiles instead of waiting for one shared browser. Logins are
+//! shared through one restore key: cookies and localStorage are saved when a
+//! session's browser closes and are loaded when the next one starts.
 
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -27,8 +31,23 @@ const NPM_INSTALL_SPEC: &str = "agent-browser@latest";
 /// Jean-managed npm install directory under app data.
 pub const CLI_DIR_NAME: &str = "agent-browser-cli";
 
-/// Env var agent-browser uses for a persistent profile directory.
-const PROFILE_ENV: &str = "AGENT_BROWSER_PROFILE";
+/// Env var that selects the agent-browser session (one daemon + browser each).
+pub const SESSION_ENV: &str = "AGENT_BROWSER_SESSION";
+
+/// Env var + shared key for agent-browser auto-save/restore of cookies and
+/// localStorage. One key for all sessions keeps logins shared between them.
+const RESTORE_ENV: &str = "AGENT_BROWSER_RESTORE";
+const RESTORE_KEY: &str = "jean";
+
+/// Close an idle session's browser after 15 minutes to free memory. The
+/// restore state is saved on this shutdown too.
+const IDLE_TIMEOUT_ENV: &str = "AGENT_BROWSER_IDLE_TIMEOUT_MS";
+const IDLE_TIMEOUT_MS: &str = "900000";
+
+/// agent-browser session name for a Jean session.
+pub fn session_name(jean_session_id: &str) -> String {
+    format!("jean-{jean_session_id}")
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,10 +56,6 @@ pub struct AgentBrowserStatus {
     pub installed: bool,
     pub binary_path: Option<String>,
     pub version: Option<String>,
-    /// Absolute path to Jean-managed Chromium user-data-dir.
-    pub profile_path: String,
-    /// Whether the profile directory exists on disk.
-    pub profile_exists: bool,
     /// Jean-managed npm install directory (may not exist yet).
     pub managed_dir: String,
     /// Whether the binary is Jean-managed under app data.
@@ -74,21 +89,25 @@ pub struct AgentBrowserUpdateStatus {
 
 struct McpEntry {
     command: String,
-    profile_path: String,
 }
 
+/// Env written into every backend's MCP entry. The per-session
+/// `AGENT_BROWSER_SESSION` is not here: Jean sets it on each run.
+const ENTRY_ENV: [(&str, &str); 2] = [
+    (RESTORE_ENV, RESTORE_KEY),
+    (IDLE_TIMEOUT_ENV, IDLE_TIMEOUT_MS),
+];
+
 impl McpEntry {
-    fn new(command: String, profile_path: String) -> Self {
-        Self {
-            command,
-            profile_path,
-        }
+    fn new(command: String) -> Self {
+        Self { command }
     }
 
     fn env_map(&self) -> serde_json::Map<String, Value> {
-        let mut env = serde_json::Map::new();
-        env.insert(PROFILE_ENV.into(), self.profile_path.clone().into());
-        env
+        ENTRY_ENV
+            .iter()
+            .map(|(key, value)| (key.to_string(), Value::from(*value)))
+            .collect()
     }
 
     fn claude_server_json(&self) -> Value {
@@ -127,12 +146,15 @@ impl McpEntry {
     }
 
     fn codex_snippet(&self) -> String {
+        let env = ENTRY_ENV
+            .iter()
+            .map(|(key, value)| format!("{key} = \"{value}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
         format!(
-            "[mcp_servers.{}]\ncommand = \"{}\"\nargs = [\"mcp\"]\nenv = {{ {} = \"{}\" }}\nenabled = true\n",
+            "[mcp_servers.{}]\ncommand = \"{}\"\nargs = [\"mcp\"]\nenv = {{ {env} }}\nenabled = true\n",
             MCP_SERVER_NAME,
             escape_toml_string(&self.command),
-            PROFILE_ENV,
-            escape_toml_string(&self.profile_path),
         )
     }
 
@@ -141,15 +163,18 @@ impl McpEntry {
         table["command"] = toml_edit::value(self.command.clone());
         table["args"] = toml_edit::value(toml_edit::Array::from_iter(["mcp"]));
         let mut env = toml_edit::InlineTable::new();
-        env.insert(PROFILE_ENV, self.profile_path.clone().into());
+        for (key, value) in ENTRY_ENV {
+            env.insert(key, value.into());
+        }
         table["env"] = toml_edit::value(env);
         table["enabled"] = toml_edit::value(true);
         toml_edit::Item::Table(table)
     }
 }
 
-/// Resolve Jean-managed persistent profile directory.
-pub fn profile_path(app: &AppHandle) -> Result<PathBuf, String> {
+/// Shared persistent profile used by Jean versions before per-session browsers.
+/// Only read once to import its logins (see [`import_legacy_profile`]).
+fn legacy_profile_path(app: &AppHandle) -> Result<PathBuf, String> {
     let app_data = app
         .path()
         .app_data_dir()
@@ -239,35 +264,92 @@ fn read_binary_version(path: &Path) -> Option<String> {
     }
 }
 
-/// Create the profile directory if missing.
-pub fn ensure_profile(app: &AppHandle) -> Result<PathBuf, String> {
-    let path = profile_path(app)?;
-    std::fs::create_dir_all(&path).map_err(|e| {
-        format!(
-            "Failed to create agent browser profile {}: {e}",
-            path.display()
-        )
-    })?;
-    Ok(path)
-}
-
-fn build_entry(app: &AppHandle) -> Result<McpEntry, String> {
-    let profile = ensure_profile(app)?;
+fn build_entry(app: &AppHandle) -> McpEntry {
     let resolved = resolve_agent_browser_binary(app);
     let command = resolved
         .path
         .filter(|p| !p.is_empty())
         .unwrap_or_else(|| "agent-browser".to_string());
-    Ok(McpEntry::new(
-        command,
-        profile.to_string_lossy().to_string(),
+    McpEntry::new(command)
+}
+
+/// Per-thread Codex config override that sets the agent-browser session.
+///
+/// Codex runs one app-server for all Jean sessions, so Jean cannot set the
+/// session env per run. Codex starts MCP servers per thread, so a dotted
+/// per-thread override works instead. Returns `None` when the Codex config has
+/// no agent-browser server: the override alone would create a partial server
+/// table without `command`, which Codex rejects.
+pub fn codex_session_config_override(jean_session_id: &str) -> Option<(String, Value)> {
+    let path = dirs::home_dir()?.join(".codex").join("config.toml");
+    codex_session_config_override_at(&path, jean_session_id)
+}
+
+fn codex_session_config_override_at(path: &Path, jean_session_id: &str) -> Option<(String, Value)> {
+    let doc = std::fs::read_to_string(path)
+        .ok()?
+        .parse::<toml_edit::DocumentMut>()
+        .ok()?;
+    doc.get("mcp_servers")?.get(MCP_SERVER_NAME)?;
+    Some((
+        format!("mcp_servers.{MCP_SERVER_NAME}.env.{SESSION_ENV}"),
+        Value::from(session_name(jean_session_id)),
     ))
+}
+
+/// One-time import of logins from the legacy shared profile into the shared
+/// restore key. Opening the profile with `--restore` and closing it saves its
+/// cookies as restore state. The profile is then renamed so the import does
+/// not run again. Fails (and retries on the next launch) while a legacy
+/// browser still holds the profile lock.
+pub(crate) fn import_legacy_profile(app: &AppHandle) -> Result<(), String> {
+    let profile = legacy_profile_path(app)?;
+    if !profile.is_dir() {
+        return Ok(());
+    }
+    let Some(binary) = resolve_agent_browser_binary(app)
+        .path
+        .filter(|p| !p.is_empty())
+    else {
+        return Ok(());
+    };
+
+    const IMPORT_SESSION: &str = "jean-profile-import";
+    let profile_arg = profile.to_string_lossy().to_string();
+    let run = |args: &[&str]| -> Result<(), String> {
+        let output = host_cli_command(&binary, None)
+            .args(["--session", IMPORT_SESSION])
+            .args(args)
+            .output()
+            .map_err(|e| format!("Failed to run agent-browser: {e}"))?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+        }
+    };
+    run(&[
+        "--profile",
+        &profile_arg,
+        "--restore",
+        RESTORE_KEY,
+        "open",
+        "about:blank",
+    ])
+    .map_err(|e| format!("Failed to open legacy agent-browser profile: {e}"))?;
+    run(&["close"]).map_err(|e| format!("Failed to save legacy agent-browser logins: {e}"))?;
+
+    let imported = profile.with_file_name("profile-imported");
+    std::fs::rename(&profile, &imported).map_err(|e| {
+        format!(
+            "Imported legacy agent-browser logins, but failed to rename {}: {e}",
+            profile.display()
+        )
+    })
 }
 
 /// Status for Settings UI / operators.
 pub async fn get_agent_browser_status(app: AppHandle) -> Result<AgentBrowserStatus, String> {
-    let profile = profile_path(&app)?;
-    let profile_exists = profile.is_dir();
     let managed_dir = managed_cli_dir(&app)?;
     let resolved = resolve_agent_browser_binary(&app);
     let entry = McpEntry::new(
@@ -276,27 +358,18 @@ pub async fn get_agent_browser_status(app: AppHandle) -> Result<AgentBrowserStat
             .clone()
             .filter(|p| !p.is_empty())
             .unwrap_or_else(|| "agent-browser".to_string()),
-        profile.to_string_lossy().to_string(),
     );
 
     Ok(AgentBrowserStatus {
         installed: resolved.installed,
         binary_path: resolved.path,
         version: resolved.version,
-        profile_path: profile.to_string_lossy().to_string(),
-        profile_exists,
         managed_dir: managed_dir.to_string_lossy().to_string(),
         managed_install: resolved.managed,
         claude_snippet: entry.claude_snippet(),
         codex_snippet: entry.codex_snippet(),
         install_hint: "Jean installs Agent Browser automatically. Manual fallback: npm install -g agent-browser@latest && agent-browser install".to_string(),
     })
-}
-
-/// Ensure profile dir exists (idempotent).
-pub async fn ensure_agent_browser_profile(app: AppHandle) -> Result<AgentBrowserStatus, String> {
-    ensure_profile(&app)?;
-    get_agent_browser_status(app).await
 }
 
 /// Check the npm registry for a newer agent-browser release.
@@ -384,8 +457,6 @@ pub(crate) fn install_agent_browser_sync(app: &AppHandle) -> Result<AgentBrowser
         )
     })?;
 
-    // Ensure profile exists so MCP install can succeed right after.
-    ensure_profile(app)?;
     let npm_path = crate::prerequisites::require_npm("agent-browser")?;
 
     let npm_output = host_cli_command(&npm_path, None)
@@ -454,7 +525,6 @@ pub(crate) fn install_agent_browser_sync(app: &AppHandle) -> Result<AgentBrowser
     }
 
     // Build status without re-entering async.
-    let profile = profile_path(app)?;
     let resolved = resolve_agent_browser_binary(app);
     if !resolved.installed {
         return Err("agent-browser install finished but binary still not detected".to_string());
@@ -464,15 +534,12 @@ pub(crate) fn install_agent_browser_sync(app: &AppHandle) -> Result<AgentBrowser
             .path
             .clone()
             .unwrap_or_else(|| binary.to_string_lossy().to_string()),
-        profile.to_string_lossy().to_string(),
     );
 
     Ok(AgentBrowserStatus {
         installed: true,
         binary_path: resolved.path,
         version: resolved.version,
-        profile_path: profile.to_string_lossy().to_string(),
-        profile_exists: profile.is_dir(),
         managed_dir: cli_dir.to_string_lossy().to_string(),
         managed_install: true,
         claude_snippet: entry.claude_snippet(),
@@ -483,14 +550,14 @@ pub(crate) fn install_agent_browser_sync(app: &AppHandle) -> Result<AgentBrowser
 
 /// Install `agent-browser` MCP server into selected CLI backends.
 ///
-/// Creates the Jean profile directory and writes backend config with
-/// `AGENT_BROWSER_PROFILE` pointing at it. Prefers the Jean-managed binary when
-/// present; otherwise requires `agent-browser` on PATH.
+/// Writes the shared restore key and idle timeout into each backend config.
+/// Prefers the Jean-managed binary when present; otherwise requires
+/// `agent-browser` on PATH.
 pub async fn install_agent_browser_mcp(
     app: AppHandle,
     backends: Option<Vec<String>>,
 ) -> Result<Vec<AgentBrowserInstallResult>, String> {
-    let entry = build_entry(&app)?;
+    let entry = build_entry(&app);
     let backends = backends.unwrap_or_else(|| {
         vec![
             "claude".to_string(),
@@ -675,10 +742,7 @@ mod antigravity_install_tests {
     fn installs_agent_browser_in_antigravity_global_config() {
         let temp = tempfile::tempdir().expect("tempdir");
         let path = temp.path().join("mcp_config.json");
-        let entry = McpEntry {
-            command: "agent-browser".to_string(),
-            profile_path: temp.path().join("profile").to_string_lossy().to_string(),
-        };
+        let entry = McpEntry::new("agent-browser".to_string());
 
         install_antigravity_at(path.clone(), &entry).expect("install");
 
@@ -883,26 +947,60 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn mcp_entry_claude_snippet_includes_profile_env() {
-        let entry = McpEntry::new(
-            "agent-browser".into(),
-            "/tmp/jean-agent-browser/profile".into(),
-        );
-        let snippet = entry.claude_snippet();
-        assert!(snippet.contains("agent-browser"));
-        assert!(snippet.contains("AGENT_BROWSER_PROFILE"));
-        assert!(snippet.contains("/tmp/jean-agent-browser/profile"));
-        assert!(snippet.contains("\"mcp\""));
+    fn mcp_entry_uses_shared_restore_key_without_shared_profile() {
+        let server = McpEntry::new("agent-browser".into()).claude_server_json();
+        assert_eq!(server["args"], json!(["mcp"]));
+        assert_eq!(server["env"]["AGENT_BROWSER_RESTORE"], "jean");
+        assert_eq!(server["env"]["AGENT_BROWSER_IDLE_TIMEOUT_MS"], "900000");
+        // A shared profile is locked by one Chrome and blocks parallel sessions.
+        assert!(server["env"].get("AGENT_BROWSER_PROFILE").is_none());
+        // The session is set per run, never globally.
+        assert!(server["env"].get(SESSION_ENV).is_none());
     }
 
     #[test]
-    fn mcp_entry_codex_snippet_is_toml() {
-        let entry = McpEntry::new("agent-browser".into(), "/data/profile".into());
-        let snippet = entry.codex_snippet();
-        assert!(snippet.contains("[mcp_servers.agent-browser]"));
-        assert!(snippet.contains("AGENT_BROWSER_PROFILE"));
-        assert!(snippet.contains("/data/profile"));
-        assert!(snippet.contains("enabled = true"));
+    fn mcp_entry_codex_snippet_is_valid_toml() {
+        let snippet = McpEntry::new("agent-browser".into()).codex_snippet();
+        let doc = snippet.parse::<toml_edit::DocumentMut>().unwrap();
+        let server = &doc["mcp_servers"]["agent-browser"];
+        assert_eq!(
+            server["env"]["AGENT_BROWSER_RESTORE"].as_str(),
+            Some("jean")
+        );
+        assert_eq!(server["enabled"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn session_name_is_scoped_to_jean_session() {
+        assert_eq!(session_name("abc-123"), "jean-abc-123");
+    }
+
+    #[test]
+    fn codex_override_targets_session_env_of_installed_server() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        install_toml_server(
+            path.clone(),
+            &McpEntry::new("agent-browser".into()),
+            "Codex",
+            false,
+        )
+        .unwrap();
+
+        let (key, value) = codex_session_config_override_at(&path, "s1").unwrap();
+        assert_eq!(key, "mcp_servers.agent-browser.env.AGENT_BROWSER_SESSION");
+        assert_eq!(value, "jean-s1");
+    }
+
+    #[test]
+    fn codex_override_skipped_without_installed_server() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        // Missing file
+        assert!(codex_session_config_override_at(&path, "s1").is_none());
+        // Server not installed: an override would create a partial table.
+        fs::write(&path, "[mcp_servers.other]\ncommand = \"x\"\n").unwrap();
+        assert!(codex_session_config_override_at(&path, "s1").is_none());
     }
 
     #[test]
@@ -915,7 +1013,7 @@ mod tests {
         )
         .unwrap();
 
-        let entry = McpEntry::new("agent-browser".into(), "/p".into());
+        let entry = McpEntry::new("agent-browser".into());
         install_json_server(path.clone(), "mcpServers", entry.claude_server_json()).unwrap();
 
         let parsed: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
@@ -925,8 +1023,8 @@ mod tests {
             "agent-browser"
         );
         assert_eq!(
-            parsed["mcpServers"]["agent-browser"]["env"]["AGENT_BROWSER_PROFILE"],
-            "/p"
+            parsed["mcpServers"]["agent-browser"]["env"]["AGENT_BROWSER_RESTORE"],
+            "jean"
         );
     }
 
@@ -936,14 +1034,14 @@ mod tests {
         let path = dir.path().join("config.toml");
         fs::write(&path, "[mcp_servers.existing]\ncommand = \"foo\"\n").unwrap();
 
-        let entry = McpEntry::new("/usr/bin/agent-browser".into(), "/var/profile".into());
+        let entry = McpEntry::new("/usr/bin/agent-browser".into());
         install_toml_server(path.clone(), &entry, "Codex", false).unwrap();
 
         let content = fs::read_to_string(&path).unwrap();
         assert!(content.contains("[mcp_servers.existing]"));
         assert!(content.contains("[mcp_servers.agent-browser]"));
         assert!(content.contains("/usr/bin/agent-browser"));
-        assert!(content.contains("/var/profile"));
+        assert!(content.contains("AGENT_BROWSER_RESTORE"));
     }
 
     #[test]

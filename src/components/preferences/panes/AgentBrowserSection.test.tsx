@@ -23,8 +23,6 @@ const status = {
   installed: false,
   binaryPath: null,
   version: null,
-  profilePath: '/tmp/agent-browser/profile',
-  profileExists: false,
   managedDir: '/tmp/agent-browser-cli',
   managedInstall: false,
   claudeSnippet: '{}',
@@ -49,7 +47,7 @@ describe('AgentBrowserSection', () => {
     vi.mocked(invoke).mockImplementation(async (command: string) => {
       if (command === 'get_agent_browser_status') return status
       if (command === 'install_agent_browser') {
-        return { ...status, installed: true, profileExists: true }
+        return { ...status, installed: true }
       }
       if (command === 'install_agent_browser_mcp') return []
       return null

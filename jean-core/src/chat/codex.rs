@@ -1105,7 +1105,7 @@ pub fn execute_codex_via_server(
     let thread_id = match (|| -> Result<String, String> {
         if let Some(tid) = existing_thread_id {
             // Resume existing thread
-            let resume_params = build_thread_start_params(
+            let mut resume_params = build_thread_start_params(
                 working_dir,
                 model,
                 execution_mode,
@@ -1114,6 +1114,7 @@ pub fn execute_codex_via_server(
                 Some(model_verbosity),
                 codex_provider,
             );
+            apply_agent_browser_session(&mut resume_params, session_id);
             let mut full_params =
                 serde_json::json!({ "threadId": tid, "persistExtendedHistory": true });
             // Copy overridable fields
@@ -1136,6 +1137,7 @@ pub fn execute_codex_via_server(
                 Err(e) => {
                     log::warn!("Failed to resume thread {tid}: {e}, starting new thread");
                     start_new_thread(
+                        session_id,
                         working_dir,
                         model,
                         execution_mode,
@@ -1148,6 +1150,7 @@ pub fn execute_codex_via_server(
             }
         } else {
             start_new_thread(
+                session_id,
                 working_dir,
                 model,
                 execution_mode,
@@ -1840,7 +1843,20 @@ pub fn resume_codex_after_crash(
 
 /// Start a new Codex thread via app-server.
 #[allow(clippy::too_many_arguments)]
+/// Give this thread's agent-browser MCP server its own browser session, so
+/// parallel Jean sessions do not share one browser.
+fn apply_agent_browser_session(params: &mut serde_json::Value, session_id: &str) {
+    let Some((key, value)) = crate::agent_browser::codex_session_config_override(session_id) else {
+        return;
+    };
+    if !params["config"].is_object() {
+        params["config"] = serde_json::json!({});
+    }
+    params["config"][key] = value;
+}
+
 fn start_new_thread(
+    session_id: &str,
     working_dir: &std::path::Path,
     model: Option<&str>,
     execution_mode: Option<&str>,
@@ -1851,7 +1867,7 @@ fn start_new_thread(
 ) -> Result<String, String> {
     use super::codex_server;
 
-    let params = build_thread_start_params(
+    let mut params = build_thread_start_params(
         working_dir,
         model,
         execution_mode,
@@ -1860,6 +1876,7 @@ fn start_new_thread(
         model_verbosity,
         codex_provider,
     );
+    apply_agent_browser_session(&mut params, session_id);
 
     let result = codex_server::send_request("thread/start", params)?;
     let thread_id = result

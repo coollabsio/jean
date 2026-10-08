@@ -128,6 +128,7 @@ describe('model option helpers', () => {
     expect(modelOptions.map(option => option.value)).toEqual([
       'claude-opus-5-5',
       'claude-sonnet-5-5',
+      'claude-haiku-5-5',
       'claude-fable-5-1',
       'claude-fable-5',
       'claude-opus-5',
@@ -151,6 +152,7 @@ describe('model option helpers', () => {
     expect(normalizeClaudeModel('claude-opus-5')).toBe('claude-opus-5')
     expect(normalizeClaudeModel('claude-sonnet-5-5')).toBe('claude-sonnet-5-5')
     expect(normalizeClaudeModel('claude-sonnet-5')).toBe('claude-sonnet-5')
+    expect(normalizeClaudeModel('claude-haiku-5-5')).toBe('claude-haiku-5-5')
     expect(normalizeClaudeModel('claude-opus-4-8')).toBe('claude-opus-4-8')
     expect(normalizeClaudeModel('claude-opus-4-7')).toBe('claude-opus-4-7')
     expect(normalizeClaudeModel('claude-opus-4-6')).toBe('claude-opus-4-6')

@@ -666,6 +666,10 @@ pub fn run_kimi_acp_host_from_args() -> Result<(), String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     if let Some(session_id) = jean_session_id {
+        command.env(
+            crate::agent_browser::SESSION_ENV,
+            crate::agent_browser::session_name(&session_id),
+        );
         command.env("JEAN_SESSION_ID", session_id);
     }
     if let Some(worktree_id) = worktree_id {
@@ -1239,6 +1243,10 @@ fn execute_kimi_attached(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .env("JEAN_SESSION_ID", options.jean_session_id)
+        .env(
+            crate::agent_browser::SESSION_ENV,
+            crate::agent_browser::session_name(options.jean_session_id),
+        )
         .env("JEAN_WORKTREE_ID", options.worktree_id);
     let (depth_key, depth_value) = super::jean_mcp::child_depth_env();
     command.env(depth_key, depth_value);

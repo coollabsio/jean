@@ -43,6 +43,7 @@
 - Add live-stream and persisted-history parsers together, and route history by the per-run backend before generic fallback logic.
 - Resolve default, custom, and empty prompts consistently on every backend; backend mode instructions must augment the shared prompt.
 - A capability is complete only when preferences, every send path, persistence, rendering, cancellation, and tests all support it.
+- Per-session settings for a backend child (env, MCP config) need a per-run path: process env for per-run CLIs, per-thread config overrides for shared servers (Codex app-server). Shared server processes (OpenCode) cannot isolate per session.
 
 ## Verify external tools from authoritative sources
 
