@@ -157,7 +157,13 @@ export function ServersList({ servers }: ServersListProps) {
                     )}
                   </span>
                 </button>
-                <div className="absolute right-1.5 top-1/2 flex -translate-y-1/2 gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+                {/* Touch devices cannot hover, so keep actions visible there. */}
+                <div
+                  className={cn(
+                    'absolute right-1.5 top-1/2 flex -translate-y-1/2 gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100',
+                    isMobile && 'opacity-100'
+                  )}
+                >
                   {!project.server?.local && (
                     <button
                       type="button"
