@@ -16,6 +16,14 @@ describe('decideWorktreeMiddleClose', () => {
   it('closes immediately when confirm_session_close is disabled', () => {
     expect(decideWorktreeMiddleClose(false)).toBe('close')
   })
+
+  it('closes immediately when the bypass modifier is held, even with confirmation on', () => {
+    expect(decideWorktreeMiddleClose(true, true)).toBe('close')
+  })
+
+  it('still confirms with confirmation on when the bypass is not held', () => {
+    expect(decideWorktreeMiddleClose(true, false)).toBe('confirm')
+  })
 })
 
 describe('decideSessionMiddleClose', () => {
@@ -97,5 +105,27 @@ describe('decideSessionMiddleClose', () => {
         confirmSessionClose: false,
       })
     ).toBe('delete')
+  })
+
+  it('deletes when the bypass modifier is held, even with confirmation on', () => {
+    expect(
+      decideSessionMiddleClose({
+        activeSessionCount: 1,
+        sessionIsEmpty: false,
+        confirmSessionClose: true,
+        bypassConfirm: true,
+      })
+    ).toBe('delete')
+  })
+
+  it('still confirms a non-empty session when the bypass is not held', () => {
+    expect(
+      decideSessionMiddleClose({
+        activeSessionCount: 1,
+        sessionIsEmpty: false,
+        confirmSessionClose: true,
+        bypassConfirm: false,
+      })
+    ).toBe('confirm')
   })
 })
