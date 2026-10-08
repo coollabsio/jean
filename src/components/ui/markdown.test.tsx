@@ -66,7 +66,10 @@ describe('Markdown', () => {
     fireEvent.click(screen.getByRole('link', { name: 'docs' }))
     expect(mockSetRow).not.toHaveBeenCalled()
 
+    const focusChat = vi.fn()
+    window.addEventListener('focus-chat-input', focusChat)
     fireEvent.click(screen.getByText('a'))
+    window.removeEventListener('focus-chat-input', focusChat)
     expect(mockSetRow).toHaveBeenCalledWith(
       's1',
       't1',
@@ -74,7 +77,9 @@ describe('Markdown', () => {
       expect.any(Array),
       ''
     )
-    expect(screen.getByLabelText(/row 1/i)).toBeTruthy()
+    // Adding a row moves focus to the chat input, without the note form.
+    expect(focusChat).toHaveBeenCalledTimes(1)
+    expect(screen.queryByLabelText(/row 1/i)).toBeNull()
   })
 
   it('checks the checklist row when the row is added to the prompt', () => {

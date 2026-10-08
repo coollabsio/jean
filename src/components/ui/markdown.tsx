@@ -282,9 +282,9 @@ function focusSiblingRow(row: HTMLElement, step: 1 | -1) {
 }
 
 /**
- * Table row that adds itself to the prompt chip on click, then opens a small
- * form under the row for an optional note. A click on a row that is already
- * in the prompt opens the same form to edit the note or remove the row.
+ * Table row that adds itself to the prompt chip on click and moves focus to
+ * the chat input. A click on a row that is already in the prompt opens a small
+ * form under the row to add or edit a note, or to remove the row.
  *
  * Keyboard: Up/Down move between rows, Enter opens the note form (a second
  * Enter adds the row to the prompt), Delete/Backspace remove the row.
@@ -293,10 +293,10 @@ function PromptRow({ row, rowIndex, inPrompt, note, onSave }: PromptRowProps) {
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState(note)
   const rowRef = useRef<HTMLElement>(null)
+  const isMobile = useIsMobile()
   const rowNumber = rowIndex + 1
 
-  const openForm = (addNow: boolean) => {
-    if (addNow && !inPrompt) onSave(rowIndex, '')
+  const openForm = () => {
     setDraft(note)
     setOpen(true)
   }
@@ -324,7 +324,15 @@ function PromptRow({ row, rowIndex, inPrompt, note, onSave }: PromptRowProps) {
             const target = event.target as HTMLElement
             if (target.closest(ROW_CLICK_IGNORE)) return
             if (window.getSelection()?.toString()) return
-            openForm(true)
+            if (inPrompt) {
+              openForm()
+              return
+            }
+            onSave(rowIndex, '')
+            // Skip on mobile to avoid the on-screen keyboard popup.
+            if (!isMobile) {
+              window.dispatchEvent(new CustomEvent('focus-chat-input'))
+            }
           },
           onKeyDown: (event: React.KeyboardEvent<HTMLElement>) => {
             if (event.target !== event.currentTarget) return
@@ -333,7 +341,7 @@ function PromptRow({ row, rowIndex, inPrompt, note, onSave }: PromptRowProps) {
             if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
               focusSiblingRow(row, event.key === 'ArrowDown' ? 1 : -1)
             } else if (event.key === 'Enter' || event.key === ' ') {
-              openForm(false)
+              openForm()
             } else if (event.key === 'Delete' || event.key === 'Backspace') {
               if (inPrompt) onSave(rowIndex, null)
             } else {
