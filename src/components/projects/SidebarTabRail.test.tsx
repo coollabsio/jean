@@ -12,13 +12,17 @@ describe('SidebarTabRail', () => {
   beforeEach(() => {
     mocks.isMobile = false
     useProjectsStore.setState({ sidebarActiveTab: 'projects' })
-    useUIStore.setState({ leftSidebarVisible: true, preferencesOpen: false })
+    useUIStore.setState({
+      leftSidebarVisible: true,
+      preferencesOpen: false,
+      railSection: 'workspace',
+    })
   })
 
-  it('shows a single Workspace section', () => {
+  it('shows Workspace and Agents sections', () => {
     render(<SidebarTabRail />)
 
-    expect(screen.getAllByRole('tab')).toHaveLength(1)
+    expect(screen.getAllByRole('tab')).toHaveLength(2)
     expect(
       screen
         .getByRole('tab', { name: 'Workspace' })
@@ -33,7 +37,7 @@ describe('SidebarTabRail', () => {
     expect(useUIStore.getState().leftSidebarVisible).toBe(true)
   })
 
-  it('hides a visible sidebar when Workspace is clicked', async () => {
+  it('hides a visible sidebar and keeps Workspace active', async () => {
     render(<SidebarTabRail togglesSidebar />)
     await userEvent.click(screen.getByRole('tab', { name: 'Workspace' }))
 
@@ -42,7 +46,7 @@ describe('SidebarTabRail', () => {
       screen
         .getByRole('tab', { name: 'Workspace' })
         .getAttribute('aria-selected')
-    ).toBe('false')
+    ).toBe('true')
   })
 
   it('shows a hidden sidebar and keeps the panel view', async () => {
@@ -69,6 +73,40 @@ describe('SidebarTabRail', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Open Settings' }))
 
     expect(useUIStore.getState().preferencesOpen).toBe(true)
+    expect(useUIStore.getState().leftSidebarVisible).toBe(false)
+  })
+
+  it('switches to Agents without hiding the desktop sidebar state', async () => {
+    render(<SidebarTabRail togglesSidebar />)
+    await userEvent.click(screen.getByRole('tab', { name: 'Agents' }))
+
+    expect(useUIStore.getState().railSection).toBe('agents')
+    expect(useUIStore.getState().leftSidebarVisible).toBe(true)
+    expect(
+      screen.getByRole('tab', { name: 'Agents' }).getAttribute('aria-selected')
+    ).toBe('true')
+    expect(
+      screen
+        .getByRole('tab', { name: 'Workspace' })
+        .getAttribute('aria-selected')
+    ).toBe('false')
+  })
+
+  it('returns to Workspace and shows the sidebar from Agents', async () => {
+    useUIStore.setState({ railSection: 'agents', leftSidebarVisible: false })
+    render(<SidebarTabRail togglesSidebar />)
+    await userEvent.click(screen.getByRole('tab', { name: 'Workspace' }))
+
+    expect(useUIStore.getState().railSection).toBe('workspace')
+    expect(useUIStore.getState().leftSidebarVisible).toBe(true)
+  })
+
+  it('closes the mobile drawer when Agents is clicked', async () => {
+    mocks.isMobile = true
+    render(<SidebarTabRail />)
+    await userEvent.click(screen.getByRole('tab', { name: 'Agents' }))
+
+    expect(useUIStore.getState().railSection).toBe('agents')
     expect(useUIStore.getState().leftSidebarVisible).toBe(false)
   })
 })

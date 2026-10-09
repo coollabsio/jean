@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Code, Settings } from '@/components/icons/reicon'
+import { Bot, Code, Settings } from '@/components/icons/reicon'
 import {
   Tooltip,
   TooltipContent,
@@ -10,14 +10,13 @@ import { edgeNeutral, raised } from '@/components/ui/button'
 import { isNativeApp } from '@/lib/environment'
 import { FALLBACK_APP_VERSION } from '@/lib/app-version'
 import { openExternal } from '@/lib/platform'
-import { useUIStore } from '@/store/ui-store'
+import { useUIStore, type RailSection } from '@/store/ui-store'
 import { useIsMobile } from '@/hooks/use-mobile'
 
-/** Top-level Jean features. Agents will be added here later. */
-type RailSection = 'workspace'
-
+/** Top-level Jean features */
 const SECTIONS: { section: RailSection; label: string; Icon: typeof Code }[] = [
   { section: 'workspace', label: 'Workspace', Icon: Code },
+  { section: 'agents', label: 'Agents', Icon: Bot },
 ]
 
 // Same 3D raised look as Button (secondary variant)
@@ -45,8 +44,7 @@ export function SidebarTabRail({
   className,
   children,
 }: SidebarTabRailProps) {
-  const sidebarVisible = useUIStore(state => state.leftSidebarVisible)
-  const showActive = !togglesSidebar || sidebarVisible
+  const railSection = useUIStore(state => state.railSection)
   const isMobile = useIsMobile()
   const [appVersion, setAppVersion] = useState(FALLBACK_APP_VERSION)
 
@@ -59,12 +57,24 @@ export function SidebarTabRail({
       .catch(() => setAppVersion(FALLBACK_APP_VERSION))
   }, [])
 
-  // Only one section exists, so clicking it only toggles the sidebar.
-  const handleSelect = useCallback(() => {
-    if (!togglesSidebar) return
-    const { leftSidebarVisible, setLeftSidebarVisible } = useUIStore.getState()
-    setLeftSidebarVisible(!leftSidebarVisible)
-  }, [togglesSidebar])
+  const handleSelect = useCallback(
+    (section: RailSection) => {
+      const ui = useUIStore.getState()
+      // Agents has no sidebar panel, only a main page
+      if (section === 'agents') {
+        ui.setRailSection('agents')
+        if (isMobile) ui.setLeftSidebarVisible(false)
+        return
+      }
+      if (ui.railSection !== 'workspace') {
+        ui.setRailSection('workspace')
+        if (togglesSidebar) ui.setLeftSidebarVisible(true)
+        return
+      }
+      if (togglesSidebar) ui.setLeftSidebarVisible(!ui.leftSidebarVisible)
+    },
+    [togglesSidebar, isMobile]
+  )
 
   const handleOpenSettings = useCallback(() => {
     const ui = useUIStore.getState()
@@ -89,7 +99,8 @@ export function SidebarTabRail({
         aria-orientation="vertical"
       >
         {SECTIONS.map(({ section, label, Icon }) => {
-          const selected = showActive
+          // Active = open section, even when the Workspace list is collapsed
+          const selected = railSection === section
           return (
             <Tooltip key={section}>
               <TooltipTrigger asChild>
@@ -102,7 +113,7 @@ export function SidebarTabRail({
                     RAIL_BUTTON_CLASS,
                     selected && RAIL_BUTTON_PRESSED_CLASS
                   )}
-                  onClick={handleSelect}
+                  onClick={() => handleSelect(section)}
                 >
                   <Icon className="size-6" />
                 </button>
@@ -119,7 +130,8 @@ export function SidebarTabRail({
             onClick={handleOpenSettings}
             aria-label="Open Settings"
             data-testid="sidebar-settings"
-            className={cn(RAIL_BUTTON_CLASS, 'mt-auto')}
+            // Plain icon, not a raised button
+            className="mt-auto flex size-12 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           >
             <Settings className="size-6" />
           </button>

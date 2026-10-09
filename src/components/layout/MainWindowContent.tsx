@@ -52,6 +52,7 @@ export const MainWindowContent = memo(function MainWindowContent({
   sidebarSwipeIndicator,
 }: MainWindowContentProps) {
   const activeWorktreePath = useChatStore(state => state.activeWorktreePath)
+  const showAgents = useUIStore(state => state.railSection === 'agents')
   const isMobile = useIsMobile()
 
   const selectedProjectId = useProjectsStore(state => state.selectedProjectId)
@@ -67,7 +68,8 @@ export const MainWindowContent = memo(function MainWindowContent({
 
   const realProjects = projects.filter(p => !isFolder(p))
 
-  const showWelcome = !activeWorktreePath && !selectedProjectId && !children
+  const showWelcome =
+    !showAgents && !activeWorktreePath && !selectedProjectId && !children
   const shouldCheckBackends = backendCheckReady && showWelcome
   const { installedBackends, isLoading: backendsLoading } =
     useInstalledBackends({
@@ -206,7 +208,7 @@ export const MainWindowContent = memo(function MainWindowContent({
           />
         </div>
       )}
-      {activeWorktreePath ? (
+      {activeWorktreePath && !showAgents ? (
         <div
           ref={isMobile ? sidebarSwipeContainerRef : undefined}
           className="relative h-full w-full"
@@ -230,7 +232,15 @@ export const MainWindowContent = memo(function MainWindowContent({
           className="relative flex h-full w-full min-w-0 flex-col bg-background"
           data-testid="mobile-swipe-open-sidebar"
         >
-          {nonChatContent}
+          {showAgents ? (
+            <div className="flex flex-1 items-center justify-center font-sans">
+              <p className="text-lg text-muted-foreground">
+                Agents are coming...
+              </p>
+            </div>
+          ) : (
+            nonChatContent
+          )}
         </div>
       )}
     </div>

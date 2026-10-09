@@ -250,6 +250,10 @@ export function MainWindow() {
   const { offset: toasterOffset, mobileOffset: toasterMobileOffset } =
     useToasterOffset()
   const leftSidebarVisible = useUIStore(state => state.leftSidebarVisible)
+  // Desktop: Agents has no sidebar panel, so the Workspace panel stays hidden
+  const workspacePanelVisible = useUIStore(
+    state => state.leftSidebarVisible && state.railSection === 'workspace'
+  )
   const leftSidebarSize = useUIStore(state => state.leftSidebarSize)
   const setLeftSidebarSize = useUIStore(state => state.setLeftSidebarSize)
   const setLeftSidebarVisible = useUIStore(state => state.setLeftSidebarVisible)
@@ -608,7 +612,7 @@ export function MainWindow() {
           <div
             className={cn(
               'h-full shrink-0 pt-8',
-              leftSidebarVisible
+              workspacePanelVisible
                 ? 'bg-sidebar dark:bg-[#0b0b0b]'
                 : 'bg-background'
             )}
@@ -621,7 +625,7 @@ export function MainWindow() {
         )}
 
         {/* Desktop: in-flow left sidebar (shifts layout). Only after UI state init. */}
-        {!isMobile && leftSidebarVisible && isInitialized && (
+        {!isMobile && workspacePanelVisible && isInitialized && (
           <SidebarWidthProvider value={leftSidebarSize}>
             <div
               ref={sidebarRef}
@@ -636,7 +640,7 @@ export function MainWindow() {
         )}
 
         {/* Desktop: custom resize handle for left sidebar */}
-        {!isMobile && leftSidebarVisible && isInitialized && (
+        {!isMobile && workspacePanelVisible && isInitialized && (
           <div
             role="separator"
             tabIndex={-1}

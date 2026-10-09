@@ -111,8 +111,12 @@ export interface MinimizedCliUpdate {
   progress: number | null
 }
 
+/** Top-level Jean feature selected in the sidebar tab rail */
+export type RailSection = 'workspace' | 'agents'
+
 interface UIState {
   leftSidebarVisible: boolean
+  railSection: RailSection
   leftSidebarSize: number // Width in pixels, persisted across sessions
   /** File browser (worktree explorer) visibility */
   fileBrowserVisible: boolean
@@ -230,6 +234,7 @@ interface UIState {
   availableCliUpdates: PendingCliUpdate[]
   toggleLeftSidebar: () => void
   setLeftSidebarVisible: (visible: boolean) => void
+  setRailSection: (section: RailSection) => void
   setLeftSidebarSize: (size: number) => void
   leftSidebarSwipe: {
     isDragging: boolean
@@ -382,6 +387,7 @@ export const useUIStore = create<UIState>()(
   devtools(
     (set, get) => ({
       leftSidebarVisible: false,
+      railSection: 'workspace',
       leftSidebarSize: 250, // Default width in pixels
       leftSidebarSwipe: {
         isDragging: false,
@@ -504,6 +510,14 @@ export const useUIStore = create<UIState>()(
               : { leftSidebarVisible: visible },
           undefined,
           'setLeftSidebarVisible'
+        ),
+
+      setRailSection: section =>
+        set(
+          state =>
+            state.railSection === section ? state : { railSection: section },
+          undefined,
+          'setRailSection'
         ),
 
       toggleRightSidebar: () =>
