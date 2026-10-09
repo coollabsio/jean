@@ -55,6 +55,7 @@ export function serverOpenCommand(
         sshUser: server.user ?? undefined,
         sshHost: server.host,
         sshPort: server.port ?? undefined,
+        sshIdentityFile: server.identity_file ?? undefined,
       },
     }
   }
@@ -108,7 +109,12 @@ export async function openServerIn(
     const home = server.local
       ? await import('@tauri-apps/api/path').then(({ homeDir }) => homeDir())
       : ''
-    const { command, args } = serverOpenCommand(server, target, {
+    // The key path belongs to the Jean that stores the server.
+    const localServer =
+      ownerServerId === LOCAL_SERVER_ID
+        ? server
+        : { ...server, identity_file: null }
+    const { command, args } = serverOpenCommand(localServer, target, {
       ...options,
       home,
     })

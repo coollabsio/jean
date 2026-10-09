@@ -238,6 +238,7 @@ pub async fn open_worktree_in_terminal(
     ssh_user: Option<String>,
     ssh_host: Option<String>,
     ssh_port: Option<u16>,
+    ssh_identity_file: Option<String>,
 ) -> Result<(), String> {
     let ssh_args = ssh_host.map(|host| {
         let destination = ssh_user
@@ -245,6 +246,14 @@ pub async fn open_worktree_in_terminal(
             .map(|user| format!("{user}@{host}"))
             .unwrap_or(host);
         let mut args = vec!["-t".to_string()];
+        if let Some(path) = ssh_identity_file.filter(|path| !path.trim().is_empty()) {
+            args.extend([
+                "-o".to_string(),
+                "IdentitiesOnly=yes".to_string(),
+                "-i".to_string(),
+                path,
+            ]);
+        }
         if let Some(port) = ssh_port.filter(|port| *port != 22) {
             args.extend(["-p".to_string(), port.to_string()]);
         }

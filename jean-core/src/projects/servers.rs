@@ -41,6 +41,17 @@ fn validate_ssh_token(label: &str, value: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The key path goes into a single-quoted shell argument of the AI's ssh
+/// command, so it must be an absolute path without quotes or line breaks.
+fn validate_identity_file(path: &str) -> Result<(), String> {
+    if !std::path::Path::new(path).is_absolute()
+        || path.chars().any(|c| c == '\'' || c == '\n' || c == '\r')
+    {
+        return Err("SSH key path is invalid.".to_string());
+    }
+    Ok(())
+}
+
 fn normalize_server(mut server: ProjectServer) -> Result<ProjectServer, String> {
     if server.local {
         return Ok(ProjectServer {
@@ -59,6 +70,13 @@ fn normalize_server(mut server: ProjectServer) -> Result<ProjectServer, String> 
     }
     if server.port == Some(0) {
         return Err("Port must be between 1 and 65535.".to_string());
+    }
+    server.identity_file = server
+        .identity_file
+        .map(|path| path.trim().to_string())
+        .filter(|path| !path.is_empty());
+    if let Some(path) = server.identity_file.as_deref() {
+        validate_identity_file(path)?;
     }
     server.jean_connection_id = server
         .jean_connection_id
@@ -311,6 +329,18 @@ pub async fn list_ssh_public_keys() -> Result<Vec<SshPublicKey>, String> {
     Ok(keys)
 }
 
+/// Private key file next to the local `.pub` file with this content.
+async fn public_key_identity_file(public_key: &str) -> Option<String> {
+    let public_key = public_key.trim();
+    list_ssh_public_keys()
+        .await
+        .ok()?
+        .into_iter()
+        .find(|key| key.content == public_key)
+        .and_then(|key| key.path.strip_suffix(".pub").map(str::to_string))
+        .filter(|path| std::path::Path::new(path).is_file())
+}
+
 fn validate_public_key(key: &str) -> Result<(), String> {
     let key_type = key.split_whitespace().next().unwrap_or_default();
     let known_type = key_type.starts_with("ssh-")
@@ -433,7 +463,7 @@ pub async fn setup_server_user(
 ) -> Result<Project, String> {
     let root_user = root_user.trim().to_string();
     validate_ssh_token("Root user", &root_user)?;
-    let script = server_user_setup_script(user.clone(), public_key, access).await?;
+    let script = server_user_setup_script(user.clone(), public_key.clone(), access).await?;
     let data = load_projects_data(&app)?;
     let server = data
         .find_project(&project_id)
@@ -451,6 +481,7 @@ pub async fn setup_server_user(
     let output = tauri::async_runtime::spawn_blocking(move || {
         use std::io::Write;
         let mut child = crate::platform::silent_command("ssh")
+            .args(target.identity_args())
             .args([
                 "-o",
                 "BatchMode=yes",
@@ -496,6 +527,12 @@ pub async fn setup_server_user(
         .ok_or_else(|| format!("Project not found: {project_id}"))?;
     if let Some(server) = project.server.as_mut() {
         server.user = Some(user.trim().to_string());
+        // A pinned key must be the one the new user accepts.
+        if server.identity_file.is_some() {
+            if let Some(path) = public_key_identity_file(&public_key).await {
+                server.identity_file = Some(path);
+            }
+        }
     }
     let project = project.clone();
     save_projects_data(&app, &data)?;
@@ -573,6 +610,7 @@ mod tests {
             host: "10.0.0.5".to_string(),
             user: user.map(str::to_string),
             port,
+            identity_file: None,
             jean_connection_id: None,
             local: false,
         }
@@ -592,6 +630,12 @@ mod tests {
             server(Some("deploy"), Some(2222)).ssh_command(),
             "ssh -o BatchMode=yes -p 2222 deploy@10.0.0.5"
         );
+        let mut keyed = server(Some("root"), None);
+        keyed.identity_file = Some("/home/me/.ssh/id work".to_string());
+        assert_eq!(
+            keyed.ssh_command(),
+            "ssh -o BatchMode=yes -o IdentitiesOnly=yes -i '/home/me/.ssh/id work' root@10.0.0.5"
+        );
     }
 
     #[test]
@@ -610,6 +654,7 @@ mod tests {
             host: "  example.com ".to_string(),
             user: Some("  ".to_string()),
             port: None,
+            identity_file: Some(" ".to_string()),
             jean_connection_id: Some(" ".to_string()),
             local: false,
         })
@@ -617,6 +662,13 @@ mod tests {
         assert_eq!(ok.host, "example.com");
         assert_eq!(ok.user, None);
         assert_eq!(ok.jean_connection_id, None);
+        assert_eq!(ok.identity_file, None);
+
+        for path in ["id_ed25519", "/x/id' ; rm -rf /", "/x/id\nfoo"] {
+            let mut bad = server(None, None);
+            bad.identity_file = Some(path.to_string());
+            assert!(normalize_server(bad).is_err(), "{path}");
+        }
     }
 
     #[tokio::test]

@@ -15,10 +15,11 @@ import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { isNativeApp } from '@/lib/environment'
 import { parseOptionalSshPort } from '@/lib/remote-connections'
 import { useServerConnectionSnapshots } from '@/lib/server-connections'
-import { useSaveServerProject } from '@/services/projects'
+import { useSaveServerProject, useSshPublicKeys } from '@/services/projects'
 import { useProjectsStore } from '@/store/projects-store'
 import type { Project } from '@/types/projects'
 import { LOCAL_SERVER_ID } from '@/types/server-resource'
+import { projectServerId } from '../server-filter'
 
 interface ServerDialogProps {
   open: boolean
@@ -79,11 +80,33 @@ function ServerForm({
     user: project?.server?.user ?? '',
     host: project?.server?.host ?? '',
     port: project?.server?.port ? String(project.server.port) : '',
+    identityFile: project?.server?.identity_file ?? '',
     runFrom: LOCAL_SERVER_ID as string,
     systemPrompt: project?.custom_system_prompt ?? '',
   })
   // The built-in local entry has no SSH settings: only name and prompt.
   const isLocal = !!project?.server?.local
+  // Keys of the Jean that runs ssh for this server.
+  const keys = useSshPublicKeys(
+    project ? projectServerId(project) : form.runFrom,
+    !isLocal
+  )
+  const keyOptions = (keys.data ?? []).map(key => ({
+    path: key.path.replace(/\.pub$/, ''),
+    label: `${key.path
+      .split('/')
+      .pop()
+      ?.replace(/\.pub$/, '')} · ${key.keyType}${
+      key.comment ? ` · ${key.comment}` : ''
+    }`,
+  }))
+  // Keep a saved key that is not in the list (for example, no .pub file).
+  if (
+    form.identityFile &&
+    !keyOptions.some(option => option.path === form.identityFile)
+  ) {
+    keyOptions.push({ path: form.identityFile, label: form.identityFile })
+  }
   const [error, setError] = useState<string | null>(null)
 
   const update = (key: keyof typeof form) => (value: string) =>
@@ -108,6 +131,7 @@ function ServerForm({
               host: form.host.trim(),
               user: form.user.trim() || null,
               port: port ?? null,
+              identity_file: form.identityFile || null,
             },
         serverId: form.runFrom,
         systemPrompt: form.systemPrompt,
@@ -206,6 +230,36 @@ function ServerForm({
               This Jean uses its own SSH keys and AI backends.
             </p>
           )}
+          <div className="space-y-1.5">
+            <Label htmlFor="server-identity-file">SSH key</Label>
+            <NativeSelect
+              id="server-identity-file"
+              className="w-full"
+              value={form.identityFile}
+              onChange={event => update('identityFile')(event.target.value)}
+            >
+              <NativeSelectOption value="">
+                Default (SSH config / agent)
+              </NativeSelectOption>
+              {keyOptions.map(option => (
+                <NativeSelectOption key={option.path} value={option.path}>
+                  {option.label}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+            <p className="text-xs text-muted-foreground">
+              {keys.isLoading ? (
+                'Loading keys…'
+              ) : keys.isError ? (
+                'Could not load keys.'
+              ) : (
+                <>
+                  Keys from <code>~/.ssh</code> on the machine that runs{' '}
+                  <code>ssh</code>.
+                </>
+              )}
+            </p>
+          </div>
         </>
       )}
       <div className="space-y-1.5">

@@ -235,8 +235,6 @@ pub struct AppPreferences {
     pub magic_models_auto_initialized: bool, // Whether magic prompt models were auto-set based on installed backends
     #[serde(default)]
     pub commit_close_issue: bool, // Commit magic: add "Closes #N" for the worktree's linked GitHub issue
-    #[serde(default)]
-    pub commit_session_changes_only: bool, // Commit magic: stage only files changed by the active session
     #[serde(default = "default_file_edit_mode")]
     pub file_edit_mode: String, // How to edit files: inline (Pierre) or external (VS Code, etc.)
     #[serde(default)]
@@ -2716,7 +2714,6 @@ impl Default for AppPreferences {
             magic_prompt_modes: MagicPromptModes::default(),
             magic_models_auto_initialized: false,
             commit_close_issue: false,
-            commit_session_changes_only: false,
             file_edit_mode: default_file_edit_mode(),
             ai_language: String::new(),
             waiting_sound: default_waiting_sound(),

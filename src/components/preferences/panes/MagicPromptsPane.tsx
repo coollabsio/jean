@@ -2473,17 +2473,6 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                   Add &quot;Closes #issue&quot; when the worktree has a linked
                   GitHub issue
                 </label>
-                <label className="flex items-center gap-2 text-xs">
-                  <Switch
-                    checked={preferences?.commit_session_changes_only ?? false}
-                    onCheckedChange={checked =>
-                      patchPreferences.mutate({
-                        commit_session_changes_only: checked,
-                      })
-                    }
-                  />
-                  Commit only files changed by the current session
-                </label>
               </div>
             )}
             <Button

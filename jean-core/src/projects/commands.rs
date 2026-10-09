@@ -9163,27 +9163,6 @@ fn get_recent_commits(repo_path: &str, count: u32) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-/// Stage only specific files. Resets the index first to ensure a clean state.
-/// Uncommitted files that a session's AI turns changed (from its checkpoints).
-fn session_changed_files(
-    app: &AppHandle,
-    worktree_id: &str,
-    session_id: &str,
-    status: &str,
-) -> Result<Vec<String>, String> {
-    let session_paths: std::collections::HashSet<String> =
-        super::checkpoints::list_checkpoints(app, worktree_id)?
-            .into_iter()
-            .filter(|c| c.session_id == session_id)
-            .flat_map(|c| c.files_changed.into_iter().map(|f| f.path))
-            .collect();
-    Ok(parse_porcelain_files(status)
-        .into_iter()
-        .map(|(_, path)| path)
-        .filter(|path| session_paths.contains(path))
-        .collect())
-}
-
 /// Insert an extra rule into the prompt's "Rules:" list, or append it.
 fn add_commit_prompt_rule(prompt: &str, rule: &str) -> String {
     match prompt.find("Rules:\n") {
@@ -9195,6 +9174,7 @@ fn add_commit_prompt_rule(prompt: &str, rule: &str) -> String {
     }
 }
 
+/// Stage only specific files. Resets the index first to ensure a clean state.
 fn stage_specific_files(repo_path: &str, files: &[String]) -> Result<(), String> {
     // Reset staging area to ensure only the specified files are staged
     let reset_output = wsl_aware_command("git", Some(Path::new(repo_path)))
@@ -9593,7 +9573,6 @@ pub async fn create_commit_with_ai(
     custom_profile_name: Option<String>,
     reasoning_effort: Option<String>,
     specific_files: Option<Vec<String>>,
-    session_id: Option<String>,
 ) -> Result<CreateCommitResponse, String> {
     log::trace!("Creating commit for: {worktree_path}");
 
@@ -9624,18 +9603,7 @@ pub async fn create_commit_with_ai(
         return Err("No changes to commit".to_string());
     }
 
-    // 2. Stage changes (specific files, current session files, or all)
-    let specific_files = match (&specific_files, &session_id, &worktree) {
-        (Some(files), _, _) if !files.is_empty() => specific_files,
-        (_, Some(session_id), Some(worktree)) if preferences.commit_session_changes_only => {
-            let files = session_changed_files(&app, &worktree.id, session_id, &status)?;
-            if files.is_empty() {
-                return Err("No uncommitted changes from this session".to_string());
-            }
-            Some(files)
-        }
-        _ => specific_files,
-    };
+    // 2. Stage changes (specific files or all)
     match &specific_files {
         Some(files) if !files.is_empty() => stage_specific_files(&worktree_path, files)?,
         _ => stage_all_changes(&worktree_path)?,
@@ -9730,7 +9698,6 @@ pub async fn start_commit_job(
     custom_profile_name: Option<String>,
     reasoning_effort: Option<String>,
     specific_files: Option<Vec<String>>,
-    session_id: Option<String>,
     job_id: Option<String>,
 ) -> Result<StartCommitJobResponse, String> {
     let job_id = job_id.unwrap_or_else(|| Uuid::new_v4().to_string());
@@ -9762,7 +9729,6 @@ pub async fn start_commit_job(
                 custom_profile_name,
                 reasoning_effort,
                 specific_files,
-                session_id,
             ))
         })
         .await

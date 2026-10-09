@@ -14,8 +14,6 @@ export interface StartCommitJobArgs {
   customProfileName?: string | null
   reasoningEffort?: string | null
   specificFiles?: string[] | null
-  /** Active session; the backend uses it when "session changes only" is on */
-  sessionId?: string | null
 }
 
 export async function startCommitJob(
