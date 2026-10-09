@@ -587,11 +587,12 @@ export function MainWindow() {
       )}
 
       {/* Title Bar - semi-transparent overlay */}
-      {/* Native desktop: the worktree header already shows project/worktree
-          details, so the title bar shows only the server badge. */}
+      {/* Desktop (native + web): the worktree header already shows
+          project/worktree details, and a window-centered title overlaps the
+          left sidebar. Web keeps the title in the browser tab (document.title). */}
       <TitleBar
         title={windowTitle}
-        hideTitle={isNativeApp() && !isMobile}
+        hideTitle={!isMobile}
         className="absolute top-0 left-0 right-0"
       />
 
