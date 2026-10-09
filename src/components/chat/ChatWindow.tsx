@@ -1835,11 +1835,19 @@ const ChatWindowContent = memo(function ChatWindowContent({
   )
 
   const handleCommitInSession = useCallback(() => {
-    const closeIssueNumber = preferences?.commit_close_issue
-      ? worktree?.issue_number
-      : undefined
-    sendMagicPrompt(buildCommitInSessionPrompt(closeIssueNumber))
-  }, [preferences?.commit_close_issue, sendMagicPrompt, worktree?.issue_number])
+    const closeIssueNumbers = preferences?.commit_close_issue
+      ? [
+          ...(worktree?.issue_number ? [worktree.issue_number] : []),
+          ...(loadedIssueContexts ?? []).map(ctx => ctx.number),
+        ]
+      : []
+    sendMagicPrompt(buildCommitInSessionPrompt(closeIssueNumbers))
+  }, [
+    loadedIssueContexts,
+    preferences?.commit_close_issue,
+    sendMagicPrompt,
+    worktree?.issue_number,
+  ])
 
   const handleCommentAndCloseIssue = useCallback(() => {
     if (!loadedIssueContexts?.length) {
