@@ -1049,11 +1049,23 @@ export const SessionChatModal = memo(function SessionChatModal({
               <div
                 className={cn(
                   'flex items-center justify-between gap-2 px-4 py-2',
-                  MODAL_TERMINAL_PRIMARY_ROW_CLASS
+                  MODAL_TERMINAL_PRIMARY_ROW_CLASS,
+                  // Mobile: let the title take its own line so badges cannot squeeze it to zero width
+                  isMobile && 'h-auto min-h-11'
                 )}
               >
-                <div className="flex items-center gap-2 min-w-0">
-                  <h2 className="text-sm font-medium min-w-0 flex-1 truncate">
+                <div
+                  className={cn(
+                    'flex items-center gap-2 min-w-0',
+                    isMobile && 'flex-wrap gap-y-1'
+                  )}
+                >
+                  <h2
+                    className={cn(
+                      'text-sm font-medium min-w-0 flex-1 truncate',
+                      isMobile && 'basis-full'
+                    )}
+                  >
                     {project && !isMobile && (
                       <span className="text-muted-foreground font-normal">
                         <button

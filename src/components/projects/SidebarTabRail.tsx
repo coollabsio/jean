@@ -18,7 +18,7 @@ const TABS: { tab: SidebarTab; label: string; Icon: typeof Folder }[] = [
 ]
 
 const RAIL_BUTTON_CLASS =
-  'relative flex size-9 shrink-0 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
+  'relative flex size-12 shrink-0 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
 
 interface SidebarTabRailProps {
   /** Desktop: clicking the active tab hides the sidebar, any tab shows it. */
@@ -27,7 +27,7 @@ interface SidebarTabRailProps {
   children?: React.ReactNode
 }
 
-/** Vertical 36px icon rail: sidebar view tabs, Settings at the bottom. */
+/** Vertical 72px icon rail: sidebar view tabs, Settings at the bottom. */
 export function SidebarTabRail({
   togglesSidebar = false,
   className,
@@ -62,17 +62,17 @@ export function SidebarTabRail({
   return (
     <div
       className={cn(
-        'flex w-9 shrink-0 flex-col items-center gap-1 pt-1',
+        'flex w-18 shrink-0 flex-col items-center gap-1.5 pt-2',
         // Center Settings on the sidebar footer row (see ProjectsSidebar)
         isNativeApp()
-          ? 'pb-1.5'
-          : 'pb-[max(0.875rem,env(safe-area-inset-bottom))]',
+          ? 'pb-0'
+          : 'pb-[max(0.5rem,env(safe-area-inset-bottom))]',
         className
       )}
     >
       {children}
       <div
-        className="flex flex-col items-center gap-1"
+        className="flex flex-col items-center gap-1.5"
         role="tablist"
         aria-label="Sidebar view"
         aria-orientation="vertical"
@@ -95,7 +95,7 @@ export function SidebarTabRail({
                   )}
                   onClick={() => handleSelect(tab)}
                 >
-                  <Icon className="size-4" />
+                  <Icon className="size-6" />
                 </button>
               </TooltipTrigger>
               <TooltipContent side="right">{label}</TooltipContent>
@@ -115,7 +115,7 @@ export function SidebarTabRail({
               'mt-auto text-muted-foreground hover:bg-muted/50 hover:text-foreground'
             )}
           >
-            <Settings className="size-4" />
+            <Settings className="size-6" />
           </button>
         </TooltipTrigger>
         <TooltipContent side="right">Settings</TooltipContent>

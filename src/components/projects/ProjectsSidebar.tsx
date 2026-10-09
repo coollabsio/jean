@@ -222,11 +222,11 @@ export function ProjectsSidebar() {
         <SidebarTabRail className="border-r border-border/40">
           <button
             type="button"
-            className="flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="flex size-12 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             onClick={() => closeMobileSidebarIfNeeded(isMobile)}
             aria-label="Close sidebar"
           >
-            <X className="size-4" />
+            <X className="size-6" />
           </button>
         </SidebarTabRail>
       )}

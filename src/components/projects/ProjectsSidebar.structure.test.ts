@@ -19,7 +19,7 @@ describe('ProjectsSidebar server filter', () => {
 
     expect(rail).toContain('role="tablist"')
     expect(rail).toContain('aria-orientation="vertical"')
-    expect(rail).toContain('size-9')
+    expect(rail).toContain('size-12')
     expect(source).toContain('<SidebarTabRail')
     expect(mainWindow).toContain('<SidebarTabRail')
     expect(source).toContain('<ServersList')
