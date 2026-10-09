@@ -59,7 +59,7 @@ describe('RecentWorktreesList structure', () => {
 
   it('uses fully rounded rows and a full background for the current row', () => {
     expect(source).toContain(
-      'className="@container flex flex-col gap-2 px-2 py-2"'
+      '@container flex flex-col gap-2 px-2 pt-2'
     )
     expect(source).toContain('rounded-lg border py-2.5 pl-3 pr-3')
     expect(source).toContain(

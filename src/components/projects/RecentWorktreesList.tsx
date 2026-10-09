@@ -382,7 +382,7 @@ export function RecentWorktreesList({
         )}
         <ul
           aria-label="Recent sessions"
-          className="@container flex flex-col gap-2 px-2 py-2"
+          className={`@container flex flex-col gap-2 px-2 pt-2 ${footerActionsContainer ? 'pb-16' : 'pb-2'}`}
         >
           {displayedRows.map((row, index) => {
             const isCurrent = row.session.id === selectedSessionId

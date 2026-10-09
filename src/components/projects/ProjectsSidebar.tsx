@@ -230,7 +230,7 @@ export function ProjectsSidebar() {
           </button>
         </SidebarTabRail>
       )}
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="relative flex min-w-0 flex-1 flex-col">
         {/* Same 8px offset and 48px height as the rail buttons, so they line up */}
         <div
           className="mt-2 flex h-12 shrink-0 items-center gap-1 px-3"
@@ -461,12 +461,13 @@ export function ProjectsSidebar() {
             />
           )}
         </div>
+        {/* Transparent footer floats over the list; only its buttons take clicks */}
         <div
-          className={`flex shrink-0 items-center justify-between ${showServerMenu ? 'px-2 pt-2 pb-4' : 'px-2 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))]'}`}
+          className={`pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between ${showServerMenu ? 'px-2 pt-2 pb-4' : 'px-2 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))]'}`}
         >
           <div
             ref={setFooterActionsEl}
-            className="flex min-h-8 min-w-0 flex-1 justify-center"
+            className="flex min-w-0 flex-1 justify-center [&>*]:pointer-events-auto"
           />
         </div>
       </div>
