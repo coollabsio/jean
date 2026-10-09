@@ -25,6 +25,7 @@ import { cn } from '@/lib/utils'
 import { generateId } from '@/lib/uuid'
 import { getExtensionColor } from '@/lib/file-colors'
 import { fuzzySearchFiles } from '@/lib/fuzzy-search'
+import { BOTTOM_UP_LIST_CLASS } from './mention-list'
 
 export interface FileMentionPopoverHandle {
   moveUp: () => void
@@ -202,13 +203,14 @@ export function FileMentionPopover({
   // Expose navigation methods via ref for parent to call
   useImperativeHandle(handleRef, () => {
     return {
+      // List renders bottom-up: ArrowUp moves to the next (worse) match.
       moveUp: () => {
-        setSelectedIndex(i => Math.max(i - 1, 0))
-      },
-      moveDown: () => {
         setSelectedIndex(i =>
           Math.min(i + 1, Math.max(0, filteredFiles.length - 1))
         )
+      },
+      moveDown: () => {
+        setSelectedIndex(i => Math.max(i - 1, 0))
       },
       selectCurrent: () => {
         const file = filteredFiles[clampedSelectedIndex]
@@ -329,7 +331,10 @@ export function FileMentionPopover({
         <Command shouldFilter={false}>
           <CommandList
             ref={listRef}
-            className="min-h-[280px] max-h-[min(360px,60vh)]"
+            className={cn(
+              'min-h-[280px] max-h-[min(360px,60vh)]',
+              BOTTOM_UP_LIST_CLASS
+            )}
           >
             {filteredFiles.length === 0 ? (
               <CommandEmpty>

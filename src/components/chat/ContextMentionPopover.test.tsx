@@ -224,7 +224,7 @@ describe('ContextMentionPopover', () => {
     )
   })
 
-  it('selects a search result with the keyboard', () => {
+  it('moves up to worse matches because the list renders bottom-up', () => {
     const onSelectContext = vi.fn()
     render(
       <ContextMentionPopover
@@ -241,10 +241,13 @@ describe('ContextMentionPopover', () => {
     const search = screen.getByRole('combobox', {
       name: 'Search issues and context links',
     })
+    fireEvent.keyDown(search, { key: 'ArrowUp' })
+    fireEvent.keyDown(search, { key: 'Enter' })
+    expect(onSelectContext).toHaveBeenLastCalledWith(items[1], false)
+
     fireEvent.keyDown(search, { key: 'ArrowDown' })
     fireEvent.keyDown(search, { key: 'Enter' })
-
-    expect(onSelectContext).toHaveBeenCalledWith(items[1], false)
+    expect(onSelectContext).toHaveBeenLastCalledWith(items[0], false)
   })
 
   it('offers separate add and investigate actions for issues and PRs', () => {
@@ -413,7 +416,7 @@ describe('ContextMentionPopover', () => {
 
     const search = screen.getByRole('combobox')
     for (let index = 0; index < 8; index++) {
-      fireEvent.keyDown(search, { key: 'ArrowDown' })
+      fireEvent.keyDown(search, { key: 'ArrowUp' })
     }
     fireEvent.keyDown(search, { key: 'Enter' })
     expect(onSelectContext).toHaveBeenCalledWith(issues[8], false)

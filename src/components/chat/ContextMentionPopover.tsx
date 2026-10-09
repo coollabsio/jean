@@ -34,6 +34,7 @@ import {
 } from '@/components/ui/command'
 import { Popover, PopoverContent, PopoverAnchor } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
+import { BOTTOM_UP_LIST_CLASS } from './mention-list'
 import { IssuePreviewModal } from '@/components/worktree/IssuePreviewModal'
 import { ContextLinkBadge } from '@/components/worktree/ContextLinkBadge'
 import {
@@ -228,11 +229,12 @@ export function ContextMentionPopover({
   useImperativeHandle(
     handleRef,
     () => ({
-      moveUp: () => setSelectedIndex(i => Math.max(i - 1, 0)),
-      moveDown: () =>
+      // List renders bottom-up: ArrowUp moves to the next (worse) match.
+      moveUp: () =>
         setSelectedIndex(i =>
           Math.min(i + 1, Math.max(0, flatItems.length - 1))
         ),
+      moveDown: () => setSelectedIndex(i => Math.max(i - 1, 0)),
       selectCurrent: (investigate = false) => {
         const item = flatItems[clampedSelectedIndex]
         if (item) handleSelect(item, investigate)
@@ -326,13 +328,13 @@ export function ContextMentionPopover({
             onKeyDown={event => {
               event.stopPropagation()
               switch (event.key) {
-                case 'ArrowDown':
+                case 'ArrowUp':
                   event.preventDefault()
                   setSelectedIndex(index =>
                     Math.min(index + 1, Math.max(0, flatItems.length - 1))
                   )
                   break
-                case 'ArrowUp':
+                case 'ArrowDown':
                   event.preventDefault()
                   setSelectedIndex(index => Math.max(index - 1, 0))
                   break
@@ -351,7 +353,10 @@ export function ContextMentionPopover({
           />
           <CommandList
             ref={listRef}
-            className="min-h-[280px] max-h-[min(420px,60vh)]"
+            className={cn(
+              'min-h-[280px] max-h-[min(420px,60vh)]',
+              BOTTOM_UP_LIST_CLASS
+            )}
           >
             {flatItems.length === 0 ? (
               <CommandEmpty>
