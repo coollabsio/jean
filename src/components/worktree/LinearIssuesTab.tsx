@@ -1,5 +1,10 @@
-import { useCallback } from 'react'
-import { Loader2, Search, RefreshCw, AlertCircle } from '@/components/icons/reicon'
+import { useCallback, useMemo } from 'react'
+import {
+  Loader2,
+  Search,
+  RefreshCw,
+  AlertCircle,
+} from '@/components/icons/reicon'
 import { isLinearAuthError } from '@/services/linear'
 import { LinearAuthError } from '@/components/shared/LinearAuthError'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -11,6 +16,7 @@ import {
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { LinearIssueItem } from './LinearIssueItem'
+import type { GetContextLinkMatches } from './ContextLinkBadge'
 import { BulkInvestigateBar } from './BulkInvestigateBar'
 import { SelectAllControl } from './ItemSelectCheckbox'
 import { useMultiSelect } from './hooks/useMultiSelect'
@@ -34,6 +40,7 @@ export interface LinearIssuesTabProps {
   creatingFromId: string | null
   isBulkInvestigating?: boolean
   searchInputRef: React.RefObject<HTMLInputElement | null>
+  getContextMatches?: GetContextLinkMatches
 }
 
 const getLinearKey = (issue: LinearIssue) => issue.id
@@ -56,8 +63,24 @@ export function LinearIssuesTab({
   creatingFromId,
   isBulkInvestigating = false,
   searchInputRef,
+  getContextMatches,
 }: LinearIssuesTabProps) {
   const multi = useMultiSelect(issues, getLinearKey)
+  const matchesById = useMemo(
+    () =>
+      new Map(
+        getContextMatches
+          ? issues.map(
+              issue =>
+                [
+                  issue.id,
+                  getContextMatches({ type: 'linear', id: issue.identifier }),
+                ] as const
+            )
+          : []
+      ),
+    [issues, getContextMatches]
+  )
   const errorMessage =
     error instanceof Error ? error.message : String(error ?? '')
 
@@ -171,6 +194,7 @@ export function LinearIssuesTab({
                 index={index}
                 isSelected={index === selectedIndex}
                 isCreating={creatingFromId === issue.id}
+                contextMatches={matchesById.get(issue.id)}
                 isChecked={multi.isChecked(issue.id)}
                 onCheckedChange={checked => multi.toggle(issue.id, checked)}
                 onMouseEnter={() => setSelectedIndex(index)}

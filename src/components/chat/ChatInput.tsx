@@ -1402,6 +1402,7 @@ export const ChatInput = memo(function ChatInput({
       <ContextMentionPopover
         projectPath={activeWorktreePath ?? null}
         projectId={activeProjectId ?? null}
+        sessionId={activeSessionId}
         open={contextMentionOpen}
         onOpenChange={setContextMentionOpen}
         onSelectContext={handleContextSelect}

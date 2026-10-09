@@ -8,7 +8,14 @@ import {
 } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Loader2, Plus, RefreshCw, Sparkles } from '@/components/icons/reicon'
+import {
+  ExternalLink,
+  Eye,
+  Loader2,
+  Plus,
+  RefreshCw,
+  Sparkles,
+} from '@/components/icons/reicon'
 import { Kbd } from '@/components/ui/kbd'
 import {
   Tooltip,
@@ -27,6 +34,14 @@ import {
 } from '@/components/ui/command'
 import { Popover, PopoverContent, PopoverAnchor } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
+import { IssuePreviewModal } from '@/components/worktree/IssuePreviewModal'
+import { ContextLinkBadge } from '@/components/worktree/ContextLinkBadge'
+import {
+  contextLinkMatchLabel,
+  openContextLinkMatch,
+  useContextLinkUsage,
+  type ContextLinkRef,
+} from '@/hooks/useContextLinkUsage'
 import {
   type ContextMentionItem,
   useContextMentionData,
@@ -50,6 +65,33 @@ const linearContextQueries = new Set([
   'issue-by-number',
 ])
 
+interface PreviewTarget {
+  type: 'issue' | 'pr' | 'security' | 'advisory'
+  number: number
+  ghsaId?: string
+}
+
+function getPreviewTarget(item: ContextMentionItem): PreviewTarget | null {
+  if (item.issue) return { type: 'issue', number: item.issue.number }
+  if (item.pr) return { type: 'pr', number: item.pr.number }
+  if (item.securityAlert)
+    return { type: 'security', number: item.securityAlert.number }
+  if (item.advisory)
+    return { type: 'advisory', number: 0, ghsaId: item.advisory.ghsaId }
+  return null
+}
+
+function getLinkRef(item: ContextMentionItem): ContextLinkRef | null {
+  if (item.issue) return { type: 'issue', id: item.issue.number }
+  if (item.pr) return { type: 'pr', id: item.pr.number }
+  if (item.securityAlert)
+    return { type: 'security', id: item.securityAlert.number }
+  if (item.advisory) return { type: 'advisory', id: item.advisory.ghsaId }
+  if (item.linearIssue)
+    return { type: 'linear', id: item.linearIssue.identifier }
+  return null
+}
+
 export interface ContextMentionPopoverHandle {
   moveUp: () => void
   moveDown: () => void
@@ -59,6 +101,8 @@ export interface ContextMentionPopoverHandle {
 interface ContextMentionPopoverProps {
   projectPath: string | null
   projectId: string | null
+  /** Current session; its own links are not reported as duplicates */
+  sessionId?: string
   open: boolean
   onOpenChange: (open: boolean) => void
   onSelectContext: (item: ContextMentionItem, investigate?: boolean) => void
@@ -71,6 +115,7 @@ interface ContextMentionPopoverProps {
 export function ContextMentionPopover({
   projectPath,
   projectId,
+  sessionId,
   open,
   onOpenChange,
   onSelectContext,
@@ -91,6 +136,7 @@ export function ContextMentionPopover({
   const [issueLimit, setIssueLimit] = useState(8)
   const [prLimit, setPrLimit] = useState(8)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [previewTarget, setPreviewTarget] = useState<PreviewTarget | null>(null)
   const { groups, isFetching } = useContextMentionData({
     open,
     projectPath,
@@ -99,6 +145,12 @@ export function ContextMentionPopover({
     includeClosed,
     issueLimit,
     prLimit,
+  })
+  const { getMatches } = useContextLinkUsage({
+    enabled: open,
+    projectId,
+    projectPath,
+    currentSessionId: sessionId,
   })
   const listRef = useRef<HTMLDivElement>(null)
   const [selectedIndex, setSelectedIndex] = useState(0)
@@ -115,10 +167,20 @@ export function ContextMentionPopover({
 
   const handleSelect = useCallback(
     (item: ContextMentionItem, investigate = false) => {
-      onSelectContext(item, investigate)
       onOpenChange(false)
+      // Do not start a second investigation of an item that already has one
+      const linkRef = investigate ? getLinkRef(item) : null
+      const existing = linkRef ? getMatches(linkRef)[0] : undefined
+      if (existing) {
+        openContextLinkMatch(existing)
+        toast.info(
+          `${item.label} is already in ${contextLinkMatchLabel(existing)} — opened it`
+        )
+        return
+      }
+      onSelectContext(item, investigate)
     },
-    [onOpenChange, onSelectContext]
+    [getMatches, onOpenChange, onSelectContext]
   )
 
   const handleRefresh = useCallback(async () => {
@@ -212,6 +274,10 @@ export function ContextMentionPopover({
         sideOffset={20}
         onOpenAutoFocus={e => e.preventDefault()}
         onCloseAutoFocus={e => e.preventDefault()}
+        // Keep the list open while the preview modal is on top of it
+        onInteractOutside={e => {
+          if (previewTarget) e.preventDefault()
+        }}
       >
         <div className="flex items-center justify-between border-b px-3 py-2">
           <span className="text-xs font-medium text-muted-foreground">
@@ -304,7 +370,10 @@ export function ContextMentionPopover({
                   {group.items.map(item => {
                     flatIndex += 1
                     const itemIndex = flatIndex
-                    const Icon = item.icon
+                    const preview = projectPath ? getPreviewTarget(item) : null
+                    const linkRef = getLinkRef(item)
+                    const matches = linkRef ? getMatches(linkRef) : []
+                    const existing = matches[0]
                     const isSelected = itemIndex === clampedSelectedIndex
                     return (
                       <CommandItem
@@ -313,34 +382,25 @@ export function ContextMentionPopover({
                         value={`${item.type}:${item.label}:${item.title}`}
                         onSelect={() => handleSelect(item)}
                         className={cn(
-                          'flex items-center gap-2 cursor-pointer',
+                          'flex items-start gap-2 cursor-pointer',
                           'data-[selected=true]:bg-transparent data-[selected=true]:text-foreground',
                           isSelected && '!bg-accent !text-accent-foreground'
                         )}
                       >
-                        <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="shrink-0 text-xs font-mono text-muted-foreground">
-                              {item.label}
-                            </span>
-                            <span className="truncate text-sm font-medium">
-                              {item.title}
-                            </span>
-                          </div>
-                          {item.subtitle && (
-                            <div className="truncate text-xs text-muted-foreground">
-                              {item.subtitle}
-                            </div>
-                          )}
+                        <div className="min-w-0 flex-1 self-center line-clamp-2 break-words text-sm">
+                          <span className="mr-2 font-mono text-xs text-muted-foreground">
+                            {item.label}
+                          </span>
+                          <span className="font-medium">{item.title}</span>
                         </div>
+                        <ContextLinkBadge matches={matches} />
                         {item.badge && (
-                          <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">
+                          <span className="shrink-0 self-center rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">
                             {item.badge}
                           </span>
                         )}
                         {(item.type === 'issue' || item.type === 'pr') && (
-                          <span className="flex shrink-0 items-center gap-1">
+                          <span className="flex shrink-0 items-center gap-1 self-center">
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <button
@@ -367,25 +427,62 @@ export function ContextMentionPopover({
                               <TooltipTrigger asChild>
                                 <button
                                   type="button"
-                                  aria-label={`Add ${item.label} and start investigating`}
+                                  aria-label={
+                                    existing
+                                      ? `Open existing investigation of ${item.label}`
+                                      : `Add ${item.label} and start investigating`
+                                  }
                                   className={actionButtonClass}
                                   onClick={event => {
                                     event.stopPropagation()
                                     handleSelect(item, true)
                                   }}
                                 >
-                                  <Sparkles className="size-3.5" />
-                                  {!isMobile && <span>Investigate</span>}
+                                  {existing ? (
+                                    <ExternalLink className="size-3.5" />
+                                  ) : (
+                                    <Sparkles className="size-3.5" />
+                                  )}
+                                  {!isMobile && (
+                                    <span>
+                                      {existing ? 'Open' : 'Investigate'}
+                                    </span>
+                                  )}
                                 </button>
                               </TooltipTrigger>
                               <TooltipContent className="flex items-center gap-2">
-                                Add {item.label} and start investigating
+                                {existing
+                                  ? `Open ${contextLinkMatchLabel(existing)}`
+                                  : `Add ${item.label} and start investigating`}
                                 {showKeyboardHints && isSelected && (
                                   <Kbd>Shift+Enter</Kbd>
                                 )}
                               </TooltipContent>
                             </Tooltip>
                           </span>
+                        )}
+                        {preview && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button
+                                type="button"
+                                aria-label={`Preview ${item.label}`}
+                                className={cn(
+                                  actionButtonClass,
+                                  'shrink-0 self-center min-w-8 justify-center'
+                                )}
+                                onClick={event => {
+                                  event.stopPropagation()
+                                  setPreviewTarget(preview)
+                                }}
+                              >
+                                <Eye className="size-3.5" />
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              Preview {item.label}
+                            </TooltipContent>
+                          </Tooltip>
                         )}
                       </CommandItem>
                     )
@@ -411,6 +508,18 @@ export function ContextMentionPopover({
           </CommandList>
         </Command>
       </PopoverContent>
+      {projectPath && previewTarget && (
+        <IssuePreviewModal
+          open
+          onOpenChange={isOpen => {
+            if (!isOpen) setPreviewTarget(null)
+          }}
+          projectPath={projectPath}
+          type={previewTarget.type}
+          number={previewTarget.number}
+          ghsaId={previewTarget.ghsaId}
+        />
+      )}
     </Popover>
   )
 }

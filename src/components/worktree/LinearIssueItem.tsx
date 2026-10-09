@@ -8,12 +8,15 @@ import {
 import { cn } from '@/lib/utils'
 import type { LinearIssue } from '@/types/linear'
 import { ItemSelectCheckbox } from './ItemSelectCheckbox'
+import { ContextLinkBadge } from './ContextLinkBadge'
+import type { ContextLinkMatch } from '@/hooks/useContextLinkUsage'
 
 export interface LinearIssueItemProps {
   issue: LinearIssue
   index: number
   isSelected: boolean
   isCreating: boolean
+  contextMatches?: ContextLinkMatch[]
   isChecked?: boolean
   onCheckedChange?: (checked: boolean) => void
   onMouseEnter: () => void
@@ -35,6 +38,7 @@ export function LinearIssueItem({
   index,
   isSelected,
   isCreating,
+  contextMatches,
   isChecked = false,
   onCheckedChange,
   onMouseEnter,
@@ -119,6 +123,7 @@ export function LinearIssueItem({
           )}
         </div>
       </button>
+      <ContextLinkBadge matches={contextMatches} />
       <div className="flex items-center gap-1 flex-shrink-0">
         <Tooltip>
           <TooltipTrigger asChild>

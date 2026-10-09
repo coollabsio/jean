@@ -1053,6 +1053,15 @@ pub async fn dispatch_command(
             .await?;
             to_value(result)
         }
+        "get_context_link_usage" => {
+            let project_path: Option<String> = field_opt(&args, "projectPath", "project_path")?;
+            let project_id: Option<String> = field_opt(&args, "projectId", "project_id")?;
+            to_value(crate::projects::get_context_link_usage(
+                app,
+                project_path,
+                project_id,
+            )?)
+        }
         "list_loaded_advisory_contexts" => {
             let session_id: String = field(&args, "sessionId", "session_id")?;
             let worktree_id: Option<String> = field_opt(&args, "worktreeId", "worktree_id")?;

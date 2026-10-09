@@ -617,6 +617,87 @@ pub fn save_context_references(
     std::fs::write(&path, content).map_err(|e| format!("Failed to write references.json: {e}"))
 }
 
+/// Session and worktree IDs that reference each context item of one project.
+/// The frontend resolves the IDs and ignores IDs that no longer exist.
+#[derive(Debug, Clone, Serialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextLinkUsage {
+    pub issues: std::collections::HashMap<u32, Vec<String>>,
+    pub prs: std::collections::HashMap<u32, Vec<String>>,
+    pub security: std::collections::HashMap<u32, Vec<String>>,
+    pub advisories: std::collections::HashMap<String, Vec<String>>,
+    pub linear: std::collections::HashMap<String, Vec<String>>,
+}
+
+fn collect_numbered_refs(
+    refs: &std::collections::HashMap<String, ContextRef>,
+    prefix: &str,
+) -> std::collections::HashMap<u32, Vec<String>> {
+    refs.iter()
+        .filter(|(_, entry)| !entry.sessions.is_empty())
+        .filter_map(|(key, entry)| {
+            let number = key.strip_prefix(prefix)?.parse::<u32>().ok()?;
+            Some((number, entry.sessions.clone()))
+        })
+        .collect()
+}
+
+fn collect_named_refs(
+    refs: &std::collections::HashMap<String, ContextRef>,
+    prefix: &str,
+) -> std::collections::HashMap<String, Vec<String>> {
+    refs.iter()
+        .filter(|(_, entry)| !entry.sessions.is_empty())
+        .filter_map(|(key, entry)| {
+            let name = key.strip_prefix(prefix)?;
+            (!name.is_empty()).then(|| (name.to_string(), entry.sessions.clone()))
+        })
+        .collect()
+}
+
+fn collect_context_link_usage(
+    refs: &ContextReferences,
+    repo_key: Option<&str>,
+    linear_project_name: Option<&str>,
+) -> ContextLinkUsage {
+    let mut usage = ContextLinkUsage::default();
+    if let Some(repo_key) = repo_key {
+        let prefix = format!("{repo_key}-");
+        usage.issues = collect_numbered_refs(&refs.issues, &prefix);
+        usage.prs = collect_numbered_refs(&refs.prs, &prefix);
+        usage.security = collect_numbered_refs(&refs.security, &prefix);
+        usage.advisories = collect_named_refs(&refs.advisories, &format!("{repo_key}::"));
+    }
+    if let Some(project_name) = linear_project_name {
+        usage.linear = collect_named_refs(&refs.linear, &format!("{project_name}-"));
+    }
+    usage
+}
+
+/// Get which sessions/worktrees already use the context items of a project
+pub fn get_context_link_usage(
+    app: &tauri::AppHandle,
+    project_path: Option<String>,
+    project_id: Option<String>,
+) -> Result<ContextLinkUsage, String> {
+    let refs = load_context_references(app)?;
+    let repo_key = project_path
+        .as_deref()
+        .and_then(|path| get_repo_identifier(path).ok())
+        .map(|id| id.to_key());
+    let linear_project_name = match project_id {
+        Some(id) => super::storage::load_projects_data(app)?
+            .find_project(&id)
+            .map(|project| project.name.clone()),
+        None => None,
+    };
+    Ok(collect_context_link_usage(
+        &refs,
+        repo_key.as_deref(),
+        linear_project_name.as_deref(),
+    ))
+}
+
 /// Add a session reference to an issue context
 /// Key format: "{owner}-{repo}-{number}"
 pub fn add_issue_reference(
@@ -3588,6 +3669,37 @@ mod tests {
 
         assert!(!is_unsupported_github_repo_error(stderr));
         assert!(is_gh_cli_auth_error(stderr));
+    }
+
+    #[test]
+    fn test_context_link_usage_only_includes_current_repo() {
+        let entry = |ids: &[&str]| ContextRef {
+            sessions: ids.iter().map(|id| id.to_string()).collect(),
+            orphaned_at: None,
+        };
+        let mut refs = ContextReferences::default();
+        refs.issues
+            .insert("owner-repo-12".into(), entry(&["s1", "wt1"]));
+        refs.issues
+            .insert("owner-repo-extra-5".into(), entry(&["s2"]));
+        refs.issues.insert("owner-repo-13".into(), entry(&[]));
+        refs.prs.insert("owner-repo-7".into(), entry(&["s3"]));
+        refs.advisories
+            .insert("owner-repo::GHSA-aaaa-bbbb-cccc".into(), entry(&["s4"]));
+        refs.linear.insert("Jean-ENG-42".into(), entry(&["s5"]));
+        refs.linear.insert("Other-ENG-1".into(), entry(&["s6"]));
+
+        let usage = collect_context_link_usage(&refs, Some("owner-repo"), Some("Jean"));
+
+        assert_eq!(usage.issues.len(), 1);
+        assert_eq!(usage.issues[&12], vec!["s1".to_string(), "wt1".to_string()]);
+        assert_eq!(usage.prs[&7], vec!["s3".to_string()]);
+        assert_eq!(
+            usage.advisories["GHSA-aaaa-bbbb-cccc"],
+            vec!["s4".to_string()]
+        );
+        assert_eq!(usage.linear.len(), 1);
+        assert_eq!(usage.linear["ENG-42"], vec!["s5".to_string()]);
     }
 
     #[test]

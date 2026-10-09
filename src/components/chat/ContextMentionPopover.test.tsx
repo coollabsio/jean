@@ -2,9 +2,9 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@/test/test-utils'
 import { render as renderWithoutProviders } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { Bug, GitPullRequest } from '@/components/icons/reicon'
 import { ContextMentionPopover } from './ContextMentionPopover'
 import type { ContextMentionItem } from './hooks/useContextMentionData'
+import type { GitHubIssue } from '@/types/github'
 import type * as EnvironmentModule from '@/lib/environment'
 
 const useContextMentionDataMock = vi.hoisted(() => vi.fn())
@@ -25,18 +25,33 @@ const items: [ContextMentionItem, ContextMentionItem] = [
     type: 'issue',
     label: '#123',
     title: 'Fix login bug',
-    subtitle: 'open issue by alice',
-    icon: Bug,
   },
   {
     id: 'pr:45',
     type: 'pr',
     label: 'PR #45',
     title: 'Add context mentions',
-    subtitle: 'open main ← feature',
-    icon: GitPullRequest,
   },
 ]
+
+const linkUsage = vi.hoisted(() => ({
+  getMatches: vi.fn((): unknown[] => []),
+  open: vi.fn(),
+}))
+
+vi.mock('@/hooks/useContextLinkUsage', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/hooks/useContextLinkUsage')>()),
+  useContextLinkUsage: () => ({ getMatches: linkUsage.getMatches }),
+  openContextLinkMatch: linkUsage.open,
+}))
+
+vi.mock('@/components/worktree/IssuePreviewModal', () => ({
+  IssuePreviewModal: ({ type, number }: { type: string; number: number }) => (
+    <div role="dialog">
+      Preview {type} {number}
+    </div>
+  ),
+}))
 
 vi.mock('./hooks/useContextMentionData', () => ({
   useContextMentionData: useContextMentionDataMock,
@@ -46,6 +61,8 @@ describe('ContextMentionPopover', () => {
   beforeEach(() => {
     platform.native = false
     platform.mobile = false
+    linkUsage.getMatches.mockReset().mockReturnValue([])
+    linkUsage.open.mockReset()
     useContextMentionDataMock.mockImplementation(() => ({
       groups: [
         { id: 'issue', heading: 'GitHub Issues', items: [items[0]] },
@@ -90,6 +107,93 @@ describe('ContextMentionPopover', () => {
         .parentElement
     ).toContainElement(
       screen.getByRole('button', { name: 'Include closed/merged' })
+    )
+  })
+
+  it('opens the issue preview without selecting or closing the list', () => {
+    const onOpenChange = vi.fn()
+    const onSelectContext = vi.fn()
+    useContextMentionDataMock.mockImplementation(() => ({
+      groups: [
+        {
+          id: 'issue',
+          heading: 'GitHub Issues',
+          items: [{ ...items[0], issue: { number: 123 } as GitHubIssue }],
+        },
+      ],
+      isFetching: false,
+    }))
+    render(
+      <ContextMentionPopover
+        projectPath="/tmp/repo"
+        projectId="project-1"
+        open
+        onOpenChange={onOpenChange}
+        onSelectContext={onSelectContext}
+        searchQuery=""
+        anchorPosition={{ top: 0, left: 0 }}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Preview #123' }))
+
+    expect(screen.getByText('Preview issue 123')).toBeInTheDocument()
+    expect(onSelectContext).not.toHaveBeenCalled()
+    expect(onOpenChange).not.toHaveBeenCalled()
+  })
+
+  it('opens the existing investigation instead of starting a new one', () => {
+    const match = {
+      worktreeId: 'wt-1',
+      worktreeName: 'fix-login',
+      worktreePath: '/tmp/wt-1',
+      sessionId: 'session-2',
+      sessionName: 'Investigate #123',
+    }
+    linkUsage.getMatches.mockReturnValue([match])
+    const onSelectContext = vi.fn()
+    useContextMentionDataMock.mockImplementation(() => ({
+      groups: [
+        {
+          id: 'issue',
+          heading: 'GitHub Issues',
+          items: [{ ...items[0], issue: { number: 123 } as GitHubIssue }],
+        },
+      ],
+      isFetching: false,
+    }))
+    render(
+      <ContextMentionPopover
+        projectPath="/tmp/repo"
+        projectId="project-1"
+        sessionId="session-1"
+        open
+        onOpenChange={vi.fn()}
+        onSelectContext={onSelectContext}
+        searchQuery=""
+        anchorPosition={{ top: 0, left: 0 }}
+      />
+    )
+
+    expect(screen.getByTestId('context-link-badge')).toHaveTextContent(
+      'fix-login › Investigate #123'
+    )
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Open existing investigation of #123',
+      })
+    )
+
+    expect(linkUsage.open).toHaveBeenCalledWith(match)
+    expect(onSelectContext).not.toHaveBeenCalled()
+
+    // Attaching context to the current session is still allowed
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Add #123 to session context' })
+    )
+    expect(onSelectContext).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'issue:123' }),
+      false
     )
   })
 
@@ -250,7 +354,6 @@ describe('ContextMentionPopover', () => {
       (_, index): ContextMentionItem => ({
         ...items[0],
         type: 'issue',
-        icon: Bug,
         id: `issue:${index + 1}`,
         label: `#${index + 1}`,
         title: `Issue ${index + 1}`,
@@ -261,7 +364,6 @@ describe('ContextMentionPopover', () => {
       (_, index): ContextMentionItem => ({
         ...items[1],
         type: 'pr',
-        icon: GitPullRequest,
         id: `pr:${index + 1}`,
         label: `PR #${index + 1}`,
         title: `Pull request ${index + 1}`,
