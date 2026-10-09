@@ -242,8 +242,9 @@ export function ProjectsSidebar() {
         </SidebarTabRail>
       )}
       <div className="flex min-w-0 flex-1 flex-col">
+        {/* Same 8px offset and 48px height as the rail buttons, so they line up */}
         <div
-          className="flex shrink-0 gap-1 px-3 pt-2"
+          className="mt-2 flex h-12 shrink-0 items-center gap-1 px-3"
           role="tablist"
           aria-label="Workspace view"
         >
@@ -267,14 +268,14 @@ export function ProjectsSidebar() {
           {activeTab === 'projects' ? (
             <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
               <div className="border-b border-border/40 pb-2">
-                <div className="flex gap-1 px-3 pt-1">
+                <div className="flex gap-1 px-3">
                   <div className="relative min-w-0 flex-1">
                     <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                     <Input
                       type="search"
                       value={searchQuery}
                       onChange={event => setSearchQuery(event.target.value)}
-                      placeholder="Search projects and servers…"
+                      placeholder="Search…"
                       aria-label="Search projects, worktrees and servers"
                       className="h-8 border-transparent bg-transparent pl-7 pr-2 text-xs shadow-none focus-visible:border-transparent dark:bg-transparent"
                     />
@@ -338,7 +339,8 @@ export function ProjectsSidebar() {
                 </div>
               </div>
               {showServerMenu && (
-                <div className="px-3 py-2">
+                <div className="px-1.5 py-2">
+                  {/* 6px + 6px inset lines up with the section headers */}
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <button
@@ -356,7 +358,7 @@ export function ProjectsSidebar() {
                     <DropdownMenuContent
                       align="start"
                       className="border-border/60 bg-popover/95 shadow-lg backdrop-blur-sm"
-                      style={{ width: sidebarWidth - 24 }}
+                      style={{ width: sidebarWidth - 12 }}
                     >
                       <DropdownMenuRadioGroup
                         value={serverFilter}

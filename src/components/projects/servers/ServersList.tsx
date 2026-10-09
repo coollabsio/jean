@@ -26,6 +26,11 @@ import { useUIStore } from '@/store/ui-store'
 import type { Project } from '@/types/projects'
 import { ServerUserSetupDialog } from './ServerUserSetupDialog'
 import { serverSubtitle } from './servers-view'
+import {
+  SECTION_HEADER_CLASS,
+  SECTION_LABEL_CLASS,
+  SECTION_TOGGLE_CLASS,
+} from '../section-header'
 
 /** No user means the ssh default, often root. */
 function usesAdminUser(project: Project): boolean {
@@ -88,13 +93,11 @@ export function ServersList({ servers, searchQuery }: ServersListProps) {
       {/* Nothing to show: the Add server action is in the Projects "+" menu */}
       {filteredServers.length > 0 && (
         <div className="py-1">
-          <div className="flex items-center justify-between pl-3 pr-2 pb-1 pt-2">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/50">
-              Servers
-            </span>
+          <div className={SECTION_HEADER_CLASS}>
+            <span className={SECTION_LABEL_CLASS}>Servers</span>
             <button
               type="button"
-              className="flex size-4 shrink-0 items-center justify-center rounded opacity-50 hover:bg-accent-foreground/10 hover:opacity-100"
+              className={SECTION_TOGGLE_CLASS}
               onClick={() => setCollapsed(value => !value)}
               aria-label={showServers ? 'Hide servers' : 'Show servers'}
               aria-expanded={showServers}

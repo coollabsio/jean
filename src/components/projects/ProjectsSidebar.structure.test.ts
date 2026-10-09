@@ -39,7 +39,7 @@ describe('ProjectsSidebar server filter', () => {
       'utf8'
     )
 
-    expect(source).toContain('className="px-3 py-2"')
+    expect(source).toContain('className="px-1.5 py-2"')
     expect(source).toContain('<DropdownMenuTrigger')
     expect(source).toContain('aria-label="Filter projects by server"')
     expect(source).toContain(
@@ -98,7 +98,7 @@ describe('ProjectsSidebar server filter', () => {
     expect(source).toContain('<Plus className="size-3.5" />')
     expect(source).toContain('<GitBranchPlus className="size-3.5" />')
     expect(source).toContain('disabled={!selectedProjectId}')
-    expect(source).toContain('className="flex gap-1 px-3 pt-1"')
+    expect(source).toContain('className="flex gap-1 px-3"')
     expect(source).toContain('border-transparent bg-transparent')
     expect(source).toContain('searchQuery={searchQuery}')
     expect(source).not.toContain('aria-label="New"')
