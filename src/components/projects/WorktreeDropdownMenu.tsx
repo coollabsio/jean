@@ -214,6 +214,11 @@ export function WorktreeDropdownMenu({
     )
   }
 
+  const handleNewWorktree = useCallback(() => {
+    useProjectsStore.getState().selectProject(projectId)
+    useUIStore.getState().setNewWorktreeModalOpen(true)
+  }, [projectId])
+
   const handleOpenIssues = useCallback(() => {
     useProjectsStore.getState().selectProject(projectId)
     const { setNewWorktreeModalDefaultTab, setNewWorktreeModalOpen } =
@@ -264,6 +269,11 @@ export function WorktreeDropdownMenu({
           >
             <Plus className="mr-2 h-4 w-4" />
             New Session
+          </DropdownMenuItem>
+
+          <DropdownMenuItem onClick={handleNewWorktree}>
+            <GitBranch className="mr-2 h-4 w-4" />
+            New Worktree
           </DropdownMenuItem>
 
           {!isMobile && runScripts.length === 1 && (
