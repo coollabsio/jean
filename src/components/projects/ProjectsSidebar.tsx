@@ -461,9 +461,9 @@ export function ProjectsSidebar() {
             />
           )}
         </div>
-        {/* Transparent footer floats over the list; only its buttons take clicks */}
+        {/* Glassy footer floats over the list (only when it has buttons); only its buttons take clicks */}
         <div
-          className={`pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between ${showServerMenu ? 'px-2 pt-2 pb-4' : 'px-2 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))]'}`}
+          className={`pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between has-[button]:bg-sidebar/60 has-[button]:backdrop-blur-md dark:has-[button]:bg-[#0b0b0b]/60 ${showServerMenu ? 'px-2 pt-2 pb-4' : 'px-2 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))]'}`}
         >
           <div
             ref={setFooterActionsEl}
