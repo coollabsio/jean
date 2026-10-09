@@ -6,7 +6,6 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import { edgeNeutral, raised } from '@/components/ui/button'
 import { isNativeApp } from '@/lib/environment'
 import { FALLBACK_APP_VERSION } from '@/lib/app-version'
 import { openExternal } from '@/lib/platform'
@@ -19,17 +18,12 @@ const SECTIONS: { section: RailSection; label: string; Icon: typeof Code }[] = [
   { section: 'agents', label: 'Agents', Icon: Bot },
 ]
 
-// Same 3D raised look as Button (secondary variant)
-const RAIL_BUTTON_CLASS = cn(
-  raised,
-  edgeNeutral,
-  'relative flex size-12 shrink-0 items-center justify-center rounded-md bg-secondary text-muted-foreground hover:bg-secondary/80 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
-)
+// Plain icons, no button chrome
+const RAIL_ICON_CLASS =
+  'flex size-12 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
 
-// Active section stays pressed down: moved by the edge height, no outer edge,
-// and a top inner shadow
-const RAIL_BUTTON_PRESSED_CLASS =
-  'translate-y-0.5 bg-muted text-foreground shadow-[inset_0_2px_0_var(--btn-edge)] hover:translate-y-0.5 hover:bg-muted hover:shadow-[inset_0_2px_0_var(--btn-edge)]'
+// Active section uses the brand accent (yellow in dark mode)
+const RAIL_ICON_ACTIVE_CLASS = 'text-primary hover:text-primary'
 
 interface SidebarTabRailProps {
   /** Desktop: clicking the active section hides the sidebar, any section shows it. */
@@ -110,8 +104,8 @@ export function SidebarTabRail({
                   aria-selected={selected}
                   aria-label={label}
                   className={cn(
-                    RAIL_BUTTON_CLASS,
-                    selected && RAIL_BUTTON_PRESSED_CLASS
+                    RAIL_ICON_CLASS,
+                    selected && RAIL_ICON_ACTIVE_CLASS
                   )}
                   onClick={() => handleSelect(section)}
                 >
@@ -130,8 +124,7 @@ export function SidebarTabRail({
             onClick={handleOpenSettings}
             aria-label="Open Settings"
             data-testid="sidebar-settings"
-            // Plain icon, not a raised button
-            className="mt-auto flex size-12 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className={cn(RAIL_ICON_CLASS, 'mt-auto')}
           >
             <Settings className="size-6" />
           </button>
