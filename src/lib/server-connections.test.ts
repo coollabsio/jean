@@ -72,6 +72,38 @@ describe('ServerConnectionManager', () => {
     expect(adapters.r2.reconnect).toHaveBeenCalledOnce()
   })
 
+  it('notifies reconnect listeners only after a dropped socket reconnects', () => {
+    let notifyAdapter: () => void = () => undefined
+    const remoteAdapter = {
+      ...adapter(),
+      connected: false,
+      subscribe: (callback: () => void) => {
+        notifyAdapter = callback
+        return () => undefined
+      },
+    }
+    const manager = new ServerConnectionManager({
+      isNative: () => true,
+      invokeLocal: vi.fn(),
+      createRemote: () => remoteAdapter,
+    })
+    const onReconnect = vi.fn()
+    manager.onRemoteReconnect(onReconnect)
+    manager.sync([remote('r1')])
+
+    remoteAdapter.connected = true
+    notifyAdapter()
+    expect(onReconnect).not.toHaveBeenCalled()
+
+    notifyAdapter()
+    remoteAdapter.connected = false
+    notifyAdapter()
+    remoteAdapter.connected = true
+    notifyAdapter()
+    expect(onReconnect).toHaveBeenCalledOnce()
+    expect(onReconnect).toHaveBeenCalledWith('r1')
+  })
+
   it('does not create remote adapters in Web Access', () => {
     const createRemote = vi.fn(() => adapter())
     const manager = new ServerConnectionManager({
