@@ -278,11 +278,9 @@ describe('model option helpers', () => {
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
       'test against its `url`, port, and startup command'
     )
+    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain('start_run_environment')
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
-      'use the Agent Browser when it is available'
-    )
-    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
-      'no other browser testing method'
+      'no other browser tool is available, use the Agent Browser'
     )
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
       'VERY IMPORTANT: Keep Code Simple'
