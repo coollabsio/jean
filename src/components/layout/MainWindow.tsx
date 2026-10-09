@@ -604,7 +604,15 @@ export function MainWindow() {
         {/* Desktop: always-visible vertical tab rail for the left sidebar */}
         {!isMobile && isInitialized && (
           // Border starts below the title bar so it never crosses its buttons
-          <div className="h-full shrink-0 bg-sidebar pt-8 dark:bg-[#0b0b0b]">
+          // Collapsed: blend with the main window. Expanded: match the sidebar.
+          <div
+            className={cn(
+              'h-full shrink-0 pt-8',
+              leftSidebarVisible
+                ? 'bg-sidebar dark:bg-[#0b0b0b]'
+                : 'bg-background'
+            )}
+          >
             <SidebarTabRail
               togglesSidebar
               className="h-full border-r border-border/40"
