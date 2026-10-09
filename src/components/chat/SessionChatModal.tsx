@@ -1086,7 +1086,13 @@ export const SessionChatModal = memo(function SessionChatModal({
                       isMobile ? 'basis-full' : 'contents'
                     )}
                   >
-                    <h2 className="text-sm font-medium min-w-0 flex-1 truncate">
+                    <h2
+                      className={cn(
+                        'text-sm font-medium min-w-0 truncate',
+                        // Mobile: no grow, so the menu sits right after the title
+                        !isMobile && 'flex-1'
+                      )}
+                    >
                       {project && !isMobile && (
                         <span className="text-muted-foreground font-normal">
                           <button
