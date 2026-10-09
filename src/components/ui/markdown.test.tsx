@@ -179,6 +179,37 @@ describe('Markdown', () => {
     )
   })
 
+  it('keeps focus on the next note form when one form closes another', async () => {
+    useChatStore.setState({
+      pendingTextFiles: {
+        s4: [{ id: 'tf', tableRows: { tableKey: 't4', rows: [0, 1] } }],
+      },
+    } as never)
+    render(
+      <Markdown sessionId="s4" tableKey="t4">
+        {'| Name |\n| --- |\n| a |\n| b |'}
+      </Markdown>
+    )
+
+    fireEvent.click(screen.getByText('a'))
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByLabelText(/Row 1 is in the prompt/)
+      )
+    )
+
+    // A click on the next row closes the first form and opens the next one.
+    // The first form's deferred close must not pull focus back to its row.
+    const rowB = screen.getByText('b')
+    fireEvent.pointerDown(rowB)
+    fireEvent.click(rowB)
+    await act(() => new Promise(resolve => setTimeout(resolve, 20)))
+    expect(screen.queryByLabelText(/Row 1 is in the prompt/)).toBeNull()
+    expect(document.activeElement).toBe(
+      screen.getByLabelText(/Row 2 is in the prompt/)
+    )
+  })
+
   it('opens relative file links in the active worktree viewer', () => {
     useChatStore.setState({ activeWorktreePath: '/repo/worktree' })
     useUIStore.getState().setViewingFilePath(null)

@@ -356,9 +356,14 @@ function PromptRow({ row, rowIndex, inPrompt, note, onSave }: PromptRowProps) {
         align="start"
         className="w-80 p-3"
         onCloseAutoFocus={event => {
-          // Return focus to the row so keyboard navigation can continue.
           event.preventDefault()
-          rowRef.current?.focus({ preventScroll: true })
+          // Radix runs this after a deferred tick. When a click on another row
+          // or the chat input closed the form, focus is already there: keep it.
+          // Otherwise (Escape, Save) return focus to the row for keyboard nav.
+          const active = document.activeElement
+          if (!active || active === document.body) {
+            rowRef.current?.focus({ preventScroll: true })
+          }
         }}
       >
         <form
