@@ -9,5 +9,5 @@ export function buildCommitInSessionPrompt(
   const closes = closeIssueNumber
     ? ` Add a "Closes #${closeIssueNumber}" footer line so the commit closes GitHub issue #${closeIssueNumber}.`
     : ''
-  return `Commit all current changes in this worktree with a concise commit message that matches the recent commit style.${closes}`
+  return `Commit the current session changes with a concise commit message that matches the recent commit style. The branch could have other changes unrelated to this session, so make sure you commit only the right ones.${closes}`
 }

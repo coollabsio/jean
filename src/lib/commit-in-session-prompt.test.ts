@@ -5,7 +5,7 @@ describe('buildCommitInSessionPrompt', () => {
   it('adds a Closes footer rule when an issue number is given', () => {
     const prompt = buildCommitInSessionPrompt(42)
 
-    expect(prompt).toContain('Commit all current changes')
+    expect(prompt).toContain('Commit the current session changes')
     expect(prompt).toContain('"Closes #42"')
     expect(prompt).not.toContain('\n')
   })

@@ -49,6 +49,8 @@ When you finish a turn that involved tool calls, edits, or multi-step work, end 
 
 - 2-4 short bullets for context that doesn't fit above: caveats, follow-ups, unresolved questions, or files the user should review.
 
+Tested against local dev env: Yes/No
+
 [Optional `### How to test` subsection — include ONLY when the rules below say to.]
 
 Rules:
@@ -57,6 +59,7 @@ Rules:
 - The recap is the user-facing deliverable — it must be self-contained. Include the actual answer/result inline. Do NOT write things like \"I looked it up\" or \"see above\" — restate the answer.
 - If the turn found issues, gaps, risks, or recommended fixes, list them in the recap as a Markdown table (for example: | # | Finding | Location | Impact | Recommended fix |), not as bullets or prose.
 - Add a `### How to test` subsection ONLY when the turn produced code, config, or behavior changes the user can verify. Make it actionable and specific (commands to run, UI flows to click through, files to inspect); if it makes sense, always include a smoke test that explains how the user can manually verify the main behavior. OMIT the subsection entirely on read-only turns — questions, explanations, research, planning, code review without edits, or any turn where there is nothing meaningful to test. Do NOT include placeholder content like \"N/A\", \"Nothing to test\", \"No tests needed\", or an empty bullet list. If in doubt, leave it out.
+- When the turn produced code, config, or behavior changes, include the line `Tested against local dev env: Yes` or `Tested against local dev env: No` (pick one, based on whether you actually verified the change in a running local dev environment). Omit this line on read-only turns.
 - In plan mode, when a plan is ready, you MUST still call the native plan tool (Claude ExitPlanMode, Codex `<proposed_plan>` / plan item, Cursor/OpenCode equivalent) to present it. The recap does NOT replace the plan tool — never end a plan-mode turn with only a `## Recap` block in place of the plan tool call.
 - Skip the recap entirely if the turn was a single one-line answer with no tool calls.
 - Do NOT repeat tool inputs, file diffs, or raw command output verbatim. Summarize.";
@@ -95,6 +98,12 @@ mod tests {
         assert!(RECAP_INSTRUCTION.contains("smoke test"));
         assert!(RECAP_INSTRUCTION.contains("manual"));
         assert!(RECAP_INSTRUCTION.contains("if it makes sense"));
+    }
+
+    #[test]
+    fn recap_requests_local_dev_env_tested_line() {
+        assert!(RECAP_INSTRUCTION.contains("Tested against local dev env: Yes"));
+        assert!(RECAP_INSTRUCTION.contains("Tested against local dev env: No"));
     }
 
     #[test]
