@@ -87,8 +87,8 @@ export function ServersList({ servers }: ServersListProps) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
-      <div className="border-b border-border/40 pb-2 pt-[3px]">
-        <div className="flex gap-1 px-3 pt-2">
+      <div className="border-b border-border/40 pb-2">
+        <div className="flex gap-1 px-3 pt-[7px]">
           <div className="relative min-w-0 flex-1">
             <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input

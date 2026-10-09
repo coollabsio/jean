@@ -84,6 +84,8 @@ export function MobileToolbarMenu({
       dispatchMagicCommand({ command: 'check-github-issues' }),
     commit: onCommit,
     'commit-and-push': onCommitAndPush,
+    'commit-in-session': () =>
+      dispatchMagicCommand({ command: 'commit-in-session' }),
     'comment-and-close-issue': () =>
       dispatchMagicCommand({ command: 'comment-and-close-issue' }),
     'revert-last-commit': onRevertLastCommit,

@@ -288,7 +288,7 @@ export function RecentWorktreesList({
       window.removeEventListener('open-recent-session-by-index', onOpenByIndex)
   }, [displayedRows, handleOpen])
 
-  if (query.isPending) {
+  if (query.isPending && projects.length > 0) {
     return (
       <div
         role="status"
@@ -375,6 +375,11 @@ export function RecentWorktreesList({
       data-testid="recent-worktrees-list"
     >
       <div className="min-h-0 flex-1 overflow-y-auto">
+        {displayedRows.length === 0 && (
+          <div className="px-3 py-6 text-center text-xs text-muted-foreground">
+            No recent sessions
+          </div>
+        )}
         <ul
           aria-label="Recent sessions"
           className="@container flex flex-col gap-2 px-2 py-2"

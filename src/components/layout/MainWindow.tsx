@@ -170,6 +170,7 @@ const CloseWorktreeDialog = lazy(() =>
 )
 import { Toaster } from '@/components/ui/sonner'
 import { MobileLeftSidebar } from './MobileLeftSidebar'
+import { SidebarTabRail } from '@/components/projects/SidebarTabRail'
 import { BrowserSidePane } from '@/components/browser/BrowserSidePane'
 import { BrowserPanel } from '@/components/browser/BrowserPanel'
 import { useBrowserEvents } from '@/hooks/useBrowserPane'
@@ -599,6 +600,17 @@ export function MainWindow() {
 
       {/* Main Content Area */}
       <div className="flex flex-1 overflow-hidden">
+        {/* Desktop: always-visible vertical tab rail for the left sidebar */}
+        {!isMobile && isInitialized && (
+          // Border starts below the title bar so it never crosses its buttons
+          <div className="h-full shrink-0 bg-sidebar pt-8 dark:bg-[#0b0b0b]">
+            <SidebarTabRail
+              togglesSidebar
+              className="h-full border-r border-border/40"
+            />
+          </div>
+        )}
+
         {/* Desktop: in-flow left sidebar (shifts layout). Only after UI state init. */}
         {!isMobile && leftSidebarVisible && isInitialized && (
           <SidebarWidthProvider value={leftSidebarSize}>

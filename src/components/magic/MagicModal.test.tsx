@@ -858,6 +858,23 @@ describe('MagicModal manual PR link', () => {
     dispatchSpy.mockRestore()
   })
 
+  it('dispatches the commit in session command to the current chat', async () => {
+    const user = userEvent.setup()
+    mocks.activeWorktreePath = '/repo/worktree'
+    const dispatchSpy = vi.spyOn(window, 'dispatchEvent')
+    render(<MagicModal />)
+
+    await user.click(screen.getByRole('button', { name: /commit in session/i }))
+
+    expect(dispatchSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'magic-command',
+        detail: { command: 'commit-in-session' },
+      })
+    )
+    dispatchSpy.mockRestore()
+  })
+
   it('does not show the removed smoke test magic command', () => {
     render(<MagicModal />)
 

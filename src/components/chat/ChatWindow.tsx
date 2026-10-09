@@ -198,6 +198,7 @@ import { useUIStore } from '@/store/ui-store'
 import { buildMcpConfigJson } from '@/services/mcp'
 import { CHECK_GITHUB_ISSUES_PROMPT } from '@/lib/github-discovery-prompt'
 import { buildCommentAndCloseIssuePrompt } from '@/lib/github-issue-close-prompt'
+import { buildCommitInSessionPrompt } from '@/lib/commit-in-session-prompt'
 import type { McpServerInfo } from '@/types/chat'
 import { useGitStatus } from '@/services/git-status'
 import { useRemotePicker } from '@/hooks/useRemotePicker'
@@ -1809,30 +1810,44 @@ const ChatWindowContent = memo(function ChatWindowContent({
     handleClearClaudeGoal,
   ])
 
+  // Sends a magic prompt to this session with the selected backend/model/mode
+  const sendMagicPrompt = useCallback(
+    (message: string) =>
+      sendMessageNow({
+        id: generateId(),
+        message,
+        pendingImages: [],
+        pendingFiles: [],
+        pendingSkills: [],
+        pendingTextFiles: [],
+        model: selectedModelRef.current,
+        provider: selectedProviderRef.current,
+        executionMode: executionModeRef.current,
+        thinkingLevel: selectedThinkingLevelRef.current,
+        effortLevel: useAdaptiveThinkingRef.current
+          ? selectedEffortLevelRef.current
+          : undefined,
+        mcpConfig: getMcpConfig(),
+        backend: selectedBackendRef.current,
+        queuedAt: Date.now(),
+      }),
+    [getMcpConfig, sendMessageNow]
+  )
+
+  const handleCommitInSession = useCallback(() => {
+    const closeIssueNumber = preferences?.commit_close_issue
+      ? worktree?.issue_number
+      : undefined
+    sendMagicPrompt(buildCommitInSessionPrompt(closeIssueNumber))
+  }, [preferences?.commit_close_issue, sendMagicPrompt, worktree?.issue_number])
+
   const handleCommentAndCloseIssue = useCallback(() => {
     if (!loadedIssueContexts?.length) {
       toast.error('No GitHub issue attached to this session or worktree')
       return
     }
-    sendMessageNow({
-      id: generateId(),
-      message: buildCommentAndCloseIssuePrompt(loadedIssueContexts),
-      pendingImages: [],
-      pendingFiles: [],
-      pendingSkills: [],
-      pendingTextFiles: [],
-      model: selectedModelRef.current,
-      provider: selectedProviderRef.current,
-      executionMode: executionModeRef.current,
-      thinkingLevel: selectedThinkingLevelRef.current,
-      effortLevel: useAdaptiveThinkingRef.current
-        ? selectedEffortLevelRef.current
-        : undefined,
-      mcpConfig: getMcpConfig(),
-      backend: selectedBackendRef.current,
-      queuedAt: Date.now(),
-    })
-  }, [getMcpConfig, loadedIssueContexts, sendMessageNow])
+    sendMagicPrompt(buildCommentAndCloseIssuePrompt(loadedIssueContexts))
+  }, [loadedIssueContexts, sendMagicPrompt])
 
   // Git operations hook - handles commit, PR, review, merge operations
   const {
@@ -2100,6 +2115,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
     handlePreReleaseReview,
     handleCommit,
     handleCommitAndPush: handleCommitAndPushWithPicker,
+    handleCommitInSession,
     handleCommentAndCloseIssue,
     handlePull: handlePullWithPicker,
     handlePush: handlePushWithPicker,

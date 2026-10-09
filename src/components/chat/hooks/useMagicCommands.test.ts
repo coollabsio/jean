@@ -15,6 +15,7 @@ function renderUseMagicCommands(
     handlePreReleaseReview: vi.fn(),
     handleCommit: vi.fn(),
     handleCommitAndPush: vi.fn(),
+    handleCommitInSession: vi.fn(),
     handleCommentAndCloseIssue: vi.fn(),
     handlePull: vi.fn(),
     handlePush: vi.fn(),
@@ -73,6 +74,18 @@ describe('useMagicCommands review comments batch', () => {
     )
 
     expect(handlers.handlePreReleaseReview).toHaveBeenCalledTimes(1)
+  })
+
+  it('dispatches the commit in session command to the current chat', () => {
+    const handlers = renderUseMagicCommands()
+
+    window.dispatchEvent(
+      new CustomEvent('magic-command', {
+        detail: { command: 'commit-in-session' },
+      })
+    )
+
+    expect(handlers.handleCommitInSession).toHaveBeenCalledTimes(1)
   })
 
   it('dispatches the comment and close issue command to the current chat', () => {
