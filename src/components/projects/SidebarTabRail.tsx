@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Code, Settings } from '@/components/icons/reicon'
 import {
   Tooltip,
@@ -8,6 +8,8 @@ import {
 import { cn } from '@/lib/utils'
 import { edgeNeutral, raised } from '@/components/ui/button'
 import { isNativeApp } from '@/lib/environment'
+import { FALLBACK_APP_VERSION } from '@/lib/app-version'
+import { openExternal } from '@/lib/platform'
 import { useUIStore } from '@/store/ui-store'
 import { useIsMobile } from '@/hooks/use-mobile'
 
@@ -37,7 +39,7 @@ interface SidebarTabRailProps {
   children?: React.ReactNode
 }
 
-/** Vertical 72px icon rail: feature sections, Settings at the bottom. */
+/** Vertical 72px icon rail: feature sections, Settings and app version at the bottom. */
 export function SidebarTabRail({
   togglesSidebar = false,
   className,
@@ -46,6 +48,16 @@ export function SidebarTabRail({
   const sidebarVisible = useUIStore(state => state.leftSidebarVisible)
   const showActive = !togglesSidebar || sidebarVisible
   const isMobile = useIsMobile()
+  const [appVersion, setAppVersion] = useState(FALLBACK_APP_VERSION)
+
+  useEffect(() => {
+    if (!isNativeApp()) return
+
+    import('@tauri-apps/api/app')
+      .then(({ getVersion }) => getVersion())
+      .then(setAppVersion)
+      .catch(() => setAppVersion(FALLBACK_APP_VERSION))
+  }, [])
 
   // Only one section exists, so clicking it only toggles the sidebar.
   const handleSelect = useCallback(() => {
@@ -65,7 +77,6 @@ export function SidebarTabRail({
     <div
       className={cn(
         'flex w-18 shrink-0 flex-col items-center gap-1.5 pt-2',
-        // Center Settings on the sidebar footer row (see ProjectsSidebar)
         isNativeApp() ? 'pb-2' : 'pb-[max(0.5rem,env(safe-area-inset-bottom))]',
         className
       )}
@@ -115,6 +126,18 @@ export function SidebarTabRail({
         </TooltipTrigger>
         <TooltipContent side="right">Settings</TooltipContent>
       </Tooltip>
+      <button
+        type="button"
+        onClick={() =>
+          openExternal(
+            `https://github.com/coollabsio/jean/releases/tag/v${appVersion}`
+          )
+        }
+        data-testid="sidebar-app-version"
+        className="text-[0.625rem] leading-none text-foreground/40 transition-colors hover:text-foreground/60"
+      >
+        v{appVersion}
+      </button>
     </div>
   )
 }

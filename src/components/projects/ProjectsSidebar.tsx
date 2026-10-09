@@ -53,8 +53,6 @@ import {
 import { useInstalledBackends } from '@/hooks/useInstalledBackends'
 import { scheduleIdleWork } from '@/lib/idle'
 import { isNativeApp } from '@/lib/environment'
-import { FALLBACK_APP_VERSION } from '@/lib/app-version'
-import { openExternal } from '@/lib/platform'
 import { useServerConnectionSnapshots } from '@/lib/server-connections'
 import {
   ALL_SERVERS,
@@ -157,7 +155,6 @@ export function ProjectsSidebar() {
   const [connectionsOpen, setConnectionsOpen] = useState(false)
   const activeTab = useProjectsStore(state => state.sidebarActiveTab)
   const [searchQuery, setSearchQuery] = useState('')
-  const [appVersion, setAppVersion] = useState(FALLBACK_APP_VERSION)
   const [footerActionsEl, setFooterActionsEl] = useState<HTMLDivElement | null>(
     null
   )
@@ -192,14 +189,6 @@ export function ProjectsSidebar() {
           ?.serverName ??
         'Local')
   useEffect(() => scheduleIdleWork(() => setBackendCheckReady(true), 1500), [])
-  useEffect(() => {
-    if (!isNativeApp()) return
-
-    import('@tauri-apps/api/app')
-      .then(({ getVersion }) => getVersion())
-      .then(setAppVersion)
-      .catch(() => setAppVersion(FALLBACK_APP_VERSION))
-  }, [])
   const { installedBackends } = useInstalledBackends({
     enabled: backendCheckReady,
   })
@@ -477,20 +466,8 @@ export function ProjectsSidebar() {
         >
           <div
             ref={setFooterActionsEl}
-            className="flex min-w-0 flex-1 justify-center"
+            className="flex min-h-8 min-w-0 flex-1 justify-center"
           />
-          <button
-            type="button"
-            onClick={() =>
-              openExternal(
-                `https://github.com/coollabsio/jean/releases/tag/v${appVersion}`
-              )
-            }
-            data-testid="sidebar-app-version"
-            className="flex h-8 items-center px-1.5 text-[0.625rem] leading-none text-foreground/40 transition-colors hover:text-foreground/60"
-          >
-            v{appVersion}
-          </button>
         </div>
       </div>
     </div>
