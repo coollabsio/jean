@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 describe('ProjectsSidebar server filter', () => {
-  it('offers Projects, Recent and Servers as the top-level views', () => {
+  it('shows Servers inside the Projects view, with a Projects/Recent toggle', () => {
     const source = readFileSync(
       'src/components/projects/ProjectsSidebar.tsx',
       'utf8'
@@ -27,6 +27,10 @@ describe('ProjectsSidebar server filter', () => {
     expect(source).toContain('footerActionsContainer={footerActionsEl}')
     expect(source).toContain('ref={setFooterActionsEl}')
     expect(source).toContain('state => state.sidebarActiveTab')
+    expect(source).toContain('aria-label="Workspace view"')
+    expect(source).toContain('Add server')
+    expect(source).not.toContain("activeTab === 'servers'")
+    expect(rail).toContain("label: 'Workspace'")
   })
 
   it('uses a compact dropdown that blends into the sidebar', () => {
@@ -75,7 +79,9 @@ describe('ProjectsSidebar server filter', () => {
     const serverSelector = source.indexOf(
       'aria-label="Filter projects by server"'
     )
-    const search = source.indexOf('aria-label="Search projects and worktrees"')
+    const search = source.indexOf(
+      'aria-label="Search projects, worktrees and servers"'
+    )
     const addProject = source.indexOf('aria-label="Add project"')
     const addWorktree = source.indexOf(
       'aria-label="Add worktree to selected project"'
@@ -87,10 +93,12 @@ describe('ProjectsSidebar server filter', () => {
     expect(addWorktree).toBeGreaterThan(addProject)
     expect(serverSelector).toBeGreaterThan(addWorktree)
     expect(projectTree).toBeGreaterThan(serverSelector)
+    expect(source.indexOf('<ServersList')).toBeGreaterThan(serverSelector)
+    expect(projectTree).toBeGreaterThan(source.indexOf('<ServersList'))
     expect(source).toContain('<Plus className="size-3.5" />')
     expect(source).toContain('<GitBranchPlus className="size-3.5" />')
     expect(source).toContain('disabled={!selectedProjectId}')
-    expect(source).toContain('className="flex gap-1 px-3 pt-[7px]"')
+    expect(source).toContain('className="flex gap-1 px-3 pt-1"')
     expect(source).toContain('border-transparent bg-transparent')
     expect(source).toContain('searchQuery={searchQuery}')
     expect(source).not.toContain('aria-label="New"')
@@ -140,7 +148,7 @@ describe('ProjectsSidebar server filter', () => {
     )
 
     expect(source).toContain(
-      "showServerMenu ? 'p-2' : 'px-2 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))]'"
+      "showServerMenu ? 'px-2 pt-2 pb-4' : 'px-2 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))]'"
     )
   })
 

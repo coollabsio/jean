@@ -93,7 +93,7 @@ export const FloatingButtons = memo(function FloatingButtons({
               <TooltipTrigger asChild>
                 <Button
                   size="sm"
-                  className="h-6 gap-1 rounded-none rounded-tl-md px-2 text-xs"
+                  className="h-6 gap-1 rounded-none rounded-tl-md bg-primary px-2 text-xs hover:bg-primary hover:brightness-110"
                   onClick={withScroll(onYoloApprove)}
                 >
                   Full access
@@ -108,7 +108,7 @@ export const FloatingButtons = memo(function FloatingButtons({
               <DropdownMenuTrigger asChild>
                 <Button
                   size="sm"
-                  className="h-6 rounded-none rounded-tr-md border-l border-l-primary-foreground/20 px-1.5"
+                  className="h-6 rounded-none rounded-tr-md border-l border-l-primary-foreground/20 bg-primary px-1.5 hover:bg-primary hover:brightness-110"
                 >
                   <ChevronDown className="h-3.5 w-3.5" />
                 </Button>
@@ -148,7 +148,7 @@ export const FloatingButtons = memo(function FloatingButtons({
                 <Button
                   size="sm"
                   variant="outline"
-                  className="h-6 gap-1 rounded-none rounded-tl-md border-b-0 bg-card px-2 text-xs"
+                  className="h-6 gap-1 rounded-none rounded-tl-md border-b-0 bg-card px-2 text-xs hover:bg-muted dark:bg-card dark:hover:bg-muted"
                   onClick={withScroll(onApprove)}
                 >
                   <Check className="h-3.5 w-3.5" />
@@ -162,7 +162,7 @@ export const FloatingButtons = memo(function FloatingButtons({
                 <Button
                   size="sm"
                   variant="outline"
-                  className="h-6 rounded-none rounded-tr-md border-b-0 border-l-0 bg-card px-1.5"
+                  className="h-6 rounded-none rounded-tr-md border-b-0 border-l-0 bg-card px-1.5 hover:bg-muted dark:bg-card dark:hover:bg-muted"
                 >
                   <ChevronDown className="h-3.5 w-3.5" />
                 </Button>

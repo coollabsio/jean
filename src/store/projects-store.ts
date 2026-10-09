@@ -9,7 +9,8 @@ export interface ProjectCanvasSettings {
   labels?: LabelData[]
 }
 
-export type SidebarTab = 'projects' | 'servers' | 'recent'
+/** Panel view inside the Workspace rail section. */
+export type SidebarTab = 'projects' | 'recent'
 
 interface ProjectsUIState {
   // Selection state

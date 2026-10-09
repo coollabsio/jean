@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { Folder, History, Server, Settings } from '@/components/icons/reicon'
+import { Code, Settings } from '@/components/icons/reicon'
 import {
   Tooltip,
   TooltipContent,
@@ -7,50 +7,42 @@ import {
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { isNativeApp } from '@/lib/environment'
-import { useProjectsStore, type SidebarTab } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
 import { useIsMobile } from '@/hooks/use-mobile'
 
-const TABS: { tab: SidebarTab; label: string; Icon: typeof Folder }[] = [
-  { tab: 'projects', label: 'Projects', Icon: Folder },
-  { tab: 'recent', label: 'Recent', Icon: History },
-  { tab: 'servers', label: 'Servers (Beta)', Icon: Server },
+/** Top-level Jean features. Agents will be added here later. */
+type RailSection = 'workspace'
+
+const SECTIONS: { section: RailSection; label: string; Icon: typeof Code }[] = [
+  { section: 'workspace', label: 'Workspace', Icon: Code },
 ]
 
 const RAIL_BUTTON_CLASS =
   'relative flex size-12 shrink-0 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
 
 interface SidebarTabRailProps {
-  /** Desktop: clicking the active tab hides the sidebar, any tab shows it. */
+  /** Desktop: clicking the active section hides the sidebar, any section shows it. */
   togglesSidebar?: boolean
   className?: string
   children?: React.ReactNode
 }
 
-/** Vertical 72px icon rail: sidebar view tabs, Settings at the bottom. */
+/** Vertical 72px icon rail: feature sections, Settings at the bottom. */
 export function SidebarTabRail({
   togglesSidebar = false,
   className,
   children,
 }: SidebarTabRailProps) {
-  const activeTab = useProjectsStore(state => state.sidebarActiveTab)
   const sidebarVisible = useUIStore(state => state.leftSidebarVisible)
   const showActive = !togglesSidebar || sidebarVisible
   const isMobile = useIsMobile()
 
-  const handleSelect = useCallback(
-    (tab: SidebarTab) => {
-      const { sidebarActiveTab, setSidebarActiveTab } =
-        useProjectsStore.getState()
-      if (togglesSidebar) {
-        const { leftSidebarVisible, setLeftSidebarVisible } =
-          useUIStore.getState()
-        setLeftSidebarVisible(!(leftSidebarVisible && sidebarActiveTab === tab))
-      }
-      setSidebarActiveTab(tab)
-    },
-    [togglesSidebar]
-  )
+  // Only one section exists, so clicking it only toggles the sidebar.
+  const handleSelect = useCallback(() => {
+    if (!togglesSidebar) return
+    const { leftSidebarVisible, setLeftSidebarVisible } = useUIStore.getState()
+    setLeftSidebarVisible(!leftSidebarVisible)
+  }, [togglesSidebar])
 
   const handleOpenSettings = useCallback(() => {
     const ui = useUIStore.getState()
@@ -64,9 +56,7 @@ export function SidebarTabRail({
       className={cn(
         'flex w-18 shrink-0 flex-col items-center gap-1.5 pt-2',
         // Center Settings on the sidebar footer row (see ProjectsSidebar)
-        isNativeApp()
-          ? 'pb-0'
-          : 'pb-[max(0.5rem,env(safe-area-inset-bottom))]',
+        isNativeApp() ? 'pb-2' : 'pb-[max(0.5rem,env(safe-area-inset-bottom))]',
         className
       )}
     >
@@ -74,13 +64,13 @@ export function SidebarTabRail({
       <div
         className="flex flex-col items-center gap-1.5"
         role="tablist"
-        aria-label="Sidebar view"
+        aria-label="Jean features"
         aria-orientation="vertical"
       >
-        {TABS.map(({ tab, label, Icon }) => {
-          const selected = showActive && activeTab === tab
+        {SECTIONS.map(({ section, label, Icon }) => {
+          const selected = showActive
           return (
-            <Tooltip key={tab}>
+            <Tooltip key={section}>
               <TooltipTrigger asChild>
                 <button
                   type="button"
@@ -93,7 +83,7 @@ export function SidebarTabRail({
                       ? 'text-foreground before:absolute before:inset-y-2 before:left-0 before:w-px before:bg-foreground'
                       : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
                   )}
-                  onClick={() => handleSelect(tab)}
+                  onClick={handleSelect}
                 >
                   <Icon className="size-6" />
                 </button>
