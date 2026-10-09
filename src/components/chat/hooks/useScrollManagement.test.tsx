@@ -322,6 +322,35 @@ describe('useScrollManagement streaming auto-scroll', () => {
     expect(getByTestId('is-at-bottom')).toHaveTextContent('false')
   })
 
+  it('stays at bottom when a nested scroller consumes an upward wheel', () => {
+    const { getByTestId } = setupHook({ isSending: false })
+    const nested = getByTestId('content')
+    nested.style.overflowY = 'auto'
+    defineReadonlyNumber(nested, 'clientHeight', 100)
+    defineReadonlyNumber(nested, 'scrollHeight', 300)
+    nested.scrollTop = 50
+
+    act(() => {
+      nested.dispatchEvent(
+        new WheelEvent('wheel', { deltaY: -100, bubbles: true })
+      )
+    })
+
+    expect(getByTestId('is-at-bottom')).toHaveTextContent('true')
+  })
+
+  it('stays at bottom on horizontal swipes with vertical jitter', () => {
+    const { getByTestId, viewport } = setupHook({ isSending: false })
+
+    act(() => {
+      viewport.dispatchEvent(
+        new WheelEvent('wheel', { deltaX: 40, deltaY: -2 })
+      )
+    })
+
+    expect(getByTestId('is-at-bottom')).toHaveTextContent('true')
+  })
+
   it('resets stale away-from-bottom state when content no longer overflows', async () => {
     const { getByTestId, viewport } = setupHook({ isSending: false })
     defineReadonlyNumber(viewport, 'clientHeight', 400)
@@ -583,11 +612,12 @@ describe('useScrollManagement session scroll retention (issue #594)', () => {
       visibleCount: 40,
     })
 
-    const { viewport, getByTestId, rerenderSession, setScrollHeight } = setupHook({
-      isSending: false,
-      activeSessionId: 'session-a',
-      messages: makeMessages(10),
-    })
+    const { viewport, getByTestId, rerenderSession, setScrollHeight } =
+      setupHook({
+        isSending: false,
+        activeSessionId: 'session-a',
+        messages: makeMessages(10),
+      })
 
     // The new session first renders with the previous session's short history
     // window, so there is temporarily no scrollable overflow.
