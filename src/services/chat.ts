@@ -1889,6 +1889,27 @@ export function useSendMessage() {
         throw new Error('Not in Tauri context')
       }
 
+      // Snapshot the exact send args so a background auto-continue (after a
+      // usage limit resets) can replay this send without the active-session UI.
+      useChatStore.getState().setLastSentArgs(sessionId, {
+        sessionId,
+        worktreeId,
+        worktreePath,
+        message,
+        model,
+        executionMode,
+        thinkingLevel,
+        effortLevel,
+        parallelExecutionPrompt,
+        aiLanguage,
+        allowedTools,
+        mcpConfig,
+        chromeEnabled,
+        customProfileName,
+        backend,
+        includeRecap,
+      })
+
       console.log(
         `[SendMutation] mutationFn CALLED sessionId=${sessionId} worktreeId=${worktreeId}`
       )

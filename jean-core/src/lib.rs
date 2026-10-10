@@ -3008,6 +3008,10 @@ pub struct UIState {
     #[serde(default)]
     pub seen_failed_workflow_run_ids: Vec<u64>,
 
+    /// Sessions armed for auto-continue after a usage limit resets
+    #[serde(default)]
+    pub auto_resume: Vec<AutoResumeEntry>,
+
     /// Version for future migration support
     #[serde(default = "default_ui_state_version")]
     pub version: u32,
@@ -3015,6 +3019,16 @@ pub struct UIState {
 
 fn default_ui_state_version() -> u32 {
     1
+}
+
+/// A session armed for auto-continue after a usage limit resets. `send_args`
+/// is the opaque frontend `SendMessageArgs` payload, replayed verbatim.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutoResumeEntry {
+    pub session_id: String,
+    #[serde(default)]
+    pub resume_at_ms: Option<f64>,
+    pub send_args: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3144,6 +3158,7 @@ impl Default for UIState {
             pinned_recent_session_ids: Vec::new(),
             last_opened_per_project: std::collections::HashMap::new(),
             seen_failed_workflow_run_ids: Vec::new(),
+            auto_resume: Vec::new(),
             version: default_ui_state_version(),
         }
     }
