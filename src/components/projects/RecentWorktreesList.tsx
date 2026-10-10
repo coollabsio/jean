@@ -331,7 +331,7 @@ export function RecentWorktreesList({
     (query.data?.failedWorktreeIds.length ?? 0)
   const hiddenCount = Math.max(0, (query.data?.total ?? rows.length) - limit)
   const footerButtonClass =
-    'flex h-8 items-center justify-center gap-1 rounded-md px-2 text-xs text-muted-foreground hover:bg-muted/50 hover:text-foreground'
+    'flex h-6 items-center justify-center gap-1 rounded-md px-2 text-xs text-muted-foreground hover:bg-muted/50 hover:text-foreground'
   const footerActions = (
     <>
       {hiddenCount > 0 && !snoozedBoundaryLoaded && (
@@ -382,7 +382,7 @@ export function RecentWorktreesList({
         )}
         <ul
           aria-label="Recent sessions"
-          className={`@container flex flex-col gap-2 px-2 pt-2 ${footerActionsContainer ? 'pb-16' : 'pb-2'}`}
+          className={`@container flex flex-col gap-2 px-2 pt-2 ${footerActionsContainer ? 'pb-10' : 'pb-2'}`}
         >
           {displayedRows.map((row, index) => {
             const isCurrent = row.session.id === selectedSessionId

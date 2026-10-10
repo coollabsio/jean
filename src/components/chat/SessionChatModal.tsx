@@ -1068,29 +1068,27 @@ export const SessionChatModal = memo(function SessionChatModal({
               <div
                 className={cn(
                   'flex items-center justify-between gap-2 px-4 py-2',
-                  MODAL_TERMINAL_PRIMARY_ROW_CLASS,
-                  // Mobile: let the title take its own line so badges cannot squeeze it to zero width
-                  isMobile && 'h-auto min-h-11'
+                  MODAL_TERMINAL_PRIMARY_ROW_CLASS
                 )}
               >
                 <div
                   className={cn(
                     'flex items-center gap-2 min-w-0',
-                    isMobile && 'flex-wrap gap-y-1'
+                    // Mobile: badges clip at the edge instead of squeezing the title
+                    isMobile && 'overflow-hidden'
                   )}
                 >
-                  {/* Mobile: title and menu share the first line; badges wrap below */}
+                  {/* Mobile: menu sits right after the title */}
                   <div
                     className={cn(
-                      'flex min-w-0 items-center gap-2',
-                      isMobile ? 'basis-full' : 'contents'
+                      isMobile ? 'flex shrink-0 items-center gap-2' : 'contents'
                     )}
                   >
                     <h2
                       className={cn(
-                        'text-sm font-medium min-w-0 truncate',
-                        // Mobile: no grow, so the menu sits right after the title
-                        !isMobile && 'flex-1'
+                        'text-sm font-medium min-w-0',
+                        // Mobile: never truncate the title
+                        isMobile ? 'whitespace-nowrap' : 'flex-1 truncate'
                       )}
                     >
                       {project && !isMobile && (
