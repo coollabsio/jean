@@ -66,7 +66,10 @@ impl ProjectServer {
             Some(port) if port != 22 => format!(" -p {port}"),
             _ => String::new(),
         };
-        format!("ssh -o BatchMode=yes{identity}{port} {}", self.destination())
+        format!(
+            "ssh -o BatchMode=yes{identity}{port} {}",
+            self.destination()
+        )
     }
 
     /// `ssh` options that select the identity file, if one is set

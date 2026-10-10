@@ -1166,6 +1166,7 @@ pub async fn dispatch_command(
         // =====================================================================
         // Chat Sessions
         // =====================================================================
+        "get_jean_agent_workdir" => to_value(crate::chat::jean_agent::get_jean_agent_workdir(app)?),
         "get_sessions" => {
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
             let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;

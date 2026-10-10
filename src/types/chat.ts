@@ -157,6 +157,8 @@ export interface SubagentUsage {
   total_tokens: number
   tool_uses: number
   duration_ms: number
+  /** Model the subagent runs on (e.g. `claude-opus-5-5`) */
+  model?: string
 }
 
 export interface PlanStep {
@@ -1331,7 +1333,7 @@ export interface SubAgent {
   status: 'in_progress' | 'completed' | 'errored' | 'interrupted'
   /** Completion message from agents_states */
   message?: string
-  /** Bold label before the prompt (e.g. Claude subagent_type) */
+  /** Bold label before the prompt (e.g. Claude subagent model or type) */
   label?: string
   /** Number of tool calls the agent made (Claude only) */
   toolCount?: number

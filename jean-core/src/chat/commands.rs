@@ -3546,6 +3546,14 @@ pub async fn send_chat_message(
 
     // Use passed parameter for parallel execution prompt (None = disabled)
     let parallel_execution_prompt = parallel_execution_prompt.filter(|p| !p.trim().is_empty());
+    // Jean agent: append its coordinator prompt. Every backend receives this prompt.
+    let parallel_execution_prompt = match super::jean_agent::system_prompt_for(&worktree_id) {
+        Some(agent_prompt) => Some(match parallel_execution_prompt {
+            Some(prompt) => format!("{prompt}\n\n{agent_prompt}"),
+            None => agent_prompt.to_string(),
+        }),
+        None => parallel_execution_prompt,
+    };
 
     // Use passed parameter for Chrome browser integration (default false - beta)
     let chrome = chrome_enabled.unwrap_or(false);
@@ -11409,7 +11417,11 @@ mod tests {
     fn codex_default_prompt_has_run_environment_rules_once_in_every_mode() {
         for mode in ["plan", "build", "yolo"] {
             let prompt = resolve_codex_global_system_prompt(None, Some(mode));
-            assert_eq!(prompt.matches("## Jean Run Environment").count(), 1, "{mode}");
+            assert_eq!(
+                prompt.matches("## Jean Run Environment").count(),
+                1,
+                "{mode}"
+            );
             assert!(prompt.contains("start_run_environment"), "{mode}");
         }
     }

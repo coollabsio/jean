@@ -2022,7 +2022,8 @@ export const useChatStore = create<ChatUIState>()(
               !existing ||
               (prev?.total_tokens === usage.total_tokens &&
                 prev.tool_uses === usage.tool_uses &&
-                prev.duration_ms === usage.duration_ms)
+                prev.duration_ms === usage.duration_ms &&
+                prev.model === usage.model)
             ) {
               return state
             }

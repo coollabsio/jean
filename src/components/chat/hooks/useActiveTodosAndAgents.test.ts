@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   extractClaudeAgents,
   extractCodexAgents,
+  formatSubagentModel,
   useActiveTodosAndAgents,
 } from './useActiveTodosAndAgents'
 import type { ChatMessage, ToolCall } from '@/types/chat'
@@ -252,6 +253,32 @@ describe('extractClaudeAgents', () => {
       tokens: 48804,
       durationMs: 61421,
     })
+  })
+
+  it('labels the agent with its model when known', () => {
+    const base = toolCall('Agent', {
+      id: 'agent-m',
+      description: 'Model',
+      subagent_type: 'general-purpose',
+    })
+    expect(extractClaudeAgents([base], true)[0]?.label).toBe('general-purpose')
+    const withModel: ToolCall = {
+      ...base,
+      subagent_usage: {
+        total_tokens: 0,
+        tool_uses: 0,
+        duration_ms: 0,
+        model: 'claude-opus-5-5',
+      },
+    }
+    expect(extractClaudeAgents([withModel], true)[0]?.label).toBe('Opus 5.5')
+  })
+
+  it('formats Claude model ids', () => {
+    expect(formatSubagentModel('claude-sonnet-4-6[1m]')).toBe('Sonnet 4.6')
+    expect(formatSubagentModel('claude-haiku-4-5-20251001')).toBe('Haiku 4.5')
+    expect(formatSubagentModel('claude-fable-5-1')).toBe('Fable 5.1')
+    expect(formatSubagentModel('gpt-5')).toBe('gpt-5')
   })
 
   it('marks agents without output done or interrupted after the turn', () => {

@@ -1,5 +1,7 @@
 use super::coalesce::ChunkCoalescer;
-use super::run_log::{claude_subagent_usage, tool_result_content_to_string, tool_result_is_error};
+use super::run_log::{
+    apply_claude_subagent_usage, tool_result_content_to_string, tool_result_is_error,
+};
 use super::types::{
     is_claude_compaction_summary_text, CompactMetadata, ContentBlock, EffortLevel,
     PermissionDenial, PermissionDeniedEvent, SubagentUsage, ThinkingLevel, ToolCall, UsageData,
@@ -1895,20 +1897,15 @@ pub fn tail_claude_output(
                 flush_pending_chunks(app, session_id, worktree_id, &run_id, &mut chunk_coalescer);
             }
 
-            if let Some((tool_use_id, subagent_usage)) = claude_subagent_usage(&msg) {
-                if let Some(tc) = tool_calls.iter_mut().find(|t| t.id == tool_use_id) {
-                    if tc.subagent_usage.as_ref() != Some(&subagent_usage) {
-                        tc.subagent_usage = Some(subagent_usage.clone());
-                        let event = SubagentUsageEvent {
-                            session_id: session_id.to_string(),
-                            worktree_id: worktree_id.to_string(),
-                            tool_use_id,
-                            usage: subagent_usage,
-                        };
-                        if let Err(e) = app.emit_all("chat:subagent_usage", &event) {
-                            log::error!("Failed to emit subagent_usage: {e}");
-                        }
-                    }
+            if let Some((tool_use_id, usage)) = apply_claude_subagent_usage(&mut tool_calls, &msg) {
+                let event = SubagentUsageEvent {
+                    session_id: session_id.to_string(),
+                    worktree_id: worktree_id.to_string(),
+                    tool_use_id,
+                    usage,
+                };
+                if let Err(e) = app.emit_all("chat:subagent_usage", &event) {
+                    log::error!("Failed to emit subagent_usage: {e}");
                 }
             }
 
@@ -3441,7 +3438,8 @@ mod tests {
             .contains("test against its `url`, port, and startup command"));
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("start_run_environment"));
         assert!(!DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("use the returned/startup command"));
-        assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("no other browser tool is available, use the Agent Browser"));
+        assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT
+            .contains("no other browser tool is available, use the Agent Browser"));
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("VERY IMPORTANT: Keep Code Simple"));
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT
             .contains("Always implement the simplest maintainable solution"));

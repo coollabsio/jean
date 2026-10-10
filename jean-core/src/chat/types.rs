@@ -399,6 +399,9 @@ pub struct SubagentUsage {
     pub total_tokens: u64,
     pub tool_uses: u64,
     pub duration_ms: u64,
+    /// Model the subagent runs on (e.g. `claude-opus-5-5`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 /// A permission denial when a tool requires approval
