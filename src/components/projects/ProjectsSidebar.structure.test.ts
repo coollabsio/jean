@@ -148,7 +148,7 @@ describe('ProjectsSidebar server filter', () => {
     )
 
     expect(source).toContain(
-      "showServerMenu ? 'px-2 py-1' : 'px-2 pt-1 pb-[max(0.25rem,env(safe-area-inset-bottom))]'"
+      "showServerMenu ? 'px-2 py-0.5' : 'px-2 pt-0.5 pb-[max(0.125rem,env(safe-area-inset-bottom))]'"
     )
   })
 })
