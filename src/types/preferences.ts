@@ -1282,6 +1282,19 @@ export function resolveMagicPromptBackend(
   ) as CliBackend | null
 }
 
+/** Modifier held while closing to skip the confirmation dialog ('none' disables). */
+export type CloseConfirmBypassModifier = 'shift' | 'alt' | 'none'
+
+export const CLOSE_CONFIRM_BYPASS_MODIFIERS = [
+  'shift',
+  'alt',
+  'none',
+] as const satisfies readonly CloseConfirmBypassModifier[]
+
+/** Off by default: closing stays behind the confirmation dialog until opted out. */
+export const DEFAULT_CLOSE_CONFIRM_BYPASS_MODIFIER: CloseConfirmBypassModifier =
+  'none'
+
 // Types that match the Rust AppPreferences struct
 // Only contains settings that should be persisted to disk
 // Note: Field names use snake_case to match Rust struct exactly
@@ -1367,6 +1380,7 @@ export interface AppPreferences {
   fast_mode_models: string[] // Model keys ("backend:baseModel") with fast tier last enabled
 
   confirm_session_close: boolean // Show confirmation dialog before closing sessions/worktrees
+  close_confirm_bypass_modifier: CloseConfirmBypassModifier // Modifier that skips the close confirmation ('none' disables)
   default_execution_mode: ExecutionMode // Default workflow/permission policy for new sessions
   default_backend: CliBackend // Default CLI backend for new sessions
   default_new_session_kind: NewSessionKind // Default action for CMD+T: 'chat', 'terminal', or a CLI backend
@@ -2518,6 +2532,7 @@ export const defaultPreferences: AppPreferences = {
   favorite_base_branches: [],
   fast_mode_models: [],
   confirm_session_close: true, // Default: enabled (show confirmation)
+  close_confirm_bypass_modifier: DEFAULT_CLOSE_CONFIRM_BYPASS_MODIFIER, // Default: off — closing always confirms until opted out
   default_execution_mode: 'yolo', // Default: Full access
   default_backend: 'claude', // Default: Claude
   default_new_session_kind: 'chat', // Default: Jean Chat for CMD+T

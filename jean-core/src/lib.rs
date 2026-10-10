@@ -313,6 +313,8 @@ pub struct AppPreferences {
     pub canvas_layout: String, // Canvas display mode: grid or list
     #[serde(default = "default_confirm_session_close")]
     pub confirm_session_close: bool, // Show confirmation dialog before closing sessions/worktrees
+    #[serde(default = "default_close_confirm_bypass_modifier")]
+    pub close_confirm_bypass_modifier: String, // Modifier that skips the close confirmation ("none" disables)
     #[serde(default = "default_execution_mode")]
     pub default_execution_mode: String, // Default workflow/permission policy for new sessions
     #[serde(default = "default_backend")]
@@ -663,6 +665,10 @@ fn default_canvas_layout() -> String {
 
 fn default_confirm_session_close() -> bool {
     true // Enabled by default
+}
+
+fn default_close_confirm_bypass_modifier() -> String {
+    "none".to_string() // Off by default — closing stays behind the confirmation dialog
 }
 
 fn default_execution_mode() -> String {
@@ -2754,6 +2760,7 @@ impl Default for AppPreferences {
             fast_mode_models: Vec::new(),
             canvas_layout: default_canvas_layout(),
             confirm_session_close: default_confirm_session_close(),
+            close_confirm_bypass_modifier: default_close_confirm_bypass_modifier(),
             default_execution_mode: default_execution_mode(),
             default_backend: default_backend(),
             default_new_session_kind: default_new_session_kind(),
@@ -3429,6 +3436,7 @@ const CLIENT_ONLY_PREFERENCE_KEYS: &[&str] = &[
     "mobile_zoom_level",
     "sync_zoom_levels",
     "confirm_session_close",
+    "close_confirm_bypass_modifier",
     "expand_tool_calls_by_default",
     "window_vibrancy",
     "finished_session_animation_enabled",

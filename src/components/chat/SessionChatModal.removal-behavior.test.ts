@@ -107,8 +107,9 @@ describe('SessionChatModal removal behavior', () => {
       start === -1 || end === -1 ? '' : source.slice(start, end)
 
     expect(removeSessionTab).toContain('needsConfirm')
-    expect(removeSessionTab).toContain(
-      'preferences?.confirm_session_close !== false && !sessionIsEmpty'
+    // Tolerate Prettier's line breaks in the inlined gate.
+    expect(removeSessionTab).toMatch(
+      /preferences\?\.confirm_session_close !== false &&\s*!sessionIsEmpty/
     )
     // Confirm gate wraps the action for every non-empty tab (not only last).
     expect(removeSessionTab).toMatch(
