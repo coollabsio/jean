@@ -1071,24 +1071,17 @@ export const SessionChatModal = memo(function SessionChatModal({
                   MODAL_TERMINAL_PRIMARY_ROW_CLASS
                 )}
               >
-                <div
-                  className={cn(
-                    'flex items-center gap-2 min-w-0',
-                    // Mobile: badges clip at the edge instead of squeezing the title
-                    isMobile && 'overflow-hidden'
-                  )}
-                >
-                  {/* Mobile: menu sits right after the title */}
+                <div className="flex items-center gap-2 min-w-0">
+                  {/* Mobile: menu sits right after the title; the title truncates so git badges stay visible */}
                   <div
                     className={cn(
-                      isMobile ? 'flex shrink-0 items-center gap-2' : 'contents'
+                      isMobile ? 'flex min-w-0 items-center gap-2' : 'contents'
                     )}
                   >
                     <h2
                       className={cn(
-                        'text-sm font-medium min-w-0',
-                        // Mobile: never truncate the title
-                        isMobile ? 'whitespace-nowrap' : 'flex-1 truncate'
+                        'text-sm font-medium min-w-0 truncate',
+                        !isMobile && 'flex-1'
                       )}
                     >
                       {project && !isMobile && (
@@ -1110,7 +1103,12 @@ export const SessionChatModal = memo(function SessionChatModal({
                     {isMobile && worktreeMenu}
                   </div>
                   {!zenMode && stackedBaseBranch && (
-                    <span className="inline-flex shrink min-w-0 items-center gap-1 rounded border border-border/50 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
+                    <span
+                      className={cn(
+                        'inline-flex min-w-0 items-center gap-1 rounded border border-border/50 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground',
+                        isMobile ? 'shrink-0' : 'shrink'
+                      )}
+                    >
                       <GitBranchPlus className="h-2.5 w-2.5" />
                       <span className="max-w-16 sm:max-w-40 truncate">
                         {stackedBaseBranch}
