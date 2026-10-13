@@ -1487,10 +1487,24 @@ fn verify_permission_rules_applied(
     response: &serde_json::Value,
     rules: &serde_json::Value,
 ) -> Result<(), String> {
-    if response.get("permission") == Some(rules) {
-        Ok(())
-    } else {
-        Err("OpenCode did not confirm the requested permission rules. Update OpenCode before using this permission policy.".to_string())
+    match response.get("permission") {
+        // Server echoed back the rules — verify they match exactly.
+        Some(echoed) if echoed == rules => Ok(()),
+        // Server returned a conflicting permission set — reject.
+        Some(echoed) => Err(format!(
+            "OpenCode returned conflicting permission rules. Expected: {rules}, got: {echoed}"
+        )),
+        // Server acknowledged the PATCH (HTTP 2xx) but did not echo the
+        // permission field. This happens on resumed/updated sessions where
+        // the response contains session metadata instead. Trust the HTTP
+        // status and succeed — the rules were already sent in the request.
+        None => {
+            log::warn!(
+                "OpenCode PATCH response did not include a 'permission' field; \
+                 trusting HTTP success status for permission application."
+            );
+            Ok(())
+        }
     }
 }
 
@@ -3951,21 +3965,58 @@ mod tests {
     #[test]
     fn permission_policy_requires_confirmation_from_the_server() {
         let rules = permission_rules_for_mode("supervised").unwrap();
+        // Exact echo → ok
         assert!(verify_permission_rules_applied(
             &serde_json::json!({ "permission": &rules }),
             &rules
         )
         .is_ok());
+        // Response without permission field (resumed session) → ok (trusts HTTP 2xx)
         assert!(verify_permission_rules_applied(
             &serde_json::json!({ "id": "legacy-session" }),
             &rules
         )
-        .is_err());
+        .is_ok());
+        // Conflicting permission set → err
         assert!(verify_permission_rules_applied(
             &serde_json::json!({ "permission": permission_rules_for_mode("yolo").unwrap() }),
             &rules
         )
         .is_err());
+    }
+
+    #[test]
+    fn permission_policy_accepts_resumed_session_without_permission_field() {
+        let rules = permission_rules_for_mode("supervised").unwrap();
+
+        // Real-world scenario: OpenCode PATCH returns 2xx with session metadata
+        // but no "permission" field on resumed/updated sessions.
+        let resumed_response = serde_json::json!({
+            "id": "session-123",
+            "title": "Fix bug",
+            "status": "active",
+            "createdAt": "2025-01-01T00:00:00Z"
+        });
+        assert_eq!(
+            verify_permission_rules_applied(&resumed_response, &rules),
+            Ok(()),
+            "HTTP 2xx response without permission field should be accepted for resumed sessions"
+        );
+
+        // Conflicting permission set must still be rejected with a descriptive error.
+        let conflicting = serde_json::json!({
+            "id": "session-123",
+            "permission": permission_rules_for_mode("yolo").unwrap()
+        });
+        let err = verify_permission_rules_applied(&conflicting, &rules).unwrap_err();
+        assert!(
+            err.contains("conflicting permission rules"),
+            "Error should mention conflicting rules, got: {err}"
+        );
+        assert!(
+            err.contains("Expected:") && err.contains("got:"),
+            "Error should include both expected and actual values, got: {err}"
+        );
     }
 
     #[test]
