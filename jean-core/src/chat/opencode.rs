@@ -1487,24 +1487,24 @@ fn verify_permission_rules_applied(
     response: &serde_json::Value,
     rules: &serde_json::Value,
 ) -> Result<(), String> {
-    match response.get("permission") {
-        // Server echoed back the rules — verify they match exactly.
-        Some(echoed) if echoed == rules => Ok(()),
-        // Server returned a conflicting permission set — reject.
-        Some(echoed) => Err(format!(
-            "OpenCode returned conflicting permission rules. Expected: {rules}, got: {echoed}"
-        )),
-        // Server acknowledged the PATCH (HTTP 2xx) but did not echo the
-        // permission field. This happens on resumed/updated sessions where
-        // the response contains session metadata instead. Trust the HTTP
-        // status and succeed — the rules were already sent in the request.
-        None => {
-            log::warn!(
-                "OpenCode PATCH response did not include a 'permission' field; \
-                 trusting HTTP success status for permission application."
-            );
-            Ok(())
-        }
+    // OpenCode appends PATCHed rules to the session's existing ruleset and
+    // evaluates with last-match-wins. Every Jean ruleset starts with a `*`/`*`
+    // catch-all, so a trailing copy of the requested rules decides every
+    // permission check, even on resumed sessions that carry older rules.
+    // Servers that ignore `permission` (older OpenCode) omit it or leave an
+    // older ruleset, so HTTP success alone is not enough.
+    let (Some(applied), Some(requested)) = (
+        response
+            .get("permission")
+            .and_then(serde_json::Value::as_array),
+        rules.as_array(),
+    ) else {
+        return Err("OpenCode did not confirm the requested permission rules. Update OpenCode before using this permission policy.".to_string());
+    };
+    if applied.ends_with(requested) {
+        Ok(())
+    } else {
+        Err("OpenCode returned permission rules that do not end with the requested policy. Update OpenCode before using this permission policy.".to_string())
     }
 }
 
@@ -3965,19 +3965,22 @@ mod tests {
     #[test]
     fn permission_policy_requires_confirmation_from_the_server() {
         let rules = permission_rules_for_mode("supervised").unwrap();
-        // Exact echo → ok
         assert!(verify_permission_rules_applied(
             &serde_json::json!({ "permission": &rules }),
             &rules
         )
         .is_ok());
-        // Response without permission field (resumed session) → ok (trusts HTTP 2xx)
+        // Older servers ignore `permission`; HTTP success alone must not pass.
         assert!(verify_permission_rules_applied(
             &serde_json::json!({ "id": "legacy-session" }),
             &rules
         )
-        .is_ok());
-        // Conflicting permission set → err
+        .is_err());
+        assert!(verify_permission_rules_applied(
+            &serde_json::json!({ "permission": null }),
+            &rules
+        )
+        .is_err());
         assert!(verify_permission_rules_applied(
             &serde_json::json!({ "permission": permission_rules_for_mode("yolo").unwrap() }),
             &rules
@@ -3986,37 +3989,45 @@ mod tests {
     }
 
     #[test]
-    fn permission_policy_accepts_resumed_session_without_permission_field() {
-        let rules = permission_rules_for_mode("supervised").unwrap();
-
-        // Real-world scenario: OpenCode PATCH returns 2xx with session metadata
-        // but no "permission" field on resumed/updated sessions.
-        let resumed_response = serde_json::json!({
-            "id": "session-123",
-            "title": "Fix bug",
-            "status": "active",
-            "createdAt": "2025-01-01T00:00:00Z"
-        });
+    fn permission_policy_accepts_rules_merged_onto_resumed_session() {
+        let previous = permission_rules_for_mode("yolo").unwrap();
+        let rules = permission_rules_for_mode("plan").unwrap();
+        let merged: Vec<serde_json::Value> = previous
+            .as_array()
+            .unwrap()
+            .iter()
+            .chain(rules.as_array().unwrap())
+            .cloned()
+            .collect();
         assert_eq!(
-            verify_permission_rules_applied(&resumed_response, &rules),
-            Ok(()),
-            "HTTP 2xx response without permission field should be accepted for resumed sessions"
+            verify_permission_rules_applied(&serde_json::json!({ "permission": merged }), &rules),
+            Ok(())
         );
 
-        // Conflicting permission set must still be rejected with a descriptive error.
-        let conflicting = serde_json::json!({
-            "id": "session-123",
-            "permission": permission_rules_for_mode("yolo").unwrap()
-        });
-        let err = verify_permission_rules_applied(&conflicting, &rules).unwrap_err();
-        assert!(
-            err.contains("conflicting permission rules"),
-            "Error should mention conflicting rules, got: {err}"
-        );
-        assert!(
-            err.contains("Expected:") && err.contains("got:"),
-            "Error should include both expected and actual values, got: {err}"
-        );
+        // An unchanged older ruleset means the PATCH was ignored.
+        let ignored: Vec<serde_json::Value> = rules
+            .as_array()
+            .unwrap()
+            .iter()
+            .chain(previous.as_array().unwrap())
+            .cloned()
+            .collect();
+        assert!(verify_permission_rules_applied(
+            &serde_json::json!({ "permission": ignored }),
+            &rules
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn permission_rulesets_start_with_catch_all() {
+        // Suffix verification relies on this: OpenCode evaluates last-match-wins,
+        // so a leading catch-all makes the trailing ruleset decide every check.
+        for mode in ["plan", "build", "supervised", "yolo"] {
+            let rules = permission_rules_for_mode(mode).unwrap();
+            assert_eq!(rules[0]["permission"], "*", "{mode}");
+            assert_eq!(rules[0]["pattern"], "*", "{mode}");
+        }
     }
 
     #[test]
