@@ -3203,6 +3203,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mcp_recovered_empty_session_uses_new_session_execution_policy() {
+        for (backend, default_policy, expected_policy) in [
+            ("claude", "build", "build"),
+            ("codex", "supervised", "supervised"),
+            ("cursor", "build", "plan"),
+        ] {
+            for force_new in [false, true] {
+                let (_temp, app) = session_lookup_app();
+                let preferences = crate::AppPreferences {
+                    default_backend: backend.to_string(),
+                    default_execution_mode: default_policy.to_string(),
+                    ..Default::default()
+                };
+                std::fs::write(
+                    crate::get_preferences_path(&app).unwrap(),
+                    serde_json::to_vec(&preferences).unwrap(),
+                )
+                .unwrap();
+                if force_new {
+                    crate::chat::storage::save_empty_index(&app, "current-base").unwrap();
+                }
+                let created = run_tool(
+                    &app,
+                    "create_session",
+                    json!({ "worktreeId": "current-base" }),
+                    "test",
+                )
+                .await
+                .unwrap();
+                let metadata =
+                    crate::chat::storage::load_metadata(&app, created["id"].as_str().unwrap())
+                        .unwrap()
+                        .unwrap();
+                assert_eq!(
+                    metadata.selected_execution_mode.as_deref(),
+                    Some(expected_policy)
+                );
+                assert_eq!(
+                    metadata.selected_permission_mode.as_deref(),
+                    Some(if expected_policy == "plan" {
+                        "yolo"
+                    } else {
+                        expected_policy
+                    })
+                );
+                assert_eq!(created["selected_execution_mode"], expected_policy);
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn mcp_create_session_persists_metadata_before_status_lookup() {
         for force_new in [false, true] {
             let (_temp, app) = session_lookup_app();
@@ -3272,7 +3323,12 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"F
     }
 
     #[cfg(unix)]
-    async fn assert_mcp_send_completed(app: &AppHandle, session_id: &str, message: &str) {
+    async fn assert_mcp_send_completed(
+        app: &AppHandle,
+        session_id: &str,
+        message: &str,
+        expected_execution_mode: &str,
+    ) {
         use crate::chat::types::RunStatus;
 
         tokio::time::timeout(Duration::from_secs(10), async {
@@ -3293,6 +3349,10 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"F
                             assert_eq!(metadata.worktree_id, "current-base");
                             assert_eq!(metadata.runs.len(), 1);
                             assert_eq!(run.user_message, message);
+                            assert_eq!(
+                                run.execution_mode.as_deref(),
+                                Some(expected_execution_mode)
+                            );
                             assert_eq!(
                                 metadata.claude_session_id.as_deref(),
                                 Some("fixture-resume")
@@ -3376,7 +3436,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"F
                 sent,
                 json!({ "sessionId": session_id, "status": "started" })
             );
-            assert_mcp_send_completed(&app, session_id, "hello world").await;
+            assert_mcp_send_completed(&app, session_id, "hello world", "build").await;
         }
     }
 
@@ -3435,7 +3495,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"F
         .await
         .unwrap();
         assert_eq!(sent["status"], "started");
-        assert_mcp_send_completed(&app, session_id, "hello").await;
+        assert_mcp_send_completed(&app, session_id, "hello", "plan").await;
     }
 
     #[test]
@@ -3479,7 +3539,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"F
         .unwrap();
         assert_eq!(sent["status"], "started");
         assert_eq!(sent["sessionId"], session_id);
-        assert_mcp_send_completed(&app, session_id, "hello world").await;
+        assert_mcp_send_completed(&app, session_id, "hello world", "build").await;
     }
 
     #[test]

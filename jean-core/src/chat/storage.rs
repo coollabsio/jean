@@ -348,6 +348,19 @@ pub fn load_mcp_session_metadata(
                 entry.order,
             );
             metadata.backend = super::commands::resolve_default_backend(app, Some(&worktree.id));
+            let preferences = crate::load_preferences_sync(app).ok();
+            let policy = super::commands::default_execution_policy(
+                app,
+                &worktree.id,
+                &metadata.backend,
+                preferences.map(|prefs| prefs.default_execution_mode),
+            );
+            metadata.selected_permission_mode = Some(if policy == "plan" {
+                "yolo".to_string()
+            } else {
+                policy.clone()
+            });
+            metadata.selected_execution_mode = Some(policy);
             metadata.archived_at = entry.archived_at;
             metadata
         });
