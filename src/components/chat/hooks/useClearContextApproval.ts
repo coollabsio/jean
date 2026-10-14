@@ -81,10 +81,10 @@ function getDefaultModelForBackend(
     | undefined
 ): string {
   if (backend === 'codex') {
-    return preferences?.selected_codex_model ?? 'gpt-5.6-sol'
+    return preferences?.selected_codex_model ?? 'gpt-6.1-sol'
   }
   if (backend === 'opencode') {
-    return preferences?.selected_opencode_model ?? 'opencode/gpt-5.6-sol'
+    return preferences?.selected_opencode_model ?? 'opencode/gpt-6.1-sol'
   }
   if (backend === 'cursor') {
     return preferences?.selected_cursor_model ?? 'cursor/auto'
@@ -273,7 +273,7 @@ export function useClearContextApproval({
       // Step 5: Send plan as first message using mode-specific overrides
       // Fallback chain: mode override → original session → global default
       const isYolo = mode === 'yolo'
-      const modeLabel = isYolo ? 'Yolo' : 'Build'
+      const modeLabel = isYolo ? 'Full access' : 'Build'
       const originalBackend = card.session.backend as CliBackend | undefined
       const modeBackendPref = isYolo
         ? preferences?.yolo_backend

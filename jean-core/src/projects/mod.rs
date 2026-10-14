@@ -11,6 +11,7 @@ pub mod pr_status;
 mod release_notes;
 pub mod saved_contexts;
 pub mod sentry_issues;
+mod servers;
 pub mod storage;
 pub mod types;
 
@@ -28,3 +29,10 @@ pub use linear_issues::*;
 pub(crate) use names::is_generated_workspace_name;
 pub use saved_contexts::*;
 pub use sentry_issues::*;
+pub(crate) use servers::{
+    default_server_system_prompt, is_server_worktree, server_system_prompt, server_worktree_ids,
+};
+pub use servers::{
+    ensure_local_server_project, list_ssh_public_keys, remove_server_project, save_server_project,
+    server_user_setup_script, setup_server_user, ServerUserAccess,
+};

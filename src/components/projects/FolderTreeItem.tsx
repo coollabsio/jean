@@ -22,16 +22,18 @@ export function FolderTreeItem({
   childCount,
   isDropTarget,
 }: FolderTreeItemProps) {
-  const {
-    expandedFolderIds,
-    toggleFolderExpanded,
-    editingFolderId,
-    setEditingFolderId,
-  } = useProjectsStore()
-  const isExpanded = expandedFolderIds.has(folder.id)
+  const isExpanded = useProjectsStore(state =>
+    state.expandedFolderIds.has(folder.id)
+  )
+  const toggleFolderExpanded = useProjectsStore(
+    state => state.toggleFolderExpanded
+  )
+  const setEditingFolderId = useProjectsStore(state => state.setEditingFolderId)
 
   // Derive editing state from store - survives re-renders from query invalidation
-  const isEditing = editingFolderId === folder.id
+  const isEditing = useProjectsStore(
+    state => state.editingFolderId === folder.id
+  )
   const [editName, setEditName] = useState(folder.name)
   const inputRef = useRef<HTMLInputElement>(null)
   const editStartTimeRef = useRef<number>(0)

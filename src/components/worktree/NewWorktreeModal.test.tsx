@@ -42,6 +42,9 @@ vi.mock('./hooks/useNewWorktreeData', () => ({
     createBaseSession: {},
   }),
 }))
+vi.mock('@/hooks/useContextLinkUsage', () => ({
+  useContextLinkUsage: () => ({ getMatches: () => [] }),
+}))
 vi.mock('./hooks/useNewWorktreeHandlers', () => ({
   useNewWorktreeHandlers: () => ({}),
 }))
@@ -123,6 +126,9 @@ describe('NewWorktreeModal investigation selector', () => {
       await user.click(screen.getByRole('tab', { name: 'Claude' }))
       expect(within(list).queryByText(/GPT/)).toBeNull()
       await user.click(within(list).getByText('Sonnet 4.6'))
+      await user.click(
+        screen.getByRole('button', { name: 'Choose backend and model' })
+      )
       expect(
         screen.getByRole('combobox', { name: 'Investigation provider' })
       ).toHaveTextContent('Anthropic')
@@ -130,9 +136,6 @@ describe('NewWorktreeModal investigation selector', () => {
         screen.getByRole('combobox', { name: 'Investigation provider' })
       )
       await user.click(screen.getByRole('option', { name: 'Team' }))
-      await user.click(
-        screen.getByRole('button', { name: 'Choose backend and model' })
-      )
       expect(
         within(screen.getByRole('listbox')).getByText('Sonnet')
       ).toBeInTheDocument()
@@ -153,8 +156,8 @@ describe('NewWorktreeModal investigation selector', () => {
     mocks.preferences = { ...mocks.preferences }
     rerender(<NewWorktreeModal />)
     expect(
-      screen.getByRole('combobox', { name: 'Investigation provider' })
-    ).toBeInTheDocument()
+      screen.queryByRole('combobox', { name: 'Investigation provider' })
+    ).toBeNull()
     expect(
       screen.getByRole('button', { name: 'Choose backend and model' })
     ).toHaveTextContent('Claude')
@@ -164,12 +167,12 @@ describe('NewWorktreeModal investigation selector', () => {
     const user = userEvent.setup()
     render(<NewWorktreeModal />)
     await user.click(screen.getByRole('button', { name: /PRs/ }))
-    expect(
-      screen.getByRole('combobox', { name: 'Investigation provider' })
-    ).toHaveTextContent('Anthropic')
     await user.click(
       screen.getByRole('button', { name: 'Choose backend and model' })
     )
+    expect(
+      screen.getByRole('combobox', { name: 'Investigation provider' })
+    ).toHaveTextContent('Anthropic')
     expect(screen.getByRole('tab', { name: 'Claude' })).toHaveAttribute(
       'aria-selected',
       'true'

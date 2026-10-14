@@ -80,6 +80,7 @@ import type { ModelReasoningCapability } from '@/services/model-catalog'
 const EMPTY_CODEX_PROVIDERS: CodexProviderProfile[] = []
 
 interface DesktopToolbarControlsProps {
+  activeSessionId?: string | null
   hasPendingQuestions: boolean
   selectedBackend: CliBackend
   selectedModel: string
@@ -123,7 +124,7 @@ interface DesktopToolbarControlsProps {
   setThinkingDropdownOpen: (open: boolean) => void
   onMcpDropdownOpenChange: (open: boolean) => void
 
-  onOpenMagicModal: () => void
+  onOpenMagicModal?: () => void
   onOpenProjectSettings?: () => void
   onResolvePrConflicts: () => void
   onLoadContext: () => void
@@ -148,6 +149,7 @@ interface DesktopToolbarControlsProps {
 }
 
 export function DesktopToolbarControls({
+  activeSessionId,
   hasPendingQuestions,
   selectedBackend,
   selectedModel,
@@ -308,19 +310,21 @@ export function DesktopToolbarControls({
     <>
       <DockBurgerButton className="hidden @xl:flex" />
 
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            aria-label="Magic"
-            className="hidden @xl:flex h-8 items-center gap-1 px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-            onClick={onOpenMagicModal}
-          >
-            <Wand2 className="h-3.5 w-3.5" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent>Magic (⌘M)</TooltipContent>
-      </Tooltip>
+      {onOpenMagicModal && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label="Magic"
+              className="hidden @xl:flex h-8 items-center gap-1 px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+              onClick={onOpenMagicModal}
+            >
+              <Wand2 className="h-3.5 w-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>Magic (⌘M)</TooltipContent>
+        </Tooltip>
+      )}
 
       <Tooltip>
         <TooltipTrigger asChild>
@@ -864,6 +868,8 @@ export function DesktopToolbarControls({
       <div className="hidden @xl:block h-4 w-px bg-border/50" />
 
       <ExecutionModeDropdown
+        backend={selectedBackend}
+        sessionId={activeSessionId}
         executionMode={executionMode}
         availableModes={availableExecutionModes}
         disabled={false}

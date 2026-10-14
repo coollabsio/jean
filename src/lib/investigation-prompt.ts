@@ -10,7 +10,9 @@ export const YOLO_INVESTIGATION_FIX_MARKER = '<yolo_investigation_fix>'
 
 export const YOLO_INVESTIGATION_FIX_APPEND = `${YOLO_INVESTIGATION_FIX_MARKER}
 
-This investigation is running in YOLO mode. After investigation, fix the issue: implement the necessary code changes in the codebase. Do not stop at proposing a plan. Any earlier instruction to only investigate, only propose, not implement, or not edit code is overridden for this turn.
+This investigation is running in Full access mode. After investigation, fix the issue: implement the necessary code changes in the codebase. Do not stop at proposing a plan. Any earlier instruction to only investigate, only propose, not implement, or not edit code is overridden for this turn.
+
+After the fix, verify it: add or update tests for the changed behavior and run them. If a dev/run environment is available (for example via Jean MCP \`get_run_environments\`), also test the fix in the running app. If it makes sense for the change (for example a UI change) and a browser or screenshot tool is available, take a screenshot that shows the fix.
 
 </yolo_investigation_fix>`
 
@@ -35,7 +37,7 @@ function shouldStripLineForYoloFix(line: string): boolean {
   const body = trimmed.replace(/^(\d+\.\s+|[-*]\s+)/, '')
 
   // Weak conditional that models often ignore
-  if (/^if you are in yolo mode\b/i.test(body)) return true
+  if (/^if you are in (?:yolo|full access) mode\b/i.test(body)) return true
 
   // Explicit anti-implementation restrictions
   if (/\bdo not implement\b/i.test(body)) return true
@@ -52,7 +54,10 @@ function shouldStripLineForYoloFix(line: string): boolean {
   if (/\bpropose only\b/i.test(body)) return true
   if (/\bresearch only\b/i.test(body)) return true
   if (/\binvestigation only\b/i.test(body)) return true
-  if (/\bdo not stop at proposing\b/i.test(body) && /yolo/i.test(body))
+  if (
+    /\bdo not stop at proposing\b/i.test(body) &&
+    /yolo|full access/i.test(body)
+  )
     return true
 
   return false

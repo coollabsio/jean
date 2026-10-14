@@ -18,11 +18,14 @@ import { useLocalDashboardEnabled } from '@/lib/remote-connections'
 import { listen, type UnlistenFn } from '@/lib/transport'
 import { toast } from 'sonner'
 import { logger } from '@/lib/logger'
+import { fileToBase64 } from '@/lib/file-base64'
 import { disposeAllWorktreeTerminals } from '@/lib/terminal-instances'
 import { toastActionLabel } from '@/lib/toast-action-label'
 import type {
   AutoFixStatus,
+  AutoFixIssuePreview,
   Project,
+  ProjectServer,
   Worktree,
   DetectPrResponse,
   LinkWorktreePrResponse,
@@ -106,13 +109,16 @@ function clearLocalWorktreeState(
         queryKey: ['chat', 'session', sessionId],
       })
     }
-    queryClient.setQueryData<AllSessionsResponse>(['all-sessions'], old => {
-      if (!old) return old
-      const entries = old.entries.filter(
-        entry => entry.worktree_id !== worktreeId
-      )
-      return entries.length === old.entries.length ? old : { ...old, entries }
-    })
+    queryClient.setQueriesData<AllSessionsResponse>(
+      { queryKey: ['all-sessions'] },
+      old => {
+        if (!old) return old
+        const entries = old.entries.filter(
+          entry => entry.worktree_id !== worktreeId
+        )
+        return entries.length === old.entries.length ? old : { ...old, entries }
+      }
+    )
     queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
     queryClient.invalidateQueries({ queryKey: ['unread-session-count'] })
   }
@@ -196,6 +202,7 @@ export async function fetchRecentWorktrees(
   }
   const items = successful
     .flatMap(result => result.response.items)
+    .filter(item => item.worktree.origin !== 'auto_fix')
     .sort(
       (a, b) =>
         b.lastActivityAt - a.lastActivityAt ||
@@ -574,6 +581,15 @@ async function openBaseSessionForProject(
   } catch (error) {
     logger.error('Failed to auto-open base session', { error })
   }
+}
+
+/** Select a server project and open its chat (base session). */
+export function openServerProject(
+  projectId: string,
+  queryClient: ReturnType<typeof useQueryClient>
+) {
+  useProjectsStore.getState().selectProject(projectId)
+  void openBaseSessionForProject(projectId, queryClient)
 }
 
 /**
@@ -1632,7 +1648,7 @@ export function useWorktreeEvents() {
     // Listen for successful deletion
     unlistenPromises.push(
       listen<WorktreeDeletedEvent>('worktree:deleted', event => {
-        const { id, project_id, teardown_output } = event.payload
+        const { id, project_id } = event.payload
         logger.info('Worktree deleted (background complete)', { id })
         clearLocalWorktreeState(id, queryClient)
 
@@ -1660,28 +1676,6 @@ export function useWorktreeEvents() {
         if (selectedWorktreeId === id) {
           selectWorktree(null)
         }
-
-        // Show teardown output if a teardown script ran
-        if (teardown_output) {
-          // Stable id: the same event can arrive over several server
-          // connections; reuse one toast instead of stacking duplicates.
-          toast.success('Teardown completed', {
-            id: `teardown-${id}`,
-            description:
-              teardown_output.length > 200
-                ? teardown_output.slice(0, 200) + '…'
-                : teardown_output,
-            action: {
-              label: toastActionLabel('View Output'),
-              onClick: () =>
-                window.dispatchEvent(
-                  new CustomEvent('show-teardown-output', {
-                    detail: { output: teardown_output, success: true },
-                  })
-                ),
-            },
-          })
-        }
       })
     )
 
@@ -1699,8 +1693,9 @@ export function useWorktreeEvents() {
         queryClient.invalidateQueries({ queryKey: ['recent-worktrees'] })
         invalidateProjectLists(queryClient)
 
+        const toastId = `teardown-${id}`
         toast.error('Failed to delete worktree', {
-          id: `teardown-${id}`,
+          id: toastId,
           description: error,
           duration: Infinity,
           action: {
@@ -1712,6 +1707,28 @@ export function useWorktreeEvents() {
                 })
               ),
           },
+          ...(error.startsWith('Teardown script failed:')
+            ? {
+                cancel: {
+                  label: 'Delete without teardown',
+                  onClick: () => {
+                    startWorktreeDeletion(queryClient, {
+                      worktreeId: id,
+                      projectId: project_id,
+                      skipTeardown: true,
+                    }).catch(err => {
+                      logger.error('Failed to start worktree deletion', {
+                        error: err,
+                      })
+                      toast.error('Failed to delete worktree', {
+                        id: toastId,
+                        description: String(err),
+                      })
+                    })
+                  },
+                },
+              }
+            : {}),
         })
       })
     )
@@ -1918,6 +1935,65 @@ export function useRenameWorktree() {
 }
 
 /**
+ * Start a background worktree deletion and drop it from local caches.
+ * Shared by useDeleteWorktree and the teardown-failure toast.
+ */
+export async function startWorktreeDeletion(
+  queryClient: QueryClient,
+  {
+    worktreeId,
+    projectId,
+    skipTeardown,
+  }: { worktreeId: string; projectId: string; skipTeardown?: boolean }
+): Promise<void> {
+  if (!isTauri()) {
+    throw new Error('Not in Tauri context')
+  }
+
+  logger.debug('Deleting worktree (background)', { worktreeId })
+  await invoke('delete_worktree', {
+    worktreeId,
+    ...(skipTeardown ? { skipTeardown: true } : {}),
+  })
+  logger.info('Worktree deletion started (background)')
+
+  // Remove from cache now. The backend already dropped it from storage, and
+  // emits no worktree:deleting event when the worktree was already gone
+  // (e.g. its folder was deleted outside Jean).
+  queryClient.setQueryData<Worktree[]>(
+    projectsQueryKeys.worktrees(projectId),
+    old => {
+      if (!old) return []
+      return old.filter(w => w.id !== worktreeId)
+    }
+  )
+  removeWorktreeFromRecentCaches(queryClient, worktreeId)
+  invalidateProjectLists(queryClient)
+
+  // Drop the worktree's sessions from the finished-session bell, which
+  // reads from ['all-sessions'].
+  queryClient.invalidateQueries({
+    queryKey: ['unread-session-count'],
+  })
+  queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
+
+  // Cleanup terminal instances for this worktree
+  clearLocalWorktreeState(worktreeId, queryClient)
+
+  // Clear chat if the deleted worktree was active
+  const { activeWorktreeId, clearActiveWorktree } = useChatStore.getState()
+  if (activeWorktreeId === worktreeId) {
+    clearActiveWorktree()
+  }
+
+  // Clear selection if this worktree was selected
+  const { selectedWorktreeId, selectWorktree } = useProjectsStore.getState()
+  if (selectedWorktreeId === worktreeId) {
+    selectWorktree(null)
+  }
+}
+
+/**
  * Hook to delete a worktree (background deletion with events)
  *
  * The backend returns immediately after marking the worktree for deletion,
@@ -1930,58 +2006,11 @@ export function useDeleteWorktree() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async ({
-      worktreeId,
-      projectId,
-    }: {
+    mutationFn: (args: {
       worktreeId: string
       projectId: string
-    }): Promise<{ worktreeId: string; projectId: string }> => {
-      if (!isTauri()) {
-        throw new Error('Not in Tauri context')
-      }
-
-      logger.debug('Deleting worktree (background)', { worktreeId })
-      await invoke('delete_worktree', { worktreeId })
-      logger.info('Worktree deletion started (background)')
-      return { worktreeId, projectId }
-    },
-    onSuccess: ({ worktreeId, projectId }) => {
-      // Remove from cache now. The backend already dropped it from storage, and
-      // emits no worktree:deleting event when the worktree was already gone
-      // (e.g. its folder was deleted outside Jean).
-      queryClient.setQueryData<Worktree[]>(
-        projectsQueryKeys.worktrees(projectId),
-        old => {
-          if (!old) return []
-          return old.filter(w => w.id !== worktreeId)
-        }
-      )
-      removeWorktreeFromRecentCaches(queryClient, worktreeId)
-      invalidateProjectLists(queryClient)
-
-      // Drop the worktree's sessions from the finished-session bell, which
-      // reads from ['all-sessions'].
-      queryClient.invalidateQueries({
-        queryKey: ['unread-session-count'],
-      })
-      queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
-
-      // Cleanup terminal instances for this worktree
-      clearLocalWorktreeState(worktreeId, queryClient)
-
-      // Clear chat if the deleted worktree was active
-      const { activeWorktreeId, clearActiveWorktree } = useChatStore.getState()
-      if (activeWorktreeId === worktreeId) {
-        clearActiveWorktree()
-      }
-
-      // Clear selection if this worktree was selected
-      const { selectedWorktreeId, selectWorktree } = useProjectsStore.getState()
-      if (selectedWorktreeId === worktreeId) {
-        selectWorktree(null)
-      }
-    },
+      skipTeardown?: boolean
+    }) => startWorktreeDeletion(queryClient, args),
     onError: error => {
       const message =
         error instanceof Error
@@ -2761,7 +2790,10 @@ export function useRunScripts(worktreePath: string | null) {
       return scripts
     },
     enabled: !!worktreePath,
-    staleTime: 0,
+    // Rendered per sidebar worktree row, so avoid refetching on every mount.
+    // jean.json saves, pulls and rebases invalidate ['run-scripts'], and
+    // starting a run always re-reads jean.json from disk.
+    staleTime: 5 * 60 * 1000,
   })
 }
 
@@ -2815,7 +2847,8 @@ export interface TerminalPortInfo {
 
 /**
  * Hook to discover TCP LISTEN ports owned by terminal processes.
- * Polls every 5s when enabled. Returns empty array on non-native platforms.
+ * Polls every 15s when enabled (each poll runs lsof). Returns empty array on
+ * non-native platforms.
  */
 export function useTerminalListeningPorts(enabled: boolean) {
   return useQuery<TerminalPortInfo[]>({
@@ -2825,7 +2858,7 @@ export function useTerminalListeningPorts(enabled: boolean) {
       return invoke<TerminalPortInfo[]>('get_terminal_listening_ports')
     },
     enabled,
-    refetchInterval: 5_000,
+    refetchInterval: 15_000,
     staleTime: 3_000,
   })
 }
@@ -3248,6 +3281,54 @@ export function useAutoFixStatus(projectId: string, enabled: boolean) {
   })
 }
 
+/** Preview uses the scheduler's own selection rules and does not start work. */
+export function useAutoFixPreview(projectId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['auto-fix-preview', projectId],
+    queryFn: async (): Promise<AutoFixIssuePreview[]> => {
+      const { serverId, resourceId } = resolveProjectServer(projectId)
+      return invokeForServer<AutoFixIssuePreview[]>(
+        serverId,
+        'preview_auto_fix_issues',
+        {
+          projectId: resourceId,
+        }
+      )
+    },
+    enabled: enabled && Boolean(projectId),
+    staleTime: 0,
+    retry: false,
+  })
+}
+
+export function useRequestAutoFixScan() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (projectId: string) => {
+      const id = toast.loading('Requesting a scan...')
+      try {
+        const { serverId, resourceId } = resolveProjectServer(projectId)
+        await invokeForServer<null>(serverId, 'request_auto_fix_scan', {
+          projectId: resourceId,
+        })
+        toast.success('Scan requested', {
+          id,
+          description:
+            'Starts on the next scheduler tick. Safety limits still apply.',
+        })
+      } catch (error) {
+        toast.error('Cannot start scan', { id, description: String(error) })
+        throw error
+      }
+    },
+    onSuccess: (_data, projectId) => {
+      queryClient.invalidateQueries({
+        queryKey: projectsQueryKeys.autoFixStatus(projectId),
+      })
+    },
+  })
+}
+
 /** Clear Mr. Robot failed issues (so they are retried) and the last error. */
 export function useClearAutoFixFailures() {
   const queryClient = useQueryClient()
@@ -3512,6 +3593,142 @@ export function useCreateFolder() {
   })
 }
 
+export interface SaveServerProjectInput {
+  /** Existing server project (undefined = create) */
+  projectId?: string
+  name: string
+  server: ProjectServer
+  /** Jean that stores a new server and runs its sessions (undefined = this one) */
+  serverId?: string
+  /** Server-scoped system prompt (empty = none; undefined = unchanged) */
+  systemPrompt?: string
+}
+
+export function saveServerProject({
+  serverId,
+  ...input
+}: SaveServerProjectInput): Promise<Project> {
+  // An existing projectId already routes to its owning Jean.
+  return input.projectId || !serverId || serverId === LOCAL_SERVER_ID
+    ? invoke<Project>('save_server_project', { ...input })
+    : invokeForServer<Project>(serverId, 'save_server_project', { ...input })
+}
+
+/**
+ * Hook to create or update a server project (SSH target)
+ */
+export function useSaveServerProject() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: saveServerProject,
+    onSuccess: (project, { projectId }) => {
+      invalidateProjectLists(queryClient)
+      if (projectId) {
+        toast.success(`Updated server: ${project.name}`)
+        return
+      }
+      toast.success(`Added server: ${project.name}`)
+      openServerProject(project.id, queryClient)
+    },
+    onError: error => {
+      logger.error('Failed to save server', { error })
+      toast.error('Failed to save server', {
+        description: error instanceof Error ? error.message : String(error),
+      })
+    },
+  })
+}
+
+/** Create the built-in local server entry on a Jean (no-op when it exists). */
+export function ensureLocalServerProject(
+  serverId: string = LOCAL_SERVER_ID
+): Promise<Project> {
+  return serverId === LOCAL_SERVER_ID
+    ? invoke<Project>('ensure_local_server_project')
+    : invokeForServer<Project>(serverId, 'ensure_local_server_project')
+}
+
+export interface SshPublicKey {
+  path: string
+  keyType: string
+  comment: string
+  content: string
+}
+
+export type ServerUserAccess = 'readonly' | 'none' | 'full'
+
+/** Public keys (`~/.ssh/*.pub`) of the Jean server that runs this server's ssh. */
+export function useSshPublicKeys(serverId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['ssh-public-keys', serverId],
+    queryFn: () =>
+      invokeForServer<SshPublicKey[]>(serverId, 'list_ssh_public_keys'),
+    enabled,
+  })
+}
+
+export function fetchServerUserSetupScript(
+  serverId: string,
+  args: { user: string; publicKey: string; access: ServerUserAccess }
+): Promise<string> {
+  return invokeForServer<string>(serverId, 'server_user_setup_script', args)
+}
+
+/**
+ * Hook to create a restricted user on a server (connects once as root)
+ */
+export function useSetupServerUser() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (args: {
+      projectId: string
+      rootUser: string
+      user: string
+      publicKey: string
+      access: ServerUserAccess
+    }) => invoke<Project>('setup_server_user', args),
+    onSuccess: project => {
+      invalidateProjectLists(queryClient)
+      toast.success(
+        `${project.name} now uses user ${project.server?.user ?? ''}`
+      )
+    },
+    onError: error => {
+      logger.error('Failed to set up server user', { error })
+      toast.error('Failed to set up server user', {
+        description: error instanceof Error ? error.message : String(error),
+      })
+    },
+  })
+}
+
+/**
+ * Hook to remove a server project with its sessions
+ */
+export function useRemoveServerProject() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (projectId: string): Promise<void> => {
+      await invoke('remove_server_project', { projectId })
+    },
+    onSuccess: (_data, projectId) => {
+      invalidateProjectLists(queryClient)
+      const { selectedProjectId, selectProject } = useProjectsStore.getState()
+      if (selectedProjectId === projectId) selectProject(null)
+      toast.success('Server removed')
+    },
+    onError: error => {
+      logger.error('Failed to remove server', { error })
+      toast.error('Failed to remove server', {
+        description: error instanceof Error ? error.message : String(error),
+      })
+    },
+  })
+}
+
 /**
  * Hook to rename a folder
  */
@@ -3732,19 +3949,26 @@ export function useAppDataDir() {
 
 /**
  * Hook to set a custom avatar for a project
- * Opens a file dialog and copies the selected image to the avatars directory
+ * Uploads the image picked on the client, so it works for local, remote, and
+ * web access projects.
  */
 export function useSetProjectAvatar() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (projectId: string): Promise<Project> => {
-      if (!isTauri()) {
-        throw new Error('Not in Tauri context')
-      }
-
+    mutationFn: async ({
+      projectId,
+      file,
+    }: {
+      projectId: string
+      file: File
+    }): Promise<Project> => {
       logger.debug('Setting project avatar', { projectId })
-      const project = await invoke<Project>('set_project_avatar', { projectId })
+      const project = await invoke<Project>('set_project_avatar', {
+        projectId,
+        data: await fileToBase64(file),
+        mimeType: file.type,
+      })
       logger.info('Project avatar set', { project })
       return project
     },
@@ -3752,17 +3976,14 @@ export function useSetProjectAvatar() {
       invalidateProjectLists(queryClient)
     },
     onError: error => {
-      // "No file selected" is not an error, user just cancelled
       const message =
         typeof error === 'string'
           ? error
           : error instanceof Error
             ? error.message
             : 'Unknown error occurred'
-      if (message !== 'No file selected') {
-        logger.error('Failed to set project avatar', { error })
-        toast.error('Failed to set avatar', { description: message })
-      }
+      logger.error('Failed to set project avatar', { error })
+      toast.error('Failed to set avatar', { description: message })
     },
   })
 }

@@ -34,6 +34,7 @@ export type MagicOption =
   | 'check-github-issues'
   | 'commit'
   | 'commit-and-push'
+  | 'commit-in-session'
   | 'comment-and-close-issue'
   | 'pull'
   | 'push'
@@ -158,9 +159,15 @@ export function buildMagicColumns(hasOpenPr: boolean): MagicColumns {
           key: 'P',
         },
         {
+          id: 'commit-in-session',
+          label: 'Commit in Session',
+          icon: GitCommitHorizontal,
+          key: 'L',
+        },
+        {
           id: 'comment-and-close-issue',
           label: 'Comment & Close Issue',
-          icon: Bug,
+          icon: GitCommitHorizontal,
           key: 'H',
         },
         {

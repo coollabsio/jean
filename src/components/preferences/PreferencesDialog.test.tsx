@@ -23,6 +23,10 @@ vi.mock('@/lib/environment', async importOriginal => ({
   isNativeApp: () => settingsServerMocks.native,
 }))
 
+vi.mock('@/hooks/use-window-maximized', () => ({
+  useWindowMaximized: () => false,
+}))
+
 vi.mock('@/lib/remote-connections', () => ({
   useRemoteConnections: () => settingsServerMocks.connections,
 }))
@@ -161,7 +165,7 @@ describe('PreferencesDialog', () => {
 
     const dialog = screen.getByRole('dialog')
     const desktopHeaderActions = dialog.querySelector<HTMLElement>(
-      'div[class~="ml-auto"][class~="lg:flex"]'
+      '[data-slot="sidebar"]'
     )
 
     if (!desktopHeaderActions) {
@@ -172,8 +176,12 @@ describe('PreferencesDialog', () => {
       within(desktopHeaderActions).getByPlaceholderText('Search settings...')
     await user.type(desktopSearchInput, 'provider')
 
+    const headerActions = dialog.querySelector<HTMLElement>('header .ml-auto')
+    if (!headerActions) {
+      throw new Error('Expected header actions to be rendered')
+    }
     await user.click(
-      within(desktopHeaderActions).getByRole('button', { name: 'Close' })
+      within(headerActions).getByRole('button', { name: 'Close' })
     )
 
     await waitFor(() => {
@@ -294,7 +302,7 @@ describe('PreferencesDialog', () => {
 
     const dialog = screen.getByRole('dialog')
     const desktopHeaderActions = dialog.querySelector<HTMLElement>(
-      'div[class~="ml-auto"][class~="lg:flex"]'
+      '[data-slot="sidebar"]'
     )
 
     if (!desktopHeaderActions) {
@@ -351,7 +359,7 @@ describe('PreferencesDialog', () => {
 
     const dialog = screen.getByRole('dialog')
     const desktopHeaderActions = dialog.querySelector<HTMLElement>(
-      'div[class~="ml-auto"][class~="lg:flex"]'
+      '[data-slot="sidebar"]'
     )
 
     if (!desktopHeaderActions) {

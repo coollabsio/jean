@@ -255,7 +255,7 @@ describe('ExitPlanModeButton', () => {
       />
     )
 
-    const yoloButton = screen.getByRole('button', { name: 'YOLO' })
+    const yoloButton = screen.getByRole('button', { name: 'Full access' })
     const approveButton = screen.getByRole('button', { name: 'Approve' })
     expect(yoloButton).toBeInTheDocument()
     expect(approveButton).toBeInTheDocument()

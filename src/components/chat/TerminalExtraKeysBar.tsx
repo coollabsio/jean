@@ -39,6 +39,7 @@ function actionAriaLabel(action: TerminalExtraKeyAction): string {
  * Termius-style special-keys strip for web access and mobile soft keyboards.
  * One-shot keys inject control sequences; Ctrl/Alt are sticky for the next char.
  * Copy/paste use the system clipboard (mobile native paste often fails on xterm).
+ * Parents key this by terminalId so sticky modifiers reset on terminal switch.
  */
 export function TerminalExtraKeysBar({
   terminalId,
@@ -97,12 +98,6 @@ export function TerminalExtraKeysBar({
     return () => window.removeEventListener('keydown', onKeyDown, true)
   }, [stickyCtrl, stickyAlt])
 
-  // Reset sticky modifiers when switching terminals.
-  useEffect(() => {
-    setStickyCtrl(false)
-    setStickyAlt(false)
-  }, [terminalId])
-
   const handleCopy = useCallback(async () => {
     const selection = getTerminalSelection(terminalId).trimEnd()
     if (!selection) {
@@ -134,7 +129,9 @@ export function TerminalExtraKeysBar({
       writeTerminalInput(terminalId, text)
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : 'Failed to paste from clipboard'
+        error instanceof Error
+          ? error.message
+          : 'Failed to paste from clipboard'
       )
     } finally {
       focusTerminal(terminalId)

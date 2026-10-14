@@ -29,6 +29,7 @@ import type {
 } from '@/types/codex-cli'
 
 import { hasBackendTransport } from '@/lib/environment'
+import { useOptionalSettingsTargetServerId } from '@/lib/settings-target'
 
 const isTauri = hasBackendTransport
 const USAGE_REFRESH_MS = 1000 * 60 * 5
@@ -46,8 +47,9 @@ export const codexCliQueryKeys = {
  * Hook to detect Codex CLI in system PATH
  */
 export function useCodexPathDetection(options?: { enabled?: boolean }) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: [...codexCliQueryKeys.all, 'path-detection'],
+    queryKey: [...codexCliQueryKeys.all, 'path-detection', serverId ?? 'local'],
     queryFn: async (): Promise<{
       found: boolean
       path: string | null
@@ -63,12 +65,12 @@ export function useCodexPathDetection(options?: { enabled?: boolean }) {
         }
       }
       try {
-        const result = await invoke<{
+        const result = await invokeForOptionalServer<{
           found: boolean
           path: string | null
           version: string | null
           package_manager: string | null
-        }>('detect_codex_in_path')
+        }>(serverId, 'detect_codex_in_path')
         console.debug('[ONBOARDING:SVC] codex path detection:', result)
         return result
       } catch (err) {
@@ -106,8 +108,10 @@ export function useCodexCliStatus(options?: {
   enabled?: boolean
   serverId?: string
 }) {
+  const settingsServerId = useOptionalSettingsTargetServerId()
+  const serverId = options?.serverId ?? settingsServerId
   return useQuery({
-    queryKey: [...codexCliQueryKeys.status(), options?.serverId ?? 'local'],
+    queryKey: [...codexCliQueryKeys.status(), serverId ?? 'local'],
     queryFn: async (): Promise<CodexCliStatus> => {
       if (!isTauri()) {
         return { installed: false, version: null, path: null }
@@ -116,7 +120,7 @@ export function useCodexCliStatus(options?: {
       try {
         console.debug('[ONBOARDING:SVC] codex: checking installed status...')
         const status = await invokeForOptionalServer<CodexCliStatus>(
-          options?.serverId,
+          serverId,
           'check_codex_cli_installed'
         )
         console.debug('[ONBOARDING:SVC] codex: status =', status)
@@ -138,8 +142,9 @@ export function useCodexCliStatus(options?: {
  * Hook to check if Codex CLI is authenticated
  */
 export function useCodexCliAuth(options?: { enabled?: boolean }) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: codexCliQueryKeys.auth(),
+    queryKey: [...codexCliQueryKeys.auth(), serverId ?? 'local'],
     queryFn: async (): Promise<CodexAuthStatus> => {
       if (!isTauri()) {
         return { authenticated: false, error: 'Not in Tauri context' }
@@ -147,7 +152,10 @@ export function useCodexCliAuth(options?: { enabled?: boolean }) {
 
       try {
         console.debug('[ONBOARDING:SVC] codex: checking auth status...')
-        const status = await invoke<CodexAuthStatus>('check_codex_cli_auth')
+        const status = await invokeForOptionalServer<CodexAuthStatus>(
+          serverId,
+          'check_codex_cli_auth'
+        )
         console.debug('[ONBOARDING:SVC] codex: auth =', status)
         return status
       } catch (error) {
@@ -226,22 +234,23 @@ export function useCodexUsageUpdateListener() {
  * Hook to fetch available Codex CLI versions from GitHub releases
  */
 export function useAvailableCodexVersions(options?: { enabled?: boolean }) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: codexCliQueryKeys.versions(),
+    queryKey: [...codexCliQueryKeys.versions(), serverId ?? 'local'],
     queryFn: async (): Promise<CodexReleaseInfo[]> => {
       if (!isTauri()) {
         return []
       }
 
       try {
-        const versions = await invoke<
+        const versions = await invokeForOptionalServer<
           {
             version: string
             tag_name: string
             published_at: string
             prerelease: boolean
           }[]
-        >('get_available_codex_versions')
+        >(serverId, 'get_available_codex_versions')
 
         return versions.map(v => ({
           version: v.version,
@@ -266,11 +275,14 @@ export function useAvailableCodexVersions(options?: { enabled?: boolean }) {
  */
 export function useInstallCodexCli() {
   const queryClient = useQueryClient()
+  const serverId = useOptionalSettingsTargetServerId()
 
   return useMutation({
     mutationFn: async (version?: string) => {
       logger.info('Installing Codex CLI', { version })
-      await invoke('install_codex_cli', { version: version ?? null })
+      await invokeForOptionalServer(serverId, 'install_codex_cli', {
+        version: version ?? null,
+      })
     },
     retry: false,
     onSuccess: () => {
@@ -349,11 +361,16 @@ export function useCodexInstallProgress(): [
 /**
  * Combined hook for Codex CLI setup flow
  */
-function checkManualVersion(version: string) {
-  return invoke<boolean>('check_codex_cli_version_exists', { version })
+function checkManualVersion(version: string, serverId?: string) {
+  return invokeForOptionalServer<boolean>(
+    serverId,
+    'check_codex_cli_version_exists',
+    { version }
+  )
 }
 
 export function useCodexCliSetup() {
+  const serverId = useOptionalSettingsTargetServerId()
   const status = useCodexCliStatus()
   const versions = useAvailableCodexVersions()
   const installMutation = useInstallCodexCli()
@@ -396,7 +413,8 @@ export function useCodexCliSetup() {
     installError: installMutation.error,
     progress,
     install,
-    checkManualVersion,
+    checkManualVersion: (version: string) =>
+      checkManualVersion(version, serverId),
     refetchStatus: status.refetch,
   }
 }

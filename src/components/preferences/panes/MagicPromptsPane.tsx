@@ -6,6 +6,7 @@ import {
   RotateCcw,
   Trash2,
 } from '@/components/icons/reicon'
+import { BackendModelPickerContent } from '@/components/chat/toolbar/BackendModelPickerContent'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
@@ -79,6 +80,7 @@ import {
   DEFAULT_SESSION_NAMING_PROMPT,
   DEFAULT_PARALLEL_EXECUTION_PROMPT,
   DEFAULT_GLOBAL_SYSTEM_PROMPT,
+  DEFAULT_SERVER_SYSTEM_PROMPT,
   DEFAULT_PROVIDER_SWITCH_HANDOFF_PROMPT,
   DEFAULT_MAGIC_PROMPTS,
   DEFAULT_MAGIC_PROMPT_MODELS,
@@ -555,6 +557,25 @@ const PROMPT_SECTIONS: PromptSection[] = [
           'Global system prompt appended to every chat session (like ~/.claude/CLAUDE.md).',
         variables: [],
         defaultValue: DEFAULT_GLOBAL_SYSTEM_PROMPT,
+      },
+      {
+        key: 'server_system_prompt',
+        label: 'Server System Prompt',
+        description:
+          'Replaces the global system prompt in sessions of servers (Servers tab). Server sessions start in Supervised mode.',
+        variables: [
+          { name: '{server_name}', description: 'Server display name' },
+          {
+            name: '{connection}',
+            description:
+              'How to run commands: the SSH line for remote servers, or "run directly" for Local',
+          },
+          {
+            name: '{ssh_command}',
+            description: 'Non-interactive SSH command prefix (empty for Local)',
+          },
+        ],
+        defaultValue: DEFAULT_SERVER_SYSTEM_PROMPT,
       },
       {
         key: 'provider_switch_handoff',
@@ -1475,6 +1496,16 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     [preferences, patchPreferences, currentModes, selectedConfig.modeKey]
   )
 
+  const handleBulkModelChange = (backend: CliBackend, model: string) => {
+    const options =
+      backend === 'claude' ? claudeModelOptions : getReviewModelOptions(backend)
+    setBulkSelection({
+      backend,
+      model: model as MagicPromptModel,
+      label: options.find(option => option.value === model)?.label ?? model,
+    })
+  }
+
   const bulkFastModel = bulkSelection
     ? getCatalogModelFastInfo(
         modelCatalog,
@@ -1573,6 +1604,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
               size="sm"
               role="combobox"
               aria-label="Model for all prompts"
+              disabled={installedBackends.length === 0}
               aria-expanded={bulkModelPopoverOpen}
               className="h-7 text-xs"
             >
@@ -1589,54 +1621,26 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
           </PopoverTrigger>
           <PopoverContent
             align="start"
-            className="w-80 max-w-[calc(100vw-2rem)] p-0"
+            className="w-[min(36rem,calc(100vw-2rem))] p-0"
           >
-            <Command>
-              <CommandInput placeholder="Search backends and models..." />
-              <CommandList>
-                <CommandEmpty>No available models found.</CommandEmpty>
-                {installedBackends.map(backend => (
-                  <CommandGroup
-                    key={backend}
-                    heading={getBackendPlainLabel(backend)}
-                  >
-                    {(backend === 'claude'
-                      ? claudeModelOptions
-                      : getReviewModelOptions(backend)
-                    )
-                      .filter(
-                        option =>
-                          !getCatalogModelFastInfo(
-                            modelCatalog,
-                            backend,
-                            option.value
-                          ).isFast
-                      )
-                      .map(option => (
-                        <CommandItem
-                          key={option.value}
-                          value={`${backend} ${option.value} ${option.label}`}
-                          keywords={[getBackendPlainLabel(backend)]}
-                          onSelect={() => {
-                            setBulkSelection({
-                              backend,
-                              model: option.value,
-                              label: option.label,
-                            })
-                            setBulkModelPopoverOpen(false)
-                          }}
-                        >
-                          {option.label}
-                          {bulkSelection?.backend === backend &&
-                            bulkSelection.model === option.value && (
-                              <Check className="ml-auto size-3.5" />
-                            )}
-                        </CommandItem>
-                      ))}
-                  </CommandGroup>
-                ))}
-              </CommandList>
-            </Command>
+            <BackendModelPickerContent
+              open={bulkModelPopoverOpen}
+              selectedBackend={
+                bulkSelection?.backend ?? installedBackends[0] ?? 'claude'
+              }
+              selectedModel={bulkSelection?.model ?? ''}
+              selectedProvider={null}
+              installedBackends={installedBackends}
+              customCliProfiles={profiles}
+              onModelChange={model =>
+                handleBulkModelChange(
+                  bulkSelection?.backend ?? installedBackends[0] ?? 'claude',
+                  model
+                )
+              }
+              onBackendModelChange={handleBulkModelChange}
+              onRequestClose={() => setBulkModelPopoverOpen(false)}
+            />
           </PopoverContent>
         </Popover>
         <label
@@ -1668,7 +1672,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="plan">Plan</SelectItem>
-            <SelectItem value="yolo">Yolo</SelectItem>
+            <SelectItem value="yolo">Full access</SelectItem>
           </SelectContent>
         </Select>
         <Button
@@ -1960,7 +1964,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="plan">Plan</SelectItem>
-                            <SelectItem value="yolo">Yolo</SelectItem>
+                            <SelectItem value="yolo">Full access</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -2452,9 +2456,23 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="plan">Plan</SelectItem>
-                    <SelectItem value="yolo">Yolo</SelectItem>
+                    <SelectItem value="yolo">Full access</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+            )}
+            {selectedKey === 'commit_message' && (
+              <div className="flex flex-col gap-2">
+                <label className="flex items-center gap-2 text-xs">
+                  <Switch
+                    checked={preferences?.commit_close_issue ?? false}
+                    onCheckedChange={checked =>
+                      patchPreferences.mutate({ commit_close_issue: checked })
+                    }
+                  />
+                  Add &quot;Closes #issue&quot; when the worktree has a linked
+                  GitHub issue
+                </label>
               </div>
             )}
             <Button

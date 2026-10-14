@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo } from 'react'
+import { SettingsSection } from '@/components/preferences/SettingsSection'
+import { useEffect, useMemo } from 'react'
 import {
   CheckCircle,
   Loader2,
@@ -31,19 +32,6 @@ import { parseServerResourceKey } from '@/lib/server-resource'
 import { McpSignInButton } from '@/components/mcp/McpSignInButton'
 import type { McpHealthStatus } from '@/types/chat'
 import type { CliBackend } from '@/types/preferences'
-
-const SettingsSection: React.FC<{
-  title: string
-  children: React.ReactNode
-}> = ({ title, children }) => (
-  <div className="space-y-4">
-    <div>
-      <h3 className="text-lg font-medium text-foreground">{title}</h3>
-      <Separator className="mt-2" />
-    </div>
-    {children}
-  </div>
-)
 
 function mcpAuthHint(backend: CliBackend): string {
   switch (backend) {

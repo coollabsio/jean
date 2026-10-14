@@ -1,23 +1,25 @@
 import { test, expect } from '../fixtures/tauri-mock'
 
 test.describe('Preferences', () => {
+  test.use({ responseOverrides: { get_package_scripts: [] } })
   const openDialog = async (
     mockPage: Parameters<typeof test>[0]['mockPage']
   ) => {
     await expect(mockPage.getByText('Test Project')).toBeVisible({
       timeout: 5000,
     })
-    await mockPage.keyboard.press('Meta+,')
+    await mockPage.keyboard.press('ControlOrMeta+,')
     const dialog = mockPage.getByRole('dialog')
     await expect(dialog).toBeVisible({ timeout: 3000 })
     return dialog
   }
 
-  const getDesktopHeaderSearchInput = (
+  const getSidebarSearchInput = (
     dialog: ReturnType<typeof openDialog> extends Promise<infer T> ? T : never
-  ) => dialog.locator('header').getByPlaceholder('Search settings...')
+  ) =>
+    dialog.locator('[data-slot=sidebar]').getByPlaceholder('Search settings...')
 
-  test('Cmd+, opens settings dialog', async ({ mockPage }) => {
+  test('settings shortcut opens the settings page', async ({ mockPage }) => {
     await openDialog(mockPage)
     await expect(
       mockPage.getByRole('dialog').filter({ hasText: 'Settings' })
@@ -37,7 +39,7 @@ test.describe('Preferences', () => {
 
   test('searching jumps to matching pane', async ({ mockPage }) => {
     const dialog = await openDialog(mockPage)
-    const searchInput = getDesktopHeaderSearchInput(dialog)
+    const searchInput = getSidebarSearchInput(dialog)
     await searchInput.fill('keybindings')
     const result = dialog.getByRole('option', {
       name: 'Keybindings',
@@ -52,7 +54,7 @@ test.describe('Preferences', () => {
 
   test('keyboard navigation selects search result', async ({ mockPage }) => {
     const dialog = await openDialog(mockPage)
-    const searchInput = getDesktopHeaderSearchInput(dialog)
+    const searchInput = getSidebarSearchInput(dialog)
     await searchInput.fill('appearance')
     await searchInput.press('ArrowDown')
     await searchInput.press('ArrowDown')
@@ -67,10 +69,8 @@ test.describe('Preferences', () => {
   }) => {
     await mockPage.setViewportSize({ width: 1280, height: 720 })
     const dialog = await openDialog(mockPage)
-    const searchInput = getDesktopHeaderSearchInput(dialog)
-    const desktopHeaderActions = searchInput.locator(
-      'xpath=ancestor::div[contains(@class, "ml-auto") and contains(@class, "md:flex")][1]'
-    )
+    const searchInput = getSidebarSearchInput(dialog)
+    const desktopHeaderActions = dialog.locator('header')
 
     await searchInput.fill('provider')
     await expect(

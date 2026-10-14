@@ -37,6 +37,7 @@ describe('ChatStore', () => {
       reviewSidebarVisible: false,
       fixedReviewFindings: {},
       tableCheckedRows: {},
+      hiddenTableChecklists: {},
       pinnedTables: {},
       worktreePaths: {},
       sendingSessionIds: {},
@@ -52,6 +53,7 @@ describe('ChatStore', () => {
       streamingThinkingContent: {},
       inputDrafts: {},
       executionModes: {},
+      permissionModes: {},
       thinkingLevels: {},
       selectedModels: {},
       scheduledWakeups: {},
@@ -908,19 +910,35 @@ describe('ChatStore', () => {
   })
 
   describe('execution mode', () => {
-    it('cycles execution mode', () => {
-      const { cycleExecutionMode, getExecutionMode } = useChatStore.getState()
+    it('starts with Full access and toggles workflow without changing permissions', () => {
+      const store = useChatStore.getState()
+      expect(store.getExecutionMode('session-1')).toBe('yolo')
+      store.cycleExecutionMode('session-1')
+      expect(store.getExecutionMode('session-1')).toBe('plan')
+      store.cycleExecutionMode('session-1')
+      expect(store.getExecutionMode('session-1')).toBe('yolo')
+    })
 
-      expect(getExecutionMode('session-1')).toBe('plan')
+    it.each(['supervised', 'build', 'auto', 'yolo'] as const)(
+      'retains %s permissions through Plan',
+      mode => {
+        const store = useChatStore.getState()
+        store.setExecutionMode('session-1', mode)
+        store.cycleExecutionMode('session-1')
+        expect(useChatStore.getState().permissionModes['session-1']).toBe(mode)
+        expect(store.getExecutionMode('session-1')).toBe('plan')
+        store.cycleExecutionMode('session-1')
+        expect(store.getExecutionMode('session-1')).toBe(mode)
+      }
+    )
 
-      cycleExecutionMode('session-1')
-      expect(getExecutionMode('session-1')).toBe('build')
-
-      cycleExecutionMode('session-1')
-      expect(getExecutionMode('session-1')).toBe('yolo')
-
-      cycleExecutionMode('session-1')
-      expect(getExecutionMode('session-1')).toBe('plan')
+    it('can change Build permissions without leaving Plan', () => {
+      const store = useChatStore.getState()
+      store.setExecutionMode('session-1', 'plan')
+      store.setPermissionMode('session-1', 'supervised')
+      expect(store.getExecutionMode('session-1')).toBe('plan')
+      store.cycleExecutionMode('session-1')
+      expect(store.getExecutionMode('session-1')).toBe('supervised')
     })
 
     it('sets execution mode directly', () => {
@@ -1382,6 +1400,7 @@ describe('ChatStore', () => {
         'streamingThinkingContent',
         'inputDrafts',
         'executionModes',
+        'permissionModes',
         'thinkingLevels',
         'effortLevels',
         'selectedBackends',
@@ -2072,6 +2091,49 @@ describe('ChatStore', () => {
       const before = useChatStore.getState()
       before.renameTableKeys('session-1', key => key)
       expect(useChatStore.getState().pinnedTables).toBe(before.pinnedTables)
+    })
+  })
+
+  describe('table checklist', () => {
+    it('keeps rows checked while checklist mode is off and shows them when on', () => {
+      const store = useChatStore.getState()
+      store.checkTableRow('session-1', 'msg-1:0', 1)
+
+      let state = useChatStore.getState()
+      expect(state.tableCheckedRows['session-1']?.['msg-1:0']).toEqual(
+        new Set([1])
+      )
+      expect(state.hiddenTableChecklists['session-1']).toEqual(['msg-1:0'])
+
+      store.enableTableChecklist('session-1', 'msg-1:0')
+      state = useChatStore.getState()
+      expect(state.hiddenTableChecklists['session-1']).toBeUndefined()
+      expect(state.tableCheckedRows['session-1']?.['msg-1:0']).toEqual(
+        new Set([1])
+      )
+    })
+
+    it('checks rows directly when checklist mode is on', () => {
+      const store = useChatStore.getState()
+      store.enableTableChecklist('session-1', 'msg-1:0')
+      store.checkTableRow('session-1', 'msg-1:0', 2)
+
+      const state = useChatStore.getState()
+      expect(state.tableCheckedRows['session-1']?.['msg-1:0']).toEqual(
+        new Set([2])
+      )
+      expect(state.hiddenTableChecklists['session-1']).toBeUndefined()
+    })
+
+    it('renames hidden checklist keys', () => {
+      const store = useChatStore.getState()
+      store.checkTableRow('session-1', 'msg-1:0', 0)
+      store.renameTableKeys('session-1', key =>
+        key.replace('msg-1:', 'saved-1:')
+      )
+      expect(
+        useChatStore.getState().hiddenTableChecklists['session-1']
+      ).toEqual(['saved-1:0'])
     })
   })
 })

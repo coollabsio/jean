@@ -20,6 +20,10 @@ pub struct AutoFixStatus {
     pub failed_issues: Vec<AutoFixFailedIssue>,
     pub starting_issues: Vec<u32>,
     pub pending_yolo_sessions: usize,
+    pub scanning: bool,
+    pub active_now: bool,
+    pub last_scan_summary: Option<String>,
+    pub activity: Vec<AutoFixActivity>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -43,4 +47,22 @@ pub struct AutoFixFailedIssue {
 pub struct AutoFixIssueCandidate {
     pub number: u32,
     pub labels: Vec<String>,
+}
+
+/// Bounded runtime history. Like scan status, this resets on restart.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoFixActivity {
+    pub at: u64,
+    pub message: String,
+    pub issue_number: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoFixIssuePreview {
+    pub issue_number: u32,
+    pub labels: Vec<String>,
+    pub reason: String,
+    pub selected: bool,
 }

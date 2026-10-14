@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
 import type { LabelData } from '@/types/chat'
-import type { WorktreeSortMode } from '@/types/projects'
+import type { Project, WorktreeSortMode } from '@/types/projects'
 
 export interface ProjectCanvasSettings {
   worktreeSortMode?: WorktreeSortMode
@@ -9,6 +9,7 @@ export interface ProjectCanvasSettings {
   labels?: LabelData[]
 }
 
+/** Panel view inside the Workspace rail section. */
 export type SidebarTab = 'projects' | 'recent'
 
 interface ProjectsUIState {
@@ -38,12 +39,12 @@ interface ProjectsUIState {
   sidebarActiveTab: SidebarTab
   pinnedRecentSessionIds: string[]
 
-  // Favorited projects shown first in the GitHub Dashboard filter and sections
-  githubDashboardFavoriteProjectIds: string[]
-
   // Add project dialog state
   addProjectDialogOpen: boolean
   addProjectParentFolderId: string | null
+
+  // Add/edit server dialog state (null = closed, no project = add)
+  serverDialog: { project?: Project } | null
 
   // Project settings dialog state
   projectSettingsDialogOpen: boolean
@@ -99,6 +100,7 @@ interface ProjectsUIState {
     open: boolean,
     parentFolderId?: string | null
   ) => void
+  setServerDialog: (serverDialog: { project?: Project } | null) => void
   setSidebarActiveTab: (tab: SidebarTab) => void
   openProjectSettings: (projectId: string, pane?: string) => void
   closeProjectSettings: () => void
@@ -125,8 +127,6 @@ interface ProjectsUIState {
   setProjectCanvasActiveFilter: (projectId: string, filter: string) => void
   setSidebarServerFilter: (serverId: string | null) => void
   setPinnedRecentSessionIds: (sessionIds: string[]) => void
-  setGitHubDashboardFavoriteProjectIds: (projectIds: string[]) => void
-  toggleGitHubDashboardFavoriteProject: (projectId: string) => void
 }
 
 export const useProjectsStore = create<ProjectsUIState>()(
@@ -145,9 +145,9 @@ export const useProjectsStore = create<ProjectsUIState>()(
       sidebarServerFilter: null,
       sidebarActiveTab: 'projects',
       pinnedRecentSessionIds: [],
-      githubDashboardFavoriteProjectIds: [],
       addProjectDialogOpen: false,
       addProjectParentFolderId: null,
+      serverDialog: null,
       projectSettingsDialogOpen: false,
       projectSettingsProjectId: null,
       projectSettingsInitialPane: null,
@@ -423,36 +423,6 @@ export const useProjectsStore = create<ProjectsUIState>()(
           'setPinnedRecentSessionIds'
         ),
 
-      setGitHubDashboardFavoriteProjectIds: projectIds =>
-        set(
-          state =>
-            state.githubDashboardFavoriteProjectIds === projectIds
-              ? state
-              : { githubDashboardFavoriteProjectIds: projectIds },
-          undefined,
-          'setGitHubDashboardFavoriteProjectIds'
-        ),
-
-      toggleGitHubDashboardFavoriteProject: projectId =>
-        set(
-          state => {
-            const current = state.githubDashboardFavoriteProjectIds
-            if (current.includes(projectId)) {
-              return {
-                githubDashboardFavoriteProjectIds: current.filter(
-                  id => id !== projectId
-                ),
-              }
-            }
-
-            return {
-              githubDashboardFavoriteProjectIds: [...current, projectId],
-            }
-          },
-          undefined,
-          'toggleGitHubDashboardFavoriteProject'
-        ),
-
       // Folder expansion actions
       toggleFolderExpanded: id =>
         set(
@@ -538,6 +508,9 @@ export const useProjectsStore = create<ProjectsUIState>()(
           undefined,
           'setAddProjectDialogOpen'
         ),
+
+      setServerDialog: serverDialog =>
+        set({ serverDialog }, undefined, 'setServerDialog'),
 
       openProjectSettings: (projectId, pane) =>
         set(

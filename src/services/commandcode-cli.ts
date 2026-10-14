@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useState } from 'react'
 import { toast } from 'sonner'
-import { invoke, invokeForOptionalServer } from '@/lib/transport'
+import { invokeForOptionalServer } from '@/lib/transport'
 import { logger } from '@/lib/logger'
 import { useOptionalSettingsTargetServerId } from '@/lib/settings-target'
 import type {
@@ -30,8 +30,13 @@ export const commandcodeCliQueryKeys = {
 }
 
 export function useCommandCodePathDetection(options?: { enabled?: boolean }) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: [...commandcodeCliQueryKeys.all, 'path-detection'],
+    queryKey: [
+      ...commandcodeCliQueryKeys.all,
+      'path-detection',
+      serverId ?? 'local',
+    ],
     queryFn: async (): Promise<CommandCodePathDetection> => {
       if (!isTauri()) {
         return {
@@ -42,7 +47,8 @@ export function useCommandCodePathDetection(options?: { enabled?: boolean }) {
         }
       }
       try {
-        return await invoke<CommandCodePathDetection>(
+        return await invokeForOptionalServer<CommandCodePathDetection>(
+          serverId,
           'detect_commandcode_in_path'
         )
       } catch (error) {
@@ -65,13 +71,15 @@ export function useCommandCodeCliStatus(options?: {
   enabled?: boolean
   serverId?: string
 }) {
+  const settingsServerId = useOptionalSettingsTargetServerId()
+  const serverId = options?.serverId ?? settingsServerId
   return useQuery({
-    queryKey: [...commandcodeCliQueryKeys.status(), options?.serverId],
+    queryKey: [...commandcodeCliQueryKeys.status(), serverId ?? 'local'],
     queryFn: async (): Promise<CommandCodeCliStatus> => {
       if (!isTauri()) return { installed: false, version: null, path: null }
       try {
         return await invokeForOptionalServer<CommandCodeCliStatus>(
-          options?.serverId,
+          serverId,
           'check_commandcode_cli_installed'
         )
       } catch (error) {
@@ -87,8 +95,9 @@ export function useCommandCodeCliStatus(options?: {
 }
 
 export function useCommandCodeCliAuth(options?: { enabled?: boolean }) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: commandcodeCliQueryKeys.auth(),
+    queryKey: [...commandcodeCliQueryKeys.auth(), serverId ?? 'local'],
     queryFn: async (): Promise<CommandCodeAuthStatus> => {
       if (!isTauri()) {
         return {
@@ -98,7 +107,10 @@ export function useCommandCodeCliAuth(options?: { enabled?: boolean }) {
         }
       }
       try {
-        return await invoke<CommandCodeAuthStatus>('check_commandcode_cli_auth')
+        return await invokeForOptionalServer<CommandCodeAuthStatus>(
+          serverId,
+          'check_commandcode_cli_auth'
+        )
       } catch (error) {
         logger.error('Failed to check Command Code CLI auth', { error })
         return {
@@ -139,19 +151,20 @@ export function useAvailableCommandCodeModels(options?: { enabled?: boolean }) {
 export function useAvailableCommandCodeVersions(options?: {
   enabled?: boolean
 }) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: commandcodeCliQueryKeys.versions(),
+    queryKey: [...commandcodeCliQueryKeys.versions(), serverId ?? 'local'],
     queryFn: async (): Promise<CommandCodeReleaseInfo[]> => {
       if (!isTauri()) return []
       try {
-        const versions = await invoke<
+        const versions = await invokeForOptionalServer<
           {
             version: string
             tag_name: string
             published_at: string
             prerelease: boolean
           }[]
-        >('get_available_commandcode_versions')
+        >(serverId, 'get_available_commandcode_versions')
         return versions.map(v => ({
           version: v.version,
           tagName: v.tag_name,
@@ -172,9 +185,12 @@ export function useAvailableCommandCodeVersions(options?: {
 
 export function useInstallCommandCodeCli() {
   const queryClient = useQueryClient()
+  const serverId = useOptionalSettingsTargetServerId()
   return useMutation({
     mutationFn: async (version?: string) => {
-      await invoke('install_commandcode_cli', { version: version ?? null })
+      await invokeForOptionalServer(serverId, 'install_commandcode_cli', {
+        version: version ?? null,
+      })
     },
     retry: false,
     onSuccess: () => {
@@ -201,11 +217,16 @@ export function useCommandCodeInstallProgress(): [
   return [progress, resetProgress]
 }
 
-function checkManualVersion(version: string) {
-  return invoke<boolean>('check_commandcode_cli_version_exists', { version })
+function checkManualVersion(version: string, serverId?: string) {
+  return invokeForOptionalServer<boolean>(
+    serverId,
+    'check_commandcode_cli_version_exists',
+    { version }
+  )
 }
 
 export function useCommandCodeCliSetup() {
+  const serverId = useOptionalSettingsTargetServerId()
   const status = useCommandCodeCliStatus()
   const versions = useAvailableCommandCodeVersions()
   const installMutation = useInstallCommandCodeCli()
@@ -234,11 +255,17 @@ export function useCommandCodeCliSetup() {
     installError: installMutation.error,
     progress,
     install,
-    checkManualVersion,
+    checkManualVersion: (version: string) =>
+      checkManualVersion(version, serverId),
     refetchStatus: status.refetch,
   }
 }
 
-export async function getCommandCodeInstallCommand(): Promise<CommandCodeInstallCommand> {
-  return invoke<CommandCodeInstallCommand>('get_commandcode_install_command')
+export async function getCommandCodeInstallCommand(
+  serverId?: string
+): Promise<CommandCodeInstallCommand> {
+  return invokeForOptionalServer<CommandCodeInstallCommand>(
+    serverId,
+    'get_commandcode_install_command'
+  )
 }

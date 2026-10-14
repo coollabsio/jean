@@ -160,3 +160,66 @@ function execCommandCopyFallback(text: string): boolean {
     }
   }
 }
+
+/** Copy rendered image pixels to this device, never the owning remote server. */
+export async function copyImageToClipboard(src: string): Promise<void> {
+  // Markdown screenshots are often data URLs. They can render under img-src,
+  // but fetching them is blocked by the native webview's connect-src policy.
+  const inline = /^(data:|blob:)/i.test(src)
+  let url = src
+  if (!inline) {
+    const response = await fetch(src)
+    if (!response.ok) throw new Error('Failed to load image')
+    url = URL.createObjectURL(await response.blob())
+  }
+  try {
+    const image = new window.Image()
+    image.src = url
+    await image.decode()
+    const canvas = document.createElement('canvas')
+    canvas.width = image.naturalWidth
+    canvas.height = image.naturalHeight
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('Image conversion is unavailable')
+    context.drawImage(image, 0, 0)
+
+    if (isNativeApp()) {
+      const [{ Image }, { writeImage }] = await Promise.all([
+        import('@tauri-apps/api/image'),
+        import('@tauri-apps/plugin-clipboard-manager'),
+      ])
+      const pixels = context.getImageData(0, 0, canvas.width, canvas.height)
+      const nativeImage = await Image.new(
+        new Uint8Array(pixels.data.buffer),
+        canvas.width,
+        canvas.height
+      )
+      try {
+        await writeImage(nativeImage)
+      } finally {
+        await nativeImage.close()
+      }
+      return
+    }
+
+    if (
+      isInsecureWebContext() ||
+      !navigator.clipboard?.write ||
+      typeof ClipboardItem === 'undefined'
+    ) {
+      throw new Error(
+        'Image copy requires HTTPS and browser clipboard permission'
+      )
+    }
+    const png = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+        value =>
+          value ? resolve(value) : reject(new Error('Failed to convert image')),
+        'image/png'
+      )
+    })
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })])
+  } finally {
+    if (!inline) URL.revokeObjectURL(url)
+  }
+}

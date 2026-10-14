@@ -18,6 +18,8 @@ import {
 import { cn } from '@/lib/utils'
 import { SecurityAlertItem, AdvisoryItem } from './NewWorktreeItems'
 import { BulkInvestigateBar } from './BulkInvestigateBar'
+import type { GetContextLinkMatches } from './ContextLinkBadge'
+import type { ContextLinkMatch } from '@/hooks/useContextLinkUsage'
 import { SelectAllControl } from './ItemSelectCheckbox'
 import { useMultiSelect } from './hooks/useMultiSelect'
 import type { DependabotAlert, RepositoryAdvisory } from '@/types/github'
@@ -85,6 +87,7 @@ export interface SecurityAlertsTabProps {
     items: SecuritySelection[]
   ) => void | Promise<void>
   isBulkInvestigating?: boolean
+  getContextMatches?: GetContextLinkMatches
 }
 
 function alertKey(number: number) {
@@ -123,6 +126,7 @@ export function SecurityAlertsTab({
   creatingFromGhsaId,
   onBulkInvestigateSecurity,
   isBulkInvestigating = false,
+  getContextMatches,
 }: SecurityAlertsTabProps) {
   const selectableItems = useMemo(() => {
     const items: SecuritySelection[] = [
@@ -142,6 +146,23 @@ export function SecurityAlertsTab({
   }, [])
 
   const multi = useMultiSelect(selectableItems, getKey)
+  const matchesByKey = useMemo(() => {
+    const map = new Map<string, ContextLinkMatch[]>()
+    if (!getContextMatches) return map
+    for (const alert of alerts) {
+      map.set(
+        alertKey(alert.number),
+        getContextMatches({ type: 'security', id: alert.number })
+      )
+    }
+    for (const advisory of filteredAdvisories) {
+      map.set(
+        advisoryKey(advisory.ghsaId),
+        getContextMatches({ type: 'advisory', id: advisory.ghsaId })
+      )
+    }
+    return map
+  }, [alerts, filteredAdvisories, getContextMatches])
 
   const handleBulkInvestigate = useCallback(async () => {
     if (!onBulkInvestigateSecurity || multi.selectedItems.length < 1) return
@@ -281,6 +302,7 @@ export function SecurityAlertsTab({
                     index={index}
                     isSelected={index === selectedIndex}
                     isCreating={creatingFromNumber === alert.number}
+                    contextMatches={matchesByKey.get(key)}
                     isChecked={multi.isChecked(key)}
                     onCheckedChange={checked => multi.toggle(key, checked)}
                     onMouseEnter={() => setSelectedIndex(index)}
@@ -327,6 +349,7 @@ export function SecurityAlertsTab({
                     index={combinedIndex}
                     isSelected={combinedIndex === selectedIndex}
                     isCreating={creatingFromGhsaId === advisory.ghsaId}
+                    contextMatches={matchesByKey.get(key)}
                     isChecked={multi.isChecked(key)}
                     onCheckedChange={checked => multi.toggle(key, checked)}
                     onMouseEnter={() => setSelectedIndex(combinedIndex)}

@@ -140,6 +140,7 @@ function getBundledReasoning(
     model.includes('fable-5') ||
     model.includes('opus-5') ||
     model.includes('sonnet-5') ||
+    model.includes('haiku-5') ||
     model.includes('opus-4-8') ||
     model.includes('opus-4-7') ||
     model.includes('opus-4-6') ||
@@ -171,8 +172,8 @@ const fallbackModelCatalog: ModelCatalog = {
   updated_at: 'bundled',
   defaults: {
     claude: 'claude-opus-5-5',
-    codex: 'gpt-5.6-sol',
-    opencode: 'opencode/gpt-5.6-sol',
+    codex: 'gpt-6.1-sol',
+    opencode: 'opencode/gpt-6.1-sol',
     grok: 'grok/grok-4.6',
   },
   backends: {

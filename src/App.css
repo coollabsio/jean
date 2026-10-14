@@ -616,8 +616,9 @@ kbd {
   font-family: var(--font-family-mono) !important;
 }
 
-/* Keyboard shortcut indicators only make sense in the native desktop app. */
-body:not(.native-app) kbd {
+/* Keyboard shortcut indicators only make sense in the native desktop app,
+   unless marked data-web-visible (shortcuts that also work in web access). */
+body:not(.native-app) kbd:not([data-web-visible]) {
   display: none !important;
 }
 

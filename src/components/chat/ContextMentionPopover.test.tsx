@@ -2,10 +2,11 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@/test/test-utils'
 import { render as renderWithoutProviders } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { Bug, GitPullRequest } from '@/components/icons/reicon'
 import { ContextMentionPopover } from './ContextMentionPopover'
 import type { ContextMentionItem } from './hooks/useContextMentionData'
+import type { GitHubIssue } from '@/types/github'
 import type * as EnvironmentModule from '@/lib/environment'
+import type * as ContextLinkUsageModule from '@/hooks/useContextLinkUsage'
 
 const useContextMentionDataMock = vi.hoisted(() => vi.fn())
 const platform = vi.hoisted(() => ({ native: false, mobile: false }))
@@ -19,26 +20,39 @@ vi.mock('@/hooks/use-mobile', () => ({
   useIsMobile: () => platform.mobile,
 }))
 
-const items: ContextMentionItem[] = [
+const items: [ContextMentionItem, ContextMentionItem] = [
   {
     id: 'issue:123',
     type: 'issue',
     label: '#123',
     title: 'Fix login bug',
-    subtitle: 'open issue by alice',
-    badge: 'open',
-    icon: Bug,
   },
   {
     id: 'pr:45',
     type: 'pr',
     label: 'PR #45',
     title: 'Add context mentions',
-    subtitle: 'open main ← feature',
-    badge: 'open',
-    icon: GitPullRequest,
   },
 ]
+
+const linkUsage = vi.hoisted(() => ({
+  getMatches: vi.fn((): unknown[] => []),
+  open: vi.fn(),
+}))
+
+vi.mock('@/hooks/useContextLinkUsage', async importOriginal => ({
+  ...(await importOriginal<typeof ContextLinkUsageModule>()),
+  useContextLinkUsage: () => ({ getMatches: linkUsage.getMatches }),
+  openContextLinkMatch: linkUsage.open,
+}))
+
+vi.mock('@/components/worktree/IssuePreviewModal', () => ({
+  IssuePreviewModal: ({ type, number }: { type: string; number: number }) => (
+    <div role="dialog">
+      Preview {type} {number}
+    </div>
+  ),
+}))
 
 vi.mock('./hooks/useContextMentionData', () => ({
   useContextMentionData: useContextMentionDataMock,
@@ -48,6 +62,8 @@ describe('ContextMentionPopover', () => {
   beforeEach(() => {
     platform.native = false
     platform.mobile = false
+    linkUsage.getMatches.mockReset().mockReturnValue([])
+    linkUsage.open.mockReset()
     useContextMentionDataMock.mockImplementation(() => ({
       groups: [
         { id: 'issue', heading: 'GitHub Issues', items: [items[0]] },
@@ -95,6 +111,93 @@ describe('ContextMentionPopover', () => {
     )
   })
 
+  it('opens the issue preview without selecting or closing the list', () => {
+    const onOpenChange = vi.fn()
+    const onSelectContext = vi.fn()
+    useContextMentionDataMock.mockImplementation(() => ({
+      groups: [
+        {
+          id: 'issue',
+          heading: 'GitHub Issues',
+          items: [{ ...items[0], issue: { number: 123 } as GitHubIssue }],
+        },
+      ],
+      isFetching: false,
+    }))
+    render(
+      <ContextMentionPopover
+        projectPath="/tmp/repo"
+        projectId="project-1"
+        open
+        onOpenChange={onOpenChange}
+        onSelectContext={onSelectContext}
+        searchQuery=""
+        anchorPosition={{ top: 0, left: 0 }}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Preview #123' }))
+
+    expect(screen.getByText('Preview issue 123')).toBeInTheDocument()
+    expect(onSelectContext).not.toHaveBeenCalled()
+    expect(onOpenChange).not.toHaveBeenCalled()
+  })
+
+  it('opens the existing investigation instead of starting a new one', () => {
+    const match = {
+      worktreeId: 'wt-1',
+      worktreeName: 'fix-login',
+      worktreePath: '/tmp/wt-1',
+      sessionId: 'session-2',
+      sessionName: 'Investigate #123',
+    }
+    linkUsage.getMatches.mockReturnValue([match])
+    const onSelectContext = vi.fn()
+    useContextMentionDataMock.mockImplementation(() => ({
+      groups: [
+        {
+          id: 'issue',
+          heading: 'GitHub Issues',
+          items: [{ ...items[0], issue: { number: 123 } as GitHubIssue }],
+        },
+      ],
+      isFetching: false,
+    }))
+    render(
+      <ContextMentionPopover
+        projectPath="/tmp/repo"
+        projectId="project-1"
+        sessionId="session-1"
+        open
+        onOpenChange={vi.fn()}
+        onSelectContext={onSelectContext}
+        searchQuery=""
+        anchorPosition={{ top: 0, left: 0 }}
+      />
+    )
+
+    expect(screen.getByTestId('context-link-badge')).toHaveTextContent(
+      'fix-login › Investigate #123'
+    )
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Open existing investigation of #123',
+      })
+    )
+
+    expect(linkUsage.open).toHaveBeenCalledWith(match)
+    expect(onSelectContext).not.toHaveBeenCalled()
+
+    // Attaching context to the current session is still allowed
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Add #123 to session context' })
+    )
+    expect(onSelectContext).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'issue:123' }),
+      false
+    )
+  })
+
   it('searches from the menu without changing the chat query', () => {
     render(
       <ContextMentionPopover
@@ -122,7 +225,7 @@ describe('ContextMentionPopover', () => {
     )
   })
 
-  it('selects a search result with the keyboard', () => {
+  it('moves up to worse matches because the list renders bottom-up', () => {
     const onSelectContext = vi.fn()
     render(
       <ContextMentionPopover
@@ -139,10 +242,13 @@ describe('ContextMentionPopover', () => {
     const search = screen.getByRole('combobox', {
       name: 'Search issues and context links',
     })
+    fireEvent.keyDown(search, { key: 'ArrowUp' })
+    fireEvent.keyDown(search, { key: 'Enter' })
+    expect(onSelectContext).toHaveBeenLastCalledWith(items[1], false)
+
     fireEvent.keyDown(search, { key: 'ArrowDown' })
     fireEvent.keyDown(search, { key: 'Enter' })
-
-    expect(onSelectContext).toHaveBeenCalledWith(items[1], false)
+    expect(onSelectContext).toHaveBeenLastCalledWith(items[0], false)
   })
 
   it('offers separate add and investigate actions for issues and PRs', () => {
@@ -193,7 +299,7 @@ describe('ContextMentionPopover', () => {
     expect(onSelectContext).toHaveBeenCalledWith(items[0], true)
   })
 
-  it('shows keyboard hints on native desktop', () => {
+  it('shows keyboard hints in tooltips on native desktop', async () => {
     platform.native = true
     render(
       <ContextMentionPopover
@@ -207,7 +313,13 @@ describe('ContextMentionPopover', () => {
       />
     )
 
-    expect(screen.getByText('Shift+Enter')).toBeInTheDocument()
+    expect(screen.queryByText('Shift+Enter')).not.toBeInTheDocument()
+    fireEvent.focus(
+      screen.getByRole('button', {
+        name: `Add ${items[0].label} and start investigating`,
+      })
+    )
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Shift+Enter')
   })
 
   it('hides keyboard hints on mobile and web access', () => {
@@ -227,6 +339,12 @@ describe('ContextMentionPopover', () => {
     expect(
       screen.getByRole('button', { name: 'Refresh context links' })
     ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', {
+        name: `Add ${items[0].label} and start investigating`,
+      })
+    ).not.toHaveTextContent('Investigate')
+    expect(screen.queryByText('Attach')).not.toBeInTheDocument()
 
     platform.native = false
     platform.mobile = false
@@ -240,7 +358,6 @@ describe('ContextMentionPopover', () => {
       (_, index): ContextMentionItem => ({
         ...items[0],
         type: 'issue',
-        icon: Bug,
         id: `issue:${index + 1}`,
         label: `#${index + 1}`,
         title: `Issue ${index + 1}`,
@@ -251,7 +368,6 @@ describe('ContextMentionPopover', () => {
       (_, index): ContextMentionItem => ({
         ...items[1],
         type: 'pr',
-        icon: GitPullRequest,
         id: `pr:${index + 1}`,
         label: `PR #${index + 1}`,
         title: `Pull request ${index + 1}`,
@@ -301,7 +417,7 @@ describe('ContextMentionPopover', () => {
 
     const search = screen.getByRole('combobox')
     for (let index = 0; index < 8; index++) {
-      fireEvent.keyDown(search, { key: 'ArrowDown' })
+      fireEvent.keyDown(search, { key: 'ArrowUp' })
     }
     fireEvent.keyDown(search, { key: 'Enter' })
     expect(onSelectContext).toHaveBeenCalledWith(issues[8], false)

@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { createPortal } from 'react-dom'
 import {
   keepPreviousData,
@@ -9,6 +16,7 @@ import {
   AlertTriangle,
   BellDot,
   Plus,
+  Server,
   Thumbtack,
 } from '@/components/icons/reicon'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -85,6 +93,7 @@ export function getAdjacentRecentRow(
 }
 
 const MAX_RECENT_SHORTCUTS = 9
+const EMPTY_RECENT_ROWS: RecentWorktreeItem[] = []
 
 /**
  * Pinned rows first. Inside the pinned and unpinned groups, running rows go
@@ -153,12 +162,12 @@ export function RecentWorktreesList({
     placeholderData: keepPreviousData,
     staleTime: 30_000,
   })
-  const rows = query.data?.items ?? []
+  const rows = query.data?.items ?? EMPTY_RECENT_ROWS
   const snoozedBoundaryLoaded = rows
     .slice(0, limit)
     .some(row => isSnoozedSession(row.lastActivityAt))
+  const pinned = useMemo(() => new Set(pinnedSessionIds), [pinnedSessionIds])
   const displayedRows = useMemo(() => {
-    const pinned = new Set(pinnedSessionIds)
     const visibleRows = rows.filter(
       row =>
         showSnoozed ||
@@ -174,13 +183,14 @@ export function RecentWorktreesList({
           waiting: waitingForInputSessionIds[row.session.id] ?? false,
         }).tone === 'working'
     )
-  }, [
-    pinnedSessionIds,
-    rows,
-    showSnoozed,
-    sendingSessionIds,
-    waitingForInputSessionIds,
-  ])
+  }, [pinned, rows, showSnoozed, sendingSessionIds, waitingForInputSessionIds])
+  const serverProjectIds = useMemo(
+    () =>
+      new Set(
+        projects.filter(project => !!project.server).map(project => project.id)
+      ),
+    [projects]
+  )
   const recentProjectKey = useMemo(
     () => [...new Set(rows.map(row => row.projectId))].sort().join('\0'),
     [rows]
@@ -237,30 +247,36 @@ export function RecentWorktreesList({
           },
         })
       )
-      if (isMobile) useUIStore.getState().setLeftSidebarVisible(false)
+      const ui = useUIStore.getState()
+      // Leave the Agents page so the project canvas can open the session
+      ui.setRailSection('workspace')
+      if (isMobile) ui.setLeftSidebarVisible(false)
     },
     [isMobile, queryClient, selectProject, selectWorktree]
   )
 
+  // Effect Event: reads the latest rows/selection without re-subscribing the
+  // window listener every time the list or session status changes.
+  const onRecentKeyDown = useEffectEvent((event: KeyboardEvent) => {
+    if (!event.metaKey || !['ArrowUp', 'ArrowDown'].includes(event.key)) return
+    event.preventDefault()
+    event.stopPropagation()
+    const row = getAdjacentRecentRow(
+      displayedRows,
+      selectedSessionId,
+      event.key === 'ArrowDown' ? 1 : -1
+    )
+    if (!row) return
+    handleOpen(row)
+    rowRefs.current.get(row.session.id)?.focus()
+  })
+
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!event.metaKey || !['ArrowUp', 'ArrowDown'].includes(event.key))
-        return
-      event.preventDefault()
-      event.stopPropagation()
-      const row = getAdjacentRecentRow(
-        displayedRows,
-        selectedSessionId,
-        event.key === 'ArrowDown' ? 1 : -1
-      )
-      if (!row) return
-      handleOpen(row)
-      rowRefs.current.get(row.session.id)?.focus()
-    }
+    const onKeyDown = (event: KeyboardEvent) => onRecentKeyDown(event)
     window.addEventListener('keydown', onKeyDown, { capture: true })
     return () =>
       window.removeEventListener('keydown', onKeyDown, { capture: true })
-  }, [displayedRows, handleOpen, selectedSessionId])
+  }, [])
 
   // Cmd/Ctrl+1-9 is matched in useMainWindowEventListeners, which dispatches
   // this event only while the Recent list is visible.
@@ -275,7 +291,7 @@ export function RecentWorktreesList({
       window.removeEventListener('open-recent-session-by-index', onOpenByIndex)
   }, [displayedRows, handleOpen])
 
-  if (query.isPending) {
+  if (query.isPending && projects.length > 0) {
     return (
       <div
         role="status"
@@ -318,7 +334,7 @@ export function RecentWorktreesList({
     (query.data?.failedWorktreeIds.length ?? 0)
   const hiddenCount = Math.max(0, (query.data?.total ?? rows.length) - limit)
   const footerButtonClass =
-    'flex h-8 items-center justify-center gap-1 rounded-md px-2 text-xs text-muted-foreground hover:bg-muted/50 hover:text-foreground'
+    'flex h-5 items-center justify-center gap-1 rounded-md px-2 text-xs text-muted-foreground hover:bg-muted/50 hover:text-foreground'
   const footerActions = (
     <>
       {hiddenCount > 0 && !snoozedBoundaryLoaded && (
@@ -362,9 +378,14 @@ export function RecentWorktreesList({
       data-testid="recent-worktrees-list"
     >
       <div className="min-h-0 flex-1 overflow-y-auto">
+        {displayedRows.length === 0 && (
+          <div className="px-3 py-6 text-center text-xs text-muted-foreground">
+            No recent sessions
+          </div>
+        )}
         <ul
           aria-label="Recent sessions"
-          className="@container flex flex-col gap-2 px-2 py-2"
+          className={`@container flex flex-col gap-2 px-2 pt-2 ${footerActionsContainer ? 'pb-8' : 'pb-2'}`}
         >
           {displayedRows.map((row, index) => {
             const isCurrent = row.session.id === selectedSessionId
@@ -383,13 +404,12 @@ export function RecentWorktreesList({
                   : 'text-muted-foreground'
             const isWorking = status.tone === 'working'
             const isUnread = isUnreadSession(row.session)
-            const isPinned = pinnedSessionIds.includes(row.session.id)
+            const isPinned = pinned.has(row.session.id)
+            const isServer = serverProjectIds.has(row.projectId)
             const showPinnedSeparator =
               !isPinned &&
               index > 0 &&
-              pinnedSessionIds.includes(
-                displayedRows[index - 1]?.session.id ?? ''
-              )
+              pinned.has(displayedRows[index - 1]?.session.id ?? '')
             return (
               <li key={row.session.id} className="group">
                 {showPinnedSeparator && (
@@ -403,9 +423,7 @@ export function RecentWorktreesList({
                   !isPinned &&
                   isSnoozedSession(row.lastActivityAt) &&
                   (index === 0 ||
-                    pinnedSessionIds.includes(
-                      displayedRows[index - 1]?.session.id ?? ''
-                    ) ||
+                    pinned.has(displayedRows[index - 1]?.session.id ?? '') ||
                     !isSnoozedSession(
                       displayedRows[index - 1]?.lastActivityAt ?? 0
                     )) && (
@@ -443,7 +461,7 @@ export function RecentWorktreesList({
                     }}
                     type="button"
                     aria-current={isCurrent ? 'page' : undefined}
-                    aria-label={`${row.session.name}, ${row.projectName}, ${row.worktree.name}, ${status.label}${isUnread ? ', unread' : ''}, ${activityLabel}`}
+                    aria-label={`${row.session.name}, ${isServer ? 'server ' : ''}${row.projectName}, ${row.worktree.name}, ${status.label}${isUnread ? ', unread' : ''}, ${activityLabel}`}
                     className="flex w-full flex-col gap-y-1 text-left focus-visible:outline-none"
                   >
                     <span className="flex items-center gap-2">
@@ -471,8 +489,19 @@ export function RecentWorktreesList({
                       </span>
                     </span>
                     <span className="flex items-center gap-2">
-                      <span className="min-w-0 flex-1 truncate text-[11px]">
-                        {row.projectName} · {row.worktree.name}
+                      <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[11px]">
+                        {isServer && (
+                          <span
+                            aria-hidden="true"
+                            className="flex shrink-0 items-center gap-0.5 rounded bg-muted px-1 py-px text-[10px] font-medium text-muted-foreground"
+                          >
+                            <Server className="size-2.5" />
+                            Server
+                          </span>
+                        )}
+                        <span className="min-w-0 truncate">
+                          {row.projectName} · {row.worktree.name}
+                        </span>
                       </span>
                       <span className="flex shrink-0 items-center justify-end gap-2 text-[10px] tabular-nums">
                         {(row.added > 0 || row.removed > 0) && (

@@ -27,6 +27,9 @@ import { QuitConfirmationDialog } from '@/components/layout/QuitConfirmationDial
 import { setServerPlatform } from '@/lib/platform'
 import { projectsQueryKeys } from '@/services/projects'
 import { chatQueryKeys } from '@/services/chat'
+import { reconcileSessionsAfterReconnect } from '@/services/session-reconcile'
+import { serverConnectionManager } from '@/lib/server-connections'
+import { parseServerResourceKey } from '@/lib/server-resource'
 import { invalidateMcpServers } from '@/services/mcp'
 import { mergeWorktreesPreservingOptimistic } from '@/lib/worktree-list-cache'
 import type { Session, WorktreeSessions } from '@/types/chat'
@@ -102,6 +105,7 @@ import { peekWebReloadState, saveWebReloadState } from './lib/web-reload-state'
 import {
   clearConnectionSwitch,
   getActiveRemoteConnection,
+  getRemoteConnections,
   isConnectionSwitchPending,
 } from './lib/remote-connections'
 import { RemoteConnectionRecovery } from './components/remote/RemoteConnectionRecovery'
@@ -944,7 +948,23 @@ function App() {
       )
       queryClient.invalidateQueries()
     }
+
+    // Native desktop keeps its shell across remote socket drops, so a run
+    // that finished during the gap would stay "sending" (no reload resync).
+    if (isNativeApp()) void reconcileSessionsAfterReconnect(queryClient)
   }, [wsConnected, queryClient, webBackend])
+
+  // Same resync for every enabled remote server in native multi-server mode.
+  useEffect(
+    () =>
+      serverConnectionManager.onRemoteReconnect(serverId => {
+        void reconcileSessionsAfterReconnect(
+          queryClient,
+          sessionId => parseServerResourceKey(sessionId)?.serverId === serverId
+        )
+      }),
+    [queryClient]
+  )
 
   // Add native-app class to body for desktop-only CSS (cursor, user-select, etc.)
   useEffect(() => {
@@ -1084,6 +1104,7 @@ function App() {
       onboardingDismissed: onboarding.onboardingDismissed,
       onboardingManuallyTriggered: onboarding.onboardingManuallyTriggered,
       requiresWslChoice,
+      hasRemoteServer: getRemoteConnections().length > 0,
     })
 
     if (action === 'wait' || action === 'none') return
@@ -1175,6 +1196,7 @@ function App() {
   // Show feature tour after CLI onboarding completes (first launch or manual trigger)
   useEffect(() => {
     let wasOpen = useUIStore.getState().onboardingOpen
+    let tourTimer: ReturnType<typeof setTimeout> | undefined
     const unsub = useUIStore.subscribe(state => {
       const isOpen = state.onboardingOpen
       const prevWasOpen = wasOpen
@@ -1191,14 +1213,18 @@ function App() {
           ])
           if (manuallyTriggered || (prefs && !prefs.has_seen_feature_tour)) {
             store.setOnboardingManuallyTriggered(false)
-            setTimeout(() => {
+            clearTimeout(tourTimer)
+            tourTimer = setTimeout(() => {
               useUIStore.getState().setFeatureTourOpen(true)
             }, 300)
           }
         }
       }
     })
-    return unsub
+    return () => {
+      unsub()
+      clearTimeout(tourTimer)
+    }
   }, [queryClient])
 
   // Kill all terminals on page refresh/close (backup for Rust-side cleanup)
@@ -1533,7 +1559,7 @@ function App() {
       window.removeEventListener('install-pending-update', handleInstallPending)
       window.removeEventListener('update-available', handleUpdateAvailable)
     }
-  }, [webBackend])
+  }, [webBackend, queryClient])
 
   // Web clients request desktop install via apply_server_update → this event.
   // Only the *host* native shell should run Tauri's updater (not a remote client

@@ -148,3 +148,18 @@ describe('normalizeClipboardForTerminal', () => {
     expect(normalizeClipboardForTerminal('a\r\nb\rc')).toBe('a\nb\nc')
   })
 })
+
+describe('copyImageToClipboard', () => {
+  it('rejects failed remote downloads without writing to the server clipboard', async () => {
+    const { copyImageToClipboard } = await import('./clipboard')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }))
+    try {
+      await expect(
+        copyImageToClipboard('https://remote/image')
+      ).rejects.toThrow('Failed to load image')
+      expect(invokeMock).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+})

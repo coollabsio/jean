@@ -83,9 +83,7 @@ describe('compact issue and PR rows', () => {
     )
 
     await user.keyboard('{Control>}')
-    await user.click(
-      screen.getByRole('button', { name: /#711Web access/i })
-    )
+    await user.click(screen.getByRole('button', { name: /#711Web access/i }))
     await user.keyboard('{/Control}')
 
     expect(onClick).toHaveBeenCalledWith(true)
@@ -267,5 +265,47 @@ describe('BranchItem', () => {
     expect(screen.getAllByRole('button')).toHaveLength(1)
     await user.click(screen.getByRole('button', { name: 'feature/existing' }))
     expect(onClick).toHaveBeenCalledWith(false)
+  })
+})
+
+describe('existing worktree badge', () => {
+  it('shows where an issue is already used without breaking the row', () => {
+    render(
+      <IssueItem
+        issue={
+          {
+            number: 7,
+            title: 'Crash on start',
+            state: 'OPEN',
+            created_at: '2020-01-01T00:00:00Z',
+          } as GitHubIssue
+        }
+        index={0}
+        isSelected={false}
+        isCreating={false}
+        contextMatches={[
+          {
+            worktreeId: 'wt-1',
+            worktreeName: 'fix-crash',
+            worktreePath: '/repo/fix-crash',
+            sessionId: 's-1',
+            sessionName: 'Investigate',
+          },
+          {
+            worktreeId: 'wt-2',
+            worktreeName: 'other',
+            worktreePath: '/repo/other',
+          },
+        ]}
+        onMouseEnter={vi.fn()}
+        onClick={vi.fn()}
+        onInvestigate={vi.fn()}
+        onPreview={vi.fn()}
+      />
+    )
+
+    const badge = screen.getByTestId('context-link-badge')
+    expect(badge).toHaveTextContent('In fix-crash › Investigate')
+    expect(badge).toHaveTextContent('+1')
   })
 })

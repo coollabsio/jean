@@ -13,7 +13,7 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
-import { copyToClipboard } from '@/lib/clipboard'
+import { copyImageToClipboard, copyToClipboard } from '@/lib/clipboard'
 import {
   downloadLocalFile,
   openLocalFile,
@@ -70,12 +70,17 @@ export function MessageThreadContextMenu({
   const [selection, setSelection] = useState('')
   const [linkUrl, setLinkUrl] = useState('')
   const [filePath, setFilePath] = useState('')
+  const [imageSrc, setImageSrc] = useState('')
 
   // Runs on contextmenu (right-click, Android long press) and on pointerdown,
   // because Radix opens touch long presses from a pointerdown timer and iOS
   // Safari never fires contextmenu.
   const captureMenuTarget = useCallback((event: React.SyntheticEvent) => {
     const target = event.target instanceof Element ? event.target : null
+    const image = target?.closest('img')
+    setImageSrc(
+      image instanceof HTMLImageElement ? image.currentSrc || image.src : ''
+    )
     const link = target?.closest('a[href]')
     setLinkUrl(link instanceof HTMLAnchorElement ? link.href : '')
     const fileCode = target?.closest<HTMLElement>('code[data-file-path]')
@@ -162,6 +167,13 @@ export function MessageThreadContextMenu({
       .catch(() => toast.error('Failed to copy'))
   }, [selection])
 
+  const handleCopyImage = useCallback(() => {
+    if (!imageSrc) return
+    void copyImageToClipboard(imageSrc)
+      .then(() => toast.success('Image copied to clipboard'))
+      .catch(error => toast.error(`Failed to copy image: ${error}`))
+  }, [imageSrc])
+
   const handleCopyUrl = useCallback(() => {
     if (!linkUrl) return
     void copyToClipboard(linkUrl)
@@ -215,6 +227,12 @@ export function MessageThreadContextMenu({
         {children}
       </ContextMenuTrigger>
       <ContextMenuContent className="w-48">
+        {imageSrc && (
+          <ContextMenuItem onSelect={handleCopyImage}>
+            <Copy className="h-4 w-4" />
+            Copy image
+          </ContextMenuItem>
+        )}
         {filePath && (
           <>
             <ContextMenuItem onSelect={handleOpenFile}>
@@ -245,7 +263,7 @@ export function MessageThreadContextMenu({
             {copyMessageLabel}
           </ContextMenuItem>
         )}
-        {!canCopySelection && !canCopyMessage && (
+        {!imageSrc && !canCopySelection && !canCopyMessage && (
           <ContextMenuItem disabled>No text to copy</ContextMenuItem>
         )}
       </ContextMenuContent>

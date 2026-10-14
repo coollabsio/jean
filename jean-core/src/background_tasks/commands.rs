@@ -80,7 +80,7 @@ pub fn set_active_worktree_for_polling(
     pr_url: Option<String>,
 ) -> Result<(), String> {
     let info = match (worktree_id, worktree_path, base_branch) {
-        (Some(id), Some(path), Some(branch)) => {
+        (Some(id), Some(path), Some(branch)) if !crate::projects::is_server_worktree(&app, &id) => {
             let context = lookup_status_context(&app, &id);
             Some(ActiveWorktreeInfo {
                 worktree_id: id,
@@ -180,8 +180,10 @@ pub fn set_all_worktrees_for_polling(
     worktrees: Vec<AllWorktreeInfo>,
 ) -> Result<(), String> {
     let contexts = load_status_contexts(&app);
+    let server_worktrees = crate::projects::server_worktree_ids(&app);
     let infos: Vec<ActiveWorktreeInfo> = worktrees
         .into_iter()
+        .filter(|w| !server_worktrees.contains(&w.worktree_id))
         .map(|w| {
             let context = contexts.get(&w.worktree_id).cloned().unwrap_or_default();
             ActiveWorktreeInfo {

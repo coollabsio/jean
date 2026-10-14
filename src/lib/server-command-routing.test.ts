@@ -146,6 +146,30 @@ describe('server command routing', () => {
     ).toMatchObject({ id: 'remote:folder', serverId: 'remote' })
   })
 
+  it('scopes remote unread session lists like full session lists', () => {
+    for (const command of ['list_all_sessions', 'list_unread_sessions']) {
+      expect(
+        decorateServerResult('r1', command, {
+          entries: [
+            {
+              project_id: 'p1',
+              worktree_id: 'w1',
+              sessions: [{ id: 's1', worktree_id: 'w1' }],
+            },
+          ],
+        })
+      ).toMatchObject({
+        entries: [
+          {
+            project_id: 'r1:p1',
+            worktree_id: 'r1:w1',
+            sessions: [{ id: 'r1:s1', worktree_id: 'r1:w1' }],
+          },
+        ],
+      })
+    }
+  })
+
   it('decorates a moved remote project', () => {
     expect(
       decorateServerResult('remote', 'move_item', {
@@ -214,6 +238,12 @@ describe('server command routing', () => {
       serverId: 'r1',
       resourceId: 's1',
     })
+  })
+
+  it('scopes the next active session id returned by close and archive', () => {
+    expect(decorateServerResult('r1', 'close_session', 's2')).toBe('r1:s2')
+    expect(decorateServerResult('r1', 'archive_session', 's2')).toBe('r1:s2')
+    expect(decorateServerResult('r1', 'archive_session', null)).toBeNull()
   })
 
   it('decorates background investigation session and worktree identities', () => {

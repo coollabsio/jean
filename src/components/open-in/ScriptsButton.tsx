@@ -1,5 +1,5 @@
 import { Play, Star } from '@/components/icons/reicon'
-import { Button } from '@/components/ui/button'
+import { Button, edgePrimary, raised } from '@/components/ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -59,7 +59,12 @@ export function ScriptsButton({
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 gap-1.5 border border-primary bg-primary px-2 text-xs text-primary-foreground/85 hover:bg-primary/90 hover:text-primary-foreground dark:border-border/50 dark:bg-muted/50 dark:text-muted-foreground dark:hover:text-foreground"
+          className={cn(
+            'h-7 gap-1.5 border border-primary bg-primary px-2 text-xs text-primary-foreground/85 hover:bg-primary/90 hover:text-primary-foreground dark:border-border/50 dark:bg-muted/50 dark:text-muted-foreground dark:hover:text-foreground',
+            raised,
+            edgePrimary,
+            'dark:[--btn-edge:color-mix(in_oklab,var(--foreground)_12%,transparent)]'
+          )}
           aria-label="Scripts"
         >
           <Play className="h-3.5 w-3.5" />

@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { isImeComposingEvent } from '@/lib/ime-composition'
+import { useChatStore } from '@/store/chat-store'
 import type { QueuedMessage } from '@/types/chat'
 
 interface QueuedPromptsPanelProps {
@@ -57,7 +58,15 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
   onSendNow,
   onEdit,
 }: QueuedPromptsPanelProps) {
-  const [isOpen, setIsOpen] = useState(true)
+  // Collapsed state is remembered per session (expanded by default)
+  const isOpen = useChatStore(
+    state => !state.collapsedQueuedPromptsSessions[sessionId]
+  )
+  const setIsOpen = useCallback(
+    (open: boolean) =>
+      useChatStore.getState().setQueuedPromptsCollapsed(sessionId, !open),
+    [sessionId]
+  )
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingText, setEditingText] = useState('')
@@ -118,7 +127,15 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
         }
       }
     },
-    [messages, selectedIndex, sessionId, onRemove, onSendNow, scrollRowIntoView]
+    [
+      messages,
+      selectedIndex,
+      sessionId,
+      onRemove,
+      onSendNow,
+      scrollRowIntoView,
+      setIsOpen,
+    ]
   )
 
   const startEditing = useCallback((msg: QueuedMessage) => {

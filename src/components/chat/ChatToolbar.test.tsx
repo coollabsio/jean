@@ -140,7 +140,9 @@ describe('ChatToolbar pending questions', () => {
   it('keeps every execution mode dropdown enabled while waiting for question input', () => {
     renderChatToolbar({ hasPendingQuestions: true, executionMode: 'yolo' })
 
-    const modeButtons = screen.getAllByRole('button', { name: /^yolo$/i })
+    const modeButtons = screen.getAllByRole('button', {
+      name: /^permissions: full access$/i,
+    })
     expect(modeButtons.length).toBeGreaterThanOrEqual(2)
     for (const button of modeButtons) {
       expect(button).toBeEnabled()

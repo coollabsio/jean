@@ -11,6 +11,7 @@
 - Register ownership at adapter boundaries so path-only commands and remote assets route through the correct server.
 - Keep ownership visible in multi-source UI and test duplicate display names.
 - Return one ID form per server on every transport path (ID-routed, path-routed, explicit server). Mixed scoped/raw IDs make valid resources look missing.
+- Path routing matches only exact registered worktree/project paths. A file path inside a worktree does not route, so pass the owning `serverId` (`invokeForOptionalServer`).
 - Do not persist temporary session context under a broader worktree or project identity.
 
 ## Keep multi-server behavior at the correct boundary
@@ -27,6 +28,7 @@
 - Update durable storage and the active query cache before closing setup UI, or stale cache data can reopen it.
 - Subscribe Zustand components to the data that controls rendering, not to stable getter functions.
 - Guard Zustand mutations against no-op updates so unchanged values do not notify all subscribers.
+- Serialize preference patches that fire in parallel. Local `patch_preferences` is load-merge-save and remote patches carry an expected revision, so concurrent patches lose keys or conflict.
 - Test timing-sensitive close, reopen, refresh, and restoration paths, not only the persistence call.
 
 ## Verify behavior at system boundaries
@@ -43,6 +45,7 @@
 - Add live-stream and persisted-history parsers together, and route history by the per-run backend before generic fallback logic.
 - Resolve default, custom, and empty prompts consistently on every backend; backend mode instructions must augment the shared prompt.
 - A capability is complete only when preferences, every send path, persistence, rendering, cancellation, and tests all support it.
+- Per-session settings for a backend child (env, MCP config) need a per-run path: process env for per-run CLIs, per-thread config overrides for shared servers (Codex app-server). Shared server processes (OpenCode) cannot isolate per session.
 
 ## Verify external tools from authoritative sources
 
@@ -111,3 +114,19 @@
 - UI chrome is monochrome (`primary`, `foreground`, `muted-foreground`, `accent`). Use color only for status.
 - Status colors: `success`, `warning`, `info`, `destructive` (+ `*-foreground` on solid backgrounds). They have light and dark values in `src/App.css`; opacity modifiers work (`bg-warning/10`).
 - Do not add hardcoded hues such as `text-yellow-400`: they are tuned for one theme and fail contrast in the other. For categorical identity colors (file types, brands, GitHub closed/merged purple), use a `-600` + `dark:-400` pair.
+
+## Keep hot render paths cheap
+
+- Streaming flushes re-render anything that subscribes to streaming state, so memoized children need stable props: `useCallback` handlers, module-level empty arrays, and `.mutate`/`.mutateAsync` instead of whole `useMutation` results (new object each render).
+- Subscribe list rows to their own slice. Mount store-heavy subscriptions only in the expanded child that needs them.
+- Do not mount hidden heavy content (collapsed Markdown, diffs, stats). Tick timers in the smallest leaf component.
+- Keep heavy libraries (xterm, diff editors) behind dynamic `import()` so core services do not pull them into the boot bundle.
+
+## Keep giant async dispatchers small
+
+- `dispatch_command` and Jean MCP `run_tool` already use most of a debug worker stack. Add new command groups as a separate async fn called through `Box::pin`, never as new inline arms.
+- Test Jean MCP changes against an isolated debug `jean-server` (own `JEAN_DATA_DIR`, port and temporary `HOME` with linked CLI credentials), so the global CLI MCP configs and the user's servers are not touched.
+
+## Backend-created sessions need an explicit mode
+
+- A session without a metadata file loads with the legacy Plan default. Sessions created by the backend (not the UI) must save their execution mode, or tools that Plan mode blocks (Jean MCP) fail.

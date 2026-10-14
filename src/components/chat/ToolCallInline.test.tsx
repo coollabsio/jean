@@ -1359,8 +1359,8 @@ describe('TaskCallInline nested agents', () => {
       />
     )
     clickExpandTrigger()
-    // Parent + nested agent both show a spinner
-    expect(container.querySelectorAll('.animate-spin')).toHaveLength(2)
+    // Parent + nested agent both show the working waveform
+    expect(container.querySelectorAll('.working-waveform')).toHaveLength(2)
     // Nested agent reports its fallback-grouped child
     expect(screen.getAllByText('1 tool')).toHaveLength(2)
   })

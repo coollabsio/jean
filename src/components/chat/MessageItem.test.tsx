@@ -69,7 +69,7 @@ describe('MessageItem', () => {
   const baseProps = {
     message: baseMessage,
     messageIndex: 0,
-    totalMessages: 1,
+    isLastMessage: true,
     lastPlanMessageIndex: 0,
     hasFollowUpMessage: false,
     sessionId: 'session-1',

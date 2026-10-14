@@ -1,3 +1,5 @@
+import { useInstalledBackends } from '@/hooks/useInstalledBackends'
+import { useSettingsTargetServerId } from '@/lib/settings-target'
 import React, {
   useState,
   useCallback,
@@ -110,7 +112,6 @@ import {
   useAvailableKimiModels,
   kimiCliQueryKeys,
 } from '@/services/kimi-cli'
-import { useAntigravityCliStatus } from '@/services/antigravity-cli'
 import type { ClaudeAuthStatus } from '@/types/claude-cli'
 import type { GhAuthStatus } from '@/types/gh-cli'
 import type { CodexAuthStatus } from '@/types/codex-cli'
@@ -206,7 +207,12 @@ import {
   fetchRemoteServerInfo,
   formatJeanVersionLabel,
 } from '@/lib/remote-version'
-import type { ThinkingLevel, EffortLevel } from '@/types/chat'
+import {
+  getSupportedPermissionModes,
+  type ThinkingLevel,
+  type EffortLevel,
+  type ExecutionMode,
+} from '@/types/chat'
 import {
   hasBackend,
   isNativeApp,
@@ -217,8 +223,8 @@ import { isNewerVersion } from '@/lib/version-utils'
 import { cn } from '@/lib/utils'
 import { copyToClipboard } from '@/lib/clipboard'
 import { getPathUpdateAction } from '@/lib/cli-update'
-import { BackendPaneHeader, SettingsSection } from '../SettingsSection'
-import { BackendCliSourceCards } from '../BackendCliSourceCards'
+import { SettingsSection } from '../SettingsSection'
+import { BackendCliSourceSelect } from '../BackendCliSourceSelect'
 import { AiLanguageField } from './AiLanguageField'
 import {
   resolveDefaultModelForBackend,
@@ -284,6 +290,11 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   scope = 'general',
 }) => {
   const isGeneralScope = scope === 'general'
+  const serverId = useSettingsTargetServerId()
+  const { installedBackends } = useInstalledBackends({
+    enabled: isGeneralScope,
+    serverId,
+  })
   const queryClient = useQueryClient()
   const activeRemoteConnection = getActiveRemoteConnection()
   const { data: remoteServerInfo, isLoading: isRemoteServerInfoLoading } =
@@ -307,9 +318,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   const codexReasoning = getCatalogModelReasoning(
     modelCatalog,
     'codex',
-    preferences?.selected_codex_model ?? 'gpt-5.6-sol'
+    preferences?.selected_codex_model ?? 'gpt-6.1-sol'
   )
-  const selectedCodexModel = preferences?.selected_codex_model ?? 'gpt-5.6-sol'
+  const selectedCodexModel = preferences?.selected_codex_model ?? 'gpt-6.1-sol'
   const selectedCodexReasoningOptions = withAdaptiveEffortOption(
     codexReasoning?.type === 'effort'
       ? codexReasoning.levels
@@ -418,7 +429,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     useCommandCodeCliStatus()
   const { data: grokStatus, isLoading: isGrokLoading } = useGrokCliStatus()
   const { data: kimiStatus, isLoading: isKimiLoading } = useKimiCliStatus()
-  const { data: antigravityStatus } = useAntigravityCliStatus()
   const isGhPathSource = preferences?.gh_cli_source === 'path'
   const { data: ghVersions, isLoading: isGhVersionsLoading } =
     useAvailableGhVersions({ enabled: isGhPathSource && !!ghStatus?.installed })
@@ -1000,79 +1010,14 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   // at send time / backend settings — hiding unauthenticated backends made Claude
   // (and others) disappear from Defaults when auth probes were false-negative.
   const stored = preferences?.default_backend ?? 'claude'
-  const claudeInstalled = !!cliStatus?.installed
-  const codexInstalled = !!codexStatus?.installed
-  const opencodeInstalled = !!opencodeStatus?.installed
-  const cursorInstalled = !!cursorStatus?.installed
-  const piInstalled = !!piStatus?.installed
-  const commandcodeInstalled = !!commandcodeStatus?.installed
-  const grokInstalled = !!grokStatus?.installed
-  const kimiInstalled = !!kimiStatus?.installed
-  const antigravityInstalled = !!antigravityStatus?.installed
   const installedBackendOptions = useMemo(
     () =>
-      backendOptions.filter(option =>
-        option.value === 'claude'
-          ? claudeInstalled
-          : option.value === 'codex'
-            ? codexInstalled
-            : option.value === 'opencode'
-              ? opencodeInstalled
-              : option.value === 'cursor'
-                ? cursorInstalled
-                : option.value === 'pi'
-                  ? piInstalled
-                  : option.value === 'commandcode'
-                    ? commandcodeInstalled
-                    : option.value === 'grok'
-                      ? grokInstalled
-                      : option.value === 'kimi'
-                        ? kimiInstalled
-                        : option.value === 'antigravity'
-                          ? antigravityInstalled
-                          : false
-      ),
-    [
-      claudeInstalled,
-      codexInstalled,
-      opencodeInstalled,
-      cursorInstalled,
-      piInstalled,
-      commandcodeInstalled,
-      grokInstalled,
-      kimiInstalled,
-      antigravityInstalled,
-    ]
+      backendOptions.filter(option => installedBackends.includes(option.value)),
+    [installedBackends]
   )
-
-  const effectiveBackend = useMemo(() => {
-    const installed: Record<string, boolean | undefined> = {
-      claude: claudeInstalled,
-      codex: codexInstalled,
-      opencode: opencodeInstalled,
-      cursor: cursorInstalled,
-      pi: piInstalled,
-      commandcode: commandcodeInstalled,
-      grok: grokInstalled,
-      kimi: kimiInstalled,
-      antigravity: antigravityInstalled,
-    }
-    if (installed[stored]) return stored
-    const first = installedBackendOptions[0]
-    return first?.value ?? stored
-  }, [
-    stored,
-    claudeInstalled,
-    codexInstalled,
-    opencodeInstalled,
-    cursorInstalled,
-    piInstalled,
-    commandcodeInstalled,
-    grokInstalled,
-    kimiInstalled,
-    antigravityInstalled,
-    installedBackendOptions,
-  ])
+  const effectiveBackend = installedBackends.includes(stored)
+    ? stored
+    : (installedBackendOptions[0]?.value ?? stored)
 
   const handleCodexModelChange = (value: CodexModel) => {
     if (preferences) {
@@ -1150,7 +1095,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   }
 
   const selectedOpenCodeModel =
-    preferences?.selected_opencode_model ?? 'opencode/gpt-5.6-sol'
+    preferences?.selected_opencode_model ?? 'opencode/gpt-6.1-sol'
   const openCodeModelOptions = (
     availableOpencodeModels?.length
       ? availableOpencodeModels
@@ -1452,7 +1397,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         queryKey: claudeCliQueryKeys.auth(),
       })
       const result = await queryClient.fetchQuery<ClaudeAuthStatus>({
-        queryKey: claudeCliQueryKeys.auth(),
+        queryKey: [...claudeCliQueryKeys.auth(), serverId],
       })
 
       if (result?.authenticated) {
@@ -1471,6 +1416,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     cliStatus?.supports_auth_command,
     openCliLoginModal,
     queryClient,
+    serverId,
   ])
 
   const handleGhLogin = useCallback(async () => {
@@ -1482,7 +1428,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
       // Invalidate cache and refetch to get fresh status
       await queryClient.invalidateQueries({ queryKey: ghCliQueryKeys.auth() })
       const result = await queryClient.fetchQuery<GhAuthStatus>({
-        queryKey: ghCliQueryKeys.auth(),
+        queryKey: [...ghCliQueryKeys.auth(), serverId],
       })
 
       if (result?.authenticated) {
@@ -1495,7 +1441,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
 
     // Not authenticated, open login modal
     openCliLoginModal('gh', ghStatus.path, ['auth', 'login'])
-  }, [ghStatus?.path, openCliLoginModal, queryClient])
+  }, [ghStatus?.path, openCliLoginModal, queryClient, serverId])
 
   const handleCodexLogin = useCallback(async () => {
     if (!codexStatus?.path) return
@@ -1506,7 +1452,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         queryKey: codexCliQueryKeys.auth(),
       })
       const result = await queryClient.fetchQuery<CodexAuthStatus>({
-        queryKey: codexCliQueryKeys.auth(),
+        queryKey: [...codexCliQueryKeys.auth(), serverId],
       })
 
       if (result?.authenticated) {
@@ -1519,7 +1465,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
 
     // Not authenticated, open login modal (device-code auth for terminal/headless)
     openCliLoginModal('codex', codexStatus.path, loginArgsForBackend('codex'))
-  }, [codexStatus?.path, openCliLoginModal, queryClient])
+  }, [codexStatus?.path, openCliLoginModal, queryClient, serverId])
 
   const handleCodeRabbitLogin = useCallback(async () => {
     if (!coderabbitStatus?.path) return
@@ -1553,7 +1499,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         queryKey: opencodeCliQueryKeys.auth(),
       })
       const result = await queryClient.fetchQuery<OpenCodeAuthStatus>({
-        queryKey: opencodeCliQueryKeys.auth(),
+        queryKey: [...opencodeCliQueryKeys.auth(), serverId],
       })
 
       if (result?.authenticated) {
@@ -1565,7 +1511,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     }
 
     openCliLoginModal('opencode', opencodeStatus.path, ['auth', 'login'])
-  }, [opencodeStatus?.path, openCliLoginModal, queryClient])
+  }, [opencodeStatus?.path, openCliLoginModal, queryClient, serverId])
 
   const handleClaudeRelogin = useCallback(() => {
     if (!cliStatus?.path) return
@@ -1602,7 +1548,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         queryKey: cursorCliQueryKeys.auth(),
       })
       const result = await queryClient.fetchQuery<CursorAuthStatus>({
-        queryKey: cursorCliQueryKeys.auth(),
+        queryKey: [...cursorCliQueryKeys.auth(), serverId],
       })
 
       if (result?.authenticated) {
@@ -1614,7 +1560,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     }
 
     openCliLoginModal('cursor', cursorStatus.path, ['login'])
-  }, [cursorStatus?.path, openCliLoginModal, queryClient])
+  }, [cursorStatus?.path, openCliLoginModal, queryClient, serverId])
 
   const handleCursorRelogin = useCallback(() => {
     if (!cursorStatus?.path) return
@@ -1650,7 +1596,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         queryKey: piCliQueryKeys.auth(),
       })
       const result = await queryClient.fetchQuery<PiAuthStatus>({
-        queryKey: piCliQueryKeys.auth(),
+        queryKey: [...piCliQueryKeys.auth(), serverId],
       })
       if (result?.authenticated) {
         toast.success('PI CLI is already authenticated')
@@ -1660,7 +1606,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
       setCheckingPiAuth(false)
     }
     openCliLoginModal('pi', piStatus.path, [])
-  }, [piStatus?.path, openCliLoginModal, queryClient])
+  }, [piStatus?.path, openCliLoginModal, queryClient, serverId])
 
   const handlePiRelogin = useCallback(() => {
     if (!piStatus?.path) return
@@ -1682,7 +1628,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         queryKey: commandcodeCliQueryKeys.auth(),
       })
       const result = await queryClient.fetchQuery<CommandCodeAuthStatus>({
-        queryKey: commandcodeCliQueryKeys.auth(),
+        queryKey: [...commandcodeCliQueryKeys.auth(), serverId],
       })
       if (result?.authenticated) {
         toast.success('Command Code CLI is already authenticated')
@@ -1692,7 +1638,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
       setCheckingCommandCodeAuth(false)
     }
     openCliLoginModal('commandcode', commandcodeStatus.path, ['login'])
-  }, [commandcodeStatus?.path, openCliLoginModal, queryClient])
+  }, [commandcodeStatus?.path, openCliLoginModal, queryClient, serverId])
 
   const handleCommandCodeRelogin = useCallback(() => {
     if (!commandcodeStatus?.path) return
@@ -1718,7 +1664,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         queryKey: grokCliQueryKeys.auth(),
       })
       const result = await queryClient.fetchQuery<GrokAuthStatus>({
-        queryKey: grokCliQueryKeys.auth(),
+        queryKey: [...grokCliQueryKeys.auth(), serverId],
       })
       if (result?.authenticated) {
         toast.success('Grok CLI is already authenticated')
@@ -1728,7 +1674,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
       setCheckingGrokAuth(false)
     }
     openCliLoginModal('grok', grokStatus.path, ['login'])
-  }, [grokStatus?.path, openCliLoginModal, queryClient])
+  }, [grokStatus?.path, openCliLoginModal, queryClient, serverId])
 
   const handleGrokRelogin = useCallback(() => {
     if (!grokStatus?.path) return
@@ -1750,7 +1696,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         queryKey: kimiCliQueryKeys.auth(),
       })
       const result = await queryClient.fetchQuery<KimiAuthStatus>({
-        queryKey: kimiCliQueryKeys.auth(),
+        queryKey: [...kimiCliQueryKeys.auth(), serverId],
       })
       if (result?.authenticated) {
         toast.success('Kimi Code CLI is already authenticated')
@@ -1760,7 +1706,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
       setCheckingKimiAuth(false)
     }
     openCliLoginModal('kimi', kimiStatus.path, ['login'])
-  }, [kimiStatus?.path, openCliLoginModal, queryClient])
+  }, [kimiStatus?.path, openCliLoginModal, queryClient, serverId])
 
   const handleKimiRelogin = useCallback(() => {
     if (!kimiStatus?.path) return
@@ -1781,11 +1727,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   }, [])
 
   return (
-    <div className="space-y-6">
-      {backendPaneScopes.includes(scope) && (
-        <BackendPaneHeader backend={scope as CliBackend} />
-      )}
-
+    <div
+      className={cn('space-y-6', backendPaneScopes.includes(scope) && 'w-full')}
+    >
       {hasBackend() && scope === 'claude' && (
         <SettingsSection
           title="CLI source"
@@ -1902,16 +1846,15 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 </Tooltip>
               }
             >
-              <div className="w-full space-y-3">
-                <BackendCliSourceCards
-                  value={preferences?.claude_cli_source ?? 'jean'}
-                  onValueChange={handleClaudeSourceChange}
-                  backendName="Claude CLI"
-                  path={pathDetection?.path}
-                  pathVersion={pathDetection?.version}
-                  pathFound={!!pathDetection?.found}
-                />
-                {preferences?.claude_cli_source === 'jean' &&
+              <BackendCliSourceSelect
+                value={preferences?.claude_cli_source ?? 'jean'}
+                onValueChange={handleClaudeSourceChange}
+                backendName="Claude CLI"
+                path={pathDetection?.path}
+                pathVersion={pathDetection?.version}
+                pathFound={!!pathDetection?.found}
+                action={
+                  preferences?.claude_cli_source === 'jean' &&
                   cliStatus?.installed && (
                     <Button
                       variant="destructive"
@@ -1920,8 +1863,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                     >
                       Uninstall
                     </Button>
-                  )}
-              </div>
+                  )
+                }
+              />
             </InlineField>
             {!cliStatus?.installed && !pathDetection?.found && (
               <p className="text-xs text-muted-foreground px-1">
@@ -2055,7 +1999,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="jean">Jean (managed)</SelectItem>
+                  <SelectItem value="jean">Jean managed</SelectItem>
                   <SelectItem value="path" disabled={!ghPathDetection?.found}>
                     System PATH
                     {!ghPathDetection?.found && ' (not found)'}
@@ -2209,7 +2153,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="jean">Jean (managed)</SelectItem>
+                      <SelectItem value="jean">Jean managed</SelectItem>
                       <SelectItem
                         value="path"
                         disabled={!coderabbitPathDetection?.found}
@@ -2355,16 +2299,15 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 </Tooltip>
               }
             >
-              <div className="w-full space-y-3">
-                <BackendCliSourceCards
-                  value={preferences?.codex_cli_source ?? 'jean'}
-                  onValueChange={handleCodexSourceChange}
-                  backendName="Codex CLI"
-                  path={codexPathDetection?.path}
-                  pathVersion={codexPathDetection?.version}
-                  pathFound={!!codexPathDetection?.found}
-                />
-                {preferences?.codex_cli_source === 'jean' &&
+              <BackendCliSourceSelect
+                value={preferences?.codex_cli_source ?? 'jean'}
+                onValueChange={handleCodexSourceChange}
+                backendName="Codex CLI"
+                path={codexPathDetection?.path}
+                pathVersion={codexPathDetection?.version}
+                pathFound={!!codexPathDetection?.found}
+                action={
+                  preferences?.codex_cli_source === 'jean' &&
                   codexStatus?.installed && (
                     <Button
                       variant="destructive"
@@ -2373,8 +2316,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                     >
                       Uninstall
                     </Button>
-                  )}
-              </div>
+                  )
+                }
+              />
             </InlineField>
             {!codexStatus?.installed && !codexPathDetection?.found && (
               <p className="text-xs text-muted-foreground px-1">
@@ -2509,16 +2453,15 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 </Tooltip>
               }
             >
-              <div className="w-full space-y-3">
-                <BackendCliSourceCards
-                  value={preferences?.opencode_cli_source ?? 'jean'}
-                  onValueChange={handleOpencodeSourceChange}
-                  backendName="OpenCode CLI"
-                  path={opencodePathDetection?.path}
-                  pathVersion={opencodePathDetection?.version}
-                  pathFound={!!opencodePathDetection?.found}
-                />
-                {preferences?.opencode_cli_source === 'jean' &&
+              <BackendCliSourceSelect
+                value={preferences?.opencode_cli_source ?? 'jean'}
+                onValueChange={handleOpencodeSourceChange}
+                backendName="OpenCode CLI"
+                path={opencodePathDetection?.path}
+                pathVersion={opencodePathDetection?.version}
+                pathFound={!!opencodePathDetection?.found}
+                action={
+                  preferences?.opencode_cli_source === 'jean' &&
                   opencodeStatus?.installed && (
                     <Button
                       variant="destructive"
@@ -2527,8 +2470,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                     >
                       Uninstall
                     </Button>
-                  )}
-              </div>
+                  )
+                }
+              />
             </InlineField>
             {!opencodeStatus?.installed && !opencodePathDetection?.found && (
               <p className="text-xs text-muted-foreground px-1">
@@ -2727,16 +2671,15 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 </Tooltip>
               }
             >
-              <div className="w-full space-y-3">
-                <BackendCliSourceCards
-                  value={preferences?.pi_cli_source ?? 'jean'}
-                  onValueChange={handlePiSourceChange}
-                  backendName="PI CLI"
-                  path={piPathDetection?.path}
-                  pathVersion={piPathDetection?.version}
-                  pathFound={!!piPathDetection?.found}
-                />
-                {preferences?.pi_cli_source === 'jean' &&
+              <BackendCliSourceSelect
+                value={preferences?.pi_cli_source ?? 'jean'}
+                onValueChange={handlePiSourceChange}
+                backendName="PI CLI"
+                path={piPathDetection?.path}
+                pathVersion={piPathDetection?.version}
+                pathFound={!!piPathDetection?.found}
+                action={
+                  preferences?.pi_cli_source === 'jean' &&
                   piStatus?.installed && (
                     <Button
                       variant="destructive"
@@ -2745,8 +2688,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                     >
                       Uninstall
                     </Button>
-                  )}
-              </div>
+                  )
+                }
+              />
             </InlineField>
             {piStatus?.installed && !piAuth?.authenticated && piAuthMessage && (
               <div className="text-xs text-muted-foreground">
@@ -2842,16 +2786,15 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 </Tooltip>
               }
             >
-              <div className="w-full space-y-3">
-                <BackendCliSourceCards
-                  value={preferences?.commandcode_cli_source ?? 'jean'}
-                  onValueChange={handleCommandCodeSourceChange}
-                  backendName="Command Code CLI"
-                  path={commandcodePathDetection?.path}
-                  pathVersion={commandcodePathDetection?.version}
-                  pathFound={!!commandcodePathDetection?.found}
-                />
-                {preferences?.commandcode_cli_source === 'jean' &&
+              <BackendCliSourceSelect
+                value={preferences?.commandcode_cli_source ?? 'jean'}
+                onValueChange={handleCommandCodeSourceChange}
+                backendName="Command Code CLI"
+                path={commandcodePathDetection?.path}
+                pathVersion={commandcodePathDetection?.version}
+                pathFound={!!commandcodePathDetection?.found}
+                action={
+                  preferences?.commandcode_cli_source === 'jean' &&
                   commandcodeStatus?.installed && (
                     <Button
                       variant="destructive"
@@ -2860,8 +2803,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                     >
                       Uninstall
                     </Button>
-                  )}
-              </div>
+                  )
+                }
+              />
             </InlineField>
             {commandcodeStatus?.installed &&
               !commandcodeAuth?.authenticated &&
@@ -2987,7 +2931,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
           <div className="space-y-4">
             <InlineField label="Model">
               <Select
-                value={preferences?.selected_codex_model ?? 'gpt-5.6-sol'}
+                value={preferences?.selected_codex_model ?? 'gpt-6.1-sol'}
                 onValueChange={handleCodexModelChange}
               >
                 <SelectTrigger className="w-full sm:w-80">
@@ -3054,8 +2998,10 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="build">Build</SelectItem>
-                  <SelectItem value="yolo">Yolo</SelectItem>
+                  <SelectItem value="build">
+                    Auto-accept edits / legacy Build
+                  </SelectItem>
+                  <SelectItem value="yolo">Full access</SelectItem>
                 </SelectContent>
               </Select>
             </InlineField>
@@ -3411,16 +3357,15 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   </Tooltip>
                 }
               >
-                <div className="w-full space-y-3">
-                  <BackendCliSourceCards
-                    value={preferences?.grok_cli_source ?? 'jean'}
-                    onValueChange={handleGrokSourceChange}
-                    backendName="Grok CLI"
-                    path={grokPathDetection?.path}
-                    pathVersion={grokPathDetection?.version}
-                    pathFound={!!grokPathDetection?.found}
-                  />
-                  {preferences?.grok_cli_source === 'jean' &&
+                <BackendCliSourceSelect
+                  value={preferences?.grok_cli_source ?? 'jean'}
+                  onValueChange={handleGrokSourceChange}
+                  backendName="Grok CLI"
+                  path={grokPathDetection?.path}
+                  pathVersion={grokPathDetection?.version}
+                  pathFound={!!grokPathDetection?.found}
+                  action={
+                    preferences?.grok_cli_source === 'jean' &&
                     grokStatus?.installed && (
                       <Button
                         variant="destructive"
@@ -3429,8 +3374,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                       >
                         Uninstall
                       </Button>
-                    )}
-                </div>
+                    )
+                  }
+                />
               </InlineField>
             </div>
           </SettingsSection>
@@ -3580,16 +3526,15 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   </Tooltip>
                 }
               >
-                <div className="w-full space-y-3">
-                  <BackendCliSourceCards
-                    value={preferences?.kimi_cli_source ?? 'jean'}
-                    onValueChange={handleKimiSourceChange}
-                    backendName="Kimi Code CLI"
-                    path={kimiPathDetection?.path}
-                    pathVersion={kimiPathDetection?.version}
-                    pathFound={!!kimiPathDetection?.found}
-                  />
-                  {preferences?.kimi_cli_source === 'jean' &&
+                <BackendCliSourceSelect
+                  value={preferences?.kimi_cli_source ?? 'jean'}
+                  onValueChange={handleKimiSourceChange}
+                  backendName="Kimi Code CLI"
+                  path={kimiPathDetection?.path}
+                  pathVersion={kimiPathDetection?.version}
+                  pathFound={!!kimiPathDetection?.found}
+                  action={
+                    preferences?.kimi_cli_source === 'jean' &&
                     kimiStatus?.installed && (
                       <Button
                         variant="destructive"
@@ -3598,8 +3543,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                       >
                         Uninstall
                       </Button>
-                    )}
-                </div>
+                    )
+                  }
+                />
               </InlineField>
             </div>
           </SettingsSection>
@@ -3674,12 +3620,12 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             </InlineField>
 
             <InlineField
-              label="Default mode"
-              description="Permission mode for new sessions"
+              label="Default permissions"
+              description="Permission policy for new sessions on the default backend."
             >
               <Select
-                value={preferences?.default_execution_mode ?? 'plan'}
-                onValueChange={(value: 'plan' | 'build' | 'yolo') => {
+                value={preferences?.default_execution_mode ?? 'yolo'}
+                onValueChange={(value: ExecutionMode) => {
                   patchPreferences.mutate({ default_execution_mode: value })
                 }}
               >
@@ -3687,9 +3633,29 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="plan">Plan</SelectItem>
-                  <SelectItem value="build">Build</SelectItem>
-                  <SelectItem value="yolo">Yolo</SelectItem>
+                  {preferences?.default_execution_mode === 'plan' && (
+                    <SelectItem value="plan">Plan (legacy workflow)</SelectItem>
+                  )}
+                  {preferences?.default_execution_mode === 'build' &&
+                    !getSupportedPermissionModes(
+                      preferences?.default_backend ?? 'claude'
+                    ).includes('build') && (
+                      <SelectItem value="build">Legacy Build</SelectItem>
+                    )}
+                  {getSupportedPermissionModes(
+                    preferences?.default_backend ?? 'claude'
+                  ).map(mode => (
+                    <SelectItem key={mode} value={mode}>
+                      {
+                        {
+                          supervised: 'Supervised',
+                          build: 'Auto-accept edits',
+                          auto: 'Auto',
+                          yolo: 'Full access',
+                        }[mode]
+                      }
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </InlineField>
@@ -3721,8 +3687,8 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             </InlineField>
 
             <InlineField
-              label="Build execution"
-              description="Backend, model, thinking, and effort override when approving plans"
+              label="Plan approval"
+              description="Backend, model, thinking, and effort overrides when approving a plan with the selected permissions"
             >
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
                 <div>
@@ -3968,8 +3934,8 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             </InlineField>
 
             <InlineField
-              label="Yolo execution"
-              description="Backend, model, thinking, and effort override when yolo-approving plans"
+              label="Full-access plan approval"
+              description="Backend, model, thinking, and effort overrides when approving a plan with Full access"
             >
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
                 <div>
@@ -4533,7 +4499,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
 
               <InlineField
                 label="Close original session on clear context"
-                description="Automatically close the original session when using Clear Context and yolo"
+                description="Automatically close the original session when using Clear context with Full access"
               >
                 <Switch
                   checked={preferences?.close_original_on_clear_context ?? true}
@@ -4757,7 +4723,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             <AlertDialogAction
               onClick={handleDeleteAllArchives}
               disabled={isDeleting}
-              className="bg-destructive text-white hover:bg-destructive/90"
+              variant="destructive"
             >
               {isDeleting ? 'Deleting...' : 'Delete All'}
             </AlertDialogAction>
@@ -4829,7 +4795,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             <AlertDialogAction
               onClick={handleConfirmDeleteCli}
               disabled={isDeletingCli}
-              className="bg-destructive text-white hover:bg-destructive/90"
+              variant="destructive"
             >
               {isDeletingCli ? 'Deleting...' : 'Delete'}
             </AlertDialogAction>

@@ -26,6 +26,9 @@ const ROUTED_ARGUMENT_KEYS = new Set([
   'parent_id',
   'activeSessionId',
   'active_session_id',
+  // Agents: each Jean server has its own agents
+  'agentId',
+  'agent_id',
 ])
 
 const PATH_ARGUMENT_KEYS = new Set([
@@ -272,6 +275,10 @@ export function decorateServerResult<T>(
   ) {
     return decorateSession(serverId, value) as T
   }
+  // These return the next active session id (or null) as a bare string.
+  if (command === 'close_session' || command === 'archive_session') {
+    return scopedId(serverId, value) as T
+  }
   if (
     command === 'start_background_investigation' &&
     value &&
@@ -287,7 +294,11 @@ export function decorateServerResult<T>(
   if (command === 'list_archived_sessions' && Array.isArray(value)) {
     return value.map(item => decorateSession(serverId, item)) as T
   }
-  if (command === 'list_all_sessions' && value && typeof value === 'object') {
+  if (
+    (command === 'list_all_sessions' || command === 'list_unread_sessions') &&
+    value &&
+    typeof value === 'object'
+  ) {
     const response = value as Record<string, unknown>
     return {
       ...response,
@@ -315,6 +326,8 @@ export function decorateServerResult<T>(
       'clone_project',
       'init_project',
       'create_folder',
+      'save_server_project',
+      'setup_server_user',
       'rename_folder',
       'move_item',
       'update_project_settings',

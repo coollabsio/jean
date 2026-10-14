@@ -41,6 +41,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod agent_browser;
+pub mod agents;
 mod antigravity_cli;
 mod auto_fix;
 mod background_tasks;
@@ -236,6 +237,8 @@ pub struct AppPreferences {
     pub magic_prompt_modes: MagicPromptModes, // Per-prompt execution modes for chat-style magic prompts
     #[serde(default)]
     pub magic_models_auto_initialized: bool, // Whether magic prompt models were auto-set based on installed backends
+    #[serde(default)]
+    pub commit_close_issue: bool, // Commit magic: add "Closes #N" for the worktree's linked GitHub issue
     #[serde(default = "default_file_edit_mode")]
     pub file_edit_mode: String, // How to edit files: inline (Pierre) or external (VS Code, etc.)
     #[serde(default)]
@@ -272,6 +275,8 @@ pub struct AppPreferences {
     pub auto_archive_on_pr_merged: bool, // Auto-archive worktrees when their PR is merged
     #[serde(default)]
     pub debug_mode_enabled: bool, // Show debug panel in chat sessions (default: false)
+    #[serde(default)]
+    pub agents_enabled: bool, // Experimental: show the Agents tab (default: false)
     #[serde(default)]
     pub default_enabled_mcp_servers: Vec<String>, // MCP server names enabled by default (empty = none)
     #[serde(default)]
@@ -315,7 +320,7 @@ pub struct AppPreferences {
     #[serde(default = "default_confirm_session_close")]
     pub confirm_session_close: bool, // Show confirmation dialog before closing sessions/worktrees
     #[serde(default = "default_execution_mode")]
-    pub default_execution_mode: String, // Default execution mode: "plan", "build", or "yolo"
+    pub default_execution_mode: String, // Default workflow/permission policy for new sessions
     #[serde(default = "default_backend")]
     pub default_backend: String, // Default CLI backend: "claude", "codex", "opencode", "cursor", "pi", or "commandcode"
     #[serde(default = "default_new_session_kind")]
@@ -667,7 +672,7 @@ fn default_confirm_session_close() -> bool {
 }
 
 fn default_execution_mode() -> String {
-    "plan".to_string()
+    "yolo".to_string()
 }
 
 fn default_backend() -> String {
@@ -758,11 +763,11 @@ fn maybe_auto_select_system_cli_preferences(
 }
 
 fn default_codex_model() -> String {
-    "gpt-5.6-sol".to_string()
+    "gpt-6.1-sol".to_string()
 }
 
 fn default_opencode_model() -> String {
-    "opencode/gpt-5.6-sol".to_string()
+    "opencode/gpt-6.1-sol".to_string()
 }
 
 fn default_cursor_model() -> String {
@@ -926,8 +931,9 @@ mod tests {
         assert!(prompt.contains("Jean Run Environment"));
         assert!(prompt.contains("get_run_environments"));
         assert!(prompt.contains("test against its `url`, port, and startup command"));
-        assert!(prompt.contains("use the Agent Browser when it is available"));
-        assert!(prompt.contains("no other browser testing method"));
+        assert!(prompt.contains("start_run_environment"));
+        assert!(!prompt.contains("use the returned/startup command"));
+        assert!(prompt.contains("no other browser tool is available, use the Agent Browser"));
         assert!(prompt.contains("VERY IMPORTANT: Keep Code Simple"));
         assert!(prompt.contains("Always implement the simplest maintainable solution"));
         assert!(prompt.contains("Clickable References"));
@@ -1423,6 +1429,9 @@ pub struct MagicPrompts {
     pub parallel_execution: Option<String>,
     #[serde(default)]
     pub global_system_prompt: Option<String>,
+    /// Replaces the global system prompt for sessions of server projects
+    #[serde(default)]
+    pub server_system_prompt: Option<String>,
     #[serde(default)]
     pub provider_switch_handoff: Option<String>,
     #[serde(default)]
@@ -1452,7 +1461,10 @@ Investigate the loaded GitHub {issueWord} ({issueRefs})
 1. Validate the issue before deeper investigation:
    - Read the issue context file(s), including its current status, description, and comments
    - Confirm that the issue is still valid, relevant, and not already resolved or superseded
-   - Decide whether it makes sense to work on it now; if not, stop and explain why
+   - Take the request with a grain of salt: do not assume it must be fixed or added just because it was reported
+   - Check whether it is actually needed: is the bug real and reproducible, or is it user error, a misconfiguration, or expected behavior? Does the feature fit the project's scope, or does existing functionality already cover it?
+   - Weigh the value against the cost: how many users it affects, added complexity, maintenance burden, and regression risk
+   - Decide whether it makes sense to work on it now and is worth fixing or adding at all; if not, stop and explain why, and recommend a response (for example: close, ask for more information, or won't fix)
 2. Analyze the problem:
    - What is the expected vs actual behavior?
    - Are there error messages, stack traces, or reproduction steps?
@@ -1483,6 +1495,7 @@ Investigate the loaded GitHub {issueWord} ({issueRefs})
 - Ask clarifying questions if requirements are unclear
 - If multiple solutions exist, explain trade-offs
 - Reference specific file paths and line numbers
+- Present found issues, gaps, risks, and recommended fixes in Markdown tables (for example: | # | Finding | Location | Impact | Recommended fix |), not long prose lists
 
 </guidelines>"#
         .to_string()
@@ -1501,7 +1514,10 @@ Investigate the loaded GitHub {prWord} ({prRefs})
 1. Validate the PR before deeper investigation:
    - Read the PR context file(s), including its current status, description, reviews, and comments
    - Confirm that the PR is still valid, relevant, and not already merged, closed, or superseded
-   - Decide whether it makes sense to work on it now; if not, stop and explain why
+   - Take the PR with a grain of salt: do not assume it should be merged just because it was opened
+   - Check whether it is actually needed: does it solve a real problem, fit the project's scope, and not duplicate existing functionality?
+   - Weigh the value against the cost: added complexity, maintenance burden, regression risk, and the size of the change compared to its benefit
+   - Decide whether it makes sense to work on it now and is worth merging at all; if not, stop and explain why, and recommend a response (for example: close, request changes, or ask for more context)
 2. Understand the changes:
    - What is the PR trying to accomplish?
    - What branches are involved (head → base)?
@@ -1541,6 +1557,7 @@ Investigate the loaded GitHub {prWord} ({prRefs})
 - Flag any security concerns prominently, even minor ones
 - If multiple approaches exist, explain trade-offs
 - Reference specific file paths and line numbers
+- Present found issues, gaps, risks, and recommended fixes in Markdown tables (for example: | # | Finding | Location | Impact | Recommended fix |), not long prose lists
 
 </guidelines>"#
         .to_string()
@@ -1777,6 +1794,7 @@ Investigate the failed GitHub Actions workflow run for "{workflowName}" on branc
 - If the error is in code, reference specific file paths and line numbers
 - If it's a flaky test, suggest how to make it more reliable
 - If progress is blocked by infrastructure, permissions, or a non-actionable external failure, stop and report the blocker clearly
+- Present found issues, gaps, risks, and recommended fixes in Markdown tables (for example: | # | Finding | Location | Impact | Recommended fix |), not long prose lists
 
 </guidelines>"#
         .to_string()
@@ -1836,6 +1854,7 @@ Investigate the loaded Dependabot {alertWord} ({alertRefs})
 - Don't just recommend "upgrade" — assess compatibility impact
 - Reference specific file paths where the affected package is used
 - If multiple alerts are loaded, address each one separately
+- Present found issues, gaps, risks, and recommended fixes in Markdown tables (for example: | # | Finding | Location | Impact | Recommended fix |), not long prose lists
 
 </guidelines>"#
         .to_string()
@@ -1884,6 +1903,7 @@ Investigate the loaded security {advisoryWord} ({advisoryRefs})
 - Check for the same vulnerability pattern across the entire codebase, not just the reported location
 - Reference specific file paths and line numbers
 - If multiple advisories are loaded, address each one separately
+- Present found issues, gaps, risks, and recommended fixes in Markdown tables (for example: | # | Finding | Location | Impact | Recommended fix |), not long prose lists
 
 </guidelines>"#
         .to_string()
@@ -1938,6 +1958,7 @@ Investigate the loaded Linear {linearWord} ({linearRefs})
 - Ask clarifying questions if requirements are unclear
 - If multiple solutions exist, explain trade-offs
 - Reference specific file paths and line numbers
+- Present found issues, gaps, risks, and recommended fixes in Markdown tables (for example: | # | Finding | Location | Impact | Recommended fix |), not long prose lists
 
 </guidelines>"#
         .to_string()
@@ -1982,6 +2003,7 @@ Investigate the loaded Sentry {sentryWord} ({sentryRefs})
 - Be thorough but focused - investigate deeply without getting sidetracked
 - If multiple solutions exist, explain the trade-offs
 - Reference specific file paths and line numbers
+- Present found issues, gaps, risks, and recommended fixes in Markdown tables (for example: | # | Finding | Location | Impact | Recommended fix |), not long prose lists
 
 </guidelines>"#
         .to_string()
@@ -2099,9 +2121,9 @@ fn default_global_system_prompt() -> String {
 ### 1. Planning Guidance
 - For non-trivial tasks (3+ steps or architectural decisions), prefer planning before implementation when the current execution mode has not already authorized execution.
 - If something goes sideways, STOP and re-plan immediately - don't keep pushing
-- Use plan mode for verification steps when the current execution mode is plan; in build/yolo, verify directly after implementing.
+- Use plan mode for verification steps when the current execution mode is plan; in build/full access, verify directly after implementing.
 - Write detailed specs upfront to reduce ambiguity
-- Keep plans concise but complete enough for zero-context handoff (YOLO/Build in a new worktree must not require re-scanning the repo). Prefer short wording over thin checklists.
+- Keep plans concise but complete enough for zero-context handoff (Full access/Build in a new worktree must not require re-scanning the repo). Prefer short wording over thin checklists.
 - When the current execution mode is plan, use the backend's native plan tool/UI call when available (Claude ExitPlanMode, Codex `<proposed_plan>` / collaboration Plan mode, Cursor/OpenCode equivalent), not plain text only.
 - For unresolved questions while planning, prefer the backend-native interactive question UI instead of plain text when available: Claude AskUserQuestion, Codex request_user_input, OpenCode question. If no such interactive question tool is present in your current tool set (headless/`--print` runs may omit Claude AskUserQuestion), do NOT skip the question and do NOT dead-end on a tool search — instead ask inline as a short numbered list of options (1, 2, 3...) and tell the user to reply with a number.
 - For Codex specifically, when the current execution mode is plan: do not write plan files or code; when the plan is ready wrap it in `<proposed_plan>...</proposed_plan>` so Jean can show the approval UI. Do not use the `update_plan` checklist tool in plan mode.
@@ -2137,8 +2159,7 @@ fn default_global_system_prompt() -> String {
 - Do not re-run a passing check when the code it covers has not changed since.
 - Write new tests only for behavior that can break silently: business logic, parsing/serialization, state transitions, persistence, and a regression test for each fixed bug.
 - Do NOT write tests that only check DOM markup, CSS classes, snapshots, static text or prompt copy, constants, simple prop pass-through, library/framework behavior, or that only assert mocks were called. Verify UI changes in the running app instead.
-- Before UI, HTTP, browser, or end-to-end verification, call Jean MCP `get_run_environments` and test against the returned url/port/command when a Run environment is available.
-- For the current selected project, if there is no other browser testing method, use the Agent Browser when it is available.
+- If a UI check needs a browser and no other browser tool is available, use the Agent Browser.
 
 ### 6. Demand Elegance (Balanced)
 - For non-trivial changes: pause and ask "is there a more elegant way?"
@@ -2166,6 +2187,7 @@ fn default_global_system_prompt() -> String {
 - **Simplicity First**: Make every change as simple as possible. Impact minimal code.
 - **VERY IMPORTANT: Keep Code Simple**: Do not over-engineer. Always implement the simplest maintainable solution. Avoid extra abstractions, frameworks, configuration, or future-proofing unless clearly required.
 - **Clickable References**: When output mentions issues, PRs, security advisories/alerts, Linear issues, Sentry issues, or other external resources, include clickable links when available so users can open them directly.
+- **Tables for Findings**: When you report found issues, gaps, risks, or recommended fixes, present them in a Markdown table (for example: | # | Finding | Location | Impact | Recommended fix |) instead of long prose lists.
 - **No Laziness**: Find root causes. No temporary fixes. Senior developer standards.
 - **Minimal Impact**: Changes should only touch what's necessary. Avoid introducing bugs.
 
@@ -2180,7 +2202,7 @@ fn default_global_system_prompt() -> String {
 ## Jean Run Environment
 - When you need to test a running app (UI, HTTP, browser, smoke, e2e), call Jean MCP `get_run_environments` first (pass this worktreeId when known).
 - If an environment is running, test against its `url`, port, and startup command. Do not guess localhost ports or start a second dev server when Jean already has one.
-- If nothing is running and verification needs a live server, say so and use the returned/startup command rather than inventing a different command or port.
+- If nothing is running and verification needs a live server, start it with Jean MCP `start_run_environment`. Do not start a dev server by hand. If no Run command is configured, say so; do not invent a command or port.
 - In how-to-test notes, include the exact URL/port you used.
 
 ## Important!
@@ -2590,7 +2612,7 @@ impl MagicPrompts {
     /// This ensures users who never customized a prompt get auto-updated defaults.
     fn migrate_defaults(&mut self) {
         type DefaultEntry<'a> = (fn() -> String, &'a mut Option<String>);
-        let defaults: [DefaultEntry; 18] = [
+        let defaults: [DefaultEntry; 19] = [
             (
                 default_investigate_issue_prompt,
                 &mut self.investigate_issue,
@@ -2615,6 +2637,10 @@ impl MagicPrompts {
                 &mut self.parallel_execution,
             ),
             (default_global_system_prompt, &mut self.global_system_prompt),
+            (
+                crate::projects::default_server_system_prompt,
+                &mut self.server_system_prompt,
+            ),
             (
                 default_provider_switch_handoff_prompt,
                 &mut self.provider_switch_handoff,
@@ -2693,6 +2719,7 @@ impl Default for AppPreferences {
             magic_prompt_efforts: MagicPromptReasoningEfforts::default(),
             magic_prompt_modes: MagicPromptModes::default(),
             magic_models_auto_initialized: false,
+            commit_close_issue: false,
             file_edit_mode: default_file_edit_mode(),
             ai_language: String::new(),
             waiting_sound: default_waiting_sound(),
@@ -2711,6 +2738,7 @@ impl Default for AppPreferences {
             auto_pull_base_branch: default_auto_pull_base_branch(),
             auto_archive_on_pr_merged: default_auto_archive_on_pr_merged(),
             debug_mode_enabled: false,
+            agents_enabled: false,
             default_effort_level: default_effort_level(),
             default_enabled_mcp_servers: Vec::new(),
             known_mcp_servers: Vec::new(),
@@ -2978,10 +3006,6 @@ pub struct UIState {
     #[serde(default)]
     pub pinned_recent_session_ids: Vec<String>,
 
-    /// Favorited projects shown first in the GitHub Dashboard
-    #[serde(default)]
-    pub github_dashboard_favorite_project_ids: Vec<String>,
-
     /// Last opened worktree+session per project: projectId → { worktree_id, session_id }
     #[serde(default)]
     pub last_opened_per_project: std::collections::HashMap<String, LastOpenedEntry>,
@@ -3125,7 +3149,6 @@ impl Default for UIState {
             dashboard_worktree_collapse_overrides: std::collections::HashMap::new(),
             project_canvas_settings: std::collections::HashMap::new(),
             pinned_recent_session_ids: Vec::new(),
-            github_dashboard_favorite_project_ids: Vec::new(),
             last_opened_per_project: std::collections::HashMap::new(),
             seen_failed_workflow_run_ids: Vec::new(),
             version: default_ui_state_version(),
@@ -3519,6 +3542,7 @@ pub async fn get_server_capabilities() -> Result<ServerCapabilitiesEnvelope, Str
         ("session_naming", "Session naming", default_session_naming_prompt()),
         ("parallel_execution", "Parallel execution", default_parallel_execution_prompt()),
         ("global_system_prompt", "Global system prompt", default_global_system_prompt()),
+        ("server_system_prompt", "Server system prompt", crate::projects::default_server_system_prompt()),
         ("provider_switch_handoff", "Provider switch handoff", default_provider_switch_handoff_prompt()),
         ("investigate_security_alert", "Investigate security alert", default_investigate_security_alert_prompt()),
         ("investigate_advisory", "Investigate advisory", default_investigate_advisory_prompt()),
@@ -4666,6 +4690,19 @@ fn resolve_headless_token_required(
     }
 }
 
+/// Worker stack size of Jean's tokio runtimes. Debug builds keep very large
+/// async frames (the command and Jean MCP dispatchers), and any Jean MCP call
+/// overflowed tokio's 2 MiB default stack there.
+pub const RUNTIME_THREAD_STACK_SIZE: usize = 8 * 1024 * 1024;
+
+/// Multi-thread tokio runtime for the app and server entry points.
+pub fn build_tokio_runtime() -> std::io::Result<tokio::runtime::Runtime> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(RUNTIME_THREAD_STACK_SIZE)
+        .build()
+}
+
 /// Initialize the shared runtime used by both transport adapters.
 pub fn initialize_runtime(context: &RuntimeContext) -> Result<(), String> {
     let (broadcaster, _) = http_server::WsBroadcaster::new();
@@ -4690,6 +4727,11 @@ pub fn initialize_runtime(context: &RuntimeContext) -> Result<(), String> {
     task_manager.start();
     context.manage(task_manager);
     auto_fix::scheduler::start_auto_fix_scheduler(context.clone());
+    // Agents keep working without clients: open their database and start the loop.
+    match agents::init(context) {
+        Ok(()) => agents::start(context.clone()),
+        Err(error) => log::error!("Agents are unavailable: {error}"),
+    }
 
     let cleanup_context = context.clone();
     async_runtime::spawn_blocking(move || {
@@ -4751,7 +4793,7 @@ pub async fn start_runtime_services(context: RuntimeContext) -> Result<(), Strin
             }
         }
 
-        match agent_browser::install_agent_browser_mcp(context, None).await {
+        match agent_browser::install_agent_browser_mcp(context.clone(), None).await {
             Ok(results) => {
                 for result in results
                     .into_iter()
@@ -4765,6 +4807,14 @@ pub async fn start_runtime_services(context: RuntimeContext) -> Result<(), Strin
                 }
             }
             Err(error) => log::warn!("Failed to activate required agent-browser MCP: {error}"),
+        }
+
+        match async_runtime::spawn_blocking(move || agent_browser::import_legacy_profile(&context))
+            .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => log::warn!("{error}"),
+            Err(error) => log::warn!("Legacy agent-browser profile import task failed: {error}"),
         }
     });
 
@@ -4926,15 +4976,6 @@ pub fn expose_managed_cli_in_wsl(distro: &str, tool: &str, managed_binary: &str)
     if let Err(error) = platform::ensure_managed_cli_link_in_wsl(distro, tool, managed_binary) {
         log::warn!("Failed to expose Jean-managed {tool} CLI in WSL: {error}");
     }
-}
-
-pub async fn set_project_avatar_from_path(
-    context: RuntimeContext,
-    project_id: String,
-    source_path: PathBuf,
-) -> Result<Value, String> {
-    let project = projects::set_project_avatar_from_path(context, project_id, source_path).await?;
-    serde_json::to_value(project).map_err(|error| error.to_string())
 }
 
 pub fn get_project_worktrees_folder(

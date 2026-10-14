@@ -493,8 +493,10 @@ const sectionEntries: PreferenceSearchEntry[] = [
     keywords: [
       'default backend',
       'default mode',
-      'build execution',
-      'yolo execution',
+      'plan approval',
+      'selected permissions',
+      'full-access plan approval',
+      'full access',
       'ai language',
       'editor',
       'terminal',
@@ -764,6 +766,17 @@ const sectionEntries: PreferenceSearchEntry[] = [
     fallbackAnchorId: 'pref-pane-experimental',
   },
   {
+    id: 'experimental-agents',
+    pane: 'experimental',
+    paneTitle: 'Experimental',
+    type: 'section',
+    title: 'Agents',
+    sectionTitle: 'Experimental',
+    keywords: ['agents', 'jean', 'coordinator', 'boss'],
+    anchorId: 'pref-experimental-section-agents',
+    fallbackAnchorId: 'pref-pane-experimental',
+  },
+  {
     id: 'terminal-settings',
     pane: 'terminal',
     paneTitle: 'Terminal',
@@ -977,6 +990,12 @@ const magicPromptDefinitions: {
     title: 'Global System Prompt',
     description: 'System prompt applied to every session.',
     keywords: ['global system prompt', 'system prompt'],
+  },
+  {
+    key: 'server_system_prompt',
+    title: 'Server System Prompt',
+    description: 'System prompt for sessions of SSH servers.',
+    keywords: ['server system prompt', 'ssh prompt', 'servers'],
   },
   {
     key: 'provider_switch_handoff',

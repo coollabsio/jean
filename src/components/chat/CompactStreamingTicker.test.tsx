@@ -140,8 +140,10 @@ describe('CompactStreamingTicker', () => {
         Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
 
-    expect(beforeSteer.querySelector('.animate-spin')).not.toBeInTheDocument()
-    expect(afterSteer.querySelector('.animate-spin')).toBeInTheDocument()
+    expect(
+      beforeSteer.querySelector('.working-waveform')
+    ).not.toBeInTheDocument()
+    expect(afterSteer.querySelector('.working-waveform')).toBeInTheDocument()
   })
 
   it('does not repeat fallback text inside activity after a steered prompt', () => {

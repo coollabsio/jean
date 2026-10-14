@@ -6,6 +6,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { MessageThreadContextMenu } from './message-thread-context-menu'
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden'
 
 interface ImageLightboxProps {
@@ -52,7 +53,13 @@ export function ImageLightbox({
         className={`cursor-pointer focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded-md ${className ?? ''}`}
       >
         {children ?? (
-          <img src={assetSrc} alt={alt} className={thumbnailClassName} />
+          <img
+            src={assetSrc}
+            alt={alt}
+            className={thumbnailClassName}
+            loading="lazy"
+            decoding="async"
+          />
         )}
       </button>
 
@@ -65,11 +72,13 @@ export function ImageLightbox({
             <DialogTitle>Image Preview</DialogTitle>
             <DialogDescription>Preview of image: {alt}</DialogDescription>
           </VisuallyHidden>
-          <img
-            src={assetSrc}
-            alt={alt}
-            className="max-w-full max-h-[calc(85vh-4rem)] object-contain rounded-md mx-auto"
-          />
+          <MessageThreadContextMenu>
+            <img
+              src={assetSrc}
+              alt={alt}
+              className="max-w-full max-h-[calc(85vh-4rem)] object-contain rounded-md mx-auto"
+            />
+          </MessageThreadContextMenu>
         </DialogContent>
       </Dialog>
     </>

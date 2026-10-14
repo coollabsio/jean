@@ -13,8 +13,6 @@ interface AgentBrowserStatus {
   installed: boolean
   binaryPath: string | null
   version: string | null
-  profilePath: string
-  profileExists: boolean
   managedDir: string
   managedInstall: boolean
   claudeSnippet: string
@@ -127,11 +125,6 @@ export const AgentBrowserSection: React.FC = () => {
                 <span className="flex items-center gap-1.5 text-warning">
                   <XCircle className="size-3.5" />
                   Automatic agent-browser setup is not complete
-                </span>
-              )}
-              {status?.profileExists && (
-                <span className="text-xs text-muted-foreground">
-                  Profile ready
                 </span>
               )}
             </div>

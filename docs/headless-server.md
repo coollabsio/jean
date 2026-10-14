@@ -9,7 +9,8 @@ the HTTP/WebSocket protocol. `src-server` is the standalone server adapter.
 
 jean-server has no embedded WebView. For an AI-controlled browser where you log
 in manually once and agents reuse cookies, Jean uses **vercel-labs/agent-browser**
-with a Jean-managed Chromium profile (`AGENT_BROWSER_PROFILE` under app data).
+with one isolated browser per Jean session. Logins are shared through the
+agent-browser restore key `jean` (`AGENT_BROWSER_RESTORE`).
 
 - Settings → **MCP Servers** → **Agent Browser** → **Install agent-browser** (this also installs MCP into supported installed backends)
 - Host prerequisite: `npm` on PATH (Jean downloads agent-browser + Chromium into app data)
@@ -197,6 +198,28 @@ JEAN_SERVER_INSTALL_PATH=/opt/jean/jean-server \
 JEAN_SERVER_SERVICE=jean-dev.service \
 bun run install:local:server
 ```
+
+### Separate local development service
+
+On the local development host, `jean-dev.service` runs at
+`http://100.110.234.18:3457/`. It uses `/usr/local/bin/jean-server-dev` and
+`/root/.local/share/com.jean.dev`. Its separate login token is in
+`/etc/jean-dev.env` (readable only by root). It starts with no production projects
+or sessions.
+
+To rebuild and restart only this development service, use:
+
+```bash
+bun run install:local:dev
+tail -f tmp/install-local-server.log
+```
+
+This command does not restart `jean-server.service` on port `3456`.
+The development unit uses `KillMode=process` so a restart does not terminate
+child agent processes. Those processes can remain active after the service stops;
+see the [systemd kill documentation](https://github.com/systemd/systemd/blob/main/man/systemd.kill.xml).
+Separate app data is not a security boundary: both services run as the same user.
+If you add the same repository to both services, both can change its files.
 
 ## Options and environment
 

@@ -536,12 +536,8 @@ export function CheckpointRestoreDialog({
                   void executeApprovedRestore()
                 }}
                 disabled={restoring}
-                className={cn(
-                  'm-0 h-auto min-h-10 w-full whitespace-normal py-2.5 sm:w-auto sm:min-w-[10rem]',
-                  approvalCopy.destructive
-                    ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
-                    : undefined
-                )}
+                variant={approvalCopy.destructive ? 'destructive' : undefined}
+                className="m-0 h-auto min-h-10 w-full whitespace-normal py-2.5 sm:w-auto sm:min-w-[10rem]"
               >
                 {restoring ? (
                   <>

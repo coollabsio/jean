@@ -3,6 +3,15 @@ export type {
   IconProps as LucideProps,
 } from 'reicon-react'
 
+import { createIcon } from 'reicon-react'
+
+// Reicon has no plain circle; RecordCircle looks like a voicemail glyph.
+export const Circle = createIcon('Circle', {
+  O: `<path fill-rule="evenodd" clip-rule="evenodd" d="M12 1.25C6.06294 1.25 1.25 6.06294 1.25 12C1.25 17.9371 6.06294 22.75 12 22.75C17.9371 22.75 22.75 17.9371 22.75 12C22.75 6.06294 17.9371 1.25 12 1.25ZM2.75 12C2.75 6.89137 6.89137 2.75 12 2.75C17.1086 2.75 21.25 6.89137 21.25 12C21.25 17.1086 17.1086 21.25 12 21.25C6.89137 21.25 2.75 17.1086 2.75 12Z" fill="currentColor"/>`,
+  F: `<circle cx="12" cy="12" r="10" fill="currentColor"/>`,
+})
+export { Circle as CircleIcon }
+
 export {
   Activity,
   AlertCircle,
@@ -101,7 +110,6 @@ export {
   Pointer,
   Puzzle,
   Radio,
-  RecordCircle,
   Refresh,
   RotateLeft,
   RotateRight,
@@ -163,11 +171,9 @@ export { ChevronRight as ChevronRightIcon } from 'reicon-react'
 export { ChevronUp as ChevronUpIcon } from 'reicon-react'
 export { ChevronExpandY as ChevronsDownUp } from 'reicon-react'
 export { ChevronExpandY as ChevronsUpDown } from 'reicon-react'
-export { RecordCircle as Circle } from 'reicon-react'
 export { Loader as CircleDashed } from 'reicon-react'
 export { IssueIcon as CircleDot } from './IssueIcon'
 export { HelpCircle as CircleHelp } from 'reicon-react'
-export { RecordCircle as CircleIcon } from 'reicon-react'
 export { PauseCircle as CirclePause } from 'reicon-react'
 export { Sidebar as Columns2 } from 'reicon-react'
 export { Backspace as Delete } from 'reicon-react'
@@ -193,6 +199,7 @@ export { Menu as GripVerticalIcon } from 'reicon-react'
 export { Sledgehammer as Hammer } from 'reicon-react'
 export { HardDrive as HardDriveDownload } from 'reicon-react'
 export { Image as ImageIcon } from 'reicon-react'
+export { Video } from 'reicon-react'
 export { InfoCircle as Info } from 'reicon-react'
 export { Key as KeyRound } from 'reicon-react'
 export { Layout as LayoutDashboard } from 'reicon-react'

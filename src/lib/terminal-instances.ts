@@ -9,14 +9,19 @@
  * non-running renderers may also be evicted by the bounded memory policy.
  */
 
-import { Terminal as XtermTerminal } from '@xterm/xterm'
-import { FitAddon as XtermFitAddon } from '@xterm/addon-fit'
-import { WebLinksAddon } from '@xterm/addon-web-links'
-import {
-  init as initGhosttyWeb,
+// Renderer libraries are type-only here and loaded on first terminal creation,
+// so importing this module (dispose/registry helpers) keeps xterm and
+// ghostty-web out of the boot bundle.
+import type { Terminal as XtermTerminal } from '@xterm/xterm'
+import type { FitAddon as XtermFitAddon } from '@xterm/addon-fit'
+import type {
   Terminal as GhosttyWebTerminal,
   FitAddon as GhosttyWebFitAddon,
 } from 'ghostty-web'
+import type * as XtermModule from '@xterm/xterm'
+import type * as XtermFitModule from '@xterm/addon-fit'
+import type * as XtermWebLinksModule from '@xterm/addon-web-links'
+import type * as GhosttyWebModule from 'ghostty-web'
 import { openExternal } from '@/lib/platform'
 import { attachOrphanCompositionEndGuard } from '@/lib/terminal-composition-guard'
 import { LocalTerminalLinkProvider } from '@/lib/terminal-local-links'
@@ -104,7 +109,10 @@ const pendingOnStopped = new Map<
   (exitCode: number | null, signal: string | null) => void
 >()
 
-let ghosttyWebReady: Promise<void> | null = null
+let ghosttyWebReady: Promise<typeof GhosttyWebModule> | null = null
+let xtermModules: Promise<
+  [typeof XtermModule, typeof XtermFitModule, typeof XtermWebLinksModule]
+> | null = null
 let preferencesSubscriptionRegistered = false
 let detachedRendererTrimTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -128,11 +136,29 @@ function getConfiguredRenderer(): TerminalRenderer {
   return renderer === 'ghostty-web' ? 'ghostty-web' : 'xterm'
 }
 
-function ensureGhosttyWebReady(): Promise<void> {
+function ensureGhosttyWebReady(): Promise<typeof GhosttyWebModule> {
   if (!ghosttyWebReady) {
-    ghosttyWebReady = initGhosttyWeb()
+    ghosttyWebReady = import('ghostty-web').then(async mod => {
+      await mod.init()
+      return mod
+    })
   }
   return ghosttyWebReady
+}
+
+function loadXtermModules() {
+  if (!xtermModules) {
+    xtermModules = Promise.all([
+      import('@xterm/xterm'),
+      import('@xterm/addon-fit'),
+      import('@xterm/addon-web-links'),
+    ])
+    // Allow a retry after a transient chunk-load failure.
+    xtermModules.catch(() => {
+      xtermModules = null
+    })
+  }
+  return xtermModules
 }
 
 function getTerminalFontFamily(): string {
@@ -799,9 +825,7 @@ function sendTerminalWrite(terminalId: string, data: string): void {
 
 function flushPendingCriticalInput(terminalId?: string): void {
   if (!isTransportConnected()) return
-  const ids = terminalId
-    ? [terminalId]
-    : [...pendingCriticalInput.keys()]
+  const ids = terminalId ? [terminalId] : [...pendingCriticalInput.keys()]
   for (const id of ids) {
     const data = pendingCriticalInput.get(id)
     if (!data) continue
@@ -947,7 +971,8 @@ async function createTerminalForRenderer(
   }
 
   if (renderer === 'ghostty-web') {
-    await ensureGhosttyWebReady()
+    const { Terminal: GhosttyWebTerminal, FitAddon: GhosttyWebFitAddon } =
+      await ensureGhosttyWebReady()
     const terminal = new GhosttyWebTerminal(terminalOptions)
     terminal.attachCustomKeyEventHandler(event => {
       // ghostty-web uses the inverse convention from xterm.js:
@@ -960,6 +985,11 @@ async function createTerminalForRenderer(
     return { terminal, fitAddon, appearance }
   }
 
+  const [
+    { Terminal: XtermTerminal },
+    { FitAddon: XtermFitAddon },
+    { WebLinksAddon },
+  ] = await loadXtermModules()
   const terminal = new XtermTerminal({
     ...terminalOptions,
     allowProposedApi: true,
@@ -1155,9 +1185,7 @@ function handleTerminalStopped(event: TerminalStoppedEvent): void {
       ).filter(isPanelTerminal)
       if (remaining.length === 0) {
         setTerminalPanelOpen(wId, false)
-        useTerminalStore
-          .getState()
-          .setTerminalVisibleForWorktree(wId, false)
+        useTerminalStore.getState().setTerminalVisibleForWorktree(wId, false)
         useTerminalStore.getState().setModalTerminalOpen(wId, false)
       }
     }, 0)
@@ -1231,9 +1259,9 @@ function snapshotTerminalBuffer(instance: PersistentTerminal): string {
         active: {
           viewportY: number
           length: number
-          getLine(row: number):
-            | { translateToString(trimRight?: boolean): string }
-            | undefined
+          getLine(
+            row: number
+          ): { translateToString(trimRight?: boolean): string } | undefined
         }
       }
     }
@@ -1289,10 +1317,13 @@ function scheduleDetachedRendererTrim(): void {
 
   if (nextExpiry == null) return
 
-  detachedRendererTrimTimer = setTimeout(() => {
-    detachedRendererTrimTimer = null
-    trimDetachedTerminalRenderers()
-  }, Math.max(1_000, nextExpiry - Date.now()))
+  detachedRendererTrimTimer = setTimeout(
+    () => {
+      detachedRendererTrimTimer = null
+      trimDetachedTerminalRenderers()
+    },
+    Math.max(1_000, nextExpiry - Date.now())
+  )
 }
 
 function disposeDetachedRenderer(

@@ -2,7 +2,7 @@
 
 # Jean
 
-A desktop AI assistant for managing multiple projects, worktrees, and chat sessions with Claude CLI, Codex CLI, Cursor CLI, OpenCode, PI, Command Code, Grok, and Kimi Code.
+A dev environment for AI agents. Run Claude, Codex, Cursor, OpenCode, Pi, Command Code, Grok, Kimi Code, and Antigravity in parallel - each in its own git worktree - on your laptop or your own server.
 
 Tauri v2 · React 19 · Rust · TypeScript · Tailwind CSS v4 · shadcn/ui v4 · Zustand v5 · TanStack Query · Pierre Diffs · xterm.js
 
@@ -10,44 +10,46 @@ Tauri v2 · React 19 · Rust · TypeScript · Tailwind CSS v4 · shadcn/ui v4 ·
 
 ## About the Project
 
-Jean is an opinionated native desktop app built with Tauri that gives you a powerful interface for working with Claude CLI, Codex CLI, Cursor CLI, OpenCode, PI, Command Code, Grok, and Kimi Code across multiple projects. It has strong opinions about how AI-assisted development should work - managing git worktrees, chat sessions, terminals, GitHub and Linear integrations in one cohesive workflow.
+Jean is an opinionated AI agent workspace. It has strong opinions about how AI-assisted development should work: every task gets its own git worktree, agents run in parallel, and git work, reviews, terminals, and GitHub, Linear, and Sentry integrations live in one cohesive workflow.
 
-No vendor lock-in. Everything runs locally on your machine with your own CLI installations.
+Run it as a native desktop app, as a headless `jean-server` on Linux, or both: the desktop app shows local and remote projects together in one sidebar, grouped by server.
+
+No vendor lock-in. Jean uses your own CLI installations and subscriptions, and everything runs on machines you control.
 
 For more information, take a look at [jean.build](https://jean.build).
 
 ## Screenshots
 
+<p align="center"><img src="screenshots/worktrees.webp" width="820" alt="Project view with worktrees, linked pull requests, diff stats and labels" /></p>
+
 <table>
 <tr>
-<td><img src="screenshots/SCR-20260304-krym.png" width="400" alt="Screenshot 1" /></td>
-<td><img src="screenshots/SCR-20260304-ksgh.png" width="400" alt="Screenshot 2" /></td>
+<td><img src="screenshots/recent-sessions.webp" width="400" alt="Recent tab with sessions from many projects, next to parallel session tabs" /><br /><sub><b>Recent sessions & parallel agents</b></sub></td>
+<td><img src="screenshots/terminal.webp" width="400" alt="Terminal panel next to an agent session" /><br /><sub><b>Built-in terminal</b></sub></td>
 </tr>
 <tr>
-<td><img src="screenshots/SCR-20260304-ksjn.png" width="400" alt="Screenshot 3" /></td>
-<td><img src="screenshots/SCR-20260304-ksnq.png" width="400" alt="Screenshot 4" /></td>
+<td><img src="screenshots/diff-review.webp" width="400" alt="Split diff viewer with a file list" /><br /><sub><b>Diff review with line comments</b></sub></td>
+<td><img src="screenshots/magic-commands.webp" width="400" alt="Magic command palette" /><br /><sub><b>Magic commands</b></sub></td>
 </tr>
 <tr>
-<td><img src="screenshots/SCR-20260304-kstl.png" width="400" alt="Screenshot 5" /></td>
-<td><img src="screenshots/SCR-20260304-ktab.png" width="400" alt="Screenshot 6" /></td>
-</tr>
-<tr>
-<td><img src="screenshots/SCR-20260304-ktwr.png" width="400" alt="Screenshot 7" /></td>
-<td><img src="screenshots/SCR-20260304-kuhk.png" width="400" alt="Screenshot 8" /></td>
+<td><img src="screenshots/magic-prompts.webp" width="400" alt="Magic Prompts settings with backend, model, reasoning and mode" /><br /><sub><b>Magic prompts</b></sub></td>
+<td><img src="screenshots/issues.webp" width="400" alt="New session dialog with open GitHub issues" /><br /><sub><b>Start from an issue, PR, Linear or Sentry</b></sub></td>
 </tr>
 </table>
 
 ## Features
 
-- **Project & Worktree Management** - Multi-project support, linked projects for cross-project context, git worktree automation (create, archive, restore, delete), custom project avatars
-- **Session Management** - Multiple sessions per worktree, execution modes (Plan, Build, Yolo) with plan approval flows, session recap/digest, saved contexts with AI summarization, archiving with retention settings, recovery, auto-naming, canvas views
-- **AI Chat (Claude, Codex, Cursor, OpenCode, PI, Command Code, Grok, Kimi)** - Model selection and thinking/effort levels with per-mode overrides, MCP server support, multi-agent collaboration, file picker & image attachments, chat search, notification sounds, custom system prompts, custom CLI profiles
-- **Magic Commands** - Investigate issues/PRs/workflows, code review with finding tracking, AI commit messages, PR content generation, merge conflict resolution, release notes generation, customizable per-prompt model/backend/effort selection
-- **GitHub Integration** - Dashboard with Issues, PRs, Security Alerts, and Advisories tabs, Dependabot investigation, checkout PRs as worktrees, auto-archive on PR merge, workflow investigation
-- **Linear Integration** - Issue investigation, context loading, per-project API key and team configuration
-- **Developer Tools** - Multi-dock terminal (floating, left, right, bottom), command palette, open in editor (Zed, VS Code, VSCodium, Cursor, Xcode, IntelliJ), git operations (status, stash, revert, fetch/merge with conflict detection), diff viewer (unified & side-by-side), file browser with preview and editing (use the folder-tree button in the title bar, **View → Toggle File Browser**, or `Cmd/Ctrl+Shift+B`), debug panel with token usage tracking
-- **Web Access** - Every Jean instance (desktop or headless server) can expose the full UI over HTTP/WebSocket with token auth so you can use it from a browser on your network
-- **Customization** - Themes (light/dark/system), custom fonts, customizable AI prompts, configurable keybindings, mobile swipe gestures
+- **Project & Worktree Management** - Multi-project support, linked projects for cross-project context, git worktree automation (create, archive, restore, delete), worktree labels and filters, custom project avatars
+- **Session Management** - Multiple sessions per worktree, Recent tab across all projects, execution modes (Plan, Build, Yolo) with plan approval flows, `/goal` tracking, session recap/digest, saved contexts with AI summarization, archiving with retention settings, recovery, auto-naming, canvas views
+- **AI Backends** - Claude, Codex, Cursor, OpenCode, Pi, Command Code, Grok, Kimi Code, and Antigravity (beta). Model selection and thinking/effort levels with per-mode overrides, MCP server support, multi-agent collaboration, file picker & image attachments, chat search, notification sounds, custom system prompts, custom CLI profiles
+- **Magic Commands & Prompts** - Investigate issues/PRs/workflows/security alerts, code review with finding tracking, AI commit messages, PR content generation, merge conflict resolution, release notes generation; every prompt is editable with its own backend, model, effort, and mode
+- **Mr. Robot (beta)** - Polls open GitHub issues, creates one worktree per issue, drafts a plan, and can execute approved plans
+- **Integrations** - GitHub (Issues, PRs, Security Alerts, Advisories, Dependabot, checkout PRs as worktrees, auto-archive on merge), Linear, Sentry, CodeRabbit
+- **Developer Tools** - Multi-dock terminal (floating, left, right, bottom), built-in browser (desktop app), command palette, open in editor (Zed, VS Code, VSCodium, Cursor, Xcode, IntelliJ), git operations (status, stash, revert, fetch/merge with conflict detection), diff viewer (unified & side-by-side) with line comments, file browser with preview and editing (`Cmd/Ctrl+Shift+B`), usage and token tracking
+- **Opinionated Plugins** - One-click RTK (cuts tool-output tokens 60-90%) and Caveman (terse Claude replies)
+- **Local + Remote** - Add any number of `jean-server` instances to the desktop app (or install one over SSH); their projects appear next to your local ones and every action runs on the server that owns the project
+- **Web Access** - Every Jean instance (desktop or headless server) can serve the full UI over HTTP/WebSocket with token auth, including on phones
+- **Customization** - Themes (light/dark/system), custom fonts, configurable keybindings, mobile swipe gestures
 
 ## Installation
 
@@ -119,8 +121,22 @@ unless you also terminate TLS and restrict who can reach the port.
 4. Open the shown URL (includes `?token=...`) in a browser, or share it with
    devices that can reach that host
 
-The native app can also connect to a remote Jean Web Access server (title bar
-server icon → **Add remote**) while keeping the desktop shell.
+### Local + remote in the desktop app
+
+The desktop app can work with any number of Jean servers at the same time:
+
+1. Open the server menu at the top of the project sidebar → **Connections**
+   (onboarding also offers this step)
+2. Click **Add remote** and either:
+   - **Install via SSH** - enter SSH user, host/IP, and ports; Jean installs
+     `jean-server` on that machine for you, or
+   - **Existing URL** - paste the Web Access URL and access token
+3. Projects from Local and every enabled remote appear together in one sidebar,
+   grouped by server. Use the **All servers** filter to focus on one host.
+
+There is no switching: sessions, terminals, file previews, and git actions run
+on the server that owns the project. Uncheck **Include in combined dashboard**
+to hide a server without removing it.
 
 ### Headless server (`jean-server`)
 
@@ -182,8 +198,7 @@ any IP/hostname to bind only that interface. Docker images are also published
 as `ghcr.io/coollabsio/jean-server`.
 
 See [docs/headless-server.md](docs/headless-server.md) for systemd details,
-reverse proxies, updates, native remote connections (including Install via SSH
-from user + IP), and security notes.
+reverse proxies, updates, and security notes.
 
 ## Contributing
 

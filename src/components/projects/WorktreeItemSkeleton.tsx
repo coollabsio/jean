@@ -12,8 +12,9 @@ interface WorktreeItemSkeletonProps {
  * Shows a pulsing animation and the worktree name while the operation is in progress.
  */
 export function WorktreeItemSkeleton({ worktree }: WorktreeItemSkeletonProps) {
-  const { selectedWorktreeId } = useProjectsStore()
-  const isSelected = selectedWorktreeId === worktree.id
+  const isSelected = useProjectsStore(
+    state => state.selectedWorktreeId === worktree.id
+  )
   const isDeleting = worktree.status === 'deleting'
 
   return (

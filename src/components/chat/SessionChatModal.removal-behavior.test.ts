@@ -162,9 +162,11 @@ describe('SessionChatModal removal behavior', () => {
     expect(modalSource).toContain("setCloseConfirmMode('worktree')")
     expect(modalSource).toContain('onRequestCloseWorktree')
     expect(modalSource).toContain('mode={closeConfirmMode}')
-    expect(canvasSource).toContain('onRequestCloseWorktree={() => {')
     expect(canvasSource).toContain(
-      'closeWorktreeDirectly(selectedWorktreeModal.worktreeId)'
+      'onRequestCloseWorktree={handleRequestCloseModalWorktree}'
+    )
+    expect(canvasSource).toContain(
+      'closeWorktreeDirectlyRef.current(modal.worktreeId)'
     )
   })
 

@@ -1,5 +1,6 @@
 import { toast } from 'sonner'
 import { invoke } from '@/lib/transport'
+import { fileToBase64 } from '@/lib/file-base64'
 import { useChatStore } from '@/store/chat-store'
 import type {
   SaveFileResponse,
@@ -21,18 +22,6 @@ function createPlaceholderId(prefix: string): string {
 
 function getExtension(filename: string): string {
   return filename.split('.').pop()?.toLowerCase() ?? ''
-}
-
-async function fileToBase64(file: File): Promise<string> {
-  const bytes = new Uint8Array(await file.arrayBuffer())
-  // Concatenate in chunks: `binary += fromCharCode(byte)` per byte is O(n²) and
-  // janks on multi-MB images; apply() over ~32KB slices keeps it linear.
-  let binary = ''
-  const CHUNK = 0x8000
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
-  }
-  return btoa(binary)
 }
 
 export type AttachmentFileKind = 'raster' | 'text' | 'file'

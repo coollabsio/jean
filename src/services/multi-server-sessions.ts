@@ -18,14 +18,15 @@ export async function loadAllSessionsForServers(
   invokeServer: (
     serverId: string,
     command: string
-  ) => Promise<AllSessionsResponse>
+  ) => Promise<AllSessionsResponse>,
+  command: 'list_all_sessions' | 'list_unread_sessions' = 'list_all_sessions'
 ): Promise<AllSessionsResponse> {
   const responses = await Promise.allSettled(
     sources
       .filter(source => source.online)
       .map(async source => ({
         source,
-        response: await invokeServer(source.serverId, 'list_all_sessions'),
+        response: await invokeServer(source.serverId, command),
       }))
   )
 
@@ -49,14 +50,12 @@ export async function loadUnreadSessionCountForServers(
   const counts = await Promise.all(
     sources
       .filter(source => source.online)
-      .map(source =>
-        invokeServer(source.serverId, 'get_unread_session_count')
-      )
+      .map(source => invokeServer(source.serverId, 'get_unread_session_count'))
   )
   return counts.reduce((total, count) => total + count, 0)
 }
 
-function useSessionServerSources(): SessionServerSource[] {
+export function useSessionServerSources(): SessionServerSource[] {
   const native = isNativeApp()
   const connections = useRemoteConnections()
   const snapshots = useServerConnectionSnapshots()
@@ -102,6 +101,35 @@ export function useConsolidatedAllSessions(enabled = true) {
   }, [enabled, sourceKey])
 
   return query
+}
+
+/**
+ * Unread sessions only, for the finished-session popover. Lives under the
+ * ['all-sessions'] prefix so every existing invalidation also refreshes it.
+ */
+export function useConsolidatedUnreadSessions(enabled = true) {
+  const native = isNativeApp()
+  const sources = useSessionServerSources()
+  const sourceKey = sources
+    .map(source => `${source.serverId}:${source.online}`)
+    .join('|')
+
+  return useQuery({
+    queryKey: ['all-sessions', 'unread', sourceKey],
+    queryFn: () =>
+      native
+        ? loadAllSessionsForServers(
+            sources,
+            (serverId, command) =>
+              invokeForServer<AllSessionsResponse>(serverId, command),
+            'list_unread_sessions'
+          )
+        : invoke<AllSessionsResponse>('list_unread_sessions'),
+    enabled,
+    // Always refresh on open; cached rows render while the fetch runs.
+    staleTime: 0,
+    gcTime: 120_000,
+  })
 }
 
 export function useConsolidatedUnreadSessionCount() {

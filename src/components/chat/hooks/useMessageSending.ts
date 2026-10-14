@@ -704,6 +704,8 @@ export function useMessageSending({
       clearChatInputState,
       installedBackends,
       markAtBottom,
+      preferences,
+      queryClient,
       sendMessageNow,
     ]
   )

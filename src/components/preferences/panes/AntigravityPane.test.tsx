@@ -1,5 +1,6 @@
+import userEvent from '@testing-library/user-event'
 import { fireEvent, render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ReactQuery from '@tanstack/react-query'
 import { AntigravityPane } from './AntigravityPane'
 
@@ -73,18 +74,30 @@ vi.mock('@/services/antigravity-cli', () => ({
   }),
 }))
 
+beforeAll(() => {
+  HTMLElement.prototype.hasPointerCapture = vi.fn(() => false)
+  HTMLElement.prototype.setPointerCapture = vi.fn()
+  HTMLElement.prototype.releasePointerCapture = vi.fn()
+  HTMLElement.prototype.scrollIntoView = vi.fn()
+})
+
 describe('AntigravityPane', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     authData = { authenticated: true }
   })
 
-  it('shows Jean-managed and system PATH sources', () => {
+  it('shows Jean-managed and system PATH sources', async () => {
+    const user = userEvent.setup()
     render(<AntigravityPane />)
 
-    expect(screen.getByText('Jean managed')).toBeInTheDocument()
-    expect(screen.getByText('System PATH')).toBeInTheDocument()
-    expect(screen.getByText('System PATH').closest('label')).toHaveAttribute(
+    expect(
+      screen.getByRole('combobox', { name: 'Antigravity CLI source' })
+    ).toHaveTextContent('Jean managed')
+    await user.click(
+      screen.getByRole('combobox', { name: 'Antigravity CLI source' })
+    )
+    expect(screen.getByRole('option', { name: /System PATH/ })).toHaveAttribute(
       'title',
       expect.stringContaining('/usr/local/bin/antigravity')
     )
@@ -99,13 +112,14 @@ describe('AntigravityPane', () => {
     expect(screen.queryByText('0.55.0-preview')).not.toBeInTheDocument()
   })
 
-  it('persists PATH source selection', () => {
+  it('persists PATH source selection', async () => {
+    const user = userEvent.setup()
     render(<AntigravityPane />)
 
-    const pathLabel = screen.getByText('System PATH').closest('label')
-    expect(pathLabel).not.toBeNull()
-    if (!pathLabel) return
-    fireEvent.click(pathLabel)
+    await user.click(
+      screen.getByRole('combobox', { name: 'Antigravity CLI source' })
+    )
+    await user.click(screen.getByRole('option', { name: /System PATH/ }))
 
     expect(patchMutate).toHaveBeenCalledWith(
       { antigravity_cli_source: 'path' },

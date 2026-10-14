@@ -30,6 +30,7 @@ import {
   formatCursorModelLabel,
   formatOpencodeModelLabel,
   formatPiModelLabel,
+  getProviderDisplayName,
 } from '@/components/chat/toolbar/toolbar-utils'
 import { ANTIGRAVITY_MODEL_OPTIONS } from '@/components/chat/toolbar/toolbar-options'
 import { useToolbarDerivedState } from '@/components/chat/toolbar/useToolbarDerivedState'
@@ -47,6 +48,7 @@ interface DesktopBackendModelPickerProps {
   selectedProvider: string | null
   installedBackends: CliBackend[]
   customCliProfiles: CustomCliProfile[]
+  onProviderChange?: (provider: string) => void
   onModelChange: (model: string) => void
   onBackendModelChange: (backend: CliBackend, model: string) => void
 }
@@ -61,6 +63,7 @@ export function DesktopBackendModelPicker({
   selectedProvider,
   installedBackends,
   customCliProfiles,
+  onProviderChange,
   onModelChange,
   onBackendModelChange,
 }: DesktopBackendModelPickerProps) {
@@ -227,6 +230,11 @@ export function DesktopBackendModelPicker({
                   badgeClassName="text-[9px] leading-3"
                 />
                 <span className="truncate">· {selectedModelLabel}</span>
+                {onProviderChange && selectedBackend === 'claude' && (
+                  <span className="truncate text-muted-foreground">
+                    · {getProviderDisplayName(selectedProvider)}
+                  </span>
+                )}
                 {getModelFastInfo(selectedBackend, selectedModel).isFast && (
                   <Zap
                     className="h-3 w-3 shrink-0 fill-current text-warning"
@@ -274,6 +282,7 @@ export function DesktopBackendModelPicker({
           customCliProfiles={customCliProfiles}
           sessionHasMessages={sessionHasMessages}
           providerLocked={providerLocked}
+          onProviderChange={onProviderChange}
           onModelChange={onModelChange}
           onBackendModelChange={onBackendModelChange}
           onRequestClose={() => handleOpenChange(false)}

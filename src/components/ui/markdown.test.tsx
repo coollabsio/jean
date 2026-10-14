@@ -1,10 +1,23 @@
 import { describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@/test/test-utils'
+import { act, fireEvent, render, screen, waitFor } from '@/test/test-utils'
 import { Markdown, headingBefore } from './markdown'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 
-const { mockSetRow } = vi.hoisted(() => ({ mockSetRow: vi.fn() }))
+const { mockSetRow, mockReadImage } = vi.hoisted(() => ({
+  mockSetRow: vi.fn(),
+  mockReadImage: vi.fn(),
+}))
+vi.mock('@/lib/transport', async importOriginal => ({
+  ...(await importOriginal<object>()),
+  invokeForOptionalServer: mockReadImage,
+}))
+vi.mock('@/lib/remote-connections', () => ({
+  getActiveRemoteConnection: () => null,
+  getRemoteConnections: () => [
+    { id: 'remote-1', url: 'https://jean.example', token: 'image-token' },
+  ],
+}))
 vi.mock('@/lib/table-rows-prompt', async importOriginal => ({
   ...(await importOriginal<object>()),
   setTableRowInPrompt: mockSetRow,
@@ -39,7 +52,7 @@ describe('Markdown', () => {
     expect(useChatStore.getState().pinnedTables['session-1']).toBeUndefined()
   })
 
-  it('adds a row to the prompt on row click, but not on link clicks', () => {
+  it('adds a row to the prompt on row click, but not on link clicks', async () => {
     mockSetRow.mockReset()
     const table =
       '| Name | Link |\n| --- | --- |\n| a | [docs](https://x.dev) |'
@@ -53,6 +66,8 @@ describe('Markdown', () => {
     fireEvent.click(screen.getByRole('link', { name: 'docs' }))
     expect(mockSetRow).not.toHaveBeenCalled()
 
+    const focusChat = vi.fn()
+    window.addEventListener('focus-chat-input', focusChat)
     fireEvent.click(screen.getByText('a'))
     expect(mockSetRow).toHaveBeenCalledWith(
       's1',
@@ -61,7 +76,23 @@ describe('Markdown', () => {
       expect.any(Array),
       ''
     )
-    expect(screen.getByLabelText(/row 1/i)).toBeTruthy()
+    // One click adds the row and opens the note form with focus in it.
+    const note = screen.getByLabelText(/row 1/i)
+    await waitFor(() => expect(document.activeElement).toBe(note))
+    expect(focusChat).not.toHaveBeenCalled()
+
+    // Enter saves the note, then focus goes on to the chat input.
+    fireEvent.change(note, { target: { value: 'fix it' } })
+    fireEvent.keyDown(note, { key: 'Enter' })
+    expect(mockSetRow).toHaveBeenLastCalledWith(
+      's1',
+      't1',
+      0,
+      expect.any(Array),
+      'fix it'
+    )
+    await waitFor(() => expect(focusChat).toHaveBeenCalledTimes(1))
+    window.removeEventListener('focus-chat-input', focusChat)
   })
 
   it('checks the checklist row when the row is added to the prompt', () => {
@@ -78,6 +109,25 @@ describe('Markdown', () => {
     expect(
       useChatStore.getState().tableCheckedRows.s2?.t2 ?? new Set()
     ).toEqual(new Set([1]))
+  })
+
+  it('checks the row in the background when checklist mode is off', () => {
+    mockSetRow.mockReset()
+    useChatStore.setState({ tableCheckedRows: {}, hiddenTableChecklists: {} })
+    render(
+      <Markdown sessionId="s3" tableKey="t3">
+        {'| Name |\n| --- |\n| a |\n| b |'}
+      </Markdown>
+    )
+
+    fireEvent.click(screen.getByText('b'))
+    // No checklist column while checklist mode is off.
+    expect(screen.queryByLabelText(/Toggle row/)).toBeNull()
+
+    act(() => useChatStore.getState().enableTableChecklist('s3', 't3'))
+    expect(
+      (screen.getByLabelText('Toggle row 2') as HTMLElement).dataset.state
+    ).toBe('checked')
   })
 
   it('supports keyboard row navigation, add with note, and removal', () => {
@@ -139,6 +189,89 @@ describe('Markdown', () => {
       0,
       expect.any(Array),
       null
+    )
+  })
+
+  it('keeps focus on the next note form when one form closes another', async () => {
+    useChatStore.setState({
+      pendingTextFiles: {
+        s4: [{ id: 'tf', tableRows: { tableKey: 't4', rows: [0, 1] } }],
+      },
+    } as never)
+    render(
+      <Markdown sessionId="s4" tableKey="t4">
+        {'| Name |\n| --- |\n| a |\n| b |'}
+      </Markdown>
+    )
+
+    fireEvent.click(screen.getByText('a'))
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByLabelText(/Row 1 is in the prompt/)
+      )
+    )
+
+    // A click on the next row closes the first form and opens the next one.
+    // The first form's deferred close must not pull focus back to its row.
+    const rowB = screen.getByText('b')
+    fireEvent.pointerDown(rowB)
+    fireEvent.click(rowB)
+    await act(() => new Promise(resolve => setTimeout(resolve, 20)))
+    expect(screen.queryByLabelText(/Row 1 is in the prompt/)).toBeNull()
+    expect(document.activeElement).toBe(
+      screen.getByLabelText(/Row 2 is in the prompt/)
+    )
+  })
+
+  it('keeps a typed note when the user clicks its row or outside the form', async () => {
+    mockSetRow.mockReset()
+    useChatStore.setState({
+      pendingTextFiles: {
+        s5: [{ id: 'tf', tableRows: { tableKey: 't5', rows: [0] } }],
+      },
+    } as never)
+    render(
+      <Markdown sessionId="s5" tableKey="t5">
+        {'| Name |\n| --- |\n| a |\n| b |'}
+      </Markdown>
+    )
+    const rowA = screen.getByText('a')
+    const noteLabel = /Row 1 is in the prompt/
+
+    fireEvent.click(rowA)
+    fireEvent.change(screen.getByLabelText(noteLabel), {
+      target: { value: 'draft' },
+    })
+    // Radix starts to listen for outside clicks one tick after it opens.
+    await act(() => new Promise(resolve => setTimeout(resolve, 20)))
+
+    // A click on the row of the open form keeps the form and the draft.
+    fireEvent.pointerDown(rowA)
+    fireEvent.click(rowA)
+    const note = screen.getByLabelText(noteLabel) as HTMLTextAreaElement
+    expect(note.value).toBe('draft')
+    expect(document.activeElement).toBe(note)
+
+    // Escape discards the draft and returns focus to the row.
+    fireEvent.keyDown(note, { key: 'Escape' })
+    await act(() => new Promise(resolve => setTimeout(resolve, 20)))
+    expect(screen.queryByLabelText(noteLabel)).toBeNull()
+    expect(mockSetRow).not.toHaveBeenCalled()
+    expect(document.activeElement).toBe(rowA.closest('tr'))
+
+    // A click outside the form saves a changed note.
+    fireEvent.click(rowA)
+    fireEvent.change(screen.getByLabelText(noteLabel), {
+      target: { value: 'kept' },
+    })
+    await act(() => new Promise(resolve => setTimeout(resolve, 20)))
+    fireEvent.pointerDown(document.body)
+    expect(mockSetRow).toHaveBeenCalledWith(
+      's5',
+      't5',
+      0,
+      expect.any(Array),
+      'kept'
     )
   })
 
@@ -333,6 +466,88 @@ describe('Markdown', () => {
     expect(image?.getAttribute('src')).toBe(
       '/api/files/linear-context-images/ENG-123/image.png'
     )
+  })
+
+  it('routes app-data images through the session owner, not the local transport', () => {
+    const path = '/root/.local/share/com.jean.desktop/pasted-images/shot.png'
+    const { container, rerender } = render(
+      <Markdown sessionId="remote-1:session-1">{`![Shot](${path})`}</Markdown>
+    )
+    expect(container.querySelector('img')?.getAttribute('src')).toBe(
+      `https://jean.example/api/files/${encodeURIComponent(path)}?token=image-token`
+    )
+
+    rerender(
+      <Markdown sessionId="local:session-1">{`![Shot](${path})`}</Markdown>
+    )
+    expect(container.querySelector('img')?.getAttribute('src')).toBe(
+      '/api/files/pasted-images/shot.png'
+    )
+  })
+
+  it.each([undefined, 'local:session-1', 'remote-1:session-1'])(
+    'loads screenshots outside app data from their owner (%s)',
+    async sessionId => {
+      mockReadImage.mockReset()
+      mockReadImage.mockResolvedValue({
+        mimeType: 'image/png',
+        data: 'c2hvdA==',
+      })
+      const { container } = render(
+        <Markdown sessionId={sessionId}>
+          {'![Shot](/tmp/browser-shot.png)'}
+        </Markdown>
+      )
+      await waitFor(() => {
+        expect(container.querySelector('img')?.getAttribute('src')).toBe(
+          'data:image/png;base64,c2hvdA=='
+        )
+      })
+      expect(mockReadImage).toHaveBeenCalledWith(
+        sessionId?.split(':')[0],
+        'read_file_base64',
+        { path: '/tmp/browser-shot.png' }
+      )
+    }
+  )
+
+  it('does not display the previous server image after switching sessions', async () => {
+    mockReadImage.mockReset()
+    let completeFirst!: (result: { mimeType: string; data: string }) => void
+    mockReadImage
+      .mockImplementationOnce(
+        () =>
+          new Promise(resolve => {
+            completeFirst = resolve
+          })
+      )
+      .mockResolvedValueOnce({ mimeType: 'image/png', data: 'bmV3' })
+    const content = '![Shot](/tmp/browser-shot.png)'
+    const { container, rerender } = render(
+      <Markdown sessionId="remote-1:session-1">{content}</Markdown>
+    )
+    rerender(<Markdown sessionId="remote-2:session-2">{content}</Markdown>)
+    await waitFor(() => {
+      expect(container.querySelector('img')?.getAttribute('src')).toBe(
+        'data:image/png;base64,bmV3'
+      )
+    })
+    completeFirst({ mimeType: 'image/png', data: 'b2xk' })
+    await waitFor(() => {
+      expect(container.querySelector('img')?.getAttribute('src')).toBe(
+        'data:image/png;base64,bmV3'
+      )
+    })
+  })
+
+  it('keeps HTTPS images unchanged without reading them as files', () => {
+    mockReadImage.mockReset()
+    const url = 'https://example.com/screenshot.png'
+    const { container } = render(
+      <Markdown sessionId="remote-1:session-1">{`![Shot](${url})`}</Markdown>
+    )
+    expect(container.querySelector('img')?.getAttribute('src')).toBe(url)
+    expect(mockReadImage).not.toHaveBeenCalled()
   })
 
   it('preserves spaces from Grok-style word-boundary stream deltas', () => {

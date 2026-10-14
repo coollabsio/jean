@@ -565,6 +565,47 @@ pub fn list_all_session_ids(app: &AppHandle) -> Result<Vec<String>, String> {
     Ok(session_ids)
 }
 
+/// Worktree ID of a session, from the session index files. New sessions have
+/// no metadata file until their first run, so callers that only have a
+/// session ID (Jean MCP) use this as a fallback.
+pub fn find_session_worktree_id(
+    app: &AppHandle,
+    session_id: &str,
+) -> Result<Option<String>, String> {
+    find_session_worktree_id_in_dir(&get_index_dir(app)?, session_id)
+}
+
+fn find_session_worktree_id_in_dir(
+    index_dir: &Path,
+    session_id: &str,
+) -> Result<Option<String>, String> {
+    let entries = fs::read_dir(index_dir)
+        .map_err(|e| format!("Failed to read session index directory: {e}"))?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_none_or(|ext| ext != "json") {
+            continue;
+        }
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        // Cheap filter before parsing every index file.
+        if !text.contains(session_id) {
+            continue;
+        }
+        let Ok(index) = serde_json::from_str::<serde_json::Value>(&text) else {
+            continue;
+        };
+        let has_session = index["sessions"]
+            .as_array()
+            .is_some_and(|sessions| sessions.iter().any(|s| s["id"] == session_id));
+        if has_session {
+            return Ok(index["worktree_id"].as_str().map(str::to_string));
+        }
+    }
+    Ok(None)
+}
+
 /// Delete orphaned session data directories that are not referenced by any index file.
 /// Returns the number of orphaned directories deleted.
 pub fn cleanup_orphaned_session_data(app: &AppHandle) -> Result<u32, String> {
@@ -653,7 +694,8 @@ fn cleanup_orphaned_session_indexes_in_dir(
             continue;
         };
 
-        if valid_index_stems.contains(stem) {
+        // Agent sessions use reserved IDs with no worktree record.
+        if valid_index_stems.contains(stem) || crate::agents::is_agent_worktree_id(stem) {
             continue;
         }
 
@@ -797,11 +839,20 @@ pub fn load_sessions(
         } else {
             // No metadata found - create minimal session from index entry
             // Use resolved backend from preferences instead of hardcoded Claude
+            let backend = super::commands::resolve_default_backend(app, Some(worktree_id));
+            let execution_mode = super::commands::default_execution_policy(
+                app,
+                worktree_id,
+                &backend,
+                crate::load_preferences_sync(app)
+                    .ok()
+                    .map(|prefs| prefs.default_execution_mode),
+            );
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs();
-            Session {
+            let mut session = Session {
                 id: entry.id.clone(),
                 name: entry.name.clone(),
                 order: entry.order,
@@ -810,7 +861,7 @@ pub fn load_sessions(
                 last_message_at: None,
                 messages: vec![],
                 message_count: Some(entry.message_count),
-                backend: super::commands::resolve_default_backend(app, Some(worktree_id)),
+                backend,
                 claude_session_id: None,
                 codex_thread_id: None,
                 codex_goal: None,
@@ -826,6 +877,7 @@ pub fn load_sessions(
                 selected_effort_level: None,
                 selected_provider: None,
                 selected_execution_mode: None,
+                selected_permission_mode: Some("yolo".to_string()),
                 session_naming_completed: false,
                 archived_at: entry.archived_at,
                 archived_by_base_close: None,
@@ -855,6 +907,7 @@ pub fn load_sessions(
                 pending_plan_message_id: None,
                 enabled_mcp_servers: None,
                 table_checked_rows: std::collections::HashMap::new(),
+                hidden_table_checklists: vec![],
                 pinned_tables: vec![],
                 last_run_status: None,
                 last_run_execution_mode: None,
@@ -864,7 +917,10 @@ pub fn load_sessions(
                 total_runs: 0,
                 loaded_run_start_index: 0,
                 scheduled_wakeup: None,
-            }
+            };
+            // Persist an explicit policy: a missing field reloads as legacy Plan.
+            session.set_execution_policy(Some(execution_mode));
+            session
         };
         sessions.push(session);
     }
@@ -904,11 +960,20 @@ where
         } else {
             // No metadata found - create minimal session from index entry
             // Use resolved backend from preferences instead of hardcoded Claude
+            let backend = super::commands::resolve_default_backend(app, Some(worktree_id));
+            let execution_mode = super::commands::default_execution_policy(
+                app,
+                worktree_id,
+                &backend,
+                crate::load_preferences_sync(app)
+                    .ok()
+                    .map(|prefs| prefs.default_execution_mode),
+            );
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs();
-            Session {
+            let mut session = Session {
                 id: entry.id.clone(),
                 name: entry.name.clone(),
                 order: entry.order,
@@ -917,7 +982,7 @@ where
                 last_message_at: None,
                 messages: vec![],
                 message_count: Some(entry.message_count),
-                backend: super::commands::resolve_default_backend(app, Some(worktree_id)),
+                backend,
                 claude_session_id: None,
                 codex_thread_id: None,
                 codex_goal: None,
@@ -933,6 +998,7 @@ where
                 selected_effort_level: None,
                 selected_provider: None,
                 selected_execution_mode: None,
+                selected_permission_mode: Some("yolo".to_string()),
                 session_naming_completed: false,
                 archived_at: entry.archived_at,
                 archived_by_base_close: None,
@@ -962,6 +1028,7 @@ where
                 pending_plan_message_id: None,
                 enabled_mcp_servers: None,
                 table_checked_rows: std::collections::HashMap::new(),
+                hidden_table_checklists: vec![],
                 pinned_tables: vec![],
                 last_run_status: None,
                 last_run_execution_mode: None,
@@ -971,7 +1038,10 @@ where
                 total_runs: 0,
                 loaded_run_start_index: 0,
                 scheduled_wakeup: None,
-            }
+            };
+            // Persist an explicit policy: a missing field reloads as legacy Plan.
+            session.set_execution_policy(Some(execution_mode));
+            session
         };
         hydrated_sessions.push(session);
     }
@@ -1549,6 +1619,30 @@ mod tests {
     }
 
     #[test]
+    fn find_session_worktree_id_reads_index_files() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let index = serde_json::json!({
+            "worktree_id": "wt-1",
+            "sessions": [{ "id": "s-1" }, { "id": "s-2" }],
+        });
+        std::fs::write(temp.path().join("wt-1.json"), index.to_string()).unwrap();
+        std::fs::write(temp.path().join("broken.json"), "{ s-3").unwrap();
+        assert_eq!(
+            find_session_worktree_id_in_dir(temp.path(), "s-2").unwrap(),
+            Some("wt-1".to_string())
+        );
+        assert_eq!(
+            find_session_worktree_id_in_dir(temp.path(), "s-3").unwrap(),
+            None
+        );
+        // A substring match alone (no session with that ID) is not a match.
+        assert_eq!(
+            find_session_worktree_id_in_dir(temp.path(), "s-").unwrap(),
+            None
+        );
+    }
+
+    #[test]
     fn test_cleanup_orphaned_session_indexes_keeps_linked_and_base_indexes() {
         use std::collections::HashSet;
 
@@ -1560,6 +1654,10 @@ mod tests {
         std::fs::write(index_dir.join("orphan-wt.json"), "{}").expect("write orphan index");
         std::fs::write(index_dir.join("base-old-project.json"), "{}").expect("write stale base");
         std::fs::write(index_dir.join("notes.txt"), "ignore").expect("write non-json");
+        let jean_agent_index = "__jean_agent__.json";
+        let custom_agent_index = "__agent_reviewer__.json";
+        std::fs::write(index_dir.join(jean_agent_index), "{}").expect("write jean agent index");
+        std::fs::write(index_dir.join(custom_agent_index), "{}").expect("write agent index");
 
         let valid_stems = HashSet::from(["wt-1".to_string(), "base-project-1".to_string()]);
 
@@ -1572,6 +1670,8 @@ mod tests {
         assert!(!index_dir.join("orphan-wt.json").exists());
         assert!(!index_dir.join("base-old-project.json").exists());
         assert!(index_dir.join("notes.txt").exists());
+        assert!(index_dir.join(jean_agent_index).exists());
+        assert!(index_dir.join(custom_agent_index).exists());
     }
 
     #[test]

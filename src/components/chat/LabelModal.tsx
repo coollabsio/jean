@@ -279,7 +279,6 @@ export function LabelModal({
       getLabelData,
       applyLabel,
       saveEditedColor,
-      mode,
     ]
   )
 

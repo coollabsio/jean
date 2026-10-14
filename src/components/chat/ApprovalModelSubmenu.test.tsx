@@ -186,7 +186,7 @@ describe('ApprovalModelSubmenu', () => {
       </DropdownMenu>
     )
 
-    expect(screen.queryByText('YOLO')).toBeNull()
+    expect(screen.queryByText('Full access')).toBeNull()
     expect(screen.queryByText('Build')).toBeNull()
     expect(screen.getAllByText('Current Session')).toHaveLength(2)
     expect(screen.getAllByText('New Session')).toHaveLength(2)

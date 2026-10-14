@@ -84,7 +84,9 @@ export function useBackgroundInvestigation(): void {
   useEffect(() => {
     if (!hasAutoInvestigate) return
     return queryClient.getQueryCache().subscribe(event => {
-      if (event.type !== 'updated') return
+      // Only new data matters; fetch-status transitions (fetch/pending/
+      // invalidate) would just re-render App without a ready worktree.
+      if (event.type !== 'updated' || event.action.type !== 'success') return
       const key = event.query.queryKey
       if (
         key[0] === projectsQueryKeys.all[0] &&
@@ -637,6 +639,7 @@ async function processBackgroundInvestigation(
     setSelectedModel,
     setSelectedProvider,
     setSelectedBackend,
+    setExecutionMode,
     setExecutingMode,
     clearStreamingContent,
     clearToolCalls,
@@ -665,6 +668,7 @@ async function processBackgroundInvestigation(
   setSelectedModel(sessionId, selectedModel)
   setSelectedProvider(sessionId, provider)
   setSelectedBackend(sessionId, backend)
+  setExecutionMode(sessionId, executionMode)
   setExecutingMode(sessionId, executionMode)
   clearStreamingContent(sessionId)
   clearToolCalls(sessionId)

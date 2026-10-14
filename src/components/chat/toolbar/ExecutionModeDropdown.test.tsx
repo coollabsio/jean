@@ -5,9 +5,9 @@ import { ExecutionModeDropdown } from './ExecutionModeDropdown'
 
 describe('ExecutionModeDropdown', () => {
   it.each([
-    ['plan', 'Plan'],
-    ['build', 'Build'],
-    ['yolo', 'Yolo'],
+    ['plan', 'Full access'],
+    ['build', 'Auto-accept edits'],
+    ['yolo', 'Full access'],
   ] as const)('shows %s label in the trigger', (mode, label) => {
     render(
       <ExecutionModeDropdown
@@ -17,11 +17,11 @@ describe('ExecutionModeDropdown', () => {
     )
 
     expect(
-      screen.getByRole('button', { name: new RegExp(`^${label}$`, 'i') })
+      screen.getByRole('button', { name: new RegExp(`^Permissions: ${label}$`, 'i') })
     ).toBeInTheDocument()
   })
 
-  it('keeps mode options selectable from the dropdown', async () => {
+  it('leaves Plan when a permission is selected', async () => {
     const user = userEvent.setup()
     const onSetExecutionMode = vi.fn()
 
@@ -32,11 +32,8 @@ describe('ExecutionModeDropdown', () => {
       />
     )
 
-    await user.click(screen.getByRole('button', { name: /^plan$/i }))
-    await user.click(
-      await screen.findByRole('menuitemradio', { name: /build/i })
-    )
-
-    expect(onSetExecutionMode).toHaveBeenCalledWith('build')
+    await user.click(screen.getByRole('button', { name: 'Permissions: Full access' }))
+    await user.click(screen.getByRole('menuitemradio', { name: /Supervised/ }))
+    expect(onSetExecutionMode).toHaveBeenCalledWith('supervised')
   })
 })

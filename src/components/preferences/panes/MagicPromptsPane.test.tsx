@@ -41,6 +41,7 @@ vi.mock('@/hooks/useInstalledBackends', () => ({
 }))
 
 vi.mock('@/services/opencode-cli', () => ({
+  useRefreshOpencodeModels: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useAvailableOpencodeModels: () => ({ data: undefined }),
 }))
 
@@ -68,7 +69,7 @@ vi.mock('@/services/antigravity-cli', () => ({
 
 vi.mock('@/services/model-catalog', () => ({
   getCatalogDefaultModelOptions: () => codexCatalogOptionsMock,
-  getCatalogModelOptions: (_catalog: unknown, backend: 'claude' | 'codex') =>
+  getCatalogModelOptions: (_catalog: unknown, backend: string) =>
     backend === 'claude'
       ? [
           { value: 'claude-fable-5-1', label: 'Claude Fable 5.1' },
@@ -76,7 +77,9 @@ vi.mock('@/services/model-catalog', () => ({
           { value: 'claude-opus-5', label: 'Claude Opus 5' },
           { value: 'claude-sonnet-5', label: 'Claude Sonnet 5' },
         ]
-      : codexCatalogOptionsMock,
+      : backend === 'codex'
+        ? codexCatalogOptionsMock
+        : [],
   getCatalogModelReasoning: (
     _catalog: unknown,
     backend: string,
@@ -113,6 +116,7 @@ vi.mock('@/services/model-catalog', () => ({
           }
         : { supportsFast: false, isFast: false, baseModel: model },
   useModelCatalog: () => ({ data: undefined }),
+  useRefreshModelCatalog: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }))
 
 class ResizeObserverMock {
@@ -146,7 +150,7 @@ describe('MagicPromptsPane', () => {
     render(<MagicPromptsPane />)
 
     await user.click(screen.getByRole('combobox', { name: 'Default mode' }))
-    await user.click(screen.getByRole('option', { name: 'Yolo' }))
+    await user.click(screen.getByRole('option', { name: 'Full access' }))
 
     expect(mutateMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -206,7 +210,7 @@ describe('MagicPromptsPane', () => {
     render(<MagicPromptsPane />)
 
     await user.click(screen.getByRole('combobox', { name: 'Model' }))
-    await user.click(screen.getByRole('option', { name: 'GPT 6 Astra' }))
+    await user.click(screen.getByRole('option', { name: /GPT 6 Astra/ }))
 
     expect(mutateMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -453,14 +457,16 @@ describe('MagicPromptsPane', () => {
     await user.click(
       screen.getByRole('combobox', { name: 'Model for all prompts' })
     )
-    expect(screen.getByRole('option', { name: 'Future model' })).toBeVisible()
-    expect(screen.getByRole('option', { name: 'Future Grok' })).toBeVisible()
+    await user.click(screen.getByRole('tab', { name: 'Codex' }))
+    expect(screen.getByRole('option', { name: /Future model/ })).toBeVisible()
+    await user.click(screen.getByRole('tab', { name: 'Grok' }))
+    expect(screen.getByRole('option', { name: /Future Grok/ })).toBeVisible()
     await user.type(
-      screen.getByPlaceholderText('Search backends and models...'),
+      screen.getByPlaceholderText('Search Grok models...'),
       'Future Grok'
     )
     expect(screen.queryByRole('option', { name: 'Future model' })).toBeNull()
-    await user.click(screen.getByRole('option', { name: 'Future Grok' }))
+    await user.click(screen.getByRole('option', { name: /Future Grok/ }))
     await user.click(
       screen.getByRole('button', { name: 'Apply to all prompts' })
     )
@@ -471,9 +477,7 @@ describe('MagicPromptsPane', () => {
     expect(new Set(Object.values(patch.magic_prompt_backends))).toEqual(
       new Set(['grok'])
     )
-    expect(
-      screen.queryByPlaceholderText('Search backends and models...')
-    ).toBeNull()
+    expect(screen.queryByPlaceholderText('Search Grok models...')).toBeNull()
   })
 
   it.each([
@@ -487,7 +491,12 @@ describe('MagicPromptsPane', () => {
       await user.click(
         screen.getByRole('combobox', { name: 'Model for all prompts' })
       )
-      await user.click(screen.getByRole('option', { name: label }))
+      await user.click(
+        screen.getByRole('tab', {
+          name: backend === 'codex' ? 'Codex' : 'Claude',
+        })
+      )
+      await user.click(screen.getByRole('option', { name: new RegExp(label) }))
       expect(mutateMock).not.toHaveBeenCalled()
       await user.click(
         screen.getByRole('button', { name: 'Apply to all prompts' })
@@ -530,13 +539,14 @@ describe('MagicPromptsPane', () => {
       screen.getByRole('combobox', { name: 'Model for all prompts' })
     )
     expect(screen.queryByRole('option', { name: /Fast/ })).toBeNull()
-    await user.click(screen.getByRole('option', { name: 'GPT 6 Astra' }))
+    await user.click(screen.getByRole('tab', { name: 'Codex' }))
+    await user.click(screen.getByRole('option', { name: /GPT 6 Astra/ }))
     expect(fastSwitch).toBeEnabled()
     await user.click(fastSwitch)
     await user.click(
       screen.getByRole('combobox', { name: 'Mode for all prompts' })
     )
-    await user.click(screen.getByRole('option', { name: 'Yolo' }))
+    await user.click(screen.getByRole('option', { name: 'Full access' }))
     await user.click(
       screen.getByRole('button', { name: 'Apply to all prompts' })
     )
@@ -617,7 +627,9 @@ describe('MagicPromptsPane', () => {
     await user.click(
       screen.getByRole('combobox', { name: 'Model for all prompts' })
     )
-    expect(screen.getByText('No available models found.')).toBeVisible()
+    expect(
+      screen.getByRole('combobox', { name: 'Model for all prompts' })
+    ).toBeDisabled()
     expect(screen.queryAllByRole('option')).toHaveLength(0)
     expect(mutateMock).not.toHaveBeenCalled()
   })
@@ -713,7 +725,7 @@ describe('MagicPromptsPane', () => {
     ).toHaveTextContent('Plan')
 
     await user.click(screen.getByRole('combobox', { name: 'Review 2 mode' }))
-    await user.click(screen.getByRole('option', { name: 'Yolo' }))
+    await user.click(screen.getByRole('option', { name: 'Full access' }))
 
     expect(mutateMock).toHaveBeenCalledWith(
       expect.objectContaining({

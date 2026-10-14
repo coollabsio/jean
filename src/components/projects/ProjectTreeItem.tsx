@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDownUp, ChevronDown } from '@/components/icons/reicon'
 import {
   convertFileSrc,
@@ -13,7 +13,6 @@ import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import { useIsMobile } from '@/hooks/use-mobile'
-import { useSidebarWidth } from '@/components/layout/SidebarWidthContext'
 import { useRemotePicker } from '@/hooks/useRemotePicker'
 import {
   useAppDataDir,
@@ -25,10 +24,6 @@ import {
   useGitStatus,
   performGitSync,
 } from '@/services/git-status'
-import { NewIssuesBadge } from '@/components/shared/NewIssuesBadge'
-import { OpenPRsBadge } from '@/components/shared/OpenPRsBadge'
-import { FailedRunsBadge } from '@/components/shared/FailedRunsBadge'
-import { SecurityAlertsBadge } from '@/components/shared/SecurityAlertsBadge'
 import {
   Tooltip,
   TooltipTrigger,
@@ -44,35 +39,20 @@ interface ProjectTreeItemProps {
   searchQuery?: string
 }
 
-const STATUS_BADGES_MIN_SIDEBAR_WIDTH = 320
-
-export function shouldShowProjectStatusBadges(
-  sidebarWidth: number,
-  isMobile: boolean,
-  isExpanded: boolean,
-  isSelected: boolean
-): boolean {
-  return (
-    !isMobile &&
-    sidebarWidth >= STATUS_BADGES_MIN_SIDEBAR_WIDTH &&
-    (isExpanded || isSelected)
-  )
-}
-
 export function ProjectTreeItem({
   project,
   searchQuery = '',
 }: ProjectTreeItemProps) {
   const isMobile = useIsMobile()
-  const sidebarWidth = useSidebarWidth()
   const isOffline = project.offline === true
-  const {
-    expandedProjectIds,
-    selectedProjectId,
-    selectProject,
-    toggleProjectExpanded,
-  } = useProjectsStore()
-  const isProjectExpanded = expandedProjectIds.has(project.id)
+  const isProjectExpanded = useProjectsStore(state =>
+    state.expandedProjectIds.has(project.id)
+  )
+  const selectedProjectId = useProjectsStore(state => state.selectedProjectId)
+  const selectProject = useProjectsStore(state => state.selectProject)
+  const toggleProjectExpanded = useProjectsStore(
+    state => state.toggleProjectExpanded
+  )
   const shouldLoadWorktrees =
     !isOffline &&
     (Boolean(searchQuery) ||
@@ -84,10 +64,18 @@ export function ProjectTreeItem({
       enabled: shouldLoadWorktrees,
     }
   )
-  const worktrees = loadedWorktrees ?? []
+  const worktrees = useMemo(
+    () =>
+      (loadedWorktrees ?? []).filter(
+        worktree => worktree.origin !== 'auto_fix'
+      ),
+    [loadedWorktrees]
+  )
   const { data: appDataDir = '' } = useAppDataDir()
   // Prefer loaded worktrees: project.worktree_count can be stale
-  const worktreeCount = loadedWorktrees?.length ?? project.worktree_count ?? 0
+  const worktreeCount = loadedWorktrees
+    ? worktrees.length
+    : (project.worktree_count ?? 0)
   const hasWorktrees = !isOffline && worktreeCount > 0
   const projectMatchesSearch = matchesProjectSearch(project, searchQuery)
   const hasMatchingWorktree = worktrees.some(worktree =>
@@ -149,12 +137,6 @@ export function ProjectTreeItem({
 
   // Project is only selected if it's the selected project AND no worktree is active
   const isSelected = selectedProjectId === project.id && !activeWorktreeId
-  const showStatusBadges = shouldShowProjectStatusBadges(
-    sidebarWidth,
-    isMobile,
-    isExpanded,
-    isSelected
-  )
 
   // Inline rename (double-click), matching folder/worktree patterns
   const [isEditing, setIsEditing] = useState(false)
@@ -398,21 +380,6 @@ export function ProjectTreeItem({
                 </TooltipContent>
               </Tooltip>
             )}
-
-          {!isOffline && showStatusBadges && (
-            <div className="flex items-center gap-1">
-              <NewIssuesBadge
-                projectPath={project.path}
-                projectId={project.id}
-              />
-              <OpenPRsBadge projectPath={project.path} projectId={project.id} />
-              <SecurityAlertsBadge
-                projectPath={project.path}
-                projectId={project.id}
-              />
-              <FailedRunsBadge projectPath={project.path} />
-            </div>
-          )}
 
           <CollapsedCountBadge
             count={worktreeCount}

@@ -74,6 +74,8 @@ export interface MagicPrompts {
   parallel_execution: string | null
   /** Global system prompt appended to every chat session (like ~/.claude/CLAUDE.md) */
   global_system_prompt: string | null
+  /** Replaces the global system prompt for sessions of server projects */
+  server_system_prompt: string | null
   /** Hidden prompt prepended when switching providers within a Jean session */
   provider_switch_handoff: string | null
   /** Prompt for investigating Dependabot vulnerability alerts */
@@ -103,7 +105,10 @@ Investigate the loaded GitHub {issueWord} ({issueRefs})
 1. Validate the issue before deeper investigation:
    - Read the issue context file(s), including its current status, description, and comments
    - Confirm that the issue is still valid, relevant, and not already resolved or superseded
-   - Decide whether it makes sense to work on it now; if not, stop and explain why
+   - Take the request with a grain of salt: do not assume it must be fixed or added just because it was reported
+   - Check whether it is actually needed: is the bug real and reproducible, or is it user error, a misconfiguration, or expected behavior? Does the feature fit the project's scope, or does existing functionality already cover it?
+   - Weigh the value against the cost: how many users it affects, added complexity, maintenance burden, and regression risk
+   - Decide whether it makes sense to work on it now and is worth fixing or adding at all; if not, stop and explain why, and recommend a response (for example: close, ask for more information, or won't fix)
 2. Analyze the problem:
    - What is the expected vs actual behavior?
    - Are there error messages, stack traces, or reproduction steps?
@@ -134,6 +139,7 @@ Investigate the loaded GitHub {issueWord} ({issueRefs})
 - Ask clarifying questions if requirements are unclear
 - If multiple solutions exist, explain trade-offs
 - Reference specific file paths and line numbers
+- Present found issues, gaps, risks, and recommended fixes in Markdown tables (for example: | # | Finding | Location | Impact | Recommended fix |), not long prose lists
 
 </guidelines>`
 
@@ -150,7 +156,10 @@ Investigate the loaded GitHub {prWord} ({prRefs})
 1. Validate the PR before deeper investigation:
    - Read the PR context file(s), including its current status, description, reviews, and comments
    - Confirm that the PR is still valid, relevant, and not already merged, closed, or superseded
-   - Decide whether it makes sense to work on it now; if not, stop and explain why
+   - Take the PR with a grain of salt: do not assume it should be merged just because it was opened
+   - Check whether it is actually needed: does it solve a real problem, fit the project's scope, and not duplicate existing functionality?
+   - Weigh the value against the cost: added complexity, maintenance burden, regression risk, and the size of the change compared to its benefit
+   - Decide whether it makes sense to work on it now and is worth merging at all; if not, stop and explain why, and recommend a response (for example: close, request changes, or ask for more context)
 2. Understand the changes:
    - What is the PR trying to accomplish?
    - What branches are involved (head → base)?
@@ -190,6 +199,7 @@ Investigate the loaded GitHub {prWord} ({prRefs})
 - Flag any security concerns prominently, even minor ones
 - If multiple approaches exist, explain trade-offs
 - Reference specific file paths and line numbers
+- Present found issues, gaps, risks, and recommended fixes in Markdown tables (for example: | # | Finding | Location | Impact | Recommended fix |), not long prose lists
 
 </guidelines>`
 
@@ -379,6 +389,7 @@ Investigate the failed GitHub Actions workflow run for "{workflowName}" on branc
 - If the error is in code, reference specific file paths and line numbers
 - If it's a flaky test, suggest how to make it more reliable
 - If progress is blocked by infrastructure, permissions, or a non-actionable external failure, stop and report the blocker clearly
+- Present found issues, gaps, risks, and recommended fixes in Markdown tables (for example: | # | Finding | Location | Impact | Recommended fix |), not long prose lists
 
 </guidelines>`
 
@@ -420,6 +431,7 @@ Investigate the loaded Dependabot {alertWord} ({alertRefs})
 - Don't just recommend "upgrade" — assess compatibility impact
 - Reference specific file paths where the affected package is used
 - If multiple alerts are loaded, address each one separately
+- Present found issues, gaps, risks, and recommended fixes in Markdown tables (for example: | # | Finding | Location | Impact | Recommended fix |), not long prose lists
 
 </guidelines>`
 
@@ -466,6 +478,7 @@ Investigate the loaded security {advisoryWord} ({advisoryRefs})
 - Check for the same vulnerability pattern across the entire codebase, not just the reported location
 - Reference specific file paths and line numbers
 - If multiple advisories are loaded, address each one separately
+- Present found issues, gaps, risks, and recommended fixes in Markdown tables (for example: | # | Finding | Location | Impact | Recommended fix |), not long prose lists
 
 </guidelines>`
 
@@ -518,6 +531,7 @@ Investigate the loaded Linear {linearWord} ({linearRefs})
 - Ask clarifying questions if requirements are unclear
 - If multiple solutions exist, explain trade-offs
 - Reference specific file paths and line numbers
+- Present found issues, gaps, risks, and recommended fixes in Markdown tables (for example: | # | Finding | Location | Impact | Recommended fix |), not long prose lists
 
 </guidelines>`
 
@@ -560,6 +574,7 @@ Investigate the loaded Sentry {sentryWord} ({sentryRefs})
 - Be thorough but focused - investigate deeply without getting sidetracked
 - If multiple solutions exist, explain the trade-offs
 - Reference specific file paths and line numbers
+- Present found issues, gaps, risks, and recommended fixes in Markdown tables (for example: | # | Finding | Location | Impact | Recommended fix |), not long prose lists
 
 </guidelines>`
 
@@ -629,9 +644,9 @@ export const DEFAULT_GLOBAL_SYSTEM_PROMPT = `Always use ASD-STE100 Simplified Te
 ### 1. Planning Guidance
 - For non-trivial tasks (3+ steps or architectural decisions), prefer planning before implementation when the current execution mode has not already authorized execution.
 - If something goes sideways, STOP and re-plan immediately - don't keep pushing
-- Use plan mode for verification steps when the current execution mode is plan; in build/yolo, verify directly after implementing.
+- Use plan mode for verification steps when the current execution mode is plan; in build/full access, verify directly after implementing.
 - Write detailed specs upfront to reduce ambiguity
-- Keep plans concise but complete enough for zero-context handoff (YOLO/Build in a new worktree must not require re-scanning the repo). Prefer short wording over thin checklists.
+- Keep plans concise but complete enough for zero-context handoff (Full access/Build in a new worktree must not require re-scanning the repo). Prefer short wording over thin checklists.
 - When the current execution mode is plan, use the backend's native plan tool/UI call when available (Claude ExitPlanMode, Codex \`<proposed_plan>\` / collaboration Plan mode, Cursor/OpenCode equivalent), not plain text only.
 - For unresolved questions while planning, prefer the backend-native interactive question UI instead of plain text when available: Claude AskUserQuestion, Codex request_user_input, OpenCode question. If no such interactive question tool is present in your current tool set (headless/\`--print\` runs may omit Claude AskUserQuestion), do NOT skip the question and do NOT dead-end on a tool search — instead ask inline as a short numbered list of options (1, 2, 3...) and tell the user to reply with a number.
 - For Codex specifically, when the current execution mode is plan: do not write plan files or code; when the plan is ready wrap it in \`<proposed_plan>...</proposed_plan>\` so Jean can show the approval UI. Do not use the \`update_plan\` checklist tool in plan mode.
@@ -667,8 +682,7 @@ export const DEFAULT_GLOBAL_SYSTEM_PROMPT = `Always use ASD-STE100 Simplified Te
 - Do not re-run a passing check when the code it covers has not changed since.
 - Write new tests only for behavior that can break silently: business logic, parsing/serialization, state transitions, persistence, and a regression test for each fixed bug.
 - Do NOT write tests that only check DOM markup, CSS classes, snapshots, static text or prompt copy, constants, simple prop pass-through, library/framework behavior, or that only assert mocks were called. Verify UI changes in the running app instead.
-- Before UI, HTTP, browser, or end-to-end verification, call Jean MCP \`get_run_environments\` and test against the returned url/port/command when a Run environment is available.
-- For the current selected project, if there is no other browser testing method, use the Agent Browser when it is available.
+- If a UI check needs a browser and no other browser tool is available, use the Agent Browser.
 
 ### 6. Demand Elegance (Balanced)
 - For non-trivial changes: pause and ask "is there a more elegant way?"
@@ -696,6 +710,7 @@ export const DEFAULT_GLOBAL_SYSTEM_PROMPT = `Always use ASD-STE100 Simplified Te
 - **Simplicity First**: Make every change as simple as possible. Impact minimal code.
 - **VERY IMPORTANT: Keep Code Simple**: Do not over-engineer. Always implement the simplest maintainable solution. Avoid extra abstractions, frameworks, configuration, or future-proofing unless clearly required.
 - **Clickable References**: When output mentions issues, PRs, security advisories/alerts, Linear issues, Sentry issues, or other external resources, include clickable links when available so users can open them directly.
+- **Tables for Findings**: When you report found issues, gaps, risks, or recommended fixes, present them in a Markdown table (for example: | # | Finding | Location | Impact | Recommended fix |) instead of long prose lists.
 - **No Laziness**: Find root causes. No temporary fixes. Senior developer standards.
 - **Minimal Impact**: Changes should only touch what's necessary. Avoid introducing bugs.
 
@@ -710,12 +725,20 @@ export const DEFAULT_GLOBAL_SYSTEM_PROMPT = `Always use ASD-STE100 Simplified Te
 ## Jean Run Environment
 - When you need to test a running app (UI, HTTP, browser, smoke, e2e), call Jean MCP \`get_run_environments\` first (pass this worktreeId when known).
 - If an environment is running, test against its \`url\`, port, and startup command. Do not guess localhost ports or start a second dev server when Jean already has one.
-- If nothing is running and verification needs a live server, say so and use the returned/startup command rather than inventing a different command or port.
+- If nothing is running and verification needs a live server, start it with Jean MCP \`start_run_environment\`. Do not start a dev server by hand. If no Run command is configured, say so; do not invent a command or port.
 - In how-to-test notes, include the exact URL/port you used.
 
 ## Important!
 
 - After each finished task, please write a few bullet points on how to test the changes.`
+
+/** Default server system prompt (must match default_server_system_prompt in jean-core) */
+export const DEFAULT_SERVER_SYSTEM_PROMPT = `You help the user inspect and manage the server "{server_name}".
+{connection}
+Default to read-only work: status, logs, configs, processes, disk, network, containers.
+Do not change the server (write files, restart services, install or remove packages, delete data) unless the user asks for it. Before a change, show the exact command and its impact.
+Keep commands non-interactive and bounded (for example \`--no-pager\`, \`tail -n 200\`). Do not print secrets.
+If a command needs root, try \`sudo -n <command>\`. If sudo denies it, tell the user what access is missing; do not work around it.`
 
 export const DEFAULT_PROVIDER_SWITCH_HANDOFF_PROMPT = `You are continuing a Jean chat session after the user switched AI backends.
 
@@ -873,6 +896,7 @@ export const DEFAULT_MAGIC_PROMPTS: MagicPrompts = {
   session_naming: null,
   parallel_execution: null,
   global_system_prompt: null,
+  server_system_prompt: null,
   provider_switch_handoff: null,
   investigate_security_alert: null,
   investigate_advisory: null,
@@ -966,13 +990,13 @@ function makeMagicPromptModelsPreset(
   }
 }
 
-/** Codex preset: use GPT-5.6 Sol for all magic prompts */
+/** Codex preset: use GPT-6.1 Sol for all magic prompts */
 export const CODEX_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
-  makeMagicPromptModelsPreset('gpt-5.6-sol')
+  makeMagicPromptModelsPreset('gpt-6.1-sol')
 
-/** Codex fast preset: use GPT-5.6 Sol Fast for all magic prompts */
+/** Codex fast preset: use GPT-6.1 Sol Fast for all magic prompts */
 export const CODEX_FAST_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
-  makeMagicPromptModelsPreset('gpt-5.6-sol-fast')
+  makeMagicPromptModelsPreset('gpt-6.1-sol-fast')
 
 /** GPT-5.6 Codex presets for all magic prompts */
 export const CODEX_56_SOL_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
@@ -990,7 +1014,7 @@ export const CODEX_56_TERRA_FAST_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels 
 
 /** OpenCode preset for all magic prompts */
 export const OPENCODE_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
-  makeMagicPromptModelsPreset('opencode/gpt-5.6-sol')
+  makeMagicPromptModelsPreset('opencode/gpt-6.1-sol')
 
 /** PI preset for all magic prompts */
 export const PI_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
@@ -1314,6 +1338,7 @@ export interface AppPreferences {
   auto_pull_base_branch: boolean // Auto-pull base branch before creating a new worktree
   auto_archive_on_pr_merged: boolean // Auto-archive worktrees when their PR is merged
   debug_mode_enabled: boolean // Show debug panel in chat sessions
+  agents_enabled?: boolean // Experimental: show the Agents tab
   default_enabled_mcp_servers: string[] // MCP server names enabled by default (empty = none)
   known_mcp_servers: string[] // All MCP server names ever seen (prevents re-enabling user-disabled servers)
   has_seen_feature_tour: boolean // Whether user has seen the feature tour onboarding
@@ -1343,7 +1368,7 @@ export interface AppPreferences {
   fast_mode_models: string[] // Model keys ("backend:baseModel") with fast tier last enabled
 
   confirm_session_close: boolean // Show confirmation dialog before closing sessions/worktrees
-  default_execution_mode: ExecutionMode // Default execution mode for new sessions: 'plan', 'build', or 'yolo'
+  default_execution_mode: ExecutionMode // Default workflow/permission policy for new sessions
   default_backend: CliBackend // Default CLI backend for new sessions
   default_new_session_kind: NewSessionKind // Default action for CMD+T: 'chat', 'terminal', or a CLI backend
   selected_codex_model: CodexModel // Default Codex model
@@ -1376,6 +1401,7 @@ export interface AppPreferences {
   linear_api_key: string | null // Global Linear personal API key (inherited by all projects)
   sentry_auth_token?: string | null // Global Sentry auth token (inherited by all projects)
   magic_models_auto_initialized: boolean // Whether magic prompt models were auto-set based on installed backends
+  commit_close_issue?: boolean // Commit magic: add "Closes #N" for the worktree's linked GitHub issue
   claude_cli_source: 'jean' | 'path' // Claude CLI source: 'jean' (managed) or 'path' (system PATH)
   codex_cli_source: 'jean' | 'path' // Codex CLI source: 'jean' (managed) or 'path' (system PATH)
   opencode_cli_source: 'jean' | 'path' // OpenCode CLI source: 'jean' (managed) or 'path' (system PATH)
@@ -1559,6 +1585,7 @@ export type ClaudeModel =
   | 'claude-opus-5-5'
   | 'claude-opus-5'
   | 'claude-sonnet-5-5'
+  | 'claude-haiku-5-5'
   | 'claude-sonnet-5'
   | 'claude-opus-4-8'
   | 'claude-opus-4-8[1m]'
@@ -1581,6 +1608,7 @@ export type ClaudeModel =
 export const modelOptions: { value: ClaudeModel; label: string }[] = [
   { value: 'claude-opus-5-5', label: 'Claude Opus 5.5' },
   { value: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5' },
+  { value: 'claude-haiku-5-5', label: 'Claude Haiku 5.5' },
   { value: 'claude-fable-5-1', label: 'Claude Fable 5.1' },
   { value: 'claude-fable-5', label: 'Claude Fable 5' },
   { value: 'claude-opus-5', label: 'Claude Opus 5' },
@@ -1942,7 +1970,7 @@ export function normalizeCodexModel(model: string): CodexModel {
     ]
   }
 
-  return isCodexModel(model) ? model : 'gpt-5.6-sol'
+  return isCodexModel(model) ? model : 'gpt-6.1-sol'
 }
 
 export type CodexReasoningEffort = string
@@ -2471,6 +2499,7 @@ export const defaultPreferences: AppPreferences = {
   auto_pull_base_branch: true, // Default: enabled
   auto_archive_on_pr_merged: true, // Default: enabled
   debug_mode_enabled: false, // Default: disabled
+  agents_enabled: false, // Default: disabled (experimental)
   default_enabled_mcp_servers: [], // Default: no MCP servers enabled
   known_mcp_servers: [], // Default: no known servers
   has_seen_feature_tour: false, // Default: not seen
@@ -2491,11 +2520,11 @@ export const defaultPreferences: AppPreferences = {
   favorite_base_branches: [],
   fast_mode_models: [],
   confirm_session_close: true, // Default: enabled (show confirmation)
-  default_execution_mode: 'plan', // Default: plan mode
+  default_execution_mode: 'yolo', // Default: Full access
   default_backend: 'claude', // Default: Claude
   default_new_session_kind: 'chat', // Default: Jean Chat for CMD+T
-  selected_codex_model: 'gpt-5.6-sol', // Default: latest Codex model
-  selected_opencode_model: 'opencode/gpt-5.6-sol', // Default OpenCode model
+  selected_codex_model: 'gpt-6.1-sol', // Default: latest Codex model
+  selected_opencode_model: 'opencode/gpt-6.1-sol', // Default OpenCode model
   selected_cursor_model: 'cursor/auto', // Default Cursor model
   selected_pi_model: 'pi/sonnet', // Default PI model
   selected_commandcode_model: 'commandcode/default', // Default Command Code model
@@ -2524,6 +2553,7 @@ export const defaultPreferences: AppPreferences = {
   linear_api_key: null, // Default: no global Linear API key
   sentry_auth_token: null, // Default: no global Sentry auth token
   magic_models_auto_initialized: false, // Default: not yet auto-set
+  commit_close_issue: false,
   claude_cli_source: 'jean', // Default: Jean-managed
   codex_cli_source: 'jean', // Default: Jean-managed
   opencode_cli_source: 'jean', // Default: Jean-managed

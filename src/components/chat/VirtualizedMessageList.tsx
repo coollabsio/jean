@@ -118,8 +118,6 @@ interface VirtualizedMessageListProps {
   isFindingFixed: (sessionId: string, key: string) => boolean
   /** Callback to copy a user message back to the input field */
   onCopyToInput?: (message: ChatMessage) => void
-  /** Clear the session's active goal (goal badge on the /goal message) */
-  onClearGoal?: () => Promise<void>
   /** Hide approve buttons (e.g. for Codex which has no native approval flow) */
   hideApproveButtons?: boolean
   /** Whether we should scroll to bottom (new message arrived while at bottom) */
@@ -176,7 +174,6 @@ export const VirtualizedMessageList = memo(
         areQuestionsSkipped,
         isFindingFixed,
         onCopyToInput,
-        onClearGoal,
         hideApproveButtons,
         shouldScrollToBottom,
         onScrollToBottomHandled,
@@ -476,7 +473,7 @@ export const VirtualizedMessageList = memo(
                   message={message}
                   getMessages={getMessages}
                   messageIndex={globalIndex}
-                  totalMessages={totalMessages}
+                  isLastMessage={globalIndex === totalMessages - 1}
                   lastPlanMessageIndex={lastPlanMessageIndex}
                   hasFollowUpMessage={hasFollowUpMessage}
                   sessionId={sessionId}
@@ -510,7 +507,6 @@ export const VirtualizedMessageList = memo(
                   areQuestionsSkipped={areQuestionsSkipped}
                   isFindingFixed={isFindingFixed}
                   onCopyToInput={onCopyToInput}
-                  onClearGoal={onClearGoal}
                   hideApproveButtons={hideApproveButtons}
                   durationMs={durationMs}
                 />

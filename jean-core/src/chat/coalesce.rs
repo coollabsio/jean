@@ -12,6 +12,7 @@
 //! session (tool_use/thinking/done/error/...) so event ordering is
 //! preserved, and before terminal events on completion/cancel/error paths.
 
+use std::io::{self, Read};
 use std::time::{Duration, Instant};
 
 /// How long consecutive deltas are buffered before being released as one
@@ -90,9 +91,34 @@ impl ChunkCoalescer {
     }
 }
 
+/// `Read` adapter that runs `on_read` before every read of the inner reader.
+///
+/// Wrapped in a `BufReader`, the inner read only happens once the buffer is
+/// drained — i.e. right before the caller may block waiting for more output.
+/// Flushing a [`ChunkCoalescer`] there means buffered text is never held back
+/// while a blocking `lines()` / `read_line()` stream idles mid-turn.
+pub struct FlushBeforeRead<R, F> {
+    inner: R,
+    on_read: F,
+}
+
+impl<R, F> FlushBeforeRead<R, F> {
+    pub fn new(inner: R, on_read: F) -> Self {
+        Self { inner, on_read }
+    }
+}
+
+impl<R: Read, F: FnMut()> Read for FlushBeforeRead<R, F> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        (self.on_read)();
+        self.inner.read(buf)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{BufRead, BufReader};
 
     #[test]
     fn push_before_window_buffers_without_releasing() {
@@ -225,5 +251,19 @@ mod tests {
         }
 
         assert_eq!(released, deltas.concat());
+    }
+
+    #[test]
+    fn flush_before_read_runs_only_when_buffer_is_drained() {
+        let reads = std::cell::Cell::new(0);
+        let reader = BufReader::new(FlushBeforeRead::new("a\nb\n".as_bytes(), || {
+            reads.set(reads.get() + 1);
+        }));
+
+        let lines: Vec<String> = reader.lines().map(Result::unwrap).collect();
+
+        assert_eq!(lines, ["a", "b"]);
+        // One read fills the buffer with both lines, one more hits EOF.
+        assert_eq!(reads.get(), 2);
     }
 }

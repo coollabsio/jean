@@ -784,6 +784,8 @@ pub fn build_thread_start_params(
         }
     }
 
+    params["approvalsReviewer"] = serde_json::json!("user");
+
     // Permission mode mapping.
     //
     // Plan mode must never ask the user for permissions. It is read-only, so
@@ -796,7 +798,7 @@ pub fn build_thread_start_params(
     // whether MCP servers are configured — but setting mcp_elicitations=false
     // is a no-op when no MCP servers exist, so it's safe to use in build mode.
     match execution_mode.unwrap_or("plan") {
-        "build" => {
+        "build" | "auto" => {
             params["approvalPolicy"] = serde_json::json!({
                 "granular": {
                     "mcp_elicitations": false,
@@ -806,6 +808,19 @@ pub fn build_thread_start_params(
                 }
             });
             params["sandbox"] = serde_json::json!("workspace-write");
+            params["approvalsReviewer"] = serde_json::json!(if execution_mode == Some("auto") {
+                "auto_review"
+            } else {
+                "user"
+            });
+            if execution_mode == Some("auto") {
+                params["approvalPolicy"] = serde_json::json!("on-request");
+            }
+        }
+        "supervised" => {
+            params["approvalPolicy"] = serde_json::json!("untrusted");
+            params["approvalsReviewer"] = serde_json::json!("user");
+            params["sandbox"] = serde_json::json!("read-only");
         }
         "yolo" => {
             params["approvalPolicy"] = serde_json::json!("never");
@@ -927,6 +942,11 @@ pub fn build_turn_start_params(
     // accidentally re-sandbox yolo turns and break tools such as Playwright on
     // macOS (issue #328 / PR #362).
     let mode = execution_mode.unwrap_or("plan");
+    params["approvalsReviewer"] = serde_json::json!(if mode == "auto" {
+        "auto_review"
+    } else {
+        "user"
+    });
     match mode {
         "yolo" => {
             params["approvalPolicy"] = serde_json::json!("never");
@@ -934,7 +954,7 @@ pub fn build_turn_start_params(
                 "type": "dangerFullAccess",
             });
         }
-        "build" => {
+        "build" | "auto" => {
             params["approvalPolicy"] = serde_json::json!({
                 "granular": {
                     "mcp_elicitations": false,
@@ -943,6 +963,9 @@ pub fn build_turn_start_params(
                     "request_permissions": true,
                 }
             });
+            if mode == "auto" {
+                params["approvalPolicy"] = serde_json::json!("on-request");
+            }
             let mut writable_roots = vec![serde_json::json!(working_dir.to_string_lossy())];
             for dir in add_dirs {
                 writable_roots.push(serde_json::json!(dir));
@@ -957,6 +980,11 @@ pub fn build_turn_start_params(
                 "excludeTmpdirEnvVar": false,
                 "excludeSlashTmp": false,
             });
+        }
+        "supervised" => {
+            params["approvalPolicy"] = serde_json::json!("untrusted");
+            params["sandboxPolicy"] =
+                serde_json::json!({ "type": "readOnly", "networkAccess": true });
         }
         // "plan" or default: read-only, never ask for approvals
         _ => {
@@ -1077,7 +1105,7 @@ pub fn execute_codex_via_server(
     let thread_id = match (|| -> Result<String, String> {
         if let Some(tid) = existing_thread_id {
             // Resume existing thread
-            let resume_params = build_thread_start_params(
+            let mut resume_params = build_thread_start_params(
                 working_dir,
                 model,
                 execution_mode,
@@ -1086,6 +1114,7 @@ pub fn execute_codex_via_server(
                 Some(model_verbosity),
                 codex_provider,
             );
+            apply_agent_browser_session(&mut resume_params, session_id);
             let mut full_params =
                 serde_json::json!({ "threadId": tid, "persistExtendedHistory": true });
             // Copy overridable fields
@@ -1093,6 +1122,7 @@ pub fn execute_codex_via_server(
                 "model",
                 "cwd",
                 "approvalPolicy",
+                "approvalsReviewer",
                 "sandbox",
                 "config",
                 "serviceTier",
@@ -1107,6 +1137,7 @@ pub fn execute_codex_via_server(
                 Err(e) => {
                     log::warn!("Failed to resume thread {tid}: {e}, starting new thread");
                     start_new_thread(
+                        session_id,
                         working_dir,
                         model,
                         execution_mode,
@@ -1119,6 +1150,7 @@ pub fn execute_codex_via_server(
             }
         } else {
             start_new_thread(
+                session_id,
                 working_dir,
                 model,
                 execution_mode,
@@ -1811,7 +1843,24 @@ pub fn resume_codex_after_crash(
 
 /// Start a new Codex thread via app-server.
 #[allow(clippy::too_many_arguments)]
+/// Give this thread's agent-browser MCP server its own browser session, so
+/// parallel Jean sessions do not share one browser.
+fn apply_agent_browser_session(params: &mut serde_json::Value, session_id: &str) {
+    let overrides = [
+        crate::agent_browser::codex_session_config_override(session_id),
+        // Jean MCP must see the real session (agents, approvals, current context).
+        crate::jean_mcp_config::codex_session_config_override(session_id),
+    ];
+    for (key, value) in overrides.into_iter().flatten() {
+        if !params["config"].is_object() {
+            params["config"] = serde_json::json!({});
+        }
+        params["config"][key] = value;
+    }
+}
+
 fn start_new_thread(
+    session_id: &str,
     working_dir: &std::path::Path,
     model: Option<&str>,
     execution_mode: Option<&str>,
@@ -1822,7 +1871,7 @@ fn start_new_thread(
 ) -> Result<String, String> {
     use super::codex_server;
 
-    let params = build_thread_start_params(
+    let mut params = build_thread_start_params(
         working_dir,
         model,
         execution_mode,
@@ -1831,6 +1880,7 @@ fn start_new_thread(
         model_verbosity,
         codex_provider,
     );
+    apply_agent_browser_session(&mut params, session_id);
 
     let result = codex_server::send_request("thread/start", params)?;
     let thread_id = result
@@ -5445,6 +5495,45 @@ fn build_one_shot_codex_args(
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn permission_policies_apply_to_threads_and_every_turn() {
+        for (mode, approval, sandbox, reviewer) in [
+            ("supervised", "untrusted", "readOnly", "user"),
+            ("auto", "on-request", "workspaceWrite", "auto_review"),
+            ("yolo", "never", "dangerFullAccess", "user"),
+            ("plan", "never", "readOnly", "user"),
+        ] {
+            let thread = build_thread_start_params(
+                std::path::Path::new("/tmp/worktree"),
+                Some("gpt-5.4"),
+                Some(mode),
+                false,
+                None,
+                None,
+                None,
+            );
+            let turn = build_turn_start_params(
+                "thread-1",
+                "hello",
+                std::path::Path::new("/tmp/worktree"),
+                Some(mode),
+                None,
+                &[],
+                &[],
+                Some("gpt-5.4"),
+            );
+            assert_eq!(thread["approvalPolicy"], approval);
+            assert_eq!(thread["approvalsReviewer"], reviewer);
+            assert_eq!(turn["approvalPolicy"], approval);
+            assert_eq!(turn["approvalsReviewer"], reviewer);
+            assert_eq!(turn["sandboxPolicy"]["type"], sandbox);
+            assert_eq!(
+                turn["collaborationMode"]["mode"],
+                if mode == "plan" { "plan" } else { "default" }
+            );
+        }
+    }
 
     #[test]
     fn reloads_mcp_servers_with_app_server_protocol_before_thread_start() {

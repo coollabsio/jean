@@ -152,7 +152,8 @@ describe('ChatInput attachments', () => {
     activeSessionId = 'session-1',
     investigateIssuePrompt?: string,
     investigatePRPrompt?: string,
-    onSubmit = vi.fn()
+    onSubmit = vi.fn(),
+    executionMode: 'plan' | 'build' | 'yolo' = 'build'
   ) => {
     const formRef = createRef<HTMLFormElement>()
     const inputRef = createRef<HTMLTextAreaElement>()
@@ -162,7 +163,7 @@ describe('ChatInput attachments', () => {
         activeSessionId={activeSessionId}
         activeWorktreePath="/tmp/worktree"
         isSending={false}
-        executionMode="build"
+        executionMode={executionMode}
         focusChatShortcut="⌘K"
         onSubmit={onSubmit}
         onCancel={vi.fn()}
@@ -229,6 +230,27 @@ describe('ChatInput attachments', () => {
       issueNumber: 123,
       projectPath: '/tmp/worktree',
     })
+  })
+
+  it('tells the agent to fix the issue when investigating in yolo mode', () => {
+    invokeMock.mockResolvedValue(undefined)
+    const textarea = renderInput(
+      'session-1',
+      'Investigate the loaded GitHub {issueWord} ({issueRefs})',
+      undefined,
+      vi.fn(),
+      'yolo'
+    )
+
+    fireEvent.change(textarea, { target: { value: '#42' } })
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Investigate selected issue' })
+    )
+
+    expect(textarea.value).toContain(
+      'Investigate the loaded GitHub issue (#123)'
+    )
+    expect(textarea.value).toContain('<yolo_investigation_fix>')
   })
 
   it('does not wait for the query refetch before sending the investigation', async () => {

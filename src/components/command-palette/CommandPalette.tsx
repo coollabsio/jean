@@ -1,9 +1,18 @@
 import { useState, useCallback, useMemo } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { Server } from '@/components/icons/reicon'
 import { useUIStore } from '@/store/ui-store'
 import { useCommandContext } from '@/hooks/use-command-context'
 import { usePreferences } from '@/services/preferences'
-import { useProjects, useAppDataDir } from '@/services/projects'
+import {
+  openServerProject,
+  useProjects,
+  useAppDataDir,
+} from '@/services/projects'
 import { useChatStore } from '@/store/chat-store'
+import { useAgentsEnabledServers } from '@/components/agents/agents-feature'
+import { useAgentsList, type AgentSummary } from '@/services/agents'
+import { AgentIcon } from '@/components/icons/JeanAgentIcon'
 import { useProjectsStore } from '@/store/projects-store'
 import {
   convertFileSrc,
@@ -19,6 +28,10 @@ import {
   useRemoteConnections,
 } from '@/lib/remote-connections'
 import { LOCAL_SERVER_ID } from '@/types/server-resource'
+import {
+  isLegacyConnectionCopy,
+  serverSubtitle,
+} from '@/components/projects/servers/servers-view'
 import {
   CommandDialog,
   CommandInput,
@@ -36,9 +49,16 @@ interface ProjectCommand {
   serverName: string
   avatarUrl: string | null
   avatarFallback: string
+  isServer: boolean
   group: string
   keywords: string[]
   execute: () => void
+}
+
+/** Agent row label: agents on other servers show the server name. */
+function agentDescription(agent: AgentSummary, multiServer: boolean) {
+  const base = agent.description || 'Open agent'
+  return multiServer ? `${base} · ${agent.serverName}` : base
 }
 
 export function CommandPalette() {
@@ -48,6 +68,7 @@ export function CommandPalette() {
   const { data: preferences } = usePreferences()
   const commandContext = useCommandContext(preferences)
   const [search, setSearch] = useState('')
+  const queryClient = useQueryClient()
 
   // Fetch projects for dynamic commands
   const { data: projects = [] } = useProjects()
@@ -65,11 +86,21 @@ export function CommandPalette() {
     ? (selectedProject.serverId ?? LOCAL_SERVER_ID)
     : getActiveConnectionId()
 
+  // Agents (only when the Agents feature is on for a server)
+  const agentServers = useAgentsEnabledServers()
+  const { data: agents = [] } = useAgentsList(agentServers)
+  const multiServerAgents = new Set(agents.map(a => a.serverId)).size > 1
+
   // Create dynamic project commands (sorted by last-accessed, most recent first)
   // Current project is excluded so the previous project is first (quick CMD+K → Enter switching)
   const projectCommands = useMemo((): ProjectCommand[] => {
     return projects
-      .filter(p => !p.is_folder && p.id !== selectedProjectId)
+      .filter(
+        p =>
+          !p.is_folder &&
+          p.id !== selectedProjectId &&
+          !isLegacyConnectionCopy(p)
+      )
       .sort((a, b) => {
         const aIsActive = (a.serverId ?? LOCAL_SERVER_ID) === activeServerId
         const bIsActive = (b.serverId ?? LOCAL_SERVER_ID) === activeServerId
@@ -79,42 +110,52 @@ export function CommandPalette() {
         const bTime = projectAccessTimestamps[b.id] ?? 0
         return bTime - aTime
       })
-      .map(project => ({
-        id: `goto-project-${project.id}`,
-        label: project.name,
-        description: native
-          ? `Open on ${project.serverName ?? 'Local'}`
-          : undefined,
-        serverName: project.serverName ?? 'Local',
-        avatarUrl: project.avatar_path
-          ? project.serverId
-            ? convertServerFileSrc(project.serverId, project.avatar_path)
-            : appDataDir
-              ? convertFileSrc(`${appDataDir}/${project.avatar_path}`)
-              : null
-          : project.default_avatar_path
+      .map(project => {
+        const isServer = !!project.server
+        return {
+          id: `goto-project-${project.id}`,
+          label: project.name,
+          description: isServer
+            ? serverSubtitle(project)
+            : native
+              ? `Open on ${project.serverName ?? 'Local'}`
+              : undefined,
+          serverName: project.serverName ?? 'Local',
+          avatarUrl: project.avatar_path
             ? project.serverId
-              ? convertServerProjectFileSrc(
-                  project.serverId,
-                  project.default_avatar_path
-                )
-              : convertProjectFileSrc(project.default_avatar_path)
-            : null,
-        avatarFallback: project.name[0]?.toUpperCase() ?? '?',
-        group: 'projects',
-        keywords: [
-          'project',
-          'switch',
-          'open',
-          project.name.toLowerCase(),
-          (project.serverName ?? 'local').toLowerCase(),
-        ],
-        execute: () => {
-          useChatStore.getState().clearActiveWorktree()
-          useProjectsStore.getState().selectProject(project.id)
-        },
-      }))
+              ? convertServerFileSrc(project.serverId, project.avatar_path)
+              : appDataDir
+                ? convertFileSrc(`${appDataDir}/${project.avatar_path}`)
+                : null
+            : project.default_avatar_path
+              ? project.serverId
+                ? convertServerProjectFileSrc(
+                    project.serverId,
+                    project.default_avatar_path
+                  )
+                : convertProjectFileSrc(project.default_avatar_path)
+              : null,
+          avatarFallback: project.name[0]?.toUpperCase() ?? '?',
+          isServer,
+          group: isServer ? 'servers' : 'projects',
+          keywords: [
+            isServer ? 'server' : 'project',
+            'switch',
+            'open',
+            project.name.toLowerCase(),
+            (project.serverName ?? 'local').toLowerCase(),
+          ],
+          execute: () => {
+            // Leave the Agents page so the project is visible
+            useUIStore.getState().setRailSection('workspace')
+            useChatStore.getState().clearActiveWorktree()
+            if (isServer) openServerProject(project.id, queryClient)
+            else useProjectsStore.getState().selectProject(project.id)
+          },
+        }
+      })
   }, [
+    queryClient,
     projects,
     appDataDir,
     projectAccessTimestamps,
@@ -137,6 +178,18 @@ export function CommandPalette() {
         )
       : projectCommands
 
+    const filteredAgents =
+      agentServers.length === 0
+        ? []
+        : searchLower
+          ? agents.filter(
+              agent =>
+                agent.name.toLowerCase().includes(searchLower) ||
+                agent.serverName.toLowerCase().includes(searchLower) ||
+                'agent'.includes(searchLower)
+            )
+          : agents
+
     // Group static commands
     const staticGroups = staticCommands.reduce(
       (acc, command) => {
@@ -148,8 +201,24 @@ export function CommandPalette() {
       {} as Record<string, typeof staticCommands>
     )
 
-    return { staticGroups, projectCommands: filteredProjectCommands }
-  }, [commandContext, search, projectCommands])
+    return {
+      staticGroups,
+      projectCommands: filteredProjectCommands.filter(cmd => !cmd.isServer),
+      serverCommands: filteredProjectCommands.filter(cmd => cmd.isServer),
+      agents: filteredAgents,
+    }
+  }, [commandContext, search, projectCommands, agents, agentServers.length])
+
+  const handleAgentSelect = useCallback(
+    (agentId: string) => {
+      setCommandPaletteOpen(false)
+      setSearch('')
+      const ui = useUIStore.getState()
+      ui.setRailSection('agents')
+      ui.setSelectedAgentId(agentId)
+    },
+    [setCommandPaletteOpen]
+  )
 
   // Handle command execution
   const handleCommandSelect = useCallback(
@@ -183,6 +252,40 @@ export function CommandPalette() {
     [setCommandPaletteOpen]
   )
 
+  const renderProjectItem = (cmd: ProjectCommand) => (
+    <CommandItem
+      key={cmd.id}
+      value={`${cmd.id} ${cmd.label} ${cmd.description ?? ''}`}
+      onSelect={() => handleCommandSelect(cmd.id)}
+      className="items-start"
+    >
+      {/* One line tall so the icon centers on the label's first line */}
+      <span className="flex h-lh shrink-0 items-center leading-snug">
+        {cmd.isServer ? (
+          <Server className="size-4 text-muted-foreground" />
+        ) : cmd.avatarUrl ? (
+          <img
+            src={cmd.avatarUrl}
+            alt={cmd.label}
+            className="size-4 rounded object-cover"
+          />
+        ) : (
+          <span className="flex size-4 items-center justify-center rounded bg-muted-foreground/20 text-[10px] leading-none font-medium uppercase">
+            {cmd.avatarFallback}
+          </span>
+        )}
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="truncate leading-snug">{cmd.label}</span>
+        {cmd.description && (
+          <span className="text-xs leading-snug text-muted-foreground">
+            {cmd.description}
+          </span>
+        )}
+      </div>
+    </CommandItem>
+  )
+
   return (
     <CommandDialog
       open={commandPaletteOpen}
@@ -200,37 +303,35 @@ export function CommandPalette() {
       <CommandList className="max-h-[70dvh] sm:max-h-[300px]">
         <CommandEmpty>No results found.</CommandEmpty>
 
-        {/* Projects stay at the top for quick switching */}
+        {/* Projects and servers stay at the top for quick switching */}
         {commandGroups.projectCommands.length > 0 && (
           <CommandGroup heading="Projects">
-            {commandGroups.projectCommands.map(cmd => (
+            {commandGroups.projectCommands.map(renderProjectItem)}
+          </CommandGroup>
+        )}
+        {commandGroups.serverCommands.length > 0 && (
+          <CommandGroup heading="Servers">
+            {commandGroups.serverCommands.map(renderProjectItem)}
+          </CommandGroup>
+        )}
+
+        {commandGroups.agents.length > 0 && (
+          <CommandGroup heading="Agents">
+            {commandGroups.agents.map(agent => (
               <CommandItem
-                key={cmd.id}
-                value={`${cmd.id} ${cmd.label} ${cmd.description ?? ''}`}
-                onSelect={() => handleCommandSelect(cmd.id)}
+                key={agent.id}
+                value={`agent-${agent.id} ${agent.name} ${agent.serverName}`}
+                onSelect={() => handleAgentSelect(agent.id)}
                 className="items-start"
               >
-                {/* One line tall so the icon centers on the label's first line */}
                 <span className="flex h-lh shrink-0 items-center leading-snug">
-                  {cmd.avatarUrl ? (
-                    <img
-                      src={cmd.avatarUrl}
-                      alt={cmd.label}
-                      className="size-4 rounded object-cover"
-                    />
-                  ) : (
-                    <span className="flex size-4 items-center justify-center rounded bg-muted-foreground/20 text-[10px] leading-none font-medium uppercase">
-                      {cmd.avatarFallback}
-                    </span>
-                  )}
+                  <AgentIcon icon={agent.icon} className="size-4" />
                 </span>
                 <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span className="truncate leading-snug">{cmd.label}</span>
-                  {cmd.description && (
-                    <span className="text-xs leading-snug text-muted-foreground">
-                      {cmd.description}
-                    </span>
-                  )}
+                  <span className="truncate leading-snug">{agent.name}</span>
+                  <span className="truncate text-xs leading-snug text-muted-foreground">
+                    {agentDescription(agent, multiServerAgents)}
+                  </span>
                 </div>
               </CommandItem>
             ))}

@@ -34,7 +34,11 @@ import { getHunkLineStats } from '@/lib/diff-stats'
 import { useTheme } from '@/hooks/use-theme'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { usePreferences } from '@/services/preferences'
-import { invoke } from '@/lib/transport'
+import { invokeForOptionalServer } from '@/lib/transport'
+import {
+  checkpointQueryKeys,
+  getAiCheckpointDiff,
+} from '@/services/checkpoints'
 import { canOpenInEditor } from '@/lib/environment'
 import { FilePathCopyRow } from './FilePathCopyRow'
 
@@ -248,6 +252,30 @@ export function patchFromEdits(
   return null
 }
 
+/**
+ * Pick one file's section out of a multi-file `git diff` patch.
+ * `path` is relative to the repository root.
+ */
+export function extractFilePatch(
+  rawPatch: string,
+  path: string
+): string | null {
+  return (
+    rawPatch.split(/^(?=diff --git )/m).find(section => {
+      const header = section.split('\n', 1)[0] ?? ''
+      return header.startsWith('diff --git ') && header.endsWith(` b/${path}`)
+    }) ?? null
+  )
+}
+
+/** A file change known only from the turn's git checkpoint (e.g. a Bash edit). */
+export interface CheckpointFileDiff {
+  worktreeId: string
+  checkpointId: string
+  /** Path relative to the checkpoint's worktree. */
+  path: string
+}
+
 type DiffStyle = 'split' | 'unified'
 
 /** Stable default so omit/undefined doesn't allocate a new [] each render. */
@@ -264,6 +292,10 @@ interface MessageDiffModalProps {
   worktreePath?: string
   /** Precomputed unified patch for backends (Codex) that report diffs directly. */
   patch?: string | null
+  /** Show this file's diff from the turn checkpoint instead of tool edits. */
+  checkpointDiff?: CheckpointFileDiff
+  /** Remote Jean server that owns the file; undefined for the active backend. */
+  serverId?: string
 }
 
 export function MessageDiffModal({
@@ -274,7 +306,9 @@ export function MessageDiffModal({
   subsequentEdits = EMPTY_EDITS,
   previousEdits = EMPTY_EDITS,
   worktreePath,
-  patch,
+  patch: toolPatch,
+  checkpointDiff,
+  serverId,
 }: MessageDiffModalProps) {
   const isMobile = useIsMobile()
   const [diffStyle, setDiffStyle] = useState<DiffStyle>(() =>
@@ -311,12 +345,38 @@ export function MessageDiffModal({
     return getFilename(filePath)
   }, [filePath, resolvedFilePath, worktreePath])
 
+  const { data: checkpointPatch, isLoading: isLoadingCheckpoint } = useQuery({
+    queryKey: checkpointQueryKeys.diff(
+      checkpointDiff?.worktreeId ?? '',
+      checkpointDiff?.checkpointId ?? '',
+      'turn'
+    ),
+    queryFn: () => {
+      if (!checkpointDiff) throw new Error('checkpointDiff is required')
+      return getAiCheckpointDiff(
+        checkpointDiff.worktreeId,
+        checkpointDiff.checkpointId,
+        'turn'
+      )
+    },
+    enabled: isOpen && !!checkpointDiff,
+    staleTime: 10_000,
+    select: diff =>
+      checkpointDiff
+        ? extractFilePatch(diff.raw_patch, checkpointDiff.path)
+        : null,
+  })
+  const patch = toolPatch ?? checkpointPatch
+
   // ── Current change: final file → reverse this message's edits → full-file diff ──
+  // The file path alone does not route to a remote server, so pass its owner.
   const { data: fileContent, isLoading: isLoadingFile } = useQuery({
-    queryKey: ['file-content', resolvedFilePath],
+    queryKey: ['file-content', serverId ?? null, resolvedFilePath],
     queryFn: () =>
-      invoke<string>('read_file_content', { path: resolvedFilePath }),
-    enabled: isOpen && !patch,
+      invokeForOptionalServer<string>(serverId, 'read_file_content', {
+        path: resolvedFilePath,
+      }),
+    enabled: isOpen && !toolPatch && !checkpointDiff,
     staleTime: 10_000,
   })
 
@@ -400,7 +460,7 @@ export function MessageDiffModal({
   // No query invalidation: opens file in OS editor only (no app cache change)
   const openFileMutation = useMutation({
     mutationFn: () =>
-      invoke('open_file_in_default_app', {
+      invokeForOptionalServer(serverId, 'open_file_in_default_app', {
         path: resolvedFilePath,
         editor: preferences?.editor,
       }),
@@ -516,7 +576,7 @@ export function MessageDiffModal({
         </DialogDescription>
 
         <div className="min-h-0 flex-1 overflow-y-auto space-y-2 sm:mt-2">
-          {isLoadingFile ? (
+          {isLoadingFile || isLoadingCheckpoint ? (
             <div className="flex items-center justify-center h-full text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin mr-2" />
               Loading diff…

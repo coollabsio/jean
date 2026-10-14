@@ -257,7 +257,7 @@ export function CommitsTabView({
     } catch {
       return []
     }
-  }, [commitDiff?.raw_patch])
+  }, [commitDiff])
 
   const filteredFiles = useMemo(() => {
     if (!fileFilter) return flattenedFiles

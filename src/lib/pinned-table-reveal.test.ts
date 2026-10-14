@@ -1,9 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   findTableMessageIndex,
   findTableMessageIndexByMarkdown,
   isSameTableKey,
   renameTableKeyMessage,
+  scrollToRenderedTable,
   tableKeyForMessage,
 } from './pinned-table-reveal'
 
@@ -82,5 +83,41 @@ describe('tableKeyForMessage', () => {
   it('keeps the offset and uses the new message id', () => {
     expect(tableKeyForMessage('stale:7828', 'a2')).toBe('a2:7828')
     expect(tableKeyForMessage('compact-u1-stale:12', 'a2')).toBe('a2:12')
+  })
+})
+
+describe('scrollToRenderedTable', () => {
+  afterEach(() => {
+    document.body.innerHTML = ''
+  })
+
+  it('waits until an opening row stops moving before it scrolls', async () => {
+    const viewport = document.createElement('div')
+    viewport.style.overflowY = 'auto'
+    const table = document.createElement('div')
+    table.dataset.tableKey = 'a1:0'
+    viewport.appendChild(table)
+    document.body.appendChild(viewport)
+
+    // The table moves down while the row height animates, then settles.
+    const tops = [0, 40, 80, 120, 160]
+    let measures = 0
+    table.getBoundingClientRect = () =>
+      ({ top: tops[Math.min(measures++, tops.length - 1)] }) as DOMRect
+    let topAtScroll: number | undefined
+    table.scrollIntoView = vi.fn(() => {
+      topAtScroll = tops[Math.min(measures - 1, tops.length - 1)]
+    })
+
+    await expect(scrollToRenderedTable('a1:0', 'a1', 0)).resolves.toBe(true)
+    expect(table.scrollIntoView).toHaveBeenCalledTimes(1)
+    expect(topAtScroll).toBe(160)
+    expect(measures).toBeGreaterThanOrEqual(tops.length + 3)
+  })
+
+  it('returns false when the table does not render', async () => {
+    await expect(scrollToRenderedTable('missing:0', null, 0)).resolves.toBe(
+      false
+    )
   })
 })

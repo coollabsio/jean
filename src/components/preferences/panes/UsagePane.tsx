@@ -44,8 +44,8 @@ function UsageCard({
   children: React.ReactNode
 }) {
   return (
-    <section id={anchorId} className="space-y-2 border-t pt-3">
-      <div className="flex items-center justify-between gap-2">
+    <section id={anchorId} className="space-y-3">
+      <div className="flex items-center justify-between gap-2 px-1 sm:px-2">
         <h3 className="flex items-center gap-2 text-sm font-medium text-foreground">
           <Icon className="size-4 shrink-0" />
           {title}
@@ -56,7 +56,9 @@ function UsageCard({
           </span>
         ) : null}
       </div>
-      {children}
+      <div className="space-y-3 rounded-xl border border-border bg-muted/30 p-4 sm:p-5">
+        {children}
+      </div>
     </section>
   )
 }

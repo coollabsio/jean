@@ -1456,6 +1456,44 @@ pub(crate) fn find_provider_for_model(
     None
 }
 
+/// Override provider defaults explicitly so a resumed Full access session cannot
+/// retain permissive rules after the user selects a restricted policy.
+fn permission_rules_for_mode(mode: &str) -> Option<serde_json::Value> {
+    match mode {
+        "yolo" => Some(serde_json::json!([
+            { "permission": "*", "pattern": "*", "action": "allow" },
+            { "permission": "external_directory", "pattern": "*", "action": "allow" }
+        ])),
+        "plan" | "supervised" | "build" => Some(serde_json::json!([
+            { "permission": "*", "pattern": "*", "action": if mode == "plan" { "deny" } else { "ask" } },
+            { "permission": "read", "pattern": "*", "action": "allow" },
+            { "permission": "read", "pattern": "*.env", "action": "ask" },
+            { "permission": "read", "pattern": "*.env.*", "action": "ask" },
+            { "permission": "read", "pattern": "*.env.example", "action": "allow" },
+            { "permission": "glob", "pattern": "*", "action": "allow" },
+            { "permission": "grep", "pattern": "*", "action": "allow" },
+            { "permission": "lsp", "pattern": "*", "action": "allow" },
+            { "permission": "skill", "pattern": "*", "action": "allow" },
+            { "permission": "todowrite", "pattern": "*", "action": "allow" },
+            { "permission": "question", "pattern": "*", "action": "allow" },
+            { "permission": "edit", "pattern": "*", "action": if mode == "build" { "allow" } else if mode == "plan" { "deny" } else { "ask" } },
+            { "permission": "external_directory", "pattern": "*", "action": "ask" }
+        ])),
+        _ => None,
+    }
+}
+
+fn verify_permission_rules_applied(
+    response: &serde_json::Value,
+    rules: &serde_json::Value,
+) -> Result<(), String> {
+    if response.get("permission") == Some(rules) {
+        Ok(())
+    } else {
+        Err("OpenCode did not confirm the requested permission rules. Update OpenCode before using this permission policy.".to_string())
+    }
+}
+
 fn agent_for_execution_mode(execution_mode: Option<&str>) -> &'static str {
     match execution_mode.unwrap_or("plan") {
         "plan" => "plan",
@@ -2927,6 +2965,27 @@ pub fn execute_opencode_http(
         opencode_session_id.clone(),
         working_dir_string.clone(),
     );
+    if let Some(rules) = permission_rules_for_mode(execution_mode.unwrap_or("plan")) {
+        let policy_url = format!("{base_url}/session/{opencode_session_id}");
+        let response = client
+            .patch(&policy_url)
+            .query(&query)
+            .json(&serde_json::json!({ "permission": &rules }))
+            .send()
+            .map_err(|error| format!("Failed to set OpenCode permissions: {error}"))?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().unwrap_or_default();
+            return Err(format!(
+                "OpenCode permission policy was not applied: status={status}, body={body}"
+            ));
+        }
+        let updated: serde_json::Value = response
+            .json()
+            .map_err(|error| format!("Failed to verify OpenCode permissions: {error}"))?;
+        verify_permission_rules_applied(&updated, &rules)?;
+    }
+
     super::commands::trigger_opencode_queue_steer(
         app.clone(),
         worktree_id.to_string(),
@@ -3888,6 +3947,52 @@ mod tests {
     /// Serializes tests that mutate process-global `SHARED_SSE` maps so parallel
     /// test threads cannot clear each other's subscribers/parents mid-assertion.
     static SSE_TEST_GUARD: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+    #[test]
+    fn permission_policy_requires_confirmation_from_the_server() {
+        let rules = permission_rules_for_mode("supervised").unwrap();
+        assert!(verify_permission_rules_applied(
+            &serde_json::json!({ "permission": &rules }),
+            &rules
+        )
+        .is_ok());
+        assert!(verify_permission_rules_applied(
+            &serde_json::json!({ "id": "legacy-session" }),
+            &rules
+        )
+        .is_err());
+        assert!(verify_permission_rules_applied(
+            &serde_json::json!({ "permission": permission_rules_for_mode("yolo").unwrap() }),
+            &rules
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn permission_modes_override_provider_defaults() {
+        fn action(mode: &str, permission: &str) -> String {
+            let rules = permission_rules_for_mode(mode).unwrap();
+            rules
+                .as_array()
+                .unwrap()
+                .iter()
+                .rev()
+                .find(|rule| rule["permission"] == permission || rule["permission"] == "*")
+                .unwrap()["action"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        }
+        assert_eq!(action("plan", "bash"), "deny");
+        assert_eq!(action("plan", "edit"), "deny");
+        assert_eq!(action("supervised", "edit"), "ask");
+        assert_eq!(action("supervised", "bash"), "ask");
+        assert_eq!(action("build", "edit"), "allow");
+        assert_eq!(action("build", "bash"), "ask");
+        assert_eq!(action("build", "external_directory"), "ask");
+        assert_eq!(action("yolo", "bash"), "allow");
+        assert_eq!(action("yolo", "external_directory"), "allow");
+    }
 
     #[test]
     fn turn_started_gate_returns_false_for_unknown_session_quickly() {

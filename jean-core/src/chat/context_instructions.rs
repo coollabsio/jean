@@ -67,10 +67,15 @@ fn build_system_prompt_parts(
         parts.push(format!("Respond to the user in {lang}."));
     }
 
-    let global_prompt = prefs
-        .as_ref()
-        .and_then(|prefs| trimmed_non_empty(prefs.magic_prompts.global_system_prompt.as_deref()))
-        .unwrap_or_else(crate::default_global_system_prompt);
+    let global_prompt =
+        crate::projects::server_system_prompt(app, worktree_id).unwrap_or_else(|| {
+            prefs
+                .as_ref()
+                .and_then(|prefs| {
+                    trimmed_non_empty(prefs.magic_prompts.global_system_prompt.as_deref())
+                })
+                .unwrap_or_else(crate::default_global_system_prompt)
+        });
     parts.push(global_prompt);
 
     let parallel_prompt = prefs

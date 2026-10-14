@@ -217,6 +217,289 @@ fn run_ssh_ok(user: &str, host: &str, ssh_port: u16, remote_cmd: &str) -> Result
     Ok(stdout)
 }
 
+/// A concrete host alias from `~/.ssh/config` (wildcard patterns are skipped).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SshConfigHost {
+    pub alias: String,
+    pub host_name: Option<String>,
+    pub user: Option<String>,
+    pub port: Option<u16>,
+}
+
+const SSH_CONFIG_MAX_INCLUDE_DEPTH: usize = 16;
+
+/// Split a config line into `(keyword, args)`. Supports `Key value` and `Key=value`.
+fn split_ssh_config_line(line: &str) -> Option<(String, Vec<String>)> {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with('#') {
+        return None;
+    }
+    let key_end = line
+        .find(|c: char| c.is_whitespace() || c == '=')
+        .unwrap_or(line.len());
+    let keyword = line[..key_end].to_ascii_lowercase();
+    let mut rest = line[key_end..].trim_start();
+    if let Some(stripped) = rest.strip_prefix('=') {
+        rest = stripped.trim_start();
+    }
+
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    let mut has_token = false;
+    for c in rest.chars() {
+        match c {
+            '"' => {
+                in_quotes = !in_quotes;
+                has_token = true;
+            }
+            '#' if !in_quotes && !has_token => break,
+            c if c.is_whitespace() && !in_quotes => {
+                if has_token {
+                    args.push(std::mem::take(&mut current));
+                    has_token = false;
+                }
+            }
+            c => {
+                current.push(c);
+                has_token = true;
+            }
+        }
+    }
+    if has_token {
+        args.push(current);
+    }
+    Some((keyword, args))
+}
+
+fn is_ssh_host_pattern(token: &str) -> bool {
+    token.starts_with('!') || token.contains('*') || token.contains('?')
+}
+
+/// Parse ssh config text. `load_include` returns the text of each file an
+/// `Include` argument resolves to.
+fn parse_ssh_config_with(
+    text: &str,
+    load_include: &mut dyn FnMut(&str) -> Vec<String>,
+    depth: usize,
+    hosts: &mut Vec<SshConfigHost>,
+) {
+    // Indexes into `hosts` that the current Host block applies to.
+    let mut current: Vec<usize> = Vec::new();
+
+    for line in text.lines() {
+        let Some((keyword, args)) = split_ssh_config_line(line) else {
+            continue;
+        };
+        match keyword.as_str() {
+            "host" => {
+                current.clear();
+                for alias in args.iter().filter(|a| !is_ssh_host_pattern(a)) {
+                    let index = match hosts.iter().position(|h| &h.alias == alias) {
+                        Some(index) => index,
+                        None => {
+                            hosts.push(SshConfigHost {
+                                alias: alias.clone(),
+                                host_name: None,
+                                user: None,
+                                port: None,
+                            });
+                            hosts.len() - 1
+                        }
+                    };
+                    if !current.contains(&index) {
+                        current.push(index);
+                    }
+                }
+            }
+            "match" => current.clear(),
+            "include" => {
+                if depth >= SSH_CONFIG_MAX_INCLUDE_DEPTH {
+                    continue;
+                }
+                for arg in &args {
+                    for body in load_include(arg) {
+                        parse_ssh_config_with(&body, load_include, depth + 1, hosts);
+                    }
+                }
+            }
+            // ssh uses the first value it finds, so never overwrite.
+            "hostname" | "user" | "port" => {
+                let Some(value) = args.first() else {
+                    continue;
+                };
+                for &index in &current {
+                    let host = &mut hosts[index];
+                    match keyword.as_str() {
+                        "hostname" if host.host_name.is_none() => {
+                            host.host_name = Some(value.clone());
+                        }
+                        "user" if host.user.is_none() => host.user = Some(value.clone()),
+                        "port" if host.port.is_none() => {
+                            host.port = value.parse::<u16>().ok().filter(|p| *p > 0);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Parse ssh config text without following `Include` lines.
+#[cfg(test)]
+fn parse_ssh_config(text: &str) -> Vec<SshConfigHost> {
+    let mut hosts = Vec::new();
+    parse_ssh_config_with(text, &mut |_| Vec::new(), 0, &mut hosts);
+    hosts
+}
+
+/// Match a file name against a simple `*` / `?` pattern.
+fn wildcard_match(pattern: &str, name: &str) -> bool {
+    let p: Vec<char> = pattern.chars().collect();
+    let n: Vec<char> = name.chars().collect();
+    let (mut pi, mut ni) = (0, 0);
+    let (mut star, mut mark) = (None, 0);
+    while ni < n.len() {
+        if pi < p.len() && (p[pi] == '?' || p[pi] == n[ni]) {
+            pi += 1;
+            ni += 1;
+        } else if pi < p.len() && p[pi] == '*' {
+            star = Some(pi);
+            mark = ni;
+            pi += 1;
+        } else if let Some(s) = star {
+            pi = s + 1;
+            mark += 1;
+            ni = mark;
+        } else {
+            return false;
+        }
+    }
+    while pi < p.len() && p[pi] == '*' {
+        pi += 1;
+    }
+    pi == p.len()
+}
+
+/// Resolve one `Include` argument to file paths. Relative paths are relative
+/// to `~/.ssh`. Wildcards are supported in the last path component only.
+fn resolve_ssh_include(arg: &str, home: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let ssh_dir = home.join(".ssh");
+    let path = if let Some(rest) = arg.strip_prefix("~/") {
+        home.join(rest)
+    } else {
+        let p = std::path::Path::new(arg);
+        if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            ssh_dir.join(p)
+        }
+    };
+
+    let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
+        return Vec::new();
+    };
+    if !file_name.contains('*') && !file_name.contains('?') {
+        return vec![path];
+    }
+    let Some(dir) = path.parent() else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut matches: Vec<std::path::PathBuf> = entries
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| wildcard_match(file_name, name))
+        })
+        .map(|entry| entry.path())
+        .filter(|p| p.is_file())
+        .collect();
+    matches.sort();
+    matches
+}
+
+/// List concrete host aliases from `~/.ssh/config` (follows `Include`).
+/// A missing config returns an empty list.
+pub fn list_ssh_config_hosts() -> Vec<SshConfigHost> {
+    let Some(home) = dirs::home_dir() else {
+        return Vec::new();
+    };
+    let Ok(text) = std::fs::read_to_string(home.join(".ssh").join("config")) else {
+        return Vec::new();
+    };
+    let mut hosts = Vec::new();
+    let mut load = |arg: &str| -> Vec<String> {
+        resolve_ssh_include(arg, &home)
+            .into_iter()
+            .filter_map(|path| std::fs::read_to_string(path).ok())
+            .collect()
+    };
+    parse_ssh_config_with(&text, &mut load, 0, &mut hosts);
+    hosts
+}
+
+/// Extract the `uname` line that follows our `JEAN_SSH_OK` marker.
+fn parse_ssh_test_output(stdout: &str) -> Result<String, String> {
+    let mut lines = stdout.lines().map(str::trim);
+    if !lines.any(|line| line == "JEAN_SSH_OK") {
+        return Err(format!(
+            "SSH connected, but the test command gave no reply: {}",
+            stdout.trim()
+        ));
+    }
+    Ok(lines
+        .find(|line| !line.is_empty())
+        .unwrap_or("unknown system")
+        .to_string())
+}
+
+/// Check SSH key access to a host. Returns `uname -sm` output (e.g. `Linux x86_64`).
+pub fn test_ssh_connection(
+    user: &str,
+    host: &str,
+    ssh_port: Option<u16>,
+) -> Result<String, String> {
+    let user = user.trim();
+    let host = host.trim();
+    validate_ssh_user(user)?;
+    validate_host(host)?;
+    let ssh_port = ssh_port.unwrap_or(DEFAULT_SSH_PORT);
+    validate_port(ssh_port, "SSH port")?;
+
+    let stdout = run_ssh_ok(user, host, ssh_port, "echo JEAN_SSH_OK && uname -sm")?;
+    parse_ssh_test_output(&stdout)
+}
+
+/// Effective hostname for a target, as ssh resolves it (`ssh -G`). This maps
+/// ssh config aliases (e.g. `dev` → `10.0.0.5`) so the HTTP URL works too.
+fn resolve_ssh_hostname(user: &str, host: &str, ssh_port: u16) -> Option<String> {
+    let output = silent_ssh_command()
+        .args(["-G", "-p", &ssh_port.to_string(), &format!("{user}@{host}")])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_ssh_g_hostname(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn parse_ssh_g_hostname(output: &str) -> Option<String> {
+    output.lines().find_map(|line| {
+        let (key, value) = line.trim().split_once(char::is_whitespace)?;
+        let value = value.trim();
+        (key.eq_ignore_ascii_case("hostname") && !value.is_empty() && validate_host(value).is_ok())
+            .then(|| value.to_string())
+    })
+}
+
 /// Parse `http://host:port/path?query` without the url crate.
 fn parse_http_url(url: &str) -> Result<(String, u16, String), String> {
     let rest = url.strip_prefix("http://").ok_or_else(|| {
@@ -563,7 +846,9 @@ pub fn install_remote_jean_server(
         .unwrap_or(&host)
         .to_string();
 
-    let url = build_web_access_url(&host, jean_port);
+    // The SSH target may be an ssh config alias; the HTTP URL needs the real host.
+    let url_host = resolve_ssh_hostname(&user, &host, ssh_port).unwrap_or_else(|| host.clone());
+    let url = build_web_access_url(&url_host, jean_port);
     let mut log = String::new();
 
     // 1) SSH connectivity
@@ -706,5 +991,130 @@ JEAN_INSTALL_TOKEN=abc123+/=
         assert_eq!(host, "10.0.0.1");
         assert_eq!(port, 3456);
         assert_eq!(path, "/api/auth?token=x");
+    }
+
+    #[test]
+    fn parses_ssh_config_hosts() {
+        let text = r#"
+# comment
+Host *
+    User nobody
+
+Host dev box2
+    HostName 10.0.0.5
+    USER ubuntu
+    Port 2222
+    IdentityFile ~/.ssh/id_dev
+
+host=prod
+  hostname prod.example.com
+  user "deploy"
+
+Host web-? !bad *.internal staging
+  Port nope
+
+Match host foo
+  User matchuser
+
+Host dev
+  User other
+"#;
+        let hosts = parse_ssh_config(text);
+        assert_eq!(
+            hosts,
+            vec![
+                SshConfigHost {
+                    alias: "dev".into(),
+                    host_name: Some("10.0.0.5".into()),
+                    user: Some("ubuntu".into()),
+                    port: Some(2222),
+                },
+                SshConfigHost {
+                    alias: "box2".into(),
+                    host_name: Some("10.0.0.5".into()),
+                    user: Some("ubuntu".into()),
+                    port: Some(2222),
+                },
+                SshConfigHost {
+                    alias: "prod".into(),
+                    host_name: Some("prod.example.com".into()),
+                    user: Some("deploy".into()),
+                    port: None,
+                },
+                SshConfigHost {
+                    alias: "staging".into(),
+                    host_name: None,
+                    user: None,
+                    port: None,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_empty_ssh_config() {
+        assert!(parse_ssh_config("").is_empty());
+        assert!(parse_ssh_config("# only\n\nUser root\n").is_empty());
+    }
+
+    #[test]
+    fn follows_ssh_config_includes() {
+        let text = "Include config.d/*\nHost main\n  User me\n";
+        let mut hosts = Vec::new();
+        let mut load = |arg: &str| -> Vec<String> {
+            assert_eq!(arg, "config.d/*");
+            vec!["Host inc\n  HostName 1.2.3.4\n  Port 2200\n".to_string()]
+        };
+        parse_ssh_config_with(text, &mut load, 0, &mut hosts);
+        let aliases: Vec<&str> = hosts.iter().map(|h| h.alias.as_str()).collect();
+        assert_eq!(aliases, vec!["inc", "main"]);
+        assert_eq!(hosts[0].port, Some(2200));
+        assert_eq!(hosts[1].user.as_deref(), Some("me"));
+    }
+
+    #[test]
+    fn include_recursion_is_bounded() {
+        let mut hosts = Vec::new();
+        let mut load = |_: &str| vec!["Include self\nHost loop\n".to_string()];
+        parse_ssh_config_with("Include self\n", &mut load, 0, &mut hosts);
+        assert_eq!(hosts.len(), 1);
+    }
+
+    #[test]
+    fn wildcard_matching() {
+        assert!(wildcard_match("*", "work"));
+        assert!(wildcard_match("*.conf", "a.conf"));
+        assert!(!wildcard_match("*.conf", "a.txt"));
+        assert!(wildcard_match("host?", "host1"));
+        assert!(!wildcard_match("host?", "host12"));
+    }
+
+    #[test]
+    fn resolves_relative_includes_to_ssh_dir() {
+        let home = std::path::Path::new("/home/u");
+        assert_eq!(
+            resolve_ssh_include("work", home),
+            vec![std::path::PathBuf::from("/home/u/.ssh/work")]
+        );
+        assert_eq!(
+            resolve_ssh_include("~/other", home),
+            vec![std::path::PathBuf::from("/home/u/other")]
+        );
+    }
+
+    #[test]
+    fn parses_ssh_g_hostname_line() {
+        let out = "user ubuntu\nhostname 10.0.0.5\nport 22\n";
+        assert_eq!(parse_ssh_g_hostname(out).as_deref(), Some("10.0.0.5"));
+        assert_eq!(parse_ssh_g_hostname("user x\n"), None);
+    }
+
+    #[test]
+    fn parses_ssh_test_output() {
+        assert_eq!(
+            parse_ssh_test_output("JEAN_SSH_OK\nLinux x86_64\n").unwrap(),
+            "Linux x86_64"
+        );
+        assert!(parse_ssh_test_output("motd only\n").is_err());
     }
 }

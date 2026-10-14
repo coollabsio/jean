@@ -9,6 +9,7 @@ import {
   type Edge,
 } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge'
 import {
+  memo,
   useCallback,
   useEffect,
   useEffectEvent,
@@ -175,6 +176,7 @@ import { CloseWorktreeDialog } from '@/components/chat/CloseWorktreeDialog'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { hasBackendTransport } from '@/lib/environment'
 import { consumeWebReloadState } from '@/lib/web-reload-state'
+import { useLatestRef } from '@/hooks/useLatestRef'
 import {
   shouldDisableWorktreeTextSelection,
   shouldShowWorktreeLabelContextMenu,
@@ -190,6 +192,7 @@ import {
   type CanvasPredefinedFilterTab,
   type CanvasPredefinedFilterTabItem,
 } from './canvas-worktree-filters'
+import { MrRobotPanel, MrRobotProgress } from './MrRobotPanel'
 import { getWorktreeLabelContainerClassName } from './worktree-label-layout'
 const GitDiffModal = lazy(() =>
   import('@/components/chat/GitDiffModal').then(mod => ({
@@ -493,7 +496,31 @@ function getSessionMetrics(cards: SessionCardData[]) {
   }
 }
 
-function WorktreeSectionHeader({
+/**
+ * Reuse the previous cards array for a worktree when every card reference is
+ * unchanged, so memoized section headers skip re-rendering on store updates
+ * that only affect other worktrees.
+ */
+function createStableSectionCardsCache(): (
+  worktreeId: string,
+  cards: SessionCardData[]
+) => SessionCardData[] {
+  const cache = new Map<string, SessionCardData[]>()
+  return (worktreeId, cards) => {
+    const previous = cache.get(worktreeId)
+    if (
+      previous &&
+      previous.length === cards.length &&
+      previous.every((card, index) => card === cards[index])
+    ) {
+      return previous
+    }
+    cache.set(worktreeId, cards)
+    return cards
+  }
+}
+
+const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
   worktree,
   projectId,
   defaultBranch,
@@ -502,6 +529,7 @@ function WorktreeSectionHeader({
   showDetails = false,
   isSelected,
   shortcutNumber,
+  rowIndex = 0,
   onRowClick,
   onDiffClick,
   onSetLabels,
@@ -516,9 +544,10 @@ function WorktreeSectionHeader({
   showDetails?: boolean
   isSelected?: boolean
   shortcutNumber?: number
-  onRowClick?: () => void
+  rowIndex?: number
+  onRowClick?: (worktree: Worktree, rowIndex: number) => void
   onDiffClick?: (request: DiffRequest) => void
-  onSetLabels?: () => void
+  onSetLabels?: (worktree: Worktree) => void
   onResolveConflicts?: (worktree: Worktree) => void
   disableTextSelection?: boolean
 }) {
@@ -598,6 +627,14 @@ function WorktreeSectionHeader({
     ]
   )
 
+  const handleRowClick = useCallback(() => {
+    onRowClick?.(worktree, rowIndex)
+  }, [onRowClick, worktree, rowIndex])
+
+  const handleSetLabels = useCallback(() => {
+    onSetLabels?.(worktree)
+  }, [onSetLabels, worktree])
+
   const handleDiffClick = useCallback(() => {
     onDiffClick?.(
       getCanvasDiffRequest(
@@ -654,12 +691,12 @@ function WorktreeSectionHeader({
         disableTextSelection && 'select-none'
       )}
       style={disableTextSelection ? { WebkitTouchCallout: 'none' } : undefined}
-      onClick={onRowClick}
+      onClick={onRowClick ? handleRowClick : undefined}
       onKeyDown={e => {
         if (!onRowClick) return
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
-          onRowClick()
+          handleRowClick()
         }
       }}
       role={onRowClick ? 'button' : undefined}
@@ -836,7 +873,7 @@ function WorktreeSectionHeader({
             )}
             {sessionMetrics.yoloCount > 0 && (
               <span className="rounded bg-destructive/10 px-2 py-0.5 text-destructive">
-                {sessionMetrics.yoloCount} yolo
+                {sessionMetrics.yoloCount} full access
               </span>
             )}
             {sessionMetrics.reviewCount > 0 && (
@@ -876,14 +913,14 @@ function WorktreeSectionHeader({
     <ContextMenu>
       <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
       <ContextMenuContent className="w-44">
-        <ContextMenuItem onSelect={onSetLabels}>
+        <ContextMenuItem onSelect={handleSetLabels}>
           <Tag className="mr-2 h-4 w-4" />
           Set labels
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
   )
-}
+})
 
 export function ProjectCanvasView({
   projectId,
@@ -1030,7 +1067,11 @@ export function ProjectCanvasView({
   }, [visibleWorktrees])
 
   const pinnedLabelTabs = useMemo(
-    () => getPinnedWorktreeLabelTabs(visibleWorktrees, projectPinnedLabels),
+    () =>
+      getPinnedWorktreeLabelTabs(
+        visibleWorktrees.filter(worktree => worktree.origin !== 'auto_fix'),
+        projectPinnedLabels
+      ),
     [visibleWorktrees, projectPinnedLabels]
   )
 
@@ -1142,6 +1183,7 @@ export function ProjectCanvasView({
   const storeState = useCanvasStoreState()
   const queryClient = useQueryClient()
   const sessionCardDataCache = useMemo(() => createSessionCardDataCache(), [])
+  const stableSectionCards = useMemo(() => createStableSectionCardsCache(), [])
 
   const markWorktreeLastUsed = useCallback(
     (worktreeId: string) => {
@@ -1302,7 +1344,10 @@ export function ProjectCanvasView({
         shouldShowCanvasWorktreeSection(worktree) &&
         (!hasSearchQuery || worktreeMatchesSearch || grouped.length > 0)
       ) {
-        readySections.push({ worktree, cards: grouped })
+        readySections.push({
+          worktree,
+          cards: stableSectionCards(worktree.id, grouped),
+        })
       }
     }
 
@@ -1324,11 +1369,26 @@ export function ProjectCanvasView({
     pendingWorktrees,
     sessionsByWorktreeId,
     sessionCardDataCache,
+    stableSectionCards,
     storeState,
     searchQuery,
     worktreeSortMode,
     activeFilterTab,
   ])
+
+  // Summary counts are independent of canvas search and the selected tab.
+  const robotRows = useMemo(
+    () =>
+      visibleWorktrees
+        .filter(worktree => worktree.origin === 'auto_fix')
+        .map(worktree => ({
+          worktree,
+          cards: (sessionsByWorktreeId.get(worktree.id)?.sessions ?? []).map(
+            session => sessionCardDataCache(session, storeState)
+          ),
+        })),
+    [visibleWorktrees, sessionsByWorktreeId, sessionCardDataCache, storeState]
+  )
 
   const canvasReorderEnabled =
     activeFilterTab === 'all' && searchQuery.trim().length === 0
@@ -1638,7 +1698,9 @@ export function ProjectCanvasView({
     worktrees,
     selectedModalWorktreeSnapshotRef.current
   )
-  selectedModalWorktreeSnapshotRef.current = selectedModalWorktree
+  useLayoutEffect(() => {
+    selectedModalWorktreeSnapshotRef.current = selectedModalWorktree
+  }, [selectedModalWorktree])
 
   useEffect(() => {
     const reloadState = consumeWebReloadState(projectId)
@@ -1745,6 +1807,20 @@ export function ProjectCanvasView({
     ]
   )
 
+  // Stable callbacks for the memoized SessionChatModal. The latest modal
+  // target and close handler are read through refs at call time.
+  const closeWorktreeDirectlyRef = useLatestRef(closeWorktreeDirectly)
+  const selectedWorktreeModalLatestRef = useLatestRef(selectedWorktreeModal)
+  const handleCloseSessionModal = useCallback(() => {
+    setSelectedWorktreeModal(null)
+  }, [])
+  const handleRequestCloseModalWorktree = useCallback(() => {
+    const modal = selectedWorktreeModalLatestRef.current
+    if (modal) {
+      closeWorktreeDirectlyRef.current(modal.worktreeId)
+    }
+  }, [closeWorktreeDirectlyRef, selectedWorktreeModalLatestRef])
+
   const handleConfirmCloseWorktree = useCallback(() => {
     if (!closeWorktreeTarget) return
     closeWorktreeDirectly(closeWorktreeTarget.worktreeId)
@@ -1819,7 +1895,7 @@ export function ProjectCanvasView({
         'open-worktree-modal',
         handleOpenModal as EventListener
       )
-  }, [])
+  }, [openWorktreeModal])
 
   // Record last opened when the active session changes while the modal is open.
   // Uses a ref for the modal so this effect is not chained off selectedWorktreeModal
@@ -2164,6 +2240,21 @@ export function ProjectCanvasView({
       }
     },
     [openWorktreeModal, projectId]
+  )
+
+  // Stable row-click handler for memoized section headers. Reads the latest
+  // selection/open handlers through a ref so it never changes identity.
+  const sectionRowClickRef = useLatestRef(
+    (worktree: Worktree, rowIndex: number) => {
+      handleSelectedIndexChange(rowIndex)
+      handleWorktreeClick(worktree.id, worktree.path)
+    }
+  )
+  const handleSectionRowClick = useCallback(
+    (worktree: Worktree, rowIndex: number) => {
+      sectionRowClickRef.current(worktree, rowIndex)
+    },
+    [sectionRowClickRef]
   )
 
   // Handle selection from keyboard nav
@@ -3394,7 +3485,7 @@ export function ProjectCanvasView({
                               : 'bg-muted text-muted-foreground'
                           )}
                         >
-                          {count}
+                          {count} {count === 1 ? 'worktree' : 'worktrees'}
                         </span>
                       </button>
                       <button
@@ -3472,6 +3563,10 @@ export function ProjectCanvasView({
           </div>
         </div>
 
+        {activeFilterTab === 'auto_fix' && (
+          <MrRobotPanel key={project.id} project={project} rows={robotRows} />
+        )}
+
         {/* Canvas View */}
         <div
           className={`flex-1 pb-16 ${worktreeSections.length === 0 && !searchQuery ? '' : 'pt-5 px-4'}`}
@@ -3482,7 +3577,8 @@ export function ProjectCanvasView({
                 No {activeFilterLabel.toLowerCase()} worktrees or sessions match
                 your search
               </div>
-            ) : activeFilterTab === 'all' && !hasAnyVisibleWorktrees ? (
+            ) : activeFilterTab === 'auto_fix' ? null : activeFilterTab ===
+                'all' && !hasAnyVisibleWorktrees ? (
               <EmptyDashboardTabs
                 projectId={projectId}
                 projectPath={project?.path ?? null}
@@ -3571,22 +3667,36 @@ export function ProjectCanvasView({
                           showDetails={true}
                           isSelected={selectedIndex === currentIndex}
                           shortcutNumber={thisShortcut}
-                          onRowClick={() => {
-                            handleSelectedIndexChange(currentIndex)
-                            handleWorktreeClick(
-                              section.worktree.id,
-                              section.worktree.path
-                            )
-                          }}
+                          rowIndex={currentIndex}
+                          onRowClick={handleSectionRowClick}
                           onDiffClick={setCanvasDiffRequest}
                           onSetLabels={
                             showWorktreeLabelContextMenu
-                              ? () => openWorktreeLabelModal(section.worktree)
+                              ? openWorktreeLabelModal
                               : undefined
                           }
                           onResolveConflicts={handleCanvasResolveConflicts}
                           disableTextSelection={disableWorktreeTextSelection}
                         />
+                        {activeFilterTab === 'auto_fix' && (
+                          <MrRobotProgress
+                            row={
+                              robotRows.find(
+                                row => row.worktree.id === section.worktree.id
+                              ) ?? section
+                            }
+                            onOpen={(worktree, card) => {
+                              if (card)
+                                useChatStore
+                                  .getState()
+                                  .setActiveSession(
+                                    worktree.id,
+                                    card.session.id
+                                  )
+                              openWorktreeModal(worktree.id, worktree.path)
+                            }}
+                          />
+                        )}
                       </div>
                     </SortableCanvasWorktreeSection>
                   )
@@ -3639,7 +3749,7 @@ export function ProjectCanvasView({
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-destructive text-white hover:bg-destructive/90"
+              variant="destructive"
               onClick={handleConfirmDeleteLabel}
             >
               Delete label
@@ -3655,12 +3765,8 @@ export function ProjectCanvasView({
         worktree={selectedModalWorktree}
         project={project ?? null}
         isOpen={!!selectedWorktreeModal && !!selectedModalWorktree && !!project}
-        onClose={() => setSelectedWorktreeModal(null)}
-        onRequestCloseWorktree={() => {
-          if (selectedWorktreeModal) {
-            closeWorktreeDirectly(selectedWorktreeModal.worktreeId)
-          }
-        }}
+        onClose={handleCloseSessionModal}
+        onRequestCloseWorktree={handleRequestCloseModalWorktree}
       />
 
       {/* Git Diff Modal (CMD+G on canvas) */}

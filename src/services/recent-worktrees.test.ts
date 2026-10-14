@@ -59,6 +59,23 @@ const response = (
 describe('fetchRecentWorktrees', () => {
   beforeEach(() => invokeForServer.mockReset())
 
+  it('does not mix automation sessions into Recent, even from older servers or pinned rows', async () => {
+    const normal = response('local', 'normal', 10)
+    const robot = response('local', 'robot', 20)
+    const robotItem = robot.items[0]
+    if (!robotItem) throw new Error('Missing robot fixture')
+    robotItem.worktree.origin = 'auto_fix'
+    invokeForServer.mockResolvedValue({
+      items: [...robot.items, ...normal.items],
+      total: 2,
+      failedWorktreeIds: [],
+    })
+    const result = await fetchRecentWorktrees([project('normal')], 10, [
+      robotItem.session.id,
+    ])
+    expect(result.items.map(item => item.projectName)).toEqual(['normal'])
+  })
+
   it('queries once per server and merges rows by activity', async () => {
     invokeForServer.mockImplementation((serverId: string) =>
       Promise.resolve(

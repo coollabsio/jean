@@ -324,7 +324,7 @@ export async function performGitPull(opts: GitPullOptions): Promise<boolean> {
         useChatStore.getState().isWorktreeRunningNonPlan(worktreeId)
       ) {
         toast.error(
-          'Cannot auto-stash: a build/yolo session is running on this worktree. Stop it first.',
+          'Cannot auto-stash: a Build or Full access session is running on this worktree. Stop it first.',
           { id: toastId }
         )
         return false

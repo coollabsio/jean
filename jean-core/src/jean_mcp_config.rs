@@ -207,6 +207,30 @@ pub fn current_mode() -> JeanMcpInstallMode {
     JeanMcpInstallMode::current()
 }
 
+/// Codex threads share the persistent `~/.codex/config.toml` Jean MCP entry,
+/// whose session env is a fixed label. This per-thread config override gives
+/// Jean MCP the real calling session (needed for agent tools and approvals).
+pub fn codex_session_config_override(session_id: &str) -> Option<(String, serde_json::Value)> {
+    let path = dirs::home_dir()?.join(".codex").join("config.toml");
+    codex_session_config_override_at(&path, current_mode().server_name(), session_id)
+}
+
+fn codex_session_config_override_at(
+    path: &Path,
+    server_name: &str,
+    session_id: &str,
+) -> Option<(String, serde_json::Value)> {
+    let doc = std::fs::read_to_string(path)
+        .ok()?
+        .parse::<toml_edit::DocumentMut>()
+        .ok()?;
+    doc.get("mcp_servers")?.get(server_name)?;
+    Some((
+        format!("mcp_servers.{server_name}.env.{JEAN_MCP_SESSION_ENV}"),
+        serde_json::Value::from(session_id),
+    ))
+}
+
 pub fn get_stable_launcher_command() -> String {
     let Ok(exe) = std::env::current_exe() else {
         return "jean".to_string();
@@ -214,7 +238,46 @@ pub fn get_stable_launcher_command() -> String {
     if launcher_path_is_unstable(&exe) {
         return "jean".to_string();
     }
-    exe.to_string_lossy().to_string()
+    stable_launcher_path(&exe).to_string_lossy().to_string()
+}
+
+fn stable_launcher_path(exe: &Path) -> PathBuf {
+    // Linux appends this suffix when an installer replaces a running binary.
+    // Child processes must launch the replacement, not the unlinked inode.
+    #[cfg(target_os = "linux")]
+    if let Some(path) = exe
+        .to_str()
+        .and_then(|path| path.strip_suffix(" (deleted)"))
+    {
+        let replacement = Path::new(path);
+        if replacement.is_file() {
+            return replacement.to_path_buf();
+        }
+    }
+    exe.to_path_buf()
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod stable_launcher_tests {
+    use super::*;
+
+    #[test]
+    fn uses_installed_replacement_of_deleted_executable() {
+        let temp = tempfile::tempdir().unwrap();
+        let replacement = temp.path().join("jean-server");
+        std::fs::write(&replacement, b"replacement").unwrap();
+        let deleted = PathBuf::from(format!("{} (deleted)", replacement.display()));
+        assert_eq!(stable_launcher_path(&deleted), replacement);
+    }
+
+    #[test]
+    fn preserves_path_without_an_installed_replacement() {
+        let temp = tempfile::tempdir().unwrap();
+        let deleted = temp.path().join("jean-server (deleted)");
+        assert_eq!(stable_launcher_path(&deleted), deleted);
+        let normal = temp.path().join("jean-server");
+        assert_eq!(stable_launcher_path(&normal), normal);
+    }
 }
 
 fn launcher_path_is_unstable(path: &Path) -> bool {
@@ -1046,6 +1109,21 @@ mod tests {
             socket: "/tmp/jean.sock".to_string(),
             token: "tok".to_string(),
         }
+    }
+
+    #[test]
+    fn codex_session_override_targets_existing_jean_entry_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[mcp_servers.jean]\ncommand = \"jean\"\n").unwrap();
+        let (key, value) = codex_session_config_override_at(&path, "jean", "s-1").unwrap();
+        assert_eq!(key, "mcp_servers.jean.env.JEAN_MCP_SESSION");
+        assert_eq!(value, serde_json::json!("s-1"));
+        assert!(codex_session_config_override_at(&path, "jean-dev", "s-1").is_none());
+        assert!(
+            codex_session_config_override_at(&dir.path().join("missing.toml"), "jean", "s-1")
+                .is_none()
+        );
     }
 
     #[test]

@@ -26,6 +26,7 @@ interface MagicCommandHandlers {
   handlePreReleaseReview: () => void
   handleCommit: () => void
   handleCommitAndPush: () => void
+  handleCommitInSession: () => void
   handleCommentAndCloseIssue: () => void
   handlePull: () => void
   handlePush: () => void
@@ -71,6 +72,7 @@ export function useMagicCommands({
   handlePreReleaseReview,
   handleCommit,
   handleCommitAndPush,
+  handleCommitInSession,
   handleCommentAndCloseIssue,
   handlePull,
   handlePush,
@@ -96,6 +98,7 @@ export function useMagicCommands({
     handlePreReleaseReview,
     handleCommit,
     handleCommitAndPush,
+    handleCommitInSession,
     handleCommentAndCloseIssue,
     handlePull,
     handlePush,
@@ -122,6 +125,7 @@ export function useMagicCommands({
       handlePreReleaseReview,
       handleCommit,
       handleCommitAndPush,
+      handleCommitInSession,
       handleCommentAndCloseIssue,
       handlePull,
       handlePush,
@@ -183,6 +187,9 @@ export function useMagicCommands({
           break
         case 'commit-and-push':
           handlers.handleCommitAndPush()
+          break
+        case 'commit-in-session':
+          handlers.handleCommitInSession()
           break
         case 'comment-and-close-issue':
           handlers.handleCommentAndCloseIssue()

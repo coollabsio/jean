@@ -39,7 +39,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
+import { Button, edgePrimary, raised } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 import { ModalCloseButton } from '@/components/ui/modal-close-button'
 import {
@@ -318,11 +318,15 @@ export function GitDiffModal({
     return theme
   }, [theme])
 
+  // Latest loadDiff call owns diff/error/loading state; older responses are dropped
+  const loadDiffRequestIdRef = useRef(0)
   const loadDiff = useCallback(
     async (request: DiffRequest, isRefresh = false) => {
       if (request.type !== 'uncommitted' && request.type !== 'branch') {
         return
       }
+      const requestId = ++loadDiffRequestIdRef.current
+      const isCurrent = () => requestId === loadDiffRequestIdRef.current
       setIsLoading(true)
       setError(null)
       // Only clear diff on initial load, not on refresh
@@ -337,6 +341,7 @@ export function GitDiffModal({
           request.baseBranch,
           request.baseRemote
         )
+        if (!isCurrent()) return
         setDiff(result)
         // Cache stats with the load so tab switches don't need a chained effect
         const stats: DiffStats = {
@@ -347,9 +352,10 @@ export function GitDiffModal({
         else if (request.type === 'uncommitted')
           setCachedUncommittedStats(stats)
       } catch (err) {
+        if (!isCurrent()) return
         setError(err instanceof Error ? err.message : String(err))
       } finally {
-        setIsLoading(false)
+        if (isCurrent()) setIsLoading(false)
       }
     },
     []
@@ -1261,7 +1267,11 @@ export function GitDiffModal({
                         type="button"
                         disabled={isCommitting}
                         onClick={handleCommitFromDiff}
-                        className="flex h-7 flex-1 items-center justify-center gap-1.5 px-2.5 bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 rounded-md text-xs font-medium transition-colors sm:flex-none sm:shrink-0 sm:px-3"
+                        className={cn(
+                          'flex h-7 flex-1 items-center justify-center gap-1.5 px-2.5 bg-primary text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50 rounded-md text-xs font-medium sm:flex-none sm:shrink-0 sm:px-3',
+                          raised,
+                          edgePrimary
+                        )}
                       >
                         {isCommitting ? (
                           <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
@@ -1854,7 +1864,7 @@ export function GitDiffModal({
             <AlertDialogCancel disabled={isReverting}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               data-revert-action
-              className="bg-destructive text-white hover:bg-destructive/90"
+              variant="destructive"
               disabled={isReverting}
               onClick={handleRevertFile}
             >

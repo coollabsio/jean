@@ -164,8 +164,6 @@ export interface UIState {
   project_canvas_settings?: Record<string, ProjectCanvasSettingsState>
   /** Session IDs pinned in the recent sessions list */
   pinned_recent_session_ids?: string[]
-  /** Favorited projects shown first in the GitHub Dashboard */
-  github_dashboard_favorite_project_ids?: string[]
   /** Last opened worktree+session per project: projectId → { worktree_id, session_id } */
   last_opened_per_project?: Record<
     string,
@@ -221,7 +219,6 @@ export const defaultUIState: UIState = {
   browser_bottom_panel_open: {},
   browser_bottom_panel_height: 360,
   pinned_recent_session_ids: [],
-  github_dashboard_favorite_project_ids: [],
   seen_failed_workflow_run_ids: [],
   version: 1,
 }

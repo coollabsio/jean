@@ -502,26 +502,28 @@ export const ChatToolbar = memo(function ChatToolbar({
           <div className={zenMode ? 'hidden' : 'contents'}>
             <DockBurgerButton className="flex @xl:hidden" />
 
-            <MobileToolbarMenu
-              isDisabled={false}
-              hasOpenPr={hasOpenPr}
-              hasIssueContexts={loadedIssueContexts.length > 0}
-              hasSentryContexts={loadedSentryContexts.length > 0}
-              hasPrContexts={loadedPRContexts.length > 0}
-              hasAdvisoryContexts={loadedAdvisoryContexts.length > 0}
-              onSaveContext={onSaveContext}
-              onLoadContext={onLoadContext}
-              onCommit={onCommit}
-              onCommitAndPush={onCommitAndPush}
-              onRevertLastCommit={handleRevertLastCommit}
-              onOpenPr={onOpenPr}
-              onReview={onReview}
-              onMerge={onMerge}
-              onMergePr={onMergePr}
-              handleSyncClick={handleSyncClick}
-              handlePullClick={handlePullClick}
-              handlePushClick={handlePushClick}
-            />
+            {onOpenMagicModal && (
+              <MobileToolbarMenu
+                isDisabled={false}
+                hasOpenPr={hasOpenPr}
+                hasIssueContexts={loadedIssueContexts.length > 0}
+                hasSentryContexts={loadedSentryContexts.length > 0}
+                hasPrContexts={loadedPRContexts.length > 0}
+                hasAdvisoryContexts={loadedAdvisoryContexts.length > 0}
+                onSaveContext={onSaveContext}
+                onLoadContext={onLoadContext}
+                onCommit={onCommit}
+                onCommitAndPush={onCommitAndPush}
+                onRevertLastCommit={handleRevertLastCommit}
+                onOpenPr={onOpenPr}
+                onReview={onReview}
+                onMerge={onMerge}
+                onMergePr={onMergePr}
+                handleSyncClick={handleSyncClick}
+                handlePullClick={handlePullClick}
+                handlePushClick={handlePushClick}
+              />
+            )}
 
             <MobileSettingsMenu
               isDisabled={false}
@@ -598,6 +600,8 @@ export const ChatToolbar = memo(function ChatToolbar({
             <div className="block @xl:hidden h-4 w-px shrink-0 bg-border/50" />
 
             <ExecutionModeDropdown
+              backend={selectedBackend}
+              sessionId={activeSessionId}
               executionMode={executionMode}
               availableModes={availableExecutionModes}
               onSetExecutionMode={onSetExecutionMode}
@@ -606,6 +610,7 @@ export const ChatToolbar = memo(function ChatToolbar({
             />
 
             <DesktopToolbarControls
+              activeSessionId={activeSessionId}
               hasPendingQuestions={hasPendingQuestions}
               selectedBackend={selectedBackend}
               selectedModel={selectedModel}
@@ -670,7 +675,7 @@ export const ChatToolbar = memo(function ChatToolbar({
             <div className="h-4 w-px shrink-0 bg-border/50" />
           </div>
 
-          <div className="shrink-0">
+          <div className="shrink-0 py-1">
             <SendCancelButton
               isSending={isSending}
               canSend={canSend}

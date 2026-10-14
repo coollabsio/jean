@@ -18,18 +18,11 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
   description,
   actions,
   anchorId,
-  variant = 'default',
+  variant = 'card',
   children,
 }) => (
-  <div
-    id={anchorId}
-    className={cn(
-      variant === 'card'
-        ? 'space-y-3 sm:[&_.settings-inline-field]:justify-between sm:[&_.settings-inline-field>div:first-child]:w-auto'
-        : 'space-y-4'
-    )}
-  >
-    <div>
+  <div id={anchorId} className="min-w-0 space-y-3">
+    <div className={variant === 'card' ? 'px-1 sm:px-2' : undefined}>
       <div className="flex flex-wrap items-center gap-3">
         <h3
           className={cn(
@@ -53,9 +46,17 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
       {description && (
         <p className="mt-1 text-sm text-muted-foreground">{description}</p>
       )}
-      {variant !== 'card' && <Separator className="mt-2" />}
+      {variant === 'default' && <Separator className="mt-2" />}
     </div>
-    {children}
+    <div
+      className={cn(
+        'space-y-4',
+        variant === 'card' &&
+          'min-w-0 rounded-xl border border-border bg-muted/30 p-4 sm:p-5 sm:[&_.settings-inline-field]:flex-wrap sm:[&_.settings-inline-field]:justify-between sm:[&_.settings-inline-field>div:first-child]:w-auto [&_.settings-inline-field>div:first-child]:min-w-32 [&_.settings-inline-field>div:first-child]:flex-1 [&_.settings-inline-field>div:first-child]:break-words'
+      )}
+    >
+      {children}
+    </div>
   </div>
 )
 

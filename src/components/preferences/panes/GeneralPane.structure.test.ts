@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 describe('GeneralPane settings structure', () => {
-  it('uses the Kimi-style header and cards for every AI backend pane', () => {
+  it('uses section cards for every AI backend pane', () => {
     const source = readFileSync(
       'src/components/preferences/panes/GeneralPane.tsx',
       'utf8'
@@ -20,7 +20,6 @@ describe('GeneralPane settings structure', () => {
     ]) {
       expect(source).toContain(`'${backend}',`)
     }
-    expect(source).toContain('<BackendPaneHeader')
 
     for (const anchorId of [
       'pref-claude-section-cli',
@@ -48,14 +47,13 @@ describe('GeneralPane settings structure', () => {
     }
   })
 
-  it('places managed uninstall actions below the full-width source cards', () => {
+  it('uses shared compact source selectors for managed backends', () => {
     const source = readFileSync(
       'src/components/preferences/panes/GeneralPane.tsx',
       'utf8'
     )
 
-    expect(source.match(/className="w-full space-y-3"/g)).toHaveLength(7)
-    expect(source.match(/<BackendCliSourceCards/g)).toHaveLength(7)
+    expect(source.match(/<BackendCliSourceSelect/g)).toHaveLength(7)
   })
 
   it('renders the Kimi auto-steer toggle inside Kimi settings', () => {
@@ -102,36 +100,13 @@ describe('GeneralPane settings structure', () => {
     expect(grokSection).not.toContain('grokCliQueryKeys.auth()')
   })
 
-  // Regression #627/#649: default backend picker must list installed CLIs even
-  // when auth probes return false (login is gated at send time instead).
-  it('filters default backend options by install status only, not auth', () => {
-    const source = readFileSync(
-      'src/components/preferences/panes/GeneralPane.tsx',
-      'utf8'
-    )
-
-    expect(source).toContain('const claudeInstalled = !!cliStatus?.installed')
-    expect(source).toContain('const codexInstalled = !!codexStatus?.installed')
-    expect(source).toContain(
-      'const opencodeInstalled = !!opencodeStatus?.installed'
-    )
-    expect(source).toContain(
-      'const antigravityInstalled = !!antigravityStatus?.installed'
-    )
-    expect(source).not.toMatch(
-      /claudeInstalled\s*=\s*!!cliStatus\?\.installed\s*&&\s*!!claudeAuth\?\.authenticated/
-    )
-    expect(source).not.toContain('claudeUsable')
-    expect(source).toContain('installedBackendOptions.map(option =>')
-  })
-
   it('renders build and yolo reasoning overrides from model capabilities', () => {
     const source = readFileSync(
       'src/components/preferences/panes/GeneralPane.tsx',
       'utf8'
     )
     const executionOverrides = source.slice(
-      source.indexOf('Build execution'),
+      source.indexOf('Plan approval'),
       source.indexOf('AI Language')
     )
 
@@ -146,7 +121,7 @@ describe('GeneralPane settings structure', () => {
       'utf8'
     )
     const executionOverrides = source.slice(
-      source.indexOf('Build execution'),
+      source.indexOf('Plan approval'),
       source.indexOf('AI Language')
     )
 

@@ -394,6 +394,7 @@ Keyboard-only affordances are native-desktop only by default:
 - Hide `<Kbd>` shortcut hints in web access and mobile views unless the shortcut is explicitly useful there.
 - Disable matching keyboard-only default actions in web access/mobile (examples: toast default action `Alt+Enter`, unread session mark-read `R`).
 - Keep the click/tap action available; only gate the desktop keyboard hint/handler.
+- `src/App.css` hides every `<kbd>` outside the native app. To show a hint in web access (desktop width), add `data-web-visible` to the `<kbd>` (example: Magic menu letters). Mobile width still hides all `<kbd>`.
 - Use `isNativeApp()` plus `useIsMobile()`/viewport width for gating, and add tests for native desktop, web access, and mobile.
 
 #### Image Processing on Paste/Drop

@@ -3,6 +3,8 @@ import userEvent from '@testing-library/user-event'
 import { render, screen } from '@/test/test-utils'
 import { ProjectsSidebar } from './ProjectsSidebar'
 import { useUIStore } from '@/store/ui-store'
+import { useProjectsStore } from '@/store/projects-store'
+import type * as EnvironmentModule from '@/lib/environment'
 
 const mocks = vi.hoisted(() => ({
   createFolder: vi.fn(),
@@ -12,6 +14,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/services/projects', () => ({
   useProjects: () => ({ data: [], isLoading: false, isError: false }),
   useCreateFolder: () => ({ mutate: mocks.createFolder, isPending: false }),
+  useRemoveServerProject: () => ({ mutate: vi.fn() }),
+  openServerProject: vi.fn(),
 }))
 vi.mock('@/hooks/useInstalledBackends', () => ({
   useInstalledBackends: () => ({ installedBackends: [] }),
@@ -23,7 +27,10 @@ vi.mock('@/components/layout/SidebarWidthContext', () => ({
 vi.mock('@/lib/server-connections', () => ({
   useServerConnectionSnapshots: () => new Map(),
 }))
-vi.mock('@/lib/environment', () => ({ isNativeApp: () => false }))
+vi.mock('@/lib/environment', async importOriginal => ({
+  ...(await importOriginal<typeof EnvironmentModule>()),
+  isNativeApp: () => false,
+}))
 vi.mock('./ProjectTree', () => ({ ProjectTree: () => null }))
 vi.mock('./RecentWorktreesList', () => ({ RecentWorktreesList: () => null }))
 
@@ -53,11 +60,11 @@ describe('ProjectsSidebar folder creation', () => {
     render(<ProjectsSidebar />)
 
     const search = screen.getByRole('searchbox', {
-      name: 'Search projects and worktrees',
+      name: 'Search projects, worktrees and servers',
     })
     await user.type(search, 'old search')
     await user.click(
-      screen.getByRole('button', { name: 'Add project or folder' })
+      screen.getByRole('button', { name: 'Add project, folder or server' })
     )
     expect(
       screen.getByRole('menuitem', { name: 'Add project' })
@@ -66,5 +73,18 @@ describe('ProjectsSidebar folder creation', () => {
 
     expect(mocks.createFolder).toHaveBeenCalledWith({ name: 'New Folder' })
     expect(search).toHaveValue('')
+  })
+
+  it('opens the server dialog from the plus menu', async () => {
+    const user = userEvent.setup()
+    useProjectsStore.setState({ serverDialog: null })
+    render(<ProjectsSidebar />)
+
+    await user.click(
+      screen.getByRole('button', { name: 'Add project, folder or server' })
+    )
+    await user.click(screen.getByRole('menuitem', { name: 'Add server' }))
+
+    expect(useProjectsStore.getState().serverDialog).toEqual({})
   })
 })

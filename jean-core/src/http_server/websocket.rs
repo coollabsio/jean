@@ -17,6 +17,7 @@ fn command_should_run_on_blocking_pool(command: &str) -> bool {
             | "get_recent_worktrees"
             | "list_all_sessions"
             | "get_unread_session_count"
+            | "list_unread_sessions"
             | "list_native_cli_sessions"
             | "create_commit_with_ai"
             | "create_pr_with_ai_content"

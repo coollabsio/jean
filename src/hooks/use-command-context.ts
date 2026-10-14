@@ -812,7 +812,7 @@ export function useCommandContext(
         type: 'error',
       })
     }
-  }, [])
+  }, [queryClient, preferences, installedBackends])
 
   // Session - Resume session (reconnect to Claude CLI)
   const resumeSession = useCallback(async () => {

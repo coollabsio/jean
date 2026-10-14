@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useEffect,
   useEffectEvent,
@@ -37,7 +38,10 @@ import { DismissButton } from '@/components/ui/dismiss-button'
 import { StatusIndicator } from '@/components/ui/status-indicator'
 import { GitStatusBadges } from '@/components/ui/git-status-badges'
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
-import { CloseWorktreeDialog } from './CloseWorktreeDialog'
+import {
+  CloseWorktreeDialog,
+  type CloseConfirmMode,
+} from './CloseWorktreeDialog'
 import { useChatStore } from '@/store/chat-store'
 import { useTerminalStore } from '@/store/terminal-store'
 import { useBrowserStore } from '@/store/browser-store'
@@ -74,14 +78,12 @@ import { DevToolsDropdown } from './DevToolsDropdown'
 import { DEFAULT_KEYBINDINGS, formatShortcutDisplay } from '@/types/keybindings'
 import {
   buildNativeClientSessionInput,
-  computeSessionCardData,
+  createSessionCardDataCache,
   getResumeCommand,
   isActionableWaitingStatus,
   statusConfig,
-  type ManualSessionStatus,
   type SessionCardData,
 } from './session-card-utils'
-import { SessionStatusMenu } from './SessionStatusMenu'
 import {
   resolveModalSessionId,
   sessionsForTabBar,
@@ -220,7 +222,7 @@ interface SessionChatModalProps {
   onRequestCloseWorktree: () => void
 }
 
-export function SessionChatModal({
+export const SessionChatModal = memo(function SessionChatModal({
   worktreeId,
   worktreePath,
   worktree,
@@ -351,11 +353,14 @@ export function SessionChatModal({
     tabSessions.find(session => session.id === currentSessionId) ?? null
   // Canonical store state shared with canvas for consistent status derivation.
   const storeState = useCanvasStoreState()
+  // Per-session card cache: a store update for one session only recomputes
+  // that session's card instead of rescanning every tab's messages.
+  const sessionCardDataCache = useMemo(() => createSessionCardDataCache(), [])
   // Compute card data once per session — same derivation as ProjectCanvasView,
   // so canvas badges and modal tab badges stay in sync.
   const cards = useMemo(
-    () => tabSessions.map(s => computeSessionCardData(s, storeState)),
-    [storeState, tabSessions]
+    () => tabSessions.map(s => sessionCardDataCache(s, storeState)),
+    [sessionCardDataCache, storeState, tabSessions]
   )
 
   const cardForSession = useCallback(
@@ -572,9 +577,8 @@ export function SessionChatModal({
 
   // CMD+W: close the active session tab, or close modal if last tab
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)
-  const [closeConfirmMode, setCloseConfirmMode] = useState<
-    'worktree' | 'session'
-  >('session')
+  const [closeConfirmMode, setCloseConfirmMode] =
+    useState<CloseConfirmMode>('session')
   const pendingCloseAction = useRef<(() => void) | null>(null)
 
   const executeCloseAction = useCallback(() => {
@@ -583,8 +587,10 @@ export function SessionChatModal({
     setCloseConfirmOpen(false)
   }, [])
 
+  // Close (delete or archive per removal behavior) or explicitly archive a
+  // session tab, asking for confirmation first.
   const removeSessionTab = useCallback(
-    (session: Session) => {
+    (session: Session, archive = false) => {
       const activeSessions = tabSessions.filter(s => !s.archived_at)
       const sessionIsEmpty = !session.message_count
       // Confirm any non-empty session when preference is on (default). Only
@@ -597,13 +603,17 @@ export function SessionChatModal({
         if (activeSessions.length > 1) {
           selectVisualNeighbor(session.id)
         }
+        if (archive) {
+          handleArchiveSession(session.id)
+          return
+        }
         // The mutation selects the backend-created empty session after success
         // when this was the last session.
         handleDeleteSession(session.id)
       }
 
       if (needsConfirm) {
-        setCloseConfirmMode('session')
+        setCloseConfirmMode(archive ? 'session-archive' : 'session')
         pendingCloseAction.current = action
         setCloseConfirmOpen(true)
       } else {
@@ -612,6 +622,7 @@ export function SessionChatModal({
     },
     [
       tabSessions,
+      handleArchiveSession,
       handleDeleteSession,
       preferences?.confirm_session_close,
       selectVisualNeighbor,
@@ -996,6 +1007,25 @@ export function SessionChatModal({
 
   if (!isOpen || !worktreeId) return null
 
+  const worktreeMenu = !zenMode && worktree && project && (
+    <WorktreeDropdownMenu
+      worktree={worktree}
+      projectId={project.id}
+      projectPath={project.path}
+      uncommittedAdded={uncommittedAdded}
+      uncommittedRemoved={uncommittedRemoved}
+      branchDiffAdded={isBase ? 0 : branchDiffAdded}
+      branchDiffRemoved={isBase ? 0 : branchDiffRemoved}
+      onUncommittedDiffClick={handleUncommittedDiffClick}
+      onBranchDiffClick={handleBranchDiffClick}
+      onToggleTerminal={handleToggleModalTerminal}
+      onToggleBrowser={isNativeApp() ? handleToggleModalBrowser : undefined}
+      packageScripts={packageScripts}
+      onRunPackageScript={handlePackageScript}
+      serverProject={project.server ? project : null}
+    />
+  )
+
   return (
     <>
       <div
@@ -1042,25 +1072,43 @@ export function SessionChatModal({
                 )}
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  <h2 className="text-sm font-medium min-w-0 flex-1 truncate">
-                    {project && !isMobile && (
-                      <span className="text-muted-foreground font-normal">
-                        <button
-                          type="button"
-                          className="hover:text-foreground transition-colors cursor-pointer text-foreground text-lg font-semibold"
-                          onClick={handleClose}
-                        >
-                          {project.name}
-                        </button>
-                        <span className="mx-1.5 text-muted-foreground/50">
-                          ›
-                        </span>
-                      </span>
+                  {/* Mobile: menu sits right after the title; the title truncates so git badges stay visible */}
+                  <div
+                    className={cn(
+                      isMobile ? 'flex min-w-0 items-center gap-2' : 'contents'
                     )}
-                    {isBase ? 'Base Session' : (worktree?.name ?? 'Worktree')}
-                  </h2>
+                  >
+                    <h2
+                      className={cn(
+                        'text-sm font-medium min-w-0 truncate',
+                        !isMobile && 'flex-1'
+                      )}
+                    >
+                      {project && !isMobile && (
+                        <span className="text-muted-foreground font-normal">
+                          <button
+                            type="button"
+                            className="hover:text-foreground transition-colors cursor-pointer text-foreground text-lg font-semibold"
+                            onClick={handleClose}
+                          >
+                            {project.name}
+                          </button>
+                          <span className="mx-1.5 text-muted-foreground/50">
+                            ›
+                          </span>
+                        </span>
+                      )}
+                      {isBase ? 'Base Session' : (worktree?.name ?? 'Worktree')}
+                    </h2>
+                    {isMobile && worktreeMenu}
+                  </div>
                   {!zenMode && stackedBaseBranch && (
-                    <span className="inline-flex shrink min-w-0 items-center gap-1 rounded border border-border/50 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
+                    <span
+                      className={cn(
+                        'inline-flex min-w-0 items-center gap-1 rounded border border-border/50 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground',
+                        isMobile ? 'shrink-0' : 'shrink'
+                      )}
+                    >
                       <GitBranchPlus className="h-2.5 w-2.5" />
                       <span className="max-w-16 sm:max-w-40 truncate">
                         {stackedBaseBranch}
@@ -1087,25 +1135,7 @@ export function SessionChatModal({
                       onBranchDiffClick={handleBranchDiffClick}
                     />
                   )}
-                  {!zenMode && worktree && project && (
-                    <WorktreeDropdownMenu
-                      worktree={worktree}
-                      projectId={project.id}
-                      projectPath={project.path}
-                      uncommittedAdded={uncommittedAdded}
-                      uncommittedRemoved={uncommittedRemoved}
-                      branchDiffAdded={isBase ? 0 : branchDiffAdded}
-                      branchDiffRemoved={isBase ? 0 : branchDiffRemoved}
-                      onUncommittedDiffClick={handleUncommittedDiffClick}
-                      onBranchDiffClick={handleBranchDiffClick}
-                      onToggleTerminal={handleToggleModalTerminal}
-                      onToggleBrowser={
-                        isNativeApp() ? handleToggleModalBrowser : undefined
-                      }
-                      packageScripts={packageScripts}
-                      onRunPackageScript={handlePackageScript}
-                    />
-                  )}
+                  {!isMobile && worktreeMenu}
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
                   {isMobile && (
@@ -1142,7 +1172,7 @@ export function SessionChatModal({
                   )}
                   {!zenMode && (
                     <>
-                      {!isMobile && (
+                      {!isMobile && !project?.server && (
                         <>
                           <HeaderSurfaceToggle
                             label="Terminal"
@@ -1174,6 +1204,7 @@ export function SessionChatModal({
                           worktreePath={worktreePath}
                           serverId={worktree?.serverId}
                           branch={worktree?.branch}
+                          server={project?.server}
                         />
                         <ScriptsButton
                           projectId={worktree?.project_id}
@@ -1327,17 +1358,6 @@ export function SessionChatModal({
                           </div>
                         </ContextMenuTrigger>
                         <ContextMenuContent className="w-64">
-                          <SessionStatusMenu
-                            statusOverride={card.statusOverride}
-                            automaticStatus={card.automaticStatus}
-                            onSetStatusOverride={(
-                              next: ManualSessionStatus | null
-                            ) => {
-                              useChatStore
-                                .getState()
-                                .setSessionStatusOverride(session.id, next)
-                            }}
-                          />
                           <ContextMenuItem
                             onSelect={() =>
                               handleStartRename(session.id, session.name)
@@ -1397,13 +1417,6 @@ export function SessionChatModal({
                               Reconnect
                             </ContextMenuItem>
                           )}
-                          <ContextMenuSeparator />
-                          <ContextMenuItem
-                            onSelect={() => handleArchiveSession(session.id)}
-                          >
-                            <Archive className="mr-2 h-4 w-4" />
-                            Archive Session
-                          </ContextMenuItem>
                           <ContextMenuItem
                             onSelect={() => {
                               void copyToClipboard(session.id)
@@ -1418,8 +1431,14 @@ export function SessionChatModal({
                           </ContextMenuItem>
                           <ContextMenuSeparator />
                           <ContextMenuItem
+                            onSelect={() => removeSessionTab(session, true)}
+                          >
+                            <Archive className="mr-2 h-4 w-4" />
+                            Archive Session
+                          </ContextMenuItem>
+                          <ContextMenuItem
                             variant="destructive"
-                            onSelect={() => handleDeleteSession(session.id)}
+                            onSelect={() => removeSessionTab(session)}
                           >
                             <Trash2 className="mr-2 h-4 w-4" />
                             Delete Session
@@ -1533,4 +1552,4 @@ export function SessionChatModal({
       />
     </>
   )
-}
+})

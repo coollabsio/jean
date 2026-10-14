@@ -64,6 +64,8 @@ export interface QuickActionsTabProps {
 const INVALID_BRANCH_CHAR = /[\s:?*~^[\\]/
 /** Stable default so omit/undefined doesn't allocate a new [] each render. */
 const EMPTY_BRANCHES: string[] = []
+const EMPTY_FAVORITE_KEYS: string[] = []
+const EMPTY_REMOTES: ProjectRemote[] = []
 
 function isInvalidBranchName(trimmed: string): boolean {
   if (trimmed.length === 0) return false
@@ -101,7 +103,8 @@ export function QuickActionsTab({
 
   const { data: preferences } = usePreferences()
   const patchPreferences = usePatchPreferences()
-  const favoriteKeys = preferences?.favorite_base_branches ?? []
+  const favoriteKeys =
+    preferences?.favorite_base_branches ?? EMPTY_FAVORITE_KEYS
   const favoritePrefix = projectId ? `${projectId}:` : null
   const starredBranches = useMemo(
     () =>
@@ -154,7 +157,9 @@ export function QuickActionsTab({
   // With several remotes (e.g. upstream + fork) the single "New Worktree"
   // action is ambiguous, so offer one explicit start point per remote instead.
   const remoteOptions =
-    effectiveBaseBranch && activeRemotes.length > 1 ? activeRemotes : []
+    effectiveBaseBranch && activeRemotes.length > 1
+      ? activeRemotes
+      : EMPTY_REMOTES
   const hasRemoteOptions = remoteOptions.length > 0
   const remoteNameSet = useMemo(
     () => new Set(remoteOptions.map(r => r.name)),

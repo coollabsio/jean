@@ -10,20 +10,14 @@ import {
 } from '@/components/ui/popover'
 
 interface GoalBadgeProps {
-  sessionId: string
-  /** Objective set by the user message that renders this badge */
-  objective: string
+  sessionId: string | null | undefined
   onClearGoal: () => Promise<void>
 }
 
-/** Shown on the user message that set the session's active goal. */
-export function GoalBadge({
-  sessionId,
-  objective,
-  onClearGoal,
-}: GoalBadgeProps) {
-  const isActive = useChatStore(
-    state => state.codexGoals[sessionId]?.trim() === objective
+/** Composer top-edge tab that shows the session's active goal. */
+export function GoalBadge({ sessionId, onClearGoal }: GoalBadgeProps) {
+  const objective = useChatStore(state =>
+    sessionId ? state.codexGoals[sessionId]?.trim() || null : null
   )
   const [clearing, setClearing] = useState(false)
   const [open, setOpen] = useState(false)
@@ -41,7 +35,7 @@ export function GoalBadge({
     }
   }, [clearing, onClearGoal])
 
-  if (!isActive) return null
+  if (!objective) return null
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -49,7 +43,8 @@ export function GoalBadge({
         <button
           type="button"
           aria-label="Show goal"
-          className="flex h-6 items-center gap-1 rounded-full border border-border/70 bg-background/90 py-0 pl-1.5 pr-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          title="Show goal"
+          className="flex h-6 items-center gap-1 rounded-t-md border border-b-0 border-border bg-card px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         >
           <Flag className="h-3.5 w-3.5" aria-hidden="true" />
           <span>Goal</span>

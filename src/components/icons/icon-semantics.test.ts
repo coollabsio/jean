@@ -41,6 +41,11 @@ describe('semantic brand and issue icons', () => {
     )
   })
 
+  it('does not use the voicemail-like RecordCircle icon anywhere', () => {
+    expect(source).not.toContain('RecordCircle,')
+    expect(source).not.toContain('export { RecordCircle as')
+  })
+
   it('maps CodeRabbit to its official brand mark', () => {
     expect(source).toContain(
       "export { CodeRabbitIcon as Rabbit } from './CodeRabbitIcon'"

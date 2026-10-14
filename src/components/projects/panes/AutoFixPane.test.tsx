@@ -450,16 +450,22 @@ describe('AutoFixPane', () => {
     renderPane()
 
     await user.click(
-      screen.getByRole('button', { name: 'Choose yolo backend and model' })
+      screen.getByRole('button', {
+        name: 'Choose Full access backend and model',
+      })
     )
     await user.click(await screen.findByRole('tab', { name: 'Cursor' }))
     await user.click(await screen.findByText('Auto'))
 
     expect(
-      screen.getByRole('button', { name: 'Choose yolo backend and model' })
+      screen.getByRole('button', {
+        name: 'Choose Full access backend and model',
+      })
     ).toHaveTextContent('Cursor')
     expect(
-      screen.getByRole('button', { name: 'Choose yolo backend and model' })
+      screen.getByRole('button', {
+        name: 'Choose Full access backend and model',
+      })
     ).toHaveTextContent('Auto')
   })
 
@@ -467,7 +473,9 @@ describe('AutoFixPane', () => {
     renderPane()
 
     expect(
-      screen.getByRole('button', { name: 'Choose yolo backend and model' })
+      screen.getByRole('button', {
+        name: 'Choose Full access backend and model',
+      })
     ).toBeDisabled()
   })
 
@@ -485,7 +493,9 @@ describe('AutoFixPane', () => {
       screen.getByRole('button', { name: 'Choose planning backend and model' })
     ).toHaveTextContent('Backend default')
     expect(
-      screen.getByRole('button', { name: 'Choose yolo backend and model' })
+      screen.getByRole('button', {
+        name: 'Choose Full access backend and model',
+      })
     ).toHaveTextContent('Backend default')
   })
 
@@ -508,7 +518,9 @@ describe('AutoFixPane', () => {
       screen.getByRole('button', { name: 'Choose planning backend and model' })
     ).toHaveTextContent('Codex')
     expect(
-      screen.getByRole('button', { name: 'Choose yolo backend and model' })
+      screen.getByRole('button', {
+        name: 'Choose Full access backend and model',
+      })
     ).toHaveTextContent('Codex')
   })
 
@@ -527,7 +539,9 @@ describe('AutoFixPane', () => {
       screen.getByRole('button', { name: 'Choose planning backend and model' })
     ).toHaveTextContent('Codex')
     expect(
-      screen.getByRole('button', { name: 'Choose yolo backend and model' })
+      screen.getByRole('button', {
+        name: 'Choose Full access backend and model',
+      })
     ).toHaveTextContent('Codex')
   })
 
@@ -562,7 +576,9 @@ describe('AutoFixPane', () => {
     await user.keyboard('{Escape}')
 
     await user.click(
-      screen.getByRole('button', { name: 'Choose yolo backend and model' })
+      screen.getByRole('button', {
+        name: 'Choose Full access backend and model',
+      })
     )
     const yoloTabs = screen.getByRole('tablist')
     for (const backend of expectedBackends) {
@@ -595,7 +611,9 @@ describe('AutoFixPane', () => {
     await user.click(await screen.findByText('Backend default'))
 
     await user.click(
-      screen.getByRole('button', { name: 'Choose yolo backend and model' })
+      screen.getByRole('button', {
+        name: 'Choose Full access backend and model',
+      })
     )
     await user.click(await screen.findByRole('tab', { name: 'Cursor' }))
     await user.click(await screen.findByText('Backend default'))
@@ -649,7 +667,7 @@ describe('AutoFixPane', () => {
     })
   })
 
-  it('shows custom Claude providers for planning and yolo', async () => {
+  it('shows custom Claude providers for planning and Full access', async () => {
     const user = userEvent.setup()
     preferencesMock.custom_cli_profiles = [
       {
@@ -677,7 +695,7 @@ describe('AutoFixPane', () => {
       screen.getByRole('combobox', { name: 'Choose planning provider' })
     ).toBeInTheDocument()
     expect(
-      screen.getByRole('combobox', { name: 'Choose yolo provider' })
+      screen.getByRole('combobox', { name: 'Choose Full access provider' })
     ).toBeInTheDocument()
 
     await user.click(

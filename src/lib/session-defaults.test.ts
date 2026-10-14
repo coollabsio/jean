@@ -18,8 +18,8 @@ const preferences = {
 describe('resolveDefaultModelForBackend', () => {
   it.each([
     ['claude', 'claude-opus-5-5'],
-    ['codex', 'gpt-5.6-sol'],
-    ['opencode', 'opencode/gpt-5.6-sol'],
+    ['codex', 'gpt-6.1-sol'],
+    ['opencode', 'opencode/gpt-6.1-sol'],
     ['cursor', 'cursor/auto'],
   ] as const)(
     'falls back to the built-in %s default when no preference exists',
@@ -61,9 +61,9 @@ describe('resolveDefaultModelForBackend', () => {
   })
 
   it('falls back to the Antigravity CLI automatic model', () => {
-    expect(resolveDefaultModelForBackend('antigravity', {} as AppPreferences)).toBe(
-      'antigravity/auto'
-    )
+    expect(
+      resolveDefaultModelForBackend('antigravity', {} as AppPreferences)
+    ).toBe('antigravity/auto')
   })
 
   it('uses the first available PI provider model when the stored PI default is unavailable', () => {

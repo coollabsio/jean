@@ -120,9 +120,45 @@ function findRenderedTable(
   )
 }
 
+function scrollParentOf(el: HTMLElement): HTMLElement | null {
+  for (let parent = el.parentElement; parent; parent = parent.parentElement) {
+    const { overflowY } = getComputedStyle(parent)
+    if (overflowY === 'auto' || overflowY === 'scroll') return parent
+  }
+  return null
+}
+
+const STABLE_FRAMES = 3
+const MAX_LAYOUT_WAIT_MS = 1500
+
 /**
- * Wait until the table renders in the chat, then scroll to it and flash it.
- * Returns false when it does not render within `timeoutMs`.
+ * Wait until the table stops moving in the scroll content. A compact activity
+ * row opens with a height animation and renders its messages, so a scroll that
+ * starts at once stops at a stale position or is clamped by the old height.
+ */
+async function waitForStableLayout(target: HTMLElement): Promise<void> {
+  const parent = scrollParentOf(target)
+  const measure = () => {
+    const top = target.getBoundingClientRect().top
+    if (!parent) return `${Math.round(top)}`
+    const offset = top - parent.getBoundingClientRect().top + parent.scrollTop
+    return `${Math.round(offset)}:${parent.scrollHeight}`
+  }
+  const deadline = Date.now() + MAX_LAYOUT_WAIT_MS
+  let last = measure()
+  let stableFrames = 0
+  while (stableFrames < STABLE_FRAMES && Date.now() < deadline) {
+    await new Promise(resolve => requestAnimationFrame(resolve))
+    const next = measure()
+    stableFrames = next === last ? stableFrames + 1 : 0
+    last = next
+  }
+}
+
+/**
+ * Wait until the table renders in the chat and its layout is stable, then
+ * scroll to it and flash it. Returns false when it does not render within
+ * `timeoutMs`.
  */
 export async function scrollToRenderedTable(
   tableKey: string,
@@ -136,6 +172,11 @@ export async function scrollToRenderedTable(
     target = findRenderedTable(tableKey, messageId)
   }
   if (!target) return false
+  await waitForStableLayout(target)
+  if (!target.isConnected) {
+    target = findRenderedTable(tableKey, messageId)
+    if (!target) return false
+  }
   target.scrollIntoView({ behavior: 'smooth', block: 'start' })
   target.classList.remove('pinned-table-highlight')
   void target.offsetWidth // restart the animation on repeat jumps

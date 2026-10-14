@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { memo, useCallback, useState } from 'react'
 import { ChevronRight, Users, X } from '@/components/icons/reicon'
 import type { SubAgent } from '@/types/chat'
 import { cn } from '@/lib/utils'
@@ -11,6 +11,7 @@ import {
 import { TaskCallDetails } from './ToolCallInline'
 import { formatTokens } from '@/lib/session-debug'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { useVisibilityAwareTicker } from '@/hooks/useVisibilityAwareTicker'
 
 interface AgentWidgetProps {
   agents: SubAgent[]
@@ -32,7 +33,8 @@ interface AgentWidgetProps {
  */
 const agentTimings = new Map<string, { start: number; end?: number }>()
 
-function trackTiming(agent: SubAgent, now: number) {
+function trackTiming(agent: SubAgent) {
+  const now = Date.now()
   const timing = agentTimings.get(agent.id)
   if (agent.status === 'in_progress') {
     if (!timing) agentTimings.set(agent.id, { start: now })
@@ -63,25 +65,16 @@ export function AgentWidget({
   onOpenChange,
   onFileClick,
 }: AgentWidgetProps) {
-  const [now, setNow] = useState(() => Date.now())
-
   const runningCount = agents.filter(a => a.status === 'in_progress').length
   const completedCount = agents.filter(a => a.status === 'completed').length
 
-  for (const agent of agents) trackTiming(agent, now)
+  for (const agent of agents) trackTiming(agent)
 
   // Running agents first, finished ones below; keep start order in each group
   const sortedAgents = [
     ...agents.filter(a => a.status === 'in_progress'),
     ...agents.filter(a => a.status !== 'in_progress'),
   ]
-
-  // Tick once per second while any agent runs, for the elapsed time
-  useEffect(() => {
-    if (runningCount === 0) return
-    const interval = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(interval)
-  }, [runningCount])
 
   return (
     <Collapsible open={open} onOpenChange={onOpenChange} className={className}>
@@ -116,7 +109,6 @@ export function AgentWidget({
               <AgentItem
                 key={agent.id}
                 agent={agent}
-                now={now}
                 onFileClick={onFileClick}
               />
             ))}
@@ -127,16 +119,16 @@ export function AgentWidget({
   )
 }
 
-interface AgentItemProps {
-  agent: SubAgent
-  now: number
-  onFileClick?: (filePath: string) => void
-}
-
-function AgentItem({ agent, now, onFileClick }: AgentItemProps) {
-  const [isOpen, setIsOpen] = useState(false)
-  const isMobile = useIsMobile()
+/**
+ * Tool count, tokens, and elapsed time. Ticks on its own so the per-second
+ * update does not re-render the row and its expanded tool calls.
+ */
+function AgentMeta({ agent }: { agent: SubAgent }) {
   const isDone = agent.status !== 'in_progress'
+  const [now, setNow] = useState(() => Date.now())
+  const updateNow = useCallback(() => setNow(Date.now()), [])
+  useVisibilityAwareTicker(!isDone, updateNow)
+
   const timing = agentTimings.get(agent.id)
   const clientMs = timing ? (timing.end ?? now) - timing.start : undefined
   // CLI-reported time is exact once done; while running it only updates on
@@ -151,6 +143,26 @@ function AgentItem({ agent, now, onFileClick }: AgentItemProps) {
     agent.tokens ? `${formatTokens(agent.tokens)} tokens` : null,
     elapsedMs !== undefined ? formatAgentElapsed(elapsedMs) : null,
   ].filter(Boolean)
+
+  return (
+    <span className="ml-auto shrink-0 pl-2 tabular-nums text-muted-foreground empty:pl-0">
+      {meta.length > 0 ? meta.join(' • ') : null}
+    </span>
+  )
+}
+
+interface AgentItemProps {
+  agent: SubAgent
+  onFileClick?: (filePath: string) => void
+}
+
+const AgentItem = memo(function AgentItem({
+  agent,
+  onFileClick,
+}: AgentItemProps) {
+  const [isOpen, setIsOpen] = useState(false)
+  const isMobile = useIsMobile()
+  const isDone = agent.status !== 'in_progress'
 
   return (
     <li className="min-w-0 text-xs">
@@ -182,9 +194,16 @@ function AgentItem({ agent, now, onFileClick }: AgentItemProps) {
               isDone && 'text-muted-foreground/70'
             )}
           >
-            {agent.label && !isMobile && (
+            {agent.label && (
               <>
-                <span className="shrink-0 font-semibold">{agent.label}</span>
+                <span
+                  className={cn(
+                    'font-semibold',
+                    isMobile ? 'max-w-24 truncate' : 'shrink-0'
+                  )}
+                >
+                  {agent.label}
+                </span>
                 <span className="shrink-0 text-muted-foreground/60">›</span>
               </>
             )}
@@ -197,15 +216,10 @@ function AgentItem({ agent, now, onFileClick }: AgentItemProps) {
               )}
             </span>
           </span>
-          {meta.length > 0 && (
-            <span className="ml-auto shrink-0 pl-2 tabular-nums text-muted-foreground">
-              {meta.join(' • ')}
-            </span>
-          )}
+          <AgentMeta agent={agent} />
           <ChevronRight
             className={cn(
               'h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-200',
-              meta.length === 0 && 'ml-auto',
               isOpen && 'rotate-90'
             )}
           />
@@ -225,4 +239,4 @@ function AgentItem({ agent, now, onFileClick }: AgentItemProps) {
       </Collapsible>
     </li>
   )
-}
+})

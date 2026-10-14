@@ -195,6 +195,7 @@ export function AddProjectDialog() {
     initProject,
     addProjectParentFolderId,
     effectiveServerId,
+    lastDestination,
     setAddProjectDialogOpen,
   ])
 

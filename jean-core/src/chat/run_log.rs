@@ -741,13 +741,22 @@ pub(crate) fn tool_result_is_error(block: &serde_json::Value) -> Option<bool> {
     (block.get("is_error").and_then(|v| v.as_bool()) == Some(true)).then_some(true)
 }
 
-/// Claude subagent totals carried by one stream line, keyed by the parent
+/// Claude subagent update carried by one stream line, keyed by the parent
 /// Task/Agent tool use id. Live totals come from `system/task_progress` (and
-/// `task_notification` when it has `usage`); final totals from the
-/// `tool_use_result` on the Task/Agent tool_result line.
-/// Shared by live streaming and history rebuild.
-pub(crate) fn claude_subagent_usage(msg: &serde_json::Value) -> Option<(String, SubagentUsage)> {
+/// `task_notification` when it has `usage`); final totals and `resolvedModel`
+/// from the `tool_use_result` on the Task/Agent tool_result line. The live
+/// model comes from the subagent's own assistant lines (`parent_tool_use_id`),
+/// which carry no totals (`None`).
+fn claude_subagent_update(
+    msg: &serde_json::Value,
+) -> Option<(String, Option<(u64, u64, u64)>, Option<String>)> {
     let u64_field = |obj: &serde_json::Value, key: &str| obj.get(key).and_then(|v| v.as_u64());
+    let str_field = |obj: &serde_json::Value, key: &str| {
+        obj.get(key)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
     match msg.get("type").and_then(|v| v.as_str())? {
         "system" => {
             let subtype = msg.get("subtype").and_then(|v| v.as_str())?;
@@ -758,12 +767,18 @@ pub(crate) fn claude_subagent_usage(msg: &serde_json::Value) -> Option<(String, 
             let usage = msg.get("usage")?;
             Some((
                 tool_use_id.to_string(),
-                SubagentUsage {
-                    total_tokens: u64_field(usage, "total_tokens")?,
-                    tool_uses: u64_field(usage, "tool_uses").unwrap_or(0),
-                    duration_ms: u64_field(usage, "duration_ms").unwrap_or(0),
-                },
+                Some((
+                    u64_field(usage, "total_tokens")?,
+                    u64_field(usage, "tool_uses").unwrap_or(0),
+                    u64_field(usage, "duration_ms").unwrap_or(0),
+                )),
+                None,
             ))
+        }
+        "assistant" => {
+            let parent = msg.get("parent_tool_use_id").and_then(|v| v.as_str())?;
+            let model = str_field(msg.get("message")?, "model")?;
+            Some((parent.to_string(), None, Some(model)))
         }
         "user" => {
             let result = msg
@@ -780,15 +795,43 @@ pub(crate) fn claude_subagent_usage(msg: &serde_json::Value) -> Option<(String, 
                 .as_str()?;
             Some((
                 tool_use_id.to_string(),
-                SubagentUsage {
+                Some((
                     total_tokens,
-                    tool_uses: u64_field(result, "totalToolUseCount").unwrap_or(0),
-                    duration_ms: u64_field(result, "totalDurationMs").unwrap_or(0),
-                },
+                    u64_field(result, "totalToolUseCount").unwrap_or(0),
+                    u64_field(result, "totalDurationMs").unwrap_or(0),
+                )),
+                str_field(result, "resolvedModel"),
             ))
         }
         _ => None,
     }
+}
+
+/// Merge one stream line's Claude subagent update into the matching
+/// Task/Agent tool call. Returns the tool use id and new usage when it changed.
+/// Shared by live streaming and history rebuild.
+pub(crate) fn apply_claude_subagent_usage(
+    tool_calls: &mut [ToolCall],
+    msg: &serde_json::Value,
+) -> Option<(String, SubagentUsage)> {
+    let (tool_use_id, totals, model) = claude_subagent_update(msg)?;
+    let tc = tool_calls.iter_mut().find(|t| t.id == tool_use_id)?;
+    let prev = tc.subagent_usage.as_ref();
+    let (total_tokens, tool_uses, duration_ms) = totals.unwrap_or_else(|| {
+        prev.map(|u| (u.total_tokens, u.tool_uses, u.duration_ms))
+            .unwrap_or_default()
+    });
+    let next = SubagentUsage {
+        total_tokens,
+        tool_uses,
+        duration_ms,
+        model: model.or_else(|| prev.and_then(|u| u.model.clone())),
+    };
+    if prev == Some(&next) {
+        return None;
+    }
+    tc.subagent_usage = Some(next.clone());
+    Some((tool_use_id, next))
 }
 
 /// Parse JSONL lines and build a ChatMessage
@@ -909,11 +952,7 @@ pub fn parse_run_to_message(lines: &[String], run: &RunEntry) -> Result<ChatMess
 
         let msg_type = msg.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
-        if let Some((tool_use_id, subagent_usage)) = claude_subagent_usage(&msg) {
-            if let Some(tc) = tool_calls.iter_mut().find(|t| t.id == tool_use_id) {
-                tc.subagent_usage = Some(subagent_usage);
-            }
-        }
+        apply_claude_subagent_usage(&mut tool_calls, &msg);
 
         match msg_type {
             "steered_user_message" => {
@@ -2425,6 +2464,12 @@ Move services between instances without downtime.
             }
         })
         .to_string();
+        let sub_turn = serde_json::json!({
+            "type": "assistant",
+            "parent_tool_use_id": tool_id,
+            "message": { "model": "claude-sonnet-5-5", "content": [{ "type": "text", "text": "ok" }] }
+        })
+        .to_string();
         let progress = serde_json::json!({
             "type": "system",
             "subtype": "task_progress",
@@ -2441,28 +2486,35 @@ Move services between instances without downtime.
                 "status": "completed",
                 "totalTokens": 48804,
                 "totalToolUseCount": 8,
-                "totalDurationMs": 61421
+                "totalDurationMs": 61421,
+                "resolvedModel": "claude-opus-5-5"
             }
         })
         .to_string();
 
-        let live = parse_run_to_message(&[task_use.clone(), progress.clone()], &run).unwrap();
+        let live = parse_run_to_message(
+            &[task_use.clone(), sub_turn.clone(), progress.clone()],
+            &run,
+        )
+        .unwrap();
         assert_eq!(
             live.tool_calls[0].subagent_usage,
             Some(SubagentUsage {
                 total_tokens: 29316,
                 tool_uses: 1,
-                duration_ms: 4832
+                duration_ms: 4832,
+                model: Some("claude-sonnet-5-5".to_string())
             })
         );
 
-        let done = parse_run_to_message(&[task_use, progress, result], &run).unwrap();
+        let done = parse_run_to_message(&[task_use, sub_turn, progress, result], &run).unwrap();
         assert_eq!(
             done.tool_calls[0].subagent_usage,
             Some(SubagentUsage {
                 total_tokens: 48804,
                 tool_uses: 8,
-                duration_ms: 61421
+                duration_ms: 61421,
+                model: Some("claude-opus-5-5".to_string())
             })
         );
     }

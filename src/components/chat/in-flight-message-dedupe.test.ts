@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { ChatMessage } from '@/types/chat'
-import { dedupeInFlightAssistantMessage } from './in-flight-message-dedupe'
+import {
+  dedupeInFlightAssistantMessage,
+  shouldHideInFlightAssistantMessage,
+} from './in-flight-message-dedupe'
 
 function createMessage(overrides: Partial<ChatMessage>): ChatMessage {
   return {
@@ -193,5 +196,38 @@ describe('dedupeInFlightAssistantMessage', () => {
         streamingToolCalls: [],
       })
     ).toEqual([messages[0]])
+  })
+})
+
+describe('shouldHideInFlightAssistantMessage', () => {
+  const messages = [
+    createMessage({ id: 'user-1', role: 'user', content: 'Prompt' }),
+    createMessage({
+      id: 'running-123',
+      role: 'assistant',
+      content: 'Partial response',
+    }),
+  ]
+
+  it('returns true when the trailing assistant duplicates the live stream', () => {
+    expect(
+      shouldHideInFlightAssistantMessage(messages, {
+        isSending: true,
+        streamingContent: 'Partial response with more text',
+        streamingContentBlocks: [],
+        streamingToolCalls: [],
+      })
+    ).toBe(true)
+  })
+
+  it('returns false and leaves the array reference intact when not sending', () => {
+    const options = {
+      isSending: false,
+      streamingContent: 'Partial response',
+      streamingContentBlocks: [],
+      streamingToolCalls: [],
+    }
+    expect(shouldHideInFlightAssistantMessage(messages, options)).toBe(false)
+    expect(dedupeInFlightAssistantMessage(messages, options)).toBe(messages)
   })
 })

@@ -142,6 +142,29 @@ is enabled and uses `deniedMcpServers` for known servers that are off. Grok
 disables them through `disabled_mcp_servers`, and Cursor through
 `mcp enable|disable`. Other backends load them automatically.
 
+### Full-screen settings pages
+
+App and project settings share `src/components/preferences/SettingsPage.tsx`.
+This full-window surface uses a non-modal Radix root and content portal, without
+an overlay, centered-dialog sizing, or a focus trap. Radix still manages initial
+focus, focus restoration, and Escape. Open child selects and popovers consume
+Escape before the page closes; settings search can also consume it to clear the
+query. Native window controls and macOS traffic-light spacing remain available.
+
+Keep navigation in the left sidebar, Back at its bottom, and pane content in a
+centered, scrollable `max-w-4xl` column. Below the `md` breakpoint, use the pane
+selector and mobile search instead. Use the shared `SettingsSection` for subtle
+background cards in both app and project panes, with section headings above the
+cards. Preserve existing settings target
+ownership and persistence; the page changes presentation only.
+
+Reference: [Radix Dialog](https://www.radix-ui.com/primitives/docs/components/dialog).
+
+CLI source selectors use `BackendCliSourceSelect`: one compact dropdown for
+Jean-managed and system PATH binaries, with unavailable PATH choices disabled.
+Keep the detected version and path tooltip, and place optional uninstall actions
+below the selector. Cursor stays PATH-only because it has no managed binary.
+
 ### Client and Server Preference Ownership
 
 Preferences use a strict ownership boundary. Display, input, notification, and
@@ -342,7 +365,7 @@ Additional systems (no dedicated docs yet):
   `TERMINAL_SESSIONS`. Don't remove the `uiStateInitialized` guard without
   re-checking the race.
 
-- **Background Tasks** - Git/PR polling with focus-aware intervals (`src-tauri/src/background_tasks/`); Auto Fix (Mr. Robot) issue polling/planning/yolo handoff and scheduler active-hours window via `chrono` local time with midnight-crossing support (`jean-core/src/auto_fix/`). Scans list only issue numbers + labels; worktrees are never auto-archived; closed/ineligible ones stop using capacity, get their queued or running plan-mode investigation stopped, and never go to yolo; failed starts/yolo runs give up after 3 attempts; GitHub rate limits defer the project 15 min. Runtime status (last scan, errors, failed issues) is in memory and exposed via `get_auto_fix_status` / `clear_auto_fix_failures`
+- **Background Tasks** - Git/PR polling with focus-aware intervals (`src-tauri/src/background_tasks/`); Auto Fix (Mr. Robot) issue polling/planning/yolo handoff and scheduler active-hours window via `chrono` local time with midnight-crossing support (`jean-core/src/auto_fix/`). Scans list only issue numbers + labels; worktrees are never auto-archived; closed/ineligible ones stop using capacity, get their queued or running plan-mode investigation stopped, and never go to yolo; failed starts/yolo runs give up after 3 attempts; GitHub rate limits defer the project 15 min. Runtime status (last scan, errors, failed issues) is in memory and exposed via `get_auto_fix_status` / `clear_auto_fix_failures`. See [Mr. Robot workspace](./mr-robot.md) for the canvas controls, preview, activity, and view separation.
 - **HTTP Server** - Tauri-free Axum server + WebSocket from `jean-core`; `src-server` provides the standalone Tokio adapter. See [server-architecture.md](./server-architecture.md).
 - **Diagnostics** - CPU/memory monitoring panel (`src-tauri/src/diagnostics/`)
 - **MCP** - Model Context Protocol server integration with per-project overrides (`src/services/mcp.ts`). First-party **Jean MCP** (`jean-core/src/jean_mcp_core.rs`) exposes project/worktree/session tools, usage + session model controls (`get_usage`, `set_session_model`), Run-command / panel-command dev environments (`get_run_environments`: running state, worktree/base session, startup command, ports, URL), plus the ship loop: `create_commit`, `push_worktree`, `detect_open_pr`, `link_worktree_pr`, `unlink_worktree_pr`, `create_pull_request`, `merge_pull_request`, `run_review` (thin wrappers over existing project commands). MCP `create_session` reuses an empty, idle chat session in the worktree before it creates another session; terminal, queued, running, archived, or previously used sessions are never reused. PR tools resolve repository paths from Jean's worktree ID; creation and linking persist the PR number and URL on the worktree.

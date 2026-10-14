@@ -18,6 +18,7 @@ export const CODEX_MODEL_OPTIONS = codexModelOptions as {
 }[]
 
 export const OPENCODE_MODEL_OPTIONS: { value: string; label: string }[] = [
+  { value: 'opencode/gpt-6.1-sol', label: 'GPT 6.1 Sol (OpenCode)' },
   { value: 'opencode/gpt-5.6-sol', label: 'GPT 5.6 Sol (OpenCode)' },
 ]
 
@@ -106,9 +107,18 @@ export const KIMI_MODEL_OPTIONS: { value: string; label: string }[] = [
 
 export const ANTIGRAVITY_MODEL_OPTIONS: { value: string; label: string }[] = [
   { value: 'antigravity/auto', label: 'Auto' },
-  { value: 'antigravity/gemini-3.6-flash-high', label: 'Gemini 3.6 Flash (High)' },
-  { value: 'antigravity/gemini-3.6-flash-medium', label: 'Gemini 3.6 Flash (Medium)' },
-  { value: 'antigravity/gemini-3.5-flash-medium', label: 'Gemini 3.5 Flash (Medium)' },
+  {
+    value: 'antigravity/gemini-3.6-flash-high',
+    label: 'Gemini 3.6 Flash (High)',
+  },
+  {
+    value: 'antigravity/gemini-3.6-flash-medium',
+    label: 'Gemini 3.6 Flash (Medium)',
+  },
+  {
+    value: 'antigravity/gemini-3.5-flash-medium',
+    label: 'Gemini 3.5 Flash (Medium)',
+  },
   { value: 'antigravity/gemini-3.1-pro-high', label: 'Gemini 3.1 Pro (High)' },
 ]
 
@@ -190,10 +200,7 @@ export const PI_EFFORT_LEVEL_OPTIONS: {
  */
 export function withAdaptiveEffortOption<
   T extends { value: string; label: string; description?: string },
->(
-  levels: T[],
-  model?: string | null
-): (T | typeof ADAPTIVE_EFFORT_OPTION)[] {
+>(levels: T[], model?: string | null): (T | typeof ADAPTIVE_EFFORT_OPTION)[] {
   if (!isGeminiModel(model)) return levels
   if (levels.some(level => level.value === 'adaptive')) return levels
   return [ADAPTIVE_EFFORT_OPTION, ...levels]

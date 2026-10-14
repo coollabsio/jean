@@ -1624,6 +1624,16 @@ fn build_grok_args(
     }
 
     match effective_mode {
+        "auto" => {
+            args.extend(
+                ["--permission-mode", "auto", "--sandbox", "workspace"].map(str::to_string),
+            );
+        }
+        "supervised" => {
+            args.extend(
+                ["--permission-mode", "default", "--sandbox", "workspace"].map(str::to_string),
+            );
+        }
         "build" => {
             args.push("--permission-mode".to_string());
             args.push("acceptEdits".to_string());
@@ -1656,13 +1666,32 @@ fn build_grok_agent_args(
     // requires the TUI approval surface Jean cannot show — leaving it enabled causes
     // plan-mode turns to hang after research. Jean owns plan UX via tool permissions
     // + synthetic ExitPlanMode on structured plan text.
-    let mut args = vec!["--no-auto-update".to_string(), "--no-plan".to_string()];
+    let native_policy = match execution_mode {
+        Some("yolo") => "bypassPermissions",
+        Some("auto") => "auto",
+        _ => "default",
+    };
+    let mut args = vec![
+        "--no-auto-update".to_string(),
+        "--no-plan".to_string(),
+        "--permission-mode".to_string(),
+        native_policy.to_string(),
+    ];
     args.push("agent".to_string());
-    // One shared Grok leader for every Jean session. The stdio process is the
-    // ACP client; MCP and the agent backend live in the leader, which Grok
-    // starts on ~/.grok/leader.sock when it is not already running.
-    args.push("--leader".to_string());
-    if matches!(execution_mode, Some("build") | Some("yolo")) {
+    // Restricted sessions use their own agent so the unrestricted shared leader
+    // cannot carry an always-approve setting into a restricted run.
+    args.push(
+        if matches!(
+            execution_mode,
+            Some("supervised") | Some("build") | Some("auto")
+        ) {
+            "--no-leader"
+        } else {
+            "--leader"
+        }
+        .to_string(),
+    );
+    if execution_mode == Some("yolo") {
         args.push("--always-approve".to_string());
     }
     if let Some(model) = raw_grok_model(model).filter(|model| !model.is_empty()) {
@@ -2705,6 +2734,12 @@ pub fn run_grok_acp_host_from_args() -> Result<(), String> {
     let pending_prompt: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     let pending_output: Arc<Mutex<Option<PathBuf>>> = Arc::new(Mutex::new(None));
     let pending_interject: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let approval_output = output.clone();
+    let _approval_scope = super::acp_permissions::scope(
+        super::types::Backend::Grok,
+        Arc::new(move |value| host_write_output_line(&approval_output, &value.to_string())),
+        abort.clone(),
+    );
 
     let listener_stop = stop.clone();
     let listener_abort = abort.clone();
@@ -2735,6 +2770,15 @@ pub fn run_grok_acp_host_from_args() -> Result<(), String> {
                     continue;
                 };
                 match value.get("type").and_then(Value::as_str) {
+                    Some("permission_reply") => {
+                        if let (Some(id), Some(option)) =
+                            (value["request_id"].as_str(), value["option_id"].as_str())
+                        {
+                            if let Err(error) = super::acp_permissions::reply(id, option) {
+                                eprintln!("[grok-acp-host] approval reply failed: {error}");
+                            }
+                        }
+                    }
                     Some("prompt") => {
                         if let Some(output) = value.get("output").and_then(Value::as_str) {
                             if let Ok(mut slot) = pending_output.lock() {
@@ -3139,6 +3183,17 @@ pub fn tail_grok_output(
         let lines = tailer.poll()?;
         let got_lines = !lines.is_empty();
         for line in lines {
+            if let Ok(value) = serde_json::from_str::<Value>(&line) {
+                if super::acp_permissions::handle_log_event(
+                    app,
+                    session_id,
+                    worktree_id,
+                    &super::pi::run_id_from_output_file(output_file),
+                    &value,
+                )? {
+                    continue;
+                }
+            }
             if line.trim().is_empty() {
                 continue;
             }
@@ -3676,35 +3731,21 @@ fn handle_acp_client_request(
     let params = request.get("params").cloned().unwrap_or(Value::Null);
     match method {
         "session/request_permission" => {
-            let allow = should_allow_acp_permission(execution_mode, &params);
-            let kind = params
-                .get("toolCall")
-                .or_else(|| params.get("tool_call"))
-                .and_then(|tc| tc.get("kind"))
-                .and_then(Value::as_str)
-                .unwrap_or("?");
-            let title = params
-                .get("toolCall")
-                .or_else(|| params.get("tool_call"))
-                .and_then(|tc| tc.get("title"))
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            log::info!(
-                "[Grok ACP] request_permission allow={allow} mode={execution_mode:?} kind={kind} title={title}"
-            );
-            let Some(option_id) = selected_permission_option(&params, allow) else {
-                return send_acp_error(stdin, id, "No matching permission option");
-            };
-            send_acp_response(
-                stdin,
-                id,
-                serde_json::json!({
-                    "outcome": {
-                        "outcome": "selected",
-                        "optionId": option_id,
+            let outcome = if matches!(
+                execution_mode,
+                Some("supervised") | Some("build") | Some("auto")
+            ) {
+                super::acp_permissions::decide(execution_mode, &params)?
+            } else {
+                let allow = should_allow_acp_permission(execution_mode, &params);
+                match selected_permission_option(&params, allow) {
+                    Some(option) => {
+                        serde_json::json!({"outcome":{"outcome":"selected","optionId":option}})
                     }
-                }),
-            )
+                    None => serde_json::json!({"outcome":{"outcome":"cancelled"}}),
+                }
+            };
+            send_acp_response(stdin, id, outcome)
         }
         "terminal/create" => {
             // Plan mode allows shell for research (gh/git/rg/find). File mutations
@@ -3887,14 +3928,14 @@ fn handle_acp_client_request(
 
 fn grok_execution_mode_instruction(execution_mode: Option<&str>) -> Option<&'static str> {
     match execution_mode.unwrap_or("plan") {
-        "build" => Some(
+        "build" | "supervised" | "auto" => Some(
             "You are in BUILD MODE. Start implementing immediately. \
              This instruction supersedes any earlier plan-mode state or instructions. \
              Do not call enter_plan_mode or exit_plan_mode unless the user explicitly asks \
              for a new plan. Ask the user directly if a required decision is missing.",
         ),
         "yolo" => Some(
-            "You are in YOLO EXECUTION MODE. Start implementing immediately. \
+            "You are in FULL ACCESS MODE. Start implementing immediately. \
              This instruction supersedes any earlier plan-mode state or instructions. \
              Do not call enter_plan_mode or exit_plan_mode unless the user explicitly asks \
              for a new plan. Do not ask for confirmation before routine implementation steps. \
@@ -4049,6 +4090,10 @@ fn spawn_grok_acp_connection(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     cmd.env("JEAN_SESSION_ID", jean_session_id);
+    cmd.env(
+        crate::agent_browser::SESSION_ENV,
+        crate::agent_browser::session_name(jean_session_id),
+    );
     cmd.env("JEAN_WORKTREE_ID", worktree_id);
     let (depth_key, depth_val) = super::jean_mcp::child_depth_env();
     cmd.env(depth_key, depth_val);
@@ -4721,6 +4766,13 @@ pub fn execute_grok(options: GrokExecutionOptions<'_>) -> Result<GrokResponse, S
             });
         }
 
+        let _approval_scope = super::acp_permissions::attached_scope(
+            app,
+            jean_session_id,
+            worktree_id,
+            output_file,
+            super::types::Backend::Grok,
+        );
         let mut response = match send_grok_acp_prompt(
             app,
             &mut connection_guard,
@@ -5101,6 +5153,16 @@ pub fn execute_one_shot_grok(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn restricted_permission_modes_still_implement() {
+        for mode in ["supervised", "auto"] {
+            assert_eq!(
+                super::grok_execution_mode_instruction(Some(mode)),
+                super::grok_execution_mode_instruction(Some("build"))
+            );
+        }
+    }
+
     use super::*;
     use std::io::BufReader;
 
@@ -6420,7 +6482,8 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
         assert!(args.contains(&"--leader".to_string()));
         assert!(!args.contains(&"--no-leader".to_string()));
         assert_eq!(args[1], "--no-plan");
-        assert_eq!(args[2], "agent");
+        assert_eq!(args[2], "--permission-mode");
+        assert_eq!(args[3], "bypassPermissions");
     }
 
     #[test]
@@ -6434,7 +6497,11 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
         assert!(build.contains(&"--no-plan".to_string()));
         assert!(yolo.contains(&"--no-plan".to_string()));
         assert!(!plan.contains(&"--always-approve".to_string()));
-        assert!(build.contains(&"--always-approve".to_string()));
+        assert!(!build.contains(&"--always-approve".to_string()));
+        assert!(build.contains(&"--no-leader".to_string()));
+        let supervised = build_grok_agent_args(None, Some("supervised"), None);
+        assert!(!supervised.contains(&"--always-approve".to_string()));
+        assert!(supervised.contains(&"--no-leader".to_string()));
     }
 
     #[test]
@@ -6476,7 +6543,7 @@ Ship the feature end-to-end with tests and clear handoff notes for YOLO.
             .find("Custom project instructions")
             .expect("custom instructions are included");
         let mode_override = message
-            .find("YOLO EXECUTION MODE")
+            .find("FULL ACCESS MODE")
             .expect("yolo mode override is included");
         assert!(mode_override > custom_instructions);
         assert!(message.contains("Do not call enter_plan_mode or exit_plan_mode"));

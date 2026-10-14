@@ -25,12 +25,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogTitle,
-} from '@/components/ui/dialog'
+import { SettingsPage, SettingsBackButton } from './SettingsPage'
 import { ModalCloseButton } from '@/components/ui/modal-close-button'
 import {
   Select,
@@ -341,6 +336,12 @@ const getPaneTitle = (pane: PreferencePane): string => {
       return 'PI'
     case 'commandcode':
       return 'Command Code'
+    case 'grok':
+      return 'Grok'
+    case 'kimi':
+      return 'Kimi Code'
+    case 'antigravity':
+      return 'Antigravity CLI'
     case 'github':
       return 'GitHub CLI'
     case 'coderabbit':
@@ -435,7 +436,8 @@ export function PreferencesDialog() {
   const [settingsServerId, setSettingsServerId] = useState(() => {
     if (!isNativeApp() || typeof window === 'undefined') return LOCAL_SERVER_ID
     const saved = window.localStorage.getItem(SETTINGS_TARGET_KEY)
-    return saved && remoteConnections.some(connection => connection.id === saved)
+    return saved &&
+      remoteConnections.some(connection => connection.id === saved)
       ? saved
       : LOCAL_SERVER_ID
   })
@@ -758,19 +760,45 @@ export function PreferencesDialog() {
 
   return (
     <SettingsTargetProvider serverId={settingsServerId}>
-    <Dialog open={preferencesOpen} onOpenChange={handleOpenChange}>
-      <DialogContent
-        showCloseButton={false}
+      <SettingsPage
+        open={preferencesOpen}
+        onOpenChange={handleOpenChange}
         onEscapeKeyDown={handleDialogEscape}
-        className="overflow-hidden p-0 !w-screen !h-dvh !max-w-screen !max-h-none !rounded-none sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-[85vh] sm:!rounded-xl font-sans"
+        title="Settings"
       >
-        <DialogTitle className="sr-only">Settings</DialogTitle>
-        <DialogDescription className="sr-only">
-          Customize your application preferences here.
-        </DialogDescription>
-
         <SidebarProvider className="!min-h-0 !h-full items-stretch overflow-hidden">
-          <Sidebar collapsible="none" className="hidden lg:flex">
+          <Sidebar
+            collapsible="none"
+            className="hidden md:flex border-r border-border"
+          >
+            <div
+              className="flex h-14 shrink-0 items-center px-4 text-sm font-semibold"
+              data-tauri-drag-region
+              data-settings-title
+            >
+              Jean{' '}
+              <span className="ml-2 font-normal text-muted-foreground">
+                Settings
+              </span>
+            </div>
+            <div className="px-3 pb-3">
+              <PreferencesSearchBar
+                variant="desktop"
+                searchValue={searchValue}
+                onSearchValueChange={setSearchValue}
+                searchOpen={searchOpen}
+                onSearchOpenChange={setSearchOpen}
+                selectedId={effectiveSearchSelection}
+                onSelectedIdChange={setSearchSelection}
+                isSearching={isSearching}
+                searchResults={searchResults}
+                groupedResults={groupedResults}
+                paneIconMap={paneIconMap}
+                onResultSelect={handleSearchResultSelect}
+                inputRef={searchInputRef}
+                containerRef={searchContainerRef}
+              />
+            </div>
             {showServerTarget && (
               <div className="px-3 pb-1 pt-3">
                 <Select
@@ -812,7 +840,10 @@ export function PreferencesDialog() {
                       if (entry.type === 'section') {
                         const isFirst = index === 0
                         return (
-                          <li key={entry.id} className={isFirst ? 'pt-0' : 'pt-1'}>
+                          <li
+                            key={entry.id}
+                            className={isFirst ? 'pt-0' : 'pt-1'}
+                          >
                             {!isFirst && (
                               <SidebarSeparator className="mx-0 mb-1" />
                             )}
@@ -855,17 +886,23 @@ export function PreferencesDialog() {
                 </SidebarGroupContent>
               </SidebarGroup>
             </SidebarContent>
+            <div className="shrink-0 border-t border-border p-2">
+              <SettingsBackButton onClick={() => handleOpenChange(false)} />
+            </div>
           </Sidebar>
 
           <main className="flex flex-1 flex-col overflow-hidden">
-            <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border">
+            <header
+              data-tauri-drag-region
+              className="flex h-14 shrink-0 items-center gap-2"
+            >
               <div className="flex flex-1 items-center gap-2 px-4">
                 {/* Mobile pane selector */}
                 <Select
                   value={activePane}
                   onValueChange={v => handlePaneSelect(v as PreferencePane)}
                 >
-                  <SelectTrigger className="lg:hidden w-full">
+                  <SelectTrigger className="md:hidden w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -885,13 +922,20 @@ export function PreferencesDialog() {
                 </Select>
                 <ModalCloseButton
                   size="lg"
-                  className="lg:hidden"
+                  className="md:hidden"
                   onClick={() => handleOpenChange(false)}
                 />
-                <Breadcrumb className="hidden lg:block">
+                <Breadcrumb className="hidden md:block">
                   <BreadcrumbList>
                     <BreadcrumbItem>
-                      <BreadcrumbLink href="#">Settings</BreadcrumbLink>
+                      <BreadcrumbLink asChild>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenChange(false)}
+                        >
+                          Settings
+                        </button>
+                      </BreadcrumbLink>
                     </BreadcrumbItem>
                     <BreadcrumbSeparator />
                     <BreadcrumbItem>
@@ -902,24 +946,7 @@ export function PreferencesDialog() {
                   </BreadcrumbList>
                 </Breadcrumb>
 
-                <div className="ml-auto hidden lg:flex items-center gap-2">
-                  <PreferencesSearchBar
-                    variant="desktop"
-                    searchValue={searchValue}
-                    onSearchValueChange={setSearchValue}
-                    searchOpen={searchOpen}
-                    onSearchOpenChange={setSearchOpen}
-                    selectedId={effectiveSearchSelection}
-                    onSelectedIdChange={setSearchSelection}
-                    isSearching={isSearching}
-                    searchResults={searchResults}
-                    groupedResults={groupedResults}
-                    paneIconMap={paneIconMap}
-                    onResultSelect={handleSearchResultSelect}
-                    inputRef={searchInputRef}
-                    containerRef={searchContainerRef}
-                  />
-
+                <div className="ml-auto hidden md:flex items-center gap-2">
                   <ModalCloseButton
                     className="relative z-10 shrink-0"
                     onClick={() => handleOpenChange(false)}
@@ -930,7 +957,7 @@ export function PreferencesDialog() {
 
             <div
               ref={scrollContainerRef}
-              className="flex min-w-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto p-4 min-h-0"
+              className="flex min-w-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto px-4 py-6 sm:px-8 lg:px-12 lg:py-10 min-h-0 [&>div[id^=pref-pane]]:mx-auto [&>div[id^=pref-pane]]:w-full [&>div[id^=pref-pane]]:max-w-4xl"
             >
               <PreferencesSearchBar
                 variant="mobile"
@@ -1071,8 +1098,7 @@ export function PreferencesDialog() {
             </div>
           </main>
         </SidebarProvider>
-      </DialogContent>
-    </Dialog>
+      </SettingsPage>
     </SettingsTargetProvider>
   )
 }

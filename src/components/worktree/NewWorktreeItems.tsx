@@ -26,6 +26,8 @@ import {
 import { useIsMobile } from '@/hooks/use-mobile'
 import { cn } from '@/lib/utils'
 import { ItemSelectCheckbox } from './ItemSelectCheckbox'
+import { ContextLinkBadge } from './ContextLinkBadge'
+import type { ContextLinkMatch } from '@/hooks/useContextLinkUsage'
 import { isNewIssue } from '@/services/github'
 import type {
   GitHubIssue,
@@ -81,6 +83,7 @@ export interface IssueItemProps {
   index: number
   isSelected: boolean
   isCreating: boolean
+  contextMatches?: ContextLinkMatch[]
   isChecked?: boolean
   onCheckedChange?: (checked: boolean) => void
   onMouseEnter: () => void
@@ -96,6 +99,7 @@ export function IssueItem({
   index,
   isSelected,
   isCreating,
+  contextMatches,
   isChecked = false,
   onCheckedChange,
   onMouseEnter,
@@ -158,6 +162,7 @@ export function IssueItem({
           </div>
         </button>
       </div>
+      <ContextLinkBadge matches={contextMatches} />
       <div className="shrink-0 flex items-center gap-1 self-center">
         <ItemActions
           label="Issue"
@@ -178,6 +183,7 @@ export interface PRItemProps {
   index: number
   isSelected: boolean
   isCreating: boolean
+  contextMatches?: ContextLinkMatch[]
   isStacking: boolean
   isChecked?: boolean
   onCheckedChange?: (checked: boolean) => void
@@ -194,6 +200,7 @@ export function PRItem({
   index,
   isSelected,
   isCreating,
+  contextMatches,
   isStacking,
   isChecked = false,
   onCheckedChange,
@@ -258,6 +265,7 @@ export function PRItem({
           </div>
         </button>
       </div>
+      <ContextLinkBadge matches={contextMatches} />
       <div className="shrink-0 flex items-center gap-1 self-center">
         <ItemActions
           label="PR"
@@ -476,6 +484,7 @@ export interface SecurityAlertItemProps {
   index: number
   isSelected: boolean
   isCreating: boolean
+  contextMatches?: ContextLinkMatch[]
   isChecked?: boolean
   onCheckedChange?: (checked: boolean) => void
   onMouseEnter: () => void
@@ -489,6 +498,7 @@ export function SecurityAlertItem({
   index,
   isSelected,
   isCreating,
+  contextMatches,
   isChecked = false,
   onCheckedChange,
   onMouseEnter,
@@ -559,6 +569,7 @@ export function SecurityAlertItem({
           </span>
         </div>
       </button>
+      <ContextLinkBadge matches={contextMatches} />
       <div className="shrink-0 flex items-center gap-1 self-center">
         <ItemActions
           label="Alert"
@@ -582,6 +593,7 @@ export interface AdvisoryItemProps {
   index: number
   isSelected: boolean
   isCreating: boolean
+  contextMatches?: ContextLinkMatch[]
   isChecked?: boolean
   onCheckedChange?: (checked: boolean) => void
   onMouseEnter: () => void
@@ -595,6 +607,7 @@ export function AdvisoryItem({
   index,
   isSelected,
   isCreating,
+  contextMatches,
   isChecked = false,
   onCheckedChange,
   onMouseEnter,
@@ -669,6 +682,7 @@ export function AdvisoryItem({
           </span>
         </div>
       </button>
+      <ContextLinkBadge matches={contextMatches} />
       <div className="shrink-0 flex items-center gap-1 self-center">
         <ItemActions
           label="Advisory"

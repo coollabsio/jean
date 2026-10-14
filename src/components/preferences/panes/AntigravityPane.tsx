@@ -1,7 +1,7 @@
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
-import { BackendPaneHeader, SettingsSection } from '../SettingsSection'
-import { BackendCliSourceCards } from '../BackendCliSourceCards'
+import { SettingsSection } from '../SettingsSection'
+import { BackendCliSourceSelect } from '../BackendCliSourceSelect'
 import {
   antigravityCliQueryKeys,
   useAvailableAntigravityModels,
@@ -58,13 +58,12 @@ export function AntigravityPane() {
   }
 
   return (
-    <div className="space-y-6">
-      <BackendPaneHeader
-        backend="antigravity"
-        description="Google's official Antigravity CLI."
-      />
+    <div className="w-full max-w-3xl space-y-6">
+      <p className="text-sm text-muted-foreground">
+        Google&apos;s official Antigravity CLI.
+      </p>
       <SettingsSection title="CLI source" variant="card">
-        <BackendCliSourceCards
+        <BackendCliSourceSelect
           value={source}
           onValueChange={setSource}
           backendName="Antigravity CLI"
@@ -189,6 +188,7 @@ export function AntigravityPane() {
       </SettingsSection>
       <SettingsSection title="Default model" variant="card">
         <select
+          aria-label="Default model"
           className="h-9 w-full rounded-md border bg-background px-3 text-sm"
           value={preferences?.selected_antigravity_model ?? 'antigravity/auto'}
           onChange={event =>

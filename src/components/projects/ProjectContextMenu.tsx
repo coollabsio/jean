@@ -65,7 +65,10 @@ export function ProjectContextMenu({
     (cachedWorktrees?.some(worktree => worktree.session_type === 'base') ??
       false)
   const { data: preferences } = usePreferences()
-  const { openProjectSettings, selectProject } = useProjectsStore()
+  const openProjectSettings = useProjectsStore(
+    state => state.openProjectSettings
+  )
+  const selectProject = useProjectsStore(state => state.selectProject)
   const setNewWorktreeModalOpen = useUIStore(
     state => state.setNewWorktreeModalOpen
   )

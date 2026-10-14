@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildCodexUserInputAnswerMap,
+  getSupportedPermissionModes,
+  normalizeExecutionModeForBackend,
   findCodexUserInputRequest,
   foldTodoWriteToolCalls,
   getAskUserQuestions,
@@ -331,5 +333,42 @@ describe('buildCodexUserInputAnswerMap', () => {
     ).toEqual({
       '0': { answers: ['Backend'] },
     })
+  })
+})
+
+describe('permission capabilities', () => {
+  it.each(['claude', 'codex', 'kimi', 'grok'] as const)(
+    'offers all policies for %s',
+    backend => {
+      expect(getSupportedPermissionModes(backend)).toEqual([
+        'supervised',
+        'build',
+        'auto',
+        'yolo',
+      ])
+    }
+  )
+  it.each(['opencode'] as const)(
+    'does not offer automatic review for %s',
+    backend => {
+      expect(getSupportedPermissionModes(backend)).toEqual([
+        'supervised',
+        'build',
+        'yolo',
+      ])
+    }
+  )
+  it.each(['cursor', 'pi', 'commandcode', 'antigravity'] as const)(
+    'does not advertise unsupported policies for %s',
+    backend => {
+      expect(getSupportedPermissionModes(backend)).toEqual(['yolo'])
+      expect(normalizeExecutionModeForBackend(backend, 'supervised')).toBe(
+        'plan'
+      )
+      expect(normalizeExecutionModeForBackend(backend, 'auto')).toBe('plan')
+    }
+  )
+  it('never escalates unsupported Cursor Build to Full access', () => {
+    expect(normalizeExecutionModeForBackend('cursor', 'build')).toBe('plan')
   })
 })

@@ -2,6 +2,7 @@ import type {
   Backend,
   EffortLevel,
   ExecutionMode,
+  PermissionMode,
   Session,
   ThinkingLevel,
 } from '@/types/chat'
@@ -12,6 +13,7 @@ export type SessionSettingKey =
   | 'thinkingLevel'
   | 'effortLevel'
   | 'executionMode'
+  | 'permissionMode'
   | 'provider'
   | 'waitingForInput'
 
@@ -62,6 +64,8 @@ export function applySessionSettingToSession(
         ...session,
         selected_execution_mode: value as ExecutionMode,
       }
+    case 'permissionMode':
+      return { ...session, selected_permission_mode: value as PermissionMode }
     case 'provider':
       return {
         ...session,

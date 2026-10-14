@@ -1,8 +1,13 @@
 //! Antigravity CLI headless execution engine.
 
+use super::coalesce::ChunkCoalescer;
+#[cfg(not(unix))]
+use super::coalesce::FlushBeforeRead;
 use super::types::{ChatMessage, ContentBlock, MessageRole, RunEntry, ToolCall, UsageData};
 use crate::http_server::EmitExt;
 use serde_json::Value;
+#[cfg(not(unix))]
+use std::cell::RefCell;
 #[cfg(not(unix))]
 use std::fs::OpenOptions;
 #[cfg(not(unix))]
@@ -323,20 +328,42 @@ fn merge_event(response: &mut AntigravityResponse, value: &Value) -> bool {
     false
 }
 
+fn emit_chunk(app: &AppHandle, session: &str, worktree: &str, text: &str) {
+    emit(
+        app,
+        "chat:chunk",
+        serde_json::json!({"session_id":session,"worktree_id":worktree,"content":text}),
+    );
+}
+
+/// Emit buffered text. Must run before any other event for the session
+/// (thinking/tool/done/error) so event ordering is preserved.
+fn flush_chunks(app: &AppHandle, session: &str, worktree: &str, coalescer: &mut ChunkCoalescer) {
+    if let Some(batch) = coalescer.flush() {
+        emit_chunk(app, session, worktree, &batch);
+    }
+}
+
+/// Emit events for blocks appended since `before`. Text deltas are coalesced
+/// into fewer chat:chunk events; buffered text is flushed before any other
+/// event so UI order is stable.
 fn emit_new(
     app: &AppHandle,
     session: &str,
     worktree: &str,
     before: usize,
     response: &AntigravityResponse,
+    coalescer: &mut ChunkCoalescer,
 ) {
     for block in response.content_blocks.iter().skip(before) {
+        if let ContentBlock::Text { text } = block {
+            if let Some(batch) = coalescer.push(text) {
+                emit_chunk(app, session, worktree, &batch);
+            }
+            continue;
+        }
+        flush_chunks(app, session, worktree, coalescer);
         match block {
-            ContentBlock::Text { text } => emit(
-                app,
-                "chat:chunk",
-                serde_json::json!({"session_id":session,"worktree_id":worktree,"content":text}),
-            ),
             ContentBlock::Thinking { thinking } => emit(
                 app,
                 "chat:thinking",
@@ -572,11 +599,25 @@ pub fn execute_antigravity(
             diagnostics: vec![],
         };
         let mut saw_terminal_event = false;
-        for line in BufReader::new(stdout).lines() {
+        // Coalesce token deltas into fewer chat:chunk events. Flushed before
+        // other events (in emit_new), before blocking on more CLI output, and
+        // when the stream ends.
+        let coalescer = RefCell::new(ChunkCoalescer::new());
+        let flush = || {
+            flush_chunks(
+                options.app,
+                options.jean_session_id,
+                options.worktree_id,
+                &mut coalescer.borrow_mut(),
+            )
+        };
+        for line in BufReader::new(FlushBeforeRead::new(stdout, flush)).lines() {
             let line =
                 line.map_err(|error| format!("Failed to read Antigravity output: {error}"))?;
-            writeln!(log, "{line}")
-                .map_err(|error| format!("Failed to save Antigravity output: {error}"))?;
+            writeln!(log, "{line}").map_err(|error| {
+                flush();
+                format!("Failed to save Antigravity output: {error}")
+            })?;
             if let Ok(value) = serde_json::from_str::<Value>(&line) {
                 let before = response.content_blocks.len();
                 if merge_event(&mut response, &value) {
@@ -588,11 +629,13 @@ pub fn execute_antigravity(
                     options.worktree_id,
                     before,
                     &response,
+                    &mut coalescer.borrow_mut(),
                 );
             } else if !line.trim().is_empty() {
                 response.diagnostics.push(line.trim().to_string());
             }
         }
+        flush();
         let status = child
             .wait()
             .map_err(|error| format!("Failed to wait for Antigravity CLI: {error}"))?;
@@ -647,6 +690,8 @@ pub fn tail_antigravity_output(
         diagnostics: vec![],
     };
     let start = Instant::now();
+    // Batch token deltas (~30ms) into fewer chat:chunk events.
+    let mut coalescer = ChunkCoalescer::new();
     loop {
         let lines = tailer.poll()?;
         let had_data = !lines.is_empty();
@@ -654,6 +699,7 @@ pub fn tail_antigravity_output(
             if let Ok(value) = serde_json::from_str::<Value>(line.trim()) {
                 let before = response.content_blocks.len();
                 if merge_event(&mut response, &value) {
+                    flush_chunks(app, session_id, worktree_id, &mut coalescer);
                     response.content = response.content.trim().to_string();
                     if let Some(error) = response.terminal_error.clone() {
                         return Err(error);
@@ -663,15 +709,35 @@ pub fn tail_antigravity_output(
                     }
                     return Ok(response);
                 }
-                emit_new(app, session_id, worktree_id, before, &response);
+                emit_new(
+                    app,
+                    session_id,
+                    worktree_id,
+                    before,
+                    &response,
+                    &mut coalescer,
+                );
             } else if !line.trim().is_empty() {
                 response.diagnostics.push(line.trim().to_string());
             }
         }
+        // Release buffered text when the coalesce window elapses, even if no
+        // new lines arrived (idle mid-sentence).
+        if coalescer
+            .deadline()
+            .is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            flush_chunks(app, session_id, worktree_id, &mut coalescer);
+        }
         if !crate::platform::is_process_alive(pid) && start.elapsed() > Duration::from_secs(2) {
+            flush_chunks(app, session_id, worktree_id, &mut coalescer);
             return finalize_dead_process_response(response);
         }
-        std::thread::sleep(next_poll_interval(had_data, start.elapsed()));
+        let mut sleep_for = next_poll_interval(had_data, start.elapsed());
+        if let Some(deadline) = coalescer.deadline() {
+            sleep_for = sleep_for.min(deadline.saturating_duration_since(Instant::now()));
+        }
+        std::thread::sleep(sleep_for);
     }
 }
 

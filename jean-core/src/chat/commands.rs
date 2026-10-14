@@ -55,6 +55,7 @@ const CODEX_DEFAULT_NOT_PLAN_MODE_PROMPT: &str = "\
 
 - **VERY IMPORTANT: Keep Code Simple**: Do not over-engineer. Always implement the simplest maintainable solution. Avoid extra abstractions, frameworks, configuration, or future-proofing unless clearly required.
 - **Clickable References**: When output mentions issues, PRs, security advisories/alerts, Linear issues, or other external resources, include clickable links when available so users can open them directly.
+- **Tables for Findings**: When you report found issues, gaps, risks, or recommended fixes, present them in a Markdown table (for example: | # | Finding | Location | Impact | Recommended fix |) instead of long prose lists.
 - After each finished task, please write a few bullet points on how to test the changes.
 - When multiple independent operations are needed, batch them into parallel tool calls. Launch independent Task subagents simultaneously rather than sequentially.
 - When specifying subagent_type for Task tool calls, always use the fully qualified name exactly as listed in the system prompt (e.g., \"code-simplifier:code-simplifier\", not just \"code-simplifier\"). If the agent type contains a colon, include the full namespace:name string.
@@ -63,14 +64,7 @@ const CODEX_DEFAULT_NOT_PLAN_MODE_PROMPT: &str = "\
 
 - Do NOT create git worktrees manually (`git worktree add`, Superpowers `using-git-worktrees`, or similar) unless the user explicitly asks for a new worktree.
 - If a new worktree is explicitly required, use Jean's worktree features through Jean MCP/tools, not raw git worktree commands.
-- If already in a Jean worktree or base/main workspace, continue in the current workspace.
-
-## Jean Run Environment
-
-- When you need to test a running app (UI, HTTP, browser, smoke, e2e), call Jean MCP `get_run_environments` first (pass this worktreeId when known).
-- If an environment is running, test against its `url`, port, and startup command. Do not guess localhost ports or start a second dev server when Jean already has one.
-- If nothing is running and verification needs a live server, say so and use the returned/startup command rather than inventing a different command or port.
-- In how-to-test notes, include the exact URL/port you used.";
+- If already in a Jean worktree or base/main workspace, continue in the current workspace.";
 const CODEX_DEFAULT_PLAN_MODE_PROMPT: &str = "\
 ## Plan Mode
 
@@ -82,7 +76,7 @@ const CODEX_DEFAULT_PLAN_MODE_PROMPT: &str = "\
 - If questions block the plan, prefer Codex `request_user_input`; after the user answers, emit a revised complete `<proposed_plan>` block with the **full revised plan**, not only short step titles.
 - Do not call implementation tools or make file changes until the user approves the plan.
 
-### Plan quality (required for YOLO/Build handoff)
+### Plan quality (required for Full access/Build handoff)
 
 Jean may hand this plan to a zero-context agent in a new worktree. Status lines like \"Plan created and ready for approval.\" are not a plan.
 
@@ -157,7 +151,7 @@ fn clear_stale_pending_cancel_before_send(session_id: &str) {
 
 fn codex_execution_mode_instruction(execution_mode: Option<&str>) -> Option<&'static str> {
     match execution_mode.unwrap_or("plan") {
-        "build" => Some(
+        "build" | "supervised" | "auto" => Some(
             "You are in BUILD MODE. Start implementing immediately. \
              This current BUILD MODE instruction supersedes any earlier plan-mode \
              instructions remembered from conversation history; treat the approved plan \
@@ -167,8 +161,8 @@ fn codex_execution_mode_instruction(execution_mode: Option<&str>) -> Option<&'st
              request_user_input instead of switching back to plan mode.",
         ),
         "yolo" => Some(
-            "You are in YOLO EXECUTION MODE. Start implementing immediately. \
-             This current YOLO EXECUTION MODE instruction supersedes any earlier plan-mode \
+            "You are in FULL ACCESS MODE. Start implementing immediately. \
+             This current FULL ACCESS MODE instruction supersedes any earlier plan-mode \
              instructions remembered from conversation history; treat the approved plan \
              as authorization to implement now. \
              Do NOT emit <proposed_plan> blocks or wait for plan approval unless the user \
@@ -182,7 +176,7 @@ fn codex_execution_mode_instruction(execution_mode: Option<&str>) -> Option<&'st
 
 fn codex_default_global_system_prompt(execution_mode: Option<&str>) -> String {
     match execution_mode.unwrap_or("plan") {
-        "build" | "yolo" => CODEX_DEFAULT_NOT_PLAN_MODE_PROMPT.to_string(),
+        "build" | "yolo" | "supervised" | "auto" => CODEX_DEFAULT_NOT_PLAN_MODE_PROMPT.to_string(),
         _ => CODEX_DEFAULT_PLAN_MODE_PROMPT.to_string(),
     }
 }
@@ -416,6 +410,47 @@ fn resolve_global_system_prompt(preferences_prompt: Option<&str>) -> String {
         .unwrap_or_else(crate::default_global_system_prompt)
 }
 
+/// Default policy for sessions without a selection. Server projects start in
+/// Supervised (approve each command), so the agent reads before it changes the host.
+fn default_execution_mode_for_worktree(
+    app: &AppHandle,
+    worktree_id: &str,
+    preferences_default: Option<String>,
+) -> Option<String> {
+    if crate::projects::is_server_worktree(app, worktree_id) {
+        Some("supervised".to_string())
+    } else {
+        preferences_default
+    }
+}
+
+/// Workflow policy for a new session: worktree/preference default, or Plan when
+/// the backend does not support that default.
+pub(crate) fn default_execution_policy(
+    app: &AppHandle,
+    worktree_id: &str,
+    backend: &Backend,
+    preferences_default: Option<String>,
+) -> String {
+    let policy = default_execution_mode_for_worktree(app, worktree_id, preferences_default)
+        .unwrap_or_else(|| "yolo".to_string());
+    if validate_execution_policy(&policy, backend).is_ok() {
+        policy
+    } else {
+        "plan".to_string()
+    }
+}
+
+/// Global system prompt for a session: server projects use the server prompt instead.
+fn resolve_session_global_system_prompt(
+    app: &AppHandle,
+    worktree_id: &str,
+    preferences_prompt: Option<&str>,
+) -> String {
+    crate::projects::server_system_prompt(app, worktree_id)
+        .unwrap_or_else(|| resolve_global_system_prompt(preferences_prompt))
+}
+
 /// Resolve the model used for a send.
 ///
 /// Precedence:
@@ -434,6 +469,27 @@ fn resolve_send_model(
     normalize_optional_string(explicit_model)
         .or_else(|| normalize_optional_string(session_selected_model))
         .or_else(|| normalize_optional_string(backend_default_model))
+}
+
+fn validate_execution_policy(mode: &str, backend: &Backend) -> Result<(), String> {
+    let supported = match mode {
+        "plan" | "yolo" => true,
+        "build" => *backend != Backend::Cursor,
+        "supervised" => matches!(
+            backend,
+            Backend::Claude | Backend::Codex | Backend::Opencode | Backend::Grok | Backend::Kimi
+        ),
+        "auto" => matches!(
+            backend,
+            Backend::Claude | Backend::Codex | Backend::Grok | Backend::Kimi
+        ),
+        _ => false,
+    };
+    if supported {
+        Ok(())
+    } else {
+        Err(format!("Permission policy '{mode}' is not supported by this backend. Select Plan or a supported permission policy."))
+    }
 }
 
 /// Resolve execution mode for a send: explicit override → session selection →
@@ -461,9 +517,13 @@ fn build_kimi_system_prompt(
         parts.push(format!("Respond to the user in {language}."));
     }
     let preferences = crate::load_preferences_sync(app).ok();
-    parts.push(resolve_global_system_prompt(preferences.as_ref().and_then(
-        |prefs| prefs.magic_prompts.global_system_prompt.as_deref(),
-    )));
+    parts.push(resolve_session_global_system_prompt(
+        app,
+        worktree_id,
+        preferences
+            .as_ref()
+            .and_then(|prefs| prefs.magic_prompts.global_system_prompt.as_deref()),
+    ));
     if let Some(prompt) = parallel_prompt
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -640,6 +700,7 @@ pub async fn list_sessions_summary(
                 "selectedModel": session.selected_model,
                 "selectedProvider": session.selected_provider,
                 "selectedExecutionMode": session.selected_execution_mode,
+                "selectedPermissionMode": session.selected_permission_mode,
                 "createdAt": session.created_at,
                 "updatedAt": session.updated_at,
                 "lastMessageAt": session.last_message_at,
@@ -689,6 +750,7 @@ pub async fn get_session_status(
         "selectedModel": metadata.selected_model,
         "selectedProvider": metadata.selected_provider,
         "selectedExecutionMode": metadata.selected_execution_mode,
+        "selectedPermissionMode": metadata.selected_permission_mode,
         "waitingForInput": metadata.waiting_for_input,
         "waitingForInputType": metadata.waiting_for_input_type,
         "latestRun": latest_run.map(|run| serde_json::json!({
@@ -766,68 +828,124 @@ pub async fn get_unread_session_count(app: AppHandle) -> Result<usize, String> {
             .into_iter()
             .filter(|worktree| worktree.archived_at.is_none())
         {
-            let index = load_index(&app, &worktree.id)?;
-            let mut legacy_summaries = HashMap::new();
-
-            for entry in &index.sessions {
-                if entry.archived_at.is_some() {
-                    continue;
-                }
-
-                let summary = if let Some(summary) = &entry.unread_summary {
-                    summary.clone()
-                } else {
-                    // Older indexes do not contain summaries. Read each legacy
-                    // metadata file once, then persist the compact result so
-                    // future count checks stay index-only.
-                    match load_metadata(&app, &entry.id) {
-                        Ok(Some(metadata)) => {
-                            let summary = metadata.to_unread_summary();
-                            legacy_summaries.insert(entry.id.clone(), summary.clone());
-                            summary
-                        }
-                        Ok(None) => {
-                            let summary = SessionUnreadSummary::default();
-                            legacy_summaries.insert(entry.id.clone(), summary.clone());
-                            summary
-                        }
-                        Err(error) => {
-                            log::warn!(
-                                "Failed to load legacy unread metadata for session {}: {error}",
-                                entry.id
-                            );
-                            continue;
-                        }
-                    }
-                };
-
-                if summary.is_unread() {
-                    unread_count += 1;
-                }
-            }
-
-            if !legacy_summaries.is_empty() {
-                let migration_result = with_index_mut(&app, &worktree.id, |index| {
-                    for (session_id, summary) in &legacy_summaries {
-                        if let Some(entry) = index.find_session_mut(session_id) {
-                            if entry.unread_summary.is_none() {
-                                entry.unread_summary = Some(summary.clone());
-                            }
-                        }
-                    }
-                    Ok(())
-                });
-                if let Err(error) = migration_result {
-                    log::warn!(
-                        "Failed to persist unread index migration for worktree {}: {error}",
-                        worktree.id
-                    );
-                }
-            }
+            unread_count += unread_session_ids_for_worktree(&app, &worktree.id)?.len();
         }
     }
 
     Ok(unread_count)
+}
+
+/// List only unread sessions across all projects, grouped like `list_all_sessions`.
+///
+/// The finished-session popover needs session objects, but only for unread
+/// sessions. Filtering on the index summaries first avoids reading the
+/// metadata file of every session in every worktree.
+pub async fn list_unread_sessions(app: AppHandle) -> Result<AllSessionsResponse, String> {
+    log::trace!("Listing unread sessions across all worktrees");
+
+    let projects_data = load_projects_data(&app)?;
+    let mut entries = Vec::new();
+
+    for project in &projects_data.projects {
+        for worktree in projects_data
+            .worktrees_for_project(&project.id)
+            .into_iter()
+            .filter(|worktree| worktree.archived_at.is_none())
+        {
+            let sessions: Vec<Session> = unread_session_ids_for_worktree(&app, &worktree.id)?
+                .iter()
+                .filter_map(|session_id| match load_metadata(&app, session_id) {
+                    Ok(Some(metadata)) => Some(metadata.to_session()),
+                    Ok(None) => None,
+                    Err(error) => {
+                        log::warn!("Failed to load unread session {session_id}: {error}");
+                        None
+                    }
+                })
+                .filter(is_unread_session)
+                .collect();
+
+            if !sessions.is_empty() {
+                entries.push(AllSessionsEntry {
+                    project_id: project.id.clone(),
+                    project_name: project.name.clone(),
+                    worktree_id: worktree.id.clone(),
+                    worktree_name: worktree.name.clone(),
+                    worktree_path: worktree.path.clone(),
+                    sessions,
+                });
+            }
+        }
+    }
+
+    Ok(AllSessionsResponse { entries })
+}
+
+/// Return the ids of unread sessions in one worktree, using index summaries.
+fn unread_session_ids_for_worktree(
+    app: &AppHandle,
+    worktree_id: &str,
+) -> Result<Vec<String>, String> {
+    let index = load_index(app, worktree_id)?;
+    let mut legacy_summaries = HashMap::new();
+    let mut unread_ids = Vec::new();
+
+    for entry in &index.sessions {
+        if entry.archived_at.is_some() {
+            continue;
+        }
+
+        let summary = if let Some(summary) = &entry.unread_summary {
+            summary.clone()
+        } else {
+            // Older indexes do not contain summaries. Read each legacy
+            // metadata file once, then persist the compact result so
+            // future unread checks stay index-only.
+            match load_metadata(app, &entry.id) {
+                Ok(Some(metadata)) => {
+                    let summary = metadata.to_unread_summary();
+                    legacy_summaries.insert(entry.id.clone(), summary.clone());
+                    summary
+                }
+                Ok(None) => {
+                    let summary = SessionUnreadSummary::default();
+                    legacy_summaries.insert(entry.id.clone(), summary.clone());
+                    summary
+                }
+                Err(error) => {
+                    log::warn!(
+                        "Failed to load legacy unread metadata for session {}: {error}",
+                        entry.id
+                    );
+                    continue;
+                }
+            }
+        };
+
+        if summary.is_unread() {
+            unread_ids.push(entry.id.clone());
+        }
+    }
+
+    if !legacy_summaries.is_empty() {
+        let migration_result = with_index_mut(app, worktree_id, |index| {
+            for (session_id, summary) in &legacy_summaries {
+                if let Some(entry) = index.find_session_mut(session_id) {
+                    if entry.unread_summary.is_none() {
+                        entry.unread_summary = Some(summary.clone());
+                    }
+                }
+            }
+            Ok(())
+        });
+        if let Err(error) = migration_result {
+            log::warn!(
+                "Failed to persist unread index migration for worktree {worktree_id}: {error}"
+            );
+        }
+    }
+
+    Ok(unread_ids)
 }
 
 fn is_unread_session(session: &Session) -> bool {
@@ -1019,6 +1137,18 @@ pub async fn create_session(
             sessions.sessions.len() as u32,
             backend_enum.clone(),
         );
+        let policy = default_execution_policy(
+            &app,
+            &worktree_id,
+            &backend_enum,
+            preferences
+                .as_ref()
+                .map(|prefs| prefs.default_execution_mode.clone()),
+        );
+        session.set_execution_policy(Some(policy));
+        if session.selected_permission_mode.is_none() {
+            session.selected_permission_mode = Some("yolo".to_string());
+        }
         session.primary_surface = primary_surface.clone();
         session.terminal_command = terminal_command.clone();
         session.terminal_command_args = terminal_command_args.clone().unwrap_or_default();
@@ -1682,12 +1812,23 @@ pub async fn update_session_state(
     enabled_mcp_servers: Option<Option<Vec<String>>>,
     selected_execution_mode: Option<Option<String>>,
     table_checked_rows: Option<std::collections::HashMap<String, Vec<u32>>>,
+    hidden_table_checklists: Option<Vec<String>>,
     pinned_tables: Option<Vec<super::types::PinnedTable>>,
+    selected_permission_mode: Option<String>,
 ) -> Result<(), String> {
     log::trace!("Updating session state for: {session_id}");
+    if let Some(mode) = selected_permission_mode.as_deref() {
+        if !matches!(mode, "supervised" | "build" | "auto" | "yolo") {
+            return Err(format!("Unsupported permission policy: {mode}"));
+        }
+    }
+    let permission_setting = selected_permission_mode.clone();
 
     with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
         if let Some(session) = sessions.find_session_mut(&session_id) {
+            if let Some(Some(mode)) = selected_execution_mode.as_ref() {
+                validate_execution_policy(mode, &session.backend)?;
+            }
             if let Some(v) = answered_questions {
                 session.answered_questions = v;
             }
@@ -1786,10 +1927,16 @@ pub async fn update_session_state(
                     &session_id,
                     v.as_deref() == Some("yolo"),
                 );
-                session.selected_execution_mode = v;
+                session.set_execution_policy(v);
+            }
+            if let Some(mode) = selected_permission_mode {
+                session.selected_permission_mode = Some(mode);
             }
             if let Some(v) = table_checked_rows {
                 session.table_checked_rows = v;
+            }
+            if let Some(v) = hidden_table_checklists {
+                session.hidden_table_checklists = v;
             }
             if let Some(v) = pinned_tables {
                 session.pinned_tables = v;
@@ -1800,6 +1947,11 @@ pub async fn update_session_state(
             Ok(())
         }
     })?;
+
+    if let Some(mode) = permission_setting {
+        broadcast_session_setting(app.clone(), session_id, "permissionMode".to_string(), mode)
+            .await?;
+    }
 
     // Notify all clients (native + web access) to refetch session data.
     // This is the single cache invalidation point for session state mutations —
@@ -3007,7 +3159,11 @@ pub async fn send_chat_message(
     let execution_mode = resolve_send_execution_mode(
         execution_mode,
         session_selected_execution_mode,
-        prefs.as_ref().map(|p| p.default_execution_mode.clone()),
+        default_execution_mode_for_worktree(
+            &app,
+            &worktree_id,
+            prefs.as_ref().map(|p| p.default_execution_mode.clone()),
+        ),
     );
     let thinking_level = thinking_level.or(session_selected_thinking_level);
     let effort_level = effort_level.or(session_selected_effort_level);
@@ -3037,6 +3193,10 @@ pub async fn send_chat_message(
     } else {
         effective_backend
     };
+
+    if let Some(mode) = execution_mode.as_deref() {
+        validate_execution_policy(mode, &effective_backend)?;
+    }
 
     // Final model fallback: preferences default for the resolved backend.
     // Covers sessions created before selected_model was persisted, or when
@@ -3336,52 +3496,58 @@ pub async fn send_chat_message(
     // Snapshot the worktree before the agent can modify files so the user can
     // review AI changes and restore individual files or the whole tree later.
     // Failures are non-fatal — chat should still proceed.
-    let checkpoint_id = match crate::projects::checkpoints::create_checkpoint(
-        &app,
-        crate::projects::checkpoints::CreateCheckpointArgs {
-            worktree_id: worktree_id.clone(),
-            worktree_path: worktree_path.clone(),
-            session_id: session_id.clone(),
-            run_id: Some(run_id.clone()),
-            user_message_id: Some(user_message_id.clone()),
-            user_message: message.clone(),
-        },
-    ) {
-        Ok(cp) => {
-            let cp_id = cp.id.clone();
-            if let Err(e) = with_metadata_mut(
-                &app,
-                &session_id,
-                &worktree_id,
-                &session_name,
-                session_order,
-                |metadata| {
-                    if let Some(run) = metadata.find_run_mut(&run_id) {
-                        run.checkpoint_id = Some(cp_id.clone());
-                    }
-                    Ok(())
-                },
-            ) {
-                log::warn!("[Checkpoint] failed to attach id to run {run_id}: {e}");
+    // Server projects use a non-git scratch folder; git would walk up to a
+    // parent repo, so they have no checkpoints.
+    let checkpoint_id = if crate::projects::is_server_worktree(&app, &worktree_id) {
+        None
+    } else {
+        match crate::projects::checkpoints::create_checkpoint(
+            &app,
+            crate::projects::checkpoints::CreateCheckpointArgs {
+                worktree_id: worktree_id.clone(),
+                worktree_path: worktree_path.clone(),
+                session_id: session_id.clone(),
+                run_id: Some(run_id.clone()),
+                user_message_id: Some(user_message_id.clone()),
+                user_message: message.clone(),
+            },
+        ) {
+            Ok(cp) => {
+                let cp_id = cp.id.clone();
+                if let Err(e) = with_metadata_mut(
+                    &app,
+                    &session_id,
+                    &worktree_id,
+                    &session_name,
+                    session_order,
+                    |metadata| {
+                        if let Some(run) = metadata.find_run_mut(&run_id) {
+                            run.checkpoint_id = Some(cp_id.clone());
+                        }
+                        Ok(())
+                    },
+                ) {
+                    log::warn!("[Checkpoint] failed to attach id to run {run_id}: {e}");
+                }
+                // Emit so clients can show restore affordances immediately.
+                if let Err(e) = app.emit_all(
+                    "checkpoint:created",
+                    &serde_json::json!({
+                        "worktree_id": worktree_id,
+                        "session_id": session_id,
+                        "run_id": run_id,
+                        "checkpoint_id": cp_id,
+                        "user_message_id": user_message_id,
+                    }),
+                ) {
+                    log::warn!("[Checkpoint] failed to emit checkpoint:created: {e}");
+                }
+                Some(cp_id)
             }
-            // Emit so clients can show restore affordances immediately.
-            if let Err(e) = app.emit_all(
-                "checkpoint:created",
-                &serde_json::json!({
-                    "worktree_id": worktree_id,
-                    "session_id": session_id,
-                    "run_id": run_id,
-                    "checkpoint_id": cp_id,
-                    "user_message_id": user_message_id,
-                }),
-            ) {
-                log::warn!("[Checkpoint] failed to emit checkpoint:created: {e}");
+            Err(e) => {
+                log::warn!("[Checkpoint] create failed session={session_id} run={run_id}: {e}");
+                None
             }
-            Some(cp_id)
-        }
-        Err(e) => {
-            log::warn!("[Checkpoint] create failed session={session_id} run={run_id}: {e}");
-            None
         }
     };
     let _ = checkpoint_id;
@@ -3392,6 +3558,14 @@ pub async fn send_chat_message(
 
     // Use passed parameter for parallel execution prompt (None = disabled)
     let parallel_execution_prompt = parallel_execution_prompt.filter(|p| !p.trim().is_empty());
+    // Agent sessions: append the agent prompt (role, tools, memory). Every backend receives this prompt.
+    let parallel_execution_prompt = match crate::agents::system_prompt_for(&app, &worktree_id) {
+        Some(agent_prompt) => Some(match parallel_execution_prompt {
+            Some(prompt) => format!("{prompt}\n\n{agent_prompt}"),
+            None => agent_prompt,
+        }),
+        None => parallel_execution_prompt,
+    };
 
     // Use passed parameter for Chrome browser integration (default false - beta)
     let chrome = chrome_enabled.unwrap_or(false);
@@ -3816,10 +3990,15 @@ pub async fn send_chat_message(
                             serde_json::from_str::<crate::AppPreferences>(&contents).ok()
                         })
                         .and_then(|prefs| prefs.magic_prompts.global_system_prompt);
-                    system_prompt_parts.push(resolve_codex_global_system_prompt(
-                        preferences_global_prompt.as_deref(),
-                        thread_execution_mode.as_deref(),
-                    ));
+                    system_prompt_parts.push(
+                        crate::projects::server_system_prompt(&thread_app, &thread_worktree_id)
+                            .unwrap_or_else(|| {
+                                resolve_codex_global_system_prompt(
+                                    preferences_global_prompt.as_deref(),
+                                    thread_execution_mode.as_deref(),
+                                )
+                            }),
+                    );
 
                     // Parallel execution prompt
                     if let Some(prompt) = &thread_parallel_prompt {
@@ -4204,7 +4383,9 @@ pub async fn send_chat_message(
 
                     // Global system prompt from preferences, with the shared default fallback.
                     let preferences = crate::load_preferences_sync(&thread_app).ok();
-                    system_prompt_parts.push(resolve_global_system_prompt(
+                    system_prompt_parts.push(resolve_session_global_system_prompt(
+                        &thread_app,
+                        &thread_worktree_id,
                         preferences
                             .as_ref()
                             .and_then(|prefs| prefs.magic_prompts.global_system_prompt.as_deref()),
@@ -4536,9 +4717,13 @@ pub async fn send_chat_message(
                     }
 
                     let preferences = crate::load_preferences_sync(&thread_app).ok();
-                    parts.push(resolve_global_system_prompt(preferences.as_ref().and_then(
-                        |prefs| prefs.magic_prompts.global_system_prompt.as_deref(),
-                    )));
+                    parts.push(resolve_session_global_system_prompt(
+                        &thread_app,
+                        &thread_worktree_id,
+                        preferences
+                            .as_ref()
+                            .and_then(|prefs| prefs.magic_prompts.global_system_prompt.as_deref()),
+                    ));
 
                     if let Some(prompt) = &thread_parallel_prompt {
                         let prompt = prompt.trim();
@@ -4701,9 +4886,13 @@ pub async fn send_chat_message(
                     }
 
                     let preferences = crate::load_preferences_sync(&thread_app).ok();
-                    parts.push(resolve_global_system_prompt(preferences.as_ref().and_then(
-                        |prefs| prefs.magic_prompts.global_system_prompt.as_deref(),
-                    )));
+                    parts.push(resolve_session_global_system_prompt(
+                        &thread_app,
+                        &thread_worktree_id,
+                        preferences
+                            .as_ref()
+                            .and_then(|prefs| prefs.magic_prompts.global_system_prompt.as_deref()),
+                    ));
 
                     if let Some(prompt) = &thread_parallel_prompt {
                         let prompt = prompt.trim();
@@ -4831,9 +5020,13 @@ pub async fn send_chat_message(
                     }
 
                     let preferences = crate::load_preferences_sync(&thread_app).ok();
-                    parts.push(resolve_global_system_prompt(preferences.as_ref().and_then(
-                        |prefs| prefs.magic_prompts.global_system_prompt.as_deref(),
-                    )));
+                    parts.push(resolve_session_global_system_prompt(
+                        &thread_app,
+                        &thread_worktree_id,
+                        preferences
+                            .as_ref()
+                            .and_then(|prefs| prefs.magic_prompts.global_system_prompt.as_deref()),
+                    ));
 
                     if let Some(prompt) = &thread_parallel_prompt {
                         let prompt = prompt.trim();
@@ -5835,13 +6028,17 @@ pub async fn set_session_execution_mode(
     session_id: String,
     execution_mode: String,
 ) -> Result<(), String> {
-    if !matches!(execution_mode.as_str(), "plan" | "build" | "yolo") {
+    if !matches!(
+        execution_mode.as_str(),
+        "plan" | "build" | "yolo" | "supervised" | "auto"
+    ) {
         return Err(format!("Unsupported execution mode: {execution_mode}"));
     }
 
     with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
         if let Some(session) = sessions.find_session_mut(&session_id) {
-            session.selected_execution_mode = Some(execution_mode);
+            validate_execution_policy(&execution_mode, &session.backend)?;
+            session.set_execution_policy(Some(execution_mode));
             Ok(())
         } else {
             Err(format!("Session not found: {session_id}"))
@@ -6866,7 +7063,13 @@ pub async fn read_file_content(path: String) -> Result<String, String> {
     }
 
     // Read the file content
-    std::fs::read_to_string(&file_path).map_err(|e| format!("Failed to read file: {e}"))
+    std::fs::read_to_string(&file_path).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::InvalidData {
+            "Binary file cannot be previewed".to_string()
+        } else {
+            format!("Failed to read file: {e}")
+        }
+    })
 }
 
 /// Binary file payload for UI preview (images outside project asset scope, etc.).
@@ -6892,11 +7095,15 @@ fn mime_type_from_path(path: &std::path::Path) -> &'static str {
         Some("bmp") => "image/bmp",
         Some("ico") => "image/x-icon",
         Some("avif") => "image/avif",
+        Some("mp4" | "m4v") => "video/mp4",
+        Some("webm") => "video/webm",
+        Some("mov") => "video/quicktime",
+        Some("ogv") => "video/ogg",
         _ => "application/octet-stream",
     }
 }
 
-/// Read a file as base64 for binary preview (e.g. images under /tmp).
+/// Read a file as base64 for binary preview (e.g. images or videos under /tmp).
 ///
 /// Same size limit as `read_file_content`. Used when asset:// and
 /// /api/project-files cannot serve paths outside project roots.
@@ -9259,6 +9466,15 @@ fn send_codex_response(rpc_id: u64, payload: serde_json::Value) -> Result<(), St
     super::codex_server::send_response(rpc_id, payload)
 }
 
+/// Answer a live Claude permission request (Supervised mode).
+pub fn respond_claude_permission(
+    session_id: String,
+    rpc_id: u64,
+    approved: bool,
+) -> Result<(), String> {
+    super::claude_permissions::respond(&session_id, rpc_id, approved)
+}
+
 /// Backward-compatible wrapper for legacy frontend callers.
 pub fn approve_codex_command(
     session_id: String,
@@ -10436,6 +10652,44 @@ mod tests {
     use super::*;
 
     #[test]
+    fn permission_policy_capabilities_never_escalate_unknown_modes() {
+        for backend in [
+            Backend::Claude,
+            Backend::Codex,
+            Backend::Opencode,
+            Backend::Cursor,
+            Backend::Pi,
+            Backend::Commandcode,
+            Backend::Grok,
+            Backend::Kimi,
+            Backend::Antigravity,
+        ] {
+            assert!(validate_execution_policy("plan", &backend).is_ok());
+            assert!(validate_execution_policy("yolo", &backend).is_ok());
+            assert!(validate_execution_policy("unknown", &backend).is_err());
+            assert_eq!(
+                validate_execution_policy("auto", &backend).is_ok(),
+                matches!(
+                    backend,
+                    Backend::Claude | Backend::Codex | Backend::Grok | Backend::Kimi
+                )
+            );
+            assert_eq!(
+                validate_execution_policy("supervised", &backend).is_ok(),
+                matches!(
+                    backend,
+                    Backend::Claude
+                        | Backend::Codex
+                        | Backend::Opencode
+                        | Backend::Grok
+                        | Backend::Kimi
+                )
+            );
+        }
+        assert!(validate_execution_policy("build", &Backend::Cursor).is_err());
+    }
+
+    #[test]
     fn resumed_grok_host_error_uses_chat_error_event() {
         let (event_name, event) =
             resumed_tail_error_event("session-1", "worktree-1", "rate limit reached");
@@ -11151,9 +11405,6 @@ mod tests {
         assert!(build_prompt.contains("Jean Worktree Policy"));
         assert!(build_prompt.contains("Do NOT create git worktrees manually"));
         assert!(build_prompt.contains("Jean MCP/tools"));
-        assert!(build_prompt.contains("Jean Run Environment"));
-        assert!(build_prompt.contains("get_run_environments"));
-        assert!(build_prompt.contains("test against its `url`, port, and startup command"));
         assert!(build_prompt.contains("VERY IMPORTANT: Keep Code Simple"));
         assert!(build_prompt.contains("Always implement the simplest maintainable solution"));
         assert!(build_prompt.contains("Clickable References"));
@@ -11164,8 +11415,6 @@ mod tests {
         assert!(!yolo_prompt.contains("<proposed_plan>"));
         assert!(!yolo_prompt.contains("CodexPlan"));
         assert!(yolo_prompt.contains("## Not Plan Mode"));
-        assert!(yolo_prompt.contains("Jean Run Environment"));
-        assert!(yolo_prompt.contains("get_run_environments"));
         assert!(yolo_prompt.contains("VERY IMPORTANT: Keep Code Simple"));
         assert!(yolo_prompt.contains("Clickable References"));
     }
@@ -11184,6 +11433,19 @@ mod tests {
             resolve_global_system_prompt(Some("  Custom global rule.  ")),
             "Custom global rule."
         );
+    }
+
+    #[test]
+    fn codex_default_prompt_has_run_environment_rules_once_in_every_mode() {
+        for mode in ["plan", "build", "yolo"] {
+            let prompt = resolve_codex_global_system_prompt(None, Some(mode));
+            assert_eq!(
+                prompt.matches("## Jean Run Environment").count(),
+                1,
+                "{mode}"
+            );
+            assert!(prompt.contains("start_run_environment"), "{mode}");
+        }
     }
 
     #[test]
@@ -11228,7 +11490,7 @@ mod tests {
             .rfind("STALE_PLAN_MARKER")
             .expect("stale plan rule is present in custom prompt");
         let mode_override = combined
-            .rfind("YOLO EXECUTION MODE")
+            .rfind("FULL ACCESS MODE")
             .expect("yolo override is present");
 
         assert!(
@@ -11252,7 +11514,7 @@ mod tests {
         assert!(build.contains("approved plan"));
 
         let yolo = codex_execution_mode_instruction(Some("yolo")).unwrap();
-        assert!(yolo.contains("YOLO EXECUTION MODE"));
+        assert!(yolo.contains("FULL ACCESS MODE"));
         assert!(yolo.contains("Start implementing immediately"));
         assert!(yolo.contains("Do NOT emit <proposed_plan>"));
         assert!(yolo.contains("Do not ask for confirmation"));

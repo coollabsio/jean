@@ -25,6 +25,10 @@ import {
 } from '@/types/chat'
 import { playNotificationSound } from '@/lib/sounds'
 import {
+  markSessionOpened,
+  markSessionOpenedWhenSeen,
+} from '@/lib/session-read'
+import {
   notifyIfBackground,
   notifySessionNeedsAttention,
 } from '@/lib/session-notifications'
@@ -36,6 +40,8 @@ import {
 } from '@/lib/backend-persist-guard'
 import type {
   ChunkEvent,
+  ExecutionMode,
+  PermissionMode,
   ToolUseEvent,
   ToolBlockEvent,
   ToolResultEvent,
@@ -90,9 +96,22 @@ import {
   isCodexBubblewrapError,
   rewriteCodexBubblewrapErrorMessage,
 } from '@/lib/cli-auth'
+import { isLivePermissionRequest } from '@/components/chat/permission-approval-utils'
 
 interface UseStreamingEventsParams {
   queryClient: QueryClient
+}
+
+/** Drop live Claude permission requests once the run that waits for them ends. */
+function clearLivePermissionRequests(sessionId: string) {
+  const { pendingPermissionDenials, setPendingDenials } =
+    useChatStore.getState()
+  const denials = pendingPermissionDenials[sessionId]
+  if (!denials?.some(isLivePermissionRequest)) return
+  setPendingDenials(
+    sessionId,
+    denials.filter(d => !isLivePermissionRequest(d))
+  )
 }
 
 function getTextContentFromBlocks(
@@ -792,6 +811,7 @@ export default function useStreamingEvents({
         const { session_id, worktree_id, denials } = event.payload
         const {
           setPendingDenials,
+          pendingPermissionDenials,
           lastSentMessages,
           setDeniedMessageContext,
           executionModes,
@@ -799,6 +819,19 @@ export default function useStreamingEvents({
           selectedModels,
           worktreePaths,
         } = useChatStore.getState()
+
+        // Live Claude request (Supervised): the run waits for the answer.
+        // Add it to the card; do not persist it, its rpc_id dies with the run.
+        if (denials.some(isLivePermissionRequest)) {
+          const current = pendingPermissionDenials[session_id] ?? []
+          setPendingDenials(session_id, [
+            ...current.filter(
+              d => !denials.some(denial => denial.rpc_id === d.rpc_id)
+            ),
+            ...denials,
+          ])
+          return
+        }
 
         // Store the denials for the approval UI
         setPendingDenials(session_id, denials)
@@ -1063,6 +1096,7 @@ export default function useStreamingEvents({
     const unlistenDone = listen<DoneEvent>('chat:done', event => {
       const sessionId = event.payload.session_id
       const worktreeId = event.payload.worktree_id
+      clearLivePermissionRequests(sessionId)
 
       // Flush any buffered chunks/thinking so streaming state is up to date
       if (
@@ -1112,17 +1146,17 @@ export default function useStreamingEvents({
 
       const isCurrentlyViewing = isViewingInFullView || isViewingInModal
 
-      // If user is currently viewing this session, bump last_opened_at so it
+      // If user is viewing this session (window focused), bump last_opened_at so it
       // doesn't appear as "unread" (updated_at will be newer after the run ends).
       // Also auto-mark user-initiated sessions (e.g. Clear Context & YOLO) as opened.
       const { userInitiatedSessionIds, removeUserInitiatedSession } =
         useChatStore.getState()
       const isUserInitiated = !!userInitiatedSessionIds[sessionId]
-      if (isCurrentlyViewing || isUserInitiated) {
-        if (isUserInitiated) removeUserInitiatedSession(sessionId)
-        invoke('set_session_last_opened', { sessionId })
-          .then(() => window.dispatchEvent(new CustomEvent('session-opened')))
-          .catch(() => undefined)
+      if (isUserInitiated) {
+        removeUserInitiatedSession(sessionId)
+        markSessionOpened(sessionId)
+      } else if (isCurrentlyViewing) {
+        markSessionOpenedWhenSeen(sessionId)
       }
 
       const preferences = queryClient.getQueryData<AppPreferences>(
@@ -1761,6 +1795,7 @@ export default function useStreamingEvents({
     // Handle errors from any CLI backend (Claude, Codex, OpenCode, Cursor)
     const unlistenError = listen<ErrorEvent>('chat:error', event => {
       const { session_id, error } = event.payload
+      clearLivePermissionRequests(session_id)
 
       // Store error for inline display and restore input
       const {
@@ -1794,7 +1829,7 @@ export default function useStreamingEvents({
 
       const isCurrentlyViewing = isViewingInFullView || isViewingInModal
 
-      // If user is currently viewing this session, bump last_opened_at so it
+      // If user is viewing this session (window focused), bump last_opened_at so it
       // doesn't appear as "unread" (updated_at will be newer after the run ends).
       // Also auto-mark user-initiated sessions (e.g. Clear Context & YOLO) as opened.
       const {
@@ -1802,11 +1837,11 @@ export default function useStreamingEvents({
         removeUserInitiatedSession: rusErr,
       } = useChatStore.getState()
       const isUserInitiatedErr = !!uisErr[session_id]
-      if (isCurrentlyViewing || isUserInitiatedErr) {
-        if (isUserInitiatedErr) rusErr(session_id)
-        invoke('set_session_last_opened', { sessionId: session_id })
-          .then(() => window.dispatchEvent(new CustomEvent('session-opened')))
-          .catch(() => undefined)
+      if (isUserInitiatedErr) {
+        rusErr(session_id)
+        markSessionOpened(session_id)
+      } else if (isCurrentlyViewing) {
+        markSessionOpenedWhenSeen(session_id)
       }
 
       // Auth failures from headless CLIs (e.g. Claude "Please run /login")
@@ -1921,6 +1956,7 @@ export default function useStreamingEvents({
           emitted_at_ms,
           run_id: eventRunId,
         } = event.payload
+        clearLivePermissionRequests(session_id)
 
         // Flush any buffered chunks/thinking so streaming state is up to date
         if (
@@ -1995,7 +2031,7 @@ export default function useStreamingEvents({
 
         const isCurrentlyViewing = isViewingInFullView || isViewingInModal
 
-        // If user is currently viewing this session, bump last_opened_at so it
+        // If user is viewing this session (window focused), bump last_opened_at so it
         // doesn't appear as "unread" (updated_at will be newer after the run ends).
         // Also auto-mark user-initiated sessions (e.g. Clear Context & YOLO) as opened.
         const {
@@ -2003,11 +2039,11 @@ export default function useStreamingEvents({
           removeUserInitiatedSession: rusCan,
         } = useChatStore.getState()
         const isUserInitiatedCan = !!uisCan[session_id]
-        if (isCurrentlyViewing || isUserInitiatedCan) {
-          if (isUserInitiatedCan) rusCan(session_id)
-          invoke('set_session_last_opened', { sessionId: session_id })
-            .then(() => window.dispatchEvent(new CustomEvent('session-opened')))
-            .catch(() => undefined)
+        if (isUserInitiatedCan) {
+          rusCan(session_id)
+          markSessionOpened(session_id)
+        } else if (isCurrentlyViewing) {
+          markSessionOpenedWhenSeen(session_id)
         }
 
         // Clear compacting state (safety net)
@@ -2444,7 +2480,10 @@ export default function useStreamingEvents({
           )
           break
         case 'executionMode':
-          store.setExecutionMode(session_id, value as 'plan' | 'build' | 'yolo')
+          store.setExecutionMode(session_id, value as ExecutionMode)
+          break
+        case 'permissionMode':
+          store.setPermissionMode(session_id, value as PermissionMode)
           break
         case 'provider':
           store.setSelectedProvider(

@@ -1,6 +1,6 @@
 import { createElement, type PropsWithChildren } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useSessionStatePersistence } from './useSessionStatePersistence'
 import { useChatStore } from '@/store/chat-store'
@@ -31,7 +31,10 @@ function createWrapper(queryClient: QueryClient) {
 describe('useSessionStatePersistence', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockUpdateSessionState.mockReset()
     useChatStore.setState({
+      executionModes: {},
+      permissionModes: {},
       activeWorktreeId: 'worktree-1',
       activeWorktreePath: '/repo',
       activeSessionIds: { 'worktree-1': 'session-1' },
@@ -44,6 +47,65 @@ describe('useSessionStatePersistence', () => {
       fixedReviewFindings: {},
       pendingPlanMessageIds: { 'session-1': 'plan-message-1' },
     })
+  })
+
+  it('saves and restores Build permissions without leaving Plan', async () => {
+    const data: WorktreeSessions = {
+      worktree_id: 'worktree-1',
+      active_session_id: 'session-1',
+      version: 1,
+      sessions: [
+        {
+          id: 'session-1',
+          name: 'Permissions',
+          order: 0,
+          created_at: 1,
+          updated_at: 1,
+          messages: [],
+          backend: 'codex',
+          selected_execution_mode: 'plan',
+          selected_permission_mode: 'auto',
+        },
+      ],
+    }
+    const persistedSession = data.sessions[0]
+    if (!persistedSession) throw new Error('Missing test session')
+    mockUseSessions.mockReturnValue({ data })
+    mockUpdateSessionState.mockImplementation(update => {
+      if (update.selectedPermissionMode)
+        persistedSession.selected_permission_mode =
+          update.selectedPermissionMode
+    })
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const wrapper = createWrapper(queryClient)
+    const first = renderHook(() => useSessionStatePersistence(), { wrapper })
+    await waitFor(() =>
+      expect(useChatStore.getState().permissionModes['session-1']).toBe('auto')
+    )
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 120))
+    })
+    act(() =>
+      useChatStore.getState().setPermissionMode('session-1', 'supervised')
+    )
+    await waitFor(() =>
+      expect(persistedSession.selected_permission_mode).toBe('supervised')
+    )
+    expect(useChatStore.getState().getExecutionMode('session-1')).toBe('plan')
+    first.unmount()
+    act(() =>
+      useChatStore.setState({ executionModes: {}, permissionModes: {} })
+    )
+    const second = renderHook(() => useSessionStatePersistence(), { wrapper })
+    await waitFor(() =>
+      expect(useChatStore.getState().permissionModes['session-1']).toBe(
+        'supervised'
+      )
+    )
+    expect(useChatStore.getState().getExecutionMode('session-1')).toBe('plan')
+    second.unmount()
   })
 
   it('hydrates persisted queued messages after a WebSocket reconnect', async () => {

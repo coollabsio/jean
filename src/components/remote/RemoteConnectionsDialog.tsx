@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useState,
+  type FormEvent,
+} from 'react'
 import {
   HardDriveDownload,
   Link2,
@@ -177,41 +183,42 @@ export function RemoteConnectionsDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, editingId, connectionIds, refreshVersions])
 
-  useEffect(() => {
-    const handleOpen = (event: Event) => {
-      setOpen(true)
-      const id = (event as CustomEvent<{ id?: string }>).detail?.id
-      const connection = connections.find(item => item.id === id)
-      if (connection) {
-        setEditingId(connection.id)
-        setAddMode('url')
-        setForm({
-          name: connection.name,
-          url: connection.url,
-          token: connection.token,
-          sshUser: connection.sshUser ?? '',
-          sshHost: connection.sshHost ?? '',
-          sshPort: String(connection.sshPort ?? 22),
-        })
-        setError(null)
-        setProgress(null)
-        setInstalling(false)
-      }
+  const handleOpen = useEffectEvent((event: Event) => {
+    setOpen(true)
+    const id = (event as CustomEvent<{ id?: string }>).detail?.id
+    const connection = connections.find(item => item.id === id)
+    if (connection) {
+      setEditingId(connection.id)
+      setAddMode('url')
+      setForm({
+        name: connection.name,
+        url: connection.url,
+        token: connection.token,
+        sshUser: connection.sshUser ?? '',
+        sshHost: connection.sshHost ?? '',
+        sshPort: String(connection.sshPort ?? 22),
+      })
+      setError(null)
+      setProgress(null)
+      setInstalling(false)
     }
-    window.addEventListener('open-remote-connections', handleOpen)
-    return () =>
-      window.removeEventListener('open-remote-connections', handleOpen)
-  }, [connections])
+  })
+  useEffect(() => {
+    const listener = (event: Event) => handleOpen(event)
+    window.addEventListener('open-remote-connections', listener)
+    return () => window.removeEventListener('open-remote-connections', listener)
+  }, [])
 
   // Close when remote connection recovery dismisses transient UI (#623).
+  const handleDismiss = useEffectEvent(() => {
+    setOpen(false)
+    setEditingId(null)
+  })
   useEffect(() => {
-    const handleDismiss = () => {
-      setOpen(false)
-      setEditingId(null)
-    }
-    window.addEventListener(DISMISS_TRANSIENT_UI_EVENT, handleDismiss)
+    const listener = () => handleDismiss()
+    window.addEventListener(DISMISS_TRANSIENT_UI_EVENT, listener)
     return () =>
-      window.removeEventListener(DISMISS_TRANSIENT_UI_EVENT, handleDismiss)
+      window.removeEventListener(DISMISS_TRANSIENT_UI_EVENT, listener)
   }, [])
 
   useEffect(() => {

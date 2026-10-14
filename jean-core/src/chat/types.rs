@@ -399,6 +399,9 @@ pub struct SubagentUsage {
     pub total_tokens: u64,
     pub tool_uses: u64,
     pub duration_ms: u64,
+    /// Model the subagent runs on (e.g. `claude-opus-5-5`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 /// A permission denial when a tool requires approval
@@ -852,9 +855,15 @@ pub struct Session {
     /// Selected provider (custom CLI profile name) for this session
     #[serde(default)]
     pub selected_provider: Option<String>,
-    /// Selected execution mode for this session (plan/build/yolo)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Selected workflow/permission policy for this session
+    #[serde(
+        default = "legacy_execution_mode",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub selected_execution_mode: Option<String>,
+    /// Build permission policy retained while planning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_permission_mode: Option<String>,
     /// Whether session naming has been attempted for this session
     /// Prevents re-triggering on app restart
     #[serde(default)]
@@ -949,6 +958,9 @@ pub struct Session {
     /// Key = "{messageId}:{markdownOffset}". Presence = checklist mode on.
     #[serde(default)]
     pub table_checked_rows: HashMap<String, Vec<u32>>,
+    /// Table keys whose checked rows are tracked while checklist mode is off.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hidden_table_checklists: Vec<String>,
     /// Tables pinned by the user for quick access, in pin order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pinned_tables: Vec<PinnedTable>,
@@ -1026,7 +1038,26 @@ pub struct LoadedMessages {
     pub loaded_run_start_index: usize,
 }
 
+// Old sessions without a saved choice started in Plan. Do not escalate them
+// when the new-session default changes to Full access.
+fn legacy_execution_mode() -> Option<String> {
+    Some("plan".to_string())
+}
+
 impl Session {
+    /// Retain the Build policy when switching to Plan, including IPC/MCP callers.
+    pub fn set_execution_policy(&mut self, mode: Option<String>) {
+        let permission = mode.as_deref().filter(|mode| *mode != "plan").or_else(|| {
+            self.selected_execution_mode
+                .as_deref()
+                .filter(|mode| *mode != "plan")
+        });
+        if let Some(permission) = permission {
+            self.selected_permission_mode = Some(permission.to_string());
+        }
+        self.selected_execution_mode = mode;
+    }
+
     /// Create a new session with the given name and backend
     pub fn new(name: String, order: u32, backend: Backend) -> Self {
         Self {
@@ -1059,7 +1090,8 @@ impl Session {
             selected_thinking_level: None,
             selected_effort_level: None,
             selected_provider: None,
-            selected_execution_mode: None,
+            selected_execution_mode: Some("yolo".to_string()),
+            selected_permission_mode: Some("yolo".to_string()),
             session_naming_completed: false,
             archived_at: None,
             archived_by_base_close: None,
@@ -1090,6 +1122,7 @@ impl Session {
             pending_plan_message_id: None,
             enabled_mcp_servers: None,
             table_checked_rows: HashMap::new(),
+            hidden_table_checklists: vec![],
             pinned_tables: vec![],
             last_run_status: None,
             last_run_execution_mode: None,
@@ -1311,6 +1344,16 @@ fn default_version() -> u32 {
 }
 
 impl SessionMetadata {
+    pub fn has_pending_acp_approval(&self) -> bool {
+        self.pending_acp_permission_requests.iter().any(|request| {
+            self.runs.iter().any(|run| {
+                run.run_id == request.run_id
+                    && matches!(run.status, RunStatus::Running | RunStatus::Resumable)
+                    && run.backend.as_ref() == Some(&request.backend)
+            })
+        })
+    }
+
     fn has_pending_plan_waiting(&self) -> bool {
         let Some(message_id) = self.pending_plan_message_id.as_ref() else {
             return false;
@@ -1343,6 +1386,7 @@ impl SessionMetadata {
         let has_pending_approval = !self.pending_permission_denials.is_empty()
             || !self.pending_codex_permission_requests.is_empty()
             || !self.pending_opencode_permission_requests.is_empty()
+            || self.has_pending_acp_approval()
             || !self.pending_codex_command_approval_requests.is_empty()
             || !self.pending_codex_user_input_requests.is_empty()
             || !self.pending_codex_mcp_elicitation_requests.is_empty()
@@ -1375,7 +1419,8 @@ impl SessionMetadata {
             last_run.and_then(|r| r.execution_mode.as_ref())
         );
         let is_pending_plan_waiting = self.has_pending_plan_waiting();
-        let waiting_for_input = self.waiting_for_input || is_pending_plan_waiting;
+        let waiting_for_input =
+            self.waiting_for_input || is_pending_plan_waiting || self.has_pending_acp_approval();
         let is_reviewing = self.is_reviewing && !is_pending_plan_waiting;
 
         let updated_at = self.updated_at();
@@ -1405,6 +1450,7 @@ impl SessionMetadata {
             selected_effort_level: self.selected_effort_level.clone(),
             selected_provider: self.selected_provider.clone(),
             selected_execution_mode: self.selected_execution_mode.clone(),
+            selected_permission_mode: self.selected_permission_mode.clone(),
             session_naming_completed: self.session_naming_completed,
             archived_at: self.archived_at,
             archived_by_base_close: self.archived_by_base_close,
@@ -1440,6 +1486,7 @@ impl SessionMetadata {
             pending_plan_message_id: self.pending_plan_message_id.clone(),
             enabled_mcp_servers: self.enabled_mcp_servers.clone(),
             table_checked_rows: self.table_checked_rows.clone(),
+            hidden_table_checklists: self.hidden_table_checklists.clone(),
             pinned_tables: self.pinned_tables.clone(),
             // Populate from last run for status recovery on app restart
             last_run_status: last_run.map(|r| r.status.clone()),
@@ -1473,6 +1520,7 @@ impl SessionMetadata {
         self.selected_effort_level = session.selected_effort_level.clone();
         self.selected_provider = session.selected_provider.clone();
         self.selected_execution_mode = session.selected_execution_mode.clone();
+        self.selected_permission_mode = session.selected_permission_mode.clone();
         self.session_naming_completed = session.session_naming_completed;
         self.archived_at = session.archived_at;
         self.archived_by_base_close = session.archived_by_base_close;
@@ -1498,13 +1546,17 @@ impl SessionMetadata {
         self.denied_message_context = session.denied_message_context.clone();
         self.is_reviewing = session.is_reviewing;
         self.status_override = session.status_override.clone();
-        self.waiting_for_input = session.waiting_for_input;
+        // ACP waiting is derived from run-owned requests, not a durable UI flag.
+        if !self.has_pending_acp_approval() {
+            self.waiting_for_input = session.waiting_for_input;
+        }
         self.waiting_for_input_type = session.waiting_for_input_type.clone();
         self.approved_plan_message_ids = session.approved_plan_message_ids.clone();
         self.plan_file_path = session.plan_file_path.clone();
         self.pending_plan_message_id = session.pending_plan_message_id.clone();
         self.enabled_mcp_servers = session.enabled_mcp_servers.clone();
         self.table_checked_rows = session.table_checked_rows.clone();
+        self.hidden_table_checklists = session.hidden_table_checklists.clone();
         self.pinned_tables = session.pinned_tables.clone();
         self.label = session.label.clone();
         self.scheduled_wakeup = session.scheduled_wakeup.clone();
@@ -1859,9 +1911,15 @@ pub struct SessionMetadata {
     /// Selected provider (custom CLI profile name) for this session
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_provider: Option<String>,
-    /// Selected execution mode for this session (plan/build/yolo)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Selected workflow/permission policy for this session
+    #[serde(
+        default = "legacy_execution_mode",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub selected_execution_mode: Option<String>,
+    /// Build permission policy retained while planning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_permission_mode: Option<String>,
     /// Whether session naming has been attempted
     #[serde(default)]
     pub session_naming_completed: bool,
@@ -1894,6 +1952,8 @@ pub struct SessionMetadata {
     /// Pending OpenCode permission requests awaiting user approval
     #[serde(default)]
     pub pending_opencode_permission_requests: Vec<OpenCodePermissionRequest>,
+    #[serde(default)]
+    pub pending_acp_permission_requests: Vec<super::acp_permissions::AcpPermissionRequest>,
     /// Pending Codex command approval requests awaiting user approval
     #[serde(default)]
     pub pending_codex_command_approval_requests: Vec<CodexCommandApprovalRequest>,
@@ -1936,6 +1996,9 @@ pub struct SessionMetadata {
     /// Per-table checklist state: tableKey -> checked row indices.
     #[serde(default)]
     pub table_checked_rows: HashMap<String, Vec<u32>>,
+    /// Table keys whose checked rows are tracked while checklist mode is off.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hidden_table_checklists: Vec<String>,
     /// Tables pinned by the user for quick access, in pin order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pinned_tables: Vec<PinnedTable>,
@@ -2071,6 +2134,7 @@ impl SessionMetadata {
             selected_effort_level: None,
             selected_provider: None,
             selected_execution_mode: None,
+            selected_permission_mode: None,
             session_naming_completed: false,
             archived_at: None,
             archived_by_base_close: None,
@@ -2081,6 +2145,7 @@ impl SessionMetadata {
             pending_permission_denials: vec![],
             pending_codex_permission_requests: vec![],
             pending_opencode_permission_requests: vec![],
+            pending_acp_permission_requests: vec![],
             pending_codex_command_approval_requests: vec![],
             pending_codex_user_input_requests: vec![],
             pending_codex_mcp_elicitation_requests: vec![],
@@ -2095,6 +2160,7 @@ impl SessionMetadata {
             pending_plan_message_id: None,
             enabled_mcp_servers: None,
             table_checked_rows: HashMap::new(),
+            hidden_table_checklists: vec![],
             pinned_tables: vec![],
             label: None,
             queued_messages: vec![],
@@ -2152,6 +2218,77 @@ mod tests {
     // ========================================================================
     // ThinkingLevel tests
     // ========================================================================
+
+    #[test]
+    fn acp_approval_waiting_is_run_owned_and_does_not_latch_after_completion() {
+        let mut metadata =
+            SessionMetadata::new("session".into(), "worktree".into(), "ACP".into(), 0);
+        let run: RunEntry = serde_json::from_value(serde_json::json!({
+            "run_id":"run", "user_message_id":"user", "user_message":"test", "started_at":1,
+            "status":"running", "backend":"grok"
+        }))
+        .unwrap();
+        metadata.runs.push(run);
+        metadata.pending_acp_permission_requests.push(
+            super::super::acp_permissions::AcpPermissionRequest {
+                request_id: "approval".into(),
+                run_id: "run".into(),
+                backend: Backend::Grok,
+                title: "Command".into(),
+                kind: "execute".into(),
+                options: vec![],
+            },
+        );
+        assert!(metadata.to_session().waiting_for_input);
+        metadata.update_from_session(&metadata.to_session());
+        assert!(!metadata.waiting_for_input);
+        let restored: SessionMetadata =
+            serde_json::from_value(serde_json::to_value(&metadata).unwrap()).unwrap();
+        assert!(restored.has_pending_acp_approval());
+        metadata.runs[0].status = RunStatus::Resumable;
+        assert!(metadata.has_pending_acp_approval());
+        metadata.runs[0].status = RunStatus::Cancelled;
+        assert!(!metadata.has_pending_acp_approval());
+        assert!(!metadata.to_session().waiting_for_input);
+    }
+
+    #[test]
+    fn permission_policy_roundtrip_and_legacy_session_defaults() {
+        let mut session = Session::new("Permissions".to_string(), 0, Backend::Codex);
+        session.selected_execution_mode = Some("plan".to_string());
+        session.selected_permission_mode = Some("auto".to_string());
+        let mut metadata = SessionMetadata::new(
+            session.id.clone(),
+            "worktree".to_string(),
+            session.name.clone(),
+            0,
+        );
+        metadata.update_from_session(&session);
+        let restored: SessionMetadata =
+            serde_json::from_value(serde_json::to_value(&metadata).unwrap()).unwrap();
+        assert_eq!(
+            restored.to_session().selected_permission_mode.as_deref(),
+            Some("auto")
+        );
+        session.set_execution_policy(Some("supervised".to_string()));
+        session.set_execution_policy(Some("plan".to_string()));
+        assert_eq!(
+            session.selected_permission_mode.as_deref(),
+            Some("supervised")
+        );
+        let mut legacy = serde_json::to_value(&session).unwrap();
+        legacy
+            .as_object_mut()
+            .unwrap()
+            .remove("selected_execution_mode");
+        legacy
+            .as_object_mut()
+            .unwrap()
+            .remove("selected_permission_mode");
+        let restored: Session = serde_json::from_value(legacy).unwrap();
+        assert_eq!(restored.selected_execution_mode.as_deref(), Some("plan"));
+        assert!(restored.selected_permission_mode.is_none());
+    }
 
     #[test]
     fn test_effort_level_ultracode_value() {
@@ -2473,6 +2610,8 @@ mod tests {
         assert!(session.messages.is_empty());
         assert!(session.claude_session_id.is_none());
         assert!(!session.session_naming_completed);
+        assert_eq!(session.selected_execution_mode.as_deref(), Some("yolo"));
+        assert_eq!(session.selected_permission_mode.as_deref(), Some("yolo"));
     }
 
     #[test]

@@ -118,11 +118,11 @@ describe('magic prompt preference resolvers', () => {
     expect(defaultPreferences.default_grok_reasoning_effort).toBe('high')
   })
 
-  it('defaults Claude to Opus 5.5 and Codex/OpenCode to GPT 5.6 Sol', () => {
+  it('defaults Claude to Opus 5.5 and Codex/OpenCode to GPT 6.1 Sol', () => {
     expect(defaultPreferences.selected_model).toBe('claude-opus-5-5')
-    expect(defaultPreferences.selected_codex_model).toBe('gpt-5.6-sol')
+    expect(defaultPreferences.selected_codex_model).toBe('gpt-6.1-sol')
     expect(defaultPreferences.selected_opencode_model).toBe(
-      'opencode/gpt-5.6-sol'
+      'opencode/gpt-6.1-sol'
     )
     expect(defaultPreferences.default_codex_model_verbosity).toBe('medium')
   })

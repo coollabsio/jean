@@ -280,7 +280,6 @@ describe('useMainWindowEventListeners terminal shortcuts', () => {
       updatePrModalOpen: false,
       planDialogOpen: false,
       gitDiffModalOpen: false,
-      githubDashboardOpen: false,
       sessionPrimarySurface: {},
       sessionTerminalIds: {},
       newSessionModeTarget: null,
@@ -879,5 +878,16 @@ describe('applyCacheInvalidationKeys', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ['all-sessions'],
     })
+  })
+})
+
+describe('removed keybindings', () => {
+  it('ignores obsolete shortcuts saved in preferences', () => {
+    expect(
+      findKeybindingAction('mod+shift+d', {
+        ...DEFAULT_KEYBINDINGS,
+        open_github_dashboard: 'mod+shift+d',
+      })
+    ).toBeNull()
   })
 })

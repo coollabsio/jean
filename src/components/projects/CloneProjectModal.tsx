@@ -1,6 +1,11 @@
 import { useState, useCallback, useEffect, useMemo } from 'react'
 import { isLocalBackend, isNativeApp } from '@/lib/environment'
-import { Loader2, Globe, FolderOpen, AlertCircle } from '@/components/icons/reicon'
+import {
+  Loader2,
+  Globe,
+  FolderOpen,
+  AlertCircle,
+} from '@/components/icons/reicon'
 import {
   Dialog,
   DialogContent,

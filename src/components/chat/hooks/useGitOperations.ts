@@ -214,9 +214,9 @@ export function useGitOperations({
         override?.model ??
         preferences?.magic_prompt_models?.resolve_conflicts_model ??
         (backend === 'codex'
-          ? (preferences?.selected_codex_model ?? 'gpt-5.6-sol')
+          ? (preferences?.selected_codex_model ?? 'gpt-6.1-sol')
           : backend === 'opencode'
-            ? (preferences?.selected_opencode_model ?? 'opencode/gpt-5.6-sol')
+            ? (preferences?.selected_opencode_model ?? 'opencode/gpt-6.1-sol')
             : backend === 'cursor'
               ? (preferences?.selected_cursor_model ?? 'cursor/auto')
               : (preferences?.selected_model ?? 'sonnet'))
@@ -381,9 +381,9 @@ export function useGitOperations({
         override?.model ??
         preferences?.magic_prompt_models?.resolve_conflicts_model ??
         (backend === 'codex'
-          ? (preferences?.selected_codex_model ?? 'gpt-5.6-sol')
+          ? (preferences?.selected_codex_model ?? 'gpt-6.1-sol')
           : backend === 'opencode'
-            ? (preferences?.selected_opencode_model ?? 'opencode/gpt-5.6-sol')
+            ? (preferences?.selected_opencode_model ?? 'opencode/gpt-6.1-sol')
             : backend === 'cursor'
               ? (preferences?.selected_cursor_model ?? 'cursor/auto')
               : (preferences?.selected_model ?? 'sonnet'))
@@ -1040,7 +1040,6 @@ export function useGitOperations({
       queryClient,
       preferences?.magic_prompts?.code_review,
       preferences?.magic_prompt_models?.code_review_model,
-      preferences?.magic_code_review_configs,
       preferences?.magic_prompt_backends,
       preferences?.default_backend,
       preferences?.magic_prompt_providers,

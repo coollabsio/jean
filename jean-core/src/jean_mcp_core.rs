@@ -14,13 +14,15 @@ use crate::chat::types::LabelData;
 use crate::http_server::EmitExt;
 use crate::projects::github_issues::{attach_issue_context_for_session, IssueContext};
 
+const EXECUTION_MODES: &[&str] = &["plan", "build", "yolo", "supervised", "auto"];
+
 pub const MCP_PROTOCOL_VERSION: &str = "2024-11-05";
 pub const JEAN_MCP_STDIO_ARG: &str = "--jean-mcp-stdio";
 pub const JEAN_MCP_SOCKET_ENV: &str = "JEAN_MCP_SOCKET";
 pub const JEAN_MCP_TOKEN_ENV: &str = "JEAN_MCP_TOKEN";
 pub const JEAN_MCP_SESSION_ENV: &str = "JEAN_MCP_SESSION";
 pub const JEAN_MCP_DEPTH_ENV: &str = "JEAN_MCP_DEPTH";
-/// Tool Claude CLI calls via `--permission-prompt-tool` (YOLO + Chrome runs).
+/// Tool Claude CLI calls via `--permission-prompt-tool` (Supervised and YOLO + Chrome runs).
 pub const CLAUDE_PERMISSION_PROMPT_TOOL: &str = "claude_permission_prompt";
 
 const RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
@@ -51,6 +53,10 @@ const RATE_LIMITED_TOOLS: &[&str] = &[
     "unarchive_session",
     "unarchive_worktree",
     "unlink_worktree_pr",
+    // Agent tools that write
+    "schedule_create",
+    "memory_save",
+    "message_agent",
 ];
 const DEFAULT_MCP_DIFF_MAX_BYTES: usize = 60_000;
 const MAX_MCP_DIFF_BYTES: usize = 200_000;
@@ -213,6 +219,9 @@ pub fn tool_registry() -> Value {
     if let Some(ship) = tool_registry_ship_loop().as_array() {
         tools.extend(ship.iter().cloned());
     }
+    if let Some(agent_tools) = crate::agents::mcp::tool_definitions().as_array() {
+        tools.extend(agent_tools.iter().cloned());
+    }
     Value::Array(tools)
 }
 
@@ -230,7 +239,7 @@ fn tool_registry_core() -> Value {
         {"name":"list_security_issues","description":"List Dependabot security alerts for a project using the same backend command as the UI. Pass projectId; the server resolves the repo path.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"},"state":{"type":"string","enum":["open","dismissed","fixed","auto_dismissed","all"],"default":"open"}},"required":["projectId"],"additionalProperties":false}},
         {"name":"list_security_advisories","description":"List repository security advisories for a project using the same backend command as the UI. Pass projectId; the server resolves the repo path.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"},"state":{"type":"string","enum":["draft","published","triage","closed","all"],"default":"all"}},"required":["projectId"],"additionalProperties":false}},
         {"name":"list_linear_issues","description":"List Linear issues for a project using the same backend command as the UI. Pass projectId; Linear API config is resolved from project/global settings.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"}},"required":["projectId"],"additionalProperties":false}},
-        {"name":"create_worktree","description":"Create a new worktree for a project. Provide issueNumber or prNumber for a GitHub issue/PR, linearIssueIdentifier (e.g. \"PLA-215\") for a Linear issue, or ghsaId (e.g. \"GHSA-xxxx-xxxx-xxxx\") for a repository security advisory; these are mutually exclusive. Jean fetches the chosen context and attaches it to the worktree, reusing the same branch naming and context-loading as the Jean UI. Pass action=\"start_autoinvestigating\" to create a session and start investigating (and magic-fix when the Magic Prompts execution mode is yolo) the issue/PR/Linear issue/security advisory with the Magic Prompts settings default backend/model. This never switches/opens Jean's UI unless the user opens the worktree separately.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"},"baseBranch":{"type":"string"},"customName":{"type":"string"},"issueNumber":{"type":"integer","minimum":1},"prNumber":{"type":"integer","minimum":1},"linearIssueIdentifier":{"type":"string","description":"Linear issue identifier like \"PLA-215\". Mutually exclusive with issueNumber/prNumber/ghsaId."},"ghsaId":{"type":"string","description":"Repository security advisory GHSA id like \"GHSA-xxxx-xxxx-xxxx\". Mutually exclusive with issueNumber/prNumber/linearIssueIdentifier."},"action":{"type":"string","enum":["start_autoinvestigating"]}},"required":["projectId"],"additionalProperties":false}},
+        {"name":"create_worktree","description":"Create a new worktree for a project. Provide issueNumber or prNumber for a GitHub issue/PR, linearIssueIdentifier (e.g. \"PLA-215\") for a Linear issue, or ghsaId (e.g. \"GHSA-xxxx-xxxx-xxxx\") for a repository security advisory; these are mutually exclusive. Jean fetches the chosen context and attaches it to the worktree, reusing the same branch naming and context-loading as the Jean UI. Pass action=\"start_autoinvestigating\" to create a session and start investigating (and magic-fix when the Magic Prompts execution mode is yolo, shown as Full access in the UI) the issue/PR/Linear issue/security advisory with the Magic Prompts settings default backend/model. This never switches/opens Jean's UI unless the user opens the worktree separately.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"},"baseBranch":{"type":"string"},"customName":{"type":"string"},"issueNumber":{"type":"integer","minimum":1},"prNumber":{"type":"integer","minimum":1},"linearIssueIdentifier":{"type":"string","description":"Linear issue identifier like \"PLA-215\". Mutually exclusive with issueNumber/prNumber/ghsaId."},"ghsaId":{"type":"string","description":"Repository security advisory GHSA id like \"GHSA-xxxx-xxxx-xxxx\". Mutually exclusive with issueNumber/prNumber/linearIssueIdentifier."},"action":{"type":"string","enum":["start_autoinvestigating"]}},"required":["projectId"],"additionalProperties":false}},
         {"name":"create_worktree_from_existing_branch","description":"Create a Jean worktree from an existing local or remote-tracking branch (branch name is used as the worktree name). Does not open Jean's UI. Prefer create_worktree for new branches; use this when the branch already exists.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"},"branchName":{"type":"string","description":"Existing branch name to check out into a new worktree path."}},"required":["projectId","branchName"],"additionalProperties":false}},
         {"name":"import_worktree","description":"Import an existing git worktree/directory on disk into a Jean project. Path must already exist and be a git worktree or repo. Does not create a new git worktree.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"},"path":{"type":"string","description":"Absolute path to an existing git worktree directory."}},"required":["projectId","path"],"additionalProperties":false}},
         {"name":"rename_worktree","description":"Rename a worktree's display name in Jean (does not rename the git branch or folder).","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"newName":{"type":"string","description":"New display name. Must be unique within the project."}},"required":["worktreeId","newName"],"additionalProperties":false}},
@@ -244,25 +253,61 @@ fn tool_registry_core() -> Value {
     ])
 }
 
-/// Decision for Claude CLI `--permission-prompt-tool` requests. Jean only
-/// passes that flag for YOLO runs with Chrome enabled: Claude in Chrome asks
-/// for per-site approval even in bypassPermissions mode, and headless runs
-/// turn every ask into a denial. YOLO approves everything, except the
-/// blocking tools Jean answers through its own UI (it stops the run when
-/// they appear), so those keep the default headless denial.
-fn claude_permission_decision(args: &Value) -> Value {
+/// Answer a Claude CLI `--permission-prompt-tool` request. Jean passes that
+/// flag for Supervised runs (ask the user live, see `claude_permissions`) and
+/// for YOLO runs with Chrome enabled (Claude in Chrome asks for per-site
+/// approval even in bypassPermissions mode, so YOLO approves everything).
+/// The blocking tools Jean answers through its own UI (it stops the run when
+/// they appear) always keep the default headless denial.
+async fn claude_permission_prompt(app: &AppHandle, source: &str, args: &Value) -> Value {
     let tool_name = args
         .get("tool_name")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    if matches!(tool_name, "AskUserQuestion" | "ExitPlanMode") {
+    if is_blocking_permission_tool(tool_name) {
+        return claude_permission_decision(args, false);
+    }
+    let approved = match crate::chat::claude_permissions::active_run(app, source) {
+        Some((mode, worktree_id)) if mode.as_deref() == Some("supervised") => {
+            let tool_use_id = args
+                .get("tool_use_id")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let input = args.get("input").cloned().unwrap_or_else(|| json!({}));
+            crate::chat::claude_permissions::ask_user(
+                app,
+                source,
+                &worktree_id,
+                tool_name,
+                tool_use_id,
+                input,
+            )
+            .await
+        }
+        Some(_) => true,
+        None => false,
+    };
+    claude_permission_decision(args, approved)
+}
+
+fn is_blocking_permission_tool(tool_name: &str) -> bool {
+    matches!(tool_name, "AskUserQuestion" | "ExitPlanMode")
+}
+
+/// Permission prompt response: https://docs.anthropic.com/en/docs/claude-code/sdk
+fn claude_permission_decision(args: &Value, approved: bool) -> Value {
+    let tool_name = args
+        .get("tool_name")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if approved && !is_blocking_permission_tool(tool_name) {
+        let input = args.get("input").cloned().unwrap_or_else(|| json!({}));
+        json!({ "behavior": "allow", "updatedInput": input })
+    } else {
         json!({
             "behavior": "deny",
             "message": format!("Permission to use {tool_name} was not granted."),
         })
-    } else {
-        let input = args.get("input").cloned().unwrap_or_else(|| json!({}));
-        json!({ "behavior": "allow", "updatedInput": input })
     }
 }
 
@@ -270,7 +315,7 @@ fn tool_registry_session() -> Value {
     json!([
         {"name":"list_sessions","description":"List chat sessions in a worktree without loading full message history. Use before creating a session to avoid duplicates.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"includeArchived":{"type":"boolean","default":false}},"required":["worktreeId"],"additionalProperties":false}},
         {"name":"create_session","description":"Get a chat session for a prompt in an existing non-archived worktree. Reuses an empty chat session when one is available; otherwise creates a new session. Returns the session id needed for send_chat_message. Fails if the worktree is archived — call unarchive_worktree first.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"name":{"type":"string"},"backend":{"type":"string","enum":["claude","codex","cursor","opencode","pi","commandcode","grok","kimi","antigravity"]}},"required":["worktreeId"],"additionalProperties":false}},
-        {"name":"send_chat_message","description":"Send a message to an existing non-archived session. Fire-and-forget: returns immediately as the session begins processing; poll get_session_status with the returned sessionId for completion or failure. Omitted settings inherit the session selections, then the user's defaults. Supplied settings override one turn only.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"message":{"type":"string"},"model":{"type":"string"},"backend":{"type":"string","enum":["claude","codex","cursor","opencode","pi","commandcode","grok","kimi","antigravity"]},"customProfileName":{"type":"string","description":"Optional one-turn provider/profile override."},"effortLevel":{"type":"string","enum":["off","adaptive","minimal","low","medium","high","xhigh","max","ultracode"]},"thinkingLevel":{"type":"string","enum":["off","adaptive","think","megathink","ultrathink"]},"executionMode":{"type":"string","enum":["plan","build","yolo"],"description":"Pass only when the user explicitly asks for a mode. Omit it to use the session's selected mode or the user's default execution mode. Do not choose plan just because the message asks for a plan first."}},"required":["sessionId","message"],"additionalProperties":false}},
+        {"name":"send_chat_message","description":"Send a message to an existing non-archived session. Fire-and-forget: returns immediately as the session begins processing; poll get_session_status with the returned sessionId for completion or failure. Omitted settings inherit the session selections, then the user's defaults. Supplied settings override one turn only.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"message":{"type":"string"},"model":{"type":"string"},"backend":{"type":"string","enum":["claude","codex","cursor","opencode","pi","commandcode","grok","kimi","antigravity"]},"customProfileName":{"type":"string","description":"Optional one-turn provider/profile override."},"effortLevel":{"type":"string","enum":["off","adaptive","minimal","low","medium","high","xhigh","max","ultracode"]},"thinkingLevel":{"type":"string","enum":["off","adaptive","think","megathink","ultrathink"]},"executionMode":{"type":"string","enum":EXECUTION_MODES,"description":"Permission modes: supervised = Supervised, build = Auto-accept edits, auto = Auto, yolo = Full access. plan is the legacy planning mode. Use get_session_capabilities to check backend support. Pass only when the user explicitly asks for a mode. Omit it to use the session's selected mode or the user's default execution mode. Do not choose plan just because the message asks for a plan first."}},"required":["sessionId","message"],"additionalProperties":false}},
         {"name":"archive_session","description":"Archive a chat session (hide it from the active session list). Prefer this over delete when history may still be useful. Cannot run send_chat_message on an archived session until unarchive_session is called.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"}},"required":["sessionId"],"additionalProperties":false}},
         {"name":"unarchive_session","description":"Restore an archived chat session so it can run again. Also unarchives the parent worktree when it is archived. Call this before send_chat_message if a previous attempt failed because the session was archived.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"}},"required":["sessionId"],"additionalProperties":false}},
         {"name":"move_session","description":"Move a Jean session to another active worktree while preserving its session id, complete message/run history, attachments, settings, and backend resume context. An idle session moves immediately. A running session is scheduled to move automatically after its current turn finishes; do not cancel the run or retry the move.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"targetWorktreeId":{"type":"string"}},"required":["sessionId","targetWorktreeId"],"additionalProperties":false}},
@@ -278,7 +323,7 @@ fn tool_registry_session() -> Value {
         {"name":"cancel_session_run","description":"Cancel the currently running request for a session. Returns whether Jean found an active process/turn/flag to cancel.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"}},"required":["sessionId"],"additionalProperties":false}},
         {"name":"read_session_messages","description":"Read recent messages from a session (most recent first). Use limit to cap returned messages.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":200,"default":50}},"required":["sessionId"],"additionalProperties":false}},
         {"name":"set_session_model","description":"Persist the selected model (and optionally backend) on a Jean session without sending a message. Prefer this when switching models for later turns; pass model on send_chat_message for a one-shot override only. When backend is omitted, Jean infers it from the model id when possible (e.g. grok/*, gpt-*, cursor/*). Returns sessionId, model, backend.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"model":{"type":"string","description":"Model id as used in Jean (e.g. claude-sonnet-4-6[1m], gpt-5.6-sol, grok/grok-4.6)."},"backend":{"type":"string","enum":["claude","codex","cursor","opencode","pi","commandcode","grok","kimi","antigravity"],"description":"Optional backend override. Inferred from model when omitted."}},"required":["sessionId","model"],"additionalProperties":false}},
-        {"name":"set_session_settings","description":"Persist session settings used by later messages. Omitted fields stay unchanged. fastMode adds or removes the supported fast model variant.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"backend":{"type":"string","enum":["claude","codex","cursor","opencode","pi","commandcode","grok","kimi","antigravity"]},"provider":{"type":"string","description":"Provider/custom profile name."},"model":{"type":"string"},"fastMode":{"type":"boolean"},"effortLevel":{"type":"string","enum":["off","adaptive","minimal","low","medium","high","xhigh","max","ultracode"]},"thinkingLevel":{"type":"string","enum":["off","adaptive","think","megathink","ultrathink"]},"executionMode":{"type":"string","enum":["plan","build","yolo"]}},"required":["sessionId"],"additionalProperties":false}},
+        {"name":"set_session_settings","description":"Persist session settings used by later messages. Omitted fields stay unchanged. fastMode adds or removes the supported fast model variant.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"backend":{"type":"string","enum":["claude","codex","cursor","opencode","pi","commandcode","grok","kimi","antigravity"]},"provider":{"type":"string","description":"Provider/custom profile name."},"model":{"type":"string"},"fastMode":{"type":"boolean"},"effortLevel":{"type":"string","enum":["off","adaptive","minimal","low","medium","high","xhigh","max","ultracode"]},"thinkingLevel":{"type":"string","enum":["off","adaptive","think","megathink","ultrathink"]},"executionMode":{"type":"string","enum":EXECUTION_MODES,"description":"supervised = Supervised; build = Auto-accept edits; auto = Auto; yolo = Full access. plan is the legacy planning mode. Check get_session_capabilities for backend support."}},"required":["sessionId"],"additionalProperties":false}},
         {"name":"get_session_capabilities","description":"Describe the session controls supported by a backend, including effort, thinking, execution, and fast-mode behavior.","inputSchema":{"type":"object","properties":{"backend":{"type":"string","enum":["claude","codex","cursor","opencode","pi","commandcode","grok","kimi","antigravity"]}},"required":["backend"],"additionalProperties":false}},
         {"name":"get_usage","description":"Fetch subscription/usage snapshots for Claude, Codex, and/or Grok (same data as Jean Settings → Usage). Use to decide whether to switch models when a plan is near limits. Optional backend filters to one provider; omit or pass \"all\" for every available snapshot. Per-backend failures are reported in errors without failing the whole call.","inputSchema":{"type":"object","properties":{"backend":{"type":"string","enum":["claude","codex","grok","all"],"default":"all","description":"Which provider usage to fetch. Default all."}},"additionalProperties":false}},
         {"name":"get_worktree_changes","description":"Get a bounded summary of a worktree's git changes: porcelain status, ahead/behind counts, diff stats, and changed files. Does not return full diffs.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"maxFiles":{"type":"integer","minimum":1,"maximum":500,"default":100}},"required":["worktreeId"],"additionalProperties":false}},
@@ -333,7 +378,11 @@ pub async fn call_tool(
         }
     }
 
-    let result_json = run_tool(app, name, arguments, source).await?;
+    // Agent sessions need the user's approval for destructive tools.
+    let result_json = match crate::agents::mcp::approval_gate(app, name, &arguments, source) {
+        Some(pending) => pending,
+        None => run_tool(app, name, arguments, source).await?,
+    };
     Ok(json!({
         "content": [{
             "type": "text",
@@ -350,6 +399,21 @@ async fn dispatch_command(app: &AppHandle, command: &str, args: Value) -> Result
         app, command, args,
     ))
     .await
+}
+
+/// Run a tool that the user approved for an agent (no approval gate).
+/// Boxed: approvals are decided through `dispatch_command`, which this tool
+/// call can reach again, so the future type would otherwise be recursive.
+pub fn run_approved_tool(
+    app: AppHandle,
+    name: String,
+    args: Value,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, String>> + Send>> {
+    Box::pin(async move {
+        run_tool(&app, &name, args, "agent-approval")
+            .await
+            .map_err(|e| e.message)
+    })
 }
 
 async fn run_tool(
@@ -984,7 +1048,7 @@ async fn run_tool(
             if let Some(value) = optional_str(&args, "backend") {
                 normalize_backend_name(&value)?;
             }
-            validate_optional_enum(&args, "executionMode", &["plan", "build", "yolo"])?;
+            validate_optional_enum(&args, "executionMode", EXECUTION_MODES)?;
             validate_optional_enum(
                 &args,
                 "thinkingLevel",
@@ -1005,6 +1069,8 @@ async fn run_tool(
                     "ultracode",
                 ],
             )?;
+            // Agent callers: the agent gets an update when this session's run ends.
+            crate::agents::mcp::record_delegation(app, source, &session_id, &worktree_id);
             let mut payload = serde_json::Map::new();
             payload.insert("sessionId".to_string(), Value::String(session_id.clone()));
             payload.insert("worktreeId".to_string(), Value::String(worktree_id));
@@ -1268,7 +1334,7 @@ async fn run_tool(
                 .transpose()?;
             let mut model = optional_str(&args, "model");
             let fast_mode = args.get("fastMode").and_then(Value::as_bool);
-            validate_optional_enum(&args, "executionMode", &["plan", "build", "yolo"])?;
+            validate_optional_enum(&args, "executionMode", EXECUTION_MODES)?;
             validate_optional_enum(
                 &args,
                 "thinkingLevel",
@@ -1424,7 +1490,7 @@ async fn run_tool(
             let fast_mode = matches!(backend.as_str(), "claude" | "codex");
             Ok(json!({
                 "backend": backend,
-                "executionModes": ["plan", "build", "yolo"],
+                "executionModes": supported_execution_modes(&backend),
                 "effortLevels": ["off", "adaptive", "minimal", "low", "medium", "high", "xhigh", "max", "ultracode"],
                 "thinkingLevels": ["off", "adaptive", "think", "megathink", "ultrathink"],
                 "fastMode": fast_mode,
@@ -1846,7 +1912,13 @@ async fn run_tool(
                 json!({ "sessionId": source, "worktreeId": worktree_id, "worktreePath": worktree_path, "projectId": project_id, "projectName": project_name, "projectPath": project_path }),
             )
         }
-        CLAUDE_PERMISSION_PROMPT_TOOL => Ok(claude_permission_decision(&args)),
+        CLAUDE_PERMISSION_PROMPT_TOOL => Ok(claude_permission_prompt(app, source, &args).await),
+        // Boxed: keeps this large function's stack frame small.
+        agent_tool if crate::agents::mcp::is_agent_tool(agent_tool) => {
+            Box::pin(crate::agents::mcp::run(app, agent_tool, &args, source))
+                .await
+                .map_err(ToolError::invalid_params)
+        }
         other => Err(ToolError::invalid_params(format!("Unknown tool: {other}"))),
     }
 }
@@ -1956,6 +2028,16 @@ fn optional_str(args: &Value, key: &str) -> Option<String> {
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string)
+}
+
+// Match the chat policy validator, including legacy Plan/Build session support.
+fn supported_execution_modes(backend: &str) -> &'static [&'static str] {
+    match backend {
+        "claude" | "codex" | "grok" | "kimi" => EXECUTION_MODES,
+        "opencode" => &["plan", "build", "yolo", "supervised"],
+        "cursor" => &["plan", "yolo"],
+        _ => &["plan", "build", "yolo"],
+    }
 }
 
 fn validate_optional_enum(args: &Value, key: &str, allowed: &[&str]) -> Result<(), ToolError> {
@@ -2281,7 +2363,9 @@ const YOLO_INVESTIGATION_FIX_MARKER: &str = "<yolo_investigation_fix>";
 
 const YOLO_INVESTIGATION_FIX_APPEND: &str = r#"<yolo_investigation_fix>
 
-This investigation is running in YOLO mode. After investigation, fix the issue: implement the necessary code changes in the codebase. Do not stop at proposing a plan. Any earlier instruction to only investigate, only propose, not implement, or not edit code is overridden for this turn.
+This investigation is running in Full access mode. After investigation, fix the issue: implement the necessary code changes in the codebase. Do not stop at proposing a plan. Any earlier instruction to only investigate, only propose, not implement, or not edit code is overridden for this turn.
+
+After the fix, verify it: add or update tests for the changed behavior and run them. If a dev/run environment is available (for example via Jean MCP `get_run_environments`), also test the fix in the running app. If it makes sense for the change (for example a UI change) and a browser or screenshot tool is available, take a screenshot that shows the fix.
 
 </yolo_investigation_fix>"#;
 
@@ -2341,7 +2425,9 @@ fn should_strip_line_for_yolo_fix(line: &str) -> bool {
 
     let lower = body.to_ascii_lowercase();
 
-    if lower.starts_with("if you are in yolo mode") {
+    if lower.starts_with("if you are in yolo mode")
+        || lower.starts_with("if you are in full access mode")
+    {
         return true;
     }
     if lower.contains("do not implement") || lower.contains("don't implement") {
@@ -2372,7 +2458,9 @@ fn should_strip_line_for_yolo_fix(line: &str) -> bool {
     {
         return true;
     }
-    if lower.contains("do not stop at proposing") && lower.contains("yolo") {
+    if lower.contains("do not stop at proposing")
+        && (lower.contains("yolo") || lower.contains("full access"))
+    {
         return true;
     }
 
@@ -2517,6 +2605,16 @@ pub async fn start_background_investigation_impl(
     let execution_mode = execution_mode
         .filter(|mode| matches!(mode.as_str(), "plan" | "yolo"))
         .unwrap_or_else(|| "plan".to_string());
+    // Persist the magic prompt mode on the session; otherwise the toolbar and
+    // follow-up turns fall back to the session's default policy.
+    crate::chat::set_session_execution_mode(
+        app.clone(),
+        worktree_id.clone(),
+        worktree_path.clone(),
+        session_id.clone(),
+        execution_mode.clone(),
+    )
+    .await?;
     // Detect yolo and append an unconditional fix-after-investigation directive
     // (also strips weak "if yolo" / anti-fix lines). Idempotent if the UI
     // already applied the same transform.
@@ -2921,6 +3019,10 @@ fn resolve_project_path(app: &AppHandle, project_id: &str) -> Result<String, Too
 }
 
 fn resolve_worktree_path(app: &AppHandle, worktree_id: &str) -> Result<String, ToolError> {
+    // Agent sessions run in their scratch folder (no worktree record).
+    if let Some(path) = crate::agents::workdir_for_worktree(app, worktree_id) {
+        return Ok(path);
+    }
     let data = crate::projects::storage::load_projects_data(app)
         .map_err(|e| ToolError::internal(format!("load_projects_data: {e}")))?;
     data.find_worktree(worktree_id)
@@ -2992,12 +3094,14 @@ fn ensure_mcp_session_can_run(
     session_id: &str,
     worktree_id: &str,
 ) -> Result<(), ToolError> {
-    let metadata = crate::chat::storage::load_metadata(app, session_id)
+    // A new session (no metadata until its first run) cannot be archived yet.
+    // Callers resolve the session first, so it is known to exist.
+    let archived_at = crate::chat::storage::load_metadata(app, session_id)
         .map_err(|e| ToolError::internal(format!("load_metadata: {e}")))?
-        .ok_or_else(|| ToolError::invalid_params(format!("Unknown sessionId: {session_id}")))?;
+        .and_then(|metadata| metadata.archived_at);
     crate::chat::ensure_session_can_run(
         session_id,
-        metadata.archived_at,
+        archived_at,
         worktree_id,
         crate::chat::worktree_archived_at(app, worktree_id),
     )
@@ -3397,6 +3501,57 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"F
     }
 
     #[test]
+    fn mcp_permission_validation_matches_advertised_modes() {
+        for name in ["send_chat_message", "set_session_settings"] {
+            let tool = find_tool(&tool_registry(), name);
+            let modes = tool["inputSchema"]["properties"]["executionMode"]["enum"]
+                .as_array()
+                .unwrap();
+            for mode in modes {
+                assert!(validate_optional_enum(
+                    &json!({"executionMode": mode}),
+                    "executionMode",
+                    EXECUTION_MODES
+                )
+                .is_ok());
+            }
+        }
+        assert!(validate_optional_enum(&json!({}), "executionMode", EXECUTION_MODES).is_ok());
+        assert!(validate_optional_enum(
+            &json!({"executionMode":"invalid"}),
+            "executionMode",
+            EXECUTION_MODES
+        )
+        .is_err());
+        for mode in ["supervised", "auto"] {
+            assert!(validate_optional_enum(
+                &json!({"executionMode":mode}),
+                "executionMode",
+                EXECUTION_MODES
+            )
+            .is_ok());
+        }
+    }
+
+    #[test]
+    fn mcp_capabilities_keep_backend_permission_limits() {
+        for backend in ["claude", "codex", "grok", "kimi"] {
+            assert_eq!(supported_execution_modes(backend), EXECUTION_MODES);
+        }
+        assert_eq!(
+            supported_execution_modes("opencode"),
+            &["plan", "build", "yolo", "supervised"]
+        );
+        assert_eq!(supported_execution_modes("cursor"), &["plan", "yolo"]);
+        for backend in ["pi", "commandcode", "antigravity"] {
+            assert_eq!(
+                supported_execution_modes(backend),
+                &["plan", "build", "yolo"]
+            );
+        }
+    }
+
+    #[test]
     fn background_run_is_added_to_persisted_worktree_ui_state() {
         let mut state = crate::UIState::default();
 
@@ -3430,23 +3585,27 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"F
     }
 
     #[test]
-    fn claude_permission_prompt_allows_all_but_blocking_tools() {
+    fn claude_permission_decision_follows_answer_but_keeps_blocking_tools_denied() {
         find_tool(&tool_registry(), CLAUDE_PERMISSION_PROMPT_TOOL);
 
-        let allow = claude_permission_decision(&json!({
-            "tool_name": "mcp__claude-in-chrome__navigate",
-            "input": { "url": "https://example.com", "tabId": 1 },
-        }));
+        let allow = claude_permission_decision(
+            &json!({
+                "tool_name": "mcp__claude-in-chrome__navigate",
+                "input": { "url": "https://example.com", "tabId": 1 },
+            }),
+            true,
+        );
         assert_eq!(allow["behavior"], "allow");
         assert_eq!(allow["updatedInput"]["url"], "https://example.com");
 
         for tool_name in ["WebSearch", "WebFetch", "Bash"] {
-            let allow = claude_permission_decision(&json!({ "tool_name": tool_name }));
-            assert_eq!(allow["behavior"], "allow", "{tool_name} must be allowed");
+            let args = json!({ "tool_name": tool_name });
+            assert_eq!(claude_permission_decision(&args, true)["behavior"], "allow");
+            assert_eq!(claude_permission_decision(&args, false)["behavior"], "deny");
         }
 
         for tool_name in ["AskUserQuestion", "ExitPlanMode"] {
-            let deny = claude_permission_decision(&json!({ "tool_name": tool_name }));
+            let deny = claude_permission_decision(&json!({ "tool_name": tool_name }), true);
             assert_eq!(deny["behavior"], "deny", "{tool_name} must stay denied");
         }
     }

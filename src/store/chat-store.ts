@@ -24,10 +24,10 @@ import {
   type CodexMcpElicitationRequest,
   type CodexDynamicToolCallRequest,
   type ExecutionMode,
+  type PermissionMode,
   type LabelData,
   type ScheduledWakeup,
   type PinnedTable,
-  EXECUTION_MODE_CYCLE,
   isPlanToolCall,
 } from '@/types/chat'
 
@@ -48,10 +48,10 @@ export type { ManualSessionStatus }
 export const DEFAULT_MODEL: ClaudeModel = 'claude-opus-5-5'
 
 /** Default Codex model */
-export const DEFAULT_CODEX_MODEL: CodexModel = 'gpt-5.6-sol'
+export const DEFAULT_CODEX_MODEL: CodexModel = 'gpt-6.1-sol'
 
 /** Default OpenCode model */
-export const DEFAULT_OPENCODE_MODEL = 'opencode/gpt-5.6-sol'
+export const DEFAULT_OPENCODE_MODEL = 'opencode/gpt-6.1-sol'
 
 /** Default thinking level */
 export const DEFAULT_THINKING_LEVEL: ThinkingLevel = 'off'
@@ -108,6 +108,10 @@ interface ChatUIState {
   // Presence of tableKey = checklist mode enabled for that table
   tableCheckedRows: Record<string, Record<string, Set<number>>>
 
+  // Tables with tracked checked rows but checklist UI off: sessionId → tableKeys
+  // (e.g. rows checked by adding a row comment while checklist mode is off)
+  hiddenTableChecklists: Record<string, string[]>
+
   // Pinned tables per session, in pin order (persisted)
   pinnedTables: Record<string, PinnedTable[]>
 
@@ -156,8 +160,9 @@ interface ChatUIState {
   // Draft input per session (preserves text when switching tabs)
   inputDrafts: Record<string, string>
 
-  // Execution mode per session (defaults to 'plan' for new sessions)
+  // Execution policy per session (Full access for new sessions)
   executionModes: Record<string, ExecutionMode>
+  permissionModes: Record<string, PermissionMode>
 
   // Thinking level per session (defaults to 'off')
   thinkingLevels: Record<string, ThinkingLevel>
@@ -292,6 +297,9 @@ interface ChatUIState {
   // Sessions where the user expanded the Subagents panel (collapsed by default)
   expandedAgentWidgetSessions: Record<string, boolean>
 
+  // Sessions where the user collapsed the Queued prompts panel (expanded by default)
+  collapsedQueuedPromptsSessions: Record<string, boolean>
+
   // Worktree loading operations (commit, pr, review, merge, pull)
   worktreeLoadingOperations: Record<string, string | null>
 
@@ -344,6 +352,8 @@ interface ChatUIState {
     tableKey: string,
     rowIndex: number
   ) => void
+  /** Check a row; when checklist mode is off, the check is kept hidden */
+  checkTableRow: (sessionId: string, tableKey: string, rowIndex: number) => void
   togglePinnedTable: (sessionId: string, table: PinnedTable) => void
   /** Rename table keys of pins and checklists, e.g. when a message id changes */
   renameTableKeys: (sessionId: string, rename: (key: string) => string) => void
@@ -493,6 +503,7 @@ interface ChatUIState {
 
   // Actions - Execution mode (session-based)
   cycleExecutionMode: (sessionId: string) => void
+  setPermissionMode: (sessionId: string, mode: PermissionMode) => void
   setExecutionMode: (sessionId: string, mode: ExecutionMode) => void
   getExecutionMode: (sessionId: string) => ExecutionMode
 
@@ -540,6 +551,7 @@ interface ChatUIState {
   setQuestionsSkipped: (sessionId: string, skipped: boolean) => void
   areQuestionsSkipped: (sessionId: string) => boolean
   setAgentWidgetExpanded: (sessionId: string, expanded: boolean) => void
+  setQueuedPromptsCollapsed: (sessionId: string, collapsed: boolean) => void
 
   // Actions - Error handling (session-based)
   setError: (sessionId: string, error: string | null) => void
@@ -757,11 +769,25 @@ interface ChatUIState {
   removeSendingWorktree: (worktreeId: string) => void
 }
 
+function withoutHiddenTable(
+  hidden: Record<string, string[]>,
+  sessionId: string,
+  tableKey: string
+): Record<string, string[]> {
+  const keys = hidden[sessionId]
+  if (!keys?.includes(tableKey)) return hidden
+  const nextKeys = keys.filter(k => k !== tableKey)
+  if (nextKeys.length > 0) return { ...hidden, [sessionId]: nextKeys }
+  const { [sessionId]: _removed, ...rest } = hidden
+  return rest
+}
+
 const SESSION_SCOPED_RECORD_KEYS = [
   'reviewResults',
   'fixedReviewFindings',
   'fixedFindings',
   'tableCheckedRows',
+  'hiddenTableChecklists',
   'pinnedTables',
   'sendingSessionIds',
   'sendStartedAt',
@@ -775,6 +801,7 @@ const SESSION_SCOPED_RECORD_KEYS = [
   'streamingThinkingContent',
   'inputDrafts',
   'executionModes',
+  'permissionModes',
   'thinkingLevels',
   'effortLevels',
   'selectedBackends',
@@ -812,6 +839,7 @@ const SESSION_SCOPED_RECORD_KEYS = [
   'savingContext',
   'skippedQuestionSessions',
   'expandedAgentWidgetSessions',
+  'collapsedQueuedPromptsSessions',
   'sessionLabels',
   'codexGoals',
 ] as const
@@ -918,6 +946,7 @@ export const useChatStore = create<ChatUIState>()(
       reviewSidebarVisible: false,
       fixedReviewFindings: {},
       tableCheckedRows: {},
+      hiddenTableChecklists: {},
       pinnedTables: {},
       worktreePaths: {},
       sendingSessionIds: {},
@@ -934,6 +963,7 @@ export const useChatStore = create<ChatUIState>()(
       streamingThinkingContent: {},
       inputDrafts: {},
       executionModes: {},
+      permissionModes: {},
       thinkingLevels: {},
       effortLevels: {},
       selectedBackends: {},
@@ -976,6 +1006,7 @@ export const useChatStore = create<ChatUIState>()(
       savingContext: {},
       skippedQuestionSessions: {},
       expandedAgentWidgetSessions: {},
+      collapsedQueuedPromptsSessions: {},
       worktreeLoadingOperations: {},
       sessionLabels: {},
       codexGoals: {},
@@ -1106,6 +1137,17 @@ export const useChatStore = create<ChatUIState>()(
         set(
           state => {
             const sessionTables = state.tableCheckedRows[sessionId] ?? {}
+            const hidden = state.hiddenTableChecklists[sessionId]
+            if (hidden?.includes(tableKey)) {
+              // Show the rows that were checked while checklist mode was off
+              return {
+                hiddenTableChecklists: withoutHiddenTable(
+                  state.hiddenTableChecklists,
+                  sessionId,
+                  tableKey
+                ),
+              }
+            }
             if (tableKey in sessionTables) return state
             return {
               tableCheckedRows: {
@@ -1128,16 +1170,22 @@ export const useChatStore = create<ChatUIState>()(
             if (!sessionTables || !(tableKey in sessionTables)) return state
             const { [tableKey]: _removed, ...restTables } = sessionTables
             const nextSession = restTables
+            const hiddenTableChecklists = withoutHiddenTable(
+              state.hiddenTableChecklists,
+              sessionId,
+              tableKey
+            )
             if (Object.keys(nextSession).length === 0) {
               const { [sessionId]: __, ...restSessions } =
                 state.tableCheckedRows
-              return { tableCheckedRows: restSessions }
+              return { tableCheckedRows: restSessions, hiddenTableChecklists }
             }
             return {
               tableCheckedRows: {
                 ...state.tableCheckedRows,
                 [sessionId]: nextSession,
               },
+              hiddenTableChecklists,
             }
           },
           undefined,
@@ -1168,6 +1216,37 @@ export const useChatStore = create<ChatUIState>()(
           'toggleTableRowChecked'
         ),
 
+      checkTableRow: (sessionId, tableKey, rowIndex) =>
+        set(
+          state => {
+            const sessionTables = state.tableCheckedRows[sessionId] ?? {}
+            const existing = sessionTables[tableKey]
+            if (existing?.has(rowIndex)) return state
+            const next: Partial<ChatUIState> = {
+              tableCheckedRows: {
+                ...state.tableCheckedRows,
+                [sessionId]: {
+                  ...sessionTables,
+                  [tableKey]: new Set(existing).add(rowIndex),
+                },
+              },
+            }
+            if (!existing) {
+              // Checklist mode is off: track the check without showing it
+              next.hiddenTableChecklists = {
+                ...state.hiddenTableChecklists,
+                [sessionId]: [
+                  ...(state.hiddenTableChecklists[sessionId] ?? []),
+                  tableKey,
+                ],
+              }
+            }
+            return next
+          },
+          undefined,
+          'checkTableRow'
+        ),
+
       togglePinnedTable: (sessionId, table) =>
         set(
           state => {
@@ -1192,10 +1271,12 @@ export const useChatStore = create<ChatUIState>()(
           state => {
             const pins = state.pinnedTables[sessionId]
             const checked = state.tableCheckedRows[sessionId]
+            const hidden = state.hiddenTableChecklists[sessionId]
             const pinsChanged = pins?.some(p => rename(p.key) !== p.key)
             const checkedChanged =
               checked && Object.keys(checked).some(k => rename(k) !== k)
-            if (!pinsChanged && !checkedChanged) return state
+            const hiddenChanged = hidden?.some(k => rename(k) !== k)
+            if (!pinsChanged && !checkedChanged && !hiddenChanged) return state
             const next: Partial<ChatUIState> = {}
             if (pins && pinsChanged) {
               next.pinnedTables = {
@@ -1209,6 +1290,12 @@ export const useChatStore = create<ChatUIState>()(
                 [sessionId]: Object.fromEntries(
                   Object.entries(checked).map(([k, rows]) => [rename(k), rows])
                 ),
+              }
+            }
+            if (hidden && hiddenChanged) {
+              next.hiddenTableChecklists = {
+                ...state.hiddenTableChecklists,
+                [sessionId]: hidden.map(rename),
               }
             }
             return next
@@ -1672,7 +1759,7 @@ export const useChatStore = create<ChatUIState>()(
         )) {
           if (isSending && state.sessionWorktreeMap[sessionId] === worktreeId) {
             const mode = state.executingModes[sessionId]
-            if (mode === 'build' || mode === 'yolo') {
+            if (mode && mode !== 'plan') {
               return true
             }
           }
@@ -1935,7 +2022,8 @@ export const useChatStore = create<ChatUIState>()(
               !existing ||
               (prev?.total_tokens === usage.total_tokens &&
                 prev.tool_uses === usage.tool_uses &&
-                prev.duration_ms === usage.duration_ms)
+                prev.duration_ms === usage.duration_ms &&
+                prev.model === usage.model)
             ) {
               return state
             }
@@ -2385,23 +2473,26 @@ export const useChatStore = create<ChatUIState>()(
         ),
 
       // Execution mode (session-based)
-      cycleExecutionMode: sessionId =>
-        set(
-          state => {
-            const current = state.executionModes[sessionId] ?? 'plan'
-            const currentIndex = EXECUTION_MODE_CYCLE.indexOf(current)
-            const nextIndex = (currentIndex + 1) % EXECUTION_MODE_CYCLE.length
-            // EXECUTION_MODE_CYCLE[nextIndex] is always defined due to modulo
-            const next = EXECUTION_MODE_CYCLE[nextIndex] as ExecutionMode
-            return {
-              executionModes: {
-                ...state.executionModes,
-                [sessionId]: next,
-              },
-            }
-          },
-          undefined,
-          'cycleExecutionMode'
+      cycleExecutionMode: sessionId => {
+        const state = get()
+        state.setExecutionMode(
+          sessionId,
+          state.executionModes[sessionId] === 'plan'
+            ? (state.permissionModes[sessionId] ?? 'yolo')
+            : 'plan'
+        )
+      },
+
+      setPermissionMode: (sessionId, mode) =>
+        set(state =>
+          state.permissionModes[sessionId] === mode
+            ? state
+            : {
+                permissionModes: {
+                  ...state.permissionModes,
+                  [sessionId]: mode,
+                },
+              }
         ),
 
       setExecutionMode: (sessionId, mode) =>
@@ -2434,9 +2525,29 @@ export const useChatStore = create<ChatUIState>()(
               return state
             }
 
+            const permissionUpdate =
+              mode === 'plan'
+                ? state.executionModes[sessionId] &&
+                  state.executionModes[sessionId] !== 'plan'
+                  ? {
+                      permissionModes: {
+                        ...state.permissionModes,
+                        [sessionId]: state.executionModes[
+                          sessionId
+                        ] as PermissionMode,
+                      },
+                    }
+                  : {}
+                : {
+                    permissionModes: {
+                      ...state.permissionModes,
+                      [sessionId]: mode,
+                    },
+                  }
             const newState: Partial<ChatUIState> = modeUnchanged
               ? {}
               : {
+                  ...permissionUpdate,
                   executionModes: {
                     ...state.executionModes,
                     [sessionId]: mode,
@@ -2500,7 +2611,7 @@ export const useChatStore = create<ChatUIState>()(
           'setExecutionMode'
         ),
 
-      getExecutionMode: sessionId => get().executionModes[sessionId] ?? 'plan',
+      getExecutionMode: sessionId => get().executionModes[sessionId] ?? 'yolo',
 
       // Thinking level (session-based)
       setThinkingLevel: (sessionId, level) =>
@@ -2596,6 +2707,12 @@ export const useChatStore = create<ChatUIState>()(
         set(
           state => {
             const updates: Partial<ChatUIState> = {}
+            const permission = state.permissionModes[fromId]
+            if (permission)
+              updates.permissionModes = {
+                ...state.permissionModes,
+                [toId]: permission,
+              }
             const em = state.executionModes[fromId]
             if (em !== undefined) {
               updates.executionModes = { ...state.executionModes, [toId]: em }
@@ -2793,6 +2910,31 @@ export const useChatStore = create<ChatUIState>()(
           },
           undefined,
           'setAgentWidgetExpanded'
+        ),
+
+      // Queued prompts panel collapsed state (session-based, expanded by default)
+      setQueuedPromptsCollapsed: (sessionId, collapsed) =>
+        set(
+          state => {
+            if (
+              !!state.collapsedQueuedPromptsSessions[sessionId] === collapsed
+            ) {
+              return state
+            }
+            if (collapsed) {
+              return {
+                collapsedQueuedPromptsSessions: {
+                  ...state.collapsedQueuedPromptsSessions,
+                  [sessionId]: true,
+                },
+              }
+            }
+            const { [sessionId]: _, ...rest } =
+              state.collapsedQueuedPromptsSessions
+            return { collapsedQueuedPromptsSessions: rest }
+          },
+          undefined,
+          'setQueuedPromptsCollapsed'
         ),
 
       // Error handling (session-based)

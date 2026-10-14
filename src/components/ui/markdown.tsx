@@ -1,6 +1,7 @@
 import {
   memo,
   useState,
+  useEffect,
   useCallback,
   useRef,
   useMemo,
@@ -35,7 +36,8 @@ import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
 import { useChatStore } from '@/store/chat-store'
 import { useIsMobile } from '@/hooks/use-mobile'
-import { convertFileSrc } from '@/lib/transport'
+import { convertServerFileSrc, invokeForOptionalServer } from '@/lib/transport'
+import { parseServerResourceKey } from '@/lib/server-resource'
 import { tableToMarkdown, setTableRowInPrompt } from '@/lib/table-rows-prompt'
 
 interface MarkdownProps {
@@ -112,7 +114,13 @@ function openLocalFileLink(href: string | undefined): boolean {
     return false
   }
 
-  return openLocalFile(decodeURIComponent(href))
+  let path = href
+  try {
+    path = decodeURIComponent(href)
+  } catch {
+    // Malformed percent-escape (e.g. a lone `%`) — use the raw href
+  }
+  return openLocalFile(path)
 }
 
 function handleFilePathClick(event: React.MouseEvent<HTMLElement>) {
@@ -173,10 +181,61 @@ function tableToTsv(data: string[][]): string {
   return data.map(row => row.join('\t')).join('\n')
 }
 
-function markdownImageSrc(src: string | undefined): string | undefined {
-  if (!src) return src
-  if (/^(https?:|data:|blob:|asset:|\/api\/|#)/i.test(src)) return src
-  return convertFileSrc(src)
+function MarkdownImage({ src, alt }: { src?: string; alt?: string }) {
+  const { sessionId } = useContext(MarkdownTableContext)
+  const serverId = sessionId
+    ? parseServerResourceKey(sessionId)?.serverId
+    : undefined
+  const isUrl = !src || /^(https?:|data:|blob:|asset:|\/api\/|#)/i.test(src)
+  const isAppData = Boolean(src && /com\.jean\.desktop[/\\]/.test(src))
+  const [loadedImage, setLoadedImage] = useState<{
+    path: string
+    serverId?: string
+    url: string
+  } | null>(null)
+
+  // Screenshots can live outside app data and project roots (for example /tmp).
+  // Use the same owner-routed file reader as the file viewer for those paths.
+  useEffect(() => {
+    if (!src || isUrl || isAppData) return
+    let cancelled = false
+    void invokeForOptionalServer<{ mimeType: string; data: string }>(
+      serverId,
+      'read_file_base64',
+      { path: src }
+    )
+      .then(result => {
+        if (!cancelled) {
+          setLoadedImage({
+            path: src,
+            serverId,
+            url: `data:${result.mimeType};base64,${result.data}`,
+          })
+        }
+      })
+      .catch(error => {
+        if (!cancelled) console.error('Failed to load markdown image:', error)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [src, serverId, isUrl, isAppData])
+
+  const imageSrc = isUrl
+    ? src
+    : isAppData && src
+      ? convertServerFileSrc(serverId, src)
+      : loadedImage?.path === src && loadedImage?.serverId === serverId
+        ? loadedImage.url
+        : undefined
+
+  return (
+    <img
+      src={imageSrc}
+      alt={alt || ''}
+      className="max-w-full h-auto rounded-md my-4"
+    />
+  )
 }
 
 /**
@@ -223,31 +282,59 @@ function focusSiblingRow(row: HTMLElement, step: 1 | -1) {
 }
 
 /**
- * Table row that adds itself to the prompt chip on click, then opens a small
- * form under the row for an optional note. A click on a row that is already
- * in the prompt opens the same form to edit the note or remove the row.
+ * Table row that adds itself to the prompt chip on click and opens a small
+ * form under the row, with focus in the note field. The form also edits the
+ * note of a row that is already in the prompt, or removes the row.
  *
  * Keyboard: Up/Down move between rows, Enter opens the note form (a second
  * Enter adds the row to the prompt), Delete/Backspace remove the row.
+ *
+ * Closing the form: Enter/Save keep the note, Escape discards it. After a
+ * click-opened form, Enter/Save move focus to the chat input; otherwise focus
+ * returns to the row. A click outside keeps a changed note, and leaves focus
+ * where the click put it.
  */
 function PromptRow({ row, rowIndex, inPrompt, note, onSave }: PromptRowProps) {
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState(note)
   const rowRef = useRef<HTMLElement>(null)
+  const noteRef = useRef<HTMLTextAreaElement>(null)
+  // Where focus goes when the form closes from inside (Enter, Save, Remove,
+  // Escape). Null after a click outside: focus stays where the click put it.
+  const closeFocusRef = useRef<'row' | 'chat' | null>(null)
+  // A click opened the form, and the click added the row to the prompt.
+  const fromClickRef = useRef(false)
+  const isMobile = useIsMobile()
   const rowNumber = rowIndex + 1
 
-  const openForm = (addNow: boolean) => {
-    if (addNow && !inPrompt) onSave(rowIndex, '')
+  const openForm = (fromClick: boolean) => {
+    closeFocusRef.current = null
+    fromClickRef.current = fromClick
     setDraft(note)
     setOpen(true)
   }
+  const closeForm = (focus: 'row' | 'chat' | null) => {
+    closeFocusRef.current = focus
+    setOpen(false)
+  }
   const saveNote = () => {
     if (!inPrompt || draft.trim() !== note) onSave(rowIndex, draft)
-    setOpen(false)
+    // Skip the chat input on mobile to avoid the on-screen keyboard popup.
+    closeForm(fromClickRef.current && !isMobile ? 'chat' : 'row')
   }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={next => {
+        if (next) return
+        // Only a click or focus outside the form gets here (Escape is
+        // handled below). Keep a changed note instead of losing it.
+        const added = inPrompt || fromClickRef.current
+        if (added && draft.trim() !== note) onSave(rowIndex, draft)
+        closeForm(null)
+      }}
+    >
       <PopoverAnchor asChild>
         {cloneElement(row, {
           ref: rowRef,
@@ -265,6 +352,12 @@ function PromptRow({ row, rowIndex, inPrompt, note, onSave }: PromptRowProps) {
             const target = event.target as HTMLElement
             if (target.closest(ROW_CLICK_IGNORE)) return
             if (window.getSelection()?.toString()) return
+            if (open) {
+              // A click on the row of the open form keeps the form open.
+              noteRef.current?.focus()
+              return
+            }
+            if (!inPrompt) onSave(rowIndex, '')
             openForm(true)
           },
           onKeyDown: (event: React.KeyboardEvent<HTMLElement>) => {
@@ -288,10 +381,26 @@ function PromptRow({ row, rowIndex, inPrompt, note, onSave }: PromptRowProps) {
       <PopoverContent
         align="start"
         className="w-80 p-3"
-        onCloseAutoFocus={event => {
-          // Return focus to the row so keyboard navigation can continue.
+        onInteractOutside={event => {
+          // The row is the anchor: a click on it must not close the form.
+          if (rowRef.current?.contains(event.target as Node)) {
+            event.preventDefault()
+          }
+        }}
+        onEscapeKeyDown={event => {
           event.preventDefault()
-          rowRef.current?.focus({ preventScroll: true })
+          closeForm('row')
+        }}
+        onCloseAutoFocus={event => {
+          // Radix runs this after the close animation. After a click outside,
+          // focus is already on the clicked element (another row's form, the
+          // chat input): never pull it back.
+          event.preventDefault()
+          if (closeFocusRef.current === 'chat') {
+            window.dispatchEvent(new CustomEvent('focus-chat-input'))
+          } else if (closeFocusRef.current === 'row') {
+            rowRef.current?.focus({ preventScroll: true })
+          }
         }}
       >
         <form
@@ -310,6 +419,7 @@ function PromptRow({ row, rowIndex, inPrompt, note, onSave }: PromptRowProps) {
               : `Add row ${rowNumber} to the prompt. Note (optional)`}
           </label>
           <Textarea
+            ref={noteRef}
             id={`prompt-row-note-${rowIndex}`}
             value={draft}
             onChange={event => setDraft(event.target.value)}
@@ -335,7 +445,7 @@ function PromptRow({ row, rowIndex, inPrompt, note, onSave }: PromptRowProps) {
                 size="sm"
                 onClick={() => {
                   onSave(rowIndex, null)
-                  setOpen(false)
+                  closeForm('row')
                 }}
               >
                 Remove
@@ -416,10 +526,7 @@ export function headingBefore(source: string, offset: number): string | null {
     const match =
       /^#{1,6}\s+(.+?)\s*#*$/.exec(line) ?? /^\*\*(.+)\*\*:?$/.exec(line)
     if (!match?.[1]) continue
-    const text = match[1]
-      .replace(/[*_`]/g, '')
-      .replace(/:$/, '')
-      .trim()
+    const text = match[1].replace(/[*_`]/g, '').replace(/:$/, '').trim()
     if (text) return text
   }
   return null
@@ -459,7 +566,9 @@ function TableBlock({
   })
   const sessionId = ctxSessionId ?? storeSessionId
   const checkedRows = useChatStore(state =>
-    sessionId && tableKey
+    sessionId &&
+    tableKey &&
+    !state.hiddenTableChecklists[sessionId]?.includes(tableKey)
       ? (state.tableCheckedRows[sessionId]?.[tableKey] ?? null)
       : null
   )
@@ -498,7 +607,8 @@ function TableBlock({
   const handleToggleChecklist = useCallback(() => {
     if (!sessionId || !tableKey) return
     const store = useChatStore.getState()
-    if (store.tableCheckedRows[sessionId]?.[tableKey]) {
+    const hidden = store.hiddenTableChecklists[sessionId]?.includes(tableKey)
+    if (store.tableCheckedRows[sessionId]?.[tableKey] && !hidden) {
       store.disableTableChecklist(sessionId, tableKey)
     } else {
       store.enableTableChecklist(sessionId, tableKey)
@@ -527,11 +637,10 @@ function TableBlock({
   const handleSetPromptRow = useCallback(
     (rowIndex: number, note: string | null) => {
       if (!sessionId || !tableKey || !tableRef.current) return
-      // Adding a row to the prompt also checks it in the table checklist.
-      const store = useChatStore.getState()
-      const checked = store.tableCheckedRows[sessionId]?.[tableKey]
-      if (note !== null && checked && !checked.has(rowIndex)) {
-        store.toggleTableRowChecked(sessionId, tableKey, rowIndex)
+      // Adding a row to the prompt also checks it in the table checklist,
+      // even when checklist mode is off (the check shows once it is on).
+      if (note !== null) {
+        useChatStore.getState().checkTableRow(sessionId, tableKey, rowIndex)
       }
       void setTableRowInPrompt(
         sessionId,
@@ -744,13 +853,7 @@ const components: Components = {
   pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
 
   // Images
-  img: ({ src, alt }) => (
-    <img
-      src={markdownImageSrc(src)}
-      alt={alt || ''}
-      className="max-w-full h-auto rounded-md my-4"
-    />
-  ),
+  img: MarkdownImage,
 
   // Links
   a: ({ href, children }) => (

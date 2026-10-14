@@ -1,3 +1,4 @@
+import { AcpPermissionsRequest } from './AcpPermissionsRequest'
 import {
   useCallback,
   useDeferredValue,
@@ -7,6 +8,7 @@ import {
   useRef,
   useState,
   lazy,
+  memo,
   Suspense,
 } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
@@ -29,6 +31,7 @@ import { invoke } from '@/lib/transport'
 import { hydrateRunningSnapshot } from '@/lib/hydrate-running-snapshot'
 import { generateId } from '@/lib/uuid'
 import {
+  ArrowDown,
   ArrowUp,
   GitBranch,
   GitMerge,
@@ -61,6 +64,15 @@ import {
 } from '@/services/projects'
 import { useProjectsStore } from '@/store/projects-store'
 import type { Worktree } from '@/types/projects'
+import type {
+  AttachedSavedContext,
+  LoadedAdvisoryContext,
+  LoadedIssueContext,
+  LoadedPullRequestContext,
+  LoadedSecurityAlertContext,
+} from '@/types/github'
+import type { LoadedLinearIssueContext } from '@/types/linear'
+import type { SentryIssueContext } from '@/types/sentry'
 import {
   useLoadedIssueContexts,
   useLoadedPRContexts,
@@ -82,6 +94,8 @@ import {
   resolveMagicPromptBackend,
   resolveMagicPromptProvider,
   type CliBackend,
+  type CodexProviderProfile,
+  type CustomCliProfile,
 } from '@/types/preferences'
 import type {
   ChatMessage,
@@ -143,6 +157,7 @@ import { ReviewMethodModal } from './ReviewMethodModal'
 import { QueuedPromptsPanel } from './QueuedPromptsPanel'
 import { useQueuedPromptActions } from './hooks/useQueuedPromptActions'
 import { FloatingButtons } from './FloatingButtons'
+import { GoalBadge } from './GoalBadge'
 import { PinnedTablesButton } from './PinnedTablesButton'
 import {
   capturePrependScrollAnchor,
@@ -183,6 +198,7 @@ import { useUIStore } from '@/store/ui-store'
 import { buildMcpConfigJson } from '@/services/mcp'
 import { CHECK_GITHUB_ISSUES_PROMPT } from '@/lib/github-discovery-prompt'
 import { buildCommentAndCloseIssuePrompt } from '@/lib/github-issue-close-prompt'
+import { buildCommitInSessionPrompt } from '@/lib/commit-in-session-prompt'
 import type { McpServerInfo } from '@/types/chat'
 import { useGitStatus } from '@/services/git-status'
 import { useRemotePicker } from '@/hooks/useRemotePicker'
@@ -255,8 +271,11 @@ import { useMessageSending } from './hooks/useMessageSending'
 import { usePlanState } from './hooks/usePlanState'
 import { useActiveTodosAndAgents } from './hooks/useActiveTodosAndAgents'
 import { usePendingAttachments } from './hooks/usePendingAttachments'
-import { dedupeInFlightAssistantMessage } from './in-flight-message-dedupe'
-import { shouldShowPermissionApproval } from './permission-approval-utils'
+import { shouldHideInFlightAssistantMessage } from './in-flight-message-dedupe'
+import {
+  isLivePermissionRequest,
+  shouldShowPermissionApproval,
+} from './permission-approval-utils'
 import { navigateToForkedSession } from './fork-session-navigation'
 
 // PERFORMANCE: Stable empty array references to prevent infinite render loops
@@ -277,6 +296,29 @@ const EMPTY_CODEX_COMMAND_APPROVAL_REQUESTS: CodexCommandApprovalRequest[] = []
 const EMPTY_CODEX_USER_INPUT_REQUESTS: CodexUserInputRequest[] = []
 const EMPTY_CODEX_MCP_ELICITATION_REQUESTS: CodexMcpElicitationRequest[] = []
 const EMPTY_CODEX_DYNAMIC_TOOL_CALL_REQUESTS: CodexDynamicToolCallRequest[] = []
+const EMPTY_MESSAGES: ChatMessage[] = []
+const EMPTY_ISSUE_CONTEXTS: LoadedIssueContext[] = []
+const EMPTY_PR_CONTEXTS: LoadedPullRequestContext[] = []
+const EMPTY_SECURITY_CONTEXTS: LoadedSecurityAlertContext[] = []
+const EMPTY_ADVISORY_CONTEXTS: LoadedAdvisoryContext[] = []
+const EMPTY_LINEAR_CONTEXTS: LoadedLinearIssueContext[] = []
+const EMPTY_SENTRY_CONTEXTS: SentryIssueContext[] = []
+const EMPTY_SAVED_CONTEXTS: AttachedSavedContext[] = []
+const EMPTY_CLI_PROFILES: CustomCliProfile[] = []
+const EMPTY_CODEX_PROVIDERS: CodexProviderProfile[] = []
+
+/**
+ * PERFORMANCE: TanStack Query v5's useMutation returns a new result object on
+ * every render, but its `mutate` / `mutateAsync` functions are stable. Expose
+ * only those so callbacks that depend on the mutation stay referentially
+ * stable across streaming re-renders.
+ */
+function useStableMutation<T extends { mutate: unknown; mutateAsync: unknown }>(
+  mutation: T
+): Pick<T, 'mutate' | 'mutateAsync'> {
+  const { mutate, mutateAsync } = mutation
+  return useMemo(() => ({ mutate, mutateAsync }), [mutate, mutateAsync])
+}
 
 interface ChatWindowProps {
   /** When true, hides terminal panel and other elements not needed in modal */
@@ -287,7 +329,11 @@ interface ChatWindowProps {
   worktreePath?: string
 }
 
-export function ChatWindow(props: ChatWindowProps = {}) {
+// PERFORMANCE: memoized - props are primitives, so parents re-rendering
+// (e.g. SessionChatModal) don't force this large tree to re-render.
+export const ChatWindow = memo(function ChatWindow(
+  props: ChatWindowProps = {}
+) {
   const storeWorktreeId = useChatStore(state => state.activeWorktreeId)
   const worktreeId = props.worktreeId ?? storeWorktreeId
   const serverId = worktreeId
@@ -299,9 +345,9 @@ export function ChatWindow(props: ChatWindowProps = {}) {
       <ChatWindowContent {...props} />
     </SettingsTargetProvider>
   )
-}
+})
 
-function ChatWindowContent({
+const ChatWindowContent = memo(function ChatWindowContent({
   isModal = false,
   worktreeId: propWorktreeId,
   worktreePath: propWorktreePath,
@@ -701,13 +747,15 @@ function ChatWindowContent({
     (preferences?.keybindings?.approve_plan_clear_context_build ??
       DEFAULT_KEYBINDINGS.approve_plan_clear_context_build) as string
   )
-  const sendMessage = useSendMessage()
-  const createSession = useCreateSession()
-  const setSessionModel = useSetSessionModel()
-  const setSessionThinkingLevel = useSetSessionThinkingLevel()
-  const setSessionEffortLevel = useSetSessionEffortLevel()
-  const setSessionBackend = useSetSessionBackend()
-  const setSessionProvider = useSetSessionProvider()
+  const sendMessage = useStableMutation(useSendMessage())
+  const createSession = useStableMutation(useCreateSession())
+  const setSessionModel = useStableMutation(useSetSessionModel())
+  const setSessionThinkingLevel = useStableMutation(
+    useSetSessionThinkingLevel()
+  )
+  const setSessionEffortLevel = useStableMutation(useSetSessionEffortLevel())
+  const setSessionBackend = useStableMutation(useSetSessionBackend())
+  const setSessionProvider = useStableMutation(useSetSessionProvider())
 
   // Fetch worktree data for PR link display
   const { data: worktree } = useWorktree(activeWorktreeId ?? null)
@@ -1048,9 +1096,9 @@ function ChatWindowContent({
   // ChatInput notifies on mount, session change, and empty/non-empty boundary changes
   const [hasInputValue, setHasInputValue] = useState(false)
   const [steerModifierActive, setSteerModifierActive] = useState(false)
-  // Per-session execution mode (defaults to preference or 'plan' for new sessions)
+  // Per-session execution mode (defaults to preference or Full access for new sessions)
   // Uses deferredSessionId for display consistency with other content
-  const defaultExecutionMode = preferences?.default_execution_mode ?? 'plan'
+  const defaultExecutionMode = preferences?.default_execution_mode ?? 'yolo'
   const executionMode = useChatStore(state =>
     deferredSessionId
       ? (state.executionModes[deferredSessionId] ??
@@ -1188,6 +1236,7 @@ function ChatWindowContent({
     isSending,
     executionMode,
     isCodexBackend,
+    hasLiveRequest: pendingDenials.some(isLivePermissionRequest),
   })
   const activeCodexCommandApprovalRequest =
     pendingCodexCommandApprovalRequests[0]
@@ -1330,6 +1379,32 @@ function ChatWindowContent({
   const approveButtonRef = useRef<HTMLButtonElement>(null)
   const triggerChatAttachRef = useRef<(() => void) | null>(null)
 
+  // PERFORMANCE: Stable ref-backed callbacks for memoized ChatInput/ChatToolbar
+  const handleRegisterClearHandler = useCallback(
+    (handler: (() => void) | null) => {
+      clearChatInputStateRef.current = handler
+    },
+    []
+  )
+  const handleRegisterAttachHandler = useCallback(
+    (handler: (() => void) | null) => {
+      triggerChatAttachRef.current = handler
+    },
+    []
+  )
+  const handleClearChatInputState = useCallback(
+    () => clearChatInputStateRef.current?.(),
+    []
+  )
+  const handleToolbarAttach = useCallback(
+    () => triggerChatAttachRef.current?.(),
+    []
+  )
+  const getCustomProfileName = useCallback(
+    () => selectedProviderRef.current ?? undefined,
+    []
+  )
+
   // Terminal panel ref for imperative collapse/expand
   const terminalPanelRef = useRef<ImperativePanelHandle>(null)
   // Review sidebar panel ref for imperative collapse/expand
@@ -1427,13 +1502,10 @@ function ChatWindowContent({
     lastAssistantMessage,
   })
 
-  // Plan state: finished pending plan, content, file path
+  // Plan state: finished pending plan awaiting approval
   const { pendingPlanMessage, hasPendingPlanApproval } = usePlanState({
     sessionMessages: session?.messages,
     pendingPlanMessageId: session?.pending_plan_message_id,
-    currentToolCalls,
-    currentStreamingContent: streamingContent,
-    currentStreamingContentBlocks,
     isSending,
   })
 
@@ -1639,8 +1711,13 @@ function ChatWindowContent({
     queryClient,
     markAtBottom,
     clearInputDraft,
-    clearChatInputState: () => clearChatInputStateRef.current?.(),
+    clearChatInputState: handleClearChatInputState,
   })
+
+  const handleSteer = useCallback(
+    () => handleSubmit(undefined, { forceSteer: true }),
+    [handleSubmit]
+  )
 
   const handleCheckGitHubIssues = useCallback(() => {
     sendMessageNow({
@@ -1716,7 +1793,7 @@ function ChatWindowContent({
     if (wasSending) await handleCancel()
   }, [activeSessionId, getMcpConfig, handleCancel, sendMessageNow])
 
-  // Shared by the goal badge on the /goal message: clear Jean's goal mirror,
+  // Used by the composer goal tab: clear Jean's goal mirror,
   // then (Claude only) clear the goal kept in the CLI session.
   const handleClearGoal = useCallback(async () => {
     if (!activeSessionId || !activeWorktreeId || !activeWorktreePath) return
@@ -1733,30 +1810,52 @@ function ChatWindowContent({
     handleClearClaudeGoal,
   ])
 
+  // Sends a magic prompt to this session with the selected backend/model/mode
+  const sendMagicPrompt = useCallback(
+    (message: string) =>
+      sendMessageNow({
+        id: generateId(),
+        message,
+        pendingImages: [],
+        pendingFiles: [],
+        pendingSkills: [],
+        pendingTextFiles: [],
+        model: selectedModelRef.current,
+        provider: selectedProviderRef.current,
+        executionMode: executionModeRef.current,
+        thinkingLevel: selectedThinkingLevelRef.current,
+        effortLevel: useAdaptiveThinkingRef.current
+          ? selectedEffortLevelRef.current
+          : undefined,
+        mcpConfig: getMcpConfig(),
+        backend: selectedBackendRef.current,
+        queuedAt: Date.now(),
+      }),
+    [getMcpConfig, sendMessageNow]
+  )
+
+  const handleCommitInSession = useCallback(() => {
+    const closeIssueNumbers = preferences?.commit_close_issue
+      ? [
+          ...(worktree?.issue_number ? [worktree.issue_number] : []),
+          ...(loadedIssueContexts ?? []).map(ctx => ctx.number),
+        ]
+      : []
+    sendMagicPrompt(buildCommitInSessionPrompt(closeIssueNumbers))
+  }, [
+    loadedIssueContexts,
+    preferences?.commit_close_issue,
+    sendMagicPrompt,
+    worktree?.issue_number,
+  ])
+
   const handleCommentAndCloseIssue = useCallback(() => {
     if (!loadedIssueContexts?.length) {
       toast.error('No GitHub issue attached to this session or worktree')
       return
     }
-    sendMessageNow({
-      id: generateId(),
-      message: buildCommentAndCloseIssuePrompt(loadedIssueContexts),
-      pendingImages: [],
-      pendingFiles: [],
-      pendingSkills: [],
-      pendingTextFiles: [],
-      model: selectedModelRef.current,
-      provider: selectedProviderRef.current,
-      executionMode: executionModeRef.current,
-      thinkingLevel: selectedThinkingLevelRef.current,
-      effortLevel: useAdaptiveThinkingRef.current
-        ? selectedEffortLevelRef.current
-        : undefined,
-      mcpConfig: getMcpConfig(),
-      backend: selectedBackendRef.current,
-      queuedAt: Date.now(),
-    })
-  }, [getMcpConfig, loadedIssueContexts, sendMessageNow])
+    sendMagicPrompt(buildCommentAndCloseIssuePrompt(loadedIssueContexts))
+  }, [loadedIssueContexts, sendMagicPrompt])
 
   // Git operations hook - handles commit, PR, review, merge operations
   const {
@@ -1926,6 +2025,10 @@ function ChatWindowContent({
   })
 
   const [reviewMethodModalOpen, setReviewMethodModalOpen] = useState(false)
+  const handleOpenReviewMethodModal = useCallback(
+    () => setReviewMethodModalOpen(true),
+    []
+  )
 
   // Linked projects modal state
   const linkedProjectsModalOpen = useUIStore(
@@ -2020,6 +2123,7 @@ function ChatWindowContent({
     handlePreReleaseReview,
     handleCommit,
     handleCommitAndPush: handleCommitAndPushWithPicker,
+    handleCommitInSession,
     handleCommentAndCloseIssue,
     handlePull: handlePullWithPicker,
     handlePush: handlePushWithPicker,
@@ -2074,9 +2178,7 @@ function ChatWindowContent({
     yoloThinkingLevelRef,
     yoloEffortLevelRef,
     selectedBackendRef,
-    getCustomProfileName: () => {
-      return selectedProviderRef.current ?? undefined
-    },
+    getCustomProfileName,
     executionModeRef,
     selectedThinkingLevelRef,
     selectedEffortLevelRef,
@@ -2326,14 +2428,29 @@ function ChatWindowContent({
     sendMessageNow,
   })
 
-  // Pre-calculate last plan message index for approve button logic
-  const lastPlanMessageIndex = useMemo(() => {
-    const messages = dedupeInFlightAssistantMessage(session?.messages ?? [], {
+  // Messages for rendering - hide the in-flight trailing assistant snapshot
+  // while streaming. PERFORMANCE: compute a boolean per render and memoize the
+  // slice on it, so the array reference stays stable across streaming flushes.
+  const rawSessionMessages = session?.messages ?? EMPTY_MESSAGES
+  const hideTrailingInFlightMessage = shouldHideInFlightAssistantMessage(
+    rawSessionMessages,
+    {
       isSending,
       streamingContent,
       streamingContentBlocks: currentStreamingContentBlocks,
       streamingToolCalls: currentToolCalls,
-    })
+    }
+  )
+  const messages = useMemo(
+    () =>
+      hideTrailingInFlightMessage
+        ? rawSessionMessages.slice(0, -1)
+        : rawSessionMessages,
+    [rawSessionMessages, hideTrailingInFlightMessage]
+  )
+
+  // Pre-calculate last plan message index for approve button logic
+  const lastPlanMessageIndex = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i]
       if (
@@ -2345,31 +2462,7 @@ function ChatWindowContent({
       }
     }
     return -1
-  }, [
-    session?.messages,
-    isSending,
-    streamingContent,
-    currentStreamingContentBlocks,
-    currentToolCalls,
-  ])
-
-  // Messages for rendering - memoize to ensure stable reference
-  const messages = useMemo(
-    () =>
-      dedupeInFlightAssistantMessage(session?.messages ?? [], {
-        isSending,
-        streamingContent,
-        streamingContentBlocks: currentStreamingContentBlocks,
-        streamingToolCalls: currentToolCalls,
-      }),
-    [
-      session?.messages,
-      isSending,
-      streamingContent,
-      currentStreamingContentBlocks,
-      currentToolCalls,
-    ]
-  )
+  }, [messages])
 
   const compactHistoryWindow = useMemo(
     () => getCurrentPromptWindow(messages),
@@ -2721,7 +2814,6 @@ function ChatWindowContent({
                                     areQuestionsSkipped={areQuestionsSkipped}
                                     isFindingFixed={isFindingFixed}
                                     onCopyToInput={handleCopyToInput}
-                                    onClearGoal={handleClearGoal}
                                     shouldScrollToBottom={isAtBottom}
                                     onScrollToBottomHandled={
                                       handleScrollToBottomHandled
@@ -2802,7 +2894,6 @@ function ChatWindowContent({
                                     areQuestionsSkipped={areQuestionsSkipped}
                                     isFindingFixed={isFindingFixed}
                                     onCopyToInput={handleCopyToInput}
-                                    onClearGoal={handleClearGoal}
                                     shouldScrollToBottom={isAtBottom}
                                     onScrollToBottomHandled={
                                       handleScrollToBottomHandled
@@ -2949,6 +3040,14 @@ function ChatWindowContent({
                               />
                             )}
 
+                            {activeSessionId &&
+                              (selectedBackend === 'grok' ||
+                                selectedBackend === 'kimi') && (
+                                <AcpPermissionsRequest
+                                  sessionId={activeSessionId}
+                                />
+                              )}
+
                             {activeOpencodePermissionRequest && (
                               <OpenCodePermissionsRequest
                                 request={activeOpencodePermissionRequest}
@@ -3033,35 +3132,6 @@ function ChatWindowContent({
                           </div>
                         </div>
                       </ScrollArea>
-
-                      {/* Floating scroll buttons */}
-                      <FloatingButtons
-                        showApproveButton={hasPendingPlanApproval}
-                        showFindingsButton={!areFindingsVisible}
-                        isAtBottom={isAtBottom || messages.length === 0}
-                        isSending={isSending}
-                        approveShortcut={approveShortcut}
-                        buildDefaultModelLabel={buildNewContextLabel}
-                        yoloDefaultModelLabel={yoloNewContextLabel}
-                        onApprove={floatingApprove}
-                        onYoloApprove={floatingYoloApprove}
-                        onClearContextBuildApprove={
-                          floatingClearContextBuildApprove
-                        }
-                        onClearContextApprove={floatingClearContextApprove}
-                        onWorktreeBuildApprove={
-                          worktree?.project_id
-                            ? floatingWorktreeBuildApprove
-                            : undefined
-                        }
-                        onWorktreeYoloApprove={
-                          worktree?.project_id
-                            ? floatingWorktreeYoloApprove
-                            : undefined
-                        }
-                        onScrollToFindings={scrollToFindings}
-                        onScrollToBottom={scrollToBottom}
-                      />
                     </div>
 
                     {/* Input container - floats over the messages so the sides stay see-through */}
@@ -3086,8 +3156,14 @@ function ChatWindowContent({
                           data-chat-composer=""
                           className="pointer-events-auto relative sm:mx-auto sm:mb-3 sm:max-w-3xl xl:max-w-4xl"
                         >
-                          {/* Hidden history and pinned tables tabs - attached to the top edge of the composer */}
+                          {/* Goal, hidden history, pinned tables, and scroll-to-bottom tabs - attached to the top edge of the composer */}
                           <div className="absolute right-3 bottom-full flex items-end gap-1">
+                            {!zenMode && (
+                              <GoalBadge
+                                sessionId={activeSessionId}
+                                onClearGoal={handleClearGoal}
+                              />
+                            )}
                             {preferences?.compact_chat_view_enabled &&
                               !zenMode &&
                               !isCompactHistoryExpanded &&
@@ -3109,6 +3185,55 @@ function ChatWindowContent({
                               sessionId={activeSessionId}
                               onShowInChat={handleShowTableInChat}
                             />
+                            <FloatingButtons
+                              showApproveButton={hasPendingPlanApproval}
+                              showFindingsButton={!areFindingsVisible}
+                              isAtBottom={isAtBottom || messages.length === 0}
+                              approveShortcut={approveShortcut}
+                              buildDefaultModelLabel={buildNewContextLabel}
+                              yoloDefaultModelLabel={yoloNewContextLabel}
+                              onApprove={floatingApprove}
+                              onYoloApprove={floatingYoloApprove}
+                              onClearContextBuildApprove={
+                                floatingClearContextBuildApprove
+                              }
+                              onClearContextApprove={
+                                floatingClearContextApprove
+                              }
+                              onWorktreeBuildApprove={
+                                worktree?.project_id
+                                  ? floatingWorktreeBuildApprove
+                                  : undefined
+                              }
+                              onWorktreeYoloApprove={
+                                worktree?.project_id
+                                  ? floatingWorktreeYoloApprove
+                                  : undefined
+                              }
+                              onScrollToFindings={scrollToFindings}
+                              onScrollToBottom={scrollToBottom}
+                            />
+                            {!isAtBottom && messages.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => scrollToBottom(true)}
+                                aria-label="Scroll to bottom"
+                                title="Scroll to bottom"
+                                className="relative flex h-6 items-center gap-1 rounded-t-md border border-b-0 border-border bg-card px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                              >
+                                <ArrowDown className="h-3.5 w-3.5" />
+                                <span>Bottom</span>
+                                {isSending && (
+                                  <span
+                                    aria-hidden="true"
+                                    className="absolute -top-0.5 -right-0.5 flex h-2 w-2"
+                                  >
+                                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
+                                    <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
+                                  </span>
+                                )}
+                              </button>
+                            )}
                           </div>
                           {/* Subagents panel - separate section above the chat input */}
                           {!zenMode &&
@@ -3277,14 +3402,12 @@ function ChatWindowContent({
                                   investigatePRPrompt={
                                     preferences?.magic_prompts?.investigate_pr
                                   }
-                                  onRegisterClearHandler={(
-                                    handler: (() => void) | null
-                                  ) => {
-                                    clearChatInputStateRef.current = handler
-                                  }}
-                                  onRegisterAttachHandler={handler => {
-                                    triggerChatAttachRef.current = handler
-                                  }}
+                                  onRegisterClearHandler={
+                                    handleRegisterClearHandler
+                                  }
+                                  onRegisterAttachHandler={
+                                    handleRegisterAttachHandler
+                                  }
                                   formRef={formRef}
                                   inputRef={inputRef}
                                   installedBackends={installedBackends}
@@ -3322,11 +3445,7 @@ function ChatWindowContent({
                                       currentQueuedMessages.length
                                     }
                                     onCancel={handleCancel}
-                                    onSteer={() =>
-                                      handleSubmit(undefined, {
-                                        forceSteer: true,
-                                      })
-                                    }
+                                    onSteer={handleSteer}
                                   />
                                 </div>
                               ) : (
@@ -3380,25 +3499,37 @@ function ChatWindowContent({
                                     projectId={worktree?.project_id}
                                     runScripts={runScripts}
                                     loadedIssueContexts={
-                                      loadedIssueContexts ?? []
+                                      loadedIssueContexts ??
+                                      EMPTY_ISSUE_CONTEXTS
                                     }
-                                    loadedPRContexts={loadedPRContexts ?? []}
+                                    loadedPRContexts={
+                                      loadedPRContexts ?? EMPTY_PR_CONTEXTS
+                                    }
                                     loadedSecurityContexts={
-                                      loadedSecurityContexts ?? []
+                                      loadedSecurityContexts ??
+                                      EMPTY_SECURITY_CONTEXTS
                                     }
                                     loadedAdvisoryContexts={
-                                      loadedAdvisoryContexts ?? []
+                                      loadedAdvisoryContexts ??
+                                      EMPTY_ADVISORY_CONTEXTS
                                     }
                                     loadedLinearContexts={
-                                      loadedLinearContexts ?? []
+                                      loadedLinearContexts ??
+                                      EMPTY_LINEAR_CONTEXTS
                                     }
                                     loadedSentryContexts={
-                                      loadedSentryContexts ?? []
+                                      loadedSentryContexts ??
+                                      EMPTY_SENTRY_CONTEXTS
                                     }
                                     attachedSavedContexts={
-                                      attachedSavedContexts ?? []
+                                      attachedSavedContexts ??
+                                      EMPTY_SAVED_CONTEXTS
                                     }
-                                    onOpenMagicModal={handleOpenMagicModal}
+                                    onOpenMagicModal={
+                                      project?.server
+                                        ? undefined
+                                        : handleOpenMagicModal
+                                    }
                                     onSaveContext={handleSaveContext}
                                     onLoadContext={handleLoadContext}
                                     onCommit={handleCommit}
@@ -3406,9 +3537,7 @@ function ChatWindowContent({
                                       handleCommitAndPushWithPicker
                                     }
                                     onOpenPr={handleOpenPr}
-                                    onReview={() =>
-                                      setReviewMethodModalOpen(true)
-                                    }
+                                    onReview={handleOpenReviewMethodModal}
                                     onMerge={handleMerge}
                                     onMergePr={handleMergePr}
                                     onResolvePrConflicts={
@@ -3428,10 +3557,12 @@ function ChatWindowContent({
                                       handleToolbarProviderChange
                                     }
                                     customCliProfiles={
-                                      preferences?.custom_cli_profiles ?? []
+                                      preferences?.custom_cli_profiles ??
+                                      EMPTY_CLI_PROFILES
                                     }
                                     customCodexProviders={
-                                      preferences?.custom_codex_providers ?? []
+                                      preferences?.custom_codex_providers ??
+                                      EMPTY_CODEX_PROVIDERS
                                     }
                                     onThinkingLevelChange={
                                       handleToolbarThinkingLevelChange
@@ -3442,9 +3573,7 @@ function ChatWindowContent({
                                     onSetExecutionMode={
                                       handleToolbarSetExecutionMode
                                     }
-                                    onAttach={() =>
-                                      triggerChatAttachRef.current?.()
-                                    }
+                                    onAttach={handleToolbarAttach}
                                     onCancel={handleCancel}
                                     willSteer={
                                       isBackendAutoSteerEnabled(
@@ -3464,11 +3593,7 @@ function ChatWindowContent({
                                     canSteer={isSteerCapableBackend(
                                       selectedBackend
                                     )}
-                                    onSteer={() =>
-                                      handleSubmit(undefined, {
-                                        forceSteer: true,
-                                      })
-                                    }
+                                    onSteer={handleSteer}
                                     queuedMessageCount={
                                       currentQueuedMessages.length
                                     }
@@ -3699,4 +3824,4 @@ function ChatWindowContent({
       </div>
     </ErrorBoundary>
   )
-}
+})

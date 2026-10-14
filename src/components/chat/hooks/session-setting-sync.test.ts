@@ -61,6 +61,15 @@ describe('applySessionSettingToSession', () => {
     })
   })
 
+  it('syncs permissions without changing the Plan workflow', () => {
+    expect(
+      applySessionSettingToSession(baseSession, 'permissionMode', 'supervised')
+    ).toMatchObject({
+      selected_execution_mode: 'plan',
+      selected_permission_mode: 'supervised',
+    })
+  })
+
   it('updates custom provider', () => {
     expect(
       applySessionSettingToSession(baseSession, 'provider', 'MiniMax')

@@ -3,7 +3,6 @@ import {
   Archive,
   BarChart3,
   Command,
-  LayoutDashboard,
   Menu,
   Plus,
   Github,
@@ -67,10 +66,6 @@ export function DockBurgerButton({ className }: DockBurgerButtonProps = {}) {
     return () => window.removeEventListener('toggle-quick-menu', handler)
   }, [toggleMenu])
 
-  const githubShortcut = formatShortcutDisplay(
-    (preferences?.keybindings?.open_github_dashboard ??
-      DEFAULT_KEYBINDINGS.open_github_dashboard) as string
-  )
   const commandPaletteShortcut = formatShortcutDisplay(
     (preferences?.keybindings?.open_command_palette ??
       DEFAULT_KEYBINDINGS.open_command_palette) as string
@@ -126,15 +121,6 @@ export function DockBurgerButton({ className }: DockBurgerButtonProps = {}) {
             <DropdownMenuShortcut>
               {commandPaletteShortcut}
             </DropdownMenuShortcut>
-          )}
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() => useUIStore.getState().setGitHubDashboardOpen(true)}
-        >
-          <LayoutDashboard className="mr-2 h-4 w-4" />
-          GitHub Dashboard
-          {!isMobile && (
-            <DropdownMenuShortcut>{githubShortcut}</DropdownMenuShortcut>
           )}
         </DropdownMenuItem>
         {isMobile && (

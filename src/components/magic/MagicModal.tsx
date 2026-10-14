@@ -16,7 +16,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Button } from '@/components/ui/button'
+import { Button, edgeNeutral } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
@@ -79,7 +79,13 @@ import {
 import { useRemotePicker } from '@/hooks/useRemotePicker'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useInstalledBackends } from '@/hooks/useInstalledBackends'
-import { chatQueryKeys, refreshWorktreeSessionsCaches } from '@/services/chat'
+import {
+  chatQueryKeys,
+  refreshWorktreeSessionsCaches,
+  useSession,
+} from '@/services/chat'
+import { resolveSelectedModelForBackend } from '@/lib/session-defaults'
+import { getModelImpliedBackend } from '@/lib/model-utils'
 import {
   clearWorktreePr,
   linkWorktreePr,
@@ -102,6 +108,7 @@ import {
   useModelCatalog,
 } from '@/services/model-catalog'
 import { BackendLabel } from '@/components/ui/backend-label'
+import { DesktopBackendModelPicker } from '@/components/chat/toolbar/DesktopBackendModelPicker'
 import { ReviewMethodModal } from '@/components/chat/ReviewMethodModal'
 import {
   resolveCodeReviewConfigs,
@@ -198,6 +205,7 @@ const KEY_TO_OPTION: Record<string, MagicOption> = {
   q: 'check-github-issues',
   c: 'commit',
   p: 'commit-and-push',
+  l: 'commit-in-session',
   h: 'comment-and-close-issue',
   t: 'sync',
   d: 'pull',
@@ -272,6 +280,17 @@ export function MagicModal() {
   // Contexts may be registered under session ID (Load Context) or worktree ID (create_worktree)
   const activeSessionId = useChatStore(state =>
     selectedWorktreeId ? state.activeSessionIds[selectedWorktreeId] : undefined
+  )
+  const sessionBackend = useChatStore(state =>
+    activeSessionId ? state.selectedBackends[activeSessionId] : undefined
+  )
+  const sessionModel = useChatStore(state =>
+    activeSessionId ? state.selectedModels[activeSessionId] : undefined
+  )
+  const { data: investigationSession } = useSession(
+    investigateDialogOpen ? (activeSessionId ?? null) : null,
+    selectedWorktreeId,
+    worktree?.path ?? null
   )
   const { data: issueContexts } = useLoadedIssueContexts(
     activeSessionId ?? selectedWorktreeId,
@@ -360,6 +379,13 @@ export function MagicModal() {
   const project = worktree
     ? projects?.find(p => p.id === worktree.project_id)
     : null
+  const isServerProject = !!project?.server
+  // Magic commands (git, GitHub, review) do not apply to servers (Servers tab).
+  useEffect(() => {
+    if (!magicModalOpen || !isServerProject) return
+    setMagicModalOpen(false)
+    toast.info('Magic commands are not available for servers')
+  }, [isServerProject, magicModalOpen, setMagicModalOpen])
   const opencodeModelOptions = useMemo(() => {
     const models = availableOpencodeModels?.length
       ? availableOpencodeModels
@@ -427,9 +453,9 @@ export function MagicModal() {
     const model =
       preferences?.magic_prompt_models?.[modelKey] ??
       (backend === 'codex'
-        ? (preferences?.selected_codex_model ?? 'gpt-5.6-sol')
+        ? (preferences?.selected_codex_model ?? 'gpt-6.1-sol')
         : backend === 'opencode'
-          ? (preferences?.selected_opencode_model ?? 'opencode/gpt-5.6-sol')
+          ? (preferences?.selected_opencode_model ?? 'opencode/gpt-6.1-sol')
           : backend === 'cursor'
             ? (preferences?.selected_cursor_model ?? 'cursor/auto')
             : backend === 'commandcode'
@@ -463,9 +489,9 @@ export function MagicModal() {
     const model =
       preferences?.magic_prompt_models?.[RESOLVE_CONFLICTS_MODEL_KEY] ??
       (backend === 'codex'
-        ? (preferences?.selected_codex_model ?? 'gpt-5.6-sol')
+        ? (preferences?.selected_codex_model ?? 'gpt-6.1-sol')
         : backend === 'opencode'
-          ? (preferences?.selected_opencode_model ?? 'opencode/gpt-5.6-sol')
+          ? (preferences?.selected_opencode_model ?? 'opencode/gpt-6.1-sol')
           : backend === 'cursor'
             ? (preferences?.selected_cursor_model ?? 'cursor/auto')
             : backend === 'commandcode'
@@ -569,21 +595,6 @@ export function MagicModal() {
     ]
   )
 
-  const customInvestigateModelOptions = useMemo(
-    () => getInvestigateModelOptions(customInvestigateBackend),
-    [customInvestigateBackend, getInvestigateModelOptions]
-  )
-
-  const effectiveCustomInvestigateModel = useMemo(() => {
-    return (
-      customInvestigateModelOptions.find(
-        option => option.value === customInvestigateModel
-      )?.value ??
-      customInvestigateModelOptions[0]?.value ??
-      ''
-    )
-  }, [customInvestigateModel, customInvestigateModelOptions])
-
   const formatBackendLabel = useCallback((backend: CliBackend) => {
     switch (backend) {
       case 'codex':
@@ -619,20 +630,7 @@ export function MagicModal() {
     : ''
   const customSelectionSummary = `${formatBackendLabel(
     customInvestigateBackend
-  )} · ${formatModelLabel(
-    customInvestigateBackend,
-    effectiveCustomInvestigateModel
-  )}`
-
-  const handleCustomInvestigateBackendChange = useCallback(
-    (backend: string) => {
-      const nextBackend = backend as CliBackend
-      setCustomInvestigateBackend(nextBackend)
-      const nextOptions = getInvestigateModelOptions(nextBackend)
-      setCustomInvestigateModel(nextOptions[0]?.value ?? '')
-    },
-    [getInvestigateModelOptions]
-  )
+  )} · ${formatModelLabel(customInvestigateBackend, customInvestigateModel)}`
 
   const getResolveModelOptions = useCallback(
     (backend: CliBackend) => {
@@ -713,7 +711,7 @@ export function MagicModal() {
             type: investigateType,
             override: {
               backend: customInvestigateBackend,
-              model: effectiveCustomInvestigateModel,
+              model: customInvestigateModel,
             },
           }
         : { command: 'investigate', type: investigateType }
@@ -723,7 +721,7 @@ export function MagicModal() {
     investigateType,
     investigateSelectionMode,
     customInvestigateBackend,
-    effectiveCustomInvestigateModel,
+    customInvestigateModel,
   ])
 
   useEffect(() => {
@@ -734,21 +732,33 @@ export function MagicModal() {
   }, [investigateDialogOpen])
 
   useEffect(() => {
-    if (!investigateDefaults) return
-    const nextBackend = installedBackends.includes(investigateDefaults.backend)
-      ? investigateDefaults.backend
+    if (!investigateDefaults || investigateSelectionMode === 'custom') return
+    const currentModel = sessionModel ?? investigationSession?.selected_model
+    const currentBackend =
+      sessionBackend ??
+      getModelImpliedBackend(currentModel) ??
+      investigationSession?.backend
+    const preferredBackend = currentBackend ?? investigateDefaults.backend
+    const nextBackend = installedBackends.includes(preferredBackend)
+      ? preferredBackend
       : (installedBackends[0] ?? 'claude')
-    const nextOptions = getInvestigateModelOptions(nextBackend)
-    const nextModel =
-      nextOptions.find(option => option.value === investigateDefaults.model)
-        ?.value ??
-      nextOptions[0]?.value ??
-      investigateDefaults.model
+    const nextModel = currentBackend
+      ? resolveSelectedModelForBackend(nextBackend, currentModel, preferences)
+      : nextBackend === investigateDefaults.backend
+        ? investigateDefaults.model
+        : (getInvestigateModelOptions(nextBackend)[0]?.value ?? '')
     setCustomInvestigateBackend(nextBackend)
     setCustomInvestigateModel(nextModel)
-  }, [getInvestigateModelOptions, installedBackends, investigateDefaults])
-
-  // Invalid customInvestigateModel is handled by effectiveCustomInvestigateModel
+  }, [
+    getInvestigateModelOptions,
+    installedBackends,
+    investigateDefaults,
+    investigateSelectionMode,
+    investigationSession,
+    sessionBackend,
+    sessionModel,
+    preferences,
+  ])
 
   useEffect(() => {
     if (!resolveDialogOpen) {
@@ -1178,10 +1188,10 @@ export function MagicModal() {
                   RESOLVE_CONFLICTS_MODEL_KEY
                 ] ??
                 (resolvedBackend === 'codex'
-                  ? (preferences?.selected_codex_model ?? 'gpt-5.6-sol')
+                  ? (preferences?.selected_codex_model ?? 'gpt-6.1-sol')
                   : resolvedBackend === 'opencode'
                     ? (preferences?.selected_opencode_model ??
-                      'opencode/gpt-5.6-sol')
+                      'opencode/gpt-6.1-sol')
                     : resolvedBackend === 'cursor'
                       ? (preferences?.selected_cursor_model ?? 'cursor/auto')
                       : (preferences?.selected_model ?? 'sonnet'))
@@ -1357,10 +1367,10 @@ ${resolveInstructions}`
               override?.model ??
               preferences?.magic_prompt_models?.[RESOLVE_CONFLICTS_MODEL_KEY] ??
               (resolvedBackend === 'codex'
-                ? (preferences?.selected_codex_model ?? 'gpt-5.6-sol')
+                ? (preferences?.selected_codex_model ?? 'gpt-6.1-sol')
                 : resolvedBackend === 'opencode'
                   ? (preferences?.selected_opencode_model ??
-                    'opencode/gpt-5.6-sol')
+                    'opencode/gpt-6.1-sol')
                   : resolvedBackend === 'cursor'
                     ? (preferences?.selected_cursor_model ?? 'cursor/auto')
                     : (preferences?.selected_model ?? 'sonnet'))
@@ -2175,6 +2185,7 @@ ${resolveInstructions}`
       isOnCanvas,
       executeGitDirectly,
       hasIssueContexts,
+      hasSentryContexts,
       hasPrContexts,
       hasAdvisoryContexts,
       activeSessionId,
@@ -2267,7 +2278,7 @@ ${resolveInstructions}`
         onClick={() => executeAction(option.id)}
         onMouseEnter={() => setSelectedOption(option.id)}
         className={cn(
-          'flex w-full items-center text-left text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          'group flex w-full items-center text-left text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           mobile
             ? 'min-h-12 gap-2.5 rounded-lg border border-border/70 bg-muted/30 px-3 py-2.5 active:bg-accent'
             : 'justify-between px-4 py-2',
@@ -2280,7 +2291,13 @@ ${resolveInstructions}`
           <span className="leading-tight">{option.label}</span>
         </span>
         {!mobile && (
-          <kbd className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+          <kbd
+            data-web-visible
+            className={cn(
+              'rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground shadow-[0_2px_0_var(--btn-edge)] transition-[translate,box-shadow] duration-[80ms] group-active:translate-y-0.5 group-active:shadow-none',
+              edgeNeutral
+            )}
+          >
             {option.key}
           </kbd>
         )}
@@ -2563,88 +2580,35 @@ ${resolveInstructions}`
                   </Label>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3 pl-7">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs text-muted-foreground">
-                      Backend
-                    </Label>
-                    <Select
-                      value={customInvestigateBackend}
-                      onValueChange={handleCustomInvestigateBackendChange}
-                    >
-                      <SelectTrigger
-                        size="sm"
-                        hideIcon={
-                          installedBackends.filter(backend =>
-                            [
-                              'claude',
-                              'codex',
-                              'opencode',
-                              'grok',
-                              'kimi',
-                              'antigravity',
-                            ].includes(backend)
-                          ).length <= 1
-                        }
-                        onClick={() => setInvestigateSelectionMode('custom')}
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {installedBackends.includes('claude') && (
-                          <SelectItem value="claude">Claude</SelectItem>
-                        )}
-                        {installedBackends.includes('codex') && (
-                          <SelectItem value="codex">Codex</SelectItem>
-                        )}
-                        {installedBackends.includes('opencode') && (
-                          <SelectItem value="opencode">OpenCode</SelectItem>
-                        )}
-                        {installedBackends.includes('grok') && (
-                          <SelectItem value="grok">
-                            <BackendLabel backend="grok" />
-                          </SelectItem>
-                        )}
-                        {installedBackends.includes('kimi') && (
-                          <SelectItem value="kimi">
-                            <BackendLabel backend="kimi" />
-                          </SelectItem>
-                        )}
-                        {installedBackends.includes('antigravity') && (
-                          <SelectItem value="antigravity">
-                            <BackendLabel backend="antigravity" />
-                          </SelectItem>
-                        )}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label className="text-xs text-muted-foreground">
-                      Model
-                    </Label>
-                    <Select
-                      value={effectiveCustomInvestigateModel}
-                      onValueChange={value => {
+                <div
+                  className="pl-7"
+                  onKeyDown={event => {
+                    if (event.key === 'Enter') event.stopPropagation()
+                  }}
+                >
+                  {investigateDialogOpen && (
+                    <DesktopBackendModelPicker
+                      triggerClassName="!flex w-full max-w-full"
+                      selectedBackend={customInvestigateBackend}
+                      selectedModel={customInvestigateModel}
+                      selectedProvider={
+                        customInvestigateBackend === 'claude'
+                          ? investigateClaudeProvider
+                          : null
+                      }
+                      installedBackends={installedBackends}
+                      customCliProfiles={preferences?.custom_cli_profiles ?? []}
+                      onModelChange={model => {
                         setInvestigateSelectionMode('custom')
-                        setCustomInvestigateModel(value)
+                        setCustomInvestigateModel(model)
                       }}
-                    >
-                      <SelectTrigger
-                        size="sm"
-                        hideIcon={customInvestigateModelOptions.length <= 1}
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {customInvestigateModelOptions.map(option => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                      onBackendModelChange={(backend, model) => {
+                        setInvestigateSelectionMode('custom')
+                        setCustomInvestigateBackend(backend)
+                        setCustomInvestigateModel(model)
+                      }}
+                    />
+                  )}
                 </div>
               </div>
             </RadioGroup>

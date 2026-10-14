@@ -154,7 +154,11 @@ export function usePlanApproval({
         )
       }
 
-      setExecutionMode(sessionId, 'build')
+      const permissionMode =
+        useChatStore.getState().permissionModes[sessionId] ??
+        card.session.selected_permission_mode ??
+        'build'
+      setExecutionMode(sessionId, permissionMode)
       clearToolCalls(sessionId)
       clearStreamingContentBlocks(sessionId)
       setSessionReviewing(sessionId, false)
@@ -253,14 +257,14 @@ export function usePlanApproval({
             sessionId,
             waitingForInput: false,
             waitingForInputType: null,
-            selectedExecutionMode: 'build',
+            selectedExecutionMode: permissionMode,
           })
         )
         .then(() => {
           invoke('broadcast_session_setting', {
             sessionId,
             key: 'executionMode',
-            value: 'build',
+            value: permissionMode,
           }).catch(err => {
             console.error(
               '[usePlanApproval] Broadcast executionMode=build failed:',
@@ -286,7 +290,7 @@ export function usePlanApproval({
           setError(sessionId, null)
           addSendingSession(sessionId)
           setSelectedModel(sessionId, model)
-          setExecutingMode(sessionId, 'build')
+          setExecutingMode(sessionId, permissionMode)
 
           sendMessage.mutate({
             sessionId,
@@ -294,7 +298,7 @@ export function usePlanApproval({
             worktreePath,
             message,
             model,
-            executionMode: 'build',
+            executionMode: permissionMode,
             thinkingLevel,
             effortLevel,
             backend: sessionBackend,
@@ -433,13 +437,13 @@ export function usePlanApproval({
         : undefined
       const baseMsgYolo = isCodexYolo
         ? 'Execute the plan you created. Implement all changes described.'
-        : 'Plan approved (yolo mode). Begin implementing all changes immediately without asking for confirmation. Do not re-explain the plan — start writing code.'
+        : 'Plan approved (Full access mode). Begin implementing all changes immediately without asking for confirmation. Do not re-explain the plan — start writing code.'
       const rawMessage = messageId
         ? formatApprovalMessage(baseMsgYolo, updatedPlan, originalPlan)
         : `I've updated the plan. Please review and execute:\n\n<updated-plan>\n${updatedPlan}\n</updated-plan>`
       const yoloInfo = [sessionBackend, model].filter(Boolean).join(' / ')
       const message = yoloInfo
-        ? `[Yolo: ${yoloInfo}]\n${rawMessage}`
+        ? `[Full access: ${yoloInfo}]\n${rawMessage}`
         : rawMessage
 
       // Chain: mark_plan_approved → update_session_state → broadcast → sendMessage

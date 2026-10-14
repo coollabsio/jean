@@ -1,4 +1,5 @@
 import {
+  memo,
   useMemo,
   useCallback,
   useRef,
@@ -117,6 +118,11 @@ const AddProjectDialog = lazy(() =>
     default: mod.AddProjectDialog,
   }))
 )
+const GlobalServerDialog = lazy(() =>
+  import('@/components/projects/servers/ServerDialog').then(mod => ({
+    default: mod.GlobalServerDialog,
+  }))
+)
 const GitInitModal = lazy(() =>
   import('@/components/projects/GitInitModal').then(mod => ({
     default: mod.GitInitModal,
@@ -152,11 +158,6 @@ const ResolveConflictsDialog = lazy(() =>
     default: mod.ResolveConflictsDialog,
   }))
 )
-const GitHubDashboardModal = lazy(() =>
-  import('@/components/github-dashboard').then(mod => ({
-    default: mod.GitHubDashboardModal,
-  }))
-)
 const NewSessionModeModal = lazy(() =>
   import('@/components/chat/NewSessionModeModal').then(mod => ({
     default: mod.NewSessionModeModal,
@@ -169,6 +170,8 @@ const CloseWorktreeDialog = lazy(() =>
 )
 import { Toaster } from '@/components/ui/sonner'
 import { MobileLeftSidebar } from './MobileLeftSidebar'
+import { SidebarTabRail } from '@/components/projects/SidebarTabRail'
+import { useShowAgents } from '@/components/agents/agents-feature'
 import { BrowserSidePane } from '@/components/browser/BrowserSidePane'
 import { BrowserPanel } from '@/components/browser/BrowserPanel'
 import { useBrowserEvents } from '@/hooks/useBrowserPane'
@@ -214,14 +217,33 @@ const MAX_FILE_BROWSER_WIDTH = 520
 function useRetainedMount(active: boolean) {
   const [shouldMount, setShouldMount] = useState(active)
 
-  useEffect(() => {
-    if (active) {
-      setShouldMount(true)
-    }
-  }, [active])
+  // Latch during render so the dialog mounts in the same commit it opens.
+  if (active && !shouldMount) {
+    setShouldMount(true)
+  }
 
-  return shouldMount
+  return shouldMount || active
 }
+
+/**
+ * Runs UI-state persistence in a null-rendering leaf so debounced save
+ * mutations and UI-state query updates don't re-render the whole MainWindow
+ * tree. Only the one-time `isInitialized` flip is reported to the parent.
+ */
+const UIStatePersistence = memo(function UIStatePersistence({
+  onInitializedChange,
+}: {
+  onInitializedChange: (isInitialized: boolean) => void
+}) {
+  const { isInitialized } = useUIStatePersistence()
+  useClientViewStatePersistence(isInitialized)
+
+  useEffect(() => {
+    onInitializedChange(isInitialized)
+  }, [isInitialized, onInitializedChange])
+
+  return null
+})
 
 export function MainWindow() {
   useTerminalThemeSync()
@@ -262,13 +284,15 @@ export function MainWindow() {
   const cliUpdateModalOpen = useUIStore(state => state.cliUpdateModalOpen)
   const cliLoginModalOpen = useUIStore(state => state.cliLoginModalOpen)
   const updateModalVersion = useUIStore(state => state.updateModalVersion)
-  const githubDashboardOpen = useUIStore(state => state.githubDashboardOpen)
   const newSessionModeTarget = useUIStore(state => state.newSessionModeTarget)
   const sessionChatModalOpen = useUIStore(state => state.sessionChatModalOpen)
   const modalSidebarSwipe = useUIStore(state => state.leftSidebarSwipe)
   const selectedWorktreeId = useProjectsStore(state => state.selectedWorktreeId)
   const addProjectDialogOpen = useProjectsStore(
     state => state.addProjectDialogOpen
+  )
+  const serverDialogOpen = useProjectsStore(
+    state => state.serverDialog !== null
   )
   const projectSettingsDialogOpen = useProjectsStore(
     state => state.projectSettingsDialogOpen
@@ -289,6 +313,23 @@ export function MainWindow() {
     }, []),
     enabled: canSwipeOpenSidebar,
   })
+  // Stable prop so memoized MainWindowContent only re-renders on swipe changes
+  const sidebarSwipeIndicator = useMemo(
+    () =>
+      canSwipeOpenSidebar
+        ? {
+            isSwiping: swipeOpenSidebar.isSwiping,
+            translateX: swipeOpenSidebar.translateX,
+            progress: swipeOpenSidebar.progress,
+          }
+        : undefined,
+    [
+      canSwipeOpenSidebar,
+      swipeOpenSidebar.isSwiping,
+      swipeOpenSidebar.translateX,
+      swipeOpenSidebar.progress,
+    ]
+  )
   const swipeDown = useSwipeDown({
     onSwipeDown: useCallback(() => {
       useUIStore.getState().setCommandPaletteOpen(true)
@@ -303,16 +344,20 @@ export function MainWindow() {
     ? projects?.find(p => p.id === worktree.project_id)
     : null
 
+  const showAgents = useShowAgents()
+
   // Compute window title based on selected project/worktree
   // On mobile, show only the project name to fit the compact title bar.
   const windowTitle = useMemo(() => {
+    // Agents page is not a project page
+    if (showAgents) return 'Agents'
     if (!project || !worktree) return 'Jean'
     if (isMobile) return project.name
     const branchSuffix =
       worktree.branch !== worktree.name ? ` (${worktree.branch})` : ''
 
     return `${project.name} › ${worktree.name}${branchSuffix}`
-  }, [project, worktree, isMobile])
+  }, [project, worktree, isMobile, showAgents])
 
   // Compute polling info - null if no worktree or data not loaded.
   // Must use the worktree's own base_branch (e.g. v4.x), not the project
@@ -332,8 +377,8 @@ export function MainWindow() {
   useWorktreePolling(pollingInfo)
 
   // Persist UI state (last opened worktree, expanded projects)
-  const { isInitialized } = useUIStatePersistence()
-  useClientViewStatePersistence(isInitialized)
+  // Set by <UIStatePersistence /> once persisted UI state has been restored
+  const [isInitialized, setIsInitialized] = useState(false)
 
   // Persist session-specific state (answered questions, fixed findings, etc.)
   useSessionStatePersistence()
@@ -503,11 +548,11 @@ export function MainWindow() {
   const shouldRenderReleaseNotesDialog = useRetainedMount(releaseNotesModalOpen)
   const shouldRenderNewWorktreeModal = useRetainedMount(newWorktreeModalOpen)
   const shouldRenderAddProjectDialog = useRetainedMount(addProjectDialogOpen)
+  const shouldRenderServerDialog = useRetainedMount(serverDialogOpen)
   const shouldRenderGitInitModal = useRetainedMount(gitInitModalOpen)
   const shouldRenderCloneProjectModal = useRetainedMount(cloneModalOpen)
   const shouldRenderArchivedModal = useRetainedMount(archivedModalOpen)
   const shouldRenderCloseWorktreeDialog = useRetainedMount(closeConfirmOpen)
-  const shouldRenderGitHubDashboardModal = useRetainedMount(githubDashboardOpen)
   const shouldRenderNewSessionModeModal = useRetainedMount(
     newSessionModeTarget !== null
   )
@@ -526,6 +571,7 @@ export function MainWindow() {
         roundedClass
       )}
     >
+      <UIStatePersistence onInitializedChange={setIsInitialized} />
       {isNativeApp() && isLinux && <WindowResizeHandles />}
 
       {/* Touch swipe-down pull indicator */}
@@ -546,11 +592,12 @@ export function MainWindow() {
       )}
 
       {/* Title Bar - semi-transparent overlay */}
-      {/* Native desktop: the worktree header already shows project/worktree
-          details, so the title bar shows only the server badge. */}
+      {/* Desktop (native + web): the worktree header already shows
+          project/worktree details, and a window-centered title overlaps the
+          left sidebar. Web keeps the title in the browser tab (document.title). */}
       <TitleBar
         title={windowTitle}
-        hideTitle={isNativeApp() && !isMobile}
+        hideTitle={!isMobile}
         className="absolute top-0 left-0 right-0"
       />
 
@@ -559,6 +606,25 @@ export function MainWindow() {
 
       {/* Main Content Area */}
       <div className="flex flex-1 overflow-hidden">
+        {/* Desktop: always-visible vertical tab rail for the left sidebar */}
+        {!isMobile && isInitialized && (
+          // Border starts below the title bar so it never crosses its buttons
+          // Collapsed: blend with the main window. Expanded: match the sidebar.
+          <div
+            className={cn(
+              'h-full shrink-0 pt-8',
+              leftSidebarVisible
+                ? 'bg-sidebar dark:bg-[#0b0b0b]'
+                : 'bg-background'
+            )}
+          >
+            <SidebarTabRail
+              togglesSidebar
+              className="h-full border-r border-border/40"
+            />
+          </div>
+        )}
+
         {/* Desktop: in-flow left sidebar (shifts layout). Only after UI state init. */}
         {!isMobile && leftSidebarVisible && isInitialized && (
           <SidebarWidthProvider value={leftSidebarSize}>
@@ -629,15 +695,7 @@ export function MainWindow() {
               sidebarSwipeContainerRef={
                 canSwipeOpenSidebar ? swipeOpenSidebar.containerRef : undefined
               }
-              sidebarSwipeIndicator={
-                canSwipeOpenSidebar
-                  ? {
-                      isSwiping: swipeOpenSidebar.isSwiping,
-                      translateX: swipeOpenSidebar.translateX,
-                      progress: swipeOpenSidebar.progress,
-                    }
-                  : undefined
-              }
+              sidebarSwipeIndicator={sidebarSwipeIndicator}
             />
           </div>
           {/* Browser bottom panel - native-only, pinned to bottom */}
@@ -798,6 +856,11 @@ export function MainWindow() {
           <AddProjectDialog />
         </Suspense>
       )}
+      {shouldRenderServerDialog && (
+        <Suspense fallback={null}>
+          <GlobalServerDialog />
+        </Suspense>
+      )}
       {shouldRenderGitInitModal && (
         <Suspense fallback={null}>
           <GitInitModal />
@@ -825,11 +888,6 @@ export function MainWindow() {
             branchName={closeConfirmBranch}
             mode={closeConfirmMode}
           />
-        </Suspense>
-      )}
-      {shouldRenderGitHubDashboardModal && (
-        <Suspense fallback={null}>
-          <GitHubDashboardModal />
         </Suspense>
       )}
       <BranchConflictDialog />

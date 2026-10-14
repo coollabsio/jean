@@ -194,18 +194,18 @@ export function useAllBackendsMcpHealth(
 
   const statuses = useMemo(() => {
     const merged: Record<string, McpHealthStatus> = {}
-    const entries: [CliBackend, typeof claude][] = [
-      ['claude', claude],
-      ['codex', codex],
-      ['opencode', opencode],
-      ['cursor', cursor],
-      ['grok', grok],
-      ['kimi', kimi],
-      ['antigravity', antigravity],
+    const entries: [CliBackend, typeof claude.data][] = [
+      ['claude', claude.data],
+      ['codex', codex.data],
+      ['opencode', opencode.data],
+      ['cursor', cursor.data],
+      ['grok', grok.data],
+      ['kimi', kimi.data],
+      ['antigravity', antigravity.data],
     ]
-    for (const [backend, query] of entries) {
-      if (has.has(backend) && query.data?.statuses) {
-        for (const [name, status] of Object.entries(query.data.statuses)) {
+    for (const [backend, data] of entries) {
+      if (has.has(backend) && data?.statuses) {
+        for (const [name, status] of Object.entries(data.statuses)) {
           merged[mcpKey(backend, name)] = status
         }
       }

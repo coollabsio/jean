@@ -181,6 +181,7 @@ const TerminalTabContent = memo(function TerminalTabContent({
       </div>
       {showExtraKeys && isActive && (
         <TerminalExtraKeysBar
+          key={terminal.id}
           terminalId={terminal.id}
           keyboardOpen={keyboardInset > 0}
         />

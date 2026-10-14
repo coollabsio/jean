@@ -18,6 +18,7 @@ import {
   type CodexMcpElicitationRequest,
   type CodexDynamicToolCallRequest,
 } from '@/types/chat'
+import type { StoredReviewResults } from '@/types/projects'
 import {
   buildNativeResumeArgs,
   getNativeTerminalResumeLaunch,
@@ -28,7 +29,10 @@ import {
   preferResolvedCliCommand,
 } from '@/services/cli-binary'
 import { findPlanFilePath, resolvePlanContent } from './tool-call-utils'
-import { shouldShowPermissionApproval } from './permission-approval-utils'
+import {
+  isLivePermissionRequest,
+  shouldShowPermissionApproval,
+} from './permission-approval-utils'
 
 /**
  * Lossless session status for canvas/sidebar/tabs/summaries.
@@ -63,13 +67,6 @@ export type SessionStatus =
  * the override.
  */
 export type ManualSessionStatus = 'idle' | 'review' | 'completed' | 'cancelled'
-
-export const MANUAL_SESSION_STATUSES: readonly ManualSessionStatus[] = [
-  'idle',
-  'review',
-  'completed',
-  'cancelled',
-] as const
 
 export function isManualSessionStatus(
   value: string | null | undefined
@@ -145,9 +142,6 @@ export interface SessionCardProps {
   onWorktreeBuildApprove?: () => void
   onWorktreeYoloApprove?: () => void
   onToggleLabel?: () => void
-  /** @deprecated Prefer onSetStatusOverride for full manual status control. */
-  onToggleReview?: () => void
-  onSetStatusOverride?: (status: ManualSessionStatus | null) => void
   onReconnect?: () => void
   onRename?: (sessionId: string, newName: string) => void
   isRenaming?: boolean
@@ -179,7 +173,7 @@ export const statusConfig: Record<
     indicatorStatus: 'running',
   },
   yoloing: {
-    label: 'Yoloing',
+    label: 'Full access',
     indicatorStatus: 'running',
   },
   reviewing: {
@@ -360,6 +354,15 @@ export function getEffectiveSessionWaiting(
     storeState.reviewingSessions[session.id] || !!session.review_results
   if (isInReviewState) return false
   return storeState.waitingForInputSessionIds[session.id] ?? false
+}
+
+/** Review jobs store a `running` entry in `review_results` until they finish. */
+function hasRunningReviewEntry(results: StoredReviewResults | undefined) {
+  return (
+    !!results &&
+    'reviews' in results &&
+    results.reviews.some(entry => entry.status === 'running')
+  )
 }
 
 /** Backend-created Code Review tabs have no chat transcript (background job). */
@@ -635,6 +638,7 @@ export function computeSessionCardData(
     isSending: sessionSending,
     executionMode,
     isCodexBackend: session.backend === 'codex',
+    hasLiveRequest: sessionDenials.some(isLivePermissionRequest),
   })
 
   // Determine status — lossless priority matrix (actionable first, then active,
@@ -668,14 +672,19 @@ export function computeSessionCardData(
     status = 'waiting'
   } else if (sessionSending && executionMode === 'plan') {
     status = 'planning'
-  } else if (sessionSending && executionMode === 'build') {
+  } else if (
+    sessionSending &&
+    (executionMode === 'build' ||
+      executionMode === 'supervised' ||
+      executionMode === 'auto')
+  ) {
     status = 'vibing'
   } else if (sessionSending && executionMode === 'yolo') {
     status = 'yoloing'
   } else if (
-    session.name.startsWith('Code Review') &&
     session.is_reviewing &&
-    !session.review_results
+    (hasRunningReviewEntry(session.review_results) ||
+      (session.name.startsWith('Code Review') && !session.review_results))
   ) {
     status = 'reviewing'
   } else if (
@@ -693,7 +702,8 @@ export function computeSessionCardData(
     // Show actual execution mode from persisted run data
     const mode = session.last_run_execution_mode ?? 'plan'
     if (mode === 'plan') status = 'planning'
-    else if (mode === 'build') status = 'vibing'
+    else if (mode === 'build' || mode === 'supervised' || mode === 'auto')
+      status = 'vibing'
     else if (mode === 'yolo') status = 'yoloing'
   } else if (!sessionSending && hasScheduledWakeup) {
     status = 'scheduled'
