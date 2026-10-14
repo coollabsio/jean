@@ -4,6 +4,7 @@ import { render, screen } from '@/test/test-utils'
 import { ProjectsSidebar } from './ProjectsSidebar'
 import { useUIStore } from '@/store/ui-store'
 import { useProjectsStore } from '@/store/projects-store'
+import type * as EnvironmentModule from '@/lib/environment'
 
 const mocks = vi.hoisted(() => ({
   createFolder: vi.fn(),
@@ -26,7 +27,10 @@ vi.mock('@/components/layout/SidebarWidthContext', () => ({
 vi.mock('@/lib/server-connections', () => ({
   useServerConnectionSnapshots: () => new Map(),
 }))
-vi.mock('@/lib/environment', () => ({ isNativeApp: () => false }))
+vi.mock('@/lib/environment', async importOriginal => ({
+  ...(await importOriginal<typeof EnvironmentModule>()),
+  isNativeApp: () => false,
+}))
 vi.mock('./ProjectTree', () => ({ ProjectTree: () => null }))
 vi.mock('./RecentWorktreesList', () => ({ RecentWorktreesList: () => null }))
 

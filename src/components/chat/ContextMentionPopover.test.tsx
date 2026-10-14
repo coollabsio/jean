@@ -6,6 +6,7 @@ import { ContextMentionPopover } from './ContextMentionPopover'
 import type { ContextMentionItem } from './hooks/useContextMentionData'
 import type { GitHubIssue } from '@/types/github'
 import type * as EnvironmentModule from '@/lib/environment'
+import type * as ContextLinkUsageModule from '@/hooks/useContextLinkUsage'
 
 const useContextMentionDataMock = vi.hoisted(() => vi.fn())
 const platform = vi.hoisted(() => ({ native: false, mobile: false }))
@@ -40,7 +41,7 @@ const linkUsage = vi.hoisted(() => ({
 }))
 
 vi.mock('@/hooks/useContextLinkUsage', async importOriginal => ({
-  ...(await importOriginal<typeof import('@/hooks/useContextLinkUsage')>()),
+  ...(await importOriginal<typeof ContextLinkUsageModule>()),
   useContextLinkUsage: () => ({ getMatches: linkUsage.getMatches }),
   openContextLinkMatch: linkUsage.open,
 }))

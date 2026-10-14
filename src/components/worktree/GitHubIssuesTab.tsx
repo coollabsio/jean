@@ -212,7 +212,7 @@ export function GitHubIssuesTab({
         )}
 
         {!isLoading && !error && issues.length > 0 && (
-          <div className="py-1">
+          <div>
             {issues.map((issue, index) => (
               <IssueItem
                 key={issue.number}

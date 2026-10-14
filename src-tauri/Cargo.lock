@@ -2527,7 +2527,7 @@ dependencies = [
 
 [[package]]
 name = "jean"
-version = "1.0.10"
+version = "1.0.11"
 dependencies = [
  "arboard",
  "base64 0.22.1",
@@ -2561,7 +2561,7 @@ dependencies = [
 
 [[package]]
 name = "jean-core"
-version = "1.0.10"
+version = "1.0.11"
 dependencies = [
  "axum",
  "base64 0.22.1",

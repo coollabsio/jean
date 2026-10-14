@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // Renders src-tauri/dmg/source/background.html to src-tauri/dmg/background.png.
 // Finder shows DMG backgrounds at 1 image pixel per point, so render at 1x.
+// The page.evaluate callback runs in the browser, not in Node.js.
+/* global document: readonly */
 import { chromium } from 'playwright'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import path from 'node:path'

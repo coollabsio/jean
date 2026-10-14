@@ -760,7 +760,7 @@ pub fn build_thread_start_params(
     model: Option<&str>,
     execution_mode: Option<&str>,
     search_enabled: bool,
-    base_instructions_content: Option<&str>,
+    developer_instructions_content: Option<&str>,
     model_verbosity: Option<&str>,
     codex_provider: Option<&crate::CodexProviderProfile>,
 ) -> serde_json::Value {
@@ -833,10 +833,11 @@ pub fn build_thread_start_params(
         }
     }
 
-    // Base instructions (system-level context: issues, PRs, custom prompts)
-    if let Some(content) = base_instructions_content {
+    // Jean context (global prompt, issues, PRs, custom prompts) is additive
+    // developer guidance. `baseInstructions` would replace Codex's own prompt.
+    if let Some(content) = developer_instructions_content {
         if !content.is_empty() {
-            params["baseInstructions"] = serde_json::json!(content);
+            params["developerInstructions"] = serde_json::json!(content);
         }
     }
 
@@ -1069,7 +1070,7 @@ pub fn execute_codex_via_server(
     search_enabled: bool,
     add_dirs: &[String],
     prompt: &str,
-    base_instructions_content: Option<&str>,
+    developer_instructions_content: Option<&str>,
     codex_provider: Option<&crate::CodexProviderProfile>,
 ) -> Result<CodexResponse, String> {
     use super::codex_server;
@@ -1110,7 +1111,7 @@ pub fn execute_codex_via_server(
                 model,
                 execution_mode,
                 search_enabled,
-                base_instructions_content,
+                developer_instructions_content,
                 Some(model_verbosity),
                 codex_provider,
             );
@@ -1126,7 +1127,7 @@ pub fn execute_codex_via_server(
                 "sandbox",
                 "config",
                 "serviceTier",
-                "baseInstructions",
+                "developerInstructions",
             ] {
                 if let Some(v) = resume_params.get(key) {
                     full_params[key] = v.clone();
@@ -1142,7 +1143,7 @@ pub fn execute_codex_via_server(
                         model,
                         execution_mode,
                         search_enabled,
-                        base_instructions_content,
+                        developer_instructions_content,
                         Some(model_verbosity),
                         codex_provider,
                     )
@@ -1155,7 +1156,7 @@ pub fn execute_codex_via_server(
                 model,
                 execution_mode,
                 search_enabled,
-                base_instructions_content,
+                developer_instructions_content,
                 Some(model_verbosity),
                 codex_provider,
             )
@@ -1865,7 +1866,7 @@ fn start_new_thread(
     model: Option<&str>,
     execution_mode: Option<&str>,
     search_enabled: bool,
-    base_instructions_content: Option<&str>,
+    developer_instructions_content: Option<&str>,
     model_verbosity: Option<&str>,
     codex_provider: Option<&crate::CodexProviderProfile>,
 ) -> Result<String, String> {
@@ -1876,7 +1877,7 @@ fn start_new_thread(
         model,
         execution_mode,
         search_enabled,
-        base_instructions_content,
+        developer_instructions_content,
         model_verbosity,
         codex_provider,
     );
@@ -5918,6 +5919,38 @@ mod tests {
         );
         assert_eq!(params["model"], "gpt-5.4");
         assert_eq!(params["serviceTier"], "fast");
+    }
+
+    #[test]
+    fn jean_context_goes_to_developer_instructions_not_base_instructions() {
+        let params = build_thread_start_params(
+            std::path::Path::new("/tmp"),
+            Some("gpt-5.5"),
+            Some("plan"),
+            false,
+            Some("Jean global system prompt"),
+            None,
+            None,
+        );
+
+        assert_eq!(params["developerInstructions"], "Jean global system prompt");
+        assert!(params.get("baseInstructions").is_none());
+    }
+
+    #[test]
+    fn empty_developer_instructions_are_omitted() {
+        let params = build_thread_start_params(
+            std::path::Path::new("/tmp"),
+            Some("gpt-5.5"),
+            Some("plan"),
+            false,
+            Some(""),
+            None,
+            None,
+        );
+
+        assert!(params.get("developerInstructions").is_none());
+        assert!(params.get("baseInstructions").is_none());
     }
 
     #[test]
