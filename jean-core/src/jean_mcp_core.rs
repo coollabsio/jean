@@ -938,6 +938,9 @@ async fn run_tool(
                     .await
                     .map_err(ToolError::internal)?;
                 }
+                // Default empty sessions can exist only in the index. Persist
+                // their metadata before returning an ID to MCP clients.
+                resolve_session_worktree(app, &session_id)?;
                 return dispatch_command(
                     app,
                     "get_session",
@@ -1171,6 +1174,7 @@ async fn run_tool(
         }
         "get_session_status" => {
             let session_id = require_str(&args, "sessionId")?;
+            resolve_session_worktree(app, &session_id)?;
             dispatch_command(
                 app,
                 "get_session_status",
@@ -2939,7 +2943,7 @@ fn resolve_session_worktree(
     app: &AppHandle,
     session_id: &str,
 ) -> Result<(String, String), ToolError> {
-    let metadata = crate::chat::storage::load_metadata(app, session_id)
+    let metadata = crate::chat::storage::load_mcp_session_metadata(app, session_id)
         .map_err(|e| ToolError::internal(format!("load_metadata: {e}")))?
         .ok_or_else(|| ToolError::invalid_params(format!("Unknown sessionId: {session_id}")))?;
     let worktree_path = resolve_worktree_path(app, &metadata.worktree_id)?;
@@ -3065,6 +3069,171 @@ pub fn jsonrpc_error(id: Option<Value>, code: i32, message: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn session_lookup_app() -> (tempfile::TempDir, AppHandle) {
+        let temp = tempfile::tempdir().unwrap();
+        let app = AppHandle::new(temp.path().to_path_buf(), temp.path().to_path_buf()).unwrap();
+        let worktree = serde_json::from_value(json!({
+            "id": "current-base", "project_id": "project", "name": "base",
+            "path": temp.path().to_string_lossy(), "branch": "main",
+            "created_at": 1, "session_type": "base"
+        }))
+        .unwrap();
+        crate::projects::storage::save_projects_data(
+            &app,
+            &crate::projects::types::ProjectsData {
+                projects: vec![],
+                worktrees: vec![worktree],
+            },
+        )
+        .unwrap();
+        (temp, app)
+    }
+
+    #[tokio::test]
+    async fn mcp_create_session_can_send_and_read_immediately() {
+        for force_new in [false, true] {
+            let (_temp, app) = session_lookup_app();
+            if force_new {
+                crate::chat::storage::save_empty_index(&app, "current-base").unwrap();
+            }
+            let created = run_tool(
+                &app,
+                "create_session",
+                json!({ "worktreeId": "current-base" }),
+                "test",
+            )
+            .await
+            .unwrap();
+            let session_id = created["id"].as_str().unwrap();
+            assert!(crate::chat::storage::load_metadata(&app, session_id)
+                .unwrap()
+                .is_some());
+            let args = json!({ "sessionId": session_id, "message": "hello world" });
+            let status = run_tool(&app, "get_session_status", args.clone(), "test")
+                .await
+                .unwrap();
+            assert_eq!(status["worktreeId"], "current-base");
+            assert_eq!(status["status"], "idle");
+            let messages = run_tool(&app, "read_session_messages", args.clone(), "test")
+                .await
+                .unwrap();
+            assert_eq!(messages["id"], session_id);
+            let sent = run_tool(&app, "send_chat_message", args, "test")
+                .await
+                .unwrap();
+            assert_eq!(
+                sent,
+                json!({ "sessionId": session_id, "status": "started" })
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn mcp_repairs_stale_base_session_owner_without_losing_metadata() {
+        let (_temp, app) = session_lookup_app();
+        let index = crate::chat::storage::load_index(&app, "current-base").unwrap();
+        let session_id = &index.sessions[0].id;
+        let mut metadata = crate::chat::types::SessionMetadata::new(
+            session_id.clone(),
+            "deleted-base".to_string(),
+            "Saved session".to_string(),
+            0,
+        );
+        metadata.codex_thread_id = Some("resume-thread".to_string());
+        metadata.archived_at = Some(123);
+        crate::chat::storage::save_metadata(&app, &metadata).unwrap();
+
+        assert_eq!(
+            resolve_session_worktree(&app, session_id).unwrap().0,
+            "current-base"
+        );
+        let repaired = crate::chat::storage::load_metadata(&app, session_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(repaired.worktree_id, "current-base");
+        assert_eq!(repaired.codex_thread_id, metadata.codex_thread_id);
+        assert_eq!(repaired.archived_at, Some(123));
+        let error = run_tool(
+            &app,
+            "send_chat_message",
+            json!({ "sessionId": session_id, "message": "hello" }),
+            "test",
+        )
+        .await
+        .unwrap_err();
+        assert!(error.message.to_lowercase().contains("archived"));
+
+        crate::chat::storage::with_existing_metadata_mut(&app, session_id, |metadata| {
+            metadata.archived_at = None;
+            metadata.worktree_id = "deleted-base".to_string();
+        })
+        .unwrap();
+        let sent = run_tool(
+            &app,
+            "send_chat_message",
+            json!({ "sessionId": session_id, "message": "hello" }),
+            "test",
+        )
+        .await
+        .unwrap();
+        assert_eq!(sent["status"], "started");
+    }
+
+    #[test]
+    fn mcp_index_only_archived_session_stays_archived_and_unknown_ids_stay_unknown() {
+        let (_temp, app) = session_lookup_app();
+        let session_id = crate::chat::storage::with_index_mut(&app, "current-base", |index| {
+            index.sessions[0].archived_at = Some(123);
+            Ok(index.sessions[0].id.clone())
+        })
+        .unwrap();
+        let (worktree_id, _) = resolve_session_worktree(&app, &session_id).unwrap();
+        assert!(ensure_mcp_session_can_run(&app, &session_id, &worktree_id).is_err());
+        assert!(resolve_session_worktree(&app, "unknown-session").is_err());
+    }
+
+    #[tokio::test]
+    async fn mcp_create_session_can_send_as_the_next_call() {
+        let (_temp, app) = session_lookup_app();
+        let created = run_tool(
+            &app,
+            "create_session",
+            json!({ "worktreeId": "current-base" }),
+            "test",
+        )
+        .await
+        .unwrap();
+        let session_id = created["id"].as_str().unwrap();
+        let sent = run_tool(
+            &app,
+            "send_chat_message",
+            json!({ "sessionId": session_id, "message": "hello world" }),
+            "test",
+        )
+        .await
+        .unwrap();
+        assert_eq!(sent["status"], "started");
+        assert_eq!(sent["sessionId"], session_id);
+    }
+
+    #[test]
+    fn mcp_session_recovery_does_not_bypass_worktree_archive_or_reopen_closed_base() {
+        let (_temp, app) = session_lookup_app();
+        let index = crate::chat::storage::load_index(&app, "current-base").unwrap();
+        let session_id = &index.sessions[0].id;
+        let mut projects = crate::projects::storage::load_projects_data(&app).unwrap();
+        projects.worktrees[0].archived_at = Some(123);
+        crate::projects::storage::save_projects_data(&app, &projects).unwrap();
+        let (worktree_id, _) = resolve_session_worktree(&app, session_id).unwrap();
+        assert!(ensure_mcp_session_can_run(&app, session_id, &worktree_id).is_err());
+        assert!(ensure_mcp_worktree_not_archived(&app, &worktree_id).is_err());
+
+        crate::chat::storage::preserve_base_sessions(&app, "current-base", "project").unwrap();
+        projects.worktrees.clear();
+        crate::projects::storage::save_projects_data(&app, &projects).unwrap();
+        assert!(resolve_session_worktree(&app, session_id).is_err());
+    }
 
     #[test]
     fn background_run_is_added_to_persisted_worktree_ui_state() {

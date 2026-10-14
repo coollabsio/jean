@@ -310,6 +310,55 @@ pub fn load_metadata(app: &AppHandle, session_id: &str) -> Result<Option<Session
     load_metadata_internal(app, session_id)
 }
 
+/// Resolve MCP sessions against existing worktrees, including index-only empty
+/// sessions and metadata left behind when a base worktree is reopened.
+pub fn load_mcp_session_metadata(
+    app: &AppHandle,
+    session_id: &str,
+) -> Result<Option<SessionMetadata>, String> {
+    let metadata = load_metadata(app, session_id)?;
+    let projects = crate::projects::storage::load_projects_data(app)?;
+    if metadata
+        .as_ref()
+        .is_some_and(|metadata| projects.find_worktree(&metadata.worktree_id).is_some())
+    {
+        return Ok(metadata);
+    }
+
+    // Only inspect indexes owned by actual worktrees. Preserved indexes for
+    // closed base worktrees must not make those sessions runnable.
+    for worktree in &projects.worktrees {
+        let index_lock = get_index_lock(&worktree.id);
+        let _index_guard = index_lock.lock().unwrap();
+        if !get_index_path(app, &worktree.id)?.exists() {
+            continue;
+        }
+        let index = load_index_internal(app, &worktree.id)?;
+        let Some(entry) = index.sessions.iter().find(|entry| entry.id == session_id) else {
+            continue;
+        };
+
+        let metadata_lock = get_metadata_lock(session_id);
+        let _metadata_guard = metadata_lock.lock().unwrap();
+        let mut metadata = load_metadata_internal(app, session_id)?.unwrap_or_else(|| {
+            let mut metadata = SessionMetadata::new(
+                entry.id.clone(),
+                worktree.id.clone(),
+                entry.name.clone(),
+                entry.order,
+            );
+            metadata.backend = super::commands::resolve_default_backend(app, Some(&worktree.id));
+            metadata.archived_at = entry.archived_at;
+            metadata
+        });
+        metadata.worktree_id = worktree.id.clone();
+        save_metadata_internal(app, &metadata)?;
+        return Ok(Some(metadata));
+    }
+
+    Ok(metadata)
+}
+
 /// Save session metadata (with locking for thread safety)
 pub fn save_metadata(app: &AppHandle, metadata: &SessionMetadata) -> Result<(), String> {
     {
@@ -1139,6 +1188,16 @@ pub fn restore_base_sessions(
     // Save to the new location
     save_index_internal(app, &index)?;
 
+    // Session metadata must follow the index when a base worktree is reopened.
+    for entry in &index.sessions {
+        let metadata_lock = get_metadata_lock(&entry.id);
+        let _metadata_guard = metadata_lock.lock().unwrap();
+        if let Some(mut metadata) = load_metadata_internal(app, &entry.id)? {
+            metadata.worktree_id = new_worktree_id.to_string();
+            save_metadata_internal(app, &metadata)?;
+        }
+    }
+
     // Delete the preserved file
     fs::remove_file(&preserved_path).map_err(|e| {
         log::warn!("Failed to delete preserved index file: {e}");
@@ -1246,6 +1305,31 @@ pub fn save_saved_contexts_metadata(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn restoring_base_sessions_updates_metadata_owner() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = AppHandle::new(temp.path().to_path_buf(), temp.path().to_path_buf()).unwrap();
+        let index = load_index(&app, "old-base").unwrap();
+        let entry = &index.sessions[0];
+        let mut metadata = SessionMetadata::new(
+            entry.id.clone(),
+            "old-base".to_string(),
+            entry.name.clone(),
+            entry.order,
+        );
+        metadata.codex_thread_id = Some("resume-thread".to_string());
+        save_metadata(&app, &metadata).unwrap();
+        preserve_base_sessions(&app, "old-base", "project").unwrap();
+
+        let restored = restore_base_sessions(&app, "project", "new-base")
+            .unwrap()
+            .unwrap();
+        let metadata = load_metadata(&app, &entry.id).unwrap().unwrap();
+        assert_eq!(restored.worktree_id, "new-base");
+        assert_eq!(metadata.worktree_id, "new-base");
+        assert_eq!(metadata.codex_thread_id.as_deref(), Some("resume-thread"));
+    }
 
     #[test]
     fn move_session_between_indexes_reassigns_complete_session() {
