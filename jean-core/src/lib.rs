@@ -29,6 +29,9 @@ extern crate self as tauri;
 mod runtime;
 pub use runtime::*;
 
+#[cfg(test)]
+mod test_support;
+
 use crate::http_server::EmitExt;
 use regex::Regex;
 use serde::{Deserialize, Serialize};

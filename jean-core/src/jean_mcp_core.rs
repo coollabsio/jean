@@ -11,7 +11,6 @@ use serde_json::{json, Value};
 use tauri::AppHandle;
 
 use crate::chat::types::LabelData;
-use crate::http_server::dispatch::dispatch_command;
 use crate::http_server::EmitExt;
 use crate::projects::github_issues::{attach_issue_context_for_session, IssueContext};
 
@@ -342,6 +341,15 @@ pub async fn call_tool(
         }],
         "isError": false,
     }))
+}
+
+// Keep the large command-dispatch future off the MCP router's stack. In debug
+// builds, inline dispatch futures in each match arm exhaust a normal test stack.
+async fn dispatch_command(app: &AppHandle, command: &str, args: Value) -> Result<Value, String> {
+    Box::pin(crate::http_server::dispatch::dispatch_command(
+        app, command, args,
+    ))
+    .await
 }
 
 async fn run_tool(
@@ -3091,9 +3099,147 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mcp_create_session_can_send_and_read_immediately() {
+    async fn mcp_create_session_persists_metadata_before_status_lookup() {
         for force_new in [false, true] {
             let (_temp, app) = session_lookup_app();
+            if force_new {
+                crate::chat::storage::save_empty_index(&app, "current-base").unwrap();
+            }
+            let created = run_tool(
+                &app,
+                "create_session",
+                json!({ "worktreeId": "current-base" }),
+                "test",
+            )
+            .await
+            .unwrap();
+            let session_id = created["id"].as_str().unwrap();
+            let metadata = crate::chat::storage::load_metadata(&app, session_id)
+                .unwrap()
+                .expect("create_session must persist metadata before returning");
+            assert_eq!(metadata.worktree_id, "current-base");
+            let status = run_tool(
+                &app,
+                "get_session_status",
+                json!({ "sessionId": session_id }),
+                "test",
+            )
+            .await
+            .unwrap();
+            assert_eq!(status["status"], "idle");
+            assert_eq!(status["worktreeId"], "current-base");
+        }
+    }
+
+    // Use an app-local CLI fixture, never an installed CLI or external account.
+    #[cfg(unix)]
+    fn session_send_app() -> (tempfile::TempDir, AppHandle) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let (temp, app) = session_lookup_app();
+        let preferences = crate::AppPreferences {
+            auto_branch_naming: false,
+            auto_session_naming: false,
+            claude_cli_source: "jean".to_string(),
+            default_execution_mode: "build".to_string(),
+            ..Default::default()
+        };
+        std::fs::write(
+            crate::get_preferences_path(&app).unwrap(),
+            serde_json::to_vec(&preferences).unwrap(),
+        )
+        .unwrap();
+        crate::claude_cli::ensure_cli_dir(&app).unwrap();
+        let binary = crate::claude_cli::get_cli_binary_path(&app).unwrap();
+        std::fs::write(
+            &binary,
+            r#"#!/bin/sh
+set -eu
+fixture_dir=$(dirname "$0")
+cat > "$fixture_dir/received.jsonl"
+pwd -P > "$fixture_dir/working-directory"
+printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Fixture reply"}]},"session_id":"fixture-resume"}'
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"Fixture reply","session_id":"fixture-resume"}'
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        (temp, app)
+    }
+
+    #[cfg(unix)]
+    async fn assert_mcp_send_completed(app: &AppHandle, session_id: &str, message: &str) {
+        use crate::chat::types::RunStatus;
+
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if let Some(metadata) =
+                    crate::chat::storage::load_metadata(app, session_id).unwrap()
+                {
+                    if let Some(run) = metadata.runs.last() {
+                        assert_ne!(run.status, RunStatus::Crashed, "background send crashed");
+                        assert_ne!(
+                            run.status,
+                            RunStatus::Cancelled,
+                            "background send cancelled"
+                        );
+                        if run.status == RunStatus::Completed
+                            && !crate::chat::registry::is_session_actively_managed(session_id)
+                        {
+                            assert_eq!(metadata.worktree_id, "current-base");
+                            assert_eq!(metadata.runs.len(), 1);
+                            assert_eq!(run.user_message, message);
+                            assert_eq!(
+                                metadata.claude_session_id.as_deref(),
+                                Some("fixture-resume")
+                            );
+                            break;
+                        }
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("MCP returned started but did not complete the background send");
+
+        let fixture_dir = crate::claude_cli::get_cli_dir(app).unwrap();
+        let received: Value =
+            serde_json::from_slice(&std::fs::read(fixture_dir.join("received.jsonl")).unwrap())
+                .unwrap();
+        assert_eq!(received["message"]["content"], message);
+        let cwd = std::fs::read_to_string(fixture_dir.join("working-directory")).unwrap();
+        let expected_cwd = std::fs::canonicalize(app.path().app_data_dir().unwrap()).unwrap();
+        assert_eq!(std::path::Path::new(cwd.trim()), expected_cwd);
+
+        // Read through MCP after completion, not just through the CLI fixture.
+        let history = run_tool(
+            app,
+            "read_session_messages",
+            json!({ "sessionId": session_id }),
+            "test",
+        )
+        .await
+        .unwrap();
+        assert_eq!(history["id"], session_id);
+        let messages = history["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[0]["content"], message);
+        assert_eq!(messages[1]["role"], "assistant");
+        assert_eq!(messages[1]["content"], "Fixture reply");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn mcp_create_session_can_send_and_read_immediately() {
+        if !crate::test_support::in_isolated_process(
+            "jean_mcp_core::tests::mcp_create_session_can_send_and_read_immediately",
+        ) {
+            return;
+        }
+        for force_new in [false, true] {
+            let (_temp, app) = session_send_app();
             if force_new {
                 crate::chat::storage::save_empty_index(&app, "current-base").unwrap();
             }
@@ -3126,12 +3272,19 @@ mod tests {
                 sent,
                 json!({ "sessionId": session_id, "status": "started" })
             );
+            assert_mcp_send_completed(&app, session_id, "hello world").await;
         }
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn mcp_repairs_stale_base_session_owner_without_losing_metadata() {
-        let (_temp, app) = session_lookup_app();
+        if !crate::test_support::in_isolated_process(
+            "jean_mcp_core::tests::mcp_repairs_stale_base_session_owner_without_losing_metadata",
+        ) {
+            return;
+        }
+        let (_temp, app) = session_send_app();
         let index = crate::chat::storage::load_index(&app, "current-base").unwrap();
         let session_id = &index.sessions[0].id;
         let mut metadata = crate::chat::types::SessionMetadata::new(
@@ -3178,6 +3331,7 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(sent["status"], "started");
+        assert_mcp_send_completed(&app, session_id, "hello").await;
     }
 
     #[test]
@@ -3193,9 +3347,15 @@ mod tests {
         assert!(resolve_session_worktree(&app, "unknown-session").is_err());
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn mcp_create_session_can_send_as_the_next_call() {
-        let (_temp, app) = session_lookup_app();
+        if !crate::test_support::in_isolated_process(
+            "jean_mcp_core::tests::mcp_create_session_can_send_as_the_next_call",
+        ) {
+            return;
+        }
+        let (_temp, app) = session_send_app();
         let created = run_tool(
             &app,
             "create_session",
@@ -3215,6 +3375,7 @@ mod tests {
         .unwrap();
         assert_eq!(sent["status"], "started");
         assert_eq!(sent["sessionId"], session_id);
+        assert_mcp_send_completed(&app, session_id, "hello world").await;
     }
 
     #[test]
