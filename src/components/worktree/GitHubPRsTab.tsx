@@ -214,7 +214,7 @@ export function GitHubPRsTab({
         )}
 
         {!isLoading && !error && prs.length > 0 && (
-          <div className="py-1">
+          <div>
             {prs.map((pr, index) => (
               <PRItem
                 key={pr.number}
