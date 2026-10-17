@@ -168,6 +168,22 @@ describe('transport bootstrap', () => {
     ])
   })
 
+  it('strips scoped ids from commands sent straight to a server', async () => {
+    const invokeOnServer = vi.fn(async () => ({ id: 'p9' }))
+    vi.doMock('./server-connections', () => ({ invokeOnServer }))
+    const transport = await loadNativeTransportModule(vi.fn())
+
+    await transport.invokeForServer('remote-1', 'add_project', {
+      path: '/srv/qrcode',
+      parentId: 'remote-1:folder-7',
+    })
+
+    expect(invokeOnServer).toHaveBeenCalledWith('remote-1', 'add_project', {
+      path: '/srv/qrcode',
+      parentId: 'folder-7',
+    })
+  })
+
   it('routes path-only Git and GitHub commands to a remote owner', async () => {
     const invokeOnServer = vi.fn(async () => ({ issues: [], totalCount: 0 }))
     vi.doMock('./server-connections', () => ({ invokeOnServer }))

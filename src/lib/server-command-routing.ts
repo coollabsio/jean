@@ -113,6 +113,26 @@ export function resolveServerCommand(
   return serverId ? { serverId, args: stripped } : null
 }
 
+
+/**
+ * Resource ids held by the client are scoped keys (`serverId:resourceId`). A
+ * command sent straight to one server must carry that server's own raw ids, or
+ * the server stores a key it can never match again.
+ */
+export function stripServerScope(
+  serverId: ServerId,
+  args?: Record<string, unknown>
+): Record<string, unknown> | undefined {
+  if (!args) return args
+  try {
+    const routed = resolveServerCommand(args)
+    return routed?.serverId === serverId ? routed.args : args
+  } catch {
+    // Arguments spanning several servers stay scoped for the caller to reject.
+    return args
+  }
+}
+
 function scopedId(serverId: ServerId, resourceId: unknown): unknown {
   return typeof resourceId === 'string' && resourceId
     ? serverResourceKey({ serverId, resourceId })
