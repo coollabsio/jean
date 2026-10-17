@@ -48,7 +48,16 @@ vi.mock('@/store/chat-store', () => ({
   },
 }))
 
+vi.mock('@/hooks/useInstalledBackends', () => ({
+  useInstalledBackends: () => ({ installedBackends: ['claude'] }),
+}))
+
+vi.mock('@/components/chat/toolbar/DesktopBackendModelPicker', () => ({
+  DesktopBackendModelPicker: () => null,
+}))
+
 vi.mock('@/services/projects', () => ({
+  useProjects: () => ({ data: [] }),
   useWorktrees: () => ({
     data: [
       {

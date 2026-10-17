@@ -315,6 +315,7 @@ interface ChatUIState {
     prompt?: string
     prompts?: string[]
     executionMode?: ExecutionMode
+    override?: { backend: CliBackend; model: string }
   } | null
   setPendingMagicCommand: (
     cmd: {
@@ -322,6 +323,7 @@ interface ChatUIState {
       prompt?: string
       prompts?: string[]
       executionMode?: ExecutionMode
+      override?: { backend: CliBackend; model: string }
     } | null
   ) => void
 
