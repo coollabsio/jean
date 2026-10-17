@@ -40,9 +40,11 @@ const RESTORE_ENV: &str = "AGENT_BROWSER_RESTORE";
 const RESTORE_KEY: &str = "jean";
 
 /// Close an idle session's browser after 15 minutes to free memory. The
-/// restore state is saved on this shutdown too.
+/// restore state is saved on this shutdown too. We now support a heartbeat
+/// mechanism to prevent premature shutdown while tools are running.
 const IDLE_TIMEOUT_ENV: &str = "AGENT_BROWSER_IDLE_TIMEOUT_MS";
 const IDLE_TIMEOUT_MS: &str = "900000";
+const HEARTBEAT_FILE: &str = "agent-browser-heartbeat";
 
 /// agent-browser session name for a Jean session.
 pub fn session_name(jean_session_id: &str) -> String {
