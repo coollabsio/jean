@@ -5,6 +5,7 @@ import {
   decorateServerResult,
   resolveServerCommand,
   registerServerResourcePath,
+  stripServerScope,
 } from './server-command-routing'
 
 describe('server command routing', () => {
@@ -258,5 +259,27 @@ describe('server command routing', () => {
       worktreeId: 'r1:w1',
       status: 'investigation_started',
     })
+  })
+
+  it('strips the scope from ids owned by the target server', () => {
+    expect(
+      stripServerScope('remote-1', {
+        path: '/srv/qrcode',
+        parentId: 'remote-1:folder-7',
+      })
+    ).toEqual({ path: '/srv/qrcode', parentId: 'folder-7' })
+  })
+
+  it('keeps ids owned by another server scoped', () => {
+    expect(
+      stripServerScope('remote-1', { parentId: 'remote-2:folder-7' })
+    ).toEqual({ parentId: 'remote-2:folder-7' })
+  })
+
+  it('leaves raw ids and missing arguments alone', () => {
+    expect(stripServerScope('remote-1', { parentId: 'folder-7' })).toEqual({
+      parentId: 'folder-7',
+    })
+    expect(stripServerScope('remote-1')).toBeUndefined()
   })
 })
