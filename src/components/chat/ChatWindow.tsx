@@ -207,7 +207,10 @@ import {
   supportsAdaptiveThinking,
 } from '@/lib/model-utils'
 import { copyToClipboard, copyHtmlToClipboard } from '@/lib/clipboard'
-import { useClaudeCliStatus } from '@/services/claude-cli'
+import { useClaudeCliStatus, useClaudeUsage } from '@/services/claude-cli'
+import { useCodexUsage } from '@/services/codex-cli'
+import { isUsageLimitError } from '@/lib/usage-limit'
+import { toEpochMs } from '@/lib/usage-format'
 import {
   getCatalogModelReasoning,
   useModelCatalog,
@@ -468,6 +471,8 @@ const ChatWindowContent = memo(function ChatWindowContent({
     setExecutionMode,
     setError,
     dismissSetupScript,
+    armAutoResume,
+    disarmAutoResume,
   } = useChatStore.getState()
 
   const queryClient = useQueryClient()
@@ -1136,6 +1141,31 @@ const ChatWindowContent = memo(function ChatWindowContent({
   const currentError = useChatStore(state =>
     deferredSessionId ? (state.errors[deferredSessionId] ?? null) : null
   )
+
+  // Auto-continue: offer only for usage/rate-limit errors on backends that
+  // expose a reset time (Claude, Codex). Reset time comes from the usage cache.
+  const isLimitError = isUsageLimitError(currentError)
+  const supportsAutoResume =
+    isLimitError &&
+    (resolvedBackend === 'claude' || resolvedBackend === 'codex')
+  const { data: claudeUsage } = useClaudeUsage({
+    enabled: supportsAutoResume && resolvedBackend === 'claude',
+  })
+  const { data: codexUsage } = useCodexUsage({
+    enabled: supportsAutoResume && resolvedBackend === 'codex',
+  })
+  const limitResetAtMs = (() => {
+    if (!supportsAutoResume) return null
+    const resetsAt =
+      resolvedBackend === 'claude'
+        ? claudeUsage?.session?.resetsAt
+        : codexUsage?.session?.resetsAt
+    return resetsAt != null ? toEpochMs(resetsAt) : null
+  })()
+  const isAutoResumeArmed = useChatStore(state =>
+    deferredSessionId ? state.autoResume[deferredSessionId] != null : false
+  )
+
   // Per-worktree setup script result (stays at worktree level)
   const setupScriptResult = useChatStore(state =>
     activeWorktreeId ? state.setupScriptResults[activeWorktreeId] : undefined
@@ -3147,6 +3177,22 @@ const ChatWindowContent = memo(function ChatWindowContent({
                             onDismiss={() =>
                               activeSessionId && setError(activeSessionId, null)
                             }
+                            onAutoContinue={
+                              supportsAutoResume && deferredSessionId
+                                ? () =>
+                                    armAutoResume(
+                                      deferredSessionId,
+                                      limitResetAtMs
+                                    )
+                                : undefined
+                            }
+                            onCancelAutoContinue={
+                              supportsAutoResume && deferredSessionId
+                                ? () => disarmAutoResume(deferredSessionId)
+                                : undefined
+                            }
+                            isAutoResumeArmed={isAutoResumeArmed}
+                            limitResetAtMs={limitResetAtMs}
                           />
                         </div>
                       )}

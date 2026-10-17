@@ -66,6 +66,34 @@ export type Backend =
 export type ExecutionMode = 'plan' | 'build' | 'yolo' | 'supervised' | 'auto'
 export type PermissionMode = Exclude<ExecutionMode, 'plan'>
 
+/**
+ * Full argument bundle passed to the `send_chat_message` mutation. Captured per
+ * session so a background re-send (e.g. auto-continue after a usage limit
+ * resets) can replay the exact send without the active-session UI.
+ */
+export interface SendMessageArgs {
+  sessionId: string
+  worktreeId: string
+  worktreePath: string
+  message: string
+  model?: string
+  executionMode?: ExecutionMode
+  thinkingLevel?: ThinkingLevel
+  effortLevel?: EffortLevel
+  parallelExecutionPrompt?: string
+  aiLanguage?: string
+  allowedTools?: string[]
+  mcpConfig?: string
+  chromeEnabled?: boolean
+  customProfileName?: string
+  backend?: string
+  /** When false, skip the end-of-turn recap instruction. */
+  includeRecap?: boolean
+}
+
+/** Cycle order for execution modes (used by Shift+Tab cycling) */
+export const EXECUTION_MODE_CYCLE: ExecutionMode[] = ['plan', 'build', 'yolo']
+
 export function getSupportedPermissionModes(
   backend: Backend | undefined
 ): PermissionMode[] {

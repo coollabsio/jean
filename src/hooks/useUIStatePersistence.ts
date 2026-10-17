@@ -22,6 +22,7 @@ import type {
   PendingSkill,
   PendingTextFile,
   ReadTextResponse,
+  SendMessageArgs,
 } from '@/types/chat'
 import type {
   PendingImageDraft,
@@ -172,7 +173,24 @@ export function useUIStatePersistence() {
       dismissedSetupScripts,
       reviewSidebarVisible,
       lastOpenedPerProject,
+      autoResume,
+      lastSentArgs,
     } = useChatStore.getState()
+    // Persist only armed sessions that still have replayable send args.
+    const autoResumeForPersist = Object.entries(autoResume).flatMap(
+      ([sessionId, resumeAtMs]) => {
+        const sendArgs = lastSentArgs[sessionId]
+        return sendArgs
+          ? [
+              {
+                session_id: sessionId,
+                resume_at_ms: resumeAtMs,
+                send_args: sendArgs,
+              },
+            ]
+          : []
+      }
+    )
     const { selectedProjectId } = useProjectsStore.getState()
     const {
       sessionTerminalIds,
@@ -261,6 +279,7 @@ export function useUIStatePersistence() {
         ])
       ),
       seen_failed_workflow_run_ids: seenFailedWorkflowRunIds,
+      auto_resume: autoResumeForPersist,
       version: 1, // Reset for first release
     }
   }, [])
@@ -958,6 +977,28 @@ export function useUIStatePersistence() {
         .setSeenFailedWorkflowRunIds(seenFailedWorkflowRunIds)
     }
 
+    // Restore armed auto-continue sessions (sessionId → reset epoch ms) plus
+    // their replayable send args. The watcher (useAutoResume) fires them.
+    const persistedAutoResume = uiState.auto_resume ?? []
+    if (persistedAutoResume.length > 0) {
+      const autoResume: Record<string, number | null> = {}
+      const lastSentArgs: Record<string, SendMessageArgs> = {}
+      for (const entry of persistedAutoResume) {
+        if (!entry?.session_id || !entry.send_args) continue
+        autoResume[entry.session_id] = entry.resume_at_ms ?? null
+        lastSentArgs[entry.session_id] = entry.send_args
+      }
+      if (Object.keys(autoResume).length > 0) {
+        logger.debug('Restoring armed auto-continue sessions', {
+          count: Object.keys(autoResume).length,
+        })
+        useChatStore.setState(state => ({
+          autoResume: { ...state.autoResume, ...autoResume },
+          lastSentArgs: { ...state.lastSentArgs, ...lastSentArgs },
+        }))
+      }
+    }
+
     // Restore browser pane state (per-worktree tabs + 3-surface visibility)
     const persistedBrowserTabs = uiState.browser_tabs ?? {}
     const browserActiveTabIds = uiState.browser_active_tab_ids ?? {}
@@ -1136,6 +1177,7 @@ export function useUIStatePersistence() {
       useChatStore.getState().dismissedSetupScripts
     let prevReviewSidebarVisible = useChatStore.getState().reviewSidebarVisible
     let prevLastOpenedPerProject = useChatStore.getState().lastOpenedPerProject
+    let prevAutoResume = useChatStore.getState().autoResume
     let prevTerminalInstances = useTerminalStore.getState().terminals
     let prevTerminalActiveIds = useTerminalStore.getState().activeTerminalIds
     let prevBrowserTabs = useBrowserStore.getState().tabs
@@ -1200,6 +1242,7 @@ export function useUIStatePersistence() {
         state.reviewSidebarVisible !== prevReviewSidebarVisible
       const lastOpenedChanged =
         state.lastOpenedPerProject !== prevLastOpenedPerProject
+      const autoResumeChanged = state.autoResume !== prevAutoResume
 
       if (
         worktreeChanged ||
@@ -1211,7 +1254,8 @@ export function useUIStatePersistence() {
         pendingSkillsChanged ||
         dismissedSetupScriptsChanged ||
         reviewSidebarChanged ||
-        lastOpenedChanged
+        lastOpenedChanged ||
+        autoResumeChanged
       ) {
         prevWorktreeId = state.activeWorktreeId
         prevWorktreePath = state.activeWorktreePath
@@ -1225,6 +1269,7 @@ export function useUIStatePersistence() {
         prevDismissedSetupScripts = state.dismissedSetupScripts
         prevReviewSidebarVisible = state.reviewSidebarVisible
         prevLastOpenedPerProject = state.lastOpenedPerProject
+        prevAutoResume = state.autoResume
         debouncedSaveRef.current?.()
       }
     })
