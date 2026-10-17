@@ -113,6 +113,21 @@ export function resolveServerCommand(
   return serverId ? { serverId, args: stripped } : null
 }
 
+/** Reduce scoped ids to the raw ids their owning server stores and matches. */
+export function stripServerScope(
+  serverId: ServerId,
+  args?: Record<string, unknown>
+): Record<string, unknown> | undefined {
+  if (!args) return args
+  try {
+    const routed = resolveServerCommand(args)
+    return routed?.serverId === serverId ? routed.args : args
+  } catch {
+    // Mixed or ambiguous ownership: send the arguments exactly as they arrived.
+    return args
+  }
+}
+
 function scopedId(serverId: ServerId, resourceId: unknown): unknown {
   return typeof resourceId === 'string' && resourceId
     ? serverResourceKey({ serverId, resourceId })
