@@ -114,8 +114,12 @@ export function partitionMemories(memories: AgentMemory[]): {
   return { userFacts, rest }
 }
 
+/** User memory holds only facts, so a rule or open-work filter hides it. */
 export function showUserFactSection(filters: MemorySearchFilters): boolean {
-  return filters.scope === '' || filters.scope === 'user'
+  return (
+    (filters.scope === '' || filters.scope === 'user') &&
+    (filters.kind === '' || filters.kind === 'fact')
+  )
 }
 
 export function showAgentMemorySection(filters: MemorySearchFilters): boolean {

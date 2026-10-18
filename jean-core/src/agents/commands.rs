@@ -470,7 +470,7 @@ pub fn search_memory(
                 from: request.from,
                 to: request.to,
                 include_expired: true,
-                limit: request.limit.unwrap_or(50),
+                limit: request.limit.unwrap_or(200).clamp(1, 200),
             },
         )
     })

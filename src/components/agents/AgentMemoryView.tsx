@@ -287,6 +287,8 @@ export function AgentMemoryView({ agent }: { agent: AgentSummary }) {
     searchingJournal
   )
 
+  const searchError =
+    (searching && memoryQuery.error) || (searchingJournal && journalQuery.error)
   const memories = searching ? (memoryQuery.data ?? []) : (data?.memories ?? [])
   const journal = searchingJournal
     ? (journalQuery.data ?? [])
@@ -437,6 +439,11 @@ export function AgentMemoryView({ agent }: { agent: AgentSummary }) {
             </Button>
           )}
         </div>
+        {searchError && (
+          <p className="text-xs text-destructive">
+            Search failed: {String(searchError)}
+          </p>
+        )}
       </div>
 
       {showUserFactSection(filters) && (

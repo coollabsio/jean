@@ -1142,21 +1142,26 @@ async fn rotate_chat_if_long(app: &AppHandle, agent: &db::Agent) -> Result<bool,
         new.id.clone(),
     )
     .await?;
+    super::with_db(app, |conn| db::set_carry_over(conn, &agent.id, &carry_over))?;
+    // The journal copy is recall only. A failure must not stop the rotation.
     let journal_id = super::with_db(app, |conn| {
-        let entry = db::add_journal(
+        db::add_journal(
             conn,
             &db::NewJournal {
                 agent_id: &agent.id,
                 project_id: None,
                 content: &journal,
-                occurred_at: Some(db::now()),
+                occurred_at: None,
                 source: "rotation",
                 source_session_id: Some(&home.id),
             },
-        )?;
-        db::set_carry_over(conn, &agent.id, &carry_over)?;
-        Ok(entry.id)
-    })?;
+        )
+    })
+    .map(|entry| entry.id.to_string())
+    .unwrap_or_else(|e| {
+        log::warn!("[Agents] {} rotation journal not saved: {e}", agent.id);
+        "none".to_string()
+    });
     crate::chat::archive_session(
         app.clone(),
         agent.worktree_id.clone(),

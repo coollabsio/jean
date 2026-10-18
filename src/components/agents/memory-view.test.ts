@@ -146,6 +146,8 @@ describe('sections', () => {
   it('hides the other section when a scope filter is set', () => {
     expect(showUserFactSection({ ...empty(), scope: 'agent' })).toBe(false)
     expect(showUserFactSection({ ...empty(), scope: 'user' })).toBe(true)
+    expect(showUserFactSection({ ...empty(), kind: 'rule' })).toBe(false)
+    expect(showUserFactSection({ ...empty(), kind: 'fact' })).toBe(true)
     expect(showAgentMemorySection({ ...empty(), scope: 'user' })).toBe(false)
     expect(showAgentMemorySection({ ...empty(), scope: 'shared' })).toBe(true)
   })

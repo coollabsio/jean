@@ -2154,7 +2154,8 @@ fn record_memory_change(
 }
 
 /// Save a memory. The same text in the same scope updates the existing entry
-/// instead of adding a duplicate. `actor_agent_id` is None when the user saves
+/// instead of adding a duplicate, and keeps its pin and project. Use
+/// `update_memory` to unpin. `actor_agent_id` is None when the user saves
 /// from the Memory view.
 pub fn save_memory(
     conn: &Connection,
@@ -2175,7 +2176,7 @@ pub fn save_memory(
     if let Some(id) = existing {
         let previous = get_memory(conn, id)?.ok_or_else(|| "Memory was not saved".to_string())?;
         conn.execute(
-            "UPDATE memories SET kind=?2, project_id=?3, pinned=?4, expires_at=?5, updated_at=?6 WHERE id=?1",
+            "UPDATE memories SET kind=?2, project_id=COALESCE(?3, project_id), pinned=MAX(pinned, ?4), expires_at=?5, updated_at=?6 WHERE id=?1",
             params![id, m.kind, m.project_id, m.pinned as i64, m.expires_at, ts],
         )
         .map_err(err)?;
@@ -2340,7 +2341,7 @@ pub fn supersede_memory(
     }
     let existing: Option<i64> = conn
         .query_row(
-            "SELECT id FROM memories WHERE id != ?1 AND agent_id IS ?2 AND scope = ?3 AND content = ?4 AND superseded_by IS NULL",
+            "SELECT id FROM memories WHERE id != ?1 AND agent_id IS ?2 AND scope = ?3 AND kind = 'fact' AND content = ?4 AND superseded_by IS NULL",
             params![previous.id, previous.agent_id, previous.scope, content],
             |row| row.get(0),
         )
@@ -2511,7 +2512,8 @@ fn validate_memory_filters(search: &MemorySearch) -> Result<(), String> {
 /// Without: pinned first, then newest. Superseded rows are excluded.
 pub fn search_memories(conn: &Connection, search: &MemorySearch) -> Result<Vec<Memory>, String> {
     validate_memory_filters(search)?;
-    let limit = search.limit.clamp(1, 200);
+    // Callers cap the limit. Prompt selection and the UI list need every row.
+    let limit = search.limit.max(1);
     let pinned = search.pinned.map(|value| value as i64);
     let include_expired = search.include_expired as i64;
     let kind = search.kind.filter(|kind| !kind.is_empty());
@@ -2810,6 +2812,11 @@ pub fn add_journal(conn: &Connection, entry: &NewJournal) -> Result<JournalEntry
     }
     let ts = now();
     let occurred_at = entry.occurred_at.unwrap_or(ts);
+    if !(0..=ts + 366 * 86_400).contains(&occurred_at) {
+        return Err(
+            "occurredAt must be unix seconds, not later than one year from now".to_string(),
+        );
+    }
     conn.execute(
         "INSERT INTO journal (agent_id, project_id, content, occurred_at, created_at, source, source_session_id)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -3603,6 +3610,66 @@ mod tests {
             None,
         )
         .is_err());
+    }
+
+    #[test]
+    fn resave_keeps_the_pin_and_lists_more_than_200_memories() {
+        let conn = db();
+        let pinned = save(
+            &conn,
+            &NewMemory {
+                pinned: true,
+                ..fact(None, "user", "Timezone is Helsinki")
+            },
+        )
+        .unwrap();
+        let again = save(&conn, &fact(None, "user", "Timezone is Helsinki")).unwrap();
+        assert_eq!(again.id, pinned.id);
+        assert!(again.pinned);
+        for i in 0..210 {
+            save(&conn, &mem(Some(JEAN_AGENT_ID), &format!("note {i}"))).unwrap();
+        }
+        assert_eq!(list_memories(&conn, JEAN_AGENT_ID).unwrap().len(), 211);
+        let prompt = select_prompt_memories(&conn, JEAN_AGENT_ID, None, usize::MAX).unwrap();
+        assert_eq!(prompt.entries.len(), 211);
+    }
+
+    #[test]
+    fn supersede_does_not_merge_into_a_rule_with_the_same_text() {
+        let conn = db();
+        let rule = save(&conn, &mem(Some(JEAN_AGENT_ID), "Deploy on Fridays")).unwrap();
+        let old = save(
+            &conn,
+            &fact(Some(JEAN_AGENT_ID), "agent", "Deploy on Mondays"),
+        )
+        .unwrap();
+        let corrected = supersede_memory(
+            &conn,
+            JEAN_AGENT_ID,
+            None,
+            old.id,
+            "Deploy on Fridays",
+            None,
+        )
+        .unwrap();
+        assert_ne!(corrected.id, rule.id);
+        assert_eq!(corrected.kind, "fact");
+    }
+
+    #[test]
+    fn journal_rejects_millisecond_timestamps() {
+        let conn = db();
+        let entry = |occurred_at| NewJournal {
+            agent_id: JEAN_AGENT_ID,
+            project_id: None,
+            content: "Shipped",
+            occurred_at: Some(occurred_at),
+            source: "agent",
+            source_session_id: None,
+        };
+        assert!(add_journal(&conn, &entry(now() * 1000)).is_err());
+        assert!(add_journal(&conn, &entry(-1)).is_err());
+        assert!(add_journal(&conn, &entry(now())).is_ok());
     }
 
     #[test]
