@@ -177,8 +177,9 @@ Next-run calculation walks local time in that zone:
   is not chosen again.
 - Spring-forward gaps (the missing hour) are skipped. `30 2 * * *` on the US
   spring-forward day runs the next day at 02:30.
-- Fall-back overlap hours are real twice. The earlier offset is next, then the
-  later offset.
+- Fall-back overlap hours are real twice. All matches in the earlier offset
+  come first, then all matches in the later offset. `*/5` runs every 5 minutes
+  through both passes.
 - If Jean was closed, a due cron fires once and then jumps to the next match
   after the actual fire time. Missed slots are not replayed.
 
@@ -196,14 +197,15 @@ A spent budget leaves the event queued; it is not dropped and it is not
 delivered early. These routines do not add a hop. If the woken task calls
 `message_agent`, that call still uses `MAX_AGENT_HOPS`.
 
-The same occurrence is stored in `schedule_event_keys`, so a merged PR or a
-finished session does not queue twice. Changing the event type clears those
+The same occurrence is stored in `schedule_event_keys`, so a merged PR does
+not queue twice. Session and archive keys include the second they happened,
+so each run of a session is a new occurrence. Changing the event type clears those
 keys. Pausing does not.
 
 | Event | Source | Not fired when |
 |---|---|---|
-| `session_finished` | `chat:done` | The session belongs to an agent (chat or task). Those already wake the owner through delegations, and a routine on them would loop. |
-| `session_failed` | `chat:error` | Same agent-session exclusion. `chat:cancelled` is not a trigger. |
+| `session_finished` | `chat:done` | The session belongs to an agent (chat or task) or is an active delegation. Those already wake their agent, and a routine on them would loop. |
+| `session_failed` | `chat:error` | Same exclusion. `chat:cancelled` is not a trigger. |
 | `worktree_archived` | `worktree:archived` | The payload has no worktree id. |
 | `pr_merged` | `pr:status-update` whose `state` is `merged` | The same worktree and PR number already woke this routine. Open and closed PRs do not match. |
 | `approval_resolved` | `decide_approval`, after the result is queued back to the requesting session | The approval id already woke this routine. |

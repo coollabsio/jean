@@ -138,10 +138,12 @@ fn on_run_ended(app: &AppHandle, session_id: &str, kind: &str, error: Option<&st
     if marked > 0 || agent_session {
         super::notify_changed(app);
     }
-    // Agent sessions already wake through delegations. Firing them again would
-    // loop: the routine's task would finish and wake the same routine.
-    if let Some(trigger) = session_trigger_name(kind, agent_session) {
-        let key = format!("session:{session_id}:{kind}");
+    // Agent and delegated sessions already wake their agent. Firing them again
+    // would loop: the routine's task (or the work it delegates) would finish
+    // and wake the same routine.
+    if let Some(trigger) = session_trigger_name(kind, agent_session || marked > 0) {
+        // A session runs many times. The second only dedups a repeated emit.
+        let key = format!("session:{session_id}:{kind}:{}", db::now());
         let context = match (kind, error) {
             ("error", Some(message)) => format!("Session {session_id} failed: {message}"),
             ("error", None) => format!("Session {session_id} failed."),
@@ -151,9 +153,10 @@ fn on_run_ended(app: &AppHandle, session_id: &str, kind: &str, error: Option<&st
     }
 }
 
-/// `done` / `error` on a project session. Agent sessions are excluded.
-pub(crate) fn session_trigger_name(kind: &str, agent_session: bool) -> Option<&'static str> {
-    if agent_session {
+/// `done` / `error` on a project session. Sessions that already wake an
+/// agent (its own chat and tasks, and delegated sessions) are excluded.
+pub(crate) fn session_trigger_name(kind: &str, wakes_agent: bool) -> Option<&'static str> {
+    if wakes_agent {
         return None;
     }
     match kind {
