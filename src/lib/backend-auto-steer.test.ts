@@ -19,6 +19,18 @@ describe('isSteerCapableBackend', () => {
     expect(isSteerCapableBackend(null)).toBe(false)
     expect(isSteerCapableBackend(undefined)).toBe(false)
   })
+
+  it('treats Claude as steerable only when its setting is on', () => {
+    expect(
+      isSteerCapableBackend('claude', { claude_auto_steer_enabled: true })
+    ).toBe(true)
+    expect(
+      isSteerCapableBackend('claude', { claude_auto_steer_enabled: false })
+    ).toBe(false)
+    expect(
+      isSteerCapableBackend('claude', { codex_auto_steer_enabled: true })
+    ).toBe(false)
+  })
 })
 
 describe('isBackendAutoSteerEnabled', () => {
@@ -43,6 +55,9 @@ describe('isBackendAutoSteerEnabled', () => {
     ).toBe(true)
     expect(
       isBackendAutoSteerEnabled('grok', { grok_auto_steer_enabled: true })
+    ).toBe(true)
+    expect(
+      isBackendAutoSteerEnabled('claude', { claude_auto_steer_enabled: true })
     ).toBe(true)
   })
 

@@ -608,12 +608,15 @@ pub fn is_session_actively_managed(session_id: &str) -> bool {
         || lock_recover(&ACTIVE_SENDS, "ACTIVE_SENDS").contains_key(session_id)
 }
 
+/// Serializes tests that touch the global process registries (some tests
+/// clear them). Shared with tailer tests in other modules.
+#[cfg(test)]
+pub(crate) static TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
 #[cfg(test)]
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
-
-    static TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
     fn clear_registries() {
         lock_recover(&PROCESS_REGISTRY, "PROCESS_REGISTRY").clear();

@@ -20,12 +20,14 @@ import type {
   ReadTextResponse,
   ExecutionMode,
 } from '@/types/chat'
-import type { CliBackend } from '@/types/preferences'
+import type { AppPreferences, CliBackend } from '@/types/preferences'
+import { preferencesQueryKeys } from '@/services/preferences'
 import {
   FileMentionPopover,
   type FileMentionPopoverHandle,
 } from './FileMentionPopover'
 import { queryClient } from '@/lib/query-client'
+import { parseServerResourceKey } from '@/lib/server-resource'
 import { fileQueryKeys } from '@/services/files'
 import { logger } from '@/lib/logger'
 import { reportBulkInvestigateResults } from '@/components/worktree/bulkInvestigateUtils'
@@ -527,7 +529,16 @@ export const ChatInput = memo(function ChatInput({
 
       const forceSteer =
         isSending &&
-        isSteerCapableBackend(selectedBackend) &&
+        isSteerCapableBackend(
+          selectedBackend,
+          queryClient.getQueryData<AppPreferences>(
+            preferencesQueryKeys.preferences(
+              activeWorktreeId
+                ? parseServerResourceKey(activeWorktreeId)?.serverId
+                : undefined
+            )
+          )
+        ) &&
         (e.metaKey || e.ctrlKey)
       onSteerModifierChange?.(forceSteer)
 
@@ -666,6 +677,7 @@ export const ChatInput = memo(function ChatInput({
     },
     [
       activeSessionId,
+      activeWorktreeId,
       fileMentionOpen,
       contextMentionOpen,
       slashPopoverOpen,

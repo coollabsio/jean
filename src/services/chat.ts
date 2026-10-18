@@ -3040,6 +3040,19 @@ export async function steerOpencodeTurn(
 }
 
 /**
+ * Inject a user message into a running Claude turn through the detached
+ * Claude host. Rejects when the run is not host-backed or already finished;
+ * callers fall back to the queue.
+ */
+export async function steerClaudeTurn(
+  worktreeId: string,
+  sessionId: string,
+  message: string
+): Promise<void> {
+  await invoke('steer_claude_turn', { worktreeId, sessionId, message })
+}
+
+/**
  * Inject a user message into a running Pi RPC turn via Jean's detached Pi host.
  * Throws when the host is gone or steering is unavailable — callers fall back
  * to cancel+send.
