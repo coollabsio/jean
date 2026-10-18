@@ -154,7 +154,7 @@ function MemoryRow({
                   )
                 }}
               >
-                {isFact ? 'Correct' : 'Save'}
+                Save
               </Button>
             </div>
           </div>
@@ -213,8 +213,8 @@ function MemoryRow({
           <Button
             size="icon-sm"
             variant="ghost"
-            aria-label={isFact ? 'Correct' : 'Edit'}
-            title={isFact ? 'Correct' : 'Edit'}
+            aria-label="Edit"
+            title="Edit"
             onClick={() => setEditing(true)}
           >
             <Pencil />
@@ -703,15 +703,9 @@ export function AgentMemoryView({ agent }: { agent: AgentSummary }) {
               memories={rest}
               agentId={agent.id}
               empty={
-                searching ? (
-                  'No matching memories.'
-                ) : (
-                  <>
-                    No memories yet. The agent saves rules and facts with{' '}
-                    <code className="text-xs">memory_save</code>, or you add
-                    them here.
-                  </>
-                )
+                searching
+                  ? 'No matching memories.'
+                  : 'No memories yet. Tell the agent in Chat to remember something.'
               }
             />
           )}
