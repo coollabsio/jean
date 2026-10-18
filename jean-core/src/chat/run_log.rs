@@ -2402,6 +2402,59 @@ Move services between instances without downtime.
     }
 
     #[test]
+    fn jsonl_tail_completion_requires_host_exit_for_host_backed_runs() {
+        let lines = |v: &[&str]| {
+            v.iter()
+                .map(|l| l.to_string())
+                .collect::<Vec<_>>()
+                .into_iter()
+        };
+        let result = r#"{"type":"result","subtype":"success"}"#;
+        let exit = r#"{"type":"jean_claude_host_exit","code":0}"#;
+
+        // Plain runs: the first result is enough.
+        assert!(jsonl_tail_shows_completion(lines(&[result]), false));
+        // Host-backed: a result with a pending steer is not done yet.
+        assert!(!jsonl_tail_shows_completion(lines(&[result]), true));
+        assert!(jsonl_tail_shows_completion(lines(&[result, exit]), true));
+        // Host exited without a result: not completed.
+        assert!(!jsonl_tail_shows_completion(lines(&[exit]), true));
+    }
+
+    #[test]
+    fn parse_run_handles_claude_host_log_without_duplicate_prompt() {
+        let run = sample_run();
+        // Host-backed Claude run: the host drops the replayed initial prompt
+        // and rewrites the steer echo, then adds its own marker lines.
+        let lines = vec![
+            r#"{"_run_meta":true}"#.to_string(),
+            r#"{"type":"jean_claude_host_start"}"#.to_string(),
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}"#
+                .to_string(),
+            r#"{"type":"steered_user_message","text":"also echo"}"#.to_string(),
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"done"}]}}"#
+                .to_string(),
+            r#"{"type":"result","subtype":"success","usage":{"input_tokens":1}}"#.to_string(),
+            r#"{"type":"jean_claude_host_exit","code":0}"#.to_string(),
+        ];
+
+        let message = parse_run_to_message(&lines, &run).unwrap();
+
+        let user_inputs: Vec<_> = message
+            .content_blocks
+            .iter()
+            .filter_map(|b| match b {
+                ContentBlock::UserInput { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(user_inputs, vec!["also echo"]);
+        assert!(!message.content.contains(&run.user_message));
+        assert!(message.content.contains("working"));
+        assert!(message.content.contains("done"));
+    }
+
+    #[test]
     fn parse_run_extracts_task_tool_result_from_content_blocks() {
         let run = sample_run();
         let tool_id = "toolu_task_report";
@@ -3336,6 +3389,8 @@ pub fn recover_incomplete_runs(app: &tauri::AppHandle) -> Result<Vec<RecoveredRu
 
 /// Check if a run's JSONL file contains a "type":"result" line,
 /// indicating the CLI process completed successfully (vs crashing).
+/// Host-backed Claude runs also need the host exit marker: a pending steer
+/// can start another turn after a `result`.
 pub fn jsonl_has_result_line(app: &tauri::AppHandle, session_id: &str, run_id: &str) -> bool {
     let session_dir = match get_session_dir(app, session_id) {
         Ok(d) => d,
@@ -3347,38 +3402,49 @@ pub fn jsonl_has_result_line(app: &tauri::AppHandle, session_id: &str, run_id: &
         Err(_) => return false,
     };
 
+    // The Claude host writes its start marker right after the `_run_meta` header.
+    let host_backed = BufReader::new(&file)
+        .lines()
+        .take(2)
+        .map_while(Result::ok)
+        .any(|line| {
+            super::claude_host::host_marker_type(&line) == Some(super::claude_host::HOST_START_TYPE)
+        });
+
     // Read from the end — the result line is always the last line.
     // For efficiency, read the last 8KB which is more than enough for the result JSON.
+    use std::io::{Seek, SeekFrom};
+    let mut file = file;
     let file_len = file.metadata().map(|m| m.len()).unwrap_or(0);
-    let reader = if file_len > 8192 {
-        use std::io::{Seek, SeekFrom};
-        let mut f = file;
-        let _ = f.seek(SeekFrom::End(-8192));
-        BufReader::new(f)
-    } else {
-        BufReader::new(file)
-    };
+    let _ = file.seek(SeekFrom::End(-(file_len.min(8192) as i64)));
+    let tail = BufReader::new(file).lines().map_while(Result::ok);
+    jsonl_tail_shows_completion(tail, host_backed)
+}
 
+fn jsonl_tail_shows_completion(lines: impl Iterator<Item = String>, host_backed: bool) -> bool {
     // Prefer error over result: legacy Grok ACP hosts wrote both, and salvaging
     // those as completed produced empty "content was not captured" runs (#580).
     // A cancelled result is not success either — see jsonl_line_is_cancelled_result.
     let mut has_result = false;
     let mut has_error = false;
-    for line in reader.lines() {
-        if let Ok(line) = line {
-            if jsonl_line_is_cancelled_result(&line) {
-                continue;
-            }
-            // Compact JSON from serde_json::json! uses no space after `:`.
-            if line.contains("\"type\":\"error\"") {
-                has_error = true;
-            }
-            if line.contains("\"type\":\"result\"") {
-                has_result = true;
-            }
+    let mut host_exited = false;
+    for line in lines {
+        if jsonl_line_is_cancelled_result(&line) {
+            continue;
+        }
+        if super::claude_host::host_marker_type(&line) == Some(super::claude_host::HOST_EXIT_TYPE) {
+            host_exited = true;
+            continue;
+        }
+        // Compact JSON from serde_json::json! uses no space after `:`.
+        if line.contains("\"type\":\"error\"") {
+            has_error = true;
+        }
+        if line.contains("\"type\":\"result\"") {
+            has_result = true;
         }
     }
-    has_result && !has_error
+    has_result && !has_error && (host_exited || !host_backed)
 }
 
 /// True when the run log ends in a Grok/Kimi cancel marker rather than success.

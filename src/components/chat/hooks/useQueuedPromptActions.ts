@@ -8,7 +8,13 @@ import {
   steerGrokTurn,
   steerOpencodeTurn,
   steerPiTurn,
+  steerClaudeTurn,
 } from '@/services/chat'
+import { preferencesQueryKeys } from '@/services/preferences'
+import { queryClient } from '@/lib/query-client'
+import { parseServerResourceKey } from '@/lib/server-resource'
+import { isSteerCapableBackend } from '@/lib/backend-auto-steer'
+import type { AppPreferences } from '@/types/preferences'
 import { buildMessageWithRefs } from '@/components/chat/message-with-refs'
 import { useChatStore } from '@/store/chat-store'
 import { logger } from '@/lib/logger'
@@ -42,9 +48,9 @@ function hasAttachments(msg: QueuedMessage): boolean {
  * "Send now" is backend-aware:
  * - Idle session: promote the message to the queue front and let the queue
  *   processor send it (reuses the existing atomic dequeue + send path).
- * - Busy Codex/Pi session: inject the text into the running turn via the
- *   backend steering API. Falls back to cancel+send when the turn already
- *   ended or the message has attachments.
+ * - Busy steer-capable session (Codex/OpenCode/Pi/Grok, or Claude when its
+ *   steer setting is on): inject the text into the running turn via the
+ *   backend steering API. Falls back to cancel+send when steering fails.
  * - Busy other backends: promote to front, cancel the current run — the
  *   queue processor auto-sends the promoted message once the session is idle.
  */
@@ -129,21 +135,29 @@ export function useQueuedPromptActions() {
         return
       }
 
-      // Busy Codex/OpenCode/Pi/Grok session: steer the running turn. All
-      // attachments become path refs via buildMessageWithRefs; Codex also gets
-      // structured attachment input when present.
+      // Busy steer-capable session (Codex/OpenCode/Pi/Grok, Claude when its
+      // steer setting is on): steer the running turn. All attachments become
+      // path refs via buildMessageWithRefs; Codex also gets structured
+      // attachment input when present. A prompt queued for a different
+      // backend is never steered into this run.
       const backend = store.selectedBackends[sessionId] ?? 'claude'
+      const preferences = queryClient.getQueryData<AppPreferences>(
+        preferencesQueryKeys.preferences(
+          parseServerResourceKey(worktreeId)?.serverId
+        )
+      )
+      const backendMatches = !msg.backend || msg.backend === backend
       if (
-        (backend === 'codex' ||
-          backend === 'opencode' ||
-          backend === 'pi' ||
-          backend === 'grok') &&
+        backendMatches &&
+        isSteerCapableBackend(backend, preferences) &&
         isSending
       ) {
         try {
           const steerMessage = buildMessageWithRefs(msg)
           if (backend === 'pi') {
             await steerPiTurn(worktreeId, sessionId, steerMessage)
+          } else if (backend === 'claude') {
+            await steerClaudeTurn(worktreeId, sessionId, steerMessage)
           } else if (backend === 'grok') {
             await steerGrokTurn(worktreeId, sessionId, steerMessage)
           } else if (backend === 'opencode') {

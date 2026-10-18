@@ -230,6 +230,17 @@ accumulating `PiResponse`. Both the batch parser (`parse_pi_json_stream_inner`)
 and the live streaming parser (`parse_pi_stream`) call it per line — never
 re-parse the whole accumulated buffer (avoids O(n²) on long sessions).
 
+#### Claude CLI Mid-Turn Steering (Detached Host)
+
+**Read this before changing Claude run spawning or `tail_claude_output`.**
+
+When `claude_auto_steer_enabled` is on (Unix only, CLI must list `--replay-user-messages`), Claude runs go through Jean's detached Claude host (`jean-core/src/chat/claude_host.rs`, argv `--jean-claude-host`) instead of `cat input | claude`. The host keeps Claude's stdin open and accepts `steer` requests on `<app_data>/r/c<sid8><run8>.sock` (`steer_claude_turn`).
+
+- The host drops the replayed initial prompt and rewrites replayed steers (`isReplay: true` user lines) as `steered_user_message`. Never parse replayed user lines elsewhere.
+- The host closes stdin on `result` only when no steer is pending, then writes `jean_claude_host_exit`. The tailer treats runs with `jean_claude_host_start` as host-backed and ends at the exit marker, not the first `result`.
+- `chat:steered` is emitted by the tailer when the CLI consumes the steer, not when the user sends it.
+- Details and limitations: `docs/developer/architecture-guide.md` → "Claude CLI mid-turn steering".
+
 #### Claude CLI JSON Schema Pattern
 
 **CRITICAL:** When using `--json-schema` with Claude CLI, structured output is returned via a tool call, not plain text.

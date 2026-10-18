@@ -239,15 +239,30 @@ export const agentsQueryKeys = {
     [...agentsQueryKeys.all, 'workdir', agentId] as const,
 }
 
-type RawAgentSummary = Omit<AgentSummary, 'serverId' | 'serverName'>
+type AgentRunKeys = 'backend' | 'model' | 'effort' | 'thinkingLevel' | 'skills'
+
+/** `list_agents` result. Older servers do not send the run configuration. */
+type RawAgentSummary = Omit<
+  AgentSummary,
+  'serverId' | 'serverName' | AgentRunKeys
+> &
+  Partial<Pick<AgentSummary, AgentRunKeys>>
 
 /** Tag an agent with its server; remote IDs become server-scoped keys so
  * commands and chat sessions route to that server. */
 export function scopeAgentSummary(
   serverId: string,
   serverName: string,
-  agent: RawAgentSummary
+  raw: RawAgentSummary
 ): AgentSummary {
+  const agent = {
+    ...raw,
+    backend: raw.backend ?? null,
+    model: raw.model ?? null,
+    effort: raw.effort ?? null,
+    thinkingLevel: raw.thinkingLevel ?? null,
+    skills: raw.skills ?? [],
+  }
   if (serverId === LOCAL_SERVER_ID) return { ...agent, serverId, serverName }
   const scope = (resourceId: string) =>
     serverResourceKey({ serverId, resourceId })
