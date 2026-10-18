@@ -39,6 +39,7 @@ export function AgentSettings({ agent }: { agent: AgentSummary }) {
       </div>
       <AgentRunFields
         idPrefix="agent-settings"
+        serverId={agent.serverId}
         value={draft}
         onChange={setDraft}
       />

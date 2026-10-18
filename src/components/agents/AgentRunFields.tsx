@@ -1,12 +1,10 @@
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from '@/components/ui/native-select'
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { useInstalledBackends } from '@/hooks/useInstalledBackends'
 import { useAllBackendSkills } from '@/services/skills'
 import type { CliBackend } from '@/types/preferences'
+import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import {
   backendChoices,
   effortOptionsForBackend,
@@ -22,6 +20,8 @@ interface AgentRunFieldsProps {
   value: AgentRunDraft
   onChange: (next: AgentRunDraft) => void
   idPrefix: string
+  /** Server that runs the agent */
+  serverId: string
 }
 
 function SelectField({
@@ -67,12 +67,22 @@ export function AgentRunFields({
   value,
   onChange,
   idPrefix,
+  serverId,
 }: AgentRunFieldsProps) {
+  // Installed backends and skill files are read on this machine. They do not
+  // apply to an agent that runs on a remote server.
+  const local = serverId === LOCAL_SERVER_ID
   const { installedBackends, isLoading } = useInstalledBackends()
-  const backends = backendChoices(installedBackends, value.backend, isLoading)
-  const skillBackend = value.backend
-    ? [value.backend as CliBackend]
-    : backends.map(option => option.value)
+  const backends = backendChoices(
+    local ? installedBackends : [],
+    value.backend,
+    isLoading
+  )
+  const skillBackend = !local
+    ? []
+    : value.backend
+      ? [value.backend as CliBackend]
+      : backends.map(option => option.value)
   const groups = useAllBackendSkills(undefined, skillBackend)
   const skills = skillChoices(groups, value.backend)
   const models = modelOptionsForBackend(value.backend)
@@ -84,7 +94,11 @@ export function AgentRunFields({
       <SelectField
         id={`${idPrefix}-backend`}
         label="Backend"
-        hint="Default uses the same backend as a new chat."
+        hint={
+          value.backend === 'cursor'
+            ? 'Cursor has no Build mode, so wake-ups run in Yolo mode without approval prompts.'
+            : 'Default uses the same backend as a new chat.'
+        }
         value={value.backend}
         options={backends}
         onChange={backend => onChange(withBackend(value, backend))}
@@ -97,7 +111,9 @@ export function AgentRunFields({
             ? 'Default uses your saved model for this backend.'
             : 'Choose a backend to pick a model.'
         }
-        value={models.some(option => option.value === value.model) ? value.model : ''}
+        value={
+          models.some(option => option.value === value.model) ? value.model : ''
+        }
         disabled={!value.backend}
         options={models}
         onChange={model => onChange({ ...value, model })}
@@ -107,7 +123,11 @@ export function AgentRunFields({
           id={`${idPrefix}-effort`}
           label="Effort"
           hint="Default leaves effort unset, the same as a new chat."
-          value={efforts.some(option => option.value === value.effort) ? value.effort : ''}
+          value={
+            efforts.some(option => option.value === value.effort)
+              ? value.effort
+              : ''
+          }
           options={efforts}
           onChange={effort => onChange({ ...value, effort })}
         />
@@ -128,7 +148,14 @@ export function AgentRunFields({
       )}
       <div className="space-y-1.5">
         <Label>Skills</Label>
-        {skills.length === 0 ? (
+        {!local ? (
+          <p className="text-xs text-muted-foreground">
+            Skills are listed only for agents on this machine.
+            {value.skills.length > 0
+              ? ` ${value.skills.length} saved skill${value.skills.length === 1 ? '' : 's'} stay selected.`
+              : ''}
+          </p>
+        ) : skills.length === 0 ? (
           <p className="text-xs text-muted-foreground">
             No skills discovered
             {value.backend ? ' for this backend' : ''}. Jean lists the skills
@@ -137,7 +164,9 @@ export function AgentRunFields({
         ) : (
           <div className="max-h-40 space-y-1 overflow-y-auto rounded-md border p-2">
             {skills.map(skill => {
-              const checked = value.skills.some(item => item.path === skill.path)
+              const checked = value.skills.some(
+                item => item.path === skill.path
+              )
               const inputId = `${idPrefix}-skill-${skill.path}`
               return (
                 <label
@@ -170,8 +199,8 @@ export function AgentRunFields({
           </div>
         )}
         <p className="text-xs text-muted-foreground">
-          Selected skills are added to the agent prompt and to each wake-up,
-          the same way a skill attached in chat is.
+          Selected skills are added to the agent prompt and to each wake-up, the
+          same way a skill attached in chat is.
         </p>
       </div>
     </div>

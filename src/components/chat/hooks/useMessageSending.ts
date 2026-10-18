@@ -11,6 +11,7 @@ import {
   steerGrokTurn,
   steerOpencodeTurn,
   steerPiTurn,
+  steerClaudeTurn,
 } from '@/services/chat'
 import { skillQueryKeys } from '@/services/skills'
 import { buildMcpConfigJson } from '@/services/mcp'
@@ -72,6 +73,7 @@ interface UseMessageSendingParams {
         opencode_auto_steer_enabled?: boolean
         pi_auto_steer_enabled?: boolean
         grok_auto_steer_enabled?: boolean
+        claude_auto_steer_enabled?: boolean
       }
     | undefined
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -623,7 +625,7 @@ export function useMessageSending({
         // Auto-steer: inject the prompt into a steer-capable running turn
         // instead of queueing. All attachment kinds (file @-mentions, skills,
         // pasted images, pasted text files) serialize to path refs via
-        // buildMessageWithRefs, so text-only steer backends (Grok/Pi/OpenCode)
+        // buildMessageWithRefs, so text-only steer backends (Grok/Pi/OpenCode/Claude)
         // can carry them. Codex additionally gets structured attachment input.
         // Steer failures (turn ended / not started yet) fall back to queue.
         const hasAttachments =
@@ -633,7 +635,7 @@ export function useMessageSending({
           skills.length > 0
         const backend = selectedBackendRef.current
         if (
-          isSteerCapableBackend(backend) &&
+          isSteerCapableBackend(backend, preferences) &&
           (options?.forceSteer ||
             isBackendAutoSteerEnabled(backend, preferences))
         ) {
@@ -641,6 +643,12 @@ export function useMessageSending({
             const steerMessage = buildMessageWithRefs(queuedMessage)
             if (backend === 'pi') {
               await steerPiTurn(activeWorktreeId, activeSessionId, steerMessage)
+            } else if (backend === 'claude') {
+              await steerClaudeTurn(
+                activeWorktreeId,
+                activeSessionId,
+                steerMessage
+              )
             } else if (backend === 'grok') {
               await steerGrokTurn(
                 activeWorktreeId,

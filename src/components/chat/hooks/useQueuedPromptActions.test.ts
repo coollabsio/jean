@@ -11,7 +11,10 @@ import {
   steerGrokTurn,
   steerOpencodeTurn,
   steerPiTurn,
+  steerClaudeTurn,
 } from '@/services/chat'
+import { queryClient } from '@/lib/query-client'
+import { preferencesQueryKeys } from '@/services/preferences'
 import type { QueuedMessage } from '@/types/chat'
 
 vi.mock('@/services/chat', () => ({
@@ -23,6 +26,7 @@ vi.mock('@/services/chat', () => ({
   steerGrokTurn: vi.fn().mockResolvedValue(undefined),
   steerOpencodeTurn: vi.fn().mockResolvedValue(undefined),
   steerPiTurn: vi.fn().mockResolvedValue(undefined),
+  steerClaudeTurn: vi.fn().mockResolvedValue(undefined),
 }))
 
 vi.mock('@/lib/logger', () => ({
@@ -56,6 +60,8 @@ describe('useQueuedPromptActions', () => {
     vi.mocked(steerGrokTurn).mockResolvedValue(undefined)
     vi.mocked(steerOpencodeTurn).mockResolvedValue(undefined)
     vi.mocked(steerPiTurn).mockResolvedValue(undefined)
+    vi.mocked(steerClaudeTurn).mockResolvedValue(undefined)
+    queryClient.removeQueries({ queryKey: preferencesQueryKeys.preferences() })
     useChatStore.setState({
       messageQueues: {
         'session-1': [
@@ -153,9 +159,9 @@ describe('useQueuedPromptActions', () => {
       'msg-1',
       'updated prompt'
     )
-    expect(useChatStore.getState().messageQueues['session-1']?.[0]?.message).toBe(
-      'updated prompt'
-    )
+    expect(
+      useChatStore.getState().messageQueues['session-1']?.[0]?.message
+    ).toBe('updated prompt')
   })
 
   it('idle session: promotes the message and force-processes the queue', async () => {
@@ -556,6 +562,108 @@ describe('useQueuedPromptActions', () => {
     expect(cancelChatMessage).toHaveBeenCalledWith('session-1', 'worktree-1')
   })
 
+  it('busy claude session with steering on: steers the running turn', async () => {
+    queryClient.setQueryData(preferencesQueryKeys.preferences(), {
+      claude_auto_steer_enabled: true,
+    })
+    useChatStore.setState({
+      sendingSessionIds: { 'session-1': true },
+      selectedBackends: { 'session-1': 'claude' },
+    })
+    const { result } = renderHook(() => useQueuedPromptActions())
+
+    await act(async () => {
+      await result.current.handleSendQueuedNow('session-1', 'msg-3')
+    })
+
+    expect(steerClaudeTurn).toHaveBeenCalledWith(
+      'worktree-1',
+      'session-1',
+      'prompt msg-3'
+    )
+    expect(cancelChatMessage).not.toHaveBeenCalled()
+    expect(
+      useChatStore.getState().messageQueues['session-1']?.map(m => m.id)
+    ).toEqual(['msg-1', 'msg-2'])
+  })
+
+  it('busy remote claude session: uses the remote server steer setting', async () => {
+    queryClient.setQueryData(preferencesQueryKeys.preferences(), {
+      claude_auto_steer_enabled: false,
+    })
+    queryClient.setQueryData(preferencesQueryKeys.preferences('remote-1'), {
+      claude_auto_steer_enabled: true,
+    })
+    useChatStore.setState({
+      sessionWorktreeMap: { 'session-1': 'remote-1:worktree-1' },
+      worktreePaths: { 'remote-1:worktree-1': '/tmp/worktree-1' },
+      sendingSessionIds: { 'session-1': true },
+      selectedBackends: { 'session-1': 'claude' },
+    })
+    const { result } = renderHook(() => useQueuedPromptActions())
+
+    await act(async () => {
+      await result.current.handleSendQueuedNow('session-1', 'msg-3')
+    })
+
+    expect(steerClaudeTurn).toHaveBeenCalledWith(
+      'remote-1:worktree-1',
+      'session-1',
+      'prompt msg-3'
+    )
+    expect(cancelChatMessage).not.toHaveBeenCalled()
+  })
+
+  it('busy claude session: steer failure falls back to promote + cancel', async () => {
+    queryClient.setQueryData(preferencesQueryKeys.preferences(), {
+      claude_auto_steer_enabled: true,
+    })
+    vi.mocked(steerClaudeTurn).mockRejectedValue(new Error('not steerable'))
+    useChatStore.setState({
+      sendingSessionIds: { 'session-1': true },
+      selectedBackends: { 'session-1': 'claude' },
+    })
+    const { result } = renderHook(() => useQueuedPromptActions())
+
+    await act(async () => {
+      await result.current.handleSendQueuedNow('session-1', 'msg-3')
+    })
+
+    expect(steerClaudeTurn).toHaveBeenCalled()
+    expect(
+      useChatStore.getState().messageQueues['session-1']?.map(m => m.id)
+    ).toEqual(['msg-3', 'msg-1', 'msg-2'])
+    expect(cancelChatMessage).toHaveBeenCalledWith('session-1', 'worktree-1')
+  })
+
+  it('busy claude session: does not steer a prompt queued for another backend', async () => {
+    queryClient.setQueryData(preferencesQueryKeys.preferences(), {
+      claude_auto_steer_enabled: true,
+    })
+    useChatStore.setState({
+      messageQueues: {
+        'session-1': [
+          createMessage('msg-1'),
+          createMessage('msg-2', { backend: 'codex' }),
+        ],
+      },
+      sendingSessionIds: { 'session-1': true },
+      selectedBackends: { 'session-1': 'claude' },
+    })
+    const { result } = renderHook(() => useQueuedPromptActions())
+
+    await act(async () => {
+      await result.current.handleSendQueuedNow('session-1', 'msg-2')
+    })
+
+    expect(steerClaudeTurn).not.toHaveBeenCalled()
+    expect(steerCodexTurn).not.toHaveBeenCalled()
+    expect(
+      useChatStore.getState().messageQueues['session-1']?.map(m => m.id)
+    ).toEqual(['msg-2', 'msg-1'])
+    expect(cancelChatMessage).toHaveBeenCalledWith('session-1', 'worktree-1')
+  })
+
   it('busy claude session: promotes to front and cancels the run', async () => {
     useChatStore.setState({
       sendingSessionIds: { 'session-1': true },
@@ -568,6 +676,7 @@ describe('useQueuedPromptActions', () => {
     })
 
     expect(steerCodexTurn).not.toHaveBeenCalled()
+    expect(steerClaudeTurn).not.toHaveBeenCalled()
     expect(
       useChatStore.getState().messageQueues['session-1']?.map(m => m.id)
     ).toEqual(['msg-3', 'msg-1', 'msg-2'])
