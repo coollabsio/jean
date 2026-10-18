@@ -41,6 +41,8 @@ const CARRY_OVER_CHARS: usize = 6000;
 /// Test override: `JEAN_AGENT_TASK_ARCHIVE_SECS`.
 const TASK_ARCHIVE_AFTER_SECS: i64 = 3 * 86_400;
 const TASK_DELETE_AFTER_SECS: i64 = 30 * 86_400;
+/// Timestamped session/archive event keys only dedup repeats of one emit.
+const EVENT_KEY_RETENTION_SECS: i64 = 86_400;
 const MAINTENANCE_INTERVAL_SECS: i64 = 60;
 static LAST_MAINTENANCE: AtomicI64 = AtomicI64::new(0);
 
@@ -143,8 +145,13 @@ fn on_run_ended(app: &AppHandle, session_id: &str, kind: &str, error: Option<&st
     // would loop: the routine's task (or the work it delegates) would finish
     // and wake the same routine.
     if let Some(trigger) = session_trigger_name(kind, agent_session || marked > 0) {
-        // A session runs many times. The second only dedups a repeated emit.
-        let key = format!("session:{session_id}:{kind}:{}", db::now());
+        // A session runs many times: key on the run that ended, so a repeated
+        // emit of one run dedups and the next run fires again.
+        let run_id = crate::chat::storage::load_metadata(app, session_id)
+            .ok()
+            .flatten()
+            .and_then(|metadata| metadata.runs.last().map(|run| run.run_id.clone()));
+        let key = session_event_key(session_id, kind, run_id.as_deref(), db::now());
         let context = match (kind, error) {
             ("error", Some(message)) => format!("Session {session_id} failed: {message}"),
             ("error", None) => format!("Session {session_id} failed."),
@@ -164,6 +171,19 @@ pub(crate) fn session_trigger_name(kind: &str, wakes_agent: bool) -> Option<&'st
         "done" => Some("session_finished"),
         "error" => Some("session_failed"),
         _ => None,
+    }
+}
+
+/// Dedup key of one ended run. Falls back to the clock when the run is unknown.
+pub(crate) fn session_event_key(
+    session_id: &str,
+    kind: &str,
+    run_id: Option<&str>,
+    at: i64,
+) -> String {
+    match run_id.filter(|id| !id.is_empty()) {
+        Some(run_id) => format!("session:{session_id}:{kind}:{run_id}"),
+        None => format!("session:{session_id}:{kind}:{at}"),
     }
 }
 
@@ -1071,6 +1091,8 @@ async fn maintenance(app: &AppHandle) -> Result<bool, String> {
         super::with_db(app, |conn| db::delete_task(conn, task.id))?;
         changed = true;
     }
+    let keys_before = db::now() - EVENT_KEY_RETENTION_SECS;
+    super::with_db(app, |conn| db::prune_event_keys(conn, keys_before))?;
     Ok(changed)
 }
 
@@ -1313,6 +1335,21 @@ mod tests {
         assert_eq!(session_trigger_name("error", false), Some("session_failed"));
         assert_eq!(session_trigger_name("done", true), None);
         assert_eq!(session_trigger_name("cancelled", false), None);
+    }
+
+    #[test]
+    fn session_event_key_uses_the_run_not_the_clock() {
+        let first = session_event_key("s", "done", Some("run-1"), 10);
+        assert_eq!(first, session_event_key("s", "done", Some("run-1"), 99));
+        assert_ne!(first, session_event_key("s", "done", Some("run-2"), 10));
+        assert_eq!(
+            session_event_key("s", "done", None, 10),
+            "session:s:done:10"
+        );
+        assert_eq!(
+            session_event_key("s", "done", Some(""), 10),
+            "session:s:done:10"
+        );
     }
 
     #[test]

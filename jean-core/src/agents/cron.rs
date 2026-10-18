@@ -14,8 +14,9 @@ use chrono_tz::Tz;
 
 /// Repeating schedules cannot run closer together than this.
 pub const MIN_SPACING_SECS: i64 = 300;
-const MAX_INTERVAL_SECS: i64 = 60 * 24 * 30;
-const SEARCH_MINUTES: i32 = 366 * 4 * 24 * 60;
+/// 30 days, the same limit as the MCP `delayMinutes` / `everyMinutes`.
+const MAX_INTERVAL_SECS: i64 = 60 * 60 * 24 * 30;
+const SEARCH_MINUTES: i64 = 366 * 4 * 24 * 60;
 
 /// A parsed 5-field cron expression.
 #[derive(Debug, Clone, PartialEq)]
@@ -175,9 +176,9 @@ fn parse_field_star(
                 if step == 0 {
                     return Err("Cron step must be 1 or more".to_string());
                 }
-                (range, step)
+                (range, Some(step))
             }
-            None => (part, 1),
+            None => (part, None),
         };
         let (start, end) = if range == "*" {
             (min, max)
@@ -188,8 +189,10 @@ fn parse_field_star(
             )
         } else {
             let value = parse_token(range, min, max, names)?;
-            (value, value)
+            // `N/step` means `N-max/step`, as in cronie.
+            (value, if step.is_some() { max } else { value })
         };
+        let step = step.unwrap_or(1);
         if start > end {
             return Err(format!("Cron range {start}-{end} is reversed"));
         }
@@ -275,7 +278,10 @@ fn next_run(expr: &CronExpr, after_unix: i64, tz: Tz) -> Result<i64, String> {
             local = overlap_start(&tz, local)?;
         }
     }
-    for _ in 0..SEARCH_MINUTES {
+    // Every step below moves `local` forward, so a wall-clock limit ends the
+    // search even when the fields never line up (for example February 31).
+    let limit = add_minutes(local, SEARCH_MINUTES)?;
+    while local <= limit {
         if !expr.months[local.month() as usize] {
             local = next_month_start(local, expr)?;
             continue;
@@ -508,6 +514,12 @@ mod tests {
         assert!(expr.dom[1] && expr.dom[7] && !expr.dom[8]);
         assert!(expr.months[1] && !expr.months[2]);
         assert!(expr.dow[1] && expr.dow[5] && !expr.dow[0]);
+        let from_zero = parse("0/15 * * * *").unwrap();
+        let minutes: Vec<usize> = (0..60).filter(|m| from_zero.minutes[*m]).collect();
+        assert_eq!(minutes, vec![0, 15, 30, 45]);
+        let from_ten = parse("0 10/6 * * *").unwrap();
+        let hours: Vec<usize> = (0..24).filter(|h| from_ten.hours[*h]).collect();
+        assert_eq!(hours, vec![10, 16, 22]);
         let sunday = parse("0 0 * * 7").unwrap();
         assert!(sunday.dow[0] && !sunday.dow[1]);
     }
@@ -520,6 +532,8 @@ mod tests {
         assert!(parse("10-1 * * * *").unwrap_err().contains("reversed"));
         assert!(parse("0 0 * * ?").unwrap_err().contains("'?'"));
         assert!(parse("0 0 * * NOPE").unwrap_err().contains("NOPE"));
+        let feb_31 = accept("0 0 31 2 *", Some("UTC"), 0).unwrap_err();
+        assert!(feb_31.contains("no run in the next 4 years"), "{feb_31}");
         assert!(parse_timezone("Not/AZone")
             .unwrap_err()
             .contains("Unknown timezone"));
