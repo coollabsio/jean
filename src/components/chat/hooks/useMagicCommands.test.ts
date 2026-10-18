@@ -109,13 +109,17 @@ describe('useMagicCommands review comments batch', () => {
           command: 'review-comments',
           prompts: ['prompt one', 'prompt two'],
           executionMode: 'plan',
+          override: { backend: 'codex', model: 'gpt-6.1-sol' },
         },
       })
     )
 
     expect(handlers.handleReviewComments).toHaveBeenCalledWith(
       ['prompt one', 'prompt two'],
-      { executionMode: 'plan' }
+      {
+        executionMode: 'plan',
+        override: { backend: 'codex', model: 'gpt-6.1-sol' },
+      }
     )
   })
 
@@ -124,13 +128,17 @@ describe('useMagicCommands review comments batch', () => {
       command: 'review-comments',
       prompts: ['pending one', 'pending two'],
       executionMode: 'plan',
+      override: { backend: 'codex', model: 'gpt-6.1-sol' },
     })
 
     const handlers = renderUseMagicCommands()
 
     expect(handlers.handleReviewComments).toHaveBeenCalledWith(
       ['pending one', 'pending two'],
-      { executionMode: 'plan' }
+      {
+        executionMode: 'plan',
+        override: { backend: 'codex', model: 'gpt-6.1-sol' },
+      }
     )
   })
 })
