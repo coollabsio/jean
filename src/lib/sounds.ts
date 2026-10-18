@@ -12,6 +12,7 @@
  */
 
 import {
+  type AppPreferences,
   type NotificationSound,
   notificationSoundOptions,
 } from '../types/preferences'
@@ -189,6 +190,19 @@ export function playNotificationSound(
       if (requestId !== playRequestId) return
       playFallbackBeep(ctx, sound)
     })
+}
+
+/**
+ * Play the configured "session needs input" sound.
+ *
+ * `useStreamingEvents.ts` inlines the same mapping: its test file mocks this
+ * module and asserts on `playNotificationSound` directly, so routing it through
+ * here would hide the sound name those assertions check.
+ */
+export function playWaitingSound(prefs: AppPreferences | undefined): void {
+  playNotificationSound((prefs?.waiting_sound ?? 'none') as NotificationSound, {
+    webAccessSoundsEnabled: prefs?.web_access_sounds_enabled ?? true,
+  })
 }
 
 /**

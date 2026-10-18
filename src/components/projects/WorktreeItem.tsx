@@ -1,4 +1,5 @@
 import { memo, useCallback, useState, useRef, useEffect, useMemo } from 'react'
+import type { MouseEvent } from 'react'
 import { StatusIndicator } from '@/components/ui/status-indicator'
 import type { IndicatorStatus } from '@/components/ui/status-indicator'
 import { ArrowDownUp, ChevronDown } from '@/components/icons/reicon'
@@ -15,6 +16,7 @@ import { useWorktreeMenuActions } from './useWorktreeMenuActions'
 import { CloseWorktreeDialog } from '@/components/chat/CloseWorktreeDialog'
 import { useSessionArchive } from '@/components/chat/hooks/useSessionArchive'
 import { middleClickClose } from '@/lib/middle-click'
+import { hasCloseConfirmBypassModifier } from '@/lib/confirm-bypass'
 import {
   decideWorktreeMiddleClose,
   decideSessionMiddleClose,
@@ -51,7 +53,7 @@ interface WorktreeSessionListProps {
   isSelected: boolean
   isNarrowSidebar: boolean
   onSessionSelect: (sessionId: string) => void
-  onSessionMiddleClose: (session: Session) => void
+  onSessionMiddleClose: (session: Session, e: MouseEvent) => void
 }
 
 /**
@@ -130,8 +132,8 @@ const WorktreeSessionList = memo(function WorktreeSessionList({
                     e.stopPropagation()
                     onSessionSelect(card.session.id)
                   }}
-                  {...middleClickClose(() =>
-                    onSessionMiddleClose(card.session)
+                  {...middleClickClose(e =>
+                    onSessionMiddleClose(card.session, e)
                   )}
                 >
                   <StatusIndicator
@@ -519,21 +521,33 @@ export const WorktreeItem = memo(function WorktreeItem({
 
   // Middle-click closes the worktree, mirroring the canvas/session-tab close —
   // including the confirmation dialog when `confirm_session_close` is enabled.
-  const handleWorktreeMiddleClose = useCallback(() => {
-    if (
-      decideWorktreeMiddleClose(preferences?.confirm_session_close) ===
-      'confirm'
-    ) {
-      setCloseConfirm({ mode: 'worktree' })
-    } else {
-      handleArchiveOrClose()
-    }
-  }, [preferences?.confirm_session_close, handleArchiveOrClose])
+  const handleWorktreeMiddleClose = useCallback(
+    (e: MouseEvent) => {
+      if (
+        decideWorktreeMiddleClose(
+          preferences?.confirm_session_close,
+          hasCloseConfirmBypassModifier(
+            e,
+            preferences?.close_confirm_bypass_modifier
+          )
+        ) === 'confirm'
+      ) {
+        setCloseConfirm({ mode: 'worktree' })
+      } else {
+        handleArchiveOrClose()
+      }
+    },
+    [
+      preferences?.confirm_session_close,
+      preferences?.close_confirm_bypass_modifier,
+      handleArchiveOrClose,
+    ]
+  )
 
   // Middle-click on a conversation row deletes it, mirroring the session-tab
   // middle-click: validate only when removing the last session of the worktree.
   const handleSessionMiddleClose = useCallback(
-    (session: Session) => {
+    (session: Session, e: MouseEvent) => {
       // The row is rendered from sessionsData, so the count is reliable here.
       const activeSessionCount = (sessionsData?.sessions ?? []).filter(
         s => !s.archived_at
@@ -545,6 +559,10 @@ export const WorktreeItem = memo(function WorktreeItem({
           useChatStore.getState().inputDrafts
         ),
         confirmSessionClose: preferences?.confirm_session_close,
+        bypassConfirm: hasCloseConfirmBypassModifier(
+          e,
+          preferences?.close_confirm_bypass_modifier
+        ),
       })
       if (decision === 'confirm') {
         setCloseConfirm({ mode: 'session', sessionId: session.id })
@@ -556,6 +574,7 @@ export const WorktreeItem = memo(function WorktreeItem({
       sessionsData?.sessions,
       handleDeleteSession,
       preferences?.confirm_session_close,
+      preferences?.close_confirm_bypass_modifier,
     ]
   )
 

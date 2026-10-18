@@ -19,13 +19,18 @@ import type {
   WorktreeSessions,
 } from '@/types/chat'
 import type { RecentWorktreeItem, ReviewJob } from '@/types/projects'
-import { isSessionCurrentlyViewed } from '@/lib/session-notifications'
+import {
+  isSessionCurrentlyViewed,
+  notifySessionNeedsAttention,
+} from '@/lib/session-notifications'
 import { markSessionOpenedWhenSeen } from '@/lib/session-read'
 import { disposeTerminal, startHeadless } from '@/lib/terminal-instances'
 import { toast } from 'sonner'
 import { useCommandContext } from './use-command-context'
 import { useLatestRef } from './useLatestRef'
-import { usePreferences } from '@/services/preferences'
+import { usePreferences, preferencesQueryKeys } from '@/services/preferences'
+import type { AppPreferences } from '@/types/preferences'
+import { playWaitingSound } from '@/lib/sounds'
 import { logger } from '@/lib/logger'
 import {
   eventToShortcutString,
@@ -35,6 +40,11 @@ import {
   type KeybindingsMap,
 } from '@/types/keybindings'
 import { installWindowKeyboardFocusRestore } from '@/lib/restore-keyboard-focus'
+import {
+  stripShortcutModifier,
+  type CloseSessionOrWorktreeDetail,
+} from '@/lib/confirm-bypass'
+import type { CloseConfirmBypassModifier } from '@/types/preferences'
 import { useIsMobile } from '@/hooks/use-mobile'
 
 const PLAN_DIALOG_APPROVAL_ACTIONS = new Set<KeybindingAction>([
@@ -139,6 +149,31 @@ export function findKeybindingAction(
   }
 
   return null
+}
+
+/**
+ * Resolve a shortcut to an action, honoring the close-confirmation bypass
+ * modifier. The held modifier serializes into a different shortcut string
+ * (e.g. `mod+shift+w` vs `mod+w`), so when the raw string matches nothing we
+ * strip the configured modifier and retry — but accept the retry ONLY for the
+ * close action, or a held modifier could shadow unrelated bindings.
+ */
+export function resolveShortcutWithBypass(
+  shortcut: string,
+  keybindings: KeybindingsMap,
+  bypassModifier: CloseConfirmBypassModifier | undefined
+): { matchedAction: KeybindingAction | null; bypassConfirm: boolean } {
+  const direct = findKeybindingAction(shortcut, keybindings)
+  if (direct) return { matchedAction: direct, bypassConfirm: false }
+
+  const stripped = stripShortcutModifier(shortcut, bypassModifier)
+  const candidate = stripped
+    ? findKeybindingAction(stripped, keybindings)
+    : null
+  if (candidate === 'close_session_or_worktree') {
+    return { matchedAction: candidate, bypassConfirm: true }
+  }
+  return { matchedAction: null, bypassConfirm: false }
 }
 
 export function useWindowKeyboardFocusRestore() {
@@ -336,6 +371,46 @@ export function applySessionRenamedToCaches(
   )
 }
 
+/**
+ * Apply a native-terminal lifecycle event to the chat store.
+ *
+ * Terminal sessions have no run transcript, so these events are the only thing
+ * driving their status: `working` on prompt submit, `attention` when the CLI
+ * finishes or asks for permission, `idle` when the CLI exits but the terminal
+ * stays open. Attention mirrors `chat:done` — sound always, OS banner unless the
+ * user is already looking at this session.
+ */
+export function applyTerminalLifecycleEvent(
+  kind: 'working' | 'idle' | 'attention',
+  payload: { sessionId?: string } | undefined,
+  queryClient: QueryClient
+): void {
+  const sessionId = payload?.sessionId
+  if (!sessionId) return
+
+  const store = useChatStore.getState()
+  if (kind === 'working') {
+    store.addSendingSession(sessionId)
+    store.setWaitingForInput(sessionId, false)
+    return
+  }
+
+  store.removeSendingSession(sessionId)
+  store.setWaitingForInput(sessionId, kind === 'attention')
+  if (kind !== 'attention') return
+
+  const prefs = queryClient.getQueryData<AppPreferences>(
+    preferencesQueryKeys.preferences()
+  )
+  playWaitingSound(prefs)
+  if (prefs?.desktop_notifications_enabled === false) return
+  notifySessionNeedsAttention(
+    sessionId,
+    'Needs your input',
+    queryClient.getQueryData<Session>(chatQueryKeys.session(sessionId))?.name
+  )
+}
+
 export function shouldAllowKeybindingThroughOpenOverlay(
   action: KeybindingAction | null,
   uiState: ReturnType<typeof useUIStore.getState>
@@ -484,7 +559,8 @@ export function switchActiveTerminalTabByIndexForShortcut(
 function executeKeybindingAction(
   action: KeybindingAction,
   commandContext: ReturnType<typeof useCommandContext>,
-  queryClient: QueryClient
+  queryClient: QueryClient,
+  bypassConfirm = false
 ) {
   // Canvas-only actions: blocked when the session chat modal is open
   const CANVAS_ONLY_ACTIONS = new Set<KeybindingAction>([
@@ -696,7 +772,12 @@ function executeKeybindingAction(
       if (closeActiveTerminalTabForShortcut()) break
       // Default: close session/worktree
       logger.debug('Keybinding: close_session_or_worktree')
-      window.dispatchEvent(new CustomEvent('close-session-or-worktree'))
+      window.dispatchEvent(
+        new CustomEvent<CloseSessionOrWorktreeDetail>(
+          'close-session-or-worktree',
+          { detail: { bypassConfirm } }
+        )
+      )
       break
     }
     case 'new_worktree':
@@ -894,6 +975,11 @@ export function useMainWindowEventListeners() {
   // Keep keybindings in a ref so the event handler always has the latest
   const keybindingsRef = useRef<KeybindingsMap>(DEFAULT_KEYBINDINGS)
 
+  // Modifier that, held with the close shortcut, skips the confirmation dialog.
+  const bypassModifierRef = useRef<CloseConfirmBypassModifier | undefined>(
+    undefined
+  )
+
   // Update ref when preferences change
   useEffect(() => {
     keybindingsRef.current = {
@@ -901,6 +987,10 @@ export function useMainWindowEventListeners() {
       ...(preferences?.keybindings ?? {}),
     }
   }, [preferences?.keybindings])
+
+  useEffect(() => {
+    bypassModifierRef.current = preferences?.close_confirm_bypass_modifier
+  }, [preferences?.close_confirm_bypass_modifier])
 
   // After alt-tab / OS window reactivation, WebViews often leave the document
   // without keyboard focus until a click. Restore the last focused element
@@ -938,7 +1028,11 @@ export function useMainWindowEventListeners() {
       if (isPlainSessionTerminalFocused()) return
 
       const keybindings = keybindingsRef.current
-      const matchedAction = findKeybindingAction(shortcut, keybindings)
+      const { matchedAction, bypassConfirm } = resolveShortcutWithBypass(
+        shortcut,
+        keybindings,
+        bypassModifierRef.current
+      )
 
       // Cmd/Ctrl+Enter is also the chat input's explicit steer shortcut. The
       // global approve-plan binding runs in capture phase, so it must yield or
@@ -1023,7 +1117,11 @@ export function useMainWindowEventListeners() {
             addTerminalTabForShortcut()
             return
           }
-          if (shortcut === kb.close_session_or_worktree) {
+          // Match the resolved action, not the raw shortcut string: with the
+          // bypass modifier held the string is e.g. `mod+shift+w`, which the
+          // strip-and-retry above already mapped to this action. Comparing the
+          // raw string would miss it and the `else` below would swallow the key.
+          if (matchedAction === 'close_session_or_worktree') {
             e.preventDefault()
             e.stopPropagation()
             closeActiveTerminalTabForShortcut()
@@ -1125,7 +1223,12 @@ export function useMainWindowEventListeners() {
         }
         e.preventDefault()
         e.stopPropagation()
-        executeKeybindingAction(action, commandContextRef.current, queryClient)
+        executeKeybindingAction(
+          action,
+          commandContextRef.current,
+          queryClient,
+          bypassConfirm
+        )
         return
       }
     }
@@ -1137,24 +1240,17 @@ export function useMainWindowEventListeners() {
         listen<RunEnvironmentStartedEvent>('run-environment:started', event =>
           handleRunEnvironmentStarted(event.payload)
         ),
-        listen<{ sessionId: string }>('terminal:working', event => {
-          const sessionId = event.payload?.sessionId
-          if (!sessionId) return
-          const store = useChatStore.getState()
-          store.addSendingSession(sessionId)
-          // Mirror chat turn start: clear waiting so the session shows as running.
-          store.setWaitingForInput(sessionId, false)
-        }),
+        listen<{ sessionId: string }>('terminal:working', event =>
+          applyTerminalLifecycleEvent('working', event.payload, queryClient)
+        ),
 
-        listen<{ sessionId: string }>('terminal:attention', event => {
-          const sessionId = event.payload?.sessionId
-          if (!sessionId) return
-          const store = useChatStore.getState()
-          store.removeSendingSession(sessionId)
-          // Mirror chat:done waiting so canvas/list badges update before sessions
-          // cache invalidation lands (terminal sessions have no run transcript).
-          store.setWaitingForInput(sessionId, true)
-        }),
+        listen<{ sessionId: string }>('terminal:idle', event =>
+          applyTerminalLifecycleEvent('idle', event.payload, queryClient)
+        ),
+
+        listen<{ sessionId: string }>('terminal:attention', event =>
+          applyTerminalLifecycleEvent('attention', event.payload, queryClient)
+        ),
 
         // Review jobs have no chat run, so mirror chat:done read handling:
         // a review that finishes on screen must not show as unread.
