@@ -59,6 +59,10 @@ import {
 } from '@/services/chat'
 import { resolveBackendCliPath } from '@/services/cli-binary'
 import { usePreferences } from '@/services/preferences'
+import {
+  hasCloseConfirmBypassModifier,
+  readCloseBypassDetail,
+} from '@/lib/confirm-bypass'
 import { parseServerResourceKey } from '@/lib/server-resource'
 import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import { usePackageScripts, type PackageScript } from '@/services/projects'
@@ -320,6 +324,7 @@ export const SessionChatModal = memo(function SessionChatModal({
   const showSessionTabs = tabSessions.length > 0 || !!currentSessionId
   const serverId = parseServerResourceKey(worktreeId)?.serverId
   const { data: preferences } = usePreferences(serverId)
+  const bypassModifier = preferences?.close_confirm_bypass_modifier
   const { data: packageScripts = [] } = usePackageScripts(worktreePath)
   const modalTerminalDockMode = useTerminalStore(
     state => state.modalTerminalDockMode
@@ -591,7 +596,11 @@ export const SessionChatModal = memo(function SessionChatModal({
   // Close (delete or archive per removal behavior) or explicitly archive a
   // session tab, asking for confirmation first.
   const removeSessionTab = useCallback(
-    (session: Session, archive = false) => {
+    (
+      session: Session,
+      options: { archive?: boolean; bypassConfirm?: boolean } = {}
+    ) => {
+      const { archive = false, bypassConfirm = false } = options
       const activeSessions = tabSessions.filter(s => !s.archived_at)
       const sessionIsEmpty = isSessionEmpty(
         session,
@@ -602,7 +611,9 @@ export const SessionChatModal = memo(function SessionChatModal({
       // without a prompt (issue #56). Empty sessions (no messages and no
       // unsent draft) close immediately.
       const needsConfirm =
-        preferences?.confirm_session_close !== false && !sessionIsEmpty
+        !bypassConfirm &&
+        preferences?.confirm_session_close !== false &&
+        !sessionIsEmpty
 
       const action = () => {
         if (activeSessions.length > 1) {
@@ -639,22 +650,30 @@ export const SessionChatModal = memo(function SessionChatModal({
       if (e.button !== 1) return
       e.preventDefault()
       e.stopPropagation()
-      removeSessionTab(session)
+      removeSessionTab(session, {
+        bypassConfirm: hasCloseConfirmBypassModifier(e, bypassModifier),
+      })
     },
-    [removeSessionTab]
+    [removeSessionTab, bypassModifier]
   )
 
   useEffect(() => {
     if (!isOpen) return
     const handler = (e: Event) => {
       e.stopImmediatePropagation()
+      const bypassConfirm = readCloseBypassDetail(e)
       const activeSessions = tabSessions.filter(s => !s.archived_at)
       if (activeSessions.length === 0) {
-        setCloseConfirmMode('worktree')
-        pendingCloseAction.current = () => {
+        const closeWorktree = () => {
           onRequestCloseWorktree()
           onClose()
         }
+        if (bypassConfirm) {
+          closeWorktree()
+          return
+        }
+        setCloseConfirmMode('worktree')
+        pendingCloseAction.current = closeWorktree
         setCloseConfirmOpen(true)
         return
       }
@@ -672,7 +691,11 @@ export const SessionChatModal = memo(function SessionChatModal({
       const sessionIsEmpty =
         !currentSession ||
         isSessionEmpty(currentSession, useChatStore.getState().inputDrafts)
-      if (preferences?.confirm_session_close !== false && !sessionIsEmpty) {
+      if (
+        !bypassConfirm &&
+        preferences?.confirm_session_close !== false &&
+        !sessionIsEmpty
+      ) {
         setCloseConfirmMode('session')
         pendingCloseAction.current = action
         setCloseConfirmOpen(true)
@@ -1356,7 +1379,13 @@ export const SessionChatModal = memo(function SessionChatModal({
                                 tooltip={'Remove session'}
                                 onClick={e => {
                                   e.stopPropagation()
-                                  removeSessionTab(session)
+                                  removeSessionTab(session, {
+                                    bypassConfirm:
+                                      hasCloseConfirmBypassModifier(
+                                        e,
+                                        bypassModifier
+                                      ),
+                                  })
                                 }}
                                 className="ml-0.5 opacity-60 sm:opacity-0 sm:group-hover/tab:opacity-60 hover:!opacity-100"
                                 size="xs"
@@ -1438,7 +1467,9 @@ export const SessionChatModal = memo(function SessionChatModal({
                           </ContextMenuItem>
                           <ContextMenuSeparator />
                           <ContextMenuItem
-                            onSelect={() => removeSessionTab(session, true)}
+                            onSelect={() =>
+                              removeSessionTab(session, { archive: true })
+                            }
                           >
                             <Archive className="mr-2 h-4 w-4" />
                             Archive Session

@@ -301,14 +301,35 @@ Additional systems (no dedicated docs yet):
   terminal session from the session-tab context menu; the original chat session
   remains unchanged.
 
-  **Codex terminal attention.** Full-screen Codex terminals receive a
-  session-scoped `notify` override for the official `agent-turn-complete`
-  event. Jean tails that notification file, persists the Codex thread id and
-  terminal activity timestamp, marks the session waiting, invalidates session
-  caches, and emits `terminal:attention`. Submitting terminal input clears the
-  waiting state. The backing Jean `sessionId` must therefore be carried through
+  **Terminal attention.** Full-screen Codex and Claude terminals report their
+  turn lifecycle into a terminal-scoped signal file
+  (`<app_data>/terminal-notifications/{terminal}.jsonl`, one NDJSON line per
+  event — keyed by terminal, not session, because the tailer thread that deletes
+  the file lives and dies with its terminal). Codex gets a `notify` override for
+  the official `agent-turn-complete`
+  event; Claude gets `UserPromptSubmit` / `Stop` / `StopFailure` / `Notification`
+  (`permission_prompt|worker_permission_prompt` — plain-word matchers are exact,
+  not regex) / `SessionEnd` hooks injected as inline `--settings`
+  JSON, so the user's own `~/.claude/settings.json` is never touched. Jean tails
+  the file, persists the Codex thread id and terminal activity timestamp, flips
+  the session between working, waiting, and idle, invalidates session caches,
+  and emits `terminal:working` / `terminal:attention` / `terminal:idle`.
+  Attention also plays the configured waiting sound and fires an OS banner,
+  matching `chat:done`; `terminal:idle` (the CLI is gone) silently clears both
+  flags. The tailer emits one final `terminal:idle` when its terminal
+  disappears, whatever ended the CLI — Codex has no session-end event to report
+  with, and submitting `/exit` itself counts as terminal input, so without it a
+  quit Codex session stays pinned to "in progress". In Codex terminals, Enter
+  clears the waiting state and marks the session working (Codex has no
+  prompt-submit event). Claude terminals ignore Enter, because Enter also
+  confirms dialogs, menus, and local slash commands that start no turn; there a
+  lone Esc or Ctrl-C settles the session to idle, because `Stop` does not fire
+  on an interrupt. The backing Jean `sessionId` must therefore be carried through
   terminal creation, native-session reconnect, frontend terminal persistence,
-  `start_terminal`, and both native/WebSocket transports.
+  `start_terminal`, and both native/WebSocket transports. Terminals opened in an
+  *external* OS terminal cannot be instrumented and stay idle. Only the CLI
+  Jean itself launches is instrumented; one the user starts *by hand* in that
+  terminal carries no hook and does not report.
 
   **Web-mode persistence.** In web access (Axum HTTP server + WebSocket),
   panel/side/drawer and modal terminals survive a full browser refresh. Three

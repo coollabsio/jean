@@ -548,6 +548,12 @@ const sectionEntries: PreferenceSearchEntry[] = [
     sectionTitle: 'General',
     keywords: [
       'confirm before closing',
+      'skip confirmation',
+      'skip close confirmation',
+      'shift close',
+      'no confirm',
+      'close session',
+      'bypass modifier',
       'close original session',
       'removal behavior',
       'auto-archive',

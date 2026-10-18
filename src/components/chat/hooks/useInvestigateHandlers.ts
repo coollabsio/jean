@@ -908,20 +908,28 @@ export function useInvestigateHandlers({
   const handleReviewComments = useCallback(
     async (
       promptOrPrompts: string | string[],
-      options?: { executionMode?: ExecutionMode }
+      options?: {
+        executionMode?: ExecutionMode
+        override?: InvestigateOverride
+      }
     ) => {
       const worktreeId = activeWorktreeIdRef.current
       const worktreePath = activeWorktreePathRef.current
       if (!worktreeId || !worktreePath) return
 
+      const override = options?.override
       const reviewCommentsModel =
+        override?.model ??
         preferences?.magic_prompt_models?.review_comments_model ??
         selectedModelRef.current
-      const reviewCommentsProvider = resolveMagicPromptProvider(
-        preferences?.magic_prompt_providers,
-        'review_comments_provider',
-        preferences?.default_provider
-      )
+      const reviewCommentsProvider =
+        override?.backend && override.backend !== 'claude'
+          ? null
+          : resolveMagicPromptProvider(
+              preferences?.magic_prompt_providers,
+              'review_comments_provider',
+              preferences?.default_provider
+            )
       const { customProfileName: resolvedProfile } = resolveCustomProfile(
         reviewCommentsModel,
         reviewCommentsProvider
@@ -933,11 +941,13 @@ export function useInvestigateHandlers({
       const useAdaptive =
         !isCustom && supportsAdaptiveThinking(reviewCommentsModel, cliVersion)
       const reviewCommentsBackend =
+        override?.backend ??
         resolveMagicPromptBackend(
           preferences?.magic_prompt_backends,
           'review_comments_backend',
           defaultBackend
-        ) ?? resolveBackend(reviewCommentsModel)
+        ) ??
+        resolveBackend(reviewCommentsModel)
 
       const prompts = Array.isArray(promptOrPrompts)
         ? promptOrPrompts.filter(prompt => prompt.trim().length > 0)

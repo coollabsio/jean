@@ -1,12 +1,24 @@
-import { memo, type ReactNode } from 'react'
+import { memo, useEffect, useState, type ReactNode } from 'react'
 import { AlertCircle, X } from '@/components/icons/reicon'
 import { openExternal } from '@/lib/platform'
+import { formatCompactDuration } from '@/lib/usage-format'
 
 interface ErrorBannerProps {
   /** The error message to display */
   error: string
   /** Callback when user dismisses the error */
   onDismiss: () => void
+  /**
+   * When set, the error is a usage/rate limit with a known reset time.
+   * Renders the "Auto-continue when limit resets" control.
+   */
+  onAutoContinue?: () => void
+  /** Cancel an armed auto-continue. */
+  onCancelAutoContinue?: () => void
+  /** Whether auto-continue is currently armed for this session. */
+  isAutoResumeArmed?: boolean
+  /** Reset time (epoch ms) for the countdown; null when unknown. */
+  limitResetAtMs?: number | null
 }
 
 const URL_REGEX = /(https?:\/\/[^\s<>"'`)]+[^\s<>"'`).,;:!?])/g
@@ -44,11 +56,34 @@ function renderWithLinks(text: string): ReactNode {
 export const ErrorBanner = memo(function ErrorBanner({
   error,
   onDismiss,
+  onAutoContinue,
+  onCancelAutoContinue,
+  isAutoResumeArmed = false,
+  limitResetAtMs = null,
 }: ErrorBannerProps) {
   const lower = error.toLowerCase()
   const isCredits =
     lower.includes('insufficient balance') || lower.includes('creditserror')
   const title = isCredits ? 'Out of credits' : 'Request failed'
+
+  // Live-tick the countdown once a second while a reset time is shown.
+  const [now, setNow] = useState(() => Date.now())
+  const showsAutoContinue = isAutoResumeArmed || !!onAutoContinue
+  useEffect(() => {
+    if (!showsAutoContinue || limitResetAtMs == null) return
+    setNow(Date.now())
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [showsAutoContinue, limitResetAtMs])
+
+  const countdown = (() => {
+    if (limitResetAtMs == null) return null
+    const diffMs = limitResetAtMs - now
+    if (diffMs <= 0) return null
+    // Under a minute, show a real seconds countdown (not "<1m").
+    if (diffMs < 60_000) return `${Math.ceil(diffMs / 1000)}s`
+    return formatCompactDuration(diffMs)
+  })()
 
   return (
     <div className="mx-auto max-w-7xl px-4 pb-2 md:px-6">
@@ -64,6 +99,36 @@ export const ErrorBanner = memo(function ErrorBanner({
               Top up your OpenCode workspace, or switch to a different
               provider/model in the toolbar.
             </p>
+          )}
+          {isAutoResumeArmed ? (
+            <div className="mt-2 flex items-center gap-2 text-xs">
+              <span className="text-destructive/80">
+                {countdown
+                  ? `Auto-continuing in ${countdown}`
+                  : 'Auto-continuing shortly'}
+              </span>
+              {onCancelAutoContinue && (
+                <button
+                  type="button"
+                  onClick={onCancelAutoContinue}
+                  className="rounded border border-destructive/30 px-2 py-0.5 font-medium hover:bg-destructive/20"
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
+          ) : (
+            onAutoContinue && (
+              <button
+                type="button"
+                onClick={onAutoContinue}
+                className="mt-2 rounded border border-destructive/30 px-2 py-0.5 text-xs font-medium hover:bg-destructive/20"
+              >
+                {countdown
+                  ? `Auto-continue when limit resets (in ${countdown})`
+                  : 'Auto-continue when limit resets'}
+              </button>
+            )
           )}
         </div>
         <button
