@@ -6,6 +6,7 @@ import {
   agentRunPatch,
   draftFromAgent,
   sameAgentRun,
+  shouldSyncAgentDraft,
   type AgentRunDraft,
 } from './agent-config'
 import { AgentRunFields } from './AgentRunFields'
@@ -16,7 +17,7 @@ export function AgentSettings({ agent }: { agent: AgentSummary }) {
   const saved = draftFromAgent(agent)
   const [draft, setDraft] = useState<AgentRunDraft>(saved)
   const [seen, setSeen] = useState<AgentRunDraft>(saved)
-  if (!sameAgentRun(seen, saved) && sameAgentRun(draft, seen)) {
+  if (shouldSyncAgentDraft(seen, draft, saved)) {
     setDraft(saved)
     setSeen(saved)
   }

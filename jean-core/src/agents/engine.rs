@@ -224,7 +224,7 @@ async fn tick(app: &AppHandle) -> Result<(), String> {
     }
     let fired = super::with_db(app, |conn| db::fire_due_schedules(conn, db::now()))?;
     changed |= !fired.is_empty();
-    let agents = super::with_db(app, db::agents_with_pending_events)?;
+    let agents = super::with_db(app, |conn| db::agents_with_pending_events(conn))?;
     for agent_id in agents {
         changed |= deliver(app, &agent_id).await?;
     }
@@ -1020,7 +1020,7 @@ fn task_title_for(kind: &str) -> &'static str {
 /// Rotate long idle chats and archive or delete old task sessions.
 async fn maintenance(app: &AppHandle) -> Result<bool, String> {
     let mut changed = false;
-    for agent in super::with_db(app, db::list_agents)? {
+    for agent in super::with_db(app, |conn| db::list_agents(conn))? {
         if !agent.paused {
             changed |= rotate_chat_if_long(app, &agent).await.unwrap_or_else(|e| {
                 log::warn!("[Agents] chat rotation of {} failed: {e}", agent.id);

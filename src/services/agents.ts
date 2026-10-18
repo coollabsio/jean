@@ -167,6 +167,20 @@ export interface AgentMemory {
   expiresAt: number | null
 }
 
+export interface AgentChange {
+  id: number
+  actorAgentId: string
+  targetAgentId: string
+  /** create | update | delete | revert | schedule_create | schedule_update | schedule_cancel */
+  action: string
+  summary: string
+  before: Record<string, unknown> | null
+  after: Record<string, unknown> | null
+  sessionId: string | null
+  createdAt: number
+  revertedChangeId: number | null
+}
+
 export interface AgentDetails {
   delegations: AgentDelegation[]
   schedules: AgentSchedule[]
@@ -174,6 +188,8 @@ export interface AgentDetails {
   memories: AgentMemory[]
   tasks: AgentTask[]
   notifications: AgentNotification[]
+  /** Self-management audit, newest first. */
+  changes: AgentChange[]
 }
 
 export interface AgentPatch {
@@ -377,6 +393,13 @@ export function useUpdateAgent() {
 export function useDeleteAgent() {
   return useAgentsMutation((args: { agentId: string }) =>
     invoke<null>('delete_agent', args)
+  )
+}
+
+export function useRevertAgentChange() {
+  return useAgentsMutation(
+    ({ agentId, changeId }: { agentId: string; changeId: number }) =>
+      invokeAgent<AgentChange>(agentId, 'revert_agent_change', { changeId })
   )
 }
 

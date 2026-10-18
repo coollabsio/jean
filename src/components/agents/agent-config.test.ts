@@ -9,6 +9,7 @@ import {
   EMPTY_AGENT_RUN,
   modelOptionsForBackend,
   sameAgentRun,
+  shouldSyncAgentDraft,
   skillChoices,
   thinkingOptionsForBackend,
   toggleSkill,
@@ -196,5 +197,15 @@ describe('agent run patch and summary', () => {
       })
     ).toBe(true)
     expect(sameAgentRun(saved, { ...saved, model: 'gpt-5.5' })).toBe(false)
+  })
+
+  it('adopts a server settings change only when the form is untouched', () => {
+    const seen = draft({ backend: 'codex' })
+    const saved = draft({ backend: 'claude', model: 'sonnet' })
+    expect(shouldSyncAgentDraft(seen, seen, saved)).toBe(true)
+    expect(shouldSyncAgentDraft(seen, draft({ backend: 'codex', effort: 'high' }), saved)).toBe(
+      false
+    )
+    expect(shouldSyncAgentDraft(saved, saved, saved)).toBe(false)
   })
 })

@@ -411,9 +411,14 @@ pub fn run_approved_tool(
     args: Value,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, String>> + Send>> {
     Box::pin(async move {
-        run_tool(&app, &name, args, "agent-approval")
-            .await
-            .map_err(|e| e.message)
+        run_tool(
+            &app,
+            &name,
+            args,
+            crate::agents::mcp::APPROVED_REPLAY_SOURCE,
+        )
+        .await
+        .map_err(|e| e.message)
     })
 }
 

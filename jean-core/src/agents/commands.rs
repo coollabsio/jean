@@ -50,10 +50,12 @@ pub struct AgentDetails {
     pub memories: Vec<db::Memory>,
     pub tasks: Vec<db::Task>,
     pub notifications: Vec<db::Notification>,
+    /// Self-management audit, newest first. Includes changes this agent made.
+    pub changes: Vec<db::AgentChange>,
 }
 
 pub async fn list_agents(app: &AppHandle) -> Result<Vec<AgentSummary>, String> {
-    let agents = super::with_db(app, db::list_agents)?;
+    let agents = super::with_db(app, |conn| db::list_agents(conn))?;
     let mut out = Vec::with_capacity(agents.len());
     for agent in agents {
         let home_with_path = super::engine::home_session(app, &agent).await.ok();
@@ -152,6 +154,7 @@ pub fn get_agent_details(app: &AppHandle, agent_id: &str) -> Result<AgentDetails
             memories: db::list_memories(conn, agent_id)?,
             tasks: db::list_tasks(conn, agent_id, 50)?,
             notifications: db::list_notifications(conn, agent_id, 30)?,
+            changes: db::list_agent_changes(conn, agent_id, 30)?,
         })
     })
 }
@@ -171,18 +174,25 @@ pub async fn create_agent(
     config: db::AgentRunConfig,
 ) -> Result<db::Agent, String> {
     let agent = super::with_db(app, |conn| {
-        db::create_agent(conn, name, description, icon, role_prompt, &config)
+        super::self_manage::create_for_actor(
+            conn,
+            None,
+            None,
+            &super::self_manage::CreateInput {
+                name: name.to_string(),
+                description: description.to_string(),
+                icon: icon.to_string(),
+                role_prompt: role_prompt.to_string(),
+                config,
+                paused: false,
+                schedules: Vec::new(),
+            },
+        )
     })?;
     // The home chat is created on first list. Stamp it now so the toolbar
     // shows this agent's backend and model before the user sends a message.
-    if let Err(e) = super::engine::home_session(app, &agent).await {
-        log::warn!(
-            "[Agents] could not prepare home session for {}: {e}",
-            agent.id
-        );
-    }
+    settle_agent_update(app, &agent, false, true).await;
     super::notify_changed(app);
-    super::notify_sessions(app);
     Ok(agent)
 }
 
@@ -192,9 +202,30 @@ pub async fn update_agent(
     patch: db::AgentPatch,
 ) -> Result<db::Agent, String> {
     let pausing = patch.paused == Some(true);
-    let agent = super::with_db(app, |conn| db::update_agent(conn, agent_id, &patch))?;
-    if patch.changes_run_config() {
-        if let Err(e) = super::engine::home_session(app, &agent).await {
+    let run_config = patch.changes_run_config();
+    let agent = super::with_db(app, |conn| {
+        super::self_manage::apply_actor_update(
+            conn,
+            super::self_manage::USER_ACTOR,
+            None,
+            agent_id,
+            &patch,
+        )
+    })?;
+    settle_agent_update(app, &agent, pausing, run_config).await;
+    super::notify_changed(app);
+    Ok(agent)
+}
+
+/// Stamp an empty home chat, and cancel a running turn when the agent is paused.
+pub(crate) async fn settle_agent_update(
+    app: &AppHandle,
+    agent: &db::Agent,
+    pausing: bool,
+    run_config_changed: bool,
+) {
+    if run_config_changed {
+        if let Err(e) = super::engine::home_session(app, agent).await {
             log::warn!(
                 "[Agents] could not update home session for {}: {e}",
                 agent.id
@@ -204,7 +235,9 @@ pub async fn update_agent(
     }
     // Stop: cancel the agent's running turn. Its queue and schedules wait.
     if pausing {
-        let path = super::agent_workdir(app, agent_id)?;
+        let Ok(path) = super::agent_workdir(app, &agent.id) else {
+            return;
+        };
         if let Ok(sessions) =
             crate::chat::get_sessions(app.clone(), agent.worktree_id.clone(), path, None, None)
                 .await
@@ -213,7 +246,7 @@ pub async fn update_agent(
                 if crate::chat::registry::is_session_actively_managed(&session.id) {
                     let _ = crate::chat::cancel_chat_message(
                         app.clone(),
-                        session.id.clone(),
+                        session.id,
                         agent.worktree_id.clone(),
                     )
                     .await;
@@ -221,14 +254,28 @@ pub async fn update_agent(
             }
         }
     }
-    super::notify_changed(app);
-    Ok(agent)
 }
 
 pub fn delete_agent(app: &AppHandle, agent_id: &str) -> Result<(), String> {
-    super::with_db(app, |conn| db::delete_agent(conn, agent_id))?;
+    super::with_db(app, |conn| {
+        super::self_manage::apply_actor_delete(conn, super::self_manage::USER_ACTOR, None, agent_id)
+    })?;
     super::notify_changed(app);
     Ok(())
+}
+
+pub async fn revert_agent_change(
+    app: &AppHandle,
+    change_id: i64,
+) -> Result<db::AgentChange, String> {
+    let change = super::with_db(app, |conn| {
+        super::self_manage::revert_change(conn, super::self_manage::USER_ACTOR, None, change_id)
+    })?;
+    if let Some(agent) = super::with_db(app, |conn| db::get_agent(conn, &change.target_agent_id))? {
+        settle_agent_update(app, &agent, false, true).await;
+    }
+    super::notify_changed(app);
+    Ok(change)
 }
 
 pub async fn decide_approval(

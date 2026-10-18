@@ -16,6 +16,27 @@ pub const MAX_MEMORY_CHARS: usize = 1000;
 /// Most active schedules one agent can hold.
 pub const MAX_SCHEDULES_PER_AGENT: i64 = 50;
 
+/// v5: audit log for agent self-management. Its own step so a later rebase
+/// can renumber it without editing v1–v4.
+const fn migration_v5_agent_self_management() -> &'static str {
+    r#"
+    CREATE TABLE agent_changes (
+        id INTEGER PRIMARY KEY,
+        actor_agent_id TEXT NOT NULL,
+        target_agent_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        before_json TEXT,
+        after_json TEXT,
+        summary TEXT NOT NULL,
+        session_id TEXT,
+        created_at INTEGER NOT NULL,
+        reverted_change_id INTEGER
+    );
+    CREATE INDEX agent_changes_target ON agent_changes(target_agent_id, id);
+    CREATE INDEX agent_changes_created ON agent_changes(action, created_at);
+    "#
+}
+
 const MIGRATIONS: &[&str] = &[
     // v1
     r#"
@@ -171,6 +192,7 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (schedule_id, event_key)
     );
     "#,
+    migration_v5_agent_self_management(),
 ];
 
 const JEAN_ROLE_PROMPT: &str = "You are Jean, the coordinator agent of the Jean app. You are the boss of all the user's projects.
@@ -697,6 +719,179 @@ pub fn delete_agent(conn: &Connection, id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Insert an agent row from a stored snapshot (revert of a delete).
+/// The id and worktree are kept. Built-in agents are not recreated.
+pub fn insert_agent_snapshot(conn: &Connection, agent: &Agent) -> Result<Agent, String> {
+    if agent.builtin {
+        return Err("Built-in agents cannot be recreated".to_string());
+    }
+    if get_agent(conn, &agent.id)?.is_some() {
+        return Err(format!("Agent {} already exists", agent.id));
+    }
+    let ts = now();
+    conn.execute(
+        "INSERT INTO agents (id, name, description, icon, role_prompt, worktree_id, paused,
+         max_wakes_per_hour, builtin, backend, model, effort, thinking_level, skills, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, ?9, ?10, ?11, ?12, ?13, ?14, ?14)",
+        params![
+            agent.id,
+            agent.name,
+            agent.description,
+            agent.icon,
+            agent.role_prompt,
+            agent.worktree_id,
+            agent.paused as i64,
+            agent.max_wakes_per_hour,
+            agent.backend,
+            agent.model,
+            agent.effort,
+            agent.thinking_level,
+            skills_json(&agent.skills)?,
+            ts
+        ],
+    )
+    .map_err(err)?;
+    get_agent(conn, &agent.id)?.ok_or_else(|| "Agent snapshot was not restored".to_string())
+}
+
+pub fn count_user_agents(conn: &Connection) -> Result<i64, String> {
+    conn.query_row("SELECT COUNT(*) FROM agents WHERE builtin=0", [], |row| {
+        row.get(0)
+    })
+    .map_err(err)
+}
+
+/// One audited self-management change. `before` / `after` are JSON snapshots.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentChange {
+    pub id: i64,
+    pub actor_agent_id: String,
+    pub target_agent_id: String,
+    pub action: String,
+    pub summary: String,
+    pub before: Option<Value>,
+    pub after: Option<Value>,
+    pub session_id: Option<String>,
+    pub created_at: i64,
+    /// The change this row undid, when `action` is `revert`.
+    pub reverted_change_id: Option<i64>,
+}
+
+const AGENT_CHANGE_COLUMNS: &str = "id, actor_agent_id, target_agent_id, action, before_json, after_json, summary, session_id, created_at, reverted_change_id";
+
+fn json_opt(raw: Option<String>) -> Option<Value> {
+    raw.and_then(|text| serde_json::from_str(&text).ok())
+}
+
+fn agent_change_from_row(row: &rusqlite::Row) -> rusqlite::Result<AgentChange> {
+    let before: Option<String> = row.get(4)?;
+    let after: Option<String> = row.get(5)?;
+    Ok(AgentChange {
+        id: row.get(0)?,
+        actor_agent_id: row.get(1)?,
+        target_agent_id: row.get(2)?,
+        action: row.get(3)?,
+        summary: row.get(6)?,
+        before: json_opt(before),
+        after: json_opt(after),
+        session_id: row.get(7)?,
+        created_at: row.get(8)?,
+        reverted_change_id: row.get(9)?,
+    })
+}
+
+pub struct NewAgentChange<'a> {
+    pub actor_agent_id: &'a str,
+    pub target_agent_id: &'a str,
+    pub action: &'a str,
+    pub summary: &'a str,
+    pub before_json: Option<String>,
+    pub after_json: Option<String>,
+    pub session_id: Option<&'a str>,
+    pub reverted_change_id: Option<i64>,
+    pub created_at: i64,
+}
+
+pub fn insert_agent_change(
+    conn: &Connection,
+    change: &NewAgentChange<'_>,
+) -> Result<AgentChange, String> {
+    conn.execute(
+        "INSERT INTO agent_changes (
+            actor_agent_id, target_agent_id, action, before_json, after_json, summary,
+            session_id, created_at, reverted_change_id
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            change.actor_agent_id,
+            change.target_agent_id,
+            change.action,
+            change.before_json,
+            change.after_json,
+            change.summary,
+            change.session_id,
+            change.created_at,
+            change.reverted_change_id
+        ],
+    )
+    .map_err(err)?;
+    get_agent_change(conn, conn.last_insert_rowid())?
+        .ok_or_else(|| "Agent change was not stored".to_string())
+}
+
+pub fn get_agent_change(conn: &Connection, id: i64) -> Result<Option<AgentChange>, String> {
+    conn.query_row(
+        &format!("SELECT {AGENT_CHANGE_COLUMNS} FROM agent_changes WHERE id=?1"),
+        [id],
+        agent_change_from_row,
+    )
+    .optional()
+    .map_err(err)
+}
+
+pub fn latest_agent_change(
+    conn: &Connection,
+    target_agent_id: &str,
+) -> Result<Option<AgentChange>, String> {
+    conn.query_row(
+        &format!(
+            "SELECT {AGENT_CHANGE_COLUMNS} FROM agent_changes
+             WHERE target_agent_id=?1 ORDER BY id DESC LIMIT 1"
+        ),
+        [target_agent_id],
+        agent_change_from_row,
+    )
+    .optional()
+    .map_err(err)
+}
+
+pub fn list_agent_changes(
+    conn: &Connection,
+    agent_id: &str,
+    limit: i64,
+) -> Result<Vec<AgentChange>, String> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {AGENT_CHANGE_COLUMNS} FROM agent_changes
+             WHERE target_agent_id=?1 OR actor_agent_id=?1
+             ORDER BY id DESC LIMIT ?2"
+        ))
+        .map_err(err)?;
+    let rows = stmt
+        .query_map(params![agent_id, limit], agent_change_from_row)
+        .map_err(err)?;
+    rows.collect::<Result<_, _>>().map_err(err)
+}
+
+pub fn count_creates_since(conn: &Connection, since: i64) -> Result<i64, String> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM agent_changes WHERE action='create' AND created_at>=?1",
+        [since],
+        |row| row.get(0),
+    )
+    .map_err(err)
+}
+
 // ============================================================================
 // Delegations
 // ============================================================================
@@ -1008,7 +1203,7 @@ pub const EVENT_TRIGGERS: &[&str] = &[
 /// Repeating intervals cannot be shorter than the cron spacing floor.
 pub const MIN_INTERVAL_SECS: i64 = super::cron::MIN_SPACING_SECS;
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Schedule {
     pub id: i64,
@@ -1324,6 +1519,26 @@ pub fn list_schedules(conn: &Connection, agent_id: &str) -> Result<Vec<Schedule>
         .map_err(err)?;
     let rows = stmt.query_map([agent_id], schedule_from_row).map_err(err)?;
     rows.collect::<Result<_, _>>().map_err(err)
+}
+
+/// Turn a cancelled schedule back on. Fails when it is missing or the agent
+/// is already at the active-schedule cap.
+pub fn reactivate_schedule(conn: &Connection, agent_id: &str, id: i64) -> Result<Schedule, String> {
+    if active_schedule_count(conn, agent_id)? >= MAX_SCHEDULES_PER_AGENT {
+        return Err(format!(
+            "Too many active schedules ({MAX_SCHEDULES_PER_AGENT}). Cancel one first."
+        ));
+    }
+    let changed = conn
+        .execute(
+            "UPDATE schedules SET active=1 WHERE id=?1 AND agent_id=?2 AND active=0",
+            params![id, agent_id],
+        )
+        .map_err(err)?;
+    if changed == 0 {
+        return Err(format!("No cancelled schedule #{id}"));
+    }
+    get_schedule(conn, agent_id, id)?.ok_or_else(|| format!("No schedule #{id}"))
 }
 
 /// Returns false when no active schedule of this agent has that ID.
@@ -2795,7 +3010,7 @@ mod tests {
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, super::MIGRATIONS.len() as i64);
         let schedules = list_schedules(&conn, JEAN_AGENT_ID).unwrap();
         assert_eq!(schedules.len(), 2);
         assert!(schedules.iter().all(|schedule| schedule.cron.is_none()

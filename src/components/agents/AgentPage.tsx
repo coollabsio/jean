@@ -138,7 +138,9 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
         <AgentIcon icon={agent.icon} className="size-9 shrink-0" />
         <div className="min-w-0 flex-1">
           <h1 className="flex items-baseline gap-2 text-base font-semibold leading-tight text-foreground">
-            <span className="truncate">{agent.name}</span>
+            <span className="truncate" data-testid="agent-header-name">
+              {agent.name}
+            </span>
             <span
               className={cn(
                 'shrink-0 text-xs font-normal',

@@ -264,3 +264,65 @@ debug builds their poll frames are large enough to overflow tokio's default
 separate function and call it through `Box::pin(...)`, as the agents commands
 do. All entry points use `jean_core::build_tokio_runtime()` (8 MiB worker
 stacks).
+
+## Self-management
+
+An agent can change itself, and Jean can change any agent, through MCP.
+Migration v5 (`migration_v5_agent_self_management` in `agents/db.rs`) adds
+`agent_changes`. Do not edit v1–v4. A later stack may renumber this step.
+
+| Tool | Who can run it immediately | Otherwise |
+|---|---|---|
+| `agent_list` | Any agent. Other agents' instructions and skills are omitted. | |
+| `agent_update` | The agent itself, or Jean (any agent). Fields: name, description, instructions, color, backend, model, effort, thinking level, skills, paused. | Updating a different agent stores an approval. The Activity tab shows it. Nothing is written until the user approves. |
+| `agent_create` | Any agent, within the caps below. Optional `schedules` use the same timing fields as `schedule_create`. | |
+| `agent_delete` | Jean, for any agent except itself. | Every other delete, including deleting yourself, waits for approval. Built-in agents are refused, not queued. |
+| `agent_revert` | Jean, for anyone. Another agent, for its own latest change, except undoing its own creation (that deletes it). | Those deletes wait for approval. |
+| `schedule_*` | The calling agent's own schedules, as before. Each change is audited. | Schedules of another agent stay on that agent's tools. |
+
+Jean is the built-in coordinator (`builtin`, id `jean`). The user, through the
+Agents UI, follows Jean's rule: create, update, and delete apply immediately
+and are audited with actor `user`.
+
+### No privilege escalation
+
+A created agent, and an update of a different agent, cannot be given more than
+the actor has right now:
+
+- Backend and model must match the actor, or stay unset. Keeping the target's
+  current value is allowed.
+- Effort and thinking cannot rank above the actor's. Unset means no grant.
+  Ranks: effort `off < adaptive < minimal < low < medium < high < xhigh < max < ultracode`;
+  thinking `off < adaptive < think < megathink < ultrathink`.
+- A skill can be added only when the actor already has that path. Skills the
+  target already has can stay.
+- The new agent's `max_wakes_per_hour` is clamped to the actor's. Jean is not
+  clamped and can set any valid config.
+
+An agent may raise its own effort, model, backend, or skills. Children created
+after that are capped at the new values. `max_wakes_per_hour` is not an MCP
+field, so an agent cannot raise its own wake budget.
+
+### Caps
+
+20 user-created agents (Jean is not counted). 5 creates per rolling hour.
+The hourly count is `agent_changes` rows with `action = 'create'`, so deleting
+an agent does not free the hour. Reverting a delete also checks both caps.
+UI creates share the same counters.
+
+### Audit and revert
+
+Every create, update, delete, and schedule change stores `before` and `after`
+JSON and a one-line summary. The Activity tab lists them (newest first) for
+the agent and for changes it made. Revert applies the `before` snapshot of the
+latest change for that agent:
+
+- update → previous fields
+- create → delete (schedules go with the agent)
+- delete → insert the snapshot again
+- schedule create → cancel; cancel → reactivate; update → previous schedule
+
+Only that latest change can be reverted. Revert writes its own audit row, so
+reverting again undoes the revert. The Agents list, header, and settings form
+refresh from `cache:invalidate` key `agents`. Settings keep a draft the user
+is editing; an untouched form takes the server values.
