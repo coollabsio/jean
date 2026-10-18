@@ -78,6 +78,16 @@ missing field for "leave it", JSON `null` for "clear back to the default", and
 IPC calls that same function via `dispatch_core_command`; there is no separate
 `generate_handler!` entry for agent commands.
 
+In the UI, `AgentRunFields` edits these fields for the New agent dialog, the
+Settings tab, and subagent types. It reuses the chat toolbar's
+`DesktopBackendModelPicker` and `ReasoningLevelDropdown`, so agents and chats
+pick backends, models, effort, and thinking the same way. Each picker has a
+**Default** entry (`AGENT_DEFAULT_OPTION`); the draft stores it as an empty
+string and `agentRunPatch` sends `null`. "Use default" clears the backend and
+every override. Agent tabs share layout pieces from
+`src/components/agents/agent-ui.tsx` (section headers, bordered lists, empty
+states, badges, save footers).
+
 The engine applies the fields in three places:
 
 - New task sessions and rotated chats are created with the agent's backend.
