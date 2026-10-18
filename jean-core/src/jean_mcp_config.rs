@@ -188,6 +188,24 @@ impl JeanMcpEntry {
     pub fn kimi_snippet(&self) -> String {
         self.claude_snippet()
     }
+
+    /// Muse Code: `mcp_servers.<name>` in `~/.config/muse/settings.json`.
+    pub fn muse_server_json(&self) -> serde_json::Value {
+        json!({
+            "transport": "stdio",
+            "command": self.command,
+            "args": [JEAN_MCP_STDIO_ARG],
+            "env": self.env(),
+            "enabled": true,
+        })
+    }
+
+    pub fn muse_snippet(&self) -> String {
+        serde_json::to_string_pretty(&json!({
+            "mcp_servers": { self.server_name.clone(): self.muse_server_json() }
+        }))
+        .unwrap_or_default()
+    }
 }
 
 #[derive(Serialize)]
@@ -336,6 +354,7 @@ pub async fn install_jean_mcp_config_impl(
             "grok".to_string(),
             "kimi".to_string(),
             "antigravity".to_string(),
+            "muse".to_string(),
         ]
     });
 
@@ -349,6 +368,7 @@ pub async fn install_jean_mcp_config_impl(
             "grok" => install_grok(&entry),
             "kimi" => install_kimi(&entry),
             "antigravity" => install_antigravity(&entry),
+            "muse" => install_muse(&entry),
             other => Err(format!("Unsupported MCP config backend: {other}")),
         };
         results.push(match result {
@@ -426,6 +446,34 @@ fn install_antigravity_at(
     entry: &JeanMcpEntry,
 ) -> Result<(PathBuf, Option<PathBuf>), String> {
     install_jsonc_server(path, "mcpServers", entry, JeanMcpEntry::claude_server_json)
+}
+
+fn install_muse(entry: &JeanMcpEntry) -> Result<(PathBuf, Option<PathBuf>), String> {
+    let path =
+        crate::muse_cli::settings_path().ok_or_else(|| "Home directory unavailable".to_string())?;
+    install_muse_at(path, entry)
+}
+
+/// Muse refuses a settings.json without `schema_version`, so seed it first.
+fn install_muse_at(
+    path: PathBuf,
+    entry: &JeanMcpEntry,
+) -> Result<(PathBuf, Option<PathBuf>), String> {
+    ensure_muse_settings_file(&path)?;
+    install_jsonc_server(path, "mcp_servers", entry, JeanMcpEntry::muse_server_json)
+}
+
+pub(crate) fn ensure_muse_settings_file(path: &Path) -> Result<(), String> {
+    let target = crate::platform::resolve_write_target(path)?;
+    if read_optional(&target)?.trim().is_empty() {
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create {}: {e}", parent.display()))?;
+        }
+        std::fs::write(&target, "{\n  \"schema_version\": 1\n}\n")
+            .map_err(|e| format!("Failed to write {}: {e}", target.display()))?;
+    }
+    Ok(())
 }
 
 fn install_jsonc_server(
@@ -544,6 +592,48 @@ fn find_opencode_config_path(home: &Path) -> Option<PathBuf> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod muse_tests {
+    use super::*;
+
+    #[test]
+    fn installs_jean_server_in_muse_settings_with_schema_version() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("muse").join("settings.json");
+        let entry = JeanMcpEntry {
+            mode: JeanMcpInstallMode::Prod,
+            server_name: "jean".to_string(),
+            command: "/opt/jean".to_string(),
+            socket: "/tmp/jean.sock".to_string(),
+            token: "secret".to_string(),
+        };
+
+        install_muse_at(path.clone(), &entry).expect("install");
+
+        let parsed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(parsed["schema_version"], 1);
+        let server = &parsed["mcp_servers"]["jean"];
+        assert_eq!(server["transport"], "stdio");
+        assert_eq!(server["command"], "/opt/jean");
+        assert_eq!(server["args"], json!([JEAN_MCP_STDIO_ARG]));
+        assert_eq!(server["enabled"], true);
+        assert_eq!(server["env"][JEAN_MCP_TOKEN_ENV], "secret");
+
+        std::fs::write(
+            &path,
+            r#"{"schema_version":1,"provider":"meta","mcp_servers":{"other":{"transport":"stdio","command":"x"}}}"#,
+        )
+        .unwrap();
+        install_muse_at(path.clone(), &entry).expect("reinstall");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(parsed["provider"], "meta");
+        assert_eq!(parsed["mcp_servers"]["other"]["command"], "x");
+        assert_eq!(parsed["mcp_servers"]["jean"]["command"], "/opt/jean");
+    }
 }
 
 #[cfg(test)]

@@ -28,6 +28,7 @@ describe('getSessionProviderDisplayName', () => {
     expect(getSessionProviderDisplayName('grok', null)).toBe('xAI')
     expect(getSessionProviderDisplayName('kimi', null)).toBe('Kimi Code')
     expect(getSessionProviderDisplayName('antigravity', null)).toBe('Google')
+    expect(getSessionProviderDisplayName('muse', null)).toBe('Meta')
   })
 
   it('shows custom Codex provider names when selected', () => {

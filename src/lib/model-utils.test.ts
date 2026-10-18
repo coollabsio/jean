@@ -20,6 +20,11 @@ describe('getModelImpliedBackend', () => {
   it('treats raw GPT model ids as Codex', () => {
     expect(getModelImpliedBackend('gpt-5.5')).toBe('codex')
   })
+
+  it('treats muse/ model ids as Muse', () => {
+    expect(getModelImpliedBackend('muse/default')).toBe('muse')
+    expect(resolveBackend('muse/muse-spark-1.2')).toBe('muse')
+  })
 })
 
 describe('isGeminiModel', () => {

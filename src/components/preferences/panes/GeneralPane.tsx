@@ -196,6 +196,7 @@ import {
   OPENCODE_MODEL_OPTIONS,
   PI_MODEL_OPTIONS,
   KIMI_EFFORT_LEVEL_OPTIONS,
+  MUSE_EFFORT_LEVEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
 import {
   formatCursorModelLabel,
@@ -1214,7 +1215,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     )
   const buildReasoningRaw =
     getCatalogModelReasoning(modelCatalog, effectiveBuildBackend, buildModel) ??
-    (['codex', 'opencode', 'pi', 'grok', 'kimi'].includes(effectiveBuildBackend)
+    (['codex', 'opencode', 'pi', 'grok', 'kimi', 'muse'].includes(
+      effectiveBuildBackend
+    )
       ? {
           type: 'effort' as const,
           default: 'high',
@@ -1223,7 +1226,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               ? codexReasoningOptions
               : effectiveBuildBackend === 'kimi'
                 ? KIMI_EFFORT_LEVEL_OPTIONS
-                : effortLevelOptions,
+                : effectiveBuildBackend === 'muse'
+                  ? MUSE_EFFORT_LEVEL_OPTIONS
+                  : effortLevelOptions,
         }
       : null)
   const buildReasoning = buildReasoningRaw
@@ -1234,7 +1239,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     : null
   const yoloReasoningRaw =
     getCatalogModelReasoning(modelCatalog, effectiveYoloBackend, yoloModel) ??
-    (['codex', 'opencode', 'pi', 'grok', 'kimi'].includes(effectiveYoloBackend)
+    (['codex', 'opencode', 'pi', 'grok', 'kimi', 'muse'].includes(
+      effectiveYoloBackend
+    )
       ? {
           type: 'effort' as const,
           default: 'high',
@@ -1243,7 +1250,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               ? codexReasoningOptions
               : effectiveYoloBackend === 'kimi'
                 ? KIMI_EFFORT_LEVEL_OPTIONS
-                : effortLevelOptions,
+                : effectiveYoloBackend === 'muse'
+                  ? MUSE_EFFORT_LEVEL_OPTIONS
+                  : effortLevelOptions,
         }
       : null)
   const yoloReasoning = yoloReasoningRaw

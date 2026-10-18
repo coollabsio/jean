@@ -6,16 +6,17 @@ import {
 } from '@/components/ui/backend-label'
 
 describe('backend labels', () => {
-  it('marks only Antigravity as beta in plain labels', () => {
+  it('marks Antigravity and Muse as beta in plain labels', () => {
     expect(getBackendPlainLabel('cursor')).toBe('Cursor')
     expect(getBackendPlainLabel('pi')).toBe('PI')
     expect(getBackendPlainLabel('commandcode')).toBe('Command Code')
     expect(getBackendPlainLabel('grok')).toBe('Grok')
     expect(getBackendPlainLabel('kimi')).toBe('Kimi Code')
+    expect(getBackendPlainLabel('muse')).toBe('Muse (Beta)')
     expect(getBackendPlainLabel('antigravity')).toBe('Antigravity CLI (Beta)')
   })
 
-  it('renders the beta badge only on Antigravity', () => {
+  it('renders the beta badge only on Antigravity and Muse', () => {
     const { rerender } = render(<BackendLabel backend="cursor" />)
 
     expect(screen.getByText('Cursor')).toBeInTheDocument()
@@ -35,6 +36,11 @@ describe('backend labels', () => {
 
     expect(screen.getByText('Kimi Code')).toBeInTheDocument()
     expect(screen.queryByText('Beta')).toBeNull()
+
+    rerender(<BackendLabel backend="muse" />)
+
+    expect(screen.getByText('Muse')).toBeInTheDocument()
+    expect(screen.getByText('Beta')).toBeInTheDocument()
 
     rerender(<BackendLabel backend="antigravity" />)
 

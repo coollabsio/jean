@@ -22,6 +22,7 @@ import {
   getNewServersToAutoEnable,
   useAllBackendsMcpHealth,
   groupServersByBackend,
+  isAutoLoadedMcpBackend,
   mcpKey,
   migrateLegacyMcpKeys,
 } from '@/services/mcp'
@@ -276,11 +277,13 @@ export const McpServersPane: React.FC = () => {
                       id={`mcp-${backend}-${server.name}`}
                       checked={
                         !server.disabled &&
-                        (backend === 'antigravity' ||
+                        (isAutoLoadedMcpBackend(backend) ||
                           enabledServersSet.has(mcpKey(backend, server.name)))
                       }
                       onCheckedChange={() => handleToggle(backend, server.name)}
-                      disabled={server.disabled || backend === 'antigravity'}
+                      disabled={
+                        server.disabled || isAutoLoadedMcpBackend(backend)
+                      }
                     />
                     <Label
                       htmlFor={`mcp-${backend}-${server.name}`}
@@ -314,7 +317,7 @@ export const McpServersPane: React.FC = () => {
                     <span className="text-xs text-muted-foreground">
                       {server.disabled
                         ? 'disabled'
-                        : backend === 'antigravity'
+                        : isAutoLoadedMcpBackend(backend)
                           ? 'automatic'
                           : server.scope}
                     </span>

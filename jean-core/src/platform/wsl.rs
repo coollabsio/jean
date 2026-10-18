@@ -269,7 +269,7 @@ pub(crate) struct CliLaunchPlan {
 ///   any argument containing CR/LF ("batch file arguments are invalid").
 ///
 /// Jean's agent backends pass whole chat prompts and pretty-printed JSON
-/// schemas as arguments (`chat/pi.rs`, `chat/cursor.rs`, `chat/antigravity.rs`,
+/// schemas as arguments (`chat/pi.rs`, `chat/cursor.rs`, `chat/antigravity.rs`, `chat/muse.rs`,
 /// `chat/naming.rs`), and on Windows those CLIs are npm `.cmd` shims — for
 /// example `pi_cli::config::CLI_BINARY_NAME` is `pi.cmd`. Those callers need
 /// `CmdWrap` or they cannot spawn at all. The npm/npx flows pass only package

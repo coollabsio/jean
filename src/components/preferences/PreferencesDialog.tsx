@@ -59,6 +59,7 @@ import { CommandCodeIcon } from '@/components/icons/CommandCodeIcon'
 import { GrokIcon } from '@/components/icons/GrokIcon'
 import { KimiIcon } from '@/components/icons/KimiIcon'
 import { AntigravityIcon } from '@/components/icons/AntigravityIcon'
+import { MuseIcon } from '@/components/icons/MuseIcon'
 import type { CliBackend, MagicPrompts } from '@/types/preferences'
 import { GeneralPane } from './panes/GeneralPane'
 import { ClaudePane } from './panes/ClaudePane'
@@ -70,6 +71,7 @@ import { CommandCodePane } from './panes/CommandCodePane'
 import { GrokPane } from './panes/GrokPane'
 import { KimiPane } from './panes/KimiPane'
 import { AntigravityPane } from './panes/AntigravityPane'
+import { MusePane } from './panes/MusePane'
 import { GitHubPane } from './panes/GitHubPane'
 import { CodeRabbitPane } from './panes/CodeRabbitPane'
 import { AppearancePane } from './panes/AppearancePane'
@@ -197,6 +199,13 @@ const navigationEntries: NavigationEntry[] = [
   },
   {
     type: 'item',
+    id: 'muse',
+    name: 'Muse',
+    icon: MuseIcon,
+    backend: 'muse',
+  },
+  {
+    type: 'item',
     id: 'github',
     name: 'GitHub CLI',
     icon: Github,
@@ -305,6 +314,7 @@ const paneIconMap: Record<PreferencePane, LucideIcon> = {
   grok: GrokIcon,
   kimi: KimiIcon,
   antigravity: AntigravityIcon,
+  muse: MuseIcon,
   github: Github,
   coderabbit: Rabbit,
   opinionated: Sparkles,
@@ -342,6 +352,8 @@ const getPaneTitle = (pane: PreferencePane): string => {
       return 'Kimi Code'
     case 'antigravity':
       return 'Antigravity CLI'
+    case 'muse':
+      return 'Muse'
     case 'github':
       return 'GitHub CLI'
     case 'coderabbit':
@@ -1023,6 +1035,11 @@ export function PreferencesDialog() {
               {activePane === 'antigravity' && (
                 <div id="pref-pane-antigravity" className="min-w-0 max-w-full">
                   <AntigravityPane />
+                </div>
+              )}
+              {activePane === 'muse' && (
+                <div id="pref-pane-muse" className="min-w-0 max-w-full">
+                  <MusePane />
                 </div>
               )}
               {activePane === 'github' && (

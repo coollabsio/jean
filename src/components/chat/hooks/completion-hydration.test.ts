@@ -52,6 +52,17 @@ describe('shouldHydrateCompletedSessionFromBackend', () => {
     ).toBe(true)
   })
 
+  it('requests hydration for Muse so the backend parse carries the session id', () => {
+    expect(
+      shouldHydrateCompletedSessionFromBackend(
+        'Hello world with normal spaces',
+        [{ type: 'text', text: 'Hello world with normal spaces' }],
+        [],
+        { backend: 'muse' }
+      )
+    ).toBe(true)
+  })
+
   it('requests hydration for Antigravity so the backend parse carries the conversation id', () => {
     expect(
       shouldHydrateCompletedSessionFromBackend(

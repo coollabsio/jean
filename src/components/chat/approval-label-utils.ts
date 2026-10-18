@@ -44,6 +44,7 @@ export function resolveApprovalLabel(
         selected_grok_model?: string | null
         selected_kimi_model?: string | null
         selected_antigravity_model?: string | null
+        selected_muse_model?: string | null
         default_backend?: string | null
       }
     | undefined,
@@ -84,7 +85,9 @@ export function resolveApprovalLabel(
                   : resolvedBackend === 'antigravity'
                     ? (preferences.selected_antigravity_model ??
                       'antigravity/auto')
-                    : (preferences.selected_model ?? null)
+                    : resolvedBackend === 'muse'
+                      ? (preferences.selected_muse_model ?? 'muse/default')
+                      : (preferences.selected_model ?? null)
   const resolvedModel = model ?? backendDefaultModel
   if (!resolvedModel && !resolvedBackend) return null
   const modelLabel = resolvedModel ? getMessageModelLabel(resolvedModel) : null

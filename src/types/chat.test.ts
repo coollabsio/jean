@@ -358,7 +358,7 @@ describe('permission capabilities', () => {
       ])
     }
   )
-  it.each(['cursor', 'pi', 'commandcode', 'antigravity'] as const)(
+  it.each(['cursor', 'pi', 'commandcode', 'antigravity', 'muse'] as const)(
     'does not advertise unsupported policies for %s',
     backend => {
       expect(getSupportedPermissionModes(backend)).toEqual(['yolo'])

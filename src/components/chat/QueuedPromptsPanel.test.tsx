@@ -270,6 +270,23 @@ describe('QueuedPromptsPanel', () => {
     )
   })
 
+  it('allows editing queued prompts for the non-steerable Muse backend', () => {
+    const { onEdit } = renderPanel({
+      messages: [
+        createMessage('msg-1', 'Muse prompt', {
+          backend: 'muse',
+        } as Partial<QueuedMessage>),
+      ],
+    })
+
+    fireEvent.click(screen.getByLabelText('Edit queued prompt'))
+    const editor = screen.getByLabelText('Queued prompt text')
+    fireEvent.change(editor, { target: { value: 'Updated muse' } })
+    fireEvent.click(screen.getByLabelText('Save queued prompt'))
+
+    expect(onEdit).toHaveBeenCalledWith('session-1', 'msg-1', 'Updated muse')
+  })
+
   it('allows editing queued steering prompts with file @-mentions', () => {
     renderPanel({
       messages: [

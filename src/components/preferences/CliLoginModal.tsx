@@ -21,6 +21,7 @@ import { commandcodeCliQueryKeys } from '@/services/commandcode-cli'
 import { grokCliQueryKeys } from '@/services/grok-cli'
 import { kimiCliQueryKeys } from '@/services/kimi-cli'
 import { antigravityCliQueryKeys } from '@/services/antigravity-cli'
+import { museCliQueryKeys } from '@/services/muse-cli'
 import { coderabbitCliQueryKeys } from '@/services/coderabbit-cli'
 import { githubQueryKeys } from '@/services/github'
 import {
@@ -30,7 +31,11 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { useUIStore, type McpLoginContext } from '@/store/ui-store'
+import {
+  useUIStore,
+  type CliLoginModalType,
+  type McpLoginContext,
+} from '@/store/ui-store'
 import { refreshMcpLoginHealth } from '@/services/mcp-auth'
 import { serverResourceKey } from '@/lib/server-resource'
 import { useShallow } from 'zustand/react/shallow'
@@ -80,19 +85,7 @@ export function CliLoginModal() {
 }
 
 interface CliLoginModalContentProps {
-  cliType:
-    | 'claude'
-    | 'gh'
-    | 'codex'
-    | 'opencode'
-    | 'cursor'
-    | 'pi'
-    | 'commandcode'
-    | 'grok'
-    | 'kimi'
-    | 'antigravity'
-    | 'coderabbit'
-    | null
+  cliType: CliLoginModalType
   command: string
   commandArgs: string[] | null
   action: 'login' | 'update' | 'install'
@@ -146,7 +139,9 @@ function CliLoginModalContent({
                       ? 'Kimi Code'
                       : cliType === 'antigravity'
                         ? 'Antigravity CLI'
-                        : 'GitHub CLI'
+                        : cliType === 'muse'
+                          ? 'Muse CLI'
+                          : 'GitHub CLI'
   const cliTitle =
     cliType === 'cursor' ||
     cliType === 'pi' ||
@@ -156,7 +151,9 @@ function CliLoginModalContent({
         <BackendLabel backend={cliType} />
         <span>CLI</span>
       </span>
-    ) : cliType === 'kimi' || cliType === 'antigravity' ? (
+    ) : cliType === 'kimi' ||
+      cliType === 'antigravity' ||
+      cliType === 'muse' ? (
       <BackendLabel backend={cliType} />
     ) : (
       cliName
@@ -248,6 +245,8 @@ function CliLoginModalContent({
           queryClient.invalidateQueries({
             queryKey: antigravityCliQueryKeys.all,
           })
+        } else if (cliType === 'muse') {
+          queryClient.invalidateQueries({ queryKey: museCliQueryKeys.all })
         } else if (cliType === 'coderabbit') {
           queryClient.invalidateQueries({
             queryKey: coderabbitCliQueryKeys.all,

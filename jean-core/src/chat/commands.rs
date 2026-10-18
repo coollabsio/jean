@@ -239,6 +239,7 @@ pub(crate) fn resolve_default_backend(app: &AppHandle, worktree_id: Option<&str>
         "grok" => Backend::Grok,
         "kimi" => Backend::Kimi,
         "antigravity" => Backend::Antigravity,
+        "muse" => Backend::Muse,
         _ => Backend::Claude,
     };
 
@@ -262,6 +263,7 @@ pub(crate) fn resolve_default_backend(app: &AppHandle, worktree_id: Option<&str>
                         "grok" => Backend::Grok,
                         "kimi" => Backend::Kimi,
                         "antigravity" => Backend::Antigravity,
+                        "muse" => Backend::Muse,
                         "claude" => Backend::Claude,
                         _ => resolved,
                     };
@@ -289,6 +291,7 @@ pub(crate) fn resolve_magic_prompt_backend(
             "grok" => return Backend::Grok,
             "kimi" => return Backend::Kimi,
             "antigravity" => return Backend::Antigravity,
+            "muse" => return Backend::Muse,
             "codex" => return Backend::Codex,
             "claude" => return Backend::Claude,
             _ => {}
@@ -312,6 +315,8 @@ fn infer_backend_from_model(model: &str, fallback: Backend) -> Backend {
         Backend::Kimi
     } else if model.starts_with("antigravity/") {
         Backend::Antigravity
+    } else if crate::is_muse_model(model) {
+        Backend::Muse
     } else if crate::is_codex_model(model) {
         Backend::Codex
     } else {
@@ -385,6 +390,7 @@ pub(crate) fn default_model_for_backend(
         Backend::Grok => &preferences.selected_grok_model,
         Backend::Kimi => &preferences.selected_kimi_model,
         Backend::Antigravity => &preferences.selected_antigravity_model,
+        Backend::Muse => &preferences.selected_muse_model,
         Backend::Claude => &preferences.selected_model,
     };
 
@@ -1075,6 +1081,7 @@ pub async fn create_session(
         Some("grok") => Backend::Grok,
         Some("kimi") => Backend::Kimi,
         Some("antigravity") => Backend::Antigravity,
+        Some("muse") => Backend::Muse,
         Some("claude") => Backend::Claude,
         _ => {
             // No explicit backend — check project default, then global preference
@@ -1096,6 +1103,8 @@ pub async fn create_session(
                     resolved = Backend::Kimi;
                 } else if prefs.default_backend == "antigravity" {
                     resolved = Backend::Antigravity;
+                } else if prefs.default_backend == "muse" {
+                    resolved = Backend::Muse;
                 }
             }
             // Check project-level override
@@ -1119,6 +1128,7 @@ pub async fn create_session(
                             "grok" => Backend::Grok,
                             "kimi" => Backend::Kimi,
                             "antigravity" => Backend::Antigravity,
+                            "muse" => Backend::Muse,
                             "claude" => Backend::Claude,
                             _ => resolved,
                         };
@@ -1999,7 +2009,7 @@ fn plan_mode_content_waits_for_approval(
     // (`has_blocking_tool` path via inject_synthetic_plan on plan-like content).
     matches!(
         backend,
-        Backend::Claude | Backend::Codex | Backend::Opencode | Backend::Kimi
+        Backend::Claude | Backend::Codex | Backend::Opencode | Backend::Kimi | Backend::Muse
     ) && execution_mode == Some("plan")
         && has_content
         && !has_plan_tool
@@ -2904,6 +2914,7 @@ fn persist_salvaged_resume_id(session: &mut Session, backend: &Backend, sid: &st
         Backend::Grok => session.grok_session_id = Some(sid.to_string()),
         Backend::Kimi => session.kimi_session_id = Some(sid.to_string()),
         Backend::Antigravity => session.antigravity_session_id = Some(sid.to_string()),
+        Backend::Muse => session.muse_session_id = Some(sid.to_string()),
     }
 }
 
@@ -3187,6 +3198,7 @@ pub async fn send_chat_message(
         Some("grok") => Backend::Grok,
         Some("kimi") => Backend::Kimi,
         Some("antigravity") => Backend::Antigravity,
+        Some("muse") => Backend::Muse,
         Some("claude") => Backend::Claude,
         _ => session_backend.clone(),
     };
@@ -3285,6 +3297,9 @@ pub async fn send_chat_message(
     let antigravity_session_id = sessions
         .find_session(&session_id)
         .and_then(|s| s.antigravity_session_id.clone());
+    let muse_session_id = sessions
+        .find_session(&session_id)
+        .and_then(|s| s.muse_session_id.clone());
     // Command Code has no native resume id; a non-empty sentinel marks that a
     // prior Command Code turn completed in this worktree, so the next run can
     // pass `-c` (cwd-scoped continue) to resume the conversation.
@@ -3435,6 +3450,11 @@ pub async fn send_chat_message(
         None
     } else {
         antigravity_session_id
+    };
+    let muse_session_id = if clear_target_resume && effective_backend == Backend::Muse {
+        None
+    } else {
+        muse_session_id
     };
 
     // Cursor CLI doesn't support thinking/effort levels
@@ -3594,6 +3614,7 @@ pub async fn send_chat_message(
             Backend::Grok => {}
             Backend::Kimi => {}
             Backend::Antigravity => {}
+            Backend::Muse => {}
         }
     }
     let allowed_tools_for_cli = if final_allowed_tools.is_empty() {
@@ -3636,6 +3657,7 @@ pub async fn send_chat_message(
     let thread_grok_session_id = grok_session_id.clone();
     let thread_kimi_session_id = kimi_session_id.clone();
     let thread_antigravity_session_id = antigravity_session_id.clone();
+    let thread_muse_session_id = muse_session_id.clone();
     let thread_commandcode_resume_id = commandcode_resume_id.clone();
     let thread_model = model.clone();
     let thread_execution_mode = execution_mode.clone();
@@ -3659,6 +3681,12 @@ pub async fn send_chat_message(
         _ => mcp_config.clone(),
     };
     let thread_custom_profile = custom_profile_name.clone();
+    // Muse takes MCP servers per session (`session/start` config.mcpServers).
+    let thread_muse_mcp_servers = if effective_backend == Backend::Muse {
+        super::jean_mcp::build_jean_mcp_entry(&app, &session_id).await
+    } else {
+        None
+    };
     let thread_codex_provider = if effective_backend == Backend::Codex {
         let prefs_for_codex = crate::load_preferences(app.clone()).await.ok();
         custom_profile_name.as_ref().and_then(|name| {
@@ -5251,6 +5279,49 @@ pub async fn send_chat_message(
                     Err(error) => Err(error),
                 }
             }
+            Backend::Muse => {
+                let system_prompt = build_kimi_system_prompt(
+                    &thread_app,
+                    &thread_worktree_id,
+                    thread_ai_language.as_deref(),
+                    thread_parallel_prompt.as_deref(),
+                    thread_include_recap,
+                );
+                let effort = thread_effort_level
+                    .as_ref()
+                    .and_then(|value| value.effort_value());
+                match super::muse::execute_muse(super::muse::MuseExecutionOptions {
+                    app: &thread_app,
+                    jean_session_id: &thread_session_id,
+                    worktree_id: &thread_worktree_id,
+                    working_dir: std::path::Path::new(&thread_working_dir),
+                    output_file: &thread_output_file,
+                    existing_muse_session_id: thread_muse_session_id.as_deref(),
+                    model: thread_model.as_deref(),
+                    execution_mode: thread_execution_mode.as_deref(),
+                    effort_level: effort,
+                    message: &thread_message,
+                    system_prompt: system_prompt.as_deref(),
+                    mcp_servers: thread_muse_mcp_servers,
+                    pid_callback: Some(make_pid_callback()),
+                }) {
+                    Ok(response) => Ok((
+                        0,
+                        UnifiedResponse {
+                            content: response.content,
+                            resume_id: response.session_id,
+                            tool_calls: response.tool_calls,
+                            content_blocks: response.content_blocks,
+                            cancelled: response.cancelled,
+                            waiting_for_plan: false,
+                            error_emitted: false,
+                            usage: response.usage,
+                            backend: Backend::Muse,
+                        },
+                    )),
+                    Err(error) => Err(error),
+                }
+            }
         };
 
         let _ = tx.send(result);
@@ -5406,8 +5477,11 @@ pub async fn send_chat_message(
     // but are intentionally excluded from visible chat history on reload.
     // Unix Grok/Kimi hosts already write ACP stream JSONL + a result marker — synthetic
     // assistant lines would double content when parse_grok_run_to_message reloads.
-    let skip_synthetic_history =
-        cfg!(unix) && matches!(unified_response.backend, Backend::Grok | Backend::Kimi);
+    let skip_synthetic_history = cfg!(unix)
+        && matches!(
+            unified_response.backend,
+            Backend::Grok | Backend::Kimi | Backend::Muse
+        );
     if matches!(
         unified_response.backend,
         Backend::Opencode
@@ -5416,6 +5490,7 @@ pub async fn send_chat_message(
             | Backend::Commandcode
             | Backend::Grok
             | Backend::Kimi
+            | Backend::Muse
     ) && !unified_response.cancelled
         && !skip_synthetic_history
     {
@@ -5625,6 +5700,9 @@ pub async fn send_chat_message(
                         Backend::Antigravity => {
                             session.antigravity_session_id = Some(resume_id_for_log.clone());
                         }
+                        Backend::Muse => {
+                            session.muse_session_id = Some(resume_id_for_log.clone());
+                        }
                     }
                 }
                 // Remove user message (undo send) - allows frontend to restore to input field
@@ -5781,6 +5859,9 @@ pub async fn send_chat_message(
                     Backend::Antigravity => {
                         session.antigravity_session_id = Some(resume_id_for_log.clone());
                     }
+                    Backend::Muse => {
+                        session.muse_session_id = Some(resume_id_for_log.clone());
+                    }
                 }
             }
 
@@ -5920,6 +6001,7 @@ pub async fn clear_session_history(
             session.grok_session_id = None;
             session.kimi_session_id = None;
             session.antigravity_session_id = None;
+            session.muse_session_id = None;
             session.selected_model = selected_model;
             session.selected_thinking_level = selected_thinking_level;
             session.selected_effort_level = selected_effort_level;
@@ -6121,6 +6203,7 @@ pub async fn set_session_backend(
                 "grok" => super::types::Backend::Grok,
                 "kimi" => super::types::Backend::Kimi,
                 "antigravity" => super::types::Backend::Antigravity,
+                "muse" => super::types::Backend::Muse,
                 _ => super::types::Backend::Claude,
             };
             log::trace!("Backend selection saved");
@@ -8065,6 +8148,19 @@ fn execute_summarization_claude(
             .map_err(|e| format!("Failed to parse Antigravity summarization response: {e}"));
     }
 
+    if backend == super::types::Backend::Muse {
+        log::trace!("Executing one-shot Muse summarization");
+        let json_str = super::muse::execute_one_shot_muse(
+            app,
+            prompt,
+            model_str,
+            Some(CONTEXT_SUMMARY_SCHEMA),
+            working_dir,
+        )?;
+        return serde_json::from_str(&json_str)
+            .map_err(|e| format!("Failed to parse Muse summarization response: {e}"));
+    }
+
     let cli_path = resolve_cli_binary(app);
     if !cli_path.exists() {
         return Err("Claude CLI not installed".to_string());
@@ -8447,6 +8543,7 @@ pub async fn get_session_debug_info(
         grok_session_id,
         kimi_session_id: session.and_then(|s| s.kimi_session_id.clone()),
         antigravity_session_id: session.and_then(|s| s.antigravity_session_id.clone()),
+        muse_session_id: session.and_then(|s| s.muse_session_id.clone()),
         claude_jsonl_file,
         run_log_files,
         total_usage,
@@ -8892,6 +8989,105 @@ pub async fn resume_session(
             continue;
         }
 
+        // === Muse detached MSP-host resume path ===
+        if run.backend == Some(Backend::Muse) {
+            let pid = match run.pid {
+                Some(pid) => pid,
+                None => continue,
+            };
+            let output_file = session_dir.join(format!("{run_id}.jsonl"));
+
+            if let Some(metadata_run) = metadata.find_run_mut(&run_id) {
+                metadata_run.status = RunStatus::Running;
+            }
+            save_metadata(&app, &metadata)?;
+
+            if !super::registry::register_detached_process(session_id.clone(), pid) {
+                log::warn!("Resume Muse session {session_id} was cancelled before tailing started");
+                return Ok(ResumeSessionResponse {
+                    resumed: false,
+                    run_count: 0,
+                });
+            }
+
+            let app_clone = app.clone();
+            let session_id_clone = session_id.clone();
+            let worktree_id_clone = worktree_id.clone();
+            let run_id_clone = run_id.clone();
+            let execution_mode = run.execution_mode.clone();
+
+            tauri::async_runtime::spawn(async move {
+                let emit_done = |app: &tauri::AppHandle, sid: &str, wid: &str| {
+                    let _ = app.emit_all(
+                        "chat:done",
+                        &serde_json::json!({
+                            "session_id": sid,
+                            "worktree_id": wid,
+                            "waiting_for_plan": false,
+                        }),
+                    );
+                };
+
+                let response = match super::muse::tail_muse_output(
+                    &app_clone,
+                    &session_id_clone,
+                    &worktree_id_clone,
+                    &output_file,
+                    pid,
+                ) {
+                    Ok(response) => response,
+                    Err(error) => {
+                        log::error!("Resume Muse tail failed for run {run_id_clone}: {error}");
+                        super::registry::unregister_process(&session_id_clone);
+                        if let Ok(mut writer) =
+                            RunLogWriter::resume(&app_clone, &session_id_clone, &run_id_clone)
+                        {
+                            let _ = writer.crash();
+                        }
+                        emit_done(&app_clone, &session_id_clone, &worktree_id_clone);
+                        return;
+                    }
+                };
+                super::registry::unregister_process(&session_id_clone);
+                let response = super::muse::finish_muse_response(
+                    &app_clone,
+                    &session_id_clone,
+                    &worktree_id_clone,
+                    execution_mode.as_deref(),
+                    response,
+                );
+                if response.cancelled {
+                    emit_done(&app_clone, &session_id_clone, &worktree_id_clone);
+                }
+
+                if let Ok(mut writer) =
+                    RunLogWriter::resume(&app_clone, &session_id_clone, &run_id_clone)
+                {
+                    let assistant_message_id = uuid::Uuid::new_v4().to_string();
+                    if let Err(error) =
+                        writer.complete(&assistant_message_id, None, response.usage.clone())
+                    {
+                        log::error!("Failed to mark resumed Muse run completed: {error}");
+                    }
+                }
+
+                if !response.session_id.is_empty() {
+                    if let Err(error) =
+                        with_existing_metadata_mut(&app_clone, &session_id_clone, |metadata| {
+                            metadata.muse_session_id = Some(response.session_id.clone());
+                            if let Some(run) = metadata.find_run_mut(&run_id_clone) {
+                                run.muse_session_id = Some(response.session_id.clone());
+                                run.usage = response.usage.clone();
+                            }
+                        })
+                    {
+                        log::warn!("Failed to persist recovered Muse session id: {error}");
+                    }
+                }
+            });
+            continue;
+        }
+
         // === Grok detached ACP-host resume path ===
         if run.backend == Some(Backend::Grok) {
             let pid = match run.pid {
@@ -9274,6 +9470,7 @@ pub async fn get_mcp_servers(
         Some("cursor") => crate::cursor_cli::mcp::get_mcp_servers(wt),
         Some("kimi") => crate::kimi_cli::mcp::get_mcp_servers(wt),
         Some("antigravity") => crate::antigravity_cli::mcp::get_mcp_servers(wt),
+        Some("muse") => crate::muse_cli::mcp::get_mcp_servers(wt),
         Some("grok") => crate::grok_cli::mcp::get_mcp_servers(wt),
         _ => crate::claude_cli::mcp::get_mcp_servers(wt),
     };
@@ -9359,6 +9556,7 @@ pub async fn check_mcp_health(
                 .collect(),
         }),
         Some("antigravity") => check_mcp_health_antigravity(&app, worktree_path.as_deref()),
+        Some("muse") => check_mcp_health_muse(worktree_path.as_deref()),
         Some("grok") => {
             let path = worktree_path.as_deref().map(std::path::Path::new);
             let statuses = crate::grok_cli::mcp::check_mcp_health(&app, path)?;
@@ -9373,6 +9571,24 @@ fn check_mcp_health_antigravity(
     worktree_path: Option<&str>,
 ) -> Result<McpHealthResult, String> {
     let statuses = crate::antigravity_cli::mcp::get_mcp_servers(worktree_path)
+        .into_iter()
+        .map(|server| {
+            (
+                server.name,
+                if server.disabled {
+                    McpHealthStatus::Disabled
+                } else {
+                    McpHealthStatus::Unknown
+                },
+            )
+        })
+        .collect();
+    Ok(McpHealthResult { statuses })
+}
+
+/// Muse has no MCP health command; report configured servers as unknown/disabled.
+fn check_mcp_health_muse(worktree_path: Option<&str>) -> Result<McpHealthResult, String> {
+    let statuses = crate::muse_cli::mcp::get_mcp_servers(worktree_path)
         .into_iter()
         .map(|server| {
             (
@@ -10787,6 +11003,7 @@ mod tests {
             Backend::Grok,
             Backend::Kimi,
             Backend::Antigravity,
+            Backend::Muse,
         ] {
             assert!(validate_execution_policy("plan", &backend).is_ok());
             assert!(validate_execution_policy("yolo", &backend).is_ok());
