@@ -100,52 +100,81 @@ pub async fn spawn_subagent(
         Some(engine::truncate(&title, 60)),
     )
     .await?;
-    if let Some(mode) = resolved.permission_mode.as_deref() {
-        let mode = if mode == "build" && resolved.backend.as_deref() == Some("cursor") {
-            "yolo"
-        } else {
-            mode
-        };
-        if session.selected_execution_mode.as_deref() != Some(mode) {
-            crate::chat::set_session_execution_mode(
+    let spawn_depth = caller_depth + 1;
+    let prepared = async {
+        if let Some(mode) = resolved.permission_mode.as_deref() {
+            let mode = if mode == "build" && resolved.backend.as_deref() == Some("cursor") {
+                "yolo"
+            } else {
+                mode
+            };
+            if session.selected_execution_mode.as_deref() != Some(mode) {
+                crate::chat::set_session_execution_mode(
+                    app.clone(),
+                    worktree_id.clone(),
+                    path.clone(),
+                    session.id.clone(),
+                    mode.to_string(),
+                )
+                .await?;
+                session.selected_execution_mode = Some(mode.to_string());
+            }
+        }
+        super::with_db(app, |conn| {
+            let running_now = db::running_task_count(conn, agent_id)?;
+            let wakes_now =
+                db::wake_budget_remaining(conn, agent_id, agent.max_wakes_per_hour, db::now())?;
+            if let Some(reason) = db::subagent_spawn_block_reason(db::SubagentSpawnLimits {
+                caller_depth,
+                caller_hop,
+                running_tasks: running_now,
+                wakes_remaining: wakes_now,
+                max_hops: MAX_AGENT_HOPS,
+            }) {
+                return Err(reason);
+            }
+            let created = db::create_subagent_task(
+                conn,
+                &agent.id,
+                &session.id,
+                &title,
+                &resolved,
+                spawn_depth,
+            )?;
+            db::upsert_delegation(
+                conn,
+                &agent.id,
+                &session.id,
+                &worktree_id,
+                caller_hop + 1,
+                Some(&origin),
+            )?;
+            db::record_wake(conn, &agent.id, &session.id)?;
+            Ok(created)
+        })
+    }
+    .await;
+    // The session exists before the final checks. Remove it when the spawn is
+    // refused, or it stays in the tasks worktree with no task row.
+    let stored = match prepared {
+        Ok(stored) => stored,
+        Err(error) => {
+            if let Err(close) = crate::chat::close_session(
                 app.clone(),
                 worktree_id.clone(),
                 path.clone(),
                 session.id.clone(),
-                mode.to_string(),
             )
-            .await?;
-            session.selected_execution_mode = Some(mode.to_string());
+            .await
+            {
+                log::warn!(
+                    "[Agents] unused subagent session {} was not removed: {close}",
+                    session.id
+                );
+            }
+            return Err(error);
         }
-    }
-
-    let spawn_depth = caller_depth + 1;
-    let stored = super::with_db(app, |conn| {
-        let running_now = db::running_task_count(conn, agent_id)?;
-        let wakes_now =
-            db::wake_budget_remaining(conn, agent_id, agent.max_wakes_per_hour, db::now())?;
-        if let Some(reason) = db::subagent_spawn_block_reason(db::SubagentSpawnLimits {
-            caller_depth,
-            caller_hop,
-            running_tasks: running_now,
-            wakes_remaining: wakes_now,
-            max_hops: MAX_AGENT_HOPS,
-        }) {
-            return Err(reason);
-        }
-        let created =
-            db::create_subagent_task(conn, &agent.id, &session.id, &title, &resolved, spawn_depth)?;
-        db::upsert_delegation(
-            conn,
-            &agent.id,
-            &session.id,
-            &worktree_id,
-            caller_hop + 1,
-            Some(&origin),
-        )?;
-        db::record_wake(conn, &agent.id, &session.id)?;
-        Ok(created)
-    })?;
+    };
 
     log::info!(
         "[Agents] subagent session {} type={} backend={} model={} effort={} thinking={} permission={} tool_mode={} depth={} instructions={}",

@@ -298,8 +298,14 @@ when any of these is already spent:
   spawn, and it cannot call `subagent_type_save` or `subagent_type_delete`
 
 A `read_only` subagent can list and search. It cannot spawn, message agents,
-change memory or schedules, or call mutating project tools. The approval gate
-still applies when `tool_mode` is unset.
+change memory or schedules, or call mutating project tools. `read_only` limits
+the Jean MCP tools only. The backend's own file and shell tools follow
+`permission_mode`, so use `plan` to stop edits too. The approval gate still
+applies when `tool_mode` is unset.
+
+Only the user can make a type run as Yolo: `permission_mode` `yolo`, or a
+Cursor backend without `plan`. `subagent_type_save` refuses that unless the
+agent already wakes as Yolo or the user set it on that type before.
 
 MCP tools, in their own block in `agents/mcp.rs`: `subagent_type_list`,
 `subagent_type_save`, `subagent_type_delete`, `spawn_subagent`. Commands, in

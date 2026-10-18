@@ -69,7 +69,7 @@ pub fn is_agent_tool(name: &str) -> bool {
 pub fn subagent_tool_definitions() -> Value {
     json!([
         {"name":"subagent_type_list","description":"Agent sessions only. List subagent types you can spawn: your own, then shared types. A subagent session cannot define types.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
-        {"name":"subagent_type_save","description":"Agent sessions only. Create or update a subagent type: name, description, instructions, and optional backend, model, effort, thinkingLevel, skills, permissionMode (plan, build, yolo), and toolMode (read_only). Pass id to update. shared true makes it available to every agent. Subagent sessions cannot call this.","inputSchema":{"type":"object","properties":{"id":{"type":"integer"},"name":{"type":"string"},"description":{"type":"string"},"instructions":{"type":"string"},"shared":{"type":"boolean"},"backend":{"type":"string"},"model":{"type":"string"},"effort":{"type":"string"},"thinkingLevel":{"type":"string"},"skills":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"path":{"type":"string"},"backend":{"type":"string"}},"required":["path"]}},"permissionMode":{"type":"string","enum":["plan","build","yolo"]},"toolMode":{"type":"string","enum":["read_only"]}},"required":["name"],"additionalProperties":false}},
+        {"name":"subagent_type_save","description":"Agent sessions only. Create or update a subagent type: name, description, instructions, and optional backend, model, effort, thinkingLevel, skills, permissionMode (plan, build, yolo), and toolMode (read_only). Only the user can set yolo, or a Cursor backend without plan. Pass id to update. shared true makes it available to every agent. Subagent sessions cannot call this.","inputSchema":{"type":"object","properties":{"id":{"type":"integer"},"name":{"type":"string"},"description":{"type":"string"},"instructions":{"type":"string"},"shared":{"type":"boolean"},"backend":{"type":"string"},"model":{"type":"string"},"effort":{"type":"string"},"thinkingLevel":{"type":"string"},"skills":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"path":{"type":"string"},"backend":{"type":"string"}},"required":["path"]}},"permissionMode":{"type":"string","enum":["plan","build","yolo"]},"toolMode":{"type":"string","enum":["read_only"]}},"required":["name"],"additionalProperties":false}},
         {"name":"subagent_type_delete","description":"Agent sessions only. Delete one of your subagent types, or a shared type, by id. Subagent sessions cannot call this.","inputSchema":{"type":"object","properties":{"id":{"type":"integer"}},"required":["id"],"additionalProperties":false}},
         {"name":"spawn_subagent","description":"Agent sessions only. Spawn one subagent of a defined type to do a task. The result arrives as an update message; end your turn after spawning. Respects the running-task cap, hourly wake budget, hop limit, and spawn depth. A subagent cannot spawn another.","inputSchema":{"type":"object","properties":{"type":{"type":"string"},"task":{"type":"string"}},"required":["type","task"],"additionalProperties":false}}
     ])
@@ -108,6 +108,52 @@ fn refuse_subagent_admin(app: &AppHandle, source: &str) -> Result<(), String> {
         return Err(reason);
     }
     Ok(())
+}
+
+/// Cursor has no Build mode, so anything but Plan runs as Yolo there.
+fn runs_as_yolo(permission_mode: Option<&str>, backend: Option<&str>) -> bool {
+    match permission_mode {
+        Some("plan") => false,
+        Some("yolo") => true,
+        _ => backend == Some("cursor"),
+    }
+}
+
+/// An agent cannot give a subagent more permission than the user gave it.
+/// Yolo is allowed only when the agent already wakes as Yolo or the user set
+/// it on this type.
+pub(crate) fn yolo_grant_block(
+    agent: &db::Agent,
+    existing: Option<&db::SubagentType>,
+    write: &db::SubagentTypeWrite,
+) -> Option<String> {
+    let permission = write
+        .permission_mode
+        .as_deref()
+        .map(|mode| mode.trim().to_ascii_lowercase())
+        .filter(|mode| !mode.is_empty());
+    let backend = db::normalize_agent_backend(write.backend.as_deref())
+        .ok()
+        .flatten()
+        .or_else(|| agent.backend.clone());
+    if !runs_as_yolo(permission.as_deref(), backend.as_deref())
+        || runs_as_yolo(None, agent.backend.as_deref())
+    {
+        return None;
+    }
+    let already = existing.is_some_and(|kind| {
+        runs_as_yolo(
+            kind.permission_mode.as_deref(),
+            kind.backend.as_deref().or(agent.backend.as_deref()),
+        )
+    });
+    if already {
+        return None;
+    }
+    Some(
+        "Only the user can let a subagent type run as Yolo (permissionMode yolo, or a Cursor backend without plan). Use plan or build, or ask the user to set it on the Subagents tab."
+            .to_string(),
+    )
 }
 
 fn subagent_type_write(args: &Value) -> Result<db::SubagentTypeWrite, String> {
@@ -406,6 +452,13 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value, source: &str) -> Res
         "subagent_type_save" => {
             refuse_subagent_admin(app, source)?;
             let write = subagent_type_write(args)?;
+            let existing = match write.id {
+                Some(id) => super::with_db(app, |conn| db::get_subagent_type(conn, id))?,
+                None => None,
+            };
+            if let Some(reason) = yolo_grant_block(&agent, existing.as_ref(), &write) {
+                return Err(reason);
+            }
             let saved =
                 super::with_db(app, |conn| db::save_subagent_type(conn, &agent.id, &write))?;
             json!({ "type": saved })
@@ -565,6 +618,68 @@ mod tests {
         assert!(read_only_subagent_block(Some("read_only"), "Diff", "delete_worktree").is_some());
         assert!(read_only_subagent_block(None, "Diff", "delete_worktree").is_none());
         assert!(read_only_subagent_block(None, "Diff", "spawn_subagent").is_none());
+    }
+
+    #[test]
+    fn agent_cannot_grant_a_subagent_yolo() {
+        let agent = |backend: &str| db::Agent {
+            id: "reviewer".into(),
+            name: "Reviewer".into(),
+            description: String::new(),
+            icon: "blue".into(),
+            role_prompt: String::new(),
+            worktree_id: "__agent_reviewer__".into(),
+            paused: false,
+            max_wakes_per_hour: 12,
+            builtin: false,
+            backend: Some(backend.into()),
+            model: None,
+            effort: None,
+            thinking_level: None,
+            skills: Vec::new(),
+        };
+        let write = |args: Value| subagent_type_write(&args).unwrap();
+        let claude = agent("claude");
+        for args in [
+            json!({"name": "Fixer", "permissionMode": "YOLO"}),
+            json!({"name": "Fixer", "backend": "cursor"}),
+            json!({"name": "Fixer", "backend": "cursor", "permissionMode": "build"}),
+        ] {
+            let reason = yolo_grant_block(&claude, None, &write(args)).unwrap();
+            assert!(reason.contains("Only the user"));
+        }
+        for args in [
+            json!({"name": "Fixer"}),
+            json!({"name": "Fixer", "permissionMode": "build"}),
+            json!({"name": "Fixer", "backend": "cursor", "permissionMode": "plan"}),
+        ] {
+            assert_eq!(yolo_grant_block(&claude, None, &write(args)), None);
+        }
+        let cursor = agent("cursor");
+        assert_eq!(
+            yolo_grant_block(&cursor, None, &write(json!({"name": "Fixer"}))),
+            None
+        );
+
+        let user_yolo = db::SubagentType {
+            id: 7,
+            agent_id: Some("reviewer".into()),
+            shared: false,
+            name: "Fixer".into(),
+            description: String::new(),
+            instructions: String::new(),
+            backend: None,
+            model: None,
+            effort: None,
+            thinking_level: None,
+            skills: Vec::new(),
+            permission_mode: Some("yolo".into()),
+            tool_mode: None,
+            created_at: 0,
+            updated_at: 0,
+        };
+        let edit = write(json!({"id": 7, "name": "Fixer", "permissionMode": "yolo"}));
+        assert_eq!(yolo_grant_block(&claude, Some(&user_yolo), &edit), None);
     }
 
     #[test]

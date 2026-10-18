@@ -5,10 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from '@/components/ui/native-select'
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea'
 import {
   useAgentDetails,
@@ -138,8 +135,9 @@ function TypeEditor({
           ))}
         </NativeSelect>
         <p className="text-xs text-muted-foreground">
-          Read only blocks writes. Delete, push, and pull requests still need
-          approval when tools are unrestricted.
+          Read only limits the Jean tools to list, search, and notify. It does
+          not stop file edits or shell commands; use Plan for that. Delete,
+          push, and pull requests still need approval with all tools.
         </p>
       </div>
       {attempted && error ? (
@@ -303,9 +301,9 @@ export function AgentSubagentTypes({ agent }: { agent: AgentSummary }) {
         <div>
           <h2 className="text-sm font-medium">Subagent types</h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            Named workers this agent can spawn. A type can override the
-            backend, model, effort, skills, and tools. The result comes back
-            as an update. A subagent cannot define types or spawn children.
+            Named workers this agent can spawn. A type can override the backend,
+            model, effort, skills, and tools. The result comes back as an
+            update. A subagent cannot define types or spawn children.
           </p>
         </div>
         {draft === null ? (
