@@ -4028,6 +4028,8 @@ const AGENT_COMMANDS: &[&str] = &[
     "delete_agent",
     "decide_agent_approval",
     "cancel_agent_schedule",
+    "create_agent_schedule",
+    "update_agent_schedule",
     "save_agent_memory",
     "update_agent_memory",
     "delete_agent_memory",
@@ -4103,6 +4105,28 @@ async fn dispatch_agents_command(
                 let schedule_id: i64 = field(args, "scheduleId", "schedule_id")?;
                 crate::agents::commands::cancel_schedule(app, &agent_id, schedule_id)?;
                 Ok(Value::Null)
+            }
+            "create_agent_schedule" => {
+                let agent_id: String = field(args, "agentId", "agent_id")?;
+                let input: crate::agents::commands::ScheduleCommandInput =
+                    serde_json::from_value(args.clone())
+                        .map_err(|e| format!("Invalid schedule: {e}"))?;
+                to_value(crate::agents::commands::create_schedule_for_agent(
+                    app, &agent_id, input,
+                )?)
+            }
+            "update_agent_schedule" => {
+                let agent_id: String = field(args, "agentId", "agent_id")?;
+                let schedule_id: i64 = field(args, "scheduleId", "schedule_id")?;
+                let patch: crate::agents::commands::ScheduleCommandPatch =
+                    serde_json::from_value(args.clone())
+                        .map_err(|e| format!("Invalid schedule: {e}"))?;
+                to_value(crate::agents::commands::update_schedule_for_agent(
+                    app,
+                    &agent_id,
+                    schedule_id,
+                    patch,
+                )?)
             }
             "save_agent_memory" => {
                 let agent_id: String = field(args, "agentId", "agent_id")?;

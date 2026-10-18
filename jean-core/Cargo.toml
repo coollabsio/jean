@@ -38,6 +38,7 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 zune-core = "=0.5.1"
 if-addrs = "0.13"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+chrono-tz = "0.10"
 rust-embed = { version = "8", features = ["debug-embed"] }
 
 [target.'cfg(unix)'.dependencies]

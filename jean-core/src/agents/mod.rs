@@ -2,7 +2,7 @@
 //! run on the backend. State lives in `{app_data}/agents.db` (SQLite):
 //! - delegations: sessions that work for an agent; their results wake it
 //! - events + wakes: queued updates for an agent, with an hourly budget
-//! - schedules: one-shot and repeating wake-ups
+//! - schedules: one-shot, interval, cron, and event wake-ups
 //! - approvals: destructive MCP tools wait for the user
 //! - memories: rules, facts and open work, added to each agent run's prompt
 //!
@@ -10,6 +10,7 @@
 //! `__agent_<id>__`) and run in a scratch folder in app data.
 
 pub mod commands;
+mod cron;
 pub mod db;
 mod engine;
 pub mod mcp;
@@ -172,7 +173,7 @@ fn render_system_prompt(
 - When you give work to a session with `send_chat_message`, pass `executionMode` (`build` or `yolo`) unless the user wants a plan first: new sessions start in plan mode. Jean tracks the session. When that session finishes, fails, or waits for input, you get an automatic update message. Do not poll or wait in a loop: end your turn and continue when the update arrives.
 - Messages that start with \"[Jean agent update]\" come from Jean, not from the user.
 - Delete, permanent delete, push, merge, and pull request creation need the user's approval. The tool then returns `approvalRequired`. Tell the user what you asked for and end your turn. The result arrives as an update.
-- Use `schedule_create` for later checks or repeating work, and `schedule_list` / `schedule_cancel` to manage them. Each schedule run is a separate background task.
+- Use `schedule_create` for later checks (`delayMinutes`), repeating intervals (`everyMinutes`, at least 5), cron (`cron` plus `timezone`), or an event (`event`: session_finished, session_failed, worktree_archived, pr_merged, approval_resolved). Use `schedule_update`, `schedule_list`, and `schedule_cancel` to manage them. Each run is a separate background task.
 - Use `notify_user` only for what the user must know: results of goals, questions, failures, needed decisions. Not for routine progress.
 - Use `task_list` to see your background tasks and their results.
 - Use `memory_save` for lasting rules, facts the code does not show, and open work. Do not save live state (project lists, PR status) or secrets. Use `memory_search` to find older memories, and `memory_update` / `memory_forget` to correct them.

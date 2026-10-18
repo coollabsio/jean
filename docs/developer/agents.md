@@ -22,7 +22,7 @@ SQLite). Migrations are a list in `agents/db.rs` (`MIGRATIONS`, tracked with
 | `tasks` | One row per task session (background work): status, one-line result, archive state. |
 | `notifications` | `notify_user` messages (inbox, toast). |
 | `wakes` | One row per wake-up, for the hourly budget (`max_wakes_per_hour`). |
-| `schedules` | One-shot (`every_secs` NULL) and repeating wake-ups. |
+| `schedules` | One-shot, interval (`every_secs`), cron, and event routines. |
 | `approvals` | Destructive MCP calls that wait for the user. |
 | `memories` + `memories_fts` | Rules, facts, open work. `agent_id` NULL = shared. FTS5 kept in sync by triggers. |
 
@@ -115,7 +115,8 @@ chat:done / chat:error / chat:cancelled (in-process listener)
 tick (every 5s, or nudge())
   ├─ delegation checks ──► event with target = origin session
   ├─ task checks ──► task status + one-line result
-  ├─ due schedules ──► event without target
+  ├─ due schedules (one-shot, interval, cron) ──► event without target
+  │    event routines are queued by listeners, not by this tick
   ├─ deliver (not paused, within the hourly budget):
   │    ├─ target set ──► "[Jean agent update]" into that session when idle
   │    │                 (an archived old chat forwards to the current chat)
@@ -128,7 +129,10 @@ tick (every 5s, or nudge())
 
 Test overrides (environment, for isolated test servers only):
 `JEAN_AGENT_CHAT_ROTATE_MESSAGES`, `JEAN_AGENT_CHAT_ROTATE_IDLE_SECS`,
-`JEAN_AGENT_TASK_ARCHIVE_SECS`.
+`JEAN_AGENT_TASK_ARCHIVE_SECS`. `JEAN_AGENT_CLOCK_FILE` points at a file whose
+contents are a positive unix timestamp; `db::now()` returns that instead of the
+wall clock so a cron routine can be moved onto its next slot during a local
+run. Leave it unset in normal use.
 
 - Wake-ups never run in Plan mode (`wake_execution_mode`), because Plan mode
   blocks the Jean MCP tools. Cursor wakes use Yolo instead of Build
@@ -141,9 +145,83 @@ Test overrides (environment, for isolated test servers only):
 - At startup, active delegations are checked once, so runs that ended while
   Jean was closed are still reported.
 
+## Schedules
+
+Migration v4 adds `cron`, `timezone`, `event`, and `paused` to `schedules`,
+plus `schedule_event_keys` for event dedup. Do not edit v1–v3. Existing rows
+keep `cron`, `timezone`, and `event` NULL and `paused` 0, so one-shot
+(`every_secs` NULL) and interval schedules behave as before.
+
+| Kind | Stored as | Next run |
+|---|---|---|
+| One-shot | `every_secs`, `cron`, and `event` NULL; `next_run_at` set | Fires once, then `active=0` |
+| Interval | `every_secs` ≥ 300 | `next_run_at = fired_at + every_secs` |
+| Cron | 5-field `cron` plus an IANA `timezone` | Next match strictly after the fire time, in that zone |
+| Event | `event` set; `next_run_at` is 0 and is not a clock time | When the event happens |
+
+`paused=1` keeps the row but the engine skips it. Delete is the existing
+cancel (`active=0`). A paused agent still skips every schedule.
+
+### Cron
+
+Five fields: `minute hour day-of-month month day-of-week`. `*`, lists, ranges,
+steps, and English month/day names are accepted. `?` is rejected. When both
+day-of-month and day-of-week are restricted, a date matches if either field
+matches (standard cron). The timezone is stored on the schedule (the UI
+defaults to the browser zone; an omitted MCP timezone means UTC). Names that
+differ only by case still resolve.
+
+Next-run calculation walks local time in that zone:
+
+- A match is strictly after the previous instant, so the slot that just fired
+  is not chosen again.
+- Spring-forward gaps (the missing hour) are skipped. `30 2 * * *` on the US
+  spring-forward day runs the next day at 02:30.
+- Fall-back overlap hours are real twice. The earlier offset is next, then the
+  later offset.
+- If Jean was closed, a due cron fires once and then jumps to the next match
+  after the actual fire time. Missed slots are not replayed.
+
+Validation rejects an expression whose successive runs are closer than 300
+seconds, including a DST transition that would squeeze two matches together.
+That is the same 5-minute floor as `every_secs`. `*/5 * * * *` is allowed;
+`*/4` and `* * * * *` are not. Errors name the field or the gap.
+
+### Events
+
+Event routines wake through the same queue as cron: `fire_event_schedules`
+inserts a `schedule` event with no target, and the tick delivers it as a new
+task. Delivery already stops at `max_wakes_per_hour` and at two running tasks.
+A spent budget leaves the event queued; it is not dropped and it is not
+delivered early. These routines do not add a hop. If the woken task calls
+`message_agent`, that call still uses `MAX_AGENT_HOPS`.
+
+The same occurrence is stored in `schedule_event_keys`, so a merged PR or a
+finished session does not queue twice. Changing the event type clears those
+keys. Pausing does not.
+
+| Event | Source | Not fired when |
+|---|---|---|
+| `session_finished` | `chat:done` | The session belongs to an agent (chat or task). Those already wake the owner through delegations, and a routine on them would loop. |
+| `session_failed` | `chat:error` | Same agent-session exclusion. `chat:cancelled` is not a trigger. |
+| `worktree_archived` | `worktree:archived` | The payload has no worktree id. |
+| `pr_merged` | `pr:status-update` whose `state` is `merged` | The same worktree and PR number already woke this routine. Open and closed PRs do not match. |
+| `approval_resolved` | `decide_approval`, after the result is queued back to the requesting session | The approval id already woke this routine. |
+
+Not included, on purpose:
+
+- **Usage-limit reset.** Codex stores `reset_at` on a usage snapshot, but Jean
+  does not emit an event when a window resets. Watching that would be a new
+  poller, not a hook on something that already happens.
+- **A message from another agent.** `message_agent` already queues a `message`
+  event for the target and records a hop. A second routine would wake that
+  agent twice for one request.
+- **An external webhook.** Jean has no inbound agent webhook. Adding one would
+  be a new server and a new trust boundary, not a small hook.
+
 ## MCP tools (`agents/mcp.rs`)
 
-Agent-only tools: `schedule_create/list/cancel`, `memory_save/search/update/forget`,
+Agent-only tools: `schedule_create/update/list/cancel`, `memory_save/search/update/forget`,
 `message_agent`, `notify_user` (emits `agents:notification` for the toast),
 `task_list`. The caller is identified by `JEAN_MCP_SESSION`. Codex threads
 get it per thread through a config override
@@ -168,9 +246,14 @@ sender's session) is recorded, so the answer returns to the session that asked.
 Registered in `http_server/dispatch.rs` (`AGENT_COMMANDS`, served by
 `dispatch_agents_command`), so native IPC and web access both work:
 `list_agents`, `get_agent_details`, `create_agent`, `update_agent`,
-`delete_agent`, `decide_agent_approval`, `cancel_agent_schedule`,
+`delete_agent`, `decide_agent_approval`, `create_agent_schedule`,
+`update_agent_schedule`, `cancel_agent_schedule`,
 `save/update/delete/export_agent_memory`, `mark_agent_notifications_read`,
 `get_agent_workdir`.
+`create_agent_schedule` takes `kind` (`once`, `interval`, `cron`, `event`)
+plus the fields for that kind (`delaySecs`, `everySecs`, `cron` + `timezone`,
+or `event`). `update_agent_schedule` patches `name`, `prompt`, `paused`, and,
+when `kind` is set, replaces the timing. Pause does not delete the routine.
 Changes emit `cache:invalidate` with key `agents`.
 
 ## Stack size note

@@ -105,6 +105,16 @@ export interface AgentDelegation {
   updatedAt: number
 }
 
+export type ScheduleKind = 'once' | 'interval' | 'cron' | 'event'
+
+/** Events a routine can listen for. Matches `EVENT_TRIGGERS` in agents/db.rs. */
+export type ScheduleEvent =
+  | 'session_finished'
+  | 'session_failed'
+  | 'worktree_archived'
+  | 'pr_merged'
+  | 'approval_resolved'
+
 export interface AgentSchedule {
   id: number
   agentId: string
@@ -113,6 +123,22 @@ export interface AgentSchedule {
   everySecs: number | null
   nextRunAt: number
   lastRunAt: number | null
+  cron: string | null
+  timezone: string | null
+  event: ScheduleEvent | string | null
+  paused: boolean
+}
+
+export interface ScheduleInput {
+  name: string
+  prompt: string
+  kind: ScheduleKind
+  everySecs?: number | null
+  delaySecs?: number | null
+  cron?: string | null
+  timezone?: string | null
+  event?: string | null
+  paused?: boolean
 }
 
 export interface AgentApproval {
@@ -371,6 +397,24 @@ export function useDecideAgentApproval() {
 export function useCancelAgentSchedule() {
   return useAgentsMutation((args: { agentId: string; scheduleId: number }) =>
     invoke<null>('cancel_agent_schedule', args)
+  )
+}
+
+export function useCreateAgentSchedule() {
+  return useAgentsMutation((args: { agentId: string } & ScheduleInput) => {
+    const payload: Record<string, unknown> = { ...args }
+    return invoke<AgentSchedule>('create_agent_schedule', payload)
+  })
+}
+
+export function useUpdateAgentSchedule() {
+  return useAgentsMutation(
+    (
+      args: { agentId: string; scheduleId: number } & Partial<ScheduleInput>
+    ) => {
+      const payload: Record<string, unknown> = { ...args }
+      return invoke<AgentSchedule>('update_agent_schedule', payload)
+    }
   )
 }
 

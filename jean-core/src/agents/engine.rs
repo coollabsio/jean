@@ -86,6 +86,31 @@ pub fn start(app: AppHandle) {
         log::warn!("[Agents] requeue failed: {e}");
     }
 
+    {
+        let listener_app = app.clone();
+        app.listen("worktree:archived", move |event| {
+            let Ok(payload) = serde_json::from_str::<Value>(event.payload()) else {
+                return;
+            };
+            let Some((key, context)) = worktree_archived_trigger(&payload, db::now()) else {
+                return;
+            };
+            emit_schedule_trigger(&listener_app, "worktree_archived", &key, &context);
+        });
+    }
+    {
+        let listener_app = app.clone();
+        app.listen("pr:status-update", move |event| {
+            let Ok(payload) = serde_json::from_str::<Value>(event.payload()) else {
+                return;
+            };
+            let Some((key, context)) = pr_merged_trigger(&payload) else {
+                return;
+            };
+            emit_schedule_trigger(&listener_app, "pr_merged", &key, &context);
+        });
+    }
+
     tauri::async_runtime::spawn(async move {
         loop {
             if let Err(e) = tick(&app).await {
@@ -100,6 +125,7 @@ pub fn start(app: AppHandle) {
 }
 
 fn on_run_ended(app: &AppHandle, session_id: &str, kind: &str, error: Option<&str>) {
+    let agent_session = super::agent_for_session(app, session_id).is_some();
     let marked = super::with_db(app, |conn| {
         let at = db::now() + CHECK_DELAY_SECS;
         Ok(
@@ -109,8 +135,80 @@ fn on_run_ended(app: &AppHandle, session_id: &str, kind: &str, error: Option<&st
     })
     .unwrap_or(0);
     // An agent's own run ended: its queued updates can be delivered now.
-    if marked > 0 || super::agent_for_session(app, session_id).is_some() {
+    if marked > 0 || agent_session {
         super::notify_changed(app);
+    }
+    // Agent sessions already wake through delegations. Firing them again would
+    // loop: the routine's task would finish and wake the same routine.
+    if let Some(trigger) = session_trigger_name(kind, agent_session) {
+        let key = format!("session:{session_id}:{kind}");
+        let context = match (kind, error) {
+            ("error", Some(message)) => format!("Session {session_id} failed: {message}"),
+            ("error", None) => format!("Session {session_id} failed."),
+            _ => format!("Session {session_id} finished."),
+        };
+        emit_schedule_trigger(app, trigger, &key, &context);
+    }
+}
+
+/// `done` / `error` on a project session. Agent sessions are excluded.
+pub(crate) fn session_trigger_name(kind: &str, agent_session: bool) -> Option<&'static str> {
+    if agent_session {
+        return None;
+    }
+    match kind {
+        "done" => Some("session_finished"),
+        "error" => Some("session_failed"),
+        _ => None,
+    }
+}
+
+pub(crate) fn worktree_archived_trigger(payload: &Value, at: i64) -> Option<(String, String)> {
+    let id = payload.get("id").and_then(Value::as_str)?;
+    if id.is_empty() {
+        return None;
+    }
+    let project_id = payload
+        .get("project_id")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    Some((
+        format!("archive:{id}:{at}"),
+        format!("Worktree {id} in project {project_id} was archived."),
+    ))
+}
+
+pub(crate) fn pr_merged_trigger(payload: &Value) -> Option<(String, String)> {
+    let state = payload.get("state").and_then(Value::as_str)?;
+    if state != "merged" {
+        return None;
+    }
+    let worktree_id = payload.get("worktree_id").and_then(Value::as_str)?;
+    if worktree_id.is_empty() {
+        return None;
+    }
+    let pr_number = payload
+        .get("pr_number")
+        .and_then(Value::as_i64)
+        .or_else(|| {
+            payload
+                .get("pr_number")
+                .and_then(Value::as_u64)
+                .map(|number| number as i64)
+        })?;
+    Some((
+        format!("pr:{worktree_id}:{pr_number}"),
+        format!("Pull request #{pr_number} on worktree {worktree_id} was merged."),
+    ))
+}
+
+fn emit_schedule_trigger(app: &AppHandle, event_name: &str, event_key: &str, context: &str) {
+    match super::with_db(app, |conn| {
+        db::fire_event_schedules(conn, event_name, event_key, context)
+    }) {
+        Ok(fired) if !fired.is_empty() => super::notify_changed(app),
+        Ok(_) => {}
+        Err(error) => log::warn!("[Agents] event {event_name} failed: {error}"),
     }
 }
 
@@ -817,7 +915,7 @@ async fn deliver(app: &AppHandle, agent_id: &str) -> Result<bool, String> {
     }
     let (home, _) = home_session(app, &agent).await?;
     let mut budget = super::with_db(app, |conn| {
-        Ok(agent.max_wakes_per_hour - db::wakes_since(conn, &agent.id, db::now() - 3600)?)
+        db::wake_budget_remaining(conn, &agent.id, agent.max_wakes_per_hour, db::now())
     })?;
     let mut sent = false;
 
@@ -1115,6 +1213,12 @@ pub async fn decide_approval(
         )?;
         Ok(())
     })?;
+    let key = format!("approval:{approval_id}");
+    let context = format!(
+        "Approval #{approval_id} ({}) was {final_status}.",
+        approval.tool
+    );
+    emit_schedule_trigger(app, "approval_resolved", &key, &context);
     super::notify_changed(app);
     super::with_db(app, |conn| db::get_approval(conn, approval_id))?
         .ok_or_else(|| format!("Approval #{approval_id} not found"))
@@ -1141,6 +1245,35 @@ mod tests {
             outcome_status(false, Some("done"), Some(&RunStatus::Completed)),
             "done"
         );
+    }
+
+    #[test]
+    fn session_triggers_skip_agent_sessions_and_cancellations() {
+        assert_eq!(
+            session_trigger_name("done", false),
+            Some("session_finished")
+        );
+        assert_eq!(session_trigger_name("error", false), Some("session_failed"));
+        assert_eq!(session_trigger_name("done", true), None);
+        assert_eq!(session_trigger_name("cancelled", false), None);
+    }
+
+    #[test]
+    fn archived_and_merged_payloads_become_trigger_keys() {
+        let archived = serde_json::json!({"id": "wt-1", "project_id": "proj"});
+        let (key, context) = worktree_archived_trigger(&archived, 50).unwrap();
+        assert_eq!(key, "archive:wt-1:50");
+        assert!(context.contains("wt-1"));
+        assert!(worktree_archived_trigger(&serde_json::json!({"id": ""}), 1).is_none());
+
+        let merged = serde_json::json!({"state": "merged", "worktree_id": "wt-1", "pr_number": 12});
+        let (key, context) = pr_merged_trigger(&merged).unwrap();
+        assert_eq!(key, "pr:wt-1:12");
+        assert!(context.contains("#12"));
+        assert!(pr_merged_trigger(
+            &serde_json::json!({"state": "open", "worktree_id": "wt-1", "pr_number": 12})
+        )
+        .is_none());
     }
 
     #[test]

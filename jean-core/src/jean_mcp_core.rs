@@ -55,6 +55,7 @@ const RATE_LIMITED_TOOLS: &[&str] = &[
     "unlink_worktree_pr",
     // Agent tools that write
     "schedule_create",
+    "schedule_update",
     "memory_save",
     "message_agent",
 ];

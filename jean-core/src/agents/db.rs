@@ -156,6 +156,21 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE agents ADD COLUMN thinking_level TEXT;
     ALTER TABLE agents ADD COLUMN skills TEXT NOT NULL DEFAULT '[]';
     "#,
+    // v4: cron expressions, timezones, event triggers, and per-schedule pause.
+    // Old rows leave cron/timezone/event NULL and paused 0, so one-shot and
+    // every_secs schedules keep their previous behavior.
+    r#"
+    ALTER TABLE schedules ADD COLUMN cron TEXT;
+    ALTER TABLE schedules ADD COLUMN timezone TEXT;
+    ALTER TABLE schedules ADD COLUMN event TEXT;
+    ALTER TABLE schedules ADD COLUMN paused INTEGER NOT NULL DEFAULT 0;
+    CREATE TABLE schedule_event_keys (
+        schedule_id INTEGER NOT NULL REFERENCES schedules(id) ON DELETE CASCADE,
+        event_key TEXT NOT NULL,
+        fired_at INTEGER NOT NULL,
+        PRIMARY KEY (schedule_id, event_key)
+    );
+    "#,
 ];
 
 const JEAN_ROLE_PROMPT: &str = "You are Jean, the coordinator agent of the Jean app. You are the boss of all the user's projects.
@@ -164,10 +179,29 @@ const JEAN_ROLE_PROMPT: &str = "You are Jean, the coordinator agent of the Jean 
 - Keep answers short and report what you did with project and worktree names.";
 
 pub fn now() -> i64 {
+    if let Some(path) = clock_file() {
+        if let Ok(text) = std::fs::read_to_string(path) {
+            if let Ok(secs) = text.trim().parse::<i64>() {
+                if secs > 0 {
+                    return secs;
+                }
+            }
+        }
+    }
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+/// `JEAN_AGENT_CLOCK_FILE` (tests and local verification only). When the file
+/// contains a positive unix timestamp, [`now`] returns that instead of the
+/// wall clock, so a cron routine can be moved onto its next slot.
+fn clock_file() -> Option<&'static str> {
+    use std::sync::OnceLock;
+    static FILE: OnceLock<Option<String>> = OnceLock::new();
+    FILE.get_or_init(|| std::env::var("JEAN_AGENT_CLOCK_FILE").ok())
+        .as_deref()
 }
 
 /// Open (or create) the database, apply migrations and seed built-in agents.
@@ -947,9 +981,32 @@ pub fn wakes_since(conn: &Connection, agent_id: &str, since: i64) -> Result<i64,
     .map_err(err)
 }
 
+/// Wakes still allowed in the current hour. Delivery stops at zero.
+pub fn wake_budget_remaining(
+    conn: &Connection,
+    agent_id: &str,
+    max_per_hour: i64,
+    now_unix: i64,
+) -> Result<i64, String> {
+    let used = wakes_since(conn, agent_id, now_unix.saturating_sub(3600))?;
+    Ok((max_per_hour - used).max(0))
+}
+
 // ============================================================================
 // Schedules
 // ============================================================================
+
+/// Events a routine can listen for. Each one is already produced inside Jean.
+pub const EVENT_TRIGGERS: &[&str] = &[
+    "session_finished",
+    "session_failed",
+    "worktree_archived",
+    "pr_merged",
+    "approval_resolved",
+];
+
+/// Repeating intervals cannot be shorter than the cron spacing floor.
+pub const MIN_INTERVAL_SECS: i64 = super::cron::MIN_SPACING_SECS;
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -961,11 +1018,36 @@ pub struct Schedule {
     pub every_secs: Option<i64>,
     pub next_run_at: i64,
     pub last_run_at: Option<i64>,
+    pub cron: Option<String>,
+    pub timezone: Option<String>,
+    /// session_finished | session_failed | worktree_archived | pr_merged | approval_resolved
+    pub event: Option<String>,
+    pub paused: bool,
 }
 
-const SCHEDULE_COLUMNS: &str = "id, agent_id, name, prompt, every_secs, next_run_at, last_run_at";
+/// Validated timing for a new or replacement schedule.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScheduleTiming {
+    pub every_secs: Option<i64>,
+    pub cron: Option<String>,
+    pub timezone: Option<String>,
+    pub event: Option<String>,
+    pub next_run_at: i64,
+}
+
+const SCHEDULE_COLUMNS: &str =
+    "id, agent_id, name, prompt, every_secs, next_run_at, last_run_at, cron, timezone, event, paused";
+
+fn prefixed_schedule_columns(alias: &str) -> String {
+    SCHEDULE_COLUMNS
+        .split(", ")
+        .map(|column| format!("{alias}.{column}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
 
 fn schedule_from_row(row: &rusqlite::Row) -> rusqlite::Result<Schedule> {
+    let paused: i64 = row.get(10)?;
     Ok(Schedule {
         id: row.get(0)?,
         agent_id: row.get(1)?,
@@ -974,6 +1056,95 @@ fn schedule_from_row(row: &rusqlite::Row) -> rusqlite::Result<Schedule> {
         every_secs: row.get(4)?,
         next_run_at: row.get(5)?,
         last_run_at: row.get(6)?,
+        cron: row.get(7)?,
+        timezone: row.get(8)?,
+        event: row.get(9)?,
+        paused: paused != 0,
+    })
+}
+
+fn clean_text(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|text| !text.is_empty())
+}
+
+/// One schedule type: cron, event, interval, or one-shot. Cron's next run is
+/// computed in `timezone` (UTC when omitted).
+pub fn validate_schedule_timing(
+    every_secs: Option<i64>,
+    cron: Option<&str>,
+    timezone: Option<&str>,
+    event: Option<&str>,
+    next_run_at: Option<i64>,
+    now_unix: i64,
+) -> Result<ScheduleTiming, String> {
+    let cron = clean_text(cron);
+    let event = clean_text(event);
+    let timezone = clean_text(timezone);
+    let every = every_secs.filter(|secs| *secs > 0);
+    if cron.is_some() && (event.is_some() || every.is_some()) {
+        return Err(
+            "Choose only one schedule type: cron, event, interval, or one-shot".to_string(),
+        );
+    }
+    if event.is_some() && every.is_some() {
+        return Err(
+            "Choose only one schedule type: cron, event, interval, or one-shot".to_string(),
+        );
+    }
+    if let Some(expression) = cron {
+        let accepted = super::cron::accept(expression, timezone, now_unix)?;
+        return Ok(ScheduleTiming {
+            every_secs: None,
+            cron: Some(accepted.expression),
+            timezone: Some(accepted.timezone),
+            event: None,
+            next_run_at: accepted.next_run_at,
+        });
+    }
+    if let Some(event_name) = event {
+        if !EVENT_TRIGGERS.contains(&event_name) {
+            return Err(format!(
+                "Unknown event '{event_name}'. Expected one of: {}",
+                EVENT_TRIGGERS.join(", ")
+            ));
+        }
+        return Ok(ScheduleTiming {
+            every_secs: None,
+            cron: None,
+            timezone: None,
+            event: Some(event_name.to_string()),
+            next_run_at: 0,
+        });
+    }
+    if let Some(every) = every {
+        let max = super::cron::max_interval_secs();
+        if !(MIN_INTERVAL_SECS..=max).contains(&every) {
+            return Err(format!(
+                "Interval must be between {MIN_INTERVAL_SECS} and {max} seconds"
+            ));
+        }
+        return Ok(ScheduleTiming {
+            every_secs: Some(every),
+            cron: None,
+            timezone: None,
+            event: None,
+            next_run_at: next_run_at.unwrap_or(now_unix.saturating_add(every)),
+        });
+    }
+    let Some(next) = next_run_at else {
+        return Err(
+            "Give a one-shot time, an interval, a cron expression, or an event".to_string(),
+        );
+    };
+    if next <= 0 {
+        return Err("One-shot run time must be a unix timestamp".to_string());
+    }
+    Ok(ScheduleTiming {
+        every_secs: None,
+        cron: None,
+        timezone: None,
+        event: None,
+        next_run_at: next,
     })
 }
 
@@ -1011,10 +1182,144 @@ pub fn create_schedule(
     .map_err(err)
 }
 
+fn require_schedule_text(label: &str, value: &str, max: usize) -> Result<String, String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(format!("{label} is required"));
+    }
+    if value.chars().count() > max {
+        return Err(format!("{label} is too long (max {max} characters)"));
+    }
+    Ok(value.to_string())
+}
+
+fn active_schedule_count(conn: &Connection, agent_id: &str) -> Result<i64, String> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM schedules WHERE agent_id=?1 AND active=1",
+        [agent_id],
+        |row| row.get(0),
+    )
+    .map_err(err)
+}
+
+pub fn get_schedule(
+    conn: &Connection,
+    agent_id: &str,
+    id: i64,
+) -> Result<Option<Schedule>, String> {
+    conn.query_row(
+        &format!(
+            "SELECT {SCHEDULE_COLUMNS} FROM schedules WHERE id=?1 AND agent_id=?2 AND active=1"
+        ),
+        params![id, agent_id],
+        schedule_from_row,
+    )
+    .optional()
+    .map_err(err)
+}
+
+/// Insert a cron, event, interval, or one-shot schedule.
+pub fn insert_schedule(
+    conn: &Connection,
+    agent_id: &str,
+    name: &str,
+    prompt: &str,
+    timing: &ScheduleTiming,
+    paused: bool,
+) -> Result<Schedule, String> {
+    if active_schedule_count(conn, agent_id)? >= MAX_SCHEDULES_PER_AGENT {
+        return Err(format!(
+            "Too many active schedules ({MAX_SCHEDULES_PER_AGENT}). Cancel one first."
+        ));
+    }
+    let name = require_schedule_text("Name", name, 200)?;
+    let prompt = require_schedule_text("Prompt", prompt, 8000)?;
+    conn.execute(
+        "INSERT INTO schedules (agent_id, name, prompt, every_secs, next_run_at, cron, timezone, event, paused, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![
+            agent_id,
+            name,
+            prompt,
+            timing.every_secs,
+            timing.next_run_at,
+            timing.cron,
+            timing.timezone,
+            timing.event,
+            if paused { 1 } else { 0 },
+            now()
+        ],
+    )
+    .map_err(err)?;
+    let id = conn.last_insert_rowid();
+    get_schedule(conn, agent_id, id)?.ok_or_else(|| "Failed to read the new schedule".to_string())
+}
+
+/// Change the name, prompt, pause flag, or timing of an active schedule.
+/// Replacing the event type forgets which events already woke it.
+pub fn update_schedule(
+    conn: &Connection,
+    agent_id: &str,
+    id: i64,
+    name: Option<&str>,
+    prompt: Option<&str>,
+    paused: Option<bool>,
+    timing: Option<&ScheduleTiming>,
+) -> Result<Schedule, String> {
+    let current =
+        get_schedule(conn, agent_id, id)?.ok_or_else(|| format!("No active schedule #{id}"))?;
+    if name.is_none() && prompt.is_none() && paused.is_none() && timing.is_none() {
+        return Err("Nothing to update".to_string());
+    }
+    if let Some(name) = name {
+        let name = require_schedule_text("Name", name, 200)?;
+        conn.execute(
+            "UPDATE schedules SET name=?2 WHERE id=?1",
+            params![id, name],
+        )
+        .map_err(err)?;
+    }
+    if let Some(prompt) = prompt {
+        let prompt = require_schedule_text("Prompt", prompt, 8000)?;
+        conn.execute(
+            "UPDATE schedules SET prompt=?2 WHERE id=?1",
+            params![id, prompt],
+        )
+        .map_err(err)?;
+    }
+    if let Some(paused) = paused {
+        conn.execute(
+            "UPDATE schedules SET paused=?2 WHERE id=?1",
+            params![id, if paused { 1 } else { 0 }],
+        )
+        .map_err(err)?;
+    }
+    if let Some(timing) = timing {
+        if current.event != timing.event {
+            conn.execute("DELETE FROM schedule_event_keys WHERE schedule_id=?1", [id])
+                .map_err(err)?;
+        }
+        conn.execute(
+            "UPDATE schedules SET every_secs=?2, cron=?3, timezone=?4, event=?5, next_run_at=?6 WHERE id=?1",
+            params![
+                id,
+                timing.every_secs,
+                timing.cron,
+                timing.timezone,
+                timing.event,
+                timing.next_run_at
+            ],
+        )
+        .map_err(err)?;
+    }
+    get_schedule(conn, agent_id, id)?.ok_or_else(|| format!("No active schedule #{id}"))
+}
+
 pub fn list_schedules(conn: &Connection, agent_id: &str) -> Result<Vec<Schedule>, String> {
     let mut stmt = conn
         .prepare(&format!(
-            "SELECT {SCHEDULE_COLUMNS} FROM schedules WHERE agent_id=?1 AND active=1 ORDER BY next_run_at"
+            "SELECT {SCHEDULE_COLUMNS} FROM schedules WHERE agent_id=?1 AND active=1
+             ORDER BY paused, CASE WHEN event IS NULL THEN 0 ELSE 1 END, next_run_at, id"
         ))
         .map_err(err)?;
     let rows = stmt.query_map([agent_id], schedule_from_row).map_err(err)?;
@@ -1032,17 +1337,42 @@ pub fn cancel_schedule(conn: &Connection, agent_id: &str, id: i64) -> Result<boo
     Ok(changed > 0)
 }
 
-/// Fire due schedules of agents that are not paused: add one event each, then
-/// move repeating schedules to their next time and end one-shot schedules.
-/// Missed runs (Jean closed) fire once, not once per missed interval.
+fn truncate_chars(text: &str, max: usize) -> String {
+    let text = text.trim();
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let cut: String = text.chars().take(max).collect();
+    format!("{cut}…")
+}
+
+fn queue_schedule_event(conn: &Connection, schedule: &Schedule, body: &str) -> Result<(), String> {
+    add_event(
+        conn,
+        &NewEvent {
+            agent_id: &schedule.agent_id,
+            kind: "schedule",
+            title: &schedule.name,
+            body,
+            ..Default::default()
+        },
+    )?;
+    Ok(())
+}
+
+/// Fire due time-based schedules of agents that are not paused: add one event
+/// each, then move repeating schedules to their next time and end one-shot
+/// schedules. Missed runs (Jean closed) fire once, not once per missed slot.
+/// Event routines are not included; they wake from [`fire_event_schedules`].
 pub fn fire_due_schedules(conn: &Connection, at: i64) -> Result<Vec<Schedule>, String> {
+    let columns = prefixed_schedule_columns("s");
     let due: Vec<Schedule> = {
         let mut stmt = conn
-            .prepare(
-                "SELECT s.id, s.agent_id, s.name, s.prompt, s.every_secs, s.next_run_at, s.last_run_at
+            .prepare(&format!(
+                "SELECT {columns}
                  FROM schedules s JOIN agents a ON a.id = s.agent_id
-                 WHERE s.active=1 AND s.next_run_at <= ?1 AND a.paused=0",
-            )
+                 WHERE s.active=1 AND s.paused=0 AND s.event IS NULL AND s.next_run_at <= ?1 AND a.paused=0"
+            ))
             .map_err(err)?;
         let rows = stmt.query_map([at], schedule_from_row).map_err(err)?;
         rows.collect::<Result<_, _>>().map_err(err)?
@@ -1052,34 +1382,110 @@ pub fn fire_due_schedules(conn: &Connection, at: i64) -> Result<Vec<Schedule>, S
             "Schedule #{} \"{}\" is due.\n\n{}",
             schedule.id, schedule.name, schedule.prompt
         );
-        add_event(
-            conn,
-            &NewEvent {
-                agent_id: &schedule.agent_id,
-                kind: "schedule",
-                title: &schedule.name,
-                body: &body,
-                ..Default::default()
-            },
-        )?;
-        match schedule.every_secs {
-            Some(every) if every > 0 => conn.execute(
+        queue_schedule_event(conn, schedule, &body)?;
+        let next = if let Some(expression) = schedule.cron.as_deref() {
+            let timezone = schedule.timezone.as_deref().unwrap_or("UTC");
+            match super::cron::next_after(expression, timezone, at) {
+                Ok(next) => Some(next),
+                Err(error) => {
+                    log::warn!(
+                        "[Agents] schedule #{} cron failed ({error}); stopping it",
+                        schedule.id
+                    );
+                    None
+                }
+            }
+        } else {
+            schedule
+                .every_secs
+                .filter(|every| *every > 0)
+                .map(|every| at + every)
+        };
+        match next {
+            Some(next_at) => conn.execute(
                 "UPDATE schedules SET last_run_at=?2, next_run_at=?3 WHERE id=?1",
-                params![schedule.id, at, at + every],
+                params![schedule.id, at, next_at],
             ),
-            _ => conn.execute(
+            None => conn.execute(
                 "UPDATE schedules SET last_run_at=?2, active=0 WHERE id=?1",
                 params![schedule.id, at],
             ),
         }
         .map_err(err)?;
+        log::info!(
+            "[Agents] schedule #{} \"{}\" fired for {}",
+            schedule.id,
+            schedule.name,
+            schedule.agent_id
+        );
     }
     Ok(due)
 }
 
+/// Wake event routines. `event_key` is remembered so the same occurrence (the
+/// same merged PR, the same session) does not queue twice. The hourly wake
+/// budget is applied later, when the queued update is delivered.
+pub fn fire_event_schedules(
+    conn: &Connection,
+    event_name: &str,
+    event_key: &str,
+    context: &str,
+) -> Result<Vec<Schedule>, String> {
+    if !EVENT_TRIGGERS.contains(&event_name) {
+        return Err(format!("Unknown event '{event_name}'"));
+    }
+    let columns = prefixed_schedule_columns("s");
+    let matching: Vec<Schedule> = {
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {columns}
+                 FROM schedules s JOIN agents a ON a.id = s.agent_id
+                 WHERE s.active=1 AND s.paused=0 AND a.paused=0 AND s.event=?1"
+            ))
+            .map_err(err)?;
+        let rows = stmt
+            .query_map([event_name], schedule_from_row)
+            .map_err(err)?;
+        rows.collect::<Result<_, _>>().map_err(err)?
+    };
+    let context = truncate_chars(context, 2000);
+    let mut fired = Vec::new();
+    for schedule in matching {
+        if !event_key.is_empty() {
+            let inserted = conn
+                .execute(
+                    "INSERT OR IGNORE INTO schedule_event_keys (schedule_id, event_key, fired_at) VALUES (?1, ?2, ?3)",
+                    params![schedule.id, event_key, now()],
+                )
+                .map_err(err)?;
+            if inserted == 0 {
+                continue;
+            }
+        }
+        let body = format!(
+            "Event {event_name} for schedule #{} \"{}\".\n{context}\n\n{}",
+            schedule.id, schedule.name, schedule.prompt
+        );
+        queue_schedule_event(conn, &schedule, &body)?;
+        conn.execute(
+            "UPDATE schedules SET last_run_at=?2 WHERE id=?1",
+            params![schedule.id, now()],
+        )
+        .map_err(err)?;
+        log::info!(
+            "[Agents] event {event_name} fired schedule #{} for {}",
+            schedule.id,
+            schedule.agent_id
+        );
+        fired.push(schedule);
+    }
+    Ok(fired)
+}
+
 pub fn next_schedule_at(conn: &Connection, agent_id: &str) -> Result<Option<i64>, String> {
     conn.query_row(
-        "SELECT MIN(next_run_at) FROM schedules WHERE agent_id=?1 AND active=1",
+        "SELECT MIN(next_run_at) FROM schedules
+         WHERE agent_id=?1 AND active=1 AND paused=0 AND event IS NULL",
         [agent_id],
         |row| row.get(0),
     )
@@ -2354,5 +2760,192 @@ mod tests {
         assert_eq!(set.backend, Some(Some("codex".into())));
         assert_eq!(set.thinking_level, Some(Some("ultrathink".into())));
         assert_eq!(set.skills.unwrap()[0].path, "/skills/review/SKILL.md");
+    }
+
+    #[test]
+    fn migration_v4_keeps_interval_and_one_shot_schedules() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        for (index, sql) in super::MIGRATIONS.iter().enumerate().take(3) {
+            conn.execute_batch(&format!(
+                "BEGIN; {sql} PRAGMA user_version = {}; COMMIT;",
+                index + 1
+            ))
+            .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO agents (id, name, description, icon, role_prompt, worktree_id, builtin, created_at, updated_at)
+             VALUES ('jean', 'Jean', '', 'jean', '', '__jean_agent__', 1, 1, 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO schedules (agent_id, name, prompt, every_secs, next_run_at, created_at)
+             VALUES ('jean', 'brief', 'daily', 600, 100, 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO schedules (agent_id, name, prompt, every_secs, next_run_at, created_at)
+             VALUES ('jean', 'once', 'check', NULL, 100, 1)",
+            [],
+        )
+        .unwrap();
+        init(&conn).unwrap();
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 4);
+        let schedules = list_schedules(&conn, JEAN_AGENT_ID).unwrap();
+        assert_eq!(schedules.len(), 2);
+        assert!(schedules.iter().all(|schedule| schedule.cron.is_none()
+            && schedule.event.is_none()
+            && !schedule.paused));
+        assert_eq!(fire_due_schedules(&conn, 150).unwrap().len(), 2);
+        let left = list_schedules(&conn, JEAN_AGENT_ID).unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].name, "brief");
+        assert_eq!(left[0].next_run_at, 750);
+        assert_eq!(left[0].every_secs, Some(600));
+    }
+
+    #[test]
+    fn cron_schedule_fires_once_and_skips_missed_slots() {
+        let conn = db();
+        let now_unix = 1_767_225_600;
+        let timing =
+            validate_schedule_timing(None, Some("0 * * * *"), Some("UTC"), None, None, now_unix)
+                .unwrap();
+        let schedule =
+            insert_schedule(&conn, JEAN_AGENT_ID, "hourly", "check", &timing, false).unwrap();
+        assert_eq!(schedule.cron.as_deref(), Some("0 * * * *"));
+        assert_eq!(schedule.timezone.as_deref(), Some("UTC"));
+        assert!(schedule.next_run_at > now_unix);
+        let late = schedule.next_run_at + 3 * 3600;
+        conn.execute(
+            "UPDATE schedules SET next_run_at=?2 WHERE id=?1",
+            params![schedule.id, now_unix],
+        )
+        .unwrap();
+        assert_eq!(fire_due_schedules(&conn, late).unwrap().len(), 1);
+        let left = list_schedules(&conn, JEAN_AGENT_ID).unwrap();
+        assert_eq!(left.len(), 1);
+        assert!(left[0].next_run_at > late);
+        assert_eq!(pending_event_count(&conn, JEAN_AGENT_ID).unwrap(), 1);
+        update_schedule(
+            &conn,
+            JEAN_AGENT_ID,
+            left[0].id,
+            None,
+            None,
+            Some(true),
+            None,
+        )
+        .unwrap();
+        assert!(fire_due_schedules(&conn, left[0].next_run_at + 10)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn event_schedules_fire_once_per_key_and_stay_queued_when_the_budget_is_spent() {
+        let conn = db();
+        let timing =
+            validate_schedule_timing(None, None, None, Some("pr_merged"), None, 0).unwrap();
+        let schedule = insert_schedule(
+            &conn,
+            JEAN_AGENT_ID,
+            "merged",
+            "look at the PR",
+            &timing,
+            false,
+        )
+        .unwrap();
+        assert_eq!(schedule.event.as_deref(), Some("pr_merged"));
+        assert_eq!(next_schedule_at(&conn, JEAN_AGENT_ID).unwrap(), None);
+        assert_eq!(
+            fire_event_schedules(&conn, "pr_merged", "pr:wt:1", "PR 1 merged")
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(fire_event_schedules(&conn, "pr_merged", "pr:wt:1", "again")
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            fire_event_schedules(&conn, "pr_merged", "pr:wt:2", "other")
+                .unwrap()
+                .len(),
+            1
+        );
+        let failed =
+            validate_schedule_timing(None, None, None, Some("session_failed"), None, 0).unwrap();
+        update_schedule(
+            &conn,
+            JEAN_AGENT_ID,
+            schedule.id,
+            None,
+            None,
+            None,
+            Some(&failed),
+        )
+        .unwrap();
+        assert_eq!(
+            fire_event_schedules(&conn, "session_failed", "session:s:error", "boom")
+                .unwrap()
+                .len(),
+            1
+        );
+        update_schedule(
+            &conn,
+            JEAN_AGENT_ID,
+            schedule.id,
+            None,
+            None,
+            Some(true),
+            None,
+        )
+        .unwrap();
+        assert!(
+            fire_event_schedules(&conn, "session_failed", "session:s2:error", "later")
+                .unwrap()
+                .is_empty()
+        );
+        for _ in 0..12 {
+            record_wake(&conn, JEAN_AGENT_ID, "s").unwrap();
+        }
+        assert_eq!(
+            wake_budget_remaining(&conn, JEAN_AGENT_ID, 12, now()).unwrap(),
+            0
+        );
+        assert!(pending_event_count(&conn, JEAN_AGENT_ID).unwrap() >= 3);
+        assert!(validate_schedule_timing(None, None, None, Some("webhook"), None, 0).is_err());
+        assert!(
+            validate_schedule_timing(Some(60), None, None, None, None, 0)
+                .unwrap_err()
+                .contains("between")
+        );
+    }
+
+    #[test]
+    fn paused_agent_skips_event_routines() {
+        let conn = db();
+        let timing =
+            validate_schedule_timing(None, None, None, Some("session_finished"), None, 0).unwrap();
+        insert_schedule(&conn, JEAN_AGENT_ID, "done", "summarize", &timing, false).unwrap();
+        update_agent(
+            &conn,
+            JEAN_AGENT_ID,
+            &AgentPatch {
+                paused: Some(true),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(
+            fire_event_schedules(&conn, "session_finished", "session:s:done", "finished")
+                .unwrap()
+                .is_empty()
+        );
     }
 }

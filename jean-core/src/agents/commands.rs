@@ -1,7 +1,7 @@
 //! Commands for the Agents UI (registered in `http_server/dispatch.rs`, which
 //! serves both native IPC and web access).
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
 use super::db;
@@ -237,6 +237,152 @@ pub async fn decide_approval(
     approve: bool,
 ) -> Result<db::Approval, String> {
     super::engine::decide_approval(app, approval_id, approve).await
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleCommandInput {
+    pub name: String,
+    pub prompt: String,
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub every_secs: Option<i64>,
+    #[serde(default)]
+    pub delay_secs: Option<i64>,
+    #[serde(default)]
+    pub cron: Option<String>,
+    #[serde(default)]
+    pub timezone: Option<String>,
+    #[serde(default)]
+    pub event: Option<String>,
+    #[serde(default)]
+    pub paused: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleCommandPatch {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub prompt: Option<String>,
+    #[serde(default)]
+    pub paused: Option<bool>,
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub every_secs: Option<i64>,
+    #[serde(default)]
+    pub delay_secs: Option<i64>,
+    #[serde(default)]
+    pub cron: Option<String>,
+    #[serde(default)]
+    pub timezone: Option<String>,
+    #[serde(default)]
+    pub event: Option<String>,
+}
+
+fn timing_from_kind(
+    kind: &str,
+    every_secs: Option<i64>,
+    delay_secs: Option<i64>,
+    cron: Option<&str>,
+    timezone: Option<&str>,
+    event: Option<&str>,
+    now_unix: i64,
+) -> Result<db::ScheduleTiming, String> {
+    let max = super::cron::max_interval_secs();
+    match kind {
+        "once" => {
+            let delay = delay_secs.unwrap_or(60);
+            if !(60..=max).contains(&delay) {
+                return Err(format!("Delay must be between 60 and {max} seconds"));
+            }
+            db::validate_schedule_timing(None, None, None, None, Some(now_unix + delay), now_unix)
+        }
+        "interval" => {
+            let every = every_secs.ok_or_else(|| "Interval requires everySecs".to_string())?;
+            db::validate_schedule_timing(
+                Some(every),
+                None,
+                None,
+                None,
+                Some(now_unix + every),
+                now_unix,
+            )
+        }
+        "cron" => {
+            let expression = cron.ok_or_else(|| "Cron requires a cron expression".to_string())?;
+            db::validate_schedule_timing(None, Some(expression), timezone, None, None, now_unix)
+        }
+        "event" => {
+            let event = event.ok_or_else(|| "Event requires an event type".to_string())?;
+            db::validate_schedule_timing(None, None, None, Some(event), None, now_unix)
+        }
+        _ => Err("kind must be once, interval, cron, or event".to_string()),
+    }
+}
+
+pub fn create_schedule_for_agent(
+    app: &AppHandle,
+    agent_id: &str,
+    input: ScheduleCommandInput,
+) -> Result<db::Schedule, String> {
+    let timing = timing_from_kind(
+        &input.kind,
+        input.every_secs,
+        input.delay_secs,
+        input.cron.as_deref(),
+        input.timezone.as_deref(),
+        input.event.as_deref(),
+        db::now(),
+    )?;
+    let schedule = super::with_db(app, |conn| {
+        db::insert_schedule(
+            conn,
+            agent_id,
+            &input.name,
+            &input.prompt,
+            &timing,
+            input.paused,
+        )
+    })?;
+    super::notify_changed(app);
+    Ok(schedule)
+}
+
+pub fn update_schedule_for_agent(
+    app: &AppHandle,
+    agent_id: &str,
+    schedule_id: i64,
+    patch: ScheduleCommandPatch,
+) -> Result<db::Schedule, String> {
+    let timing = match patch.kind.as_deref() {
+        Some(kind) => Some(timing_from_kind(
+            kind,
+            patch.every_secs,
+            patch.delay_secs,
+            patch.cron.as_deref(),
+            patch.timezone.as_deref(),
+            patch.event.as_deref(),
+            db::now(),
+        )?),
+        None => None,
+    };
+    let schedule = super::with_db(app, |conn| {
+        db::update_schedule(
+            conn,
+            agent_id,
+            schedule_id,
+            patch.name.as_deref(),
+            patch.prompt.as_deref(),
+            patch.paused,
+            timing.as_ref(),
+        )
+    })?;
+    super::notify_changed(app);
+    Ok(schedule)
 }
 
 pub fn cancel_schedule(app: &AppHandle, agent_id: &str, schedule_id: i64) -> Result<(), String> {
