@@ -11,9 +11,8 @@ vi.mock('sonner', () => ({
   toast: { error: toastErrorMock },
 }))
 
-const { parseOsc52Payload, registerOsc52ClipboardHandler } = await import(
-  './terminal-osc52'
-)
+const { parseOsc52Payload, registerOsc52ClipboardHandler } =
+  await import('./terminal-osc52')
 
 const base64 = (text: string) =>
   btoa(String.fromCharCode(...new TextEncoder().encode(text)))
@@ -88,7 +87,9 @@ describe('registerOsc52ClipboardHandler', () => {
 
     handler('c;aGVsbG8=')
     await vi.waitFor(() =>
-      expect(toastErrorMock).toHaveBeenCalledWith('Copy failed: denied')
+      expect(toastErrorMock).toHaveBeenCalledWith('Copy failed: denied', {
+        id: 'terminal-osc52-copy-error',
+      })
     )
   })
 })

@@ -145,6 +145,12 @@ function execCommandCopyFallback(text: string): boolean {
   const selection = document.getSelection()
   const previousRange =
     selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null
+  // Restore focus afterwards so a copy triggered from the terminal (OSC 52)
+  // does not leave the xterm input unfocused.
+  const previousFocus =
+    document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null
 
   textarea.focus()
   textarea.select()
@@ -154,6 +160,7 @@ function execCommandCopyFallback(text: string): boolean {
     return document.execCommand('copy')
   } finally {
     document.body.removeChild(textarea)
+    previousFocus?.focus()
     if (selection) {
       selection.removeAllRanges()
       if (previousRange) selection.addRange(previousRange)

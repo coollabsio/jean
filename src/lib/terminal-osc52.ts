@@ -43,7 +43,10 @@ export function registerOsc52ClipboardHandler(
     const text = parseOsc52Payload(data)
     if (text) {
       copyToClipboard(text).catch(error => {
-        toast.error(error instanceof Error ? error.message : String(error))
+        // Fixed id: repeated failed copies (e.g. tmux) replace one toast.
+        toast.error(error instanceof Error ? error.message : String(error), {
+          id: 'terminal-osc52-copy-error',
+        })
       })
     }
     return true

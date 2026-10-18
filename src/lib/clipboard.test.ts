@@ -73,6 +73,21 @@ describe('copyToClipboard', () => {
     expect(invokeMock).not.toHaveBeenCalled()
   })
 
+  it('restores focus after the execCommand fallback', async () => {
+    setSecureContext(false)
+    document.execCommand = vi.fn().mockReturnValue(true)
+    const terminalInput = document.createElement('textarea')
+    document.body.appendChild(terminalInput)
+    terminalInput.focus()
+
+    try {
+      await copyToClipboard('yanked text')
+      expect(document.activeElement).toBe(terminalInput)
+    } finally {
+      terminalInput.remove()
+    }
+  })
+
   it('explains HTTPS requirement when insecure copy fully fails', async () => {
     setSecureContext(false)
 
