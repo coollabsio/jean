@@ -17,6 +17,7 @@ vi.mock('@/components/ui/backend-label', () => ({
     if (backend === 'codex') return 'Codex'
     if (backend === 'claude') return 'Claude'
     if (backend === 'antigravity') return 'Antigravity CLI'
+    if (backend === 'muse') return 'Muse'
     return backend
   },
 }))
@@ -78,6 +79,14 @@ describe('SlashPopover /goal built-in', () => {
     const { SlashPopover } = await import('./SlashPopover')
 
     render(<SlashPopover {...baseProps} sessionBackend="antigravity" />)
+
+    expect(screen.queryByText('/goal')).not.toBeInTheDocument()
+  })
+
+  it('does not show /goal for Muse sessions (Codex/Grok-native built-in)', async () => {
+    const { SlashPopover } = await import('./SlashPopover')
+
+    render(<SlashPopover {...baseProps} sessionBackend="muse" />)
 
     expect(screen.queryByText('/goal')).not.toBeInTheDocument()
   })

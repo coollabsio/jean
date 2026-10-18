@@ -108,6 +108,23 @@ describe('resolveEnabledMcpServers', () => {
 
     expect(enabled).toEqual([mcpKey('antigravity', 'jean')])
   })
+
+  it('keeps enabled Muse servers active because muse serve loads them from settings.json', () => {
+    const museServer: McpServerInfo = { ...jeanServer, backend: 'muse' }
+    const disabledMuseServer: McpServerInfo = {
+      ...otherServer,
+      backend: 'muse',
+      disabled: true,
+    }
+    const enabled = resolveEnabledMcpServers({
+      availableServers: [museServer, disabledMuseServer, otherServer],
+      sessionEnabled: [],
+      globalEnabled: [],
+      knownServers: [mcpKey('muse', 'jean')],
+    })
+
+    expect(enabled).toEqual([mcpKey('muse', 'jean')])
+  })
 })
 
 describe('getNewServersToAutoEnable', () => {

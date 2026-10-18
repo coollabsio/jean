@@ -14,6 +14,7 @@ import {
 import { useGrokCliStatus, useGrokCliAuth } from '@/services/grok-cli'
 import { useKimiCliStatus, useKimiCliAuth } from '@/services/kimi-cli'
 import { useAntigravityCliStatus, useAntigravityCliAuth } from '@/services/antigravity-cli'
+import { useMuseCliStatus, useMuseCliAuth } from '@/services/muse-cli'
 import type { CliBackend } from '@/types/preferences'
 
 /**
@@ -67,6 +68,7 @@ export function useInstalledBackends(options?: {
   const grok = useGrokCliStatus({ enabled, serverId })
   const kimi = useKimiCliStatus({ enabled, serverId })
   const antigravity = useAntigravityCliStatus({ enabled, serverId })
+  const muse = useMuseCliStatus({ enabled, serverId })
 
   const installedBackends = useMemo(() => {
     const backends: CliBackend[] = []
@@ -79,6 +81,7 @@ export function useInstalledBackends(options?: {
     if (grok.data?.installed) backends.push('grok')
     if (kimi.data?.installed) backends.push('kimi')
     if (antigravity.data?.installed) backends.push('antigravity')
+    if (muse.data?.installed) backends.push('muse')
     return backends
   }, [
     claude.data?.installed,
@@ -90,6 +93,7 @@ export function useInstalledBackends(options?: {
     grok.data?.installed,
     kimi.data?.installed,
     antigravity.data?.installed,
+    muse.data?.installed,
   ])
 
   const isLoading =
@@ -101,7 +105,8 @@ export function useInstalledBackends(options?: {
     commandcode.isLoading ||
     grok.isLoading ||
     kimi.isLoading ||
-    antigravity.isLoading
+    antigravity.isLoading ||
+    muse.isLoading
 
   return {
     installedBackends,
@@ -124,6 +129,7 @@ export function useBackendAuthStatuses(options?: { enabled?: boolean }) {
   const grok = useGrokCliStatus({ enabled })
   const kimi = useKimiCliStatus({ enabled })
   const antigravity = useAntigravityCliStatus({ enabled })
+  const muse = useMuseCliStatus({ enabled })
 
   const claudeAuth = useClaudeCliAuth({
     enabled: enabled && !!claude.data?.installed,
@@ -152,6 +158,9 @@ export function useBackendAuthStatuses(options?: { enabled?: boolean }) {
   const antigravityAuth = useAntigravityCliAuth({
     enabled: enabled && !!antigravity.data?.installed,
   })
+  const museAuth = useMuseCliAuth({
+    enabled: enabled && !!muse.data?.installed,
+  })
 
   const authByBackend = useMemo(() => {
     const map: Partial<Record<CliBackend, boolean | undefined>> = {
@@ -170,6 +179,7 @@ export function useBackendAuthStatuses(options?: { enabled?: boolean }) {
         antigravity.data?.installed,
         antigravityAuth.data
       ),
+      muse: resolvedAuth(muse.data?.installed, museAuth.data),
     }
     return map
   }, [
@@ -191,6 +201,8 @@ export function useBackendAuthStatuses(options?: { enabled?: boolean }) {
     kimiAuth.data,
     antigravity.data?.installed,
     antigravityAuth.data,
+    muse.data?.installed,
+    museAuth.data,
   ])
 
   const isStatusLoading =
@@ -202,7 +214,8 @@ export function useBackendAuthStatuses(options?: { enabled?: boolean }) {
     commandcode.isLoading ||
     grok.isLoading ||
     kimi.isLoading ||
-    antigravity.isLoading
+    antigravity.isLoading ||
+    muse.isLoading
 
   const isAuthLoading =
     (!!claude.data?.installed && claudeAuth.isLoading) ||
@@ -213,7 +226,8 @@ export function useBackendAuthStatuses(options?: { enabled?: boolean }) {
     (!!commandcode.data?.installed && commandcodeAuth.isLoading) ||
     (!!grok.data?.installed && grokAuth.isLoading) ||
     (!!kimi.data?.installed && kimiAuth.isLoading) ||
-    (!!antigravity.data?.installed && antigravityAuth.isLoading)
+    (!!antigravity.data?.installed && antigravityAuth.isLoading) ||
+    (!!muse.data?.installed && museAuth.isLoading)
 
   return {
     authByBackend,

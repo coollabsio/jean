@@ -12,6 +12,7 @@ interface BackendModelPreferences {
   selected_grok_model?: string
   selected_kimi_model?: string
   selected_antigravity_model?: string
+  selected_muse_model?: string
 }
 
 export interface ModelOption {
@@ -69,6 +70,9 @@ export function resolveDefaultModelForBackend(
   }
   if (backend === 'antigravity') {
     return preferences?.selected_antigravity_model ?? 'antigravity/auto'
+  }
+  if (backend === 'muse') {
+    return preferences?.selected_muse_model ?? 'muse/default'
   }
   return preferences?.selected_model ?? DEFAULT_MODEL
 }

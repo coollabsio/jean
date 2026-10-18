@@ -23,6 +23,7 @@ import {
   getNewServersToAutoEnable,
   useAllBackendsMcpHealth,
   groupServersByBackend,
+  isAutoLoadedMcpBackend,
   mcpKey,
   migrateLegacyMcpKeys,
 } from '@/services/mcp'
@@ -223,7 +224,7 @@ export function McpServersPane({
       <SettingsSection title="MCP Servers">
         <p className="text-xs text-muted-foreground">
           Servers enabled by default for sessions in this project. Antigravity
-          loads its configured servers automatically.
+          and Muse load their configured servers automatically.
         </p>
 
         {mcpLoading ? (
@@ -259,11 +260,13 @@ export function McpServersPane({
                       id={`proj-mcp-${backend}-${server.name}`}
                       checked={
                         !server.disabled &&
-                        (backend === 'antigravity' ||
+                        (isAutoLoadedMcpBackend(backend) ||
                           selectedServersSet.has(mcpKey(backend, server.name)))
                       }
                       onCheckedChange={() => handleToggle(backend, server.name)}
-                      disabled={server.disabled || backend === 'antigravity'}
+                      disabled={
+                        server.disabled || isAutoLoadedMcpBackend(backend)
+                      }
                     />
                     <Label
                       htmlFor={`proj-mcp-${backend}-${server.name}`}
@@ -292,7 +295,7 @@ export function McpServersPane({
                     <span className="text-xs text-muted-foreground">
                       {server.disabled
                         ? 'disabled'
-                        : backend === 'antigravity'
+                        : isAutoLoadedMcpBackend(backend)
                           ? 'automatic'
                           : server.scope}
                     </span>

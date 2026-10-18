@@ -394,6 +394,17 @@ fn generate_names(app: &AppHandle, request: &NamingRequest) -> Result<NamingOutp
         return serde_json::from_str(json)
             .map_err(|error| format!("Failed to parse Antigravity naming JSON: {error}"));
     }
+    if backend == super::types::Backend::Muse {
+        let json_str = super::muse::execute_one_shot_muse(
+            app,
+            &prompt,
+            &request.model,
+            Some(NAMING_SCHEMA),
+            Some(std::path::Path::new(&request.worktree_path)),
+        )?;
+        return serde_json::from_str(&json_str)
+            .map_err(|error| format!("Failed to parse Muse naming JSON: {error}"));
+    }
 
     let cli_path = resolve_cli_binary(app);
     if !cli_path.exists() {

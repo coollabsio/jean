@@ -495,6 +495,7 @@ export function useInvestigateHandlers({
         investigateBackend === 'grok' ||
         investigateBackend === 'kimi' ||
         investigateBackend === 'antigravity' ||
+        investigateBackend === 'muse' ||
         investigateUseAdaptive
       const investigateThinkingLevel = usesEffortBackend
         ? undefined
@@ -746,6 +747,7 @@ export function useInvestigateHandlers({
         investigateBackend === 'grok' ||
         investigateBackend === 'kimi' ||
         investigateBackend === 'antigravity' ||
+        investigateBackend === 'muse' ||
         investigateUseAdaptive
       const investigateThinkingLevel = usesEffortBackend
         ? undefined

@@ -49,7 +49,7 @@ static CODEX_YOLO_AUTO_APPROVE: Lazy<Mutex<HashSet<String>>> =
     Lazy::new(|| Mutex::new(HashSet::new()));
 
 /// Sessions in PROCESS_REGISTRY whose process is fully detached (survives Jean
-/// quitting). Claude CLI and host-backed Pi/Grok/Kimi/Antigravity runs are detached.
+/// quitting). Claude CLI and host-backed Pi/Grok/Kimi/Antigravity/Muse runs are detached.
 static DETACHED_SESSIONS: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
 
 /// Sessions with a `send_chat_message` call currently in flight.
@@ -257,6 +257,38 @@ fn try_abort_antigravity_acp_host(_app: &AppHandle, _session_id: &str) {}
 
 #[cfg(not(unix))]
 fn try_abort_antigravity_acp_host(_app: &AppHandle, _session_id: &str) {}
+
+/// Ask the Muse MSP host to `turn/cancel` before its process is killed.
+#[cfg(unix)]
+fn try_abort_muse_msp_host(app: &AppHandle, session_id: &str) {
+    let run_id = super::storage::load_metadata(app, session_id)
+        .ok()
+        .flatten()
+        .and_then(|metadata| {
+            metadata
+                .runs
+                .iter()
+                .rev()
+                .find(|run| {
+                    run.status == super::types::RunStatus::Running
+                        && run.backend == Some(super::types::Backend::Muse)
+                })
+                .map(|run| run.run_id.clone())
+        });
+    let Some(run_id) = run_id else { return };
+    let Ok(app_data) = app.path().app_data_dir() else {
+        log::warn!("Failed to resolve app data dir for Muse MSP cancel");
+        return;
+    };
+    let socket_path = super::muse::muse_msp_socket_path(&app_data, session_id, &run_id);
+    let line = super::muse::serialize_muse_host_command("cancel", None);
+    if let Err(error) = super::muse::send_muse_msp_host_command(&socket_path, &line) {
+        log::warn!("Failed to send Muse MSP cancel before kill for session {session_id}: {error}");
+    }
+}
+
+#[cfg(not(unix))]
+fn try_abort_muse_msp_host(_app: &AppHandle, _session_id: &str) {}
 
 /// Register a running Claude process PID for a session.
 /// Returns `false` if the session was cancelled before registration (process is killed immediately).
@@ -880,6 +912,7 @@ pub fn cancel_process(
         let grok_host_kept = try_abort_grok_acp_host(app, session_id);
         try_abort_kimi_acp_host(app, session_id);
         try_abort_antigravity_acp_host(app, session_id);
+        try_abort_muse_msp_host(app, session_id);
         if grok_host_kept {
             log::info!("Grok ACP host left running after cancel for session {session_id}");
             if let Err(e) = run_log::mark_running_run_cancelled(app, session_id) {
@@ -1035,6 +1068,7 @@ pub fn cancel_process_if_running(
         let grok_host_kept = try_abort_grok_acp_host(app, session_id);
         try_abort_kimi_acp_host(app, session_id);
         try_abort_antigravity_acp_host(app, session_id);
+        try_abort_muse_msp_host(app, session_id);
         if grok_host_kept {
             log::info!("Grok ACP host left running after cancel for session {session_id}");
             if let Err(e) = run_log::mark_running_run_cancelled(app, session_id) {

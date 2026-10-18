@@ -11,6 +11,7 @@ import { CommandCodeIcon } from '@/components/icons/CommandCodeIcon'
 import { GrokIcon } from '@/components/icons/GrokIcon'
 import { KimiIcon } from '@/components/icons/KimiIcon'
 import { AntigravityIcon } from '@/components/icons/AntigravityIcon'
+import { MuseIcon } from '@/components/icons/MuseIcon'
 import type { CliBackend } from '@/types/preferences'
 
 export type BackendIconComponent = ForwardRefExoticComponent<
@@ -37,6 +38,8 @@ export function getBackendIcon(backend: CliBackend): BackendIconComponent {
       return KimiIcon
     case 'antigravity':
       return AntigravityIcon
+    case 'muse':
+      return MuseIcon
   }
 }
 
@@ -60,11 +63,13 @@ export function getBackendLabel(backend: CliBackend): string {
       return 'Kimi Code'
     case 'antigravity':
       return 'Antigravity CLI'
+    case 'muse':
+      return 'Muse'
   }
 }
 
 export function isBetaBackend(backend: CliBackend): boolean {
-  return backend === 'antigravity'
+  return backend === 'antigravity' || backend === 'muse'
 }
 
 export function getBackendPlainLabel(backend: CliBackend): string {

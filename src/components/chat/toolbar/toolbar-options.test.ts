@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   ANTIGRAVITY_EFFORT_LEVEL_OPTIONS,
   EFFORT_LEVEL_OPTIONS,
+  MUSE_EFFORT_LEVEL_OPTIONS,
   PI_EFFORT_LEVEL_OPTIONS,
   THINKING_LEVEL_OPTIONS,
   withAdaptiveEffortOption,
@@ -14,6 +15,21 @@ describe('ANTIGRAVITY_EFFORT_LEVEL_OPTIONS', () => {
       'low',
       'medium',
       'high',
+    ])
+  })
+})
+
+describe('MUSE_EFFORT_LEVEL_OPTIONS', () => {
+  it('matches the Muse reasoningEffort contract in CLI order', () => {
+    expect(MUSE_EFFORT_LEVEL_OPTIONS.map(option => option.value)).toEqual([
+      'none',
+      'minimal',
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+      'max',
+      'ultra',
     ])
   })
 })

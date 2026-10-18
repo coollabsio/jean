@@ -126,6 +126,16 @@ impl McpEntry {
         self.claude_server_json()
     }
 
+    fn muse_server_json(&self) -> Value {
+        json!({
+            "transport": "stdio",
+            "command": self.command,
+            "args": ["mcp"],
+            "env": self.env_map(),
+            "enabled": true,
+        })
+    }
+
     fn opencode_server_json(&self) -> Value {
         json!({
             "type": "local",
@@ -548,7 +558,7 @@ pub(crate) fn install_agent_browser_sync(app: &AppHandle) -> Result<AgentBrowser
 }
 
 /// CLI backends whose config files hold an agent-browser MCP entry.
-const CONFIG_BACKENDS: [&str; 7] = [
+const CONFIG_BACKENDS: [&str; 8] = [
     "claude",
     "codex",
     "opencode",
@@ -556,6 +566,7 @@ const CONFIG_BACKENDS: [&str; 7] = [
     "grok",
     "kimi",
     "antigravity",
+    "muse",
 ];
 
 /// Install `agent-browser` MCP server into selected CLI backends.
@@ -581,6 +592,7 @@ pub async fn install_agent_browser_mcp(
             "grok" => install_grok(&entry),
             "kimi" => install_kimi(&entry),
             "antigravity" => install_antigravity(&entry),
+            "muse" => install_muse(&entry),
             other => Err(format!("Unsupported MCP config backend: {other}")),
         };
         results.push(match result {
@@ -642,6 +654,10 @@ pub(crate) fn remove_agent_browser_mcp_sync() -> Vec<AgentBrowserInstallResult> 
                     "mcpServers",
                     "env",
                 ),
+                "muse" => match crate::muse_cli::settings_path() {
+                    Some(path) => remove_json_server(&path, "mcp_servers", "env"),
+                    None => Ok(None),
+                },
                 "opencode" => match find_opencode_config_path(&home) {
                     Some(path) => remove_json_server(&path, "mcp", "environment"),
                     None => Ok(None),
@@ -832,6 +848,13 @@ fn install_antigravity_at(
     entry: &McpEntry,
 ) -> Result<(PathBuf, Option<PathBuf>), String> {
     install_json_server(path, "mcpServers", entry.claude_server_json())
+}
+
+fn install_muse(entry: &McpEntry) -> Result<(PathBuf, Option<PathBuf>), String> {
+    let path =
+        crate::muse_cli::settings_path().ok_or_else(|| "Home directory unavailable".to_string())?;
+    crate::jean_mcp_config::ensure_muse_settings_file(&path)?;
+    install_json_server(path, "mcp_servers", entry.muse_server_json())
 }
 
 fn install_opencode(entry: &McpEntry) -> Result<(PathBuf, Option<PathBuf>), String> {

@@ -38,6 +38,8 @@ import {
   KIMI_DEFAULT_MAGIC_PROMPT_MODELS,
   ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_BACKENDS,
   ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_MODELS,
+  MUSE_DEFAULT_MAGIC_PROMPT_BACKENDS,
+  MUSE_DEFAULT_MAGIC_PROMPT_MODELS,
   type MagicPromptBackends,
   type MagicPromptModels,
 } from '@/types/preferences'
@@ -125,6 +127,11 @@ function magicDefaultsForBackend(
       return {
         models: ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_MODELS,
         backends: ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_BACKENDS,
+      }
+    case 'muse':
+      return {
+        models: MUSE_DEFAULT_MAGIC_PROMPT_MODELS,
+        backends: MUSE_DEFAULT_MAGIC_PROMPT_BACKENDS,
       }
     default:
       return null
