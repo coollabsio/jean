@@ -29,6 +29,8 @@ import { AgentMemoryView } from './AgentMemoryView'
 import { AgentTasks } from './AgentTasks'
 import { AgentSchedules } from './AgentSchedules'
 import { AgentInbox } from './AgentInbox'
+import { AgentSettings } from './AgentSettings'
+import { agentRunSummary } from './agent-config'
 
 const ChatWindow = lazy(() =>
   import('@/components/chat/ChatWindow').then(mod => ({
@@ -42,7 +44,14 @@ const LOADING = (
   </div>
 )
 
-type AgentTab = 'chat' | 'inbox' | 'tasks' | 'schedules' | 'activity' | 'memory'
+type AgentTab =
+  | 'chat'
+  | 'inbox'
+  | 'tasks'
+  | 'schedules'
+  | 'activity'
+  | 'memory'
+  | 'settings'
 
 function unavailableMessage(error: unknown): string {
   return String(error).includes('Unknown command')
@@ -120,6 +129,7 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
     { id: 'schedules', label: 'Schedules' },
     { id: 'activity', label: 'Activity', badge: agent.pendingApprovals },
     { id: 'memory', label: 'Memory' },
+    { id: 'settings', label: 'Settings' },
   ]
 
   return (
@@ -146,7 +156,9 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
                 on {agent.serverName}
               </span>
             )}
-            {agent.description}
+            {[agent.description, agentRunSummary(agent)]
+              .filter(Boolean)
+              .join(' · ')}
           </p>
         </div>
         <Button
@@ -244,8 +256,10 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
           <AgentTasks agent={agent} workdir={workdir} />
         ) : tab === 'activity' ? (
           <AgentActivity agent={agent} />
-        ) : (
+        ) : tab === 'memory' ? (
           <AgentMemoryView agent={agent} />
+        ) : (
+          <AgentSettings agent={agent} />
         )}
       </div>
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>

@@ -28,6 +28,7 @@ pub mod tail;
 pub mod types;
 pub mod wakeup;
 
+pub(crate) use commands::default_model_for_backend;
 pub use commands::*;
 pub use mcp_auth::*;
 pub use native_history::*;

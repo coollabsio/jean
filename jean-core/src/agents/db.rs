@@ -3,7 +3,7 @@
 //! unit-tested with an in-memory database.
 
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 /// Built-in coordinator agent. Its worktree ID predates the agents database.
@@ -147,6 +147,15 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX notifications_unread ON notifications(agent_id, read_at);
     "#,
+    // v3: optional per-agent backend, model, effort, thinking, and skills.
+    // NULL / empty means "use the current session and user defaults".
+    r#"
+    ALTER TABLE agents ADD COLUMN backend TEXT;
+    ALTER TABLE agents ADD COLUMN model TEXT;
+    ALTER TABLE agents ADD COLUMN effort TEXT;
+    ALTER TABLE agents ADD COLUMN thinking_level TEXT;
+    ALTER TABLE agents ADD COLUMN skills TEXT NOT NULL DEFAULT '[]';
+    "#,
 ];
 
 const JEAN_ROLE_PROMPT: &str = "You are Jean, the coordinator agent of the Jean app. You are the boss of all the user's projects.
@@ -202,6 +211,28 @@ fn err(e: rusqlite::Error) -> String {
 // Agents
 // ============================================================================
 
+/// A skill file Jean already discovered for a backend CLI.
+/// Injected with the same marker chat uses for attached skills.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSkill {
+    pub name: String,
+    pub path: String,
+    /// Backend the skill was discovered for. Omitted when unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend: Option<String>,
+}
+
+/// Optional run configuration. Unset fields mean "use current defaults".
+#[derive(Debug, Default, Clone)]
+pub struct AgentRunConfig {
+    pub backend: Option<String>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub thinking_level: Option<String>,
+    pub skills: Vec<AgentSkill>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Agent {
@@ -214,12 +245,53 @@ pub struct Agent {
     pub paused: bool,
     pub max_wakes_per_hour: i64,
     pub builtin: bool,
+    /// `claude`, `codex`, `opencode`, `cursor`, `pi`, `commandcode`, `grok`,
+    /// `kimi`, or `antigravity`. `None` keeps the session and user default.
+    #[serde(default)]
+    pub backend: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Effort level string (`low`, `high`, `xhigh`, …). `None` leaves it unset.
+    #[serde(default)]
+    pub effort: Option<String>,
+    /// Thinking level string (`off`, `think`, `ultrathink`, …).
+    #[serde(default)]
+    pub thinking_level: Option<String>,
+    #[serde(default)]
+    pub skills: Vec<AgentSkill>,
 }
 
 const AGENT_COLUMNS: &str =
-    "id, name, description, icon, role_prompt, worktree_id, paused, max_wakes_per_hour, builtin";
+    "id, name, description, icon, role_prompt, worktree_id, paused, max_wakes_per_hour, builtin, backend, model, effort, thinking_level, skills";
+
+const AGENT_BACKENDS: &[&str] = &[
+    "claude",
+    "codex",
+    "opencode",
+    "cursor",
+    "pi",
+    "commandcode",
+    "grok",
+    "kimi",
+    "antigravity",
+];
+const AGENT_EFFORTS: &[&str] = &[
+    "off",
+    "adaptive",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+    "ultracode",
+];
+const AGENT_THINKING_LEVELS: &[&str] = &["off", "adaptive", "think", "megathink", "ultrathink"];
+const MAX_AGENT_SKILLS: usize = 32;
+const MAX_AGENT_MODEL_CHARS: usize = 200;
 
 fn agent_from_row(row: &rusqlite::Row) -> rusqlite::Result<Agent> {
+    let skills_json: String = row.get(13)?;
     Ok(Agent {
         id: row.get(0)?,
         name: row.get(1)?,
@@ -230,7 +302,128 @@ fn agent_from_row(row: &rusqlite::Row) -> rusqlite::Result<Agent> {
         paused: row.get::<_, i64>(6)? != 0,
         max_wakes_per_hour: row.get(7)?,
         builtin: row.get::<_, i64>(8)? != 0,
+        backend: row.get(9)?,
+        model: row.get(10)?,
+        effort: row.get(11)?,
+        thinking_level: row.get(12)?,
+        skills: parse_skills(&skills_json),
     })
+}
+
+fn parse_skills(raw: &str) -> Vec<AgentSkill> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    match serde_json::from_str(trimmed) {
+        Ok(skills) => skills,
+        Err(e) => {
+            log::warn!("Ignoring invalid agent skills JSON: {e}");
+            Vec::new()
+        }
+    }
+}
+
+fn normalize_choice(
+    value: Option<&str>,
+    allowed: &[&str],
+    label: &str,
+) -> Result<Option<String>, String> {
+    let Some(raw) = value.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(None);
+    };
+    let raw = raw.to_ascii_lowercase();
+    if allowed.contains(&raw.as_str()) {
+        Ok(Some(raw))
+    } else {
+        Err(format!("Unknown agent {label}: {raw}"))
+    }
+}
+
+/// Empty or whitespace becomes `None` (use defaults).
+pub fn normalize_agent_backend(value: Option<&str>) -> Result<Option<String>, String> {
+    normalize_choice(value, AGENT_BACKENDS, "backend")
+}
+
+pub fn normalize_agent_model(value: Option<&str>) -> Result<Option<String>, String> {
+    let Some(raw) = value.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(None);
+    };
+    if raw.chars().count() > MAX_AGENT_MODEL_CHARS {
+        return Err(format!(
+            "Agent model is longer than {MAX_AGENT_MODEL_CHARS} characters"
+        ));
+    }
+    Ok(Some(raw.to_string()))
+}
+
+pub fn normalize_agent_effort(value: Option<&str>) -> Result<Option<String>, String> {
+    normalize_choice(value, AGENT_EFFORTS, "effort")
+}
+
+pub fn normalize_agent_thinking(value: Option<&str>) -> Result<Option<String>, String> {
+    normalize_choice(value, AGENT_THINKING_LEVELS, "thinking level")
+}
+
+/// Drop duplicates, require a path, and cap the list.
+pub fn normalize_agent_skills(skills: &[AgentSkill]) -> Result<Vec<AgentSkill>, String> {
+    let mut out = Vec::new();
+    for skill in skills {
+        let path = skill.path.trim();
+        if path.is_empty() {
+            return Err("Skill path cannot be empty".to_string());
+        }
+        if path.len() > 1024 {
+            return Err("Skill path is too long".to_string());
+        }
+        if path.contains(['\n', '\r', ']']) {
+            return Err("Skill path cannot contain newlines or ']'".to_string());
+        }
+        if out
+            .iter()
+            .any(|existing: &AgentSkill| existing.path == path)
+        {
+            continue;
+        }
+        if out.len() >= MAX_AGENT_SKILLS {
+            return Err(format!(
+                "An agent can have at most {MAX_AGENT_SKILLS} skills"
+            ));
+        }
+        let name = {
+            let trimmed = skill.name.trim();
+            if trimmed.is_empty() {
+                std::path::Path::new(path)
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .filter(|stem| !stem.is_empty())
+                    .unwrap_or("skill")
+                    .to_string()
+            } else {
+                trimmed.chars().take(120).collect()
+            }
+        };
+        out.push(AgentSkill {
+            name,
+            path: path.to_string(),
+            backend: normalize_agent_backend(skill.backend.as_deref())?,
+        });
+    }
+    Ok(out)
+}
+
+fn normalize_run_config(config: &AgentRunConfig) -> Result<AgentRunConfig, String> {
+    Ok(AgentRunConfig {
+        backend: normalize_agent_backend(config.backend.as_deref())?,
+        model: normalize_agent_model(config.model.as_deref())?,
+        effort: normalize_agent_effort(config.effort.as_deref())?,
+        thinking_level: normalize_agent_thinking(config.thinking_level.as_deref())?,
+        skills: normalize_agent_skills(&config.skills)?,
+    })
+}
+
+fn skills_json(skills: &[AgentSkill]) -> Result<String, String> {
+    serde_json::to_string(skills).map_err(|e| format!("Failed to store agent skills: {e}"))
 }
 
 pub fn list_agents(conn: &Connection) -> Result<Vec<Agent>, String> {
@@ -313,6 +506,7 @@ pub fn create_agent(
     description: &str,
     icon: &str,
     role_prompt: &str,
+    config: &AgentRunConfig,
 ) -> Result<Agent, String> {
     let name = name.trim();
     if name.is_empty() {
@@ -322,6 +516,7 @@ pub fn create_agent(
     if base.is_empty() {
         return Err("Agent name needs at least one letter or digit".to_string());
     }
+    let config = normalize_run_config(config)?;
     let mut id = base.clone();
     let mut n = 2;
     while get_agent(conn, &id)?.is_some() {
@@ -330,9 +525,22 @@ pub fn create_agent(
     }
     let ts = now();
     conn.execute(
-        "INSERT INTO agents (id, name, description, icon, role_prompt, worktree_id, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
-        params![id, name, description.trim(), icon, role_prompt.trim(), agent_worktree_id(&id), ts],
+        "INSERT INTO agents (id, name, description, icon, role_prompt, worktree_id, backend, model, effort, thinking_level, skills, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12)",
+        params![
+            id,
+            name,
+            description.trim(),
+            icon,
+            role_prompt.trim(),
+            agent_worktree_id(&id),
+            config.backend,
+            config.model,
+            config.effort,
+            config.thinking_level,
+            skills_json(&config.skills)?,
+            ts
+        ],
     )
     .map_err(err)?;
     get_agent(conn, &id)?.ok_or_else(|| "Agent was not created".to_string())
@@ -347,6 +555,38 @@ pub struct AgentPatch {
     pub role_prompt: Option<String>,
     pub paused: Option<bool>,
     pub max_wakes_per_hour: Option<i64>,
+    /// `None` leaves the field unchanged. `Some(None)` clears it (use defaults).
+    /// JSON `null` must become `Some(None)`; a missing key stays `None`.
+    #[serde(default, deserialize_with = "deserialize_clearable")]
+    pub backend: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_clearable")]
+    pub model: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_clearable")]
+    pub effort: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_clearable")]
+    pub thinking_level: Option<Option<String>>,
+    /// `None` leaves skills unchanged. An empty list clears them.
+    #[serde(default)]
+    pub skills: Option<Vec<AgentSkill>>,
+}
+
+/// `null` clears the field. A missing key never calls this and stays `None`.
+fn deserialize_clearable<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Some(Option::deserialize(deserializer)?))
+}
+
+impl AgentPatch {
+    pub fn changes_run_config(&self) -> bool {
+        self.backend.is_some()
+            || self.model.is_some()
+            || self.effort.is_some()
+            || self.thinking_level.is_some()
+            || self.skills.is_some()
+    }
 }
 
 pub fn update_agent(conn: &Connection, id: &str, patch: &AgentPatch) -> Result<Agent, String> {
@@ -372,9 +612,25 @@ pub fn update_agent(conn: &Connection, id: &str, patch: &AgentPatch) -> Result<A
     if let Some(v) = patch.max_wakes_per_hour {
         agent.max_wakes_per_hour = v.clamp(1, 120);
     }
+    if let Some(v) = &patch.backend {
+        agent.backend = normalize_agent_backend(v.as_deref())?;
+    }
+    if let Some(v) = &patch.model {
+        agent.model = normalize_agent_model(v.as_deref())?;
+    }
+    if let Some(v) = &patch.effort {
+        agent.effort = normalize_agent_effort(v.as_deref())?;
+    }
+    if let Some(v) = &patch.thinking_level {
+        agent.thinking_level = normalize_agent_thinking(v.as_deref())?;
+    }
+    if let Some(v) = &patch.skills {
+        agent.skills = normalize_agent_skills(v)?;
+    }
     conn.execute(
         "UPDATE agents SET name=?2, description=?3, icon=?4, role_prompt=?5, paused=?6,
-         max_wakes_per_hour=?7, updated_at=?8 WHERE id=?1",
+         max_wakes_per_hour=?7, backend=?8, model=?9, effort=?10, thinking_level=?11,
+         skills=?12, updated_at=?13 WHERE id=?1",
         params![
             id,
             agent.name,
@@ -383,6 +639,11 @@ pub fn update_agent(conn: &Connection, id: &str, patch: &AgentPatch) -> Result<A
             agent.role_prompt,
             agent.paused as i64,
             agent.max_wakes_per_hour,
+            agent.backend,
+            agent.model,
+            agent.effort,
+            agent.thinking_level,
+            skills_json(&agent.skills)?,
             now()
         ],
     )
@@ -1536,8 +1797,24 @@ mod tests {
     #[test]
     fn create_agent_makes_unique_slug_ids_and_reserved_worktrees() {
         let conn = db();
-        let a = create_agent(&conn, "Release Manager", "", "blue", "Ship it").unwrap();
-        let b = create_agent(&conn, "Release  manager!", "", "blue", "").unwrap();
+        let a = create_agent(
+            &conn,
+            "Release Manager",
+            "",
+            "blue",
+            "Ship it",
+            &AgentRunConfig::default(),
+        )
+        .unwrap();
+        let b = create_agent(
+            &conn,
+            "Release  manager!",
+            "",
+            "blue",
+            "",
+            &AgentRunConfig::default(),
+        )
+        .unwrap();
         assert_eq!(a.id, "release-manager");
         assert_eq!(b.id, "release-manager-2");
         assert_eq!(a.worktree_id, "__agent_release-manager__");
@@ -1551,14 +1828,22 @@ mod tests {
                 .id,
             a.id
         );
-        assert!(create_agent(&conn, "  !! ", "", "blue", "").is_err());
+        assert!(create_agent(&conn, "  !! ", "", "blue", "", &AgentRunConfig::default()).is_err());
     }
 
     #[test]
     fn builtin_agent_cannot_be_deleted_but_custom_can() {
         let conn = db();
         assert!(delete_agent(&conn, JEAN_AGENT_ID).is_err());
-        let a = create_agent(&conn, "Reviewer", "", "green", "").unwrap();
+        let a = create_agent(
+            &conn,
+            "Reviewer",
+            "",
+            "green",
+            "",
+            &AgentRunConfig::default(),
+        )
+        .unwrap();
         save_memory(
             &conn,
             &NewMemory {
@@ -1746,7 +2031,8 @@ mod tests {
     #[test]
     fn memory_search_scopes_fts_and_expiry() {
         let conn = db();
-        let other = create_agent(&conn, "Other", "", "blue", "").unwrap();
+        let other =
+            create_agent(&conn, "Other", "", "blue", "", &AgentRunConfig::default()).unwrap();
         save_memory(
             &conn,
             &mem(Some(JEAN_AGENT_ID), "Orbit deploys need approval"),
@@ -1792,7 +2078,8 @@ mod tests {
     #[test]
     fn memory_update_and_forget_respect_ownership() {
         let conn = db();
-        let other = create_agent(&conn, "Other", "", "blue", "").unwrap();
+        let other =
+            create_agent(&conn, "Other", "", "blue", "", &AgentRunConfig::default()).unwrap();
         let m = save_memory(&conn, &mem(Some(&other.id), "other fact")).unwrap();
         assert!(update_memory(
             &conn,
@@ -1940,5 +2227,132 @@ mod tests {
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
         assert_eq!(version, MIGRATIONS.len() as i64);
+        let jean = get_agent(&conn, JEAN_AGENT_ID).unwrap().unwrap();
+        assert_eq!(jean.backend, None);
+        assert_eq!(jean.model, None);
+        assert_eq!(jean.effort, None);
+        assert_eq!(jean.thinking_level, None);
+        assert!(jean.skills.is_empty());
+    }
+
+    #[test]
+    fn run_config_round_trips_and_old_rows_stay_on_defaults() {
+        let conn = db();
+        let jean = get_agent(&conn, JEAN_AGENT_ID).unwrap().unwrap();
+        assert_eq!(jean.backend, None);
+        assert!(jean.skills.is_empty());
+
+        let created = create_agent(
+            &conn,
+            "Reviewer",
+            "reviews",
+            "blue",
+            "Be thorough",
+            &AgentRunConfig {
+                backend: Some(" Codex ".into()),
+                model: Some(" gpt-5.5 ".into()),
+                effort: Some("HIGH".into()),
+                thinking_level: None,
+                skills: vec![
+                    AgentSkill {
+                        name: " review ".into(),
+                        path: " /skills/review/SKILL.md ".into(),
+                        backend: Some("codex".into()),
+                    },
+                    AgentSkill {
+                        name: String::new(),
+                        path: "/skills/review/SKILL.md".into(),
+                        backend: None,
+                    },
+                    AgentSkill {
+                        name: String::new(),
+                        path: "/skills/notes/SKILL.md".into(),
+                        backend: None,
+                    },
+                ],
+            },
+        )
+        .unwrap();
+        assert_eq!(created.backend.as_deref(), Some("codex"));
+        assert_eq!(created.model.as_deref(), Some("gpt-5.5"));
+        assert_eq!(created.effort.as_deref(), Some("high"));
+        assert_eq!(created.thinking_level, None);
+        assert_eq!(created.skills.len(), 2);
+        assert_eq!(created.skills[0].name, "review");
+        assert_eq!(created.skills[0].path, "/skills/review/SKILL.md");
+        assert_eq!(created.skills[1].name, "SKILL");
+
+        let paused = update_agent(
+            &conn,
+            &created.id,
+            &AgentPatch {
+                paused: Some(true),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(paused.paused);
+        assert_eq!(paused.backend.as_deref(), Some("codex"));
+        assert_eq!(paused.skills.len(), 2);
+
+        let cleared = update_agent(
+            &conn,
+            &created.id,
+            &AgentPatch {
+                backend: Some(None),
+                model: Some(None),
+                skills: Some(vec![]),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(cleared.backend, None);
+        assert_eq!(cleared.model, None);
+        assert_eq!(cleared.effort.as_deref(), Some("high"));
+        assert!(cleared.skills.is_empty());
+
+        let err = create_agent(
+            &conn,
+            "Bad",
+            "",
+            "blue",
+            "",
+            &AgentRunConfig {
+                backend: Some("not-a-backend".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+        assert!(err.contains("Unknown agent backend"));
+        assert!(normalize_agent_effort(Some("turbo")).is_err());
+        assert!(normalize_agent_skills(&[AgentSkill {
+            name: "x".into(),
+            path: "bad]path".into(),
+            backend: None,
+        }])
+        .is_err());
+    }
+
+    #[test]
+    fn patch_distinguishes_missing_and_null_run_fields() {
+        let missing: AgentPatch = serde_json::from_str("{}").unwrap();
+        assert!(missing.backend.is_none());
+        assert!(missing.skills.is_none());
+        assert!(!missing.changes_run_config());
+
+        let clear: AgentPatch =
+            serde_json::from_str(r#"{"backend":null,"model":null,"skills":[]}"#).unwrap();
+        assert_eq!(clear.backend, Some(None));
+        assert_eq!(clear.model, Some(None));
+        assert_eq!(clear.skills, Some(vec![]));
+        assert!(clear.changes_run_config());
+
+        let set: AgentPatch = serde_json::from_str(
+            r#"{"backend":"codex","thinkingLevel":"ultrathink","skills":[{"name":"review","path":"/skills/review/SKILL.md","backend":"codex"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(set.backend, Some(Some("codex".into())));
+        assert_eq!(set.thinking_level, Some(Some("ultrathink".into())));
+        assert_eq!(set.skills.unwrap()[0].path, "/skills/review/SKILL.md");
     }
 }

@@ -162,17 +162,27 @@ pub fn mark_notifications_read(app: &AppHandle, agent_id: &str) -> Result<(), St
     Ok(())
 }
 
-pub fn create_agent(
+pub async fn create_agent(
     app: &AppHandle,
     name: &str,
     description: &str,
     icon: &str,
     role_prompt: &str,
+    config: db::AgentRunConfig,
 ) -> Result<db::Agent, String> {
     let agent = super::with_db(app, |conn| {
-        db::create_agent(conn, name, description, icon, role_prompt)
+        db::create_agent(conn, name, description, icon, role_prompt, &config)
     })?;
+    // The home chat is created on first list. Stamp it now so the toolbar
+    // shows this agent's backend and model before the user sends a message.
+    if let Err(e) = super::engine::home_session(app, &agent).await {
+        log::warn!(
+            "[Agents] could not prepare home session for {}: {e}",
+            agent.id
+        );
+    }
     super::notify_changed(app);
+    super::notify_sessions(app);
     Ok(agent)
 }
 
@@ -183,6 +193,15 @@ pub async fn update_agent(
 ) -> Result<db::Agent, String> {
     let pausing = patch.paused == Some(true);
     let agent = super::with_db(app, |conn| db::update_agent(conn, agent_id, &patch))?;
+    if patch.changes_run_config() {
+        if let Err(e) = super::engine::home_session(app, &agent).await {
+            log::warn!(
+                "[Agents] could not update home session for {}: {e}",
+                agent.id
+            );
+        }
+        super::notify_sessions(app);
+    }
     // Stop: cancel the agent's running turn. Its queue and schedules wait.
     if pausing {
         let path = super::agent_workdir(app, agent_id)?;

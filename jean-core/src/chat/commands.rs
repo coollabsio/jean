@@ -372,7 +372,7 @@ fn should_clear_stale_resumed_claude_session(
         && !has_usage
 }
 
-fn default_model_for_backend(
+pub(crate) fn default_model_for_backend(
     backend: &Backend,
     preferences: &crate::AppPreferences,
 ) -> Option<String> {

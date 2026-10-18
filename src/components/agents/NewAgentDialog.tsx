@@ -20,6 +20,12 @@ import { cn } from '@/lib/utils'
 import { useCreateAgent } from '@/services/agents'
 import { AGENT_COLOR_CHOICES } from './agents'
 import { useAgentsEnabledServers } from './agents-feature'
+import { AgentRunFields } from './AgentRunFields'
+import {
+  agentRunPatch,
+  EMPTY_AGENT_RUN,
+  type AgentRunDraft,
+} from './agent-config'
 
 interface NewAgentDialogProps {
   open: boolean
@@ -53,6 +59,7 @@ export function NewAgentDialog({
   const [description, setDescription] = useState('')
   const [rolePrompt, setRolePrompt] = useState('')
   const [icon, setIcon] = useState<string>(AGENT_COLOR_CHOICES[0])
+  const [run, setRun] = useState<AgentRunDraft>(EMPTY_AGENT_RUN)
 
   const reset = () => {
     setName('')
@@ -60,11 +67,19 @@ export function NewAgentDialog({
     setRolePrompt('')
     setIcon(AGENT_COLOR_CHOICES[0])
     setChosenServerId(null)
+    setRun(EMPTY_AGENT_RUN)
   }
 
   const handleCreate = () => {
     createAgent.mutate(
-      { serverId: targetServerId, name, description, icon, rolePrompt },
+      {
+        serverId: targetServerId,
+        name,
+        description,
+        icon,
+        rolePrompt,
+        ...agentRunPatch(run),
+      },
       {
         onSuccess: agent => {
           toast.success(`Agent ${agent.name} created`)
@@ -82,7 +97,7 @@ export function NewAgentDialog({
       <DialogContent
         // Opened from inside the mobile sidebar sheet (z-80); sit above it
         overlayClassName="z-[90]"
-        className="sm:max-w-lg z-[90]"
+        className="sm:max-w-lg z-[90] max-h-[85vh] overflow-y-auto"
       >
         <DialogHeader>
           <DialogTitle>New agent</DialogTitle>
@@ -166,6 +181,13 @@ export function NewAgentDialog({
               onChange={e => setRolePrompt(e.target.value)}
             />
           </div>
+          {open && (
+            <AgentRunFields
+              idPrefix="new-agent"
+              value={run}
+              onChange={setRun}
+            />
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>

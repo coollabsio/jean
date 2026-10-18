@@ -4058,13 +4058,30 @@ async fn dispatch_agents_command(
                 let description: Option<String> = from_field_opt(args, "description")?;
                 let icon: Option<String> = from_field_opt(args, "icon")?;
                 let role_prompt: Option<String> = field_opt(args, "rolePrompt", "role_prompt")?;
-                to_value(crate::agents::commands::create_agent(
-                    app,
-                    &name,
-                    description.as_deref().unwrap_or(""),
-                    icon.as_deref().unwrap_or("blue"),
-                    role_prompt.as_deref().unwrap_or(""),
-                )?)
+                let backend: Option<String> = from_field_opt(args, "backend")?;
+                let model: Option<String> = from_field_opt(args, "model")?;
+                let effort: Option<String> = from_field_opt(args, "effort")?;
+                let thinking_level: Option<String> =
+                    field_opt(args, "thinkingLevel", "thinking_level")?;
+                let skills: Option<Vec<crate::agents::db::AgentSkill>> =
+                    from_field_opt(args, "skills")?;
+                to_value(
+                    crate::agents::commands::create_agent(
+                        app,
+                        &name,
+                        description.as_deref().unwrap_or(""),
+                        icon.as_deref().unwrap_or("blue"),
+                        role_prompt.as_deref().unwrap_or(""),
+                        crate::agents::db::AgentRunConfig {
+                            backend,
+                            model,
+                            effort,
+                            thinking_level,
+                            skills: skills.unwrap_or_default(),
+                        },
+                    )
+                    .await?,
+                )
             }
             "update_agent" => {
                 let agent_id: String = field(args, "agentId", "agent_id")?;

@@ -102,14 +102,20 @@ pub fn workdir_for_worktree(app: &AppHandle, worktree_id: &str) -> Option<String
 
 /// Tell every client to refresh agent data, and run the engine now.
 pub fn notify_changed(app: &AppHandle) {
-    use crate::http_server::EmitExt;
-    if let Err(e) = app.emit_all(
-        "cache:invalidate",
-        &serde_json::json!({ "keys": ["agents"] }),
-    ) {
-        log::warn!("Failed to emit agents cache invalidation: {e}");
-    }
+    emit_cache_keys(app, &["agents"]);
     engine::nudge();
+}
+
+/// The agent's chat session changed backend or model. Refresh open chats.
+pub fn notify_sessions(app: &AppHandle) {
+    emit_cache_keys(app, &["sessions"]);
+}
+
+fn emit_cache_keys(app: &AppHandle, keys: &[&str]) {
+    use crate::http_server::EmitExt;
+    if let Err(e) = app.emit_all("cache:invalidate", &serde_json::json!({ "keys": keys })) {
+        log::warn!("Failed to emit cache invalidation {keys:?}: {e}");
+    }
 }
 
 /// What an agent session is for.
@@ -183,6 +189,15 @@ fn render_system_prompt(
         }
         SessionRole::Task => out.push_str("\n## This session: background task\n- The user does not read this session. Use `notify_user` for what the user must know.\n- End each turn with a one-line summary of the result.\n"),
     }
+    if !agent.skills.is_empty() {
+        out.push_str(
+            "\n## Skills\nRead these skill files and follow them for this agent. The same marker is used when a skill is attached in chat.\n",
+        );
+        for skill in &agent.skills {
+            out.push_str(&skill_instruction(&skill.path));
+            out.push('\n');
+        }
+    }
     let others: Vec<&Agent> = peers.iter().filter(|p| p.id != agent.id).collect();
     if !others.is_empty() {
         out.push_str("\n## Other agents\nAsk them with `message_agent`; their answer arrives as an update.\n");
@@ -217,6 +232,12 @@ fn render_system_prompt(
     out
 }
 
+/// Marker Jean already uses when a skill is attached to a chat message.
+/// OpenCode inlines the file from this marker; other backends are told to read it.
+pub fn skill_instruction(path: &str) -> String {
+    format!("[Skill: {path} - Read and use this skill to guide your response]")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -232,6 +253,11 @@ mod tests {
             paused: false,
             max_wakes_per_hour: 12,
             builtin: false,
+            backend: None,
+            model: None,
+            effort: None,
+            thinking_level: None,
+            skills: Vec::new(),
         }
     }
 
@@ -277,6 +303,20 @@ mod tests {
         assert!(!prompt.contains("`jean`: Jean"));
         assert!(prompt.contains("[#1 rule, pinned] Never push orbit"));
         assert!(prompt.contains("[#2 shared rule] Short answers"));
+        assert!(!prompt.contains("## Skills"));
+    }
+
+    #[test]
+    fn prompt_lists_selected_skills_with_the_chat_marker() {
+        let mut me = agent("jean", "Jean");
+        me.skills.push(db::AgentSkill {
+            name: "review".into(),
+            path: "/skills/review/SKILL.md".into(),
+            backend: Some("codex".into()),
+        });
+        let prompt = render_system_prompt(&me, &[], &[], "jean", &SessionRole::Task);
+        assert!(prompt.contains("## Skills"));
+        assert!(prompt.contains(&skill_instruction("/skills/review/SKILL.md")));
     }
 
     #[test]

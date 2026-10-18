@@ -42,6 +42,11 @@ function agent(overrides: Partial<AgentSummary>): AgentSummary {
     runningTasks: 0,
     unreadNotifications: 0,
     activity: null,
+    backend: null,
+    model: null,
+    effort: null,
+    thinkingLevel: null,
+    skills: [],
     ...overrides,
   }
 }
@@ -168,6 +173,8 @@ describe('multi-server agents', () => {
     expect(remote.tasksWorktreeId).toBe('srv:__agent_tasks_jean__')
     expect(remote.homeSessionId).toBe('srv:s1')
     expect(remote.serverName).toBe('Home server')
+    expect(remote.backend).toBeNull()
+    expect(remote.skills).toEqual([])
     expect(agentServerId(remote.id)).toBe('srv')
     expect(agentServerId(local.id)).toBe('local')
   })

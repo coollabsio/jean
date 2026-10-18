@@ -48,10 +48,62 @@ cleanup, and `resolve_worktree_path` in the MCP core maps them to the scratch
 folder.
 
 `agents::system_prompt_for()` adds the agent prompt (role, how the
-infrastructure works, other agents, memory within a size budget) to every run
-in an agent worktree, for every backend. Chat sessions also get the end of the
-previous chat (`carry_over`); task sessions are told the user does not read
-them and to use `notify_user`.
+infrastructure works, other agents, selected skills, memory within a size
+budget) to every run in an agent worktree, for every backend. Chat sessions
+also get the end of the previous chat (`carry_over`); task sessions are told
+the user does not read them and to use `notify_user`.
+
+## Per-agent run configuration
+
+Each agent can set `backend`, `model`, `effort`, `thinking_level`, and
+`skills`. Any field left unset (`NULL`, or `[]` for skills) means the current
+defaults: the same backend, model, and reasoning a new chat session would use
+from user and project preferences. Existing `agents.db` rows stay on those
+defaults. Migration v3 adds the columns; do not edit v1 or v2.
+
+| Field | Stored as | Unset means |
+|---|---|---|
+| `backend` | `claude`, `codex`, `opencode`, `cursor`, `pi`, `commandcode`, `grok`, `kimi`, `antigravity`, or NULL | Session and user default backend |
+| `model` | Model id string, or NULL | Preference model for the resolved backend |
+| `effort` | `off`, `adaptive`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultracode`, or NULL | No effort override |
+| `thinking_level` | `off`, `adaptive`, `think`, `megathink`, `ultrathink`, or NULL | No thinking override |
+| `skills` | JSON array of `{name, path, backend?}`, default `[]` | No extra skills |
+
+`create_agent` takes the fields directly. `update_agent`'s patch uses a
+missing field for "leave it", JSON `null` for "clear back to the default", and
+`skills: []` to clear skills. Both commands go through
+`dispatch_agents_command` in `jean-core/src/http_server/dispatch.rs`. Native
+IPC calls that same function via `dispatch_core_command`; there is no separate
+`generate_handler!` entry for agent commands.
+
+The engine applies the fields in three places:
+
+- New task sessions and rotated chats are created with the agent's backend.
+  An empty home chat (no messages yet) is stamped the same way when the agent
+  is created, updated, or listed, so the chat toolbar shows the choice.
+- Wake-ups pass `backend`, `model`, `effortLevel`, and `thinkingLevel` on
+  `send_chat_message`. A set backend with an unset model also passes that
+  backend's preference model, so a stale model from another backend is not
+  sent. Sessions that already have messages keep their stored backend; the
+  wake still uses the agent's current values for that turn.
+- Cursor has no Build mode. A Cursor wake uses Yolo instead of the usual
+  Build fallback, because Plan mode blocks the Jean MCP tools.
+
+### Skills
+
+Skills are the files Jean already discovers per backend (`list_*_skills` in
+`src/services/skills.ts`). At most 32 are stored. The least invasive way to
+apply them is the marker chat already appends when a skill is attached:
+
+```
+[Skill: /path/to/SKILL.md - Read and use this skill to guide your response]
+```
+
+OpenCode inlines the file from that marker. Other backends are told to read
+it. The marker is written into the agent system prompt, which every backend
+already receives on every agent run, and the same markers are appended to
+engine wake messages so OpenCode inlines the skill on each wake. Skill files
+are not copied or rewritten.
 
 ## The loop (`agents/engine.rs`)
 
@@ -79,7 +131,11 @@ Test overrides (environment, for isolated test servers only):
 `JEAN_AGENT_TASK_ARCHIVE_SECS`.
 
 - Wake-ups never run in Plan mode (`wake_execution_mode`), because Plan mode
-  blocks the Jean MCP tools.
+  blocks the Jean MCP tools. Cursor wakes use Yolo instead of Build
+  (`wake_execution_mode_for`).
+- When the agent has a backend, model, effort, or thinking level, the wake
+  passes those on `send_chat_message`. Selected skills are appended to the
+  wake message with the chat skill marker.
 - New chat and task sessions get the default execution mode saved once
   (`ensure_session_mode`). Sessions without metadata otherwise load as Plan.
 - At startup, active delegations are checked once, so runs that ended while
