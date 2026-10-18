@@ -30,6 +30,7 @@ import { AgentTasks } from './AgentTasks'
 import { AgentSchedules } from './AgentSchedules'
 import { AgentInbox } from './AgentInbox'
 import { AgentSettings } from './AgentSettings'
+import { AgentSubagentTypes } from './AgentSubagentTypes'
 import { agentRunSummary } from './agent-config'
 
 const ChatWindow = lazy(() =>
@@ -48,6 +49,7 @@ type AgentTab =
   | 'chat'
   | 'inbox'
   | 'tasks'
+  | 'subagents'
   | 'schedules'
   | 'activity'
   | 'memory'
@@ -126,6 +128,7 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
     { id: 'chat', label: 'Chat' },
     { id: 'inbox', label: 'Inbox', badge: agent.unreadNotifications },
     { id: 'tasks', label: 'Tasks', badge: agent.runningTasks, muted: true },
+    { id: 'subagents', label: 'Subagents' },
     { id: 'schedules', label: 'Schedules' },
     { id: 'activity', label: 'Activity', badge: agent.pendingApprovals },
     { id: 'memory', label: 'Memory' },
@@ -250,6 +253,8 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
           </>
         ) : tab === 'inbox' ? (
           <AgentInbox agent={agent} />
+        ) : tab === 'subagents' ? (
+          <AgentSubagentTypes agent={agent} />
         ) : tab === 'schedules' ? (
           <AgentSchedules agent={agent} />
         ) : tab === 'tasks' ? (

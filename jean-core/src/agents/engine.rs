@@ -532,6 +532,25 @@ pub(crate) fn wake_execution_mode_for(
     wake_execution_mode(selected)
 }
 
+/// A subagent type can pin plan, build, or yolo. Cursor has no Build mode.
+/// Without a pin, wakes use [`wake_execution_mode_for`].
+pub(crate) fn wake_permission_mode(
+    selected: Option<&str>,
+    backend: Option<&str>,
+    permission_mode: Option<&str>,
+) -> Option<&'static str> {
+    match permission_mode
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some("plan") => Some("plan"),
+        Some("yolo") => Some("yolo"),
+        Some("build") if backend == Some("cursor") => Some("yolo"),
+        Some("build") => Some("build"),
+        _ => wake_execution_mode_for(selected, backend),
+    }
+}
+
 /// An unused session can take the agent's backend and model. A session that
 /// already has messages keeps the backend it started with; wakes still pass
 /// the agent's current values for that turn.
@@ -634,7 +653,7 @@ pub(crate) fn message_with_agent_skills(message: &str, skills: &[db::AgentSkill]
 
 /// Create a task or rotated chat on the agent's backend, then store its model
 /// and reasoning choices.
-async fn open_agent_session(
+pub(crate) async fn open_agent_session(
     app: &AppHandle,
     agent: &db::Agent,
     worktree_id: &str,
@@ -808,16 +827,19 @@ fn agent_session_location(
     })
 }
 
-/// Send `message` to a session as a new turn (never in Plan mode).
+/// Send `message` to a session as a new turn.
 /// The agent's backend, model, effort, thinking, and skills override the
 /// session for this turn. Unset fields stay on the session and user defaults.
-fn send_to_session(
+/// `permission_mode` is the subagent type's plan/build/yolo choice. Without
+/// one, the wake still leaves Plan mode so the Jean MCP tools stay available.
+pub(crate) fn send_to_session(
     app: &AppHandle,
     agent: &db::Agent,
     session: &crate::chat::types::Session,
     worktree_id: &str,
     path: &str,
     message: String,
+    permission_mode: Option<&str>,
 ) {
     let app_clone = app.clone();
     let agent_name = agent.id.clone();
@@ -825,9 +847,10 @@ fn send_to_session(
     let backend = trimmed_opt(&agent.backend)
         .map(str::to_string)
         .unwrap_or_else(|| backend_id(&session.backend).to_string());
-    let mode = wake_execution_mode_for(
+    let mode = wake_permission_mode(
         session.selected_execution_mode.as_deref(),
         Some(backend.as_str()),
+        permission_mode,
     );
     let mut overrides = agent_wake_overrides(agent);
     let needs_default_model = wake_needs_default_model(agent);
@@ -962,13 +985,18 @@ async fn deliver(app: &AppHandle, agent_id: &str) -> Result<bool, String> {
             Ok(())
         })?;
         let owned: Vec<db::AgentEvent> = group.into_iter().cloned().collect();
+        let wake_agent = db::agent_for_task_wake(&agent, task.as_ref());
+        let permission = task
+            .as_ref()
+            .and_then(|item| item.subagent_permission_mode.as_deref());
         send_to_session(
             app,
-            &agent,
+            &wake_agent,
             &session,
             &worktree_id,
             &path,
             compose_update(&owned),
+            permission,
         );
         budget -= 1;
         sent = true;
@@ -994,13 +1022,19 @@ async fn deliver(app: &AppHandle, agent_id: &str) -> Result<bool, String> {
             db::create_task(conn, &agent.id, &session.id, &title, &event.kind)?;
             record_delivery(conn, &agent.id, &[event], &session.id, &worktree_id)
         })?;
+        let created = super::with_db(app, |conn| db::task_by_session(conn, &session.id))?;
+        let wake_agent = db::agent_for_task_wake(&agent, created.as_ref());
+        let permission = created
+            .as_ref()
+            .and_then(|item| item.subagent_permission_mode.as_deref());
         send_to_session(
             app,
-            &agent,
+            &wake_agent,
             &session,
             &worktree_id,
             &path,
             compose_update(std::slice::from_ref(event)),
+            permission,
         );
         budget -= 1;
         sent = true;
@@ -1244,6 +1278,30 @@ mod tests {
         assert_eq!(
             outcome_status(false, Some("done"), Some(&RunStatus::Completed)),
             "done"
+        );
+    }
+
+    #[test]
+    fn subagent_permission_mode_is_kept_and_cursor_build_becomes_yolo() {
+        assert_eq!(
+            wake_permission_mode(Some("build"), Some("claude"), Some("plan")),
+            Some("plan")
+        );
+        assert_eq!(
+            wake_permission_mode(Some("plan"), Some("claude"), Some("yolo")),
+            Some("yolo")
+        );
+        assert_eq!(
+            wake_permission_mode(Some("plan"), Some("cursor"), Some("build")),
+            Some("yolo")
+        );
+        assert_eq!(
+            wake_permission_mode(Some("yolo"), Some("claude"), None),
+            None
+        );
+        assert_eq!(
+            wake_permission_mode(Some("plan"), Some("claude"), None),
+            Some("build")
         );
     }
 

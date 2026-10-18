@@ -167,7 +167,12 @@ export function withBackend(
   }
 }
 
-export function draftFromAgent(agent: AgentSummary): AgentRunDraft {
+export function draftFromAgent(
+  agent: Pick<
+    AgentSummary,
+    'backend' | 'model' | 'effort' | 'thinkingLevel' | 'skills'
+  >
+): AgentRunDraft {
   return {
     backend: agent.backend ?? '',
     model: agent.model ?? '',

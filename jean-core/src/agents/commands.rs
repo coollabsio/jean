@@ -50,6 +50,7 @@ pub struct AgentDetails {
     pub memories: Vec<db::Memory>,
     pub tasks: Vec<db::Task>,
     pub notifications: Vec<db::Notification>,
+    pub subagent_types: Vec<db::SubagentType>,
 }
 
 pub async fn list_agents(app: &AppHandle) -> Result<Vec<AgentSummary>, String> {
@@ -152,6 +153,7 @@ pub fn get_agent_details(app: &AppHandle, agent_id: &str) -> Result<AgentDetails
             memories: db::list_memories(conn, agent_id)?,
             tasks: db::list_tasks(conn, agent_id, 50)?,
             notifications: db::list_notifications(conn, agent_id, 30)?,
+            subagent_types: db::list_subagent_types(conn, agent_id)?,
         })
     })
 }
@@ -478,6 +480,73 @@ pub(crate) fn render_memory_markdown(agent_id: &str, memories: &[db::Memory]) ->
         }
     }
     out
+}
+
+/// JSON body for `save_agent_subagent_type`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubagentTypeCommandInput {
+    pub id: Option<i64>,
+    pub shared: Option<bool>,
+    pub name: String,
+    pub description: Option<String>,
+    pub instructions: Option<String>,
+    pub backend: Option<String>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub thinking_level: Option<String>,
+    pub skills: Option<Vec<db::AgentSkill>>,
+    pub permission_mode: Option<String>,
+    pub tool_mode: Option<String>,
+}
+
+impl SubagentTypeCommandInput {
+    pub fn into_write(self) -> db::SubagentTypeWrite {
+        db::SubagentTypeWrite {
+            id: self.id,
+            shared: self.shared.unwrap_or(false),
+            name: self.name,
+            description: self.description.unwrap_or_default(),
+            instructions: self.instructions.unwrap_or_default(),
+            backend: self.backend,
+            model: self.model,
+            effort: self.effort,
+            thinking_level: self.thinking_level,
+            skills: self.skills.unwrap_or_default(),
+            permission_mode: self.permission_mode,
+            tool_mode: self.tool_mode,
+        }
+    }
+}
+
+pub fn save_subagent_type(
+    app: &AppHandle,
+    agent_id: &str,
+    input: SubagentTypeCommandInput,
+) -> Result<db::SubagentType, String> {
+    let saved = super::with_db(app, |conn| {
+        db::save_subagent_type(conn, agent_id, &input.into_write())
+    })?;
+    super::notify_changed(app);
+    Ok(saved)
+}
+
+pub fn delete_subagent_type(app: &AppHandle, agent_id: &str, id: i64) -> Result<(), String> {
+    let deleted = super::with_db(app, |conn| db::delete_subagent_type(conn, agent_id, id))?;
+    if !deleted {
+        return Err(format!("Subagent type not found: {id}"));
+    }
+    super::notify_changed(app);
+    Ok(())
+}
+
+pub async fn spawn_subagent(
+    app: &AppHandle,
+    agent_id: &str,
+    type_name: &str,
+    task: &str,
+) -> Result<db::Task, String> {
+    super::subagents::spawn_subagent(app, agent_id, type_name, task, None).await
 }
 
 #[cfg(test)]

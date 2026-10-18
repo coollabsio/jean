@@ -30,16 +30,112 @@ const AGENT_TOOLS: &[&str] = &[
     "task_list",
 ];
 
+/// Subagent type tools. Kept separate so later rebases can move this block.
+const SUBAGENT_TOOLS: &[&str] = &[
+    "subagent_type_list",
+    "subagent_type_save",
+    "subagent_type_delete",
+    "spawn_subagent",
+];
+
+/// Tools a `read_only` subagent may call. Everything else is refused.
+const READ_ONLY_SUBAGENT_TOOLS: &[&str] = &[
+    "list_projects",
+    "list_worktrees",
+    "get_worktree",
+    "get_project_context",
+    "list_github_issues",
+    "list_github_prs",
+    "list_security_issues",
+    "list_security_advisories",
+    "list_linear_issues",
+    "list_archived_worktrees",
+    "get_current_context",
+    "task_list",
+    "schedule_list",
+    "memory_search",
+    "subagent_type_list",
+    "notify_user",
+];
+
 const MIN_EVERY_MINUTES: i64 = 5;
 const MAX_MINUTES: i64 = 60 * 24 * 30;
 
 pub fn is_agent_tool(name: &str) -> bool {
-    AGENT_TOOLS.contains(&name)
+    AGENT_TOOLS.contains(&name) || SUBAGENT_TOOLS.contains(&name)
+}
+
+/// MCP definitions for subagent types. Appended after the other agent tools.
+pub fn subagent_tool_definitions() -> Value {
+    json!([
+        {"name":"subagent_type_list","description":"Agent sessions only. List subagent types you can spawn: your own, then shared types. A subagent session cannot define types.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
+        {"name":"subagent_type_save","description":"Agent sessions only. Create or update a subagent type: name, description, instructions, and optional backend, model, effort, thinkingLevel, skills, permissionMode (plan, build, yolo), and toolMode (read_only). Pass id to update. shared true makes it available to every agent. Subagent sessions cannot call this.","inputSchema":{"type":"object","properties":{"id":{"type":"integer"},"name":{"type":"string"},"description":{"type":"string"},"instructions":{"type":"string"},"shared":{"type":"boolean"},"backend":{"type":"string"},"model":{"type":"string"},"effort":{"type":"string"},"thinkingLevel":{"type":"string"},"skills":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"path":{"type":"string"},"backend":{"type":"string"}},"required":["path"]}},"permissionMode":{"type":"string","enum":["plan","build","yolo"]},"toolMode":{"type":"string","enum":["read_only"]}},"required":["name"],"additionalProperties":false}},
+        {"name":"subagent_type_delete","description":"Agent sessions only. Delete one of your subagent types, or a shared type, by id. Subagent sessions cannot call this.","inputSchema":{"type":"object","properties":{"id":{"type":"integer"}},"required":["id"],"additionalProperties":false}},
+        {"name":"spawn_subagent","description":"Agent sessions only. Spawn one subagent of a defined type to do a task. The result arrives as an update message; end your turn after spawning. Respects the running-task cap, hourly wake budget, hop limit, and spawn depth. A subagent cannot spawn another.","inputSchema":{"type":"object","properties":{"type":{"type":"string"},"task":{"type":"string"}},"required":["type","task"],"additionalProperties":false}}
+    ])
+}
+
+/// Refuse a tool when the calling session is a read-only subagent.
+/// `None` means the call may continue (the approval gate still applies).
+pub fn subagent_tool_block(app: &AppHandle, name: &str, source: &str) -> Option<String> {
+    if READ_ONLY_SUBAGENT_TOOLS.contains(&name) {
+        return None;
+    }
+    let task = super::with_db(app, |conn| db::task_by_session(conn, source)).ok()??;
+    read_only_subagent_block(
+        task.subagent_tool_mode.as_deref(),
+        task.subagent_type_name.as_deref().unwrap_or("subagent"),
+        name,
+    )
+}
+
+pub(crate) fn read_only_subagent_block(
+    tool_mode: Option<&str>,
+    type_name: &str,
+    tool: &str,
+) -> Option<String> {
+    if tool_mode != Some("read_only") || READ_ONLY_SUBAGENT_TOOLS.contains(&tool) {
+        return None;
+    }
+    Some(format!(
+        "{tool} is not available to the read-only subagent \"{type_name}\"."
+    ))
+}
+
+fn refuse_subagent_admin(app: &AppHandle, source: &str) -> Result<(), String> {
+    let depth = super::with_db(app, |conn| db::spawn_depth_for_session(conn, source))?;
+    if let Some(reason) = db::subagent_define_block_reason(depth) {
+        return Err(reason);
+    }
+    Ok(())
+}
+
+fn subagent_type_write(args: &Value) -> Result<db::SubagentTypeWrite, String> {
+    let skills = match args.get("skills") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(value) => serde_json::from_value::<Vec<db::AgentSkill>>(value.clone())
+            .map_err(|error| format!("Invalid skills: {error}"))?,
+    };
+    Ok(db::SubagentTypeWrite {
+        id: int_arg(args, "id"),
+        shared: args.get("shared").and_then(Value::as_bool).unwrap_or(false),
+        name: required_str(args, "name")?,
+        description: str_arg(args, "description").unwrap_or_default(),
+        instructions: str_arg(args, "instructions").unwrap_or_default(),
+        backend: str_arg(args, "backend"),
+        model: str_arg(args, "model"),
+        effort: str_arg(args, "effort"),
+        thinking_level: str_arg(args, "thinkingLevel").or_else(|| str_arg(args, "thinking_level")),
+        skills,
+        permission_mode: str_arg(args, "permissionMode")
+            .or_else(|| str_arg(args, "permission_mode")),
+        tool_mode: str_arg(args, "toolMode").or_else(|| str_arg(args, "tool_mode")),
+    })
 }
 
 /// MCP definitions of the agent tools (appended to the Jean tool registry).
 pub fn tool_definitions() -> Value {
-    json!([
+    let mut tools = json!([
         {"name":"schedule_create","description":"Agent sessions only. Wake yourself later with a prompt. Choose one: delayMinutes (once), everyMinutes (repeating, min 5), cron (5 fields) plus timezone, or event (session_finished, session_failed, worktree_archived, pr_merged, approval_resolved). The run is a background task.","inputSchema":{"type":"object","properties":{"name":{"type":"string"},"prompt":{"type":"string"},"delayMinutes":{"type":"number","minimum":1},"everyMinutes":{"type":"number","minimum":5},"cron":{"type":"string"},"timezone":{"type":"string"},"event":{"type":"string","enum":["session_finished","session_failed","worktree_archived","pr_merged","approval_resolved"]}},"required":["name","prompt"],"additionalProperties":false}},
         {"name":"schedule_update","description":"Agent sessions only. Change one of your schedules: name, prompt, paused, or its timing (the same fields as schedule_create).","inputSchema":{"type":"object","properties":{"scheduleId":{"type":"integer"},"name":{"type":"string"},"prompt":{"type":"string"},"paused":{"type":"boolean"},"delayMinutes":{"type":"number","minimum":1},"everyMinutes":{"type":"number","minimum":5},"cron":{"type":"string"},"timezone":{"type":"string"},"event":{"type":"string","enum":["session_finished","session_failed","worktree_archived","pr_merged","approval_resolved"]}},"required":["scheduleId"],"additionalProperties":false}},
         {"name":"schedule_list","description":"Agent sessions only. List your active schedules, including paused ones.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
@@ -51,7 +147,13 @@ pub fn tool_definitions() -> Value {
         {"name":"message_agent","description":"Agent sessions only. Send a request to another agent. Its answer arrives automatically as an update message; end your turn after sending.","inputSchema":{"type":"object","properties":{"agentId":{"type":"string"},"message":{"type":"string"}},"required":["agentId","message"],"additionalProperties":false}},
         {"name":"notify_user","description":"Agent sessions only. Tell the user something they must know: a result of a goal, a question, a failure, or a needed decision (level 'action'). Shows on the agent page and as a notification. Not for routine progress.","inputSchema":{"type":"object","properties":{"message":{"type":"string","maxLength":2000},"level":{"type":"string","enum":["info","action","error"]}},"required":["message"],"additionalProperties":false}},
         {"name":"task_list","description":"Agent sessions only. List your recent background tasks (schedule runs, follow-ups, agent requests) with status and one-line result.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":50}},"additionalProperties":false}}
-    ])
+    ]);
+    if let (Some(tools), Some(extra)) =
+        (tools.as_array_mut(), subagent_tool_definitions().as_array())
+    {
+        tools.extend(extra.iter().cloned());
+    }
+    tools
 }
 
 fn caller_agent(app: &AppHandle, source: &str) -> Result<db::Agent, String> {
@@ -296,6 +398,40 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value, source: &str) -> Res
             let tasks = super::with_db(app, |conn| db::list_tasks(conn, &agent.id, limit))?;
             json!({ "tasks": tasks })
         }
+        // Subagent types. Separate from the tools above so this block can move.
+        "subagent_type_list" => {
+            let types = super::with_db(app, |conn| db::list_subagent_types(conn, &agent.id))?;
+            json!({ "types": types })
+        }
+        "subagent_type_save" => {
+            refuse_subagent_admin(app, source)?;
+            let write = subagent_type_write(args)?;
+            let saved =
+                super::with_db(app, |conn| db::save_subagent_type(conn, &agent.id, &write))?;
+            json!({ "type": saved })
+        }
+        "subagent_type_delete" => {
+            refuse_subagent_admin(app, source)?;
+            let id = required_int(args, "id")?;
+            let deleted =
+                super::with_db(app, |conn| db::delete_subagent_type(conn, &agent.id, id))?;
+            if !deleted {
+                return Err(format!("Subagent type not found: {id}"));
+            }
+            json!({ "id": id, "deleted": true })
+        }
+        "spawn_subagent" => {
+            let type_name = required_str(args, "type")?;
+            let task = required_str(args, "task")?;
+            let spawned =
+                super::subagents::spawn_subagent(app, &agent.id, &type_name, &task, Some(source))
+                    .await?;
+            json!({
+                "task": spawned,
+                "status": "spawned",
+                "note": "The result arrives as an update message. End your turn now."
+            })
+        }
         _ => return Err(format!("Unknown agent tool: {name}")),
     };
     super::notify_changed(app);
@@ -410,9 +546,45 @@ mod tests {
             .iter()
             .map(|t| t["name"].as_str().unwrap())
             .collect();
-        assert_eq!(names, AGENT_TOOLS);
+        assert_eq!(&names[..AGENT_TOOLS.len()], AGENT_TOOLS);
+        assert_eq!(&names[AGENT_TOOLS.len()..], SUBAGENT_TOOLS);
         for tool in APPROVAL_TOOLS {
             assert!(!is_agent_tool(tool));
         }
+        assert!(is_agent_tool("spawn_subagent"));
+    }
+
+    #[test]
+    fn read_only_subagent_blocks_writes_and_spawn() {
+        assert!(read_only_subagent_block(Some("read_only"), "Diff", "list_projects").is_none());
+        assert!(read_only_subagent_block(Some("read_only"), "Diff", "memory_search").is_none());
+        let blocked =
+            read_only_subagent_block(Some("read_only"), "Diff", "spawn_subagent").unwrap();
+        assert!(blocked.contains("spawn_subagent"));
+        assert!(blocked.contains("Diff"));
+        assert!(read_only_subagent_block(Some("read_only"), "Diff", "delete_worktree").is_some());
+        assert!(read_only_subagent_block(None, "Diff", "delete_worktree").is_none());
+        assert!(read_only_subagent_block(None, "Diff", "spawn_subagent").is_none());
+    }
+
+    #[test]
+    fn subagent_type_write_reads_optional_overrides() {
+        let write = subagent_type_write(&json!({
+            "name": "Investigator",
+            "instructions": "Report facts",
+            "shared": true,
+            "backend": "codex",
+            "model": "gpt-5.5",
+            "permissionMode": "plan",
+            "toolMode": "read_only",
+            "skills": [{"name": "diff", "path": "/skills/diff/SKILL.md"}]
+        }))
+        .unwrap();
+        assert!(write.shared);
+        assert_eq!(write.backend.as_deref(), Some("codex"));
+        assert_eq!(write.permission_mode.as_deref(), Some("plan"));
+        assert_eq!(write.tool_mode.as_deref(), Some("read_only"));
+        assert_eq!(write.skills.len(), 1);
+        assert!(subagent_type_write(&json!({"description": "x"})).is_err());
     }
 }

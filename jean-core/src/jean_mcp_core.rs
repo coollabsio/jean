@@ -379,6 +379,11 @@ pub async fn call_tool(
         }
     }
 
+    // Read-only subagents cannot call mutating tools. The approval gate still
+    // applies to every other agent session.
+    if let Some(reason) = crate::agents::mcp::subagent_tool_block(app, name, source) {
+        return Err(ToolError::invalid_params(reason));
+    }
     // Agent sessions need the user's approval for destructive tools.
     let result_json = match crate::agents::mcp::approval_gate(app, name, &arguments, source) {
         Some(pending) => pending,

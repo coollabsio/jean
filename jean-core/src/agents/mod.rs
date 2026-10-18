@@ -14,6 +14,7 @@ mod cron;
 pub mod db;
 mod engine;
 pub mod mcp;
+mod subagents;
 
 use std::sync::Mutex;
 
@@ -128,6 +129,67 @@ enum SessionRole {
     Task,
 }
 
+/// Agent prompt for one run. A subagent task appends that type's instructions.
+pub fn system_prompt_for_run(
+    app: &AppHandle,
+    worktree_id: &str,
+    session_id: Option<&str>,
+) -> Option<String> {
+    let base = system_prompt_for(app, worktree_id)?;
+    let task = session_id.and_then(|session_id| {
+        with_db(app, |conn| db::task_by_session(conn, session_id))
+            .ok()
+            .flatten()
+    });
+    Some(append_subagent_prompt(&base, task.as_ref()))
+}
+
+/// Extra prompt for a spawned subagent. Ordinary sessions keep `base`.
+pub fn append_subagent_prompt(base: &str, task: Option<&db::Task>) -> String {
+    let Some(task) = task else {
+        return base.to_string();
+    };
+    let Some(name) = task
+        .subagent_type_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    else {
+        return base.to_string();
+    };
+    let mut out = base.to_string();
+    out.push_str("\n## This run is a subagent\n");
+    out.push_str(&format!(
+        "- You are the `{name}` subagent. Do the task, then stop.\n- The instructions below replace the role prompt above for this run.\n- You cannot define subagent types or spawn subagents.\n"
+    ));
+    if task.subagent_tool_mode.as_deref() == Some("read_only") {
+        out.push_str(
+            "- You may only use read-only tools. Do not change projects, sessions, memory, or schedules.\n",
+        );
+    }
+    if let Some(instructions) = task
+        .subagent_instructions
+        .as_deref()
+        .filter(|text| !text.trim().is_empty())
+    {
+        out.push_str("\n## Subagent instructions\n");
+        out.push_str(instructions.trim());
+        out.push('\n');
+    }
+    if let Some(skills) = task
+        .subagent_skills
+        .as_ref()
+        .filter(|skills| !skills.is_empty())
+    {
+        out.push_str("\n## Subagent skills\nUse these skills for this run.\n");
+        for skill in skills {
+            out.push_str(&skill_instruction(&skill.path));
+            out.push('\n');
+        }
+    }
+    out
+}
+
 /// Extra system prompt for runs in an agent worktree: role, how the agent
 /// infrastructure works, other agents, and memory. `None` for normal sessions.
 pub fn system_prompt_for(app: &AppHandle, worktree_id: &str) -> Option<String> {
@@ -174,6 +236,7 @@ fn render_system_prompt(
 - Messages that start with \"[Jean agent update]\" come from Jean, not from the user.
 - Delete, permanent delete, push, merge, and pull request creation need the user's approval. The tool then returns `approvalRequired`. Tell the user what you asked for and end your turn. The result arrives as an update.
 - Use `schedule_create` for later checks (`delayMinutes`), repeating intervals (`everyMinutes`, at least 5), cron (`cron` plus `timezone`), or an event (`event`: session_finished, session_failed, worktree_archived, pr_merged, approval_resolved). Use `schedule_update`, `schedule_list`, and `schedule_cancel` to manage them. Each run is a separate background task.
+- Use `spawn_subagent` to hand one task to a subagent type from `subagent_type_list`. Pass the type name and the task. The result arrives as an update. Use `subagent_type_save` and `subagent_type_delete` to define types. A subagent cannot define types or spawn further subagents.
 - Use `notify_user` only for what the user must know: results of goals, questions, failures, needed decisions. Not for routine progress.
 - Use `task_list` to see your background tasks and their results.
 - Use `memory_save` for lasting rules, facts the code does not show, and open work. Do not save live state (project lists, PR status) or secrets. Use `memory_search` to find older memories, and `memory_update` / `memory_forget` to correct them.
@@ -302,6 +365,7 @@ mod tests {
         assert!(prompt.contains("pass `executionMode`"));
         assert!(prompt.contains("`reviewer`: Reviewer"));
         assert!(!prompt.contains("`jean`: Jean"));
+        assert!(prompt.contains("spawn_subagent"));
         assert!(prompt.contains("[#1 rule, pinned] Never push orbit"));
         assert!(prompt.contains("[#2 shared rule] Short answers"));
         assert!(!prompt.contains("## Skills"));
@@ -318,6 +382,53 @@ mod tests {
         let prompt = render_system_prompt(&me, &[], &[], "jean", &SessionRole::Task);
         assert!(prompt.contains("## Skills"));
         assert!(prompt.contains(&skill_instruction("/skills/review/SKILL.md")));
+    }
+
+    fn subagent_task(name: &str, instructions: &str, tool_mode: Option<&str>) -> db::Task {
+        db::Task {
+            id: 1,
+            agent_id: "jean".into(),
+            session_id: "s".into(),
+            title: name.into(),
+            kind: "subagent".into(),
+            status: "running".into(),
+            summary: None,
+            last_event: None,
+            check_after: None,
+            created_at: 0,
+            updated_at: 0,
+            archived_at: None,
+            subagent_type_id: Some(4),
+            subagent_type_name: Some(name.into()),
+            spawn_depth: 1,
+            subagent_instructions: Some(instructions.into()),
+            subagent_backend: Some("codex".into()),
+            subagent_model: Some("gpt-5.5".into()),
+            subagent_effort: None,
+            subagent_thinking_level: None,
+            subagent_permission_mode: Some("plan".into()),
+            subagent_tool_mode: tool_mode.map(str::to_string),
+            subagent_skills: Some(vec![db::AgentSkill {
+                name: "diff".into(),
+                path: "/skills/diff/SKILL.md".into(),
+                backend: Some("codex".into()),
+            }]),
+        }
+    }
+
+    #[test]
+    fn subagent_prompt_appends_instructions_and_blocks_children() {
+        let plain = append_subagent_prompt("base", None);
+        assert_eq!(plain, "base");
+        let task = subagent_task("Investigator", "Report facts only.", Some("read_only"));
+        let prompt = append_subagent_prompt("base role", Some(&task));
+        assert!(prompt.starts_with("base role"));
+        assert!(prompt.contains("## This run is a subagent"));
+        assert!(prompt.contains("`Investigator`"));
+        assert!(prompt.contains("cannot define subagent types"));
+        assert!(prompt.contains("read-only tools"));
+        assert!(prompt.contains("## Subagent instructions\nReport facts only."));
+        assert!(prompt.contains(&skill_instruction("/skills/diff/SKILL.md")));
     }
 
     #[test]

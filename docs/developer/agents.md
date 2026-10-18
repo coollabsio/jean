@@ -256,6 +256,58 @@ or `event`). `update_agent_schedule` patches `name`, `prompt`, `paused`, and,
 when `kind` is set, replaces the timing. Pause does not delete the routine.
 Changes emit `cache:invalidate` with key `agents`.
 
+## Subagent types
+
+An agent can define named workers and spawn one to do a single task. The
+spawned session is a normal task under `__agent_tasks_<id>__`. Its result
+returns through the existing delegation path: when the session finishes, the
+origin session receives a `[Jean agent update]`. Claude Task and Codex
+multi-agent runs stay in the chat `AgentWidget`; these subagents show on the
+agent's Tasks tab with their type name.
+
+Migration `subagent_types_migration_sql()` in `agents/db.rs` is its own step
+in `MIGRATIONS` (currently the last one; a later rebase may renumber it). Do
+not fold it into an older step. It creates `subagent_types` and adds nullable
+snapshot columns on `tasks`. Existing task rows keep `spawn_depth` 0 and a
+null type, so schedules and agent messages behave as before.
+
+| Field | Stored as | Unset means |
+|---|---|---|
+| `agent_id` | agent id, or NULL | NULL is shared with every agent |
+| `name` | text, unique per scope, case-insensitive | required |
+| `description` | text | empty |
+| `instructions` | role prompt, max 8000 characters | the parent agent's role prompt |
+| `backend`, `model`, `effort`, `thinking_level`, `skills` | same values as the agent | inherit the parent agent |
+| `permission_mode` | `plan`, `build`, or `yolo` | the normal agent wake mode (not Plan, Yolo for Cursor) |
+| `tool_mode` | `read_only`, or NULL | the agent's tools. Delete, push, merge, and pull request creation still wait for approval |
+
+Resolution prefers the agent's own type over a shared type with the same name.
+The resolved backend, model, effort, thinking level, skills, instructions, and
+modes are copied onto the task row at spawn. Later edits to the type do not
+change a task that is already running. The session is created with that
+backend and model. The instructions are written into the task message and
+appended to the system prompt for that session.
+
+`spawn_subagent` (MCP) and `spawn_agent_subagent` (UI) both refuse the spawn
+when any of these is already spent:
+
+- `MAX_RUNNING_TASKS` (2) running tasks for that agent
+- the agent's hourly wake budget (`max_wakes_per_hour`)
+- `MAX_AGENT_HOPS` (the caller's hop plus one)
+- `MAX_SUBAGENT_SPAWN_DEPTH` (1). A spawned subagent is depth 1 and cannot
+  spawn, and it cannot call `subagent_type_save` or `subagent_type_delete`
+
+A `read_only` subagent can list and search. It cannot spawn, message agents,
+change memory or schedules, or call mutating project tools. The approval gate
+still applies when `tool_mode` is unset.
+
+MCP tools, in their own block in `agents/mcp.rs`: `subagent_type_list`,
+`subagent_type_save`, `subagent_type_delete`, `spawn_subagent`. Commands, in
+their own block in `dispatch_agents_command`: `list_agent_subagent_types`,
+`save_agent_subagent_type`, `delete_agent_subagent_type`,
+`spawn_agent_subagent`. The agent page Subagents tab creates, edits, and
+deletes types and can spawn one. `get_agent_details` includes `subagentTypes`.
+
 ## Stack size note
 
 `dispatch_command` and the MCP `run_tool` are very large async functions. In

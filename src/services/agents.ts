@@ -65,13 +65,35 @@ export interface AgentSummary {
   skills: AgentSkill[]
 }
 
+/** A named worker this agent can spawn. `agentId` null means it is shared. */
+export interface SubagentType {
+  id: number
+  agentId: string | null
+  shared: boolean
+  name: string
+  description: string
+  instructions: string
+  backend: string | null
+  model: string | null
+  effort: string | null
+  thinkingLevel: string | null
+  skills: AgentSkill[]
+  /** plan | build | yolo, or null to keep the normal wake mode */
+  permissionMode: string | null
+  /** read_only, or null for the agent's normal tools */
+  toolMode: string | null
+}
+
 export interface AgentTask {
   id: number
   agentId: string
   sessionId: string
   title: string
-  /** schedule | delegation | message | approval */
+  /** schedule | delegation | message | approval | subagent */
   kind: string
+  /** Set when this task was spawned from a subagent type. */
+  subagentTypeName?: string | null
+  spawnDepth?: number
   /** running | waiting | done | failed | cancelled */
   status: string
   summary: string | null
@@ -174,6 +196,7 @@ export interface AgentDetails {
   memories: AgentMemory[]
   tasks: AgentTask[]
   notifications: AgentNotification[]
+  subagentTypes: SubagentType[]
 }
 
 export interface AgentPatch {
@@ -454,4 +477,44 @@ export function useMarkAgentNotificationsRead() {
 
 export function exportAgentMemory(agentId: string): Promise<string> {
   return invoke<string>('export_agent_memory', { agentId })
+}
+
+export interface SubagentTypeInput {
+  id?: number
+  name: string
+  description: string
+  instructions: string
+  shared: boolean
+  backend: string | null
+  model: string | null
+  effort: string | null
+  thinkingLevel: string | null
+  skills: AgentSkill[]
+  permissionMode: string | null
+  toolMode: string | null
+}
+
+export function useSaveSubagentType() {
+  return useAgentsMutation(
+    ({ agentId, ...input }: { agentId: string } & SubagentTypeInput) =>
+      invokeAgent<SubagentType>(agentId, 'save_agent_subagent_type', input)
+  )
+}
+
+export function useDeleteSubagentType() {
+  return useAgentsMutation((args: { agentId: string; typeId: number }) =>
+    invokeAgent<null>(args.agentId, 'delete_agent_subagent_type', {
+      typeId: args.typeId,
+    })
+  )
+}
+
+export function useSpawnSubagent() {
+  return useAgentsMutation(
+    (args: { agentId: string; typeName: string; task: string }) =>
+      invokeAgent<AgentTask>(args.agentId, 'spawn_agent_subagent', {
+        typeName: args.typeName,
+        task: args.task,
+      })
+  )
 }
