@@ -1271,8 +1271,15 @@ pub fn update_schedule(
     if name.is_none() && prompt.is_none() && paused.is_none() && timing.is_none() {
         return Err("Nothing to update".to_string());
     }
+    // Validate every field before the first write, so a bad field does not
+    // leave a partial update behind.
+    let name = name
+        .map(|name| require_schedule_text("Name", name, 200))
+        .transpose()?;
+    let prompt = prompt
+        .map(|prompt| require_schedule_text("Prompt", prompt, 8000))
+        .transpose()?;
     if let Some(name) = name {
-        let name = require_schedule_text("Name", name, 200)?;
         conn.execute(
             "UPDATE schedules SET name=?2 WHERE id=?1",
             params![id, name],
@@ -1280,7 +1287,6 @@ pub fn update_schedule(
         .map_err(err)?;
     }
     if let Some(prompt) = prompt {
-        let prompt = require_schedule_text("Prompt", prompt, 8000)?;
         conn.execute(
             "UPDATE schedules SET prompt=?2 WHERE id=?1",
             params![id, prompt],
@@ -1480,6 +1486,18 @@ pub fn fire_event_schedules(
         fired.push(schedule);
     }
     Ok(fired)
+}
+
+/// Delete session and archive event keys older than `before`. Their keys carry
+/// a timestamp, so they only dedup repeats of one emit and never match again.
+/// `pr:` and `approval:` keys are kept: the same PR or approval can repeat.
+pub fn prune_event_keys(conn: &Connection, before: i64) -> Result<usize, String> {
+    conn.execute(
+        "DELETE FROM schedule_event_keys
+         WHERE fired_at < ?1 AND (event_key LIKE 'session:%' OR event_key LIKE 'archive:%')",
+        [before],
+    )
+    .map_err(err)
 }
 
 pub fn next_schedule_at(conn: &Connection, agent_id: &str) -> Result<Option<i64>, String> {
@@ -2925,6 +2943,41 @@ mod tests {
                 .unwrap_err()
                 .contains("between")
         );
+        // The interval limit is 30 days, so a daily routine is valid.
+        assert!(validate_schedule_timing(Some(86_400), None, None, None, None, 0).is_ok());
+        assert!(validate_schedule_timing(Some(31 * 86_400), None, None, None, None, 0).is_err());
+    }
+
+    #[test]
+    fn prune_event_keys_drops_only_old_session_and_archive_keys() {
+        let conn = db();
+        let timing =
+            validate_schedule_timing(None, None, None, Some("pr_merged"), None, 0).unwrap();
+        let schedule =
+            insert_schedule(&conn, JEAN_AGENT_ID, "merged", "look", &timing, false).unwrap();
+        for (key, fired_at) in [
+            ("session:s:done:1", 10),
+            ("archive:wt:1", 10),
+            ("pr:wt:1", 10),
+            ("approval:1", 10),
+            ("session:s:done:2", 500),
+        ] {
+            conn.execute(
+                "INSERT INTO schedule_event_keys (schedule_id, event_key, fired_at) VALUES (?1, ?2, ?3)",
+                params![schedule.id, key, fired_at],
+            )
+            .unwrap();
+        }
+        assert_eq!(prune_event_keys(&conn, 100).unwrap(), 2);
+        let mut left: Vec<String> = conn
+            .prepare("SELECT event_key FROM schedule_event_keys")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        left.sort();
+        assert_eq!(left, ["approval:1", "pr:wt:1", "session:s:done:2"]);
     }
 
     #[test]
@@ -2947,5 +3000,30 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn update_schedule_rejects_bad_prompt_without_renaming() {
+        let conn = db();
+        let timing =
+            validate_schedule_timing(None, None, None, Some("pr_merged"), None, 0).unwrap();
+        let schedule =
+            insert_schedule(&conn, JEAN_AGENT_ID, "before", "check", &timing, false).unwrap();
+        let error = update_schedule(
+            &conn,
+            JEAN_AGENT_ID,
+            schedule.id,
+            Some("after"),
+            Some("   "),
+            None,
+            None,
+        )
+        .unwrap_err();
+        assert!(error.contains("Prompt"), "{error}");
+        let stored = get_schedule(&conn, JEAN_AGENT_ID, schedule.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.name, "before");
+        assert_eq!(stored.prompt, "check");
     }
 }

@@ -45,6 +45,8 @@ describe('validateCronExpression', () => {
     expect(validateCronExpression('*/5 * * * *')).toBeNull()
     expect(validateCronExpression('0,5,10 * * * *')).toBeNull()
     expect(cronMinutes('*/15')).toEqual([0, 15, 30, 45])
+    expect(cronMinutes('0/15')).toEqual([0, 15, 30, 45])
+    expect(cronMinutes('50/5')).toEqual([50, 55])
   })
 
   it('rejects malformed fields and tight spacing', () => {
