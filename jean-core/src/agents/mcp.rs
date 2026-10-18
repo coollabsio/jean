@@ -28,6 +28,7 @@ const AGENT_TOOLS: &[&str] = &[
     "message_agent",
     "notify_user",
     "task_list",
+    "list_connectors",
 ];
 
 const MIN_EVERY_MINUTES: i64 = 5;
@@ -50,7 +51,8 @@ pub fn tool_definitions() -> Value {
         {"name":"memory_forget","description":"Agent sessions only. Delete a memory that is wrong or no longer needed.","inputSchema":{"type":"object","properties":{"memoryId":{"type":"integer"}},"required":["memoryId"],"additionalProperties":false}},
         {"name":"message_agent","description":"Agent sessions only. Send a request to another agent. Its answer arrives automatically as an update message; end your turn after sending.","inputSchema":{"type":"object","properties":{"agentId":{"type":"string"},"message":{"type":"string"}},"required":["agentId","message"],"additionalProperties":false}},
         {"name":"notify_user","description":"Agent sessions only. Tell the user something they must know: a result of a goal, a question, a failure, or a needed decision (level 'action'). Shows on the agent page and as a notification. Not for routine progress.","inputSchema":{"type":"object","properties":{"message":{"type":"string","maxLength":2000},"level":{"type":"string","enum":["info","action","error"]}},"required":["message"],"additionalProperties":false}},
-        {"name":"task_list","description":"Agent sessions only. List your recent background tasks (schedule runs, follow-ups, agent requests) with status and one-line result.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":50}},"additionalProperties":false}}
+        {"name":"task_list","description":"Agent sessions only. List your recent background tasks (schedule runs, follow-ups, agent requests) with status and one-line result.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":50}},"additionalProperties":false}},
+        {"name":"list_connectors","description":"Agent sessions only. Read-only. List the MCP connectors saved for this agent, whether a limit is saved, and whether this session's backend can apply that limit. Does not change the limit or sign in.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}}
     ])
 }
 
@@ -319,6 +321,9 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value, source: &str) -> Res
             let limit = int_arg(args, "limit").unwrap_or(20).clamp(1, 50);
             let tasks = super::with_db(app, |conn| db::list_tasks(conn, &agent.id, limit))?;
             json!({ "tasks": tasks })
+        }
+        "list_connectors" => {
+            return Ok(super::connectors::report_for_session(app, &agent, source).await);
         }
         _ => return Err(format!("Unknown agent tool: {name}")),
     };

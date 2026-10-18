@@ -586,6 +586,7 @@ fn backend_id(backend: &Backend) -> &'static str {
         Backend::Grok => "grok",
         Backend::Kimi => "kimi",
         Backend::Antigravity => "antigravity",
+        Backend::Muse => "muse",
     }
 }
 
@@ -1374,6 +1375,8 @@ mod tests {
             effort: None,
             thinking_level: None,
             skills: Vec::new(),
+            mcp_servers: None,
+            jean_tools: None,
         }
     }
 

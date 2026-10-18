@@ -271,3 +271,126 @@ debug builds their poll frames are large enough to overflow tokio's default
 separate function and call it through `Box::pin(...)`, as the agents commands
 do. All entry points use `jean_core::build_tokio_runtime()` (8 MiB worker
 stacks).
+
+## Per-agent connectors
+
+An agent can save an allowlist of the user's MCP servers and, separately, of
+Jean MCP tools. The columns are `agents.mcp_servers` and `agents.jean_tools`
+(JSON, nullable). Migration v5 in `agents/db.rs` adds them. Do not edit
+v1–v4. Existing rows stay `NULL`.
+
+| Stored value | Meaning |
+|---|---|
+| `NULL` | No limit. Today's behavior. |
+| `[]` | A saved limit that allows nothing (no user MCP servers, or no Jean tools). |
+| a JSON array | Only those entries. |
+
+`update_agent`'s patch uses a missing field for "leave it" and JSON `null` for
+"clear back to no limit". `get_agent_connector_catalog` returns which backends
+can apply a limit, the reason for each backend, and the Jean tool names.
+Resolution lives in `agents/connectors.rs`.
+
+### How MCP servers are discovered
+
+Discovery is per backend CLI, not per agent. `get_mcp_servers` reads that
+CLI's config files and then appends servers the CLI reported itself
+(`chat/mcp_external.rs`: claude.ai connectors, plugins, ChatGPT apps, remote
+config). The file readers are:
+
+| Backend | Config files | CLI list |
+|---|---|---|
+| Claude | `~/.claude.json` (`mcpServers` and `projects[path].mcpServers`), `<worktree>/.mcp.json` | `claude mcp list` for `claude.ai` and `plugin:` names |
+| Codex | `~/.codex/config.toml` and `<worktree>/.codex/config.toml` `[mcp_servers.*]` | app-server `mcpServerStatus/list` |
+| OpenCode | project, home, and `~/.config/opencode` `opencode.json` / `.jsonc` `mcp` object | `opencode mcp list` |
+| Cursor | `~/.cursor/mcp.json` and `<worktree>/.cursor/mcp.json` | `cursor-agent mcp list` |
+| Grok | `~/.grok/config.toml` and project `.grok/config.toml`, plus Claude, Cursor, and `.mcp.json` compat files | `grok mcp doctor --json` |
+| Kimi | `~/.kimi-code/mcp.json` and project `.kimi-code/mcp.json` | none |
+| Antigravity | `~/.gemini/config/mcp_config.json` and `<worktree>/.agents/mcp_config.json` | none |
+
+`get_mcp_servers` with an unknown backend, including Pi and Command Code,
+falls through to Claude's files. Agent settings only ask for a backend that
+has its own reader. An unknown backend name is not treated as that CLI's
+server list.
+
+External servers are cached per backend and worktree. Their `config` is only
+`{ jeanExternal: true, target }`. Jean must not pass that object as a server
+definition the CLI should spawn. Claude's `--mcp-config` path already strips
+those names and, when one is enabled, skips `--strict-mcp-config` and denies
+the other known servers instead.
+
+### How a session receives them
+
+The chat UI builds `mcpConfig` (`{"mcpServers":{name: config}}`) from the
+enabled names and sends it on `send_chat_message`. The cascade is session
+override, then project, then global defaults, then auto-enable of newly
+discovered servers (`resolveEnabledMcpServers`). Antigravity is forced on for
+every non-disabled server because the CLI has no per-run switch.
+
+| Backend | Per session? | What Jean actually does |
+|---|---|---|
+| Claude | Yes | `--mcp-config` and, when no external server is enabled, `--strict-mcp-config`. The flag drops every server that is not in the JSON, including the user's global config. |
+| Grok | Yes | ACP `mcpServers` on `session/new` and `session/load`. Jean also rewrites `disabled_mcp_servers` in `~/.grok/config.toml` for the turn and restores it after. Two Grok turns at once can race on that file. |
+| Cursor | No | `cursor mcp enable` / `disable` before launch. That changes shared workspace approval and is not restored. It is not a process-local config. |
+| Codex | No | `~/.codex/config.toml`. Thread start can override `mcp_servers.<jean>.env.JEAN_MCP_SESSION` so the Jean server sees the session id. It cannot replace the server list. `config/mcpServer/reload` reloads the shared config. |
+| OpenCode | No | The HTTP session has no MCP config argument. OpenCode reads `opencode.json`. |
+| Pi | No | No MCP argument on the session. |
+| Command Code | No | No MCP argument on the session. |
+| Kimi | No | ACP `session/new` and `session/resume` always send `mcpServers: []`. The CLI then uses its own config. Jean does not put servers into that list, and does not treat the empty array as a restriction it can edit. |
+| Antigravity | No | The CLI loads every enabled server from its persistent config. |
+
+For Claude, Grok, and Cursor, `send_chat_message` merges the Jean MCP entry
+into `mcpConfig` when Jean MCP is on. A wake that omits `mcpConfig` therefore
+starts those three with Jean MCP only. Codex, OpenCode, Pi, Command Code,
+Kimi, and Antigravity ignore that JSON and load whatever is installed
+globally, including Jean MCP when it was installed into that CLI's config.
+
+### In-app sign-in
+
+`prepare_mcp_login` (`chat/mcp_auth.rs`) works for Claude and Codex only. It
+checks the server is in `get_mcp_servers` for the worktree, then returns
+`mcp login --no-browser <name>` for the embedded login terminal. Other
+backends return an error. The button is `McpSignInButton` / `openMcpLogin`.
+OAuth itself stays inside the CLI. Agent settings reuse that button and pass
+the agent scratch folder as the worktree, which is where the agent session
+runs.
+
+### What the agent limit does
+
+`send_chat_message` calls `apply_agent_mcp_allowlist` before the Jean MCP
+merge, for every send, including engine wakes.
+
+- `mcp_servers` is `NULL`: the caller's `mcpConfig` is unchanged.
+- The session backend is Claude or Grok and a list is saved: replace
+  `mcpConfig` with only the discovered servers on that backend whose names are
+  in the list. A server saved for another backend is ignored for this turn.
+  Discovery failure replaces the config with `{"mcpServers":{}}` so a broader
+  caller config is not kept. Jean MCP is merged afterwards and is not removed
+  by this list.
+- Any other backend: leave `mcpConfig` unchanged and log that the limit was
+  not applied, with the reason above. The UI shows **Unsupported on this
+  backend** and disables the switches. There is no silent success.
+
+An empty saved list on Claude or Grok passes no user servers. That is
+different from `NULL`, where a chat can still send the session's own
+`mcpConfig`, and a wake still sends none.
+
+Jean tool names are a second allowlist, enforced in `call_tool` before the
+approval gate. `NULL` allows every tool. A list allows only those names.
+`claude_permission_prompt` stays callable so Claude's permission hook still
+works. Destructive tools that are allowed still wait for approval. The list
+applies only to the agent's own session. A session the agent starts with
+`create_session` or `send_chat_message` is a normal session with no limit, so
+leave those tools off when the limit must hold. The
+read-only agent tool `list_connectors` reports the saved limit, the discovered
+servers, and whether this backend applied the limit. It does not change
+anything and does not return server config (that can hold tokens).
+
+The settings section is **Connectors and tools** on the agent page. With no
+saved MCP limit the switches are off (nothing is selected). Turning one on
+starts the allowlist. Jean tool switches start on, because no limit means
+every tool. Status badges are **Enabled**, **Off**, **Default**, **Needs
+sign-in** (from `check_mcp_health`), and **Unsupported on this backend**.
+Needs sign-in wins over Enabled so the sign-in button stays visible. Sign-in
+is shown for Claude and Codex, which are the backends `prepare_mcp_login`
+supports. Codex can sign in and still cannot apply the allowlist; the badge
+says unsupported.

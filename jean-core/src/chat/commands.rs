@@ -3666,6 +3666,15 @@ pub async fn send_chat_message(
     let thread_allowed_tools = allowed_tools_for_cli.clone();
     let thread_parallel_prompt = parallel_execution_prompt.clone();
     let thread_ai_language = ai_language.clone();
+    let backend_name = crate::agents::connectors::backend_label(&effective_backend);
+    let mcp_config = crate::agents::connectors::apply_agent_mcp_allowlist(
+        &app,
+        &session_id,
+        &worktree_path,
+        backend_name,
+        mcp_config,
+    )
+    .await;
     // Always inject Jean MCP for backends that honor runtime mcp_config.
     // Claude uses --mcp-config/--strict-mcp-config; Grok/Cursor use the same
     // JSON to decide which servers (including jean) stay enabled for the turn.
