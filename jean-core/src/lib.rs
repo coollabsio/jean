@@ -60,6 +60,7 @@ pub mod jean_mcp_core;
 pub mod jean_mcp_socket;
 pub mod jean_mcp_stdio;
 mod kimi_cli;
+mod muse_cli;
 mod opencode_cli;
 mod opencode_server;
 mod opinionated;
@@ -344,6 +345,8 @@ pub struct AppPreferences {
     pub selected_kimi_model: String, // Default Kimi Code model
     #[serde(default = "default_antigravity_model", alias = "selected_gemini_model")]
     pub selected_antigravity_model: String, // Default Antigravity CLI model
+    #[serde(default = "default_muse_model")]
+    pub selected_muse_model: String, // Default Muse Code model
     #[serde(default = "default_codex_reasoning_effort")]
     pub default_codex_reasoning_effort: String, // Codex reasoning effort: low, medium, high, xhigh
     #[serde(default = "default_codex_model_verbosity")]
@@ -400,6 +403,8 @@ pub struct AppPreferences {
     pub kimi_cli_source: String, // Kimi Code CLI source: "jean" (managed) or "path" (system PATH)
     #[serde(default = "default_cli_source", alias = "gemini_cli_source")]
     pub antigravity_cli_source: String, // Antigravity CLI source: "jean" (managed) or "path" (system PATH)
+    #[serde(default = "default_cli_source")]
+    pub muse_cli_source: String, // Muse Code CLI source: "jean" (managed) or "path" (system PATH)
     #[serde(default = "default_cli_source")]
     pub gh_cli_source: String, // GitHub CLI source: "jean" (managed) or "path" (system PATH)
     #[serde(default)]
@@ -807,6 +812,10 @@ fn default_kimi_model() -> String {
 
 fn default_antigravity_model() -> String {
     "antigravity/auto".to_string()
+}
+
+fn default_muse_model() -> String {
+    muse_cli::DEFAULT_MODEL_ID.to_string()
 }
 
 fn default_grok_cli_source() -> String {
@@ -2424,6 +2433,11 @@ pub fn is_antigravity_model(model: &str) -> bool {
     model.starts_with("antigravity/")
 }
 
+/// Muse Code model IDs are prefixed with "muse/" (e.g. "muse/default").
+pub fn is_muse_model(model: &str) -> bool {
+    model.starts_with("muse/")
+}
+
 /// Returns true if the given model string identifies a Codex model.
 /// Codex model IDs contain "codex" or start with "gpt-", but NOT OpenCode models.
 pub fn is_codex_model(model: &str) -> bool {
@@ -2609,6 +2623,7 @@ fn magic_prompt_model_matches_backend(model: &str, backend: &str) -> bool {
         "grok" => is_grok_model(model),
         "kimi" => is_kimi_model(model),
         "antigravity" => is_antigravity_model(model),
+        "muse" => is_muse_model(model),
         "claude" => {
             !is_codex_model(model)
                 && !is_opencode_model(model)
@@ -2617,6 +2632,7 @@ fn magic_prompt_model_matches_backend(model: &str, backend: &str) -> bool {
                 && !is_grok_model(model)
                 && !is_kimi_model(model)
                 && !is_antigravity_model(model)
+                && !is_muse_model(model)
                 && !model.starts_with("commandcode/")
         }
         _ => true,
@@ -2633,6 +2649,7 @@ fn selected_model_for_backend(preferences: &AppPreferences, backend: &str) -> St
         "grok" => preferences.selected_grok_model.clone(),
         "kimi" => preferences.selected_kimi_model.clone(),
         "antigravity" => preferences.selected_antigravity_model.clone(),
+        "muse" => preferences.selected_muse_model.clone(),
         _ => preferences.selected_model.clone(),
     }
 }
@@ -2829,6 +2846,7 @@ impl Default for AppPreferences {
             selected_grok_model: default_grok_model(),
             selected_kimi_model: default_kimi_model(),
             selected_antigravity_model: default_antigravity_model(),
+            selected_muse_model: default_muse_model(),
             default_codex_reasoning_effort: default_codex_reasoning_effort(),
             default_codex_model_verbosity: default_codex_model_verbosity(),
             default_grok_reasoning_effort: default_grok_reasoning_effort(),
@@ -2857,6 +2875,7 @@ impl Default for AppPreferences {
             grok_cli_source: default_grok_cli_source(),
             kimi_cli_source: default_cli_source(),
             antigravity_cli_source: default_cli_source(),
+            muse_cli_source: default_cli_source(),
             gh_cli_source: default_cli_source(),
             wsl_mode_chosen: false,
             wsl_enabled: false,
@@ -4450,6 +4469,7 @@ pub struct JeanMcpSnippet {
     pub codex_toml: Option<String>,
     pub grok_toml: Option<String>,
     pub kimi: Option<String>,
+    pub muse: Option<String>,
     pub opencode_json: Option<String>,
 }
 
@@ -4475,6 +4495,7 @@ async fn get_jean_mcp_config_snippet(app: AppHandle) -> Result<JeanMcpSnippet, S
     let codex_toml = entry.as_ref().map(|entry| entry.codex_snippet());
     let grok_toml = entry.as_ref().map(|entry| entry.grok_snippet());
     let kimi = entry.as_ref().map(|entry| entry.kimi_snippet());
+    let muse = entry.as_ref().map(|entry| entry.muse_snippet());
     let opencode_json = entry.as_ref().map(|entry| entry.opencode_snippet());
 
     Ok(JeanMcpSnippet {
@@ -4489,6 +4510,7 @@ async fn get_jean_mcp_config_snippet(app: AppHandle) -> Result<JeanMcpSnippet, S
         codex_toml,
         grok_toml,
         kimi,
+        muse,
         opencode_json,
     })
 }
@@ -5027,6 +5049,13 @@ fn repair_managed_cli_links(context: &RuntimeContext, preferences: &AppPreferenc
                 .join(executable("agy", "agy.exe")),
         ),
         (
+            "muse",
+            preferences.muse_cli_source.as_str(),
+            app_data
+                .join(muse_cli::CLI_DIR_NAME)
+                .join(muse_cli::MANAGED_CLI_BINARY_NAME),
+        ),
+        (
             "cmdc",
             preferences.commandcode_cli_source.as_str(),
             app_data
@@ -5130,7 +5159,7 @@ async fn wait_for_shutdown_signal() -> Result<(), String> {
 
 /// Run the standalone Axum adapter until it receives a shutdown signal.
 pub async fn run_server() -> Result<(), String> {
-    // Host modes (MCP stdio, PI RPC, Grok/Kimi ACP) return before the rest of
+    // Host modes (MCP stdio, PI RPC, Grok/Kimi ACP, Muse MSP) return before the rest of
     // startup. Raise the limit first so those processes get it when launched
     // via jean-server rather than the desktop binary (which also raises in run()).
     platform::raise_fd_limit();
@@ -5152,6 +5181,10 @@ pub async fn run_server() -> Result<(), String> {
     }
     if std::env::args().any(|argument| argument == chat::kimi::KIMI_ACP_HOST_ARG) {
         chat::kimi::run_kimi_acp_host_from_args()?;
+        return Ok(());
+    }
+    if std::env::args().any(|argument| argument == chat::muse::MUSE_MSP_HOST_ARG) {
+        chat::muse::run_muse_msp_host_from_args()?;
         return Ok(());
     }
     async_runtime::set(tokio::runtime::Handle::current());

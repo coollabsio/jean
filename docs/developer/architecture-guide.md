@@ -397,7 +397,7 @@ Additional systems (no dedicated docs yet):
 - **Diagnostics** - CPU/memory monitoring panel (`src-tauri/src/diagnostics/`)
 - **MCP** - Model Context Protocol server integration with per-project overrides (`src/services/mcp.ts`). First-party **Jean MCP** (`jean-core/src/jean_mcp_core.rs`) exposes project/worktree/session tools, usage + session model controls (`get_usage`, `set_session_model`), Run-command / panel-command dev environments (`get_run_environments`: running state, worktree/base session, startup command, ports, URL), plus the ship loop: `create_commit`, `push_worktree`, `detect_open_pr`, `link_worktree_pr`, `unlink_worktree_pr`, `create_pull_request`, `merge_pull_request`, `run_review` (thin wrappers over existing project commands). MCP `create_session` reuses an empty, idle chat session in the worktree before it creates another session; terminal, queued, running, archived, or previously used sessions are never reused. PR tools resolve repository paths from Jean's worktree ID; creation and linking persist the PR number and URL on the worktree.
 - **Model Catalog** - CDN-driven model lists and reasoning capabilities with bundled offline fallback ([model-catalog.md](./model-catalog.md))
-- **CLI Management** - Claude CLI, Codex CLI, Cursor CLI, OpenCode, PI, Command Code, Grok, Kimi Code, and gh CLI installation/versioning (backend-specific modules under `src-tauri/src/`)
+- **CLI Management** - Claude CLI, Codex CLI, Cursor CLI, OpenCode, PI, Command Code, Grok, Kimi Code, Antigravity, Muse, and gh CLI installation/versioning (backend-specific modules under `src-tauri/src/`)
 
 Cursor-specific notes:
 
@@ -805,3 +805,31 @@ Current official references:
 - https://antigravity.google/docs/cli/permissions
 - https://antigravity.google/docs/cli/mcp
 - https://antigravity.google/docs/cli/gcli-migration
+
+## Muse Code backend
+
+Jean runs Meta's Muse Code CLI (`muse`) through its MSP server, `muse serve`, which speaks JSON-RPC 2.0 with one JSON message per line on stdio. Each turn runs in a detached host process (`--jean-muse-msp-host`, modeled on the Kimi ACP host). The host starts `muse serve` in the worktree, sends `initialize`, starts or resumes the Muse session, sends `turn/start`, and reads notifications until `turn/completed`. Cancel sends `turn/cancel`.
+
+The Muse session ID from `session/start` is stored in `muse_session_id`. Follow-up turns call `session/resume` with that ID. Jean maps `item/*` notifications to the common chat model: `agentMessage` items become text, `reasoning` items become thinking, and `toolCall` items become tool calls with their `visibleOutput` as the result. Usage comes from `session/tokenUsage` and `turn/completed`.
+
+Execution modes map to Muse permission profiles:
+
+| Jean mode | `permissionProfile` | Extra settings                 |
+| --------- | ------------------- | ------------------------------ |
+| Plan      | `:read-only`        | None                           |
+| Build     | `:ask-me`           | `approvalMode: allowAll`       |
+| Yolo      | `:unrestricted`     | `muse serve --disable-sandbox` |
+
+The host answers MSP `approval/request` itself: it picks the approved choice in Build and Yolo and the denied choice in Plan. `muse serve` runs with `--disable-request-user-input`. Muse has no plan tool, so Plan mode treats the final agent message as the plan, the same way Kimi and Antigravity do. Jean passes its system prompt with `-c run.developer_prompt=...`. Do not use `run.system_prompt`, because it replaces Muse's own prompt. Reasoning effort passes through when it is one of `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `ultra`.
+
+Model values use the `muse/` prefix. `muse/default` omits the model so the server picks its default.
+
+Magic Prompts run `muse exec --json --permission-profile :read-only` and read the final text from the `run.terminal.completed` record. Jean passes `--output-schema`, also wraps the prompt with strict JSON instructions, and extracts the JSON object tolerantly, because `--output-schema` only works with the Meta provider.
+
+Muse MCP servers come from the `mcp_servers` object in `~/.config/muse/settings.json`. `muse serve` loads every enabled server itself, so Jean shows these servers as automatic and does not toggle them per session.
+
+Muse authenticates with `META_API_KEY`, a stored API key, or a stored browser session in `~/.config/muse/auth.json`. The CLI has no auth status command, so Jean checks the environment variable and that file. Sign-in runs `muse login` in Jean's in-app login terminal (`CliLoginModal`), so it also works in Web Access.
+
+Jean's own MCP server is added per session through `session/start` `config.mcpServers` with `mode: "optional"`. `muse serve` refuses that field unless `initialize` requests the `sessionMcp` capability.
+
+To test without a Meta account, start Jean with `JEAN_MUSE_PROVIDER=echo`. The host then runs `muse serve --provider echo`, which replies `echo: <prompt>`. The echo provider never calls tools, so tool calls, approvals, and structured magic-prompt output need a real Meta account to verify.

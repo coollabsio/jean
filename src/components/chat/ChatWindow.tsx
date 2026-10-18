@@ -1053,6 +1053,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
   // Custom providers don't support Opus 4.6 adaptive thinking — use thinking levels instead
   const useAdaptiveThinkingFlag =
     selectedBackend === 'antigravity' ||
+    selectedBackend === 'muse' ||
     (!isCustomProvider &&
       supportsAdaptiveThinking(
         selectedModel,
@@ -1595,7 +1596,8 @@ const ChatWindowContent = memo(function ChatWindowContent({
         backend === 'pi' ||
         backend === 'grok' ||
         backend === 'kimi' ||
-        backend === 'antigravity'
+        backend === 'antigravity' ||
+        backend === 'muse'
       const effortLevel = usesEffortBackend
         ? ((preferences?.magic_prompt_efforts?.code_review_effort as
             | EffortLevel

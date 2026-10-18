@@ -395,6 +395,58 @@ describe('useInvestigateHandlers', () => {
     )
   })
 
+  it('uses magic prompt effort for Muse Sentry investigation and drops thinking levels', async () => {
+    vi.mocked(invoke).mockImplementation(async command => {
+      if (command === 'get_sentry_issue_context_contents') {
+        return [
+          {
+            id: '789',
+            shortId: 'COOLIFY-MUSE',
+            title: 'Muse crash',
+            permalink: 'https://sentry.io/issues/789',
+            content: '# Sentry context\n\nStack trace',
+          },
+        ] as never
+      }
+      return undefined as never
+    })
+    const preferences: AppPreferences = {
+      ...defaultPreferences,
+      magic_prompt_models: {
+        ...defaultPreferences.magic_prompt_models,
+        investigate_sentry_issue_model: 'muse/muse-spark-1.2',
+      },
+      magic_prompt_backends: {
+        ...defaultPreferences.magic_prompt_backends,
+        investigate_sentry_issue_backend: 'muse',
+      },
+      magic_prompt_modes: {
+        ...defaultPreferences.magic_prompt_modes,
+        investigate_sentry_issue_mode: 'yolo',
+      },
+      magic_prompt_efforts: {
+        ...defaultPreferences.magic_prompt_efforts,
+        investigate_sentry_issue_effort: 'ultra',
+      },
+    }
+    const { result, sendMessage } = renderHandlers({ preferences })
+
+    await act(async () => {
+      await result.current.handleInvestigate('sentry-issue')
+    })
+
+    expect(sendMessage.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'muse/muse-spark-1.2',
+        backend: 'muse',
+        executionMode: 'yolo',
+        effortLevel: 'ultra',
+        thinkingLevel: undefined,
+      }),
+      expect.any(Object)
+    )
+  })
+
   it('keeps the session UI execution mode in sync with separate review comment send mode', async () => {
     const { result, sendMessage } = renderHandlers({ executionMode: 'yolo' })
 

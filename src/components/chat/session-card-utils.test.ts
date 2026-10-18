@@ -5,6 +5,7 @@ import {
   createSessionCardDataCache,
   getEffectiveSessionWaiting,
   getResumeArgs,
+  getResumeCommand,
   isDedicatedEmptyCodeReviewSession,
   shouldShowCodeReviewLoadingPanel,
   shouldShowReviewFullWidth,
@@ -163,6 +164,59 @@ describe('native client resume sessions', () => {
       terminalLabel: 'Antigravity conversation support (Native)',
       nativeSessionId: 'agy-conv-1',
     })
+  })
+
+  it('builds a Muse resume launch with the resume subcommand', () => {
+    const museSession: Session = {
+      ...session,
+      name: 'Muse session support',
+      backend: 'muse',
+      codex_thread_id: undefined,
+      muse_session_id: 'muse-sess-1',
+    }
+
+    expect(getResumeCommand(museSession)).toBe('muse resume muse-sess-1')
+    expect(getResumeArgs(museSession)).toEqual({
+      command: 'muse',
+      args: ['resume', 'muse-sess-1'],
+    })
+    expect(
+      getResumeArgs(museSession, {
+        resolvedCommand: '/home/user/.local/bin/muse',
+      })
+    ).toEqual({
+      command: '/home/user/.local/bin/muse',
+      args: ['resume', 'muse-sess-1'],
+    })
+    expect(
+      buildNativeClientSessionInput(
+        museSession,
+        'worktree-1',
+        '/tmp/worktree-1'
+      )
+    ).toEqual({
+      worktreeId: 'worktree-1',
+      worktreePath: '/tmp/worktree-1',
+      name: 'Muse session support (Native)',
+      backend: 'muse',
+      primarySurface: 'terminal',
+      terminalCommand: 'muse',
+      terminalCommandArgs: ['resume', 'muse-sess-1'],
+      terminalLabel: 'Muse session support (Native)',
+      nativeSessionId: 'muse-sess-1',
+    })
+  })
+
+  it('returns no Muse resume launch before the session id is known', () => {
+    const museSession: Session = {
+      ...session,
+      backend: 'muse',
+      codex_thread_id: undefined,
+      muse_session_id: null,
+    }
+
+    expect(getResumeCommand(museSession)).toBeNull()
+    expect(getResumeArgs(museSession)).toBeNull()
   })
 
   it('builds a Kimi Code resume launch with --session', () => {

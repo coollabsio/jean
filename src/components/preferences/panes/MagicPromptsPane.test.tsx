@@ -14,6 +14,7 @@ let availableGrokModelsMock:
 let availableAntigravityModelsMock:
   | { id: string; label: string; isDefault?: boolean }[]
   | undefined
+let availableMuseModelsMock: { id: string; label: string }[] | undefined
 
 vi.mock('@/services/preferences', () => ({
   usePreferences: () => ({
@@ -65,6 +66,14 @@ vi.mock('@/services/antigravity-cli', () => ({
   useAvailableAntigravityModels: () => ({
     data: availableAntigravityModelsMock,
   }),
+}))
+
+vi.mock('@/services/muse-cli', () => ({
+  MUSE_FALLBACK_MODELS: [
+    { id: 'muse/default', label: 'Default', isDefault: true },
+    { id: 'muse/muse-spark-1.2', label: 'Muse Spark 1.2' },
+  ],
+  useAvailableMuseModels: () => ({ data: availableMuseModelsMock }),
 }))
 
 vi.mock('@/services/model-catalog', () => ({
@@ -138,6 +147,7 @@ beforeEach(() => {
   preferencesMock = { ...defaultPreferences }
   availableGrokModelsMock = undefined
   availableAntigravityModelsMock = undefined
+  availableMuseModelsMock = undefined
   globalThis.ResizeObserver = ResizeObserverMock as never
   HTMLElement.prototype.scrollIntoView = vi.fn()
   HTMLElement.prototype.hasPointerCapture = vi.fn()
@@ -256,6 +266,30 @@ describe('MagicPromptsPane', () => {
     await user.click(screen.getByRole('combobox', { name: 'Backend' }))
 
     expect(screen.queryByRole('option', { name: /Antigravity/ })).toBeNull()
+    expect(screen.queryByRole('option', { name: 'Muse' })).toBeNull()
+  })
+
+  it('switches a magic prompt to Muse with its default model and effort', async () => {
+    installedBackendsMock = ['claude', 'muse']
+    const user = userEvent.setup()
+    render(<MagicPromptsPane />)
+
+    await user.click(screen.getByRole('combobox', { name: 'Backend' }))
+    await user.click(screen.getByRole('option', { name: 'Muse' }))
+
+    expect(mutateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        magic_prompt_backends: expect.objectContaining({
+          investigate_issue_backend: 'muse',
+        }),
+        magic_prompt_models: expect.objectContaining({
+          investigate_issue_model: 'muse/default',
+        }),
+        magic_prompt_efforts: expect.objectContaining({
+          investigate_issue_effort: 'high',
+        }),
+      })
+    )
   })
 
   it('lists Codex second in the magic prompt backend menu', async () => {
@@ -332,6 +366,53 @@ describe('MagicPromptsPane', () => {
       screen.getByRole('option', { name: /Gemini 3\.1 Pro/ })
     ).toBeInTheDocument()
     expect(screen.queryByText('No models found.')).toBeNull()
+  })
+
+  it('lets a Muse magic prompt pick a CLI-reported model and Muse effort levels', async () => {
+    installedBackendsMock = ['claude', 'muse']
+    availableMuseModelsMock = [
+      { id: 'muse/default', label: 'Default' },
+      { id: 'muse/muse-pro-2', label: 'Muse Pro 2' },
+    ]
+    preferencesMock = {
+      ...defaultPreferences,
+      magic_prompt_backends: {
+        ...defaultPreferences.magic_prompt_backends,
+        investigate_issue_backend: 'muse',
+      },
+      magic_prompt_models: {
+        ...defaultPreferences.magic_prompt_models,
+        investigate_issue_model: 'muse/default',
+      },
+    }
+    const user = userEvent.setup()
+    render(<MagicPromptsPane />)
+
+    await user.click(screen.getByRole('combobox', { name: 'Reasoning level' }))
+    expect(
+      screen.getAllByRole('option').map(option => option.textContent)
+    ).toEqual([
+      'None',
+      'Minimal',
+      'Low',
+      'Medium',
+      'High',
+      'xHigh',
+      'Max',
+      'Ultra',
+    ])
+    await user.keyboard('{Escape}')
+
+    await user.click(screen.getByRole('combobox', { name: 'Model' }))
+    await user.click(screen.getByRole('option', { name: /Muse Pro 2/ }))
+
+    expect(mutateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        magic_prompt_models: expect.objectContaining({
+          investigate_issue_model: 'muse/muse-pro-2',
+        }),
+      })
+    )
   })
 
   it('keeps magic prompt control labels paired with dropdowns on mobile', () => {

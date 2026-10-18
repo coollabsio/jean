@@ -122,6 +122,11 @@ export const ANTIGRAVITY_MODEL_OPTIONS: { value: string; label: string }[] = [
   { value: 'antigravity/gemini-3.1-pro-high', label: 'Gemini 3.1 Pro (High)' },
 ]
 
+export const MUSE_MODEL_OPTIONS: { value: string; label: string }[] = [
+  { value: 'muse/default', label: 'Default' },
+  { value: 'muse/muse-spark-1.2', label: 'Muse Spark 1.2' },
+]
+
 export const KIMI_EFFORT_LEVEL_OPTIONS: {
   value: EffortLevel
   label: string
@@ -175,6 +180,22 @@ export const ANTIGRAVITY_EFFORT_LEVEL_OPTIONS = [
   ...EFFORT_LEVEL_OPTIONS.filter(option =>
     ['low', 'medium', 'high'].includes(option.value)
   ),
+]
+
+/** Exact values accepted by Muse Code `reasoningEffort` (CLI default: high). */
+export const MUSE_EFFORT_LEVEL_OPTIONS: {
+  value: EffortLevel
+  label: string
+  description: string
+}[] = [
+  { value: 'none', label: 'None', description: 'No reasoning' },
+  { value: 'minimal', label: 'Minimal', description: 'Minimal' },
+  { value: 'low', label: 'Low', description: 'Low' },
+  { value: 'medium', label: 'Medium', description: 'Moderate' },
+  { value: 'high', label: 'High', description: 'Deep' },
+  { value: 'xhigh', label: 'xHigh', description: 'Extra high' },
+  { value: 'max', label: 'Max', description: 'Maximum' },
+  { value: 'ultra', label: 'Ultra', description: 'Beyond max' },
 ]
 
 export const CODEX_EFFORT_LEVEL_OPTIONS = EFFORT_LEVEL_OPTIONS.filter(

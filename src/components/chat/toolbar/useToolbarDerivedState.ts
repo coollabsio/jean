@@ -10,6 +10,7 @@ import {
   GROK_MODEL_OPTIONS,
   KIMI_MODEL_OPTIONS,
   ANTIGRAVITY_MODEL_OPTIONS,
+  MUSE_MODEL_OPTIONS,
   OPENCODE_MODEL_OPTIONS,
   PI_MODEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
@@ -36,6 +37,7 @@ interface UseToolbarDerivedStateArgs {
   commandcodeModelOptions?: { value: string; label: string }[]
   grokModelOptions?: { value: string; label: string }[]
   kimiModelOptions?: { value: string; label: string }[]
+  museModelOptions?: { value: string; label: string }[]
   customCliProfiles: CustomCliProfile[]
   installedBackends?: CliBackend[]
   availableMcpServers?: { name: string; backend?: string; disabled?: boolean }[]
@@ -89,6 +91,7 @@ export function buildBackendModelSections({
   commandcodeModelOptions,
   grokModelOptions,
   kimiModelOptions,
+  museModelOptions,
 }: {
   installedBackends: CliBackend[]
   claudeModelOptions: { value: string; label: string }[]
@@ -99,6 +102,7 @@ export function buildBackendModelSections({
   commandcodeModelOptions?: { value: string; label: string }[]
   grokModelOptions?: { value: string; label: string }[]
   kimiModelOptions?: { value: string; label: string }[]
+  museModelOptions?: { value: string; label: string }[]
 }): BackendModelSection[] {
   const sections: BackendModelSection[] = []
 
@@ -145,6 +149,12 @@ export function buildBackendModelSections({
         label: 'Antigravity CLI',
         options: ANTIGRAVITY_MODEL_OPTIONS,
       })
+    } else if (backend === 'muse') {
+      sections.push({
+        backend,
+        label: 'Muse',
+        options: museModelOptions ?? MUSE_MODEL_OPTIONS,
+      })
     }
   }
 
@@ -162,6 +172,7 @@ export function useToolbarDerivedState({
   customCliProfiles,
   grokModelOptions,
   kimiModelOptions,
+  museModelOptions,
   installedBackends = DEFAULT_INSTALLED_BACKENDS,
   availableMcpServers = EMPTY_MCP_SERVERS,
   enabledMcpServers = EMPTY_ENABLED_MCP_SERVERS,
@@ -173,6 +184,7 @@ export function useToolbarDerivedState({
   const isCommandCode = selectedBackend === 'commandcode'
   const isGrok = selectedBackend === 'grok'
   const isKimi = selectedBackend === 'kimi'
+  const isMuse = selectedBackend === 'muse'
 
   const { data: modelCatalog } = useModelCatalog()
 
@@ -259,6 +271,7 @@ export function useToolbarDerivedState({
     'kimi',
     kimiModelOptions ?? KIMI_MODEL_OPTIONS
   )
+  const resolvedMuseModelOptions = museModelOptions ?? MUSE_MODEL_OPTIONS
 
   const backendModelSections = useMemo(
     () =>
@@ -272,6 +285,7 @@ export function useToolbarDerivedState({
         commandcodeModelOptions: resolvedCommandCodeModelOptions,
         grokModelOptions: resolvedGrokModelOptions,
         kimiModelOptions: resolvedKimiModelOptions,
+        museModelOptions: resolvedMuseModelOptions,
       }),
     [
       claudeModelOptions,
@@ -281,6 +295,7 @@ export function useToolbarDerivedState({
       resolvedCommandCodeModelOptions,
       resolvedGrokModelOptions,
       resolvedKimiModelOptions,
+      resolvedMuseModelOptions,
       resolvedOpencodeModelOptions,
       resolvedPiModelOptions,
     ]
@@ -294,6 +309,7 @@ export function useToolbarDerivedState({
     if (isCommandCode) return resolvedCommandCodeModelOptions
     if (isGrok) return resolvedGrokModelOptions
     if (isKimi) return resolvedKimiModelOptions
+    if (isMuse) return resolvedMuseModelOptions
     return claudeModelOptions
   }, [
     claudeModelOptions,
@@ -304,11 +320,13 @@ export function useToolbarDerivedState({
     isCommandCode,
     isGrok,
     isKimi,
+    isMuse,
     isOpencode,
     resolvedCommandCodeModelOptions,
     resolvedCursorModelOptions,
     resolvedGrokModelOptions,
     resolvedKimiModelOptions,
+    resolvedMuseModelOptions,
     resolvedOpencodeModelOptions,
     resolvedPiModelOptions,
   ])

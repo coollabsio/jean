@@ -63,6 +63,7 @@ import {
   GROK_EFFORT_LEVEL_OPTIONS,
   KIMI_EFFORT_LEVEL_OPTIONS,
   ANTIGRAVITY_EFFORT_LEVEL_OPTIONS,
+  MUSE_EFFORT_LEVEL_OPTIONS,
   PI_EFFORT_LEVEL_OPTIONS,
   THINKING_LEVEL_OPTIONS,
   withAdaptiveEffortOption,
@@ -214,6 +215,7 @@ export function DesktopToolbarControls({
   const isGrok = selectedBackend === 'grok'
   const isKimi = selectedBackend === 'kimi'
   const isAntigravity = selectedBackend === 'antigravity'
+  const isMuse = selectedBackend === 'muse'
   const usesEffortControl =
     modelReasoning?.type === 'effort' ||
     (modelReasoning === undefined &&
@@ -222,30 +224,36 @@ export function DesktopToolbarControls({
         isPi ||
         isGrok ||
         isKimi ||
-        isAntigravity))
+        isAntigravity ||
+        isMuse))
   const effortLevelOptions =
     modelReasoning?.type === 'effort'
       ? withAdaptiveEffortOption(modelReasoning.levels, selectedModel)
       : isAntigravity
         ? ANTIGRAVITY_EFFORT_LEVEL_OPTIONS
-        : isPi
-          ? withAdaptiveEffortOption(PI_EFFORT_LEVEL_OPTIONS, selectedModel)
-          : isCodex
-            ? withAdaptiveEffortOption(
-                CODEX_EFFORT_LEVEL_OPTIONS,
-                selectedModel
-              )
-            : isKimi
+        : isMuse
+          ? MUSE_EFFORT_LEVEL_OPTIONS
+          : isPi
+            ? withAdaptiveEffortOption(PI_EFFORT_LEVEL_OPTIONS, selectedModel)
+            : isCodex
               ? withAdaptiveEffortOption(
-                  KIMI_EFFORT_LEVEL_OPTIONS,
+                  CODEX_EFFORT_LEVEL_OPTIONS,
                   selectedModel
                 )
-              : isGrok
+              : isKimi
                 ? withAdaptiveEffortOption(
-                    GROK_EFFORT_LEVEL_OPTIONS,
+                    KIMI_EFFORT_LEVEL_OPTIONS,
                     selectedModel
                   )
-                : withAdaptiveEffortOption(EFFORT_LEVEL_OPTIONS, selectedModel)
+                : isGrok
+                  ? withAdaptiveEffortOption(
+                      GROK_EFFORT_LEVEL_OPTIONS,
+                      selectedModel
+                    )
+                  : withAdaptiveEffortOption(
+                      EFFORT_LEVEL_OPTIONS,
+                      selectedModel
+                    )
   const thinkingLevelOptions =
     modelReasoning?.type === 'thinking'
       ? withAdaptiveEffortOption(modelReasoning.levels, selectedModel)
@@ -265,7 +273,9 @@ export function DesktopToolbarControls({
             : selectedEffortLevel
         : isGrok && selectedEffortLevel === 'ultracode'
           ? 'max'
-          : selectedEffortLevel
+          : isMuse && !effortOptionValues.has(selectedEffortLevel)
+            ? 'high' // Jean omits efforts Muse rejects, so Muse uses its default
+            : selectedEffortLevel
   const displayedEffortLabel =
     effortLevelOptions.find(o => o.value === displayedEffortLevel)?.label ??
     displayedEffortLevel

@@ -54,6 +54,11 @@ import {
   useAntigravityPathDetection,
 } from '@/services/antigravity-cli'
 import {
+  useMuseCliAuth,
+  useMuseCliSetup,
+  useMusePathDetection,
+} from '@/services/muse-cli'
+import {
   useGhCliAuth,
   useGhCliSetup,
   useGhPathDetection,
@@ -71,6 +76,7 @@ export type AIBackend =
   | 'grok'
   | 'kimi'
   | 'antigravity'
+  | 'muse'
 export type CliType = AIBackend | 'gh'
 
 export const AI_BACKENDS: AIBackend[] = [
@@ -83,6 +89,7 @@ export const AI_BACKENDS: AIBackend[] = [
   'grok',
   'kimi',
   'antigravity',
+  'muse',
 ]
 
 export interface CliProgress {
@@ -189,6 +196,7 @@ const SOURCE_KEYS: Record<Exclude<CliType, 'cursor'>, SourceKey> = {
   grok: 'grok_cli_source',
   kimi: 'kimi_cli_source',
   antigravity: 'antigravity_cli_source',
+  muse: 'muse_cli_source',
   gh: 'gh_cli_source',
 }
 
@@ -338,6 +346,7 @@ export function useCliSetupFlows(): Record<CliType, CliFlow> {
   const grokSetup = useGrokCliSetup()
   const kimiSetup = useKimiCliSetup()
   const antigravitySetup = useAntigravityCliSetup()
+  const museSetup = useMuseCliSetup()
   const ghSetup = useGhCliSetup()
 
   const claudePath = useClaudePathDetection()
@@ -349,6 +358,7 @@ export function useCliSetupFlows(): Record<CliType, CliFlow> {
   const grokPath = useGrokPathDetection()
   const kimiPath = useKimiPathDetection()
   const antigravityPath = useAntigravityPathDetection()
+  const musePath = useMusePathDetection()
   const ghPath = useGhPathDetection()
 
   const claudeAuth = useClaudeCliAuth({
@@ -370,6 +380,7 @@ export function useCliSetupFlows(): Record<CliType, CliFlow> {
   const antigravityAuth = useAntigravityCliAuth({
     enabled: !!antigravitySetup.status?.installed,
   })
+  const museAuth = useMuseCliAuth({ enabled: !!museSetup.status?.installed })
   const ghAuth = useGhCliAuth({ enabled: !!ghSetup.status?.installed })
 
   const m = (
@@ -399,6 +410,7 @@ export function useCliSetupFlows(): Record<CliType, CliFlow> {
       antigravityAuth,
       antigravityPath
     ),
+    muse: m('muse', museSetup, museAuth, musePath),
     gh: m('gh', ghSetup, ghAuth, ghPath),
   }
 }

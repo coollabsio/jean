@@ -15,6 +15,7 @@ export const OWN_MCP_DISCOVERY_BACKENDS = [
   'grok',
   'kimi',
   'antigravity',
+  'muse',
 ] as const
 
 export function hasOwnMcpDiscovery(backend: string): boolean {

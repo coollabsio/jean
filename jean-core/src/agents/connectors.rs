@@ -91,6 +91,10 @@ pub fn support_reason(backend: &str) -> &'static str {
             "Antigravity loads every enabled server from its persistent config. \
              There is no per-run MCP override."
         }
+        "muse" => {
+            "Muse sends only Jean MCP in session/start. Other servers come from \
+             the CLI's settings.json."
+        }
         _ => "This backend has no per-session MCP config.",
     }
 }
@@ -107,6 +111,7 @@ pub fn backend_label(backend: &crate::chat::types::Backend) -> &'static str {
         Backend::Grok => "grok",
         Backend::Kimi => "kimi",
         Backend::Antigravity => "antigravity",
+        Backend::Muse => "muse",
     }
 }
 
@@ -115,7 +120,7 @@ pub fn backend_label(backend: &crate::chat::types::Backend) -> &'static str {
 pub fn has_own_mcp_discovery(backend: &str) -> bool {
     matches!(
         backend,
-        "claude" | "codex" | "opencode" | "cursor" | "grok" | "kimi" | "antigravity"
+        "claude" | "codex" | "opencode" | "cursor" | "grok" | "kimi" | "antigravity" | "muse"
     )
 }
 
@@ -345,6 +350,7 @@ pub fn catalog_payload() -> Value {
         "grok",
         "kimi",
         "antigravity",
+        "muse",
     ];
     let mut reasons = serde_json::Map::new();
     for backend in backends {
@@ -352,7 +358,7 @@ pub fn catalog_payload() -> Value {
     }
     json!({
         "perSessionBackends": ["claude", "grok"],
-        "discoveryBackends": ["claude", "codex", "opencode", "cursor", "grok", "kimi", "antigravity"],
+        "discoveryBackends": ["claude", "codex", "opencode", "cursor", "grok", "kimi", "antigravity", "muse"],
         "reasons": reasons,
         "jeanTools": jean_tool_catalog(),
     })
@@ -539,6 +545,7 @@ mod tests {
             "commandcode",
             "kimi",
             "antigravity",
+            "muse",
             "",
         ] {
             assert_eq!(
