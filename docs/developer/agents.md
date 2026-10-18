@@ -79,13 +79,18 @@ IPC calls that same function via `dispatch_core_command`; there is no separate
 The engine applies the fields in three places:
 
 - New task sessions and rotated chats are created with the agent's backend.
-  An empty home chat (no messages yet) is stamped the same way when the agent
-  is created, updated, or listed, so the chat toolbar shows the choice.
+  An empty home chat (no messages, no running turn) is stamped the same way
+  when the agent is created or its run configuration changes, so the chat
+  toolbar shows the choice. A cleared backend or model resets that empty chat
+  to the preference default. Listing agents does not stamp, so a toolbar
+  choice made before the first message is kept.
 - Wake-ups pass `backend`, `model`, `effortLevel`, and `thinkingLevel` on
   `send_chat_message`. A set backend with an unset model also passes that
   backend's preference model, so a stale model from another backend is not
-  sent. Sessions that already have messages keep their stored backend; the
-  wake still uses the agent's current values for that turn.
+  sent. `send_chat_message` saves the wake's backend on the session, so a home
+  chat that already has messages moves to a changed backend on the next wake,
+  with the usual provider-switch handoff. An unset backend keeps the session's
+  backend.
 - Cursor has no Build mode. A Cursor wake uses Yolo instead of the usual
   Build fallback, because Plan mode blocks the Jean MCP tools.
 

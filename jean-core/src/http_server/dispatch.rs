@@ -3293,6 +3293,13 @@ pub async fn dispatch_command(
             crate::chat::steer_pi_turn(app.clone(), worktree_id, session_id, message).await?;
             Ok(Value::Null)
         }
+        "steer_claude_turn" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let message: String = from_field(&args, "message")?;
+            crate::chat::steer_claude_turn(app.clone(), worktree_id, session_id, message).await?;
+            Ok(Value::Null)
+        }
         "steer_grok_turn" => {
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
             let session_id: String = field(&args, "sessionId", "session_id")?;

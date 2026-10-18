@@ -356,6 +356,8 @@ pub struct AppPreferences {
     pub codex_auto_steer_enabled: bool, // Steer prompts into a running Codex turn instead of queueing (default: false)
     #[serde(default = "default_opencode_auto_steer")]
     pub opencode_auto_steer_enabled: bool, // Steer prompts into a running OpenCode session instead of queueing (default: false)
+    #[serde(default = "default_claude_auto_steer")]
+    pub claude_auto_steer_enabled: bool, // Steer prompts into a running Claude turn (detached host, Unix only) instead of queueing (default: false)
     #[serde(default = "default_pi_auto_steer")]
     pub pi_auto_steer_enabled: bool, // Steer prompts into a running PI turn instead of queueing (default: false)
     #[serde(default = "default_grok_auto_steer")]
@@ -459,6 +461,10 @@ fn default_codex_auto_steer() -> bool {
 }
 
 fn default_opencode_auto_steer() -> bool {
+    false
+}
+
+fn default_claude_auto_steer() -> bool {
     false
 }
 
@@ -1242,6 +1248,7 @@ mod tests {
         assert!(!preferences.codex_auto_steer_enabled);
         assert!(!preferences.opencode_auto_steer_enabled);
         assert!(!preferences.pi_auto_steer_enabled);
+        assert!(!preferences.claude_auto_steer_enabled);
         assert!(!preferences.grok_auto_steer_enabled);
 
         let mut prefs_json = serde_json::to_value(preferences).unwrap();
@@ -1249,12 +1256,14 @@ mod tests {
         prefs.remove("codex_auto_steer_enabled");
         prefs.remove("opencode_auto_steer_enabled");
         prefs.remove("pi_auto_steer_enabled");
+        prefs.remove("claude_auto_steer_enabled");
         prefs.remove("grok_auto_steer_enabled");
 
         let preferences: AppPreferences = serde_json::from_value(prefs_json).unwrap();
         assert!(!preferences.codex_auto_steer_enabled);
         assert!(!preferences.opencode_auto_steer_enabled);
         assert!(!preferences.pi_auto_steer_enabled);
+        assert!(!preferences.claude_auto_steer_enabled);
         assert!(!preferences.grok_auto_steer_enabled);
     }
 
@@ -2826,6 +2835,7 @@ impl Default for AppPreferences {
             codex_goal_execution_mode: default_codex_goal_execution_mode(),
             codex_auto_steer_enabled: default_codex_auto_steer(),
             opencode_auto_steer_enabled: default_opencode_auto_steer(),
+            claude_auto_steer_enabled: default_claude_auto_steer(),
             pi_auto_steer_enabled: default_pi_auto_steer(),
             grok_auto_steer_enabled: default_grok_auto_steer(),
             kimi_auto_steer_enabled: false,
@@ -5126,6 +5136,10 @@ pub async fn run_server() -> Result<(), String> {
     platform::raise_fd_limit();
     if std::env::args().any(|argument| argument == jean_mcp_core::JEAN_MCP_STDIO_ARG) {
         jean_mcp_stdio::run_stdio_server()?;
+        return Ok(());
+    }
+    if std::env::args().any(|argument| argument == chat::claude_host::CLAUDE_HOST_ARG) {
+        chat::claude_host::run_claude_host_from_args()?;
         return Ok(());
     }
     if std::env::args().any(|argument| argument == chat::pi::PI_RPC_HOST_ARG) {

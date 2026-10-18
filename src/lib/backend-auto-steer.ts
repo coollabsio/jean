@@ -7,12 +7,21 @@ export interface AutoSteerPreferences {
   pi_auto_steer_enabled?: boolean
   grok_auto_steer_enabled?: boolean
   kimi_auto_steer_enabled?: boolean
+  claude_auto_steer_enabled?: boolean
 }
 
-/** Backends that support steering a prompt into a running turn. */
+/**
+ * Backends that support steering a prompt into a running turn. Claude is
+ * steerable only when `claude_auto_steer_enabled` is on, because only then do
+ * new Claude runs start through the steerable detached host.
+ */
 export function isSteerCapableBackend(
-  backend: Backend | string | null | undefined
+  backend: Backend | string | null | undefined,
+  preferences?: AutoSteerPreferences | null
 ): boolean {
+  if (backend === 'claude') {
+    return preferences?.claude_auto_steer_enabled ?? false
+  }
   return (
     backend === 'codex' ||
     backend === 'opencode' ||
@@ -29,9 +38,11 @@ export function isBackendAutoSteerEnabled(
   backend: Backend | string | null | undefined,
   preferences?: AutoSteerPreferences | null
 ): boolean {
-  if (!isSteerCapableBackend(backend)) return false
+  if (!isSteerCapableBackend(backend, preferences)) return false
 
   switch (backend) {
+    case 'claude':
+      return preferences?.claude_auto_steer_enabled ?? false
     case 'opencode':
       return preferences?.opencode_auto_steer_enabled ?? false
     case 'pi':

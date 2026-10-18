@@ -175,7 +175,7 @@ pub async fn create_agent(
     })?;
     // The home chat is created on first list. Stamp it now so the toolbar
     // shows this agent's backend and model before the user sends a message.
-    if let Err(e) = super::engine::home_session(app, &agent).await {
+    if let Err(e) = super::engine::apply_run_config_to_home(app, &agent).await {
         log::warn!(
             "[Agents] could not prepare home session for {}: {e}",
             agent.id
@@ -194,7 +194,7 @@ pub async fn update_agent(
     let pausing = patch.paused == Some(true);
     let agent = super::with_db(app, |conn| db::update_agent(conn, agent_id, &patch))?;
     if patch.changes_run_config() {
-        if let Err(e) = super::engine::home_session(app, &agent).await {
+        if let Err(e) = super::engine::apply_run_config_to_home(app, &agent).await {
             log::warn!(
                 "[Agents] could not update home session for {}: {e}",
                 agent.id

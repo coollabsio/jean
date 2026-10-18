@@ -1209,6 +1209,7 @@ async fn drain_backend_queue(
             drain_queue_into_codex_turn(&app, &worktree_id, &session_id).await;
             drain_queue_into_opencode_turn(&app, &worktree_id, &worktree_path, &session_id).await;
             drain_queue_into_pi_turn(&app, &worktree_id, &session_id).await;
+            drain_queue_into_claude_turn(&app, &worktree_id, &session_id).await;
             drain_queue_into_grok_turn(&app, &worktree_id, &session_id).await;
             log::trace!("[QueueDrain] session active, stop session={session_id}");
             return;
@@ -10045,10 +10046,11 @@ fn queued_message_is_steerable_for_backend(msg: &serde_json::Value, backend: &st
         return false;
     }
 
-    // Codex, OpenCode, Pi, and Grok can all steer queued prompts. Attachment
-    // kinds (file @-mentions, skills, pasted images, pasted text files) become
-    // path refs in the steered text via build_queued_message_with_refs.
-    matches!(backend, "codex" | "opencode" | "pi" | "grok")
+    // Codex, OpenCode, Pi, Grok, and Claude (host-backed runs) can all steer
+    // queued prompts. Attachment kinds (file @-mentions, skills, pasted
+    // images, pasted text files) become path refs in the steered text via
+    // build_queued_message_with_refs.
+    matches!(backend, "codex" | "opencode" | "pi" | "grok" | "claude")
 }
 
 fn queued_message_supports_any_steering(msg: &serde_json::Value) -> bool {
@@ -10056,6 +10058,58 @@ fn queued_message_supports_any_steering(msg: &serde_json::Value) -> bool {
         || queued_message_is_steerable_for_backend(msg, "opencode")
         || queued_message_is_steerable_for_backend(msg, "pi")
         || queued_message_is_steerable_for_backend(msg, "grok")
+        || queued_message_is_steerable_for_backend(msg, "claude")
+}
+
+/// Inject a user message into a running Claude turn via the detached Claude
+/// host. Errors when the run is not host-backed or the turn already finished;
+/// callers fall back to the queue. The host writes `steered_user_message`
+/// and the tailer emits `chat:steered` when the CLI consumes the steer.
+pub async fn steer_claude_turn(
+    app: AppHandle,
+    worktree_id: String,
+    session_id: String,
+    message: String,
+) -> Result<(), String> {
+    steer_text_into_claude_turn(&app, &worktree_id, &session_id, &message).await
+}
+
+async fn steer_text_into_claude_turn(
+    app: &AppHandle,
+    _worktree_id: &str,
+    session_id: &str,
+    message: &str,
+) -> Result<(), String> {
+    #[cfg(not(unix))]
+    {
+        let _ = (app, session_id, message);
+        Err("Claude steering is only available on macOS/Linux".to_string())
+    }
+
+    #[cfg(unix)]
+    {
+        let metadata = load_metadata(app, session_id)?
+            .ok_or_else(|| format!("No metadata found for session: {session_id}"))?;
+        let run_id = metadata
+            .runs
+            .iter()
+            .rev()
+            .find(|r| r.status == RunStatus::Running && r.backend == Some(Backend::Claude))
+            .map(|r| r.run_id.clone())
+            .ok_or_else(|| format!("No running Claude run for session: {session_id}"))?;
+        let app_data = app
+            .path()
+            .app_data_dir()
+            .map_err(|e| format!("Failed to resolve app data dir: {e}"))?;
+        let socket_path =
+            super::claude_host::claude_host_socket_path(&app_data, session_id, &run_id);
+        let message = message.to_string();
+        tokio::task::spawn_blocking(move || {
+            super::claude_host::send_claude_host_steer(&socket_path, &message)
+        })
+        .await
+        .map_err(|e| format!("Claude steer task failed: {e}"))?
+    }
 }
 
 /// Inject a user message into a running Pi RPC turn via the detached PI host.
@@ -10408,8 +10462,30 @@ pub(crate) fn trigger_opencode_queue_steer(
 /// Drain steerable queued messages into a running Pi RPC host. Pi's own
 /// steering queue delivers these at the next safe tool/turn boundary.
 async fn drain_queue_into_pi_turn(app: &AppHandle, worktree_id: &str, session_id: &str) {
+    drain_queue_into_host_turn(app, worktree_id, session_id, Backend::Pi).await;
+}
+
+async fn drain_queue_into_claude_turn(app: &AppHandle, worktree_id: &str, session_id: &str) {
+    drain_queue_into_host_turn(app, worktree_id, session_id, Backend::Claude).await;
+}
+
+/// Drain steerable queued messages into a running detached-host turn (Pi RPC
+/// host or Claude host) when that backend's auto-steer preference is on.
+async fn drain_queue_into_host_turn(
+    app: &AppHandle,
+    worktree_id: &str,
+    session_id: &str,
+    backend: Backend,
+) {
+    let (backend_key, label) = match backend {
+        Backend::Claude => ("claude", "ClaudeSteer"),
+        _ => ("pi", "PiSteer"),
+    };
     let auto_steer = crate::load_preferences_sync(app)
-        .map(|p| p.pi_auto_steer_enabled)
+        .map(|p| match backend {
+            Backend::Claude => p.claude_auto_steer_enabled,
+            _ => p.pi_auto_steer_enabled,
+        })
         .unwrap_or(false);
     if !auto_steer {
         return;
@@ -10417,12 +10493,12 @@ async fn drain_queue_into_pi_turn(app: &AppHandle, worktree_id: &str, session_id
 
     #[cfg(not(unix))]
     {
-        let _ = (app, worktree_id, session_id);
+        let _ = (app, worktree_id, session_id, backend_key, label);
     }
 
     #[cfg(unix)]
     loop {
-        let has_running_pi = load_metadata(app, session_id)
+        let has_running_run = load_metadata(app, session_id)
             .ok()
             .flatten()
             .and_then(|metadata| {
@@ -10430,17 +10506,17 @@ async fn drain_queue_into_pi_turn(app: &AppHandle, worktree_id: &str, session_id
                     .runs
                     .iter()
                     .rev()
-                    .find(|r| r.status == RunStatus::Running && r.backend == Some(Backend::Pi))
+                    .find(|r| r.status == RunStatus::Running && r.backend == Some(backend.clone()))
                     .map(|r| r.run_id.clone())
             })
             .is_some();
-        if !has_running_pi {
+        if !has_running_run {
             return;
         }
 
         let popped = match with_existing_metadata_mut(app, session_id, |metadata| {
             match metadata.queued_messages.first() {
-                Some(front) if queued_message_is_steerable_for_backend(front, "pi") => {
+                Some(front) if queued_message_is_steerable_for_backend(front, backend_key) => {
                     let msg = metadata.queued_messages.remove(0);
                     (Some(msg), metadata.queued_messages.clone())
                 }
@@ -10458,7 +10534,7 @@ async fn drain_queue_into_pi_turn(app: &AppHandle, worktree_id: &str, session_id
                 popped
             }
             Err(e) => {
-                log::warn!("[PiSteer] failed to read queue session={session_id}: {e}");
+                log::warn!("[{label}] failed to read queue session={session_id}: {e}");
                 return;
             }
         };
@@ -10467,7 +10543,7 @@ async fn drain_queue_into_pi_turn(app: &AppHandle, worktree_id: &str, session_id
         let text = match build_queued_message_with_refs(&msg) {
             Ok(t) => t.trim().to_string(),
             Err(e) => {
-                log::warn!("[PiSteer] failed to build steerable message session={session_id}: {e}");
+                log::warn!("[{label}] failed to build steerable message session={session_id}: {e}");
                 continue;
             }
         };
@@ -10475,9 +10551,15 @@ async fn drain_queue_into_pi_turn(app: &AppHandle, worktree_id: &str, session_id
             continue;
         }
 
-        log::info!("[PiSteer] steering queued message into running Pi session={session_id}");
-        if let Err(e) = steer_text_into_pi_turn(app, worktree_id, session_id, &text).await {
-            log::warn!("[PiSteer] steer failed, requeueing at front session={session_id}: {e}");
+        log::info!("[{label}] steering queued message into running turn session={session_id}");
+        let steered = match backend {
+            Backend::Claude => {
+                steer_text_into_claude_turn(app, worktree_id, session_id, &text).await
+            }
+            _ => steer_text_into_pi_turn(app, worktree_id, session_id, &text).await,
+        };
+        if let Err(e) = steered {
+            log::warn!("[{label}] steer failed, requeueing at front session={session_id}: {e}");
             let requeued = with_existing_metadata_mut(app, session_id, |metadata| {
                 metadata.queued_messages.insert(0, msg.clone());
                 metadata.queued_messages.clone()
@@ -11122,6 +11204,22 @@ mod tests {
             &opencode_with_text_file,
             "opencode"
         ));
+    }
+
+    #[test]
+    fn queued_message_steerable_for_backend_accepts_claude() {
+        let claude = serde_json::json!({
+            "id": "m1",
+            "message": "also run echo STEERED",
+            "backend": "claude",
+            "pendingImages": [],
+            "pendingFiles": [],
+            "pendingSkills": [],
+            "pendingTextFiles": [],
+        });
+        assert!(queued_message_is_steerable_for_backend(&claude, "claude"));
+        assert!(!queued_message_is_steerable_for_backend(&claude, "pi"));
+        assert!(queued_message_supports_any_steering(&claude));
     }
 
     #[test]
