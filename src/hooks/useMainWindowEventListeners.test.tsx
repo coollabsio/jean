@@ -137,15 +137,14 @@ describe('resolveShortcutWithBypass', () => {
     ).toEqual({ matchedAction: null, bypassConfirm: false })
   })
 
-  it('resolves the decorated close shortcut so a focused terminal closes its tab (Step 2 regression)', () => {
-    // The terminal remap keys off matchedAction, not the raw shortcut string.
-    // Pre-fix it compared the raw `mod+shift+w` and swallowed the key.
-    const { matchedAction } = resolveShortcutWithBypass(
-      'mod+shift+w',
-      DEFAULT_KEYBINDINGS,
-      'shift'
-    )
-    expect(matchedAction).toBe('close_session_or_worktree')
+  it('prefers a direct user binding of the decorated shortcut over the bypass', () => {
+    const keybindings = {
+      ...DEFAULT_KEYBINDINGS,
+      new_worktree: 'mod+shift+w',
+    }
+    expect(
+      resolveShortcutWithBypass('mod+shift+w', keybindings, 'shift')
+    ).toEqual({ matchedAction: 'new_worktree', bypassConfirm: false })
   })
 })
 

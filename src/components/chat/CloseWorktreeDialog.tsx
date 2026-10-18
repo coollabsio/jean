@@ -57,8 +57,10 @@ function CloseWorktreeDialogContent({
   const bypassLabel = closeConfirmBypassLabel(
     preferences?.close_confirm_bypass_modifier
   )
-  const showBypassHint = isNativeApp() && !isMobile && bypassLabel !== null
   const isArchiveOnly = mode === 'session-archive'
+  // The explicit "Archive Session" menu action never reads the bypass modifier.
+  const showBypassHint =
+    isNativeApp() && !isMobile && !isArchiveOnly && bypassLabel !== null
   const isDelete =
     !isArchiveOnly && (preferences?.removal_behavior ?? 'delete') === 'delete'
   const isSession = mode !== 'worktree'
