@@ -18,11 +18,21 @@ use crate::chat::storage::with_existing_metadata_mut;
 use crate::chat::tail::NdjsonTailer;
 use crate::http_server::EmitExt;
 
-static TERMINAL_SESSIONS: Lazy<Mutex<HashMap<String, (AppHandle, String)>>> =
+struct InstrumentedTerminal {
+    app: AppHandle,
+    session_id: String,
+    /// The CLI reports prompt submits itself (Claude's `UserPromptSubmit`).
+    reports_prompt_submit: bool,
+}
+
+static TERMINAL_SESSIONS: Lazy<Mutex<HashMap<String, InstrumentedTerminal>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 /// Grace period before an unregistered terminal's signal file is reclaimed.
 const FRESH_SIGNAL_FILE: Duration = Duration::from_secs(60);
+
+/// Claude `notification_type`s that block the turn on a permission decision.
+const PERMISSION_PROMPTS: [&str; 2] = ["permission_prompt", "worker_permission_prompt"];
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -159,9 +169,10 @@ fn claude_hook_command(signal_path: &Path) -> String {
 
 /// Claude Code lifecycle hooks, as an inline `--settings` JSON payload.
 ///
-/// `UserPromptSubmit` marks the session working, `Stop` and permission prompts
-/// mark it as needing attention, and `SessionEnd` clears both so a session whose
-/// CLI exited does not sit on a stale waiting badge.
+/// `UserPromptSubmit` marks the session working, `Stop`, `StopFailure` (a turn
+/// ended by an API error, which skips `Stop`) and permission prompts mark it as
+/// needing attention, and `SessionEnd` clears both so a session whose CLI
+/// exited does not sit on a stale waiting badge.
 pub(super) fn claude_hook_args(signal_path: &Path, args: Vec<String>) -> Vec<String> {
     // Two `--settings` flags means one silently loses. A custom launch config
     // that already carries one keeps it; that terminal just does not report.
@@ -176,11 +187,15 @@ pub(super) fn claude_hook_args(signal_path: &Path, args: Vec<String>) -> Vec<Str
         "hooks": {
             "UserPromptSubmit": entry.clone(),
             "Stop": entry.clone(),
+            "StopFailure": entry.clone(),
             // No matcher: every end reason (clear, resume, logout,
             // prompt_input_exit, ...) should release the waiting state.
             "SessionEnd": entry,
             "Notification": [{
-                "matcher": "permission_prompt",
+                // A matcher of plain words is an exact match, not a regex, so
+                // subagent prompts (`worker_permission_prompt`) need their own
+                // entry. https://code.claude.com/docs/en/hooks
+                "matcher": PERMISSION_PROMPTS.join("|"),
                 "hooks": hooks,
             }],
         }
@@ -261,18 +276,15 @@ fn parse_claude_hook(line: &str) -> Option<Signal> {
         "UserPromptSubmit" => Some(Signal::TurnStart {
             first_prompt: non_empty(event.prompt),
         }),
-        "Stop" => Some(Signal::Attention {
+        "Stop" | "StopFailure" => Some(Signal::Attention {
             thread_id: None,
             first_prompt: None,
         }),
-        // The CLI matches `matcher` as an unanchored regex, so subagent prompts
-        // (`worker_permission_prompt`) reach us too. They block the turn just
-        // like a top-level prompt, so treat both as attention.
         "Notification"
             if event
                 .notification_type
                 .as_deref()
-                .is_some_and(|kind| kind.ends_with("permission_prompt")) =>
+                .is_some_and(|kind| PERMISSION_PROMPTS.contains(&kind)) =>
         {
             Some(Signal::Attention {
                 thread_id: None,
@@ -316,11 +328,16 @@ pub fn spawn_signal_tailer(
     session_id: String,
     terminal_id: String,
     signal_path: PathBuf,
+    reports_prompt_submit: bool,
 ) {
-    TERMINAL_SESSIONS
-        .lock()
-        .unwrap()
-        .insert(terminal_id.clone(), (app.clone(), session_id.clone()));
+    TERMINAL_SESSIONS.lock().unwrap().insert(
+        terminal_id.clone(),
+        InstrumentedTerminal {
+            app: app.clone(),
+            session_id: session_id.clone(),
+            reports_prompt_submit,
+        },
+    );
     std::thread::spawn(move || {
         let mut naming_attempted = false;
         let mut maybe_name_session = |first_prompt: Option<String>| {
@@ -413,19 +430,35 @@ fn input_submits_prompt(data: &str) -> bool {
     data.contains('\r') || data.contains('\n')
 }
 
-pub fn clear_attention_on_input(terminal_id: &str, data: &str) {
-    if !input_submits_prompt(data) {
-        return;
+/// The status event a keystroke implies, if any.
+///
+/// Codex has no prompt-submit event, so Enter has to stand in for one. Claude
+/// reports real submits through `UserPromptSubmit`, and for it Enter also
+/// confirms dialogs, menus, and local slash commands that start no turn, so it
+/// would leave the session stuck on "working". Claude interrupts have no hook
+/// (`Stop` skips them), so a lone Esc or Ctrl-C settles the session to idle.
+fn input_event(data: &str, reports_prompt_submit: bool) -> Option<&'static str> {
+    if reports_prompt_submit {
+        matches!(data, "\x1b" | "\x03").then_some("terminal:idle")
+    } else {
+        input_submits_prompt(data).then_some("terminal:working")
     }
-    let entry = TERMINAL_SESSIONS.lock().unwrap().get(terminal_id).cloned();
-    let Some((app, session_id)) = entry else {
+}
+
+pub fn clear_attention_on_input(terminal_id: &str, data: &str) {
+    let entry = TERMINAL_SESSIONS
+        .lock()
+        .unwrap()
+        .get(terminal_id)
+        .and_then(|terminal| {
+            input_event(data, terminal.reports_prompt_submit)
+                .map(|event| (terminal.app.clone(), terminal.session_id.clone(), event))
+        });
+    let Some((app, session_id, event)) = entry else {
         return;
     };
     set_waiting(&app, &session_id, false, None);
-    let _ = app.emit_all(
-        "terminal:working",
-        &serde_json::json!({ "sessionId": session_id }),
-    );
+    let _ = app.emit_all(event, &serde_json::json!({ "sessionId": session_id }));
 }
 
 #[cfg(test)]
@@ -506,12 +539,22 @@ mod tests {
 
         let settings: serde_json::Value = serde_json::from_str(&result[1]).unwrap();
         let hooks = &settings["hooks"];
-        for event in ["UserPromptSubmit", "Stop", "SessionEnd", "Notification"] {
+        for event in [
+            "UserPromptSubmit",
+            "Stop",
+            "StopFailure",
+            "SessionEnd",
+            "Notification",
+        ] {
             let command = hooks[event][0]["hooks"][0]["command"].as_str().unwrap();
             assert!(command.contains("session.jsonl"), "{event}: {command}");
             assert_eq!(hooks[event][0]["hooks"][0]["type"], "command");
         }
-        assert_eq!(hooks["Notification"][0]["matcher"], "permission_prompt");
+        // Plain-word matchers are exact matches, so each type is listed.
+        assert_eq!(
+            hooks["Notification"][0]["matcher"],
+            "permission_prompt|worker_permission_prompt"
+        );
     }
 
     #[test]
@@ -522,6 +565,10 @@ mod tests {
         };
         assert_eq!(
             parse_signal_line(r#"{"hook_event_name":"Stop","session_id":"s1"}"#).unwrap(),
+            attention
+        );
+        assert_eq!(
+            parse_signal_line(r#"{"hook_event_name":"StopFailure","error":"rate_limit"}"#).unwrap(),
             attention
         );
         assert_eq!(
@@ -642,5 +689,29 @@ mod tests {
         assert!(input_submits_prompt("hello\n"));
         assert!(!input_submits_prompt("hello"));
         assert!(!input_submits_prompt("\u{1b}[A"));
+    }
+
+    #[test]
+    fn codex_enter_marks_the_session_working() {
+        assert_eq!(input_event("hello\r", false), Some("terminal:working"));
+        assert_eq!(input_event("\u{1b}", false), None);
+        assert_eq!(input_event("hello", false), None);
+    }
+
+    /// Enter on a Claude trust dialog or `/model` menu starts no turn; only
+    /// `UserPromptSubmit` may mark it working.
+    #[test]
+    fn claude_enter_leaves_status_to_the_prompt_submit_hook() {
+        assert_eq!(input_event("\r", true), None);
+        assert_eq!(input_event("/model\r", true), None);
+    }
+
+    #[test]
+    fn claude_interrupt_keys_settle_the_session_to_idle() {
+        assert_eq!(input_event("\u{1b}", true), Some("terminal:idle"));
+        assert_eq!(input_event("\u{3}", true), Some("terminal:idle"));
+        // Arrow keys and Alt chords are escape sequences, not interrupts.
+        assert_eq!(input_event("\u{1b}[A", true), None);
+        assert_eq!(input_event("\u{1b}b", true), None);
     }
 }

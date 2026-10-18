@@ -165,8 +165,9 @@ Additional systems (no dedicated docs yet):
   event — keyed by terminal, not session, because the tailer thread that deletes
   the file lives and dies with its terminal). Codex gets a `notify` override for
   the official `agent-turn-complete`
-  event; Claude gets `UserPromptSubmit` / `Stop` / `Notification`
-  (`permission_prompt`) / `SessionEnd` hooks injected as inline `--settings`
+  event; Claude gets `UserPromptSubmit` / `Stop` / `StopFailure` / `Notification`
+  (`permission_prompt|worker_permission_prompt` — plain-word matchers are exact,
+  not regex) / `SessionEnd` hooks injected as inline `--settings`
   JSON, so the user's own `~/.claude/settings.json` is never touched. Jean tails
   the file, persists the Codex thread id and terminal activity timestamp, flips
   the session between working, waiting, and idle, invalidates session caches,
@@ -176,8 +177,12 @@ Additional systems (no dedicated docs yet):
   flags. The tailer emits one final `terminal:idle` when its terminal
   disappears, whatever ended the CLI — Codex has no session-end event to report
   with, and submitting `/exit` itself counts as terminal input, so without it a
-  quit Codex session stays pinned to "in progress". Submitting terminal input clears the
-  waiting state. The backing Jean `sessionId` must therefore be carried through
+  quit Codex session stays pinned to "in progress". In Codex terminals, Enter
+  clears the waiting state and marks the session working (Codex has no
+  prompt-submit event). Claude terminals ignore Enter, because Enter also
+  confirms dialogs, menus, and local slash commands that start no turn; there a
+  lone Esc or Ctrl-C settles the session to idle, because `Stop` does not fire
+  on an interrupt. The backing Jean `sessionId` must therefore be carried through
   terminal creation, native-session reconnect, frontend terminal persistence,
   `start_terminal`, and both native/WebSocket transports. Terminals opened in an
   *external* OS terminal cannot be instrumented and stay idle. Only the CLI

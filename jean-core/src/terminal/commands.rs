@@ -69,7 +69,9 @@ pub async fn start_terminal(
             } else {
                 None
             };
-            (args, signal.map(|path| (session_id.to_string(), path)))
+            let reports_prompt_submit = super::attention::is_claude_command(command);
+            let signal = signal.map(|path| (session_id.to_string(), path, reports_prompt_submit));
+            (args, signal)
         }
         _ => (command_args, None),
     };
@@ -87,13 +89,19 @@ pub async fn start_terminal(
         session_id,
     );
     if spawned.is_err() {
-        if let Some((_, signal_path)) = &signal {
+        if let Some((_, signal_path, _)) = &signal {
             let _ = std::fs::remove_file(signal_path);
         }
     }
     spawned?;
-    if let Some((session_id, signal_path)) = signal {
-        super::attention::spawn_signal_tailer(app, session_id, terminal_id, signal_path);
+    if let Some((session_id, signal_path, reports_prompt_submit)) = signal {
+        super::attention::spawn_signal_tailer(
+            app,
+            session_id,
+            terminal_id,
+            signal_path,
+            reports_prompt_submit,
+        );
     }
     Ok(())
 }
