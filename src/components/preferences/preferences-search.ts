@@ -249,6 +249,7 @@ const sectionEntries: PreferenceSearchEntry[] = [
       'thinking',
       'effort',
       'chrome browser integration',
+      'steer running turn',
     ],
     anchorId: 'pref-claude-section-settings',
     fallbackAnchorId: 'pref-pane-claude',

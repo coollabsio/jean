@@ -3430,7 +3430,10 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                         preferences
                                       ) ||
                                       (steerModifierActive &&
-                                        isSteerCapableBackend(selectedBackend))
+                                        isSteerCapableBackend(
+                                          selectedBackend,
+                                          preferences
+                                        ))
                                     }
                                     steerWithModifier={
                                       steerModifierActive &&
@@ -3440,7 +3443,8 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                       )
                                     }
                                     canSteer={isSteerCapableBackend(
-                                      selectedBackend
+                                      selectedBackend,
+                                      preferences
                                     )}
                                     queuedMessageCount={
                                       currentQueuedMessages.length
@@ -3582,7 +3586,10 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                         preferences
                                       ) ||
                                       (steerModifierActive &&
-                                        isSteerCapableBackend(selectedBackend))
+                                        isSteerCapableBackend(
+                                          selectedBackend,
+                                          preferences
+                                        ))
                                     }
                                     steerWithModifier={
                                       steerModifierActive &&
@@ -3592,7 +3599,8 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                       )
                                     }
                                     canSteer={isSteerCapableBackend(
-                                      selectedBackend
+                                      selectedBackend,
+                                      preferences
                                     )}
                                     onSteer={handleSteer}
                                     queuedMessageCount={

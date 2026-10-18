@@ -141,6 +141,19 @@ pub fn spawn_detached_process(
     log_file: &Path,
     working_dir: &Path,
 ) -> Result<u32, String> {
+    spawn_detached_process_with_env(cli_path, args, log_file, working_dir, &[])
+}
+
+/// Same as [`spawn_detached_process`], with extra env vars for the process.
+/// Env values go through the environment, not argv, so they stay out of `ps`.
+#[cfg(unix)]
+pub fn spawn_detached_process_with_env(
+    cli_path: &Path,
+    args: &[String],
+    log_file: &Path,
+    working_dir: &Path,
+    env_vars: &[(&str, &str)],
+) -> Result<u32, String> {
     let cli_path_escaped =
         shell_escape(cli_path.to_str().ok_or("CLI path contains invalid UTF-8")?);
     let log_path_escaped = shell_escape(
@@ -177,6 +190,7 @@ pub fn spawn_detached_process(
         .arg("-c")
         .arg(&shell_cmd)
         .current_dir(working_dir)
+        .envs(env_vars.iter().copied())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

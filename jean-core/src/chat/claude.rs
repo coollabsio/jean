@@ -1498,6 +1498,20 @@ fn permission_prompt_args(
 /// The process reads from an input file and writes to an output file.
 /// Jean tails the output file for real-time updates.
 #[allow(clippy::too_many_arguments)]
+/// Whether a new Claude run should use the steerable detached host.
+/// Unix only (WSL/Windows keep the `cat |` pipeline), opt-in via
+/// `claude_auto_steer_enabled`, and only for CLIs that support
+/// `--replay-user-messages` (older PATH installs fall back).
+fn use_claude_host(app: &tauri::AppHandle, cli_path: &std::path::Path) -> bool {
+    if !cfg!(unix) {
+        return false;
+    }
+    let enabled = crate::load_preferences_sync(app)
+        .map(|p| p.claude_auto_steer_enabled)
+        .unwrap_or(false);
+    enabled && claude_cli_supports_flag(cli_path, super::claude_host::REPLAY_USER_MESSAGES_FLAG)
+}
+
 pub fn execute_claude_detached(
     app: &tauri::AppHandle,
     session_id: &str,
@@ -1583,16 +1597,37 @@ pub fn execute_claude_detached(
         .map(|(k, v)| (k.as_str(), v.as_str()))
         .collect();
 
-    // Spawn detached process
-    let pid = spawn_detached_claude(
-        &cli_path,
-        &args,
-        input_file,
-        output_file,
-        working_dir,
-        &env_refs,
-    )
-    .map_err(|e| {
+    // Spawn detached process: through the steerable host when enabled
+    // (Unix + CLI supports --replay-user-messages), else the plain pipeline.
+    let spawned = if use_claude_host(app, &cli_path) {
+        #[cfg(unix)]
+        {
+            let mut host_args = args.clone();
+            host_args.push(super::claude_host::REPLAY_USER_MESSAGES_FLAG.to_string());
+            super::claude_host::spawn_claude_host(
+                app,
+                session_id,
+                &cli_path,
+                &host_args,
+                input_file,
+                output_file,
+                working_dir,
+                &env_refs,
+            )
+        }
+        #[cfg(not(unix))]
+        unreachable!("use_claude_host is false on non-Unix")
+    } else {
+        spawn_detached_claude(
+            &cli_path,
+            &args,
+            input_file,
+            output_file,
+            working_dir,
+            &env_refs,
+        )
+    };
+    let pid = spawned.map_err(|e| {
         let error_msg = format!("Failed to start Claude CLI: {e}");
         log::error!("{error_msg}");
         let _ = app.emit_all(
@@ -1799,6 +1834,10 @@ pub fn tail_claude_output(
     let mut armed_monitors: std::collections::HashMap<String, MonitorArm> =
         std::collections::HashMap::new();
     let mut saw_final_result = false;
+    // Host-backed runs (steerable) can have several `result` lines; only the
+    // host's exit marker ends them. Detected from the host's start marker.
+    let mut host_backed = false;
+    let mut host_exited = false;
 
     // Optional raw-stream dump for diagnosing new event shapes (Monitor, etc.).
     // Enable with JEAN_DUMP_STREAM=1.
@@ -1839,6 +1878,16 @@ pub fn tail_claude_output(
 
             // Skip metadata header (our own, not Claude output)
             if line.contains("\"_run_meta\"") {
+                continue;
+            }
+
+            // Claude host markers (our own, not Claude output)
+            if let Some(marker) = super::claude_host::host_marker_type(&line) {
+                if marker == super::claude_host::HOST_EXIT_TYPE {
+                    host_exited = true;
+                } else {
+                    host_backed = true;
+                }
                 continue;
             }
 
@@ -1994,6 +2043,22 @@ pub fn tail_claude_output(
             }
 
             match msg_type {
+                "steered_user_message" => {
+                    // Written by the Claude host when the CLI consumed a steer.
+                    if let Some(text) = msg.get("text").and_then(|v| v.as_str()) {
+                        content_blocks.push(ContentBlock::UserInput {
+                            text: text.to_string(),
+                        });
+                        let _ = app.emit_all(
+                            "chat:steered",
+                            &serde_json::json!({
+                                "session_id": session_id,
+                                "worktree_id": worktree_id,
+                                "text": text,
+                            }),
+                        );
+                    }
+                }
                 "assistant" => {
                     // Route assistant text to a Monitor's event log when this
                     // turn is a per-notification wake-up:
@@ -2747,8 +2812,16 @@ pub fn tail_claude_output(
             }
         }
 
-        // Check if completed
-        if completed {
+        // Check if completed. Host-backed runs end at the host exit marker
+        // (a pending steer can start another turn after a `result`).
+        if host_exited {
+            if !saw_final_result {
+                // Claude exited without a result: same as a dead process.
+                cancelled = true;
+            }
+            break;
+        }
+        if completed && !host_backed {
             break;
         }
 
@@ -3047,6 +3120,106 @@ fn result_error_text(msg: &serde_json::Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const HOST_TURN_ONE: &str = r#"{"_run_meta":true}
+{"type":"jean_claude_host_start"}
+{"type":"system","subtype":"init","session_id":"cs-1"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"first"}]},"session_id":"cs-1"}
+{"type":"steered_user_message","text":"also echo"}
+{"type":"assistant","message":{"content":[{"type":"text","text":" second"}]},"session_id":"cs-1"}
+{"type":"result","subtype":"success","result":"first","usage":{"input_tokens":10,"output_tokens":2}}
+"#;
+
+    fn tail_fixture(
+        name: &str,
+        initial: &str,
+        append_later: Option<&'static str>,
+    ) -> ClaudeResponse {
+        let tmp = tempfile::tempdir().unwrap();
+        let app = tauri::AppHandle::new(tmp.path().join("data"), tmp.path().join("res")).unwrap();
+        let output = tmp.path().join("run-1.jsonl");
+        std::fs::write(&output, initial).unwrap();
+        let _guard = super::super::registry::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let session_id = format!("claude-host-tail-{name}");
+        let pid = std::process::id();
+        assert!(super::super::registry::register_detached_process(
+            session_id.clone(),
+            pid
+        ));
+        let writer = append_later.map(|later| {
+            let output = output.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                use std::io::Write;
+                let mut f = std::fs::OpenOptions::new()
+                    .append(true)
+                    .open(output)
+                    .unwrap();
+                f.write_all(later.as_bytes()).unwrap();
+            })
+        });
+        let response = tail_claude_output(&app, &session_id, "wt-1", &output, pid).unwrap();
+        if let Some(writer) = writer {
+            writer.join().unwrap();
+        }
+        super::super::registry::unregister_process(&session_id);
+        response
+    }
+
+    #[test]
+    fn host_backed_tail_ends_at_exit_marker_and_sums_usage() {
+        let fixture = format!(
+            "{HOST_TURN_ONE}{}\n{}\n",
+            r#"{"type":"result","subtype":"success","usage":{"input_tokens":5,"output_tokens":3}}"#,
+            r#"{"type":"jean_claude_host_exit","code":0}"#
+        );
+        let response = tail_fixture("sum", &fixture, None);
+
+        assert!(!response.cancelled);
+        assert_eq!(response.content, "first second");
+        let usage = response.usage.unwrap();
+        assert_eq!(usage.input_tokens, 15);
+        assert_eq!(usage.output_tokens, 5);
+        assert!(matches!(
+            &response.content_blocks[1],
+            ContentBlock::UserInput { text } if text == "also echo"
+        ));
+    }
+
+    #[test]
+    fn host_backed_tail_does_not_stop_at_first_result() {
+        let response = tail_fixture(
+            "multi",
+            HOST_TURN_ONE,
+            Some(concat!(
+                r#"{"type":"assistant","message":{"content":[{"type":"text","text":" third"}]}}"#,
+                "\n",
+                r#"{"type":"result","subtype":"success","usage":{"input_tokens":1}}"#,
+                "\n",
+                r#"{"type":"jean_claude_host_exit","code":0}"#,
+                "\n"
+            )),
+        );
+
+        assert!(!response.cancelled);
+        assert_eq!(response.content, "first second third");
+    }
+
+    #[test]
+    fn host_exit_without_result_counts_as_cancelled() {
+        let fixture = concat!(
+            r#"{"type":"jean_claude_host_start"}"#,
+            "\n",
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"partial"}]}}"#,
+            "\n",
+            r#"{"type":"jean_claude_host_exit","code":1}"#,
+            "\n"
+        );
+        let response = tail_fixture("noresult", fixture, None);
+        assert!(response.cancelled);
+    }
 
     #[test]
     fn startup_failure_uses_cli_output_when_available() {

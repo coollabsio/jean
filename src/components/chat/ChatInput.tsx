@@ -20,7 +20,8 @@ import type {
   ReadTextResponse,
   ExecutionMode,
 } from '@/types/chat'
-import type { CliBackend } from '@/types/preferences'
+import type { AppPreferences, CliBackend } from '@/types/preferences'
+import { preferencesQueryKeys } from '@/services/preferences'
 import {
   FileMentionPopover,
   type FileMentionPopoverHandle,
@@ -527,7 +528,12 @@ export const ChatInput = memo(function ChatInput({
 
       const forceSteer =
         isSending &&
-        isSteerCapableBackend(selectedBackend) &&
+        isSteerCapableBackend(
+          selectedBackend,
+          queryClient.getQueryData<AppPreferences>(
+            preferencesQueryKeys.preferences()
+          )
+        ) &&
         (e.metaKey || e.ctrlKey)
       onSteerModifierChange?.(forceSteer)
 

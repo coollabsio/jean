@@ -1283,6 +1283,14 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     }
   }
 
+  const handleClaudeAutoSteerToggle = (enabled: boolean) => {
+    if (preferences) {
+      patchPreferences.mutate({
+        claude_auto_steer_enabled: enabled,
+      })
+    }
+  }
+
   const handlePiAutoSteerToggle = (enabled: boolean) => {
     if (preferences) {
       patchPreferences.mutate({
@@ -2916,6 +2924,15 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                     })
                   }
                 }}
+              />
+            </InlineField>
+            <InlineField
+              label="Steer running turn"
+              description="Inject new prompts into the running turn instead of queueing. Lands at the next tool call. macOS/Linux only; applies to new runs."
+            >
+              <Switch
+                checked={preferences?.claude_auto_steer_enabled ?? false}
+                onCheckedChange={handleClaudeAutoSteerToggle}
               />
             </InlineField>
           </div>

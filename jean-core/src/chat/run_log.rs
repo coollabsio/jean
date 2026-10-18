@@ -2402,6 +2402,39 @@ Move services between instances without downtime.
     }
 
     #[test]
+    fn parse_run_handles_claude_host_log_without_duplicate_prompt() {
+        let run = sample_run();
+        // Host-backed Claude run: the host drops the replayed initial prompt
+        // and rewrites the steer echo, then adds its own marker lines.
+        let lines = vec![
+            r#"{"_run_meta":true}"#.to_string(),
+            r#"{"type":"jean_claude_host_start"}"#.to_string(),
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}"#
+                .to_string(),
+            r#"{"type":"steered_user_message","text":"also echo"}"#.to_string(),
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"done"}]}}"#
+                .to_string(),
+            r#"{"type":"result","subtype":"success","usage":{"input_tokens":1}}"#.to_string(),
+            r#"{"type":"jean_claude_host_exit","code":0}"#.to_string(),
+        ];
+
+        let message = parse_run_to_message(&lines, &run).unwrap();
+
+        let user_inputs: Vec<_> = message
+            .content_blocks
+            .iter()
+            .filter_map(|b| match b {
+                ContentBlock::UserInput { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(user_inputs, vec!["also echo"]);
+        assert!(!message.content.contains(&run.user_message));
+        assert!(message.content.contains("working"));
+        assert!(message.content.contains("done"));
+    }
+
+    #[test]
     fn parse_run_extracts_task_tool_result_from_content_blocks() {
         let run = sample_run();
         let tool_id = "toolu_task_report";

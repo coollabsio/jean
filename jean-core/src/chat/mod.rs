@@ -1,6 +1,7 @@
 pub(crate) mod acp_permissions;
 pub(crate) mod antigravity;
 pub(crate) mod claude;
+pub(crate) mod claude_host;
 pub(crate) mod claude_permissions;
 pub(crate) mod coalesce;
 pub(crate) mod codex;
