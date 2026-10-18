@@ -1,16 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import userEvent from '@testing-library/user-event'
 import { render, screen } from '@/test/test-utils'
-import {
-  ProjectTreeItem,
-  shouldShowProjectStatusBadges,
-} from './ProjectTreeItem'
+import { ProjectTreeItem } from './ProjectTreeItem'
 import type { Project, Worktree } from '@/types/projects'
 import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
 
 const mocks = vi.hoisted(() => ({
-  worktrees: [] as Worktree[],
+  worktrees: [] as Worktree[] | undefined,
   worktreeQueryOptions: [] as { enabled?: boolean }[],
   updateSettingsMutate: vi.fn(),
 }))
@@ -87,16 +84,6 @@ const worktree: Worktree = {
   session_type: 'worktree',
 }
 
-describe('shouldShowProjectStatusBadges', () => {
-  it('hides GitHub status badges when the sidebar is narrow', () => {
-    expect(shouldShowProjectStatusBadges(280, false, true, false)).toBe(false)
-  })
-
-  it('shows GitHub status badges in a wide expanded project row', () => {
-    expect(shouldShowProjectStatusBadges(360, false, true, false)).toBe(true)
-  })
-})
-
 describe('ProjectTreeItem', () => {
   beforeEach(() => {
     mocks.worktrees = [worktree]
@@ -110,7 +97,6 @@ describe('ProjectTreeItem', () => {
       expandedFolderIds: new Set(),
       projectAccessTimestamps: {},
       projectCanvasSettings: {},
-      githubDashboardFavoriteProjectIds: [],
       addProjectDialogOpen: false,
       addProjectParentFolderId: null,
       projectSettingsDialogOpen: false,
@@ -183,7 +169,7 @@ describe('ProjectTreeItem', () => {
   })
 
   it('uses the project summary count without loading collapsed workspaces', () => {
-    mocks.worktrees = []
+    mocks.worktrees = undefined
     useProjectsStore.setState({
       selectedProjectId: null,
       selectedWorktreeId: null,
@@ -196,6 +182,21 @@ describe('ProjectTreeItem', () => {
     expect(
       screen.getByRole('status', { name: '3 workspaces' })
     ).toHaveTextContent('3')
+  })
+
+  it('prefers loaded worktrees over a stale project summary count', () => {
+    mocks.worktrees = []
+    useProjectsStore.setState({
+      selectedProjectId: null,
+      selectedWorktreeId: null,
+      expandedProjectIds: new Set(),
+    })
+
+    render(<ProjectTreeItem project={{ ...project, worktree_count: 2 }} />)
+
+    expect(
+      screen.queryByRole('status', { name: '2 workspaces' })
+    ).not.toBeInTheDocument()
   })
 
   it('hides the count when workspaces are shown', () => {

@@ -11,9 +11,10 @@ use serde_json::{json, Value};
 use tauri::AppHandle;
 
 use crate::chat::types::LabelData;
-use crate::http_server::dispatch::dispatch_command;
 use crate::http_server::EmitExt;
 use crate::projects::github_issues::{attach_issue_context_for_session, IssueContext};
+
+const EXECUTION_MODES: &[&str] = &["plan", "build", "yolo", "supervised", "auto"];
 
 pub const MCP_PROTOCOL_VERSION: &str = "2024-11-05";
 pub const JEAN_MCP_STDIO_ARG: &str = "--jean-mcp-stdio";
@@ -21,7 +22,7 @@ pub const JEAN_MCP_SOCKET_ENV: &str = "JEAN_MCP_SOCKET";
 pub const JEAN_MCP_TOKEN_ENV: &str = "JEAN_MCP_TOKEN";
 pub const JEAN_MCP_SESSION_ENV: &str = "JEAN_MCP_SESSION";
 pub const JEAN_MCP_DEPTH_ENV: &str = "JEAN_MCP_DEPTH";
-/// Tool Claude CLI calls via `--permission-prompt-tool` (YOLO + Chrome runs).
+/// Tool Claude CLI calls via `--permission-prompt-tool` (Supervised and YOLO + Chrome runs).
 pub const CLAUDE_PERMISSION_PROMPT_TOOL: &str = "claude_permission_prompt";
 
 const RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
@@ -52,6 +53,10 @@ const RATE_LIMITED_TOOLS: &[&str] = &[
     "unarchive_session",
     "unarchive_worktree",
     "unlink_worktree_pr",
+    // Agent tools that write
+    "schedule_create",
+    "memory_save",
+    "message_agent",
 ];
 const DEFAULT_MCP_DIFF_MAX_BYTES: usize = 60_000;
 const MAX_MCP_DIFF_BYTES: usize = 200_000;
@@ -214,6 +219,9 @@ pub fn tool_registry() -> Value {
     if let Some(ship) = tool_registry_ship_loop().as_array() {
         tools.extend(ship.iter().cloned());
     }
+    if let Some(agent_tools) = crate::agents::mcp::tool_definitions().as_array() {
+        tools.extend(agent_tools.iter().cloned());
+    }
     Value::Array(tools)
 }
 
@@ -231,7 +239,7 @@ fn tool_registry_core() -> Value {
         {"name":"list_security_issues","description":"List Dependabot security alerts for a project using the same backend command as the UI. Pass projectId; the server resolves the repo path.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"},"state":{"type":"string","enum":["open","dismissed","fixed","auto_dismissed","all"],"default":"open"}},"required":["projectId"],"additionalProperties":false}},
         {"name":"list_security_advisories","description":"List repository security advisories for a project using the same backend command as the UI. Pass projectId; the server resolves the repo path.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"},"state":{"type":"string","enum":["draft","published","triage","closed","all"],"default":"all"}},"required":["projectId"],"additionalProperties":false}},
         {"name":"list_linear_issues","description":"List Linear issues for a project using the same backend command as the UI. Pass projectId; Linear API config is resolved from project/global settings.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"}},"required":["projectId"],"additionalProperties":false}},
-        {"name":"create_worktree","description":"Create a new worktree for a project. Provide issueNumber or prNumber for a GitHub issue/PR, linearIssueIdentifier (e.g. \"PLA-215\") for a Linear issue, or ghsaId (e.g. \"GHSA-xxxx-xxxx-xxxx\") for a repository security advisory; these are mutually exclusive. Jean fetches the chosen context and attaches it to the worktree, reusing the same branch naming and context-loading as the Jean UI. Pass action=\"start_autoinvestigating\" to create a session and start investigating (and magic-fix when the Magic Prompts execution mode is yolo) the issue/PR/Linear issue/security advisory with the Magic Prompts settings default backend/model. This never switches/opens Jean's UI unless the user opens the worktree separately.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"},"baseBranch":{"type":"string"},"customName":{"type":"string"},"issueNumber":{"type":"integer","minimum":1},"prNumber":{"type":"integer","minimum":1},"linearIssueIdentifier":{"type":"string","description":"Linear issue identifier like \"PLA-215\". Mutually exclusive with issueNumber/prNumber/ghsaId."},"ghsaId":{"type":"string","description":"Repository security advisory GHSA id like \"GHSA-xxxx-xxxx-xxxx\". Mutually exclusive with issueNumber/prNumber/linearIssueIdentifier."},"action":{"type":"string","enum":["start_autoinvestigating"]}},"required":["projectId"],"additionalProperties":false}},
+        {"name":"create_worktree","description":"Create a new worktree for a project. Provide issueNumber or prNumber for a GitHub issue/PR, linearIssueIdentifier (e.g. \"PLA-215\") for a Linear issue, or ghsaId (e.g. \"GHSA-xxxx-xxxx-xxxx\") for a repository security advisory; these are mutually exclusive. Jean fetches the chosen context and attaches it to the worktree, reusing the same branch naming and context-loading as the Jean UI. Pass action=\"start_autoinvestigating\" to create a session and start investigating (and magic-fix when the Magic Prompts execution mode is yolo, shown as Full access in the UI) the issue/PR/Linear issue/security advisory with the Magic Prompts settings default backend/model. This never switches/opens Jean's UI unless the user opens the worktree separately.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"},"baseBranch":{"type":"string"},"customName":{"type":"string"},"issueNumber":{"type":"integer","minimum":1},"prNumber":{"type":"integer","minimum":1},"linearIssueIdentifier":{"type":"string","description":"Linear issue identifier like \"PLA-215\". Mutually exclusive with issueNumber/prNumber/ghsaId."},"ghsaId":{"type":"string","description":"Repository security advisory GHSA id like \"GHSA-xxxx-xxxx-xxxx\". Mutually exclusive with issueNumber/prNumber/linearIssueIdentifier."},"action":{"type":"string","enum":["start_autoinvestigating"]}},"required":["projectId"],"additionalProperties":false}},
         {"name":"create_worktree_from_existing_branch","description":"Create a Jean worktree from an existing local or remote-tracking branch (branch name is used as the worktree name). Does not open Jean's UI. Prefer create_worktree for new branches; use this when the branch already exists.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"},"branchName":{"type":"string","description":"Existing branch name to check out into a new worktree path."}},"required":["projectId","branchName"],"additionalProperties":false}},
         {"name":"import_worktree","description":"Import an existing git worktree/directory on disk into a Jean project. Path must already exist and be a git worktree or repo. Does not create a new git worktree.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"},"path":{"type":"string","description":"Absolute path to an existing git worktree directory."}},"required":["projectId","path"],"additionalProperties":false}},
         {"name":"rename_worktree","description":"Rename a worktree's display name in Jean (does not rename the git branch or folder).","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"newName":{"type":"string","description":"New display name. Must be unique within the project."}},"required":["worktreeId","newName"],"additionalProperties":false}},
@@ -245,25 +253,61 @@ fn tool_registry_core() -> Value {
     ])
 }
 
-/// Decision for Claude CLI `--permission-prompt-tool` requests. Jean only
-/// passes that flag for YOLO runs with Chrome enabled: Claude in Chrome asks
-/// for per-site approval even in bypassPermissions mode, and headless runs
-/// turn every ask into a denial. YOLO approves everything, except the
-/// blocking tools Jean answers through its own UI (it stops the run when
-/// they appear), so those keep the default headless denial.
-fn claude_permission_decision(args: &Value) -> Value {
+/// Answer a Claude CLI `--permission-prompt-tool` request. Jean passes that
+/// flag for Supervised runs (ask the user live, see `claude_permissions`) and
+/// for YOLO runs with Chrome enabled (Claude in Chrome asks for per-site
+/// approval even in bypassPermissions mode, so YOLO approves everything).
+/// The blocking tools Jean answers through its own UI (it stops the run when
+/// they appear) always keep the default headless denial.
+async fn claude_permission_prompt(app: &AppHandle, source: &str, args: &Value) -> Value {
     let tool_name = args
         .get("tool_name")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    if matches!(tool_name, "AskUserQuestion" | "ExitPlanMode") {
+    if is_blocking_permission_tool(tool_name) {
+        return claude_permission_decision(args, false);
+    }
+    let approved = match crate::chat::claude_permissions::active_run(app, source) {
+        Some((mode, worktree_id)) if mode.as_deref() == Some("supervised") => {
+            let tool_use_id = args
+                .get("tool_use_id")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let input = args.get("input").cloned().unwrap_or_else(|| json!({}));
+            crate::chat::claude_permissions::ask_user(
+                app,
+                source,
+                &worktree_id,
+                tool_name,
+                tool_use_id,
+                input,
+            )
+            .await
+        }
+        Some(_) => true,
+        None => false,
+    };
+    claude_permission_decision(args, approved)
+}
+
+fn is_blocking_permission_tool(tool_name: &str) -> bool {
+    matches!(tool_name, "AskUserQuestion" | "ExitPlanMode")
+}
+
+/// Permission prompt response: https://docs.anthropic.com/en/docs/claude-code/sdk
+fn claude_permission_decision(args: &Value, approved: bool) -> Value {
+    let tool_name = args
+        .get("tool_name")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if approved && !is_blocking_permission_tool(tool_name) {
+        let input = args.get("input").cloned().unwrap_or_else(|| json!({}));
+        json!({ "behavior": "allow", "updatedInput": input })
+    } else {
         json!({
             "behavior": "deny",
             "message": format!("Permission to use {tool_name} was not granted."),
         })
-    } else {
-        let input = args.get("input").cloned().unwrap_or_else(|| json!({}));
-        json!({ "behavior": "allow", "updatedInput": input })
     }
 }
 
@@ -271,7 +315,7 @@ fn tool_registry_session() -> Value {
     json!([
         {"name":"list_sessions","description":"List chat sessions in a worktree without loading full message history. Use before creating a session to avoid duplicates.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"includeArchived":{"type":"boolean","default":false}},"required":["worktreeId"],"additionalProperties":false}},
         {"name":"create_session","description":"Get a chat session for a prompt in an existing non-archived worktree. Reuses an empty chat session when one is available; otherwise creates a new session. Returns the session id needed for send_chat_message. Fails if the worktree is archived — call unarchive_worktree first.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"name":{"type":"string"},"backend":{"type":"string","enum":["claude","codex","cursor","opencode","pi","commandcode","grok","kimi","antigravity"]}},"required":["worktreeId"],"additionalProperties":false}},
-        {"name":"send_chat_message","description":"Send a message to an existing non-archived session. Fire-and-forget: returns immediately as the session begins processing; poll get_session_status with the returned sessionId for completion or failure. Omitted settings inherit the session selections. Supplied settings override one turn only.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"message":{"type":"string"},"model":{"type":"string"},"backend":{"type":"string","enum":["claude","codex","cursor","opencode","pi","commandcode","grok","kimi","antigravity"]},"customProfileName":{"type":"string","description":"Optional one-turn provider/profile override."},"effortLevel":{"type":"string","enum":["off","adaptive","minimal","low","medium","high","xhigh","max","ultracode"]},"thinkingLevel":{"type":"string","enum":["off","adaptive","think","megathink","ultrathink"]},"executionMode":{"type":"string","enum":["plan","build","yolo"]}},"required":["sessionId","message"],"additionalProperties":false}},
+        {"name":"send_chat_message","description":"Send a message to an existing non-archived session. Fire-and-forget: returns immediately as the session begins processing; poll get_session_status with the returned sessionId for completion or failure. Omitted settings inherit the session selections, then the user's defaults. Supplied settings override one turn only.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"message":{"type":"string"},"model":{"type":"string"},"backend":{"type":"string","enum":["claude","codex","cursor","opencode","pi","commandcode","grok","kimi","antigravity"]},"customProfileName":{"type":"string","description":"Optional one-turn provider/profile override."},"effortLevel":{"type":"string","enum":["off","adaptive","minimal","low","medium","high","xhigh","max","ultracode"]},"thinkingLevel":{"type":"string","enum":["off","adaptive","think","megathink","ultrathink"]},"executionMode":{"type":"string","enum":EXECUTION_MODES,"description":"Permission modes: supervised = Supervised, build = Auto-accept edits, auto = Auto, yolo = Full access. plan is the legacy planning mode. Use get_session_capabilities to check backend support. Pass only when the user explicitly asks for a mode. Omit it to use the session's selected mode or the user's default execution mode. Do not choose plan just because the message asks for a plan first."}},"required":["sessionId","message"],"additionalProperties":false}},
         {"name":"archive_session","description":"Archive a chat session (hide it from the active session list). Prefer this over delete when history may still be useful. Cannot run send_chat_message on an archived session until unarchive_session is called.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"}},"required":["sessionId"],"additionalProperties":false}},
         {"name":"unarchive_session","description":"Restore an archived chat session so it can run again. Also unarchives the parent worktree when it is archived. Call this before send_chat_message if a previous attempt failed because the session was archived.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"}},"required":["sessionId"],"additionalProperties":false}},
         {"name":"move_session","description":"Move a Jean session to another active worktree while preserving its session id, complete message/run history, attachments, settings, and backend resume context. An idle session moves immediately. A running session is scheduled to move automatically after its current turn finishes; do not cancel the run or retry the move.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"targetWorktreeId":{"type":"string"}},"required":["sessionId","targetWorktreeId"],"additionalProperties":false}},
@@ -279,7 +323,7 @@ fn tool_registry_session() -> Value {
         {"name":"cancel_session_run","description":"Cancel the currently running request for a session. Returns whether Jean found an active process/turn/flag to cancel.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"}},"required":["sessionId"],"additionalProperties":false}},
         {"name":"read_session_messages","description":"Read recent messages from a session (most recent first). Use limit to cap returned messages.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":200,"default":50}},"required":["sessionId"],"additionalProperties":false}},
         {"name":"set_session_model","description":"Persist the selected model (and optionally backend) on a Jean session without sending a message. Prefer this when switching models for later turns; pass model on send_chat_message for a one-shot override only. When backend is omitted, Jean infers it from the model id when possible (e.g. grok/*, gpt-*, cursor/*). Returns sessionId, model, backend.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"model":{"type":"string","description":"Model id as used in Jean (e.g. claude-sonnet-4-6[1m], gpt-5.6-sol, grok/grok-4.6)."},"backend":{"type":"string","enum":["claude","codex","cursor","opencode","pi","commandcode","grok","kimi","antigravity"],"description":"Optional backend override. Inferred from model when omitted."}},"required":["sessionId","model"],"additionalProperties":false}},
-        {"name":"set_session_settings","description":"Persist session settings used by later messages. Omitted fields stay unchanged. fastMode adds or removes the supported fast model variant.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"backend":{"type":"string","enum":["claude","codex","cursor","opencode","pi","commandcode","grok","kimi","antigravity"]},"provider":{"type":"string","description":"Provider/custom profile name."},"model":{"type":"string"},"fastMode":{"type":"boolean"},"effortLevel":{"type":"string","enum":["off","adaptive","minimal","low","medium","high","xhigh","max","ultracode"]},"thinkingLevel":{"type":"string","enum":["off","adaptive","think","megathink","ultrathink"]},"executionMode":{"type":"string","enum":["plan","build","yolo"]}},"required":["sessionId"],"additionalProperties":false}},
+        {"name":"set_session_settings","description":"Persist session settings used by later messages. Omitted fields stay unchanged. fastMode adds or removes the supported fast model variant.","inputSchema":{"type":"object","properties":{"sessionId":{"type":"string"},"backend":{"type":"string","enum":["claude","codex","cursor","opencode","pi","commandcode","grok","kimi","antigravity"]},"provider":{"type":"string","description":"Provider/custom profile name."},"model":{"type":"string"},"fastMode":{"type":"boolean"},"effortLevel":{"type":"string","enum":["off","adaptive","minimal","low","medium","high","xhigh","max","ultracode"]},"thinkingLevel":{"type":"string","enum":["off","adaptive","think","megathink","ultrathink"]},"executionMode":{"type":"string","enum":EXECUTION_MODES,"description":"supervised = Supervised; build = Auto-accept edits; auto = Auto; yolo = Full access. plan is the legacy planning mode. Check get_session_capabilities for backend support."}},"required":["sessionId"],"additionalProperties":false}},
         {"name":"get_session_capabilities","description":"Describe the session controls supported by a backend, including effort, thinking, execution, and fast-mode behavior.","inputSchema":{"type":"object","properties":{"backend":{"type":"string","enum":["claude","codex","cursor","opencode","pi","commandcode","grok","kimi","antigravity"]}},"required":["backend"],"additionalProperties":false}},
         {"name":"get_usage","description":"Fetch subscription/usage snapshots for Claude, Codex, and/or Grok (same data as Jean Settings → Usage). Use to decide whether to switch models when a plan is near limits. Optional backend filters to one provider; omit or pass \"all\" for every available snapshot. Per-backend failures are reported in errors without failing the whole call.","inputSchema":{"type":"object","properties":{"backend":{"type":"string","enum":["claude","codex","grok","all"],"default":"all","description":"Which provider usage to fetch. Default all."}},"additionalProperties":false}},
         {"name":"get_worktree_changes","description":"Get a bounded summary of a worktree's git changes: porcelain status, ahead/behind counts, diff stats, and changed files. Does not return full diffs.","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"},"maxFiles":{"type":"integer","minimum":1,"maximum":500,"default":100}},"required":["worktreeId"],"additionalProperties":false}},
@@ -334,7 +378,11 @@ pub async fn call_tool(
         }
     }
 
-    let result_json = run_tool(app, name, arguments, source).await?;
+    // Agent sessions need the user's approval for destructive tools.
+    let result_json = match crate::agents::mcp::approval_gate(app, name, &arguments, source) {
+        Some(pending) => pending,
+        None => run_tool(app, name, arguments, source).await?,
+    };
     Ok(json!({
         "content": [{
             "type": "text",
@@ -342,6 +390,30 @@ pub async fn call_tool(
         }],
         "isError": false,
     }))
+}
+
+// Keep the large command-dispatch future off the MCP router's stack. In debug
+// builds, inline dispatch futures in each match arm exhaust a normal test stack.
+async fn dispatch_command(app: &AppHandle, command: &str, args: Value) -> Result<Value, String> {
+    Box::pin(crate::http_server::dispatch::dispatch_command(
+        app, command, args,
+    ))
+    .await
+}
+
+/// Run a tool that the user approved for an agent (no approval gate).
+/// Boxed: approvals are decided through `dispatch_command`, which this tool
+/// call can reach again, so the future type would otherwise be recursive.
+pub fn run_approved_tool(
+    app: AppHandle,
+    name: String,
+    args: Value,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, String>> + Send>> {
+    Box::pin(async move {
+        run_tool(&app, &name, args, "agent-approval")
+            .await
+            .map_err(|e| e.message)
+    })
 }
 
 async fn run_tool(
@@ -906,10 +978,7 @@ async fn run_tool(
             .map_err(ToolError::internal)?;
             if let Some(session) = select_reusable_empty_mcp_session(&sessions, |session| {
                 !crate::chat::registry::is_session_actively_managed(&session.id)
-                    && crate::chat::storage::load_metadata(app, &session.id)
-                        .ok()
-                        .flatten()
-                        .is_some_and(|metadata| metadata.runs.is_empty())
+                    && metadata_has_no_runs(crate::chat::storage::load_metadata(app, &session.id))
             }) {
                 let session_id = session.id.clone();
                 if let Some(name) = args.get("name").and_then(Value::as_str) {
@@ -941,6 +1010,9 @@ async fn run_tool(
                     .await
                     .map_err(ToolError::internal)?;
                 }
+                // Default empty sessions can exist only in the index. Persist
+                // their metadata before returning an ID to MCP clients.
+                resolve_session_worktree(app, &session_id)?;
                 return dispatch_command(
                     app,
                     "get_session",
@@ -976,7 +1048,7 @@ async fn run_tool(
             if let Some(value) = optional_str(&args, "backend") {
                 normalize_backend_name(&value)?;
             }
-            validate_optional_enum(&args, "executionMode", &["plan", "build", "yolo"])?;
+            validate_optional_enum(&args, "executionMode", EXECUTION_MODES)?;
             validate_optional_enum(
                 &args,
                 "thinkingLevel",
@@ -997,6 +1069,8 @@ async fn run_tool(
                     "ultracode",
                 ],
             )?;
+            // Agent callers: the agent gets an update when this session's run ends.
+            crate::agents::mcp::record_delegation(app, source, &session_id, &worktree_id);
             let mut payload = serde_json::Map::new();
             payload.insert("sessionId".to_string(), Value::String(session_id.clone()));
             payload.insert("worktreeId".to_string(), Value::String(worktree_id));
@@ -1174,6 +1248,7 @@ async fn run_tool(
         }
         "get_session_status" => {
             let session_id = require_str(&args, "sessionId")?;
+            resolve_session_worktree(app, &session_id)?;
             dispatch_command(
                 app,
                 "get_session_status",
@@ -1259,7 +1334,7 @@ async fn run_tool(
                 .transpose()?;
             let mut model = optional_str(&args, "model");
             let fast_mode = args.get("fastMode").and_then(Value::as_bool);
-            validate_optional_enum(&args, "executionMode", &["plan", "build", "yolo"])?;
+            validate_optional_enum(&args, "executionMode", EXECUTION_MODES)?;
             validate_optional_enum(
                 &args,
                 "thinkingLevel",
@@ -1415,7 +1490,7 @@ async fn run_tool(
             let fast_mode = matches!(backend.as_str(), "claude" | "codex");
             Ok(json!({
                 "backend": backend,
-                "executionModes": ["plan", "build", "yolo"],
+                "executionModes": supported_execution_modes(&backend),
                 "effortLevels": ["off", "adaptive", "minimal", "low", "medium", "high", "xhigh", "max", "ultracode"],
                 "thinkingLevels": ["off", "adaptive", "think", "megathink", "ultrathink"],
                 "fastMode": fast_mode,
@@ -1837,7 +1912,13 @@ async fn run_tool(
                 json!({ "sessionId": source, "worktreeId": worktree_id, "worktreePath": worktree_path, "projectId": project_id, "projectName": project_name, "projectPath": project_path }),
             )
         }
-        CLAUDE_PERMISSION_PROMPT_TOOL => Ok(claude_permission_decision(&args)),
+        CLAUDE_PERMISSION_PROMPT_TOOL => Ok(claude_permission_prompt(app, source, &args).await),
+        // Boxed: keeps this large function's stack frame small.
+        agent_tool if crate::agents::mcp::is_agent_tool(agent_tool) => {
+            Box::pin(crate::agents::mcp::run(app, agent_tool, &args, source))
+                .await
+                .map_err(ToolError::invalid_params)
+        }
         other => Err(ToolError::invalid_params(format!("Unknown tool: {other}"))),
     }
 }
@@ -1864,6 +1945,14 @@ fn select_reusable_empty_mcp_session(
                 .find(|session| session.id == active_id && is_reusable(session))
         })
         .or_else(|| sessions.sessions.iter().find(is_reusable))
+}
+
+/// A fresh default session ("Session 1") has an index entry but no metadata
+/// file yet, so missing metadata also counts as empty.
+fn metadata_has_no_runs(
+    metadata: Result<Option<crate::chat::types::SessionMetadata>, String>,
+) -> bool {
+    metadata.is_ok_and(|metadata| metadata.is_none_or(|m| m.runs.is_empty()))
 }
 
 fn deletion_started_result(worktree_id: &str, action: &str) -> Value {
@@ -1939,6 +2028,16 @@ fn optional_str(args: &Value, key: &str) -> Option<String> {
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string)
+}
+
+// Match the chat policy validator, including legacy Plan/Build session support.
+fn supported_execution_modes(backend: &str) -> &'static [&'static str] {
+    match backend {
+        "claude" | "codex" | "grok" | "kimi" => EXECUTION_MODES,
+        "opencode" => &["plan", "build", "yolo", "supervised"],
+        "cursor" => &["plan", "yolo"],
+        _ => &["plan", "build", "yolo"],
+    }
 }
 
 fn validate_optional_enum(args: &Value, key: &str, allowed: &[&str]) -> Result<(), ToolError> {
@@ -2206,18 +2305,14 @@ async fn start_autoinvestigating(
         .map_err(ToolError::internal)?;
     let selection = resolve_investigation_selection(app, &prefs, &ready_worktree, kind);
     let prompt = build_investigation_prompt(&prefs, &ready_worktree, kind);
-    let parallel_execution_prompt = if prefs.parallel_execution_prompt_enabled {
-        Some(
-            prefs
-                .magic_prompts
-                .parallel_execution
-                .clone()
-                .filter(|p| !p.trim().is_empty())
-                .unwrap_or_else(crate::default_parallel_execution_prompt),
-        )
-    } else {
-        None
-    };
+    let parallel_execution_prompt = Some(
+        prefs
+            .magic_prompts
+            .parallel_execution
+            .clone()
+            .filter(|p| !p.trim().is_empty())
+            .unwrap_or_else(crate::default_parallel_execution_prompt),
+    );
     let custom_profile_name = selection
         .provider
         .clone()
@@ -2240,6 +2335,7 @@ async fn start_autoinvestigating(
         Some(source.to_string()),
         None,
         false,
+        None,
     )
     .await
     .map_err(ToolError::internal)?;
@@ -2268,7 +2364,9 @@ const YOLO_INVESTIGATION_FIX_MARKER: &str = "<yolo_investigation_fix>";
 
 const YOLO_INVESTIGATION_FIX_APPEND: &str = r#"<yolo_investigation_fix>
 
-This investigation is running in YOLO mode. After investigation, fix the issue: implement the necessary code changes in the codebase. Do not stop at proposing a plan. Any earlier instruction to only investigate, only propose, not implement, or not edit code is overridden for this turn.
+This investigation is running in Full access mode. After investigation, fix the issue: implement the necessary code changes in the codebase. Do not stop at proposing a plan. Any earlier instruction to only investigate, only propose, not implement, or not edit code is overridden for this turn.
+
+After the fix, verify it: add or update tests for the changed behavior and run them. If a dev/run environment is available (for example via Jean MCP `get_run_environments`), also test the fix in the running app. If it makes sense for the change (for example a UI change) and a browser or screenshot tool is available, take a screenshot that shows the fix.
 
 </yolo_investigation_fix>"#;
 
@@ -2328,7 +2426,9 @@ fn should_strip_line_for_yolo_fix(line: &str) -> bool {
 
     let lower = body.to_ascii_lowercase();
 
-    if lower.starts_with("if you are in yolo mode") {
+    if lower.starts_with("if you are in yolo mode")
+        || lower.starts_with("if you are in full access mode")
+    {
         return true;
     }
     if lower.contains("do not implement") || lower.contains("don't implement") {
@@ -2359,7 +2459,9 @@ fn should_strip_line_for_yolo_fix(line: &str) -> bool {
     {
         return true;
     }
-    if lower.contains("do not stop at proposing") && lower.contains("yolo") {
+    if lower.contains("do not stop at proposing")
+        && (lower.contains("yolo") || lower.contains("full access"))
+    {
         return true;
     }
 
@@ -2435,6 +2537,7 @@ pub async fn start_background_investigation_impl(
     source: Option<String>,
     issue_context: Option<IssueContext>,
     force_new_session: bool,
+    target_session_id: Option<String>,
 ) -> Result<BackgroundInvestigationResult, String> {
     let sessions = crate::chat::get_sessions(
         app.clone(),
@@ -2444,9 +2547,19 @@ pub async fn start_background_investigation_impl(
         Some(false),
     )
     .await?;
-    // Prefer the active/first session; create one if the worktree has none yet
-    // (e.g. programmatically empty index before the UI opens a tab).
-    let session_id = match select_reusable_investigation_session(&sessions, force_new_session) {
+    if let Some(id) = &target_session_id {
+        if !sessions.sessions.iter().any(|session| &session.id == id) {
+            return Err(format!(
+                "Background investigation: session {id} not found in worktree {worktree_id}"
+            ));
+        }
+    }
+    // Use the requested session, else prefer the active/first session; create
+    // one if the worktree has none yet (e.g. programmatically empty index
+    // before the UI opens a tab).
+    let session_id = match target_session_id
+        .or_else(|| select_reusable_investigation_session(&sessions, force_new_session))
+    {
         Some(id) => id,
         None => {
             let created = crate::chat::create_session(
@@ -2504,6 +2617,16 @@ pub async fn start_background_investigation_impl(
     let execution_mode = execution_mode
         .filter(|mode| matches!(mode.as_str(), "plan" | "yolo"))
         .unwrap_or_else(|| "plan".to_string());
+    // Persist the magic prompt mode on the session; otherwise the toolbar and
+    // follow-up turns fall back to the session's default policy.
+    crate::chat::set_session_execution_mode(
+        app.clone(),
+        worktree_id.clone(),
+        worktree_path.clone(),
+        session_id.clone(),
+        execution_mode.clone(),
+    )
+    .await?;
     // Detect yolo and append an unconditional fix-after-investigation directive
     // (also strips weak "if yolo" / anti-fix lines). Idempotent if the UI
     // already applied the same transform.
@@ -2576,6 +2699,7 @@ pub async fn start_background_investigation(
     execution_mode: Option<String>,
     issue_context: Option<IssueContext>,
     force_new_session: Option<bool>,
+    session_id: Option<String>,
 ) -> Result<BackgroundInvestigationResult, String> {
     start_background_investigation_impl(
         &app,
@@ -2594,6 +2718,7 @@ pub async fn start_background_investigation(
         Some("ui".to_string()),
         issue_context,
         force_new_session.unwrap_or(false),
+        session_id,
     )
     .await
 }
@@ -2908,6 +3033,10 @@ fn resolve_project_path(app: &AppHandle, project_id: &str) -> Result<String, Too
 }
 
 fn resolve_worktree_path(app: &AppHandle, worktree_id: &str) -> Result<String, ToolError> {
+    // Agent sessions run in their scratch folder (no worktree record).
+    if let Some(path) = crate::agents::workdir_for_worktree(app, worktree_id) {
+        return Ok(path);
+    }
     let data = crate::projects::storage::load_projects_data(app)
         .map_err(|e| ToolError::internal(format!("load_projects_data: {e}")))?;
     data.find_worktree(worktree_id)
@@ -2938,7 +3067,7 @@ fn resolve_session_worktree(
     app: &AppHandle,
     session_id: &str,
 ) -> Result<(String, String), ToolError> {
-    let metadata = crate::chat::storage::load_metadata(app, session_id)
+    let metadata = crate::chat::storage::load_mcp_session_metadata(app, session_id)
         .map_err(|e| ToolError::internal(format!("load_metadata: {e}")))?
         .ok_or_else(|| ToolError::invalid_params(format!("Unknown sessionId: {session_id}")))?;
     let worktree_path = resolve_worktree_path(app, &metadata.worktree_id)?;
@@ -2979,12 +3108,14 @@ fn ensure_mcp_session_can_run(
     session_id: &str,
     worktree_id: &str,
 ) -> Result<(), ToolError> {
-    let metadata = crate::chat::storage::load_metadata(app, session_id)
+    // A new session (no metadata until its first run) cannot be archived yet.
+    // Callers resolve the session first, so it is known to exist.
+    let archived_at = crate::chat::storage::load_metadata(app, session_id)
         .map_err(|e| ToolError::internal(format!("load_metadata: {e}")))?
-        .ok_or_else(|| ToolError::invalid_params(format!("Unknown sessionId: {session_id}")))?;
+        .and_then(|metadata| metadata.archived_at);
     crate::chat::ensure_session_can_run(
         session_id,
-        metadata.archived_at,
+        archived_at,
         worktree_id,
         crate::chat::worktree_archived_at(app, worktree_id),
     )
@@ -3065,6 +3196,435 @@ pub fn jsonrpc_error(id: Option<Value>, code: i32, message: &str) -> Value {
 mod tests {
     use super::*;
 
+    fn session_lookup_app() -> (tempfile::TempDir, AppHandle) {
+        let temp = tempfile::tempdir().unwrap();
+        let app = AppHandle::new(temp.path().to_path_buf(), temp.path().to_path_buf()).unwrap();
+        let worktree = serde_json::from_value(json!({
+            "id": "current-base", "project_id": "project", "name": "base",
+            "path": temp.path().to_string_lossy(), "branch": "main",
+            "created_at": 1, "session_type": "base"
+        }))
+        .unwrap();
+        crate::projects::storage::save_projects_data(
+            &app,
+            &crate::projects::types::ProjectsData {
+                projects: vec![],
+                worktrees: vec![worktree],
+            },
+        )
+        .unwrap();
+        (temp, app)
+    }
+
+    #[tokio::test]
+    async fn mcp_recovered_empty_session_uses_new_session_execution_policy() {
+        for (backend, default_policy, expected_policy) in [
+            ("claude", "build", "build"),
+            ("codex", "supervised", "supervised"),
+            ("cursor", "build", "plan"),
+        ] {
+            for force_new in [false, true] {
+                let (_temp, app) = session_lookup_app();
+                let preferences = crate::AppPreferences {
+                    default_backend: backend.to_string(),
+                    default_execution_mode: default_policy.to_string(),
+                    ..Default::default()
+                };
+                std::fs::write(
+                    crate::get_preferences_path(&app).unwrap(),
+                    serde_json::to_vec(&preferences).unwrap(),
+                )
+                .unwrap();
+                if force_new {
+                    crate::chat::storage::save_empty_index(&app, "current-base").unwrap();
+                }
+                let created = run_tool(
+                    &app,
+                    "create_session",
+                    json!({ "worktreeId": "current-base" }),
+                    "test",
+                )
+                .await
+                .unwrap();
+                let metadata =
+                    crate::chat::storage::load_metadata(&app, created["id"].as_str().unwrap())
+                        .unwrap()
+                        .unwrap();
+                assert_eq!(
+                    metadata.selected_execution_mode.as_deref(),
+                    Some(expected_policy)
+                );
+                assert_eq!(
+                    metadata.selected_permission_mode.as_deref(),
+                    Some(if expected_policy == "plan" {
+                        "yolo"
+                    } else {
+                        expected_policy
+                    })
+                );
+                assert_eq!(created["selected_execution_mode"], expected_policy);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn mcp_create_session_persists_metadata_before_status_lookup() {
+        for force_new in [false, true] {
+            let (_temp, app) = session_lookup_app();
+            if force_new {
+                crate::chat::storage::save_empty_index(&app, "current-base").unwrap();
+            }
+            let created = run_tool(
+                &app,
+                "create_session",
+                json!({ "worktreeId": "current-base" }),
+                "test",
+            )
+            .await
+            .unwrap();
+            let session_id = created["id"].as_str().unwrap();
+            let metadata = crate::chat::storage::load_metadata(&app, session_id)
+                .unwrap()
+                .expect("create_session must persist metadata before returning");
+            assert_eq!(metadata.worktree_id, "current-base");
+            let status = run_tool(
+                &app,
+                "get_session_status",
+                json!({ "sessionId": session_id }),
+                "test",
+            )
+            .await
+            .unwrap();
+            assert_eq!(status["status"], "idle");
+            assert_eq!(status["worktreeId"], "current-base");
+        }
+    }
+
+    // Use an app-local CLI fixture, never an installed CLI or external account.
+    #[cfg(unix)]
+    fn session_send_app() -> (tempfile::TempDir, AppHandle) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let (temp, app) = session_lookup_app();
+        let preferences = crate::AppPreferences {
+            auto_branch_naming: false,
+            auto_session_naming: false,
+            claude_cli_source: "jean".to_string(),
+            default_execution_mode: "build".to_string(),
+            ..Default::default()
+        };
+        std::fs::write(
+            crate::get_preferences_path(&app).unwrap(),
+            serde_json::to_vec(&preferences).unwrap(),
+        )
+        .unwrap();
+        crate::claude_cli::ensure_cli_dir(&app).unwrap();
+        let binary = crate::claude_cli::get_cli_binary_path(&app).unwrap();
+        std::fs::write(
+            &binary,
+            r#"#!/bin/sh
+set -eu
+fixture_dir=$(dirname "$0")
+cat > "$fixture_dir/received.jsonl"
+pwd -P > "$fixture_dir/working-directory"
+printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Fixture reply"}]},"session_id":"fixture-resume"}'
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"Fixture reply","session_id":"fixture-resume"}'
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        (temp, app)
+    }
+
+    #[cfg(unix)]
+    async fn assert_mcp_send_completed(
+        app: &AppHandle,
+        session_id: &str,
+        message: &str,
+        expected_execution_mode: &str,
+    ) {
+        use crate::chat::types::RunStatus;
+
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if let Some(metadata) =
+                    crate::chat::storage::load_metadata(app, session_id).unwrap()
+                {
+                    if let Some(run) = metadata.runs.last() {
+                        assert_ne!(run.status, RunStatus::Crashed, "background send crashed");
+                        assert_ne!(
+                            run.status,
+                            RunStatus::Cancelled,
+                            "background send cancelled"
+                        );
+                        if run.status == RunStatus::Completed
+                            && !crate::chat::registry::is_session_actively_managed(session_id)
+                        {
+                            assert_eq!(metadata.worktree_id, "current-base");
+                            assert_eq!(metadata.runs.len(), 1);
+                            assert_eq!(run.user_message, message);
+                            assert_eq!(
+                                run.execution_mode.as_deref(),
+                                Some(expected_execution_mode)
+                            );
+                            assert_eq!(
+                                metadata.claude_session_id.as_deref(),
+                                Some("fixture-resume")
+                            );
+                            break;
+                        }
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("MCP returned started but did not complete the background send");
+
+        let fixture_dir = crate::claude_cli::get_cli_dir(app).unwrap();
+        let received: Value =
+            serde_json::from_slice(&std::fs::read(fixture_dir.join("received.jsonl")).unwrap())
+                .unwrap();
+        assert_eq!(received["message"]["content"], message);
+        let cwd = std::fs::read_to_string(fixture_dir.join("working-directory")).unwrap();
+        let expected_cwd = std::fs::canonicalize(app.path().app_data_dir().unwrap()).unwrap();
+        assert_eq!(std::path::Path::new(cwd.trim()), expected_cwd);
+
+        // Read through MCP after completion, not just through the CLI fixture.
+        let history = run_tool(
+            app,
+            "read_session_messages",
+            json!({ "sessionId": session_id }),
+            "test",
+        )
+        .await
+        .unwrap();
+        assert_eq!(history["id"], session_id);
+        let messages = history["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[0]["content"], message);
+        assert_eq!(messages[1]["role"], "assistant");
+        assert_eq!(messages[1]["content"], "Fixture reply");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn mcp_create_session_can_send_and_read_immediately() {
+        if !crate::test_support::in_isolated_process(
+            "jean_mcp_core::tests::mcp_create_session_can_send_and_read_immediately",
+        ) {
+            return;
+        }
+        for force_new in [false, true] {
+            let (_temp, app) = session_send_app();
+            if force_new {
+                crate::chat::storage::save_empty_index(&app, "current-base").unwrap();
+            }
+            let created = run_tool(
+                &app,
+                "create_session",
+                json!({ "worktreeId": "current-base" }),
+                "test",
+            )
+            .await
+            .unwrap();
+            let session_id = created["id"].as_str().unwrap();
+            assert!(crate::chat::storage::load_metadata(&app, session_id)
+                .unwrap()
+                .is_some());
+            let args = json!({ "sessionId": session_id, "message": "hello world" });
+            let status = run_tool(&app, "get_session_status", args.clone(), "test")
+                .await
+                .unwrap();
+            assert_eq!(status["worktreeId"], "current-base");
+            assert_eq!(status["status"], "idle");
+            let messages = run_tool(&app, "read_session_messages", args.clone(), "test")
+                .await
+                .unwrap();
+            assert_eq!(messages["id"], session_id);
+            let sent = run_tool(&app, "send_chat_message", args, "test")
+                .await
+                .unwrap();
+            assert_eq!(
+                sent,
+                json!({ "sessionId": session_id, "status": "started" })
+            );
+            assert_mcp_send_completed(&app, session_id, "hello world", "build").await;
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn mcp_repairs_stale_base_session_owner_without_losing_metadata() {
+        if !crate::test_support::in_isolated_process(
+            "jean_mcp_core::tests::mcp_repairs_stale_base_session_owner_without_losing_metadata",
+        ) {
+            return;
+        }
+        let (_temp, app) = session_send_app();
+        let index = crate::chat::storage::load_index(&app, "current-base").unwrap();
+        let session_id = &index.sessions[0].id;
+        let mut metadata = crate::chat::types::SessionMetadata::new(
+            session_id.clone(),
+            "deleted-base".to_string(),
+            "Saved session".to_string(),
+            0,
+        );
+        metadata.codex_thread_id = Some("resume-thread".to_string());
+        metadata.archived_at = Some(123);
+        crate::chat::storage::save_metadata(&app, &metadata).unwrap();
+
+        assert_eq!(
+            resolve_session_worktree(&app, session_id).unwrap().0,
+            "current-base"
+        );
+        let repaired = crate::chat::storage::load_metadata(&app, session_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(repaired.worktree_id, "current-base");
+        assert_eq!(repaired.codex_thread_id, metadata.codex_thread_id);
+        assert_eq!(repaired.archived_at, Some(123));
+        let error = run_tool(
+            &app,
+            "send_chat_message",
+            json!({ "sessionId": session_id, "message": "hello" }),
+            "test",
+        )
+        .await
+        .unwrap_err();
+        assert!(error.message.to_lowercase().contains("archived"));
+
+        crate::chat::storage::with_existing_metadata_mut(&app, session_id, |metadata| {
+            metadata.archived_at = None;
+            metadata.worktree_id = "deleted-base".to_string();
+        })
+        .unwrap();
+        let sent = run_tool(
+            &app,
+            "send_chat_message",
+            json!({ "sessionId": session_id, "message": "hello" }),
+            "test",
+        )
+        .await
+        .unwrap();
+        assert_eq!(sent["status"], "started");
+        assert_mcp_send_completed(&app, session_id, "hello", "plan").await;
+    }
+
+    #[test]
+    fn mcp_index_only_archived_session_stays_archived_and_unknown_ids_stay_unknown() {
+        let (_temp, app) = session_lookup_app();
+        let session_id = crate::chat::storage::with_index_mut(&app, "current-base", |index| {
+            index.sessions[0].archived_at = Some(123);
+            Ok(index.sessions[0].id.clone())
+        })
+        .unwrap();
+        let (worktree_id, _) = resolve_session_worktree(&app, &session_id).unwrap();
+        assert!(ensure_mcp_session_can_run(&app, &session_id, &worktree_id).is_err());
+        assert!(resolve_session_worktree(&app, "unknown-session").is_err());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn mcp_create_session_can_send_as_the_next_call() {
+        if !crate::test_support::in_isolated_process(
+            "jean_mcp_core::tests::mcp_create_session_can_send_as_the_next_call",
+        ) {
+            return;
+        }
+        let (_temp, app) = session_send_app();
+        let created = run_tool(
+            &app,
+            "create_session",
+            json!({ "worktreeId": "current-base" }),
+            "test",
+        )
+        .await
+        .unwrap();
+        let session_id = created["id"].as_str().unwrap();
+        let sent = run_tool(
+            &app,
+            "send_chat_message",
+            json!({ "sessionId": session_id, "message": "hello world" }),
+            "test",
+        )
+        .await
+        .unwrap();
+        assert_eq!(sent["status"], "started");
+        assert_eq!(sent["sessionId"], session_id);
+        assert_mcp_send_completed(&app, session_id, "hello world", "build").await;
+    }
+
+    #[test]
+    fn mcp_session_recovery_does_not_bypass_worktree_archive_or_reopen_closed_base() {
+        let (_temp, app) = session_lookup_app();
+        let index = crate::chat::storage::load_index(&app, "current-base").unwrap();
+        let session_id = &index.sessions[0].id;
+        let mut projects = crate::projects::storage::load_projects_data(&app).unwrap();
+        projects.worktrees[0].archived_at = Some(123);
+        crate::projects::storage::save_projects_data(&app, &projects).unwrap();
+        let (worktree_id, _) = resolve_session_worktree(&app, session_id).unwrap();
+        assert!(ensure_mcp_session_can_run(&app, session_id, &worktree_id).is_err());
+        assert!(ensure_mcp_worktree_not_archived(&app, &worktree_id).is_err());
+
+        crate::chat::storage::preserve_base_sessions(&app, "current-base", "project").unwrap();
+        projects.worktrees.clear();
+        crate::projects::storage::save_projects_data(&app, &projects).unwrap();
+        assert!(resolve_session_worktree(&app, session_id).is_err());
+    }
+
+    #[test]
+    fn mcp_permission_validation_matches_advertised_modes() {
+        for name in ["send_chat_message", "set_session_settings"] {
+            let tool = find_tool(&tool_registry(), name);
+            let modes = tool["inputSchema"]["properties"]["executionMode"]["enum"]
+                .as_array()
+                .unwrap();
+            for mode in modes {
+                assert!(validate_optional_enum(
+                    &json!({"executionMode": mode}),
+                    "executionMode",
+                    EXECUTION_MODES
+                )
+                .is_ok());
+            }
+        }
+        assert!(validate_optional_enum(&json!({}), "executionMode", EXECUTION_MODES).is_ok());
+        assert!(validate_optional_enum(
+            &json!({"executionMode":"invalid"}),
+            "executionMode",
+            EXECUTION_MODES
+        )
+        .is_err());
+        for mode in ["supervised", "auto"] {
+            assert!(validate_optional_enum(
+                &json!({"executionMode":mode}),
+                "executionMode",
+                EXECUTION_MODES
+            )
+            .is_ok());
+        }
+    }
+
+    #[test]
+    fn mcp_capabilities_keep_backend_permission_limits() {
+        for backend in ["claude", "codex", "grok", "kimi"] {
+            assert_eq!(supported_execution_modes(backend), EXECUTION_MODES);
+        }
+        assert_eq!(
+            supported_execution_modes("opencode"),
+            &["plan", "build", "yolo", "supervised"]
+        );
+        assert_eq!(supported_execution_modes("cursor"), &["plan", "yolo"]);
+        for backend in ["pi", "commandcode", "antigravity"] {
+            assert_eq!(
+                supported_execution_modes(backend),
+                &["plan", "build", "yolo"]
+            );
+        }
+    }
+
     #[test]
     fn background_run_is_added_to_persisted_worktree_ui_state() {
         let mut state = crate::UIState::default();
@@ -3099,23 +3659,27 @@ mod tests {
     }
 
     #[test]
-    fn claude_permission_prompt_allows_all_but_blocking_tools() {
+    fn claude_permission_decision_follows_answer_but_keeps_blocking_tools_denied() {
         find_tool(&tool_registry(), CLAUDE_PERMISSION_PROMPT_TOOL);
 
-        let allow = claude_permission_decision(&json!({
-            "tool_name": "mcp__claude-in-chrome__navigate",
-            "input": { "url": "https://example.com", "tabId": 1 },
-        }));
+        let allow = claude_permission_decision(
+            &json!({
+                "tool_name": "mcp__claude-in-chrome__navigate",
+                "input": { "url": "https://example.com", "tabId": 1 },
+            }),
+            true,
+        );
         assert_eq!(allow["behavior"], "allow");
         assert_eq!(allow["updatedInput"]["url"], "https://example.com");
 
         for tool_name in ["WebSearch", "WebFetch", "Bash"] {
-            let allow = claude_permission_decision(&json!({ "tool_name": tool_name }));
-            assert_eq!(allow["behavior"], "allow", "{tool_name} must be allowed");
+            let args = json!({ "tool_name": tool_name });
+            assert_eq!(claude_permission_decision(&args, true)["behavior"], "allow");
+            assert_eq!(claude_permission_decision(&args, false)["behavior"], "deny");
         }
 
         for tool_name in ["AskUserQuestion", "ExitPlanMode"] {
-            let deny = claude_permission_decision(&json!({ "tool_name": tool_name }));
+            let deny = claude_permission_decision(&json!({ "tool_name": tool_name }), true);
             assert_eq!(deny["behavior"], "deny", "{tool_name} must stay denied");
         }
     }
@@ -3333,6 +3897,12 @@ mod tests {
         let selected =
             select_reusable_empty_mcp_session(&sessions, |session| session.id != "running");
         assert!(selected.is_none());
+    }
+
+    #[test]
+    fn missing_metadata_counts_as_empty_for_mcp_session_reuse() {
+        assert!(metadata_has_no_runs(Ok(None)));
+        assert!(!metadata_has_no_runs(Err("read failed".to_string())));
     }
 
     #[test]

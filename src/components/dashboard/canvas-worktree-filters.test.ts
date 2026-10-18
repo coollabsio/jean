@@ -44,6 +44,31 @@ describe('canvas worktree filters', () => {
     expect(matchesCanvasFilterTab(autoFixIssue, 'auto_fix')).toBe(true)
   })
 
+  it('keeps pending, failed, and ready automation worktrees out of every normal filter, including labels', () => {
+    for (const status of ['pending', 'error', 'ready'] as const) {
+      const robot = worktree({
+        origin: 'auto_fix',
+        status,
+        issue_number: 1,
+        pr_number: 2,
+        security_alert_number: 3,
+        labels: [{ name: 'Bug', color: '#fff', pinned: true }],
+      })
+      for (const filter of [
+        'all',
+        'manual',
+        'issues',
+        'prs',
+        'security',
+        'label:bug',
+      ] as const) {
+        expect(matchesCanvasFilterTab(robot, filter)).toBe(false)
+      }
+      expect(matchesCanvasFilterTab(robot, 'auto_fix')).toBe(true)
+    }
+    expect(matchesCanvasFilterTab(worktree({}), 'auto_fix')).toBe(false)
+  })
+
   it('counts auto-fix worktrees separately from All', () => {
     const worktrees = [
       worktree({ id: 'manual' }),

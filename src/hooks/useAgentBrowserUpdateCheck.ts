@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { invoke } from '@/lib/transport'
 import { queryClient } from '@/lib/query-client'
 import { invalidateAllMcpServers } from '@/services/mcp'
+import { usePreferences } from '@/services/preferences'
 
 interface AgentBrowserUpdateStatus {
   installed: boolean
@@ -16,8 +17,11 @@ const UPDATE_PROGRESS_TOAST_ID = 'agent-browser-update-progress'
 
 export function useAgentBrowserUpdateCheck() {
   const checkedRef = useRef(false)
+  const { data: preferences } = usePreferences()
+  const enabled = preferences?.agent_browser_enabled ?? false
 
   useEffect(() => {
+    if (!enabled) return
     const timer = window.setTimeout(async () => {
       if (checkedRef.current) return
       checkedRef.current = true
@@ -69,5 +73,5 @@ export function useAgentBrowserUpdateCheck() {
     }, 15_000)
 
     return () => window.clearTimeout(timer)
-  }, [])
+  }, [enabled])
 }

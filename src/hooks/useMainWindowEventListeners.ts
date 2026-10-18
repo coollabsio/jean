@@ -10,6 +10,7 @@ import { isPanelTerminal, useTerminalStore } from '@/store/terminal-store'
 import { useBrowserStore } from '@/store/browser-store'
 import { projectsQueryKeys } from '@/services/projects'
 import { chatQueryKeys } from '@/services/chat'
+import { MCP_SERVERS_KEY } from '@/services/mcp'
 import { claudeCliQueryKeys } from '@/services/claude-cli'
 import type {
   AllSessionsResponse,
@@ -17,10 +18,13 @@ import type {
   Session,
   WorktreeSessions,
 } from '@/types/chat'
-import type { RecentWorktreeItem } from '@/types/projects'
+import type { RecentWorktreeItem, ReviewJob } from '@/types/projects'
+import { isSessionCurrentlyViewed } from '@/lib/session-notifications'
+import { markSessionOpenedWhenSeen } from '@/lib/session-read'
 import { disposeTerminal, startHeadless } from '@/lib/terminal-instances'
 import { toast } from 'sonner'
 import { useCommandContext } from './use-command-context'
+import { useLatestRef } from './useLatestRef'
 import { usePreferences } from '@/services/preferences'
 import { logger } from '@/lib/logger'
 import {
@@ -31,6 +35,11 @@ import {
   type KeybindingsMap,
 } from '@/types/keybindings'
 import { installWindowKeyboardFocusRestore } from '@/lib/restore-keyboard-focus'
+import {
+  stripShortcutModifier,
+  type CloseSessionOrWorktreeDetail,
+} from '@/lib/confirm-bypass'
+import type { CloseConfirmBypassModifier } from '@/types/preferences'
 import { useIsMobile } from '@/hooks/use-mobile'
 
 const PLAN_DIALOG_APPROVAL_ACTIONS = new Set<KeybindingAction>([
@@ -79,6 +88,12 @@ export function shouldLetChatInputHandleAction(
   target: EventTarget | null,
   planDialogOpen: boolean
 ): boolean {
+  if (action === 'next_session' || action === 'previous_session') {
+    // Cmd/Ctrl+Arrow moves the caret in text fields. Switch sessions only
+    // when the caret already sits at the edge of the text in that direction,
+    // so the first press moves the caret and the next press switches.
+    return canCaretMove(target, action === 'next_session' ? 'end' : 'start')
+  }
   return (
     action === 'approve_plan' &&
     !planDialogOpen &&
@@ -87,15 +102,73 @@ export function shouldLetChatInputHandleAction(
   )
 }
 
+function canCaretMove(
+  target: EventTarget | null,
+  toward: 'start' | 'end'
+): boolean {
+  if (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement
+  ) {
+    const { selectionStart, selectionEnd, value } = target
+    // Inputs without selection support (e.g. type="number") cannot report a
+    // caret, so keep the old rule: any text means the field owns the key.
+    if (selectionStart === null || selectionEnd === null) {
+      return value.length > 0
+    }
+    if (selectionStart !== selectionEnd) return true
+    return toward === 'start' ? selectionStart > 0 : selectionEnd < value.length
+  }
+  return (
+    target instanceof HTMLElement &&
+    target.isContentEditable === true &&
+    (target.textContent ?? '').length > 0
+  )
+}
+
+/** Cmd/Ctrl+1-9 opens Recent sessions while the Recent list is visible. */
+export function isRecentSessionsShortcutActive(): boolean {
+  return (
+    useUIStore.getState().leftSidebarVisible &&
+    useProjectsStore.getState().sidebarActiveTab === 'recent'
+  )
+}
+
 export function findKeybindingAction(
   shortcut: string,
   keybindings: KeybindingsMap
 ): KeybindingAction | null {
   for (const [action, binding] of Object.entries(keybindings)) {
-    if (binding === shortcut) return action as KeybindingAction
+    if (Object.hasOwn(DEFAULT_KEYBINDINGS, action) && binding === shortcut)
+      return action as KeybindingAction
   }
 
   return null
+}
+
+/**
+ * Resolve a shortcut to an action, honoring the close-confirmation bypass
+ * modifier. The held modifier serializes into a different shortcut string
+ * (e.g. `mod+shift+w` vs `mod+w`), so when the raw string matches nothing we
+ * strip the configured modifier and retry — but accept the retry ONLY for the
+ * close action, or a held modifier could shadow unrelated bindings.
+ */
+export function resolveShortcutWithBypass(
+  shortcut: string,
+  keybindings: KeybindingsMap,
+  bypassModifier: CloseConfirmBypassModifier | undefined
+): { matchedAction: KeybindingAction | null; bypassConfirm: boolean } {
+  const direct = findKeybindingAction(shortcut, keybindings)
+  if (direct) return { matchedAction: direct, bypassConfirm: false }
+
+  const stripped = stripShortcutModifier(shortcut, bypassModifier)
+  const candidate = stripped
+    ? findKeybindingAction(stripped, keybindings)
+    : null
+  if (candidate === 'close_session_or_worktree') {
+    return { matchedAction: candidate, bypassConfirm: true }
+  }
+  return { matchedAction: null, bypassConfirm: false }
 }
 
 export function useWindowKeyboardFocusRestore() {
@@ -168,9 +241,27 @@ export function applyCacheInvalidationKeys(
           queryKey: ['recent-worktrees'],
         })
         break
+      case 'agents':
+        queryClient.invalidateQueries({ queryKey: ['agents'] })
+        break
+      case 'unread-sessions':
+        // A new run started: the session is no longer "finished".
+        queryClient.invalidateQueries({
+          queryKey: chatQueryKeys.unreadSessionCount(),
+        })
+        queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
+        break
+      case 'mcp-servers':
+        // claude.ai connectors / plugin servers found by `claude mcp list`.
+        queryClient.invalidateQueries({ queryKey: [MCP_SERVERS_KEY] })
+        break
       case 'projects':
         queryClient.invalidateQueries({
           queryKey: projectsQueryKeys.all,
+        })
+        // Native sidebar also reads the multi-server project list.
+        queryClient.invalidateQueries({
+          queryKey: ['multi-server', 'projects'],
         })
         break
       case 'preferences':
@@ -239,21 +330,25 @@ export function applySessionRenamedToCaches(
     if (!old || old.name === newName) return old
     return { ...old, name: newName }
   })
-  queryClient.setQueryData<AllSessionsResponse>(['all-sessions'], old => {
-    if (!old) return old
-    let changed = false
-    const entries = old.entries.map(entry => {
-      let entryChanged = false
-      const sessions = entry.sessions.map(session => {
-        if (session.id !== sessionId || session.name === newName) return session
-        entryChanged = true
-        changed = true
-        return { ...session, name: newName }
+  queryClient.setQueriesData<AllSessionsResponse>(
+    { queryKey: ['all-sessions'] },
+    old => {
+      if (!old) return old
+      let changed = false
+      const entries = old.entries.map(entry => {
+        let entryChanged = false
+        const sessions = entry.sessions.map(session => {
+          if (session.id !== sessionId || session.name === newName)
+            return session
+          entryChanged = true
+          changed = true
+          return { ...session, name: newName }
+        })
+        return entryChanged ? { ...entry, sessions } : entry
       })
-      return entryChanged ? { ...entry, sessions } : entry
-    })
-    return changed ? { ...old, entries } : old
-  })
+      return changed ? { ...old, entries } : old
+    }
+  )
   queryClient.setQueriesData<{ items: RecentWorktreeItem[] }>(
     { queryKey: ['recent-worktrees'] },
     old => {
@@ -275,6 +370,11 @@ export function shouldAllowKeybindingThroughOpenOverlay(
   action: KeybindingAction | null,
   uiState: ReturnType<typeof useUIStore.getState>
 ): boolean {
+  // The command palette is itself a dialog; its shortcut must close it again.
+  if (action === 'open_command_palette' && uiState.commandPaletteOpen) {
+    return true
+  }
+
   // GitDiffModal is intentionally a full-screen workflow overlay, but users
   // still need the global "Open in..." picker from there (Cmd/Ctrl+O).
   if (
@@ -414,7 +514,8 @@ export function switchActiveTerminalTabByIndexForShortcut(
 function executeKeybindingAction(
   action: KeybindingAction,
   commandContext: ReturnType<typeof useCommandContext>,
-  queryClient: QueryClient
+  queryClient: QueryClient,
+  bypassConfirm = false
 ) {
   // Canvas-only actions: blocked when the session chat modal is open
   const CANVAS_ONLY_ACTIONS = new Set<KeybindingAction>([
@@ -626,7 +727,12 @@ function executeKeybindingAction(
       if (closeActiveTerminalTabForShortcut()) break
       // Default: close session/worktree
       logger.debug('Keybinding: close_session_or_worktree')
-      window.dispatchEvent(new CustomEvent('close-session-or-worktree'))
+      window.dispatchEvent(
+        new CustomEvent<CloseSessionOrWorktreeDetail>(
+          'close-session-or-worktree',
+          { detail: { bypassConfirm } }
+        )
+      )
       break
     }
     case 'new_worktree':
@@ -786,15 +892,15 @@ function executeKeybindingAction(
       }
       break
     }
-    case 'open_github_dashboard':
-      useUIStore.getState().setGitHubDashboardOpen(true)
-      break
     case 'open_quick_menu':
       window.dispatchEvent(new CustomEvent('toggle-quick-menu'))
       break
-    case 'open_usage_dropdown':
-      window.dispatchEvent(new CustomEvent('toggle-usage-menu'))
+    case 'open_command_palette': {
+      const { commandPaletteOpen, setCommandPaletteOpen } =
+        useUIStore.getState()
+      setCommandPaletteOpen(!commandPaletteOpen)
       break
+    }
     case 'toggle_session_label': {
       logger.debug('Keybinding: toggle_session_label')
       // Works when a session is active (modal open or in session view) or on project canvas
@@ -815,11 +921,19 @@ function executeKeybindingAction(
 
 export function useMainWindowEventListeners() {
   const commandContext = useCommandContext()
+  // Listeners read the latest context through a ref so they are registered
+  // once instead of being torn down whenever the context object changes.
+  const commandContextRef = useLatestRef(commandContext)
   const queryClient = useQueryClient()
   const { data: preferences } = usePreferences()
 
   // Keep keybindings in a ref so the event handler always has the latest
   const keybindingsRef = useRef<KeybindingsMap>(DEFAULT_KEYBINDINGS)
+
+  // Modifier that, held with the close shortcut, skips the confirmation dialog.
+  const bypassModifierRef = useRef<CloseConfirmBypassModifier | undefined>(
+    undefined
+  )
 
   // Update ref when preferences change
   useEffect(() => {
@@ -828,6 +942,10 @@ export function useMainWindowEventListeners() {
       ...(preferences?.keybindings ?? {}),
     }
   }, [preferences?.keybindings])
+
+  useEffect(() => {
+    bypassModifierRef.current = preferences?.close_confirm_bypass_modifier
+  }, [preferences?.close_confirm_bypass_modifier])
 
   // After alt-tab / OS window reactivation, WebViews often leave the document
   // without keyboard focus until a click. Restore the last focused element
@@ -865,7 +983,11 @@ export function useMainWindowEventListeners() {
       if (isPlainSessionTerminalFocused()) return
 
       const keybindings = keybindingsRef.current
-      const matchedAction = findKeybindingAction(shortcut, keybindings)
+      const { matchedAction, bypassConfirm } = resolveShortcutWithBypass(
+        shortcut,
+        keybindings,
+        bypassModifierRef.current
+      )
 
       // Cmd/Ctrl+Enter is also the chat input's explicit steer shortcut. The
       // global approve-plan binding runs in capture phase, so it must yield or
@@ -896,7 +1018,11 @@ export function useMainWindowEventListeners() {
         logger.debug('Cancel prompt shortcut matched', { shortcut })
         e.preventDefault()
         e.stopPropagation()
-        executeKeybindingAction('cancel_prompt', commandContext, queryClient)
+        executeKeybindingAction(
+          'cancel_prompt',
+          commandContextRef.current,
+          queryClient
+        )
         return
       }
 
@@ -946,7 +1072,11 @@ export function useMainWindowEventListeners() {
             addTerminalTabForShortcut()
             return
           }
-          if (shortcut === kb.close_session_or_worktree) {
+          // Match the resolved action, not the raw shortcut string: with the
+          // bypass modifier held the string is e.g. `mod+shift+w`, which the
+          // strip-and-retry above already mapped to this action. Comparing the
+          // raw string would miss it and the `else` below would swallow the key.
+          if (matchedAction === 'close_session_or_worktree') {
             e.preventDefault()
             e.stopPropagation()
             closeActiveTerminalTabForShortcut()
@@ -966,7 +1096,8 @@ export function useMainWindowEventListeners() {
         }
       }
 
-      // Mod+1–9: switch session tabs (when modal open), dashboard tabs, or worktree by index
+      // Mod+1–9: Recent sessions (when the Recent list is
+      // visible), session tabs (when modal open), or worktree by index
       // Use platform mod (Cmd on macOS native, Ctrl elsewhere) so Ctrl+digit reaches terminals.
       if (isModKeyEvent(e) && !e.shiftKey && !e.altKey) {
         // Use e.code (physical key) since e.key can vary with CMD held on macOS
@@ -975,21 +1106,16 @@ export function useMainWindowEventListeners() {
         if (digit >= 1 && digit <= 9) {
           e.preventDefault()
           e.stopPropagation()
-          if (useUIStore.getState().sessionChatModalOpen) {
+          if (isRecentSessionsShortcutActive()) {
             window.dispatchEvent(
-              new CustomEvent('switch-session', {
+              new CustomEvent('open-recent-session-by-index', {
                 detail: { index: digit - 1 },
               })
             )
-          } else if (
-            useUIStore.getState().githubDashboardOpen &&
-            digit >= 1 &&
-            digit <= 4
-          ) {
-            const TAB_MAP = ['issues', 'prs', 'security', 'advisories']
+          } else if (useUIStore.getState().sessionChatModalOpen) {
             window.dispatchEvent(
-              new CustomEvent('switch-dashboard-tab', {
-                detail: { tab: TAB_MAP[digit - 1] },
+              new CustomEvent('switch-session', {
+                detail: { index: digit - 1 },
               })
             )
           } else {
@@ -1052,7 +1178,12 @@ export function useMainWindowEventListeners() {
         }
         e.preventDefault()
         e.stopPropagation()
-        executeKeybindingAction(action, commandContext, queryClient)
+        executeKeybindingAction(
+          action,
+          commandContextRef.current,
+          queryClient,
+          bypassConfirm
+        )
         return
       }
     }
@@ -1083,6 +1214,16 @@ export function useMainWindowEventListeners() {
           store.setWaitingForInput(sessionId, true)
         }),
 
+        // Review jobs have no chat run, so mirror chat:done read handling:
+        // a review that finishes on screen must not show as unread.
+        listen<ReviewJob>('review-job:updated', event => {
+          const { status, sessionId } = event.payload
+          if (status === 'running' || !sessionId) return
+          if (isSessionCurrentlyViewed(sessionId)) {
+            markSessionOpenedWhenSeen(sessionId)
+          }
+        }),
+
         listenLocal('menu-about', async () => {
           logger.debug('About menu event received')
           if (!isNativeApp()) return
@@ -1104,14 +1245,14 @@ export function useMainWindowEventListeners() {
           const ui = useUIStore.getState()
           // Package already installed this session — prompt restart, don't re-offer download
           if (ui.updateReadyVersion) {
-            commandContext.showToast(
+            commandContextRef.current.showToast(
               `Update ${ui.updateReadyVersion} is ready — restart to apply`,
               'success'
             )
             return
           }
           if (ui.isUpdateInstalling) {
-            commandContext.showToast(
+            commandContextRef.current.showToast(
               'Update download already in progress',
               'info'
             )
@@ -1128,20 +1269,23 @@ export function useMainWindowEventListeners() {
               // Show the update modal (same as auto-check on startup)
               useUIStore.getState().setUpdateModalVersion(update.version)
             } else {
-              commandContext.showToast(
+              commandContextRef.current.showToast(
                 'You are running the latest version',
                 'success'
               )
             }
           } catch (error) {
             logger.error('Update check failed:', { error: String(error) })
-            commandContext.showToast('Failed to check for updates', 'error')
+            commandContextRef.current.showToast(
+              'Failed to check for updates',
+              'error'
+            )
           }
         }),
 
         listenLocal('menu-preferences', () => {
           logger.debug('Preferences menu event received')
-          commandContext.openPreferences()
+          commandContextRef.current.openPreferences()
         }),
 
         listenLocal('menu-toggle-left-sidebar', () => {
@@ -1172,7 +1316,7 @@ export function useMainWindowEventListeners() {
           logger.debug('Magic menu event received from native menu')
           executeKeybindingAction(
             'open_magic_modal',
-            commandContext,
+            commandContextRef.current,
             queryClient
           )
         }),
@@ -1181,21 +1325,25 @@ export function useMainWindowEventListeners() {
           logger.debug('Toggle terminal menu event received from native menu')
           executeKeybindingAction(
             'toggle_terminal',
-            commandContext,
+            commandContextRef.current,
             queryClient
           )
         }),
 
         listenLocal('menu-toggle-browser', () => {
           logger.debug('Toggle browser menu event received from native menu')
-          executeKeybindingAction('toggle_browser', commandContext, queryClient)
+          executeKeybindingAction(
+            'toggle_browser',
+            commandContextRef.current,
+            queryClient
+          )
         }),
 
         listenLocal('menu-quick-menu', () => {
           logger.debug('Quick menu event received from native menu')
           executeKeybindingAction(
             'open_quick_menu',
-            commandContext,
+            commandContextRef.current,
             queryClient
           )
         }),
@@ -1373,7 +1521,7 @@ export function useMainWindowEventListeners() {
         }
       })
     }
-  }, [commandContext, queryClient])
+  }, [commandContextRef, queryClient])
 
   // Window close / quit confirmation is owned by useNativeWindowCloseGuard at
   // App root so it stays active during preloading (MainWindow unmounted).

@@ -79,7 +79,7 @@ function renderDesktopToolbarControls(
     onAttach: vi.fn(),
     installedBackends: ['claude', 'codex', 'opencode'],
     onSetExecutionMode: vi.fn(),
-    availableExecutionModes: ['plan', 'build', 'yolo'],
+    availableExecutionModes: ['plan', 'build', 'yolo', 'supervised', 'auto'],
     onToggleMcpServer: vi.fn(),
     handleModelChange: vi.fn(),
     handleBackendModelChange: vi.fn(),
@@ -121,18 +121,18 @@ describe('DesktopToolbarControls', () => {
   })
 
   it.each([
-    ['plan', 'Plan'],
-    ['build', 'Build'],
-    ['yolo', 'Yolo'],
+    ['plan', 'Full access'],
+    ['build', 'Auto-accept edits'],
+    ['yolo', 'Full access'],
   ] as const)('shows %s label in the desktop mode trigger', (mode, label) => {
     renderDesktopToolbarControls({ executionMode: mode })
 
     expect(
-      screen.getByRole('button', { name: new RegExp(`^${label}$`, 'i') })
+      screen.getByRole('button', { name: new RegExp(`^Permissions: ${label}$`, 'i') })
     ).toBeInTheDocument()
   })
 
-  it('keeps mode options selectable from the dropdown', async () => {
+  it('leaves Plan when a permission is selected', async () => {
     const user = userEvent.setup()
     const onSetExecutionMode = vi.fn()
 
@@ -141,12 +141,9 @@ describe('DesktopToolbarControls', () => {
       onSetExecutionMode,
     })
 
-    await user.click(screen.getByRole('button', { name: /^plan$/i }))
-    await user.click(
-      await screen.findByRole('menuitemradio', { name: /build/i })
-    )
-
-    expect(onSetExecutionMode).toHaveBeenCalledWith('build')
+    await user.click(screen.getByRole('button', { name: 'Permissions: Full access' }))
+    await user.click(screen.getByRole('menuitemradio', { name: /Supervised/ }))
+    expect(onSetExecutionMode).toHaveBeenCalledWith('supervised')
   })
 
   it('shows a desktop Magic button that opens the magic modal', async () => {
@@ -189,7 +186,7 @@ describe('DesktopToolbarControls', () => {
       screen.getByRole('button', { name: /choose backend and model/i })
     ).toBeEnabled()
     expect(screen.getByRole('button', { name: /medium/i })).toBeEnabled()
-    expect(screen.getByRole('button', { name: /^plan$/i })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Permissions: Full access' })).toBeEnabled()
   })
 
   it('keeps Claude provider switcher available after messages exist', () => {

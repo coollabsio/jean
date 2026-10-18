@@ -1084,8 +1084,20 @@ fn write_claude_usage_cache_entry(entry: &ClaudeUsageCacheEntry) {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    if let Ok(serialized) = serde_json::to_string_pretty(entry) {
-        let _ = std::fs::write(path, serialized);
+    let Ok(serialized) = serde_json::to_string_pretty(entry) else {
+        return;
+    };
+    // Write to a unique temp file, then rename. Run streams update this cache on
+    // every `rate_limit_event` while the UI reads it; a plain truncate+write lets
+    // a reader see an empty file and report "rate-limited" with no stale data.
+    static WRITE_SEQ: AtomicU64 = AtomicU64::new(0);
+    let seq = WRITE_SEQ.fetch_add(1, Ordering::Relaxed);
+    let tmp = path.with_extension(format!("json.{}.{seq}.tmp", std::process::id()));
+    if std::fs::write(&tmp, serialized)
+        .and_then(|()| std::fs::rename(&tmp, &path))
+        .is_err()
+    {
+        let _ = std::fs::remove_file(&tmp);
     }
 }
 
@@ -1285,17 +1297,84 @@ async fn refresh_claude_access_token(
     Ok(next_oauth.access_token)
 }
 
-/// True when Claude can run via env API key (no OAuth login required).
-fn claude_env_api_key_present() -> bool {
-    std::env::var_os("ANTHROPIC_API_KEY")
-        .map(|v| !v.is_empty())
-        .unwrap_or(false)
+/// Env vars that let Claude run without an Anthropic OAuth login: direct API
+/// key / bearer token, or a third-party provider (Bedrock, Vertex, Foundry).
+const CLAUDE_NON_OAUTH_AUTH_ENV_KEYS: &[&str] = &[
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CODE_USE_FOUNDRY",
+];
+
+fn auth_env_value_enabled(value: &str) -> bool {
+    !matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "" | "0" | "false" | "no" | "off"
+    )
+}
+
+/// True when the Jean process env provides non-OAuth Claude auth.
+fn claude_process_env_provides_auth() -> bool {
+    CLAUDE_NON_OAUTH_AUTH_ENV_KEYS.iter().any(|key| {
+        std::env::var(key)
+            .map(|v| auth_env_value_enabled(&v))
+            .unwrap_or(false)
+    })
+}
+
+/// True when Claude `settings.json` content configures non-OAuth auth via
+/// `apiKeyHelper` or provider/API-key entries in its `env` block.
+fn claude_settings_provide_auth(raw: &str) -> bool {
+    let Ok(settings) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return false;
+    };
+    let has_api_key_helper = settings
+        .get("apiKeyHelper")
+        .and_then(|v| v.as_str())
+        .is_some_and(|v| !v.trim().is_empty());
+    let env_provides_auth = settings
+        .get("env")
+        .and_then(|v| v.as_object())
+        .is_some_and(|env| {
+            CLAUDE_NON_OAUTH_AUTH_ENV_KEYS.iter().any(|key| {
+                env.get(*key)
+                    .and_then(|v| v.as_str())
+                    .is_some_and(auth_env_value_enabled)
+            })
+        });
+    has_api_key_helper || env_provides_auth
+}
+
+/// Read `~/.claude/settings.json` (inside the WSL distro when WSL mode is on,
+/// since the GUI app does not inherit shell env on macOS either).
+fn read_claude_user_settings() -> Option<String> {
+    let wsl = crate::platform::get_wsl_config();
+    if wsl.enabled {
+        let home = crate::platform::get_wsl_home_dir(&wsl.distro).ok()?;
+        let path = format!("{}/.claude/settings.json", home.trim_end_matches('/'));
+        let output = crate::platform::wsl_aware_command("cat", None)
+            .arg(path)
+            .output()
+            .ok()?;
+        return output
+            .status
+            .success()
+            .then(|| String::from_utf8_lossy(&output.stdout).to_string());
+    }
+    let path = dirs::home_dir()?.join(".claude").join("settings.json");
+    std::fs::read_to_string(path).ok()
 }
 
 /// Fallback auth signals when `claude auth status` is false or unavailable.
-/// Covers keychain/credentials.json OAuth tokens and ANTHROPIC_API_KEY.
+/// Covers keychain/credentials.json OAuth tokens, API keys, auth tokens,
+/// third-party providers (Bedrock/Vertex/Foundry) and `apiKeyHelper`, from
+/// either the process env or `~/.claude/settings.json`.
 fn claude_credentials_or_env_authenticated() -> bool {
-    if claude_env_api_key_present() {
+    if claude_process_env_provides_auth() {
+        return true;
+    }
+    if read_claude_user_settings().is_some_and(|raw| claude_settings_provide_auth(&raw)) {
         return true;
     }
     match load_claude_credentials() {
@@ -1682,19 +1761,60 @@ mod tests {
     }
 
     #[test]
-    fn claude_env_api_key_present_when_non_empty() {
-        // SAFETY: test-only env mutation in a single-threaded unit test.
+    fn claude_process_env_detects_third_party_provider() {
+        // SAFETY: test-only env mutation; no other test touches this var.
         unsafe {
-            std::env::remove_var("ANTHROPIC_API_KEY");
+            std::env::set_var("CLAUDE_CODE_USE_FOUNDRY", "1");
         }
-        assert!(!claude_env_api_key_present());
+        assert!(claude_process_env_provides_auth());
         unsafe {
-            std::env::set_var("ANTHROPIC_API_KEY", "sk-test");
+            std::env::remove_var("CLAUDE_CODE_USE_FOUNDRY");
         }
-        assert!(claude_env_api_key_present());
-        unsafe {
-            std::env::remove_var("ANTHROPIC_API_KEY");
+    }
+
+    #[test]
+    fn auth_env_value_enabled_rejects_falsey_values() {
+        assert!(auth_env_value_enabled("1"));
+        assert!(auth_env_value_enabled("true"));
+        assert!(auth_env_value_enabled("sk-ant-123"));
+        for value in ["", " ", "0", "false", "FALSE", "no", "off"] {
+            assert!(!auth_env_value_enabled(value), "{value:?}");
         }
+    }
+
+    #[test]
+    fn claude_settings_auth_detects_providers_and_helpers() {
+        assert!(claude_settings_provide_auth(
+            r#"{"env":{"CLAUDE_CODE_USE_BEDROCK":"1","AWS_REGION":"us-east-1"}}"#
+        ));
+        assert!(claude_settings_provide_auth(
+            r#"{"env":{"CLAUDE_CODE_USE_VERTEX":"true"}}"#
+        ));
+        assert!(claude_settings_provide_auth(
+            r#"{"env":{"CLAUDE_CODE_USE_FOUNDRY":"1"}}"#
+        ));
+        assert!(claude_settings_provide_auth(
+            r#"{"env":{"ANTHROPIC_AUTH_TOKEN":"tok"}}"#
+        ));
+        assert!(claude_settings_provide_auth(
+            r#"{"env":{"ANTHROPIC_API_KEY":"sk-ant"}}"#
+        ));
+        assert!(claude_settings_provide_auth(
+            r#"{"apiKeyHelper":"~/bin/get-key.sh"}"#
+        ));
+    }
+
+    #[test]
+    fn claude_settings_auth_ignores_disabled_or_missing_entries() {
+        assert!(!claude_settings_provide_auth("{}"));
+        assert!(!claude_settings_provide_auth("not json"));
+        assert!(!claude_settings_provide_auth(r#"{"apiKeyHelper":"  "}"#));
+        assert!(!claude_settings_provide_auth(
+            r#"{"env":{"CLAUDE_CODE_USE_BEDROCK":"0","ANTHROPIC_API_KEY":""}}"#
+        ));
+        assert!(!claude_settings_provide_auth(
+            r#"{"env":{"ANTHROPIC_BASE_URL":"https://example.com"}}"#
+        ));
     }
 
     #[test]

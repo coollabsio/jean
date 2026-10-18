@@ -1,12 +1,5 @@
 import { useMemo } from 'react'
 import {
-  Bug,
-  GitPullRequest,
-  ShieldAlert,
-  Siren,
-} from '@/components/icons/reicon'
-import type { LucideIcon } from '@/components/icons/reicon'
-import {
   filterAdvisories,
   filterIssues,
   filterPRs,
@@ -39,7 +32,6 @@ import type {
   RepositoryAdvisory,
 } from '@/types/github'
 import type { LinearIssue } from '@/types/linear'
-import { LinearIcon } from '@/components/icons/LinearIcon'
 
 export type ContextMentionType =
   | 'issue'
@@ -53,9 +45,7 @@ export interface ContextMentionItem {
   type: ContextMentionType
   label: string
   title: string
-  subtitle?: string
   badge?: string
-  icon: LucideIcon
   issue?: GitHubIssue
   pr?: GitHubPullRequest
   securityAlert?: DependabotAlert
@@ -87,9 +77,6 @@ function issueToItem(issue: GitHubIssue): ContextMentionItem {
     type: 'issue',
     label: `#${issue.number}`,
     title: issue.title,
-    subtitle: `${issue.state} issue by ${issue.author.login}`,
-    badge: issue.state,
-    icon: Bug,
     issue,
   }
 }
@@ -100,9 +87,7 @@ function prToItem(pr: GitHubPullRequest): ContextMentionItem {
     type: 'pr',
     label: `PR #${pr.number}`,
     title: pr.title,
-    subtitle: `${pr.state} ${pr.baseRefName} ← ${pr.headRefName}`,
-    badge: pr.isDraft ? 'draft' : pr.state,
-    icon: GitPullRequest,
+    badge: pr.isDraft ? 'draft' : undefined,
     pr,
   }
 }
@@ -113,9 +98,7 @@ function securityToItem(alert: DependabotAlert): ContextMentionItem {
     type: 'security',
     label: `Security #${alert.number}`,
     title: alert.summary,
-    subtitle: `${alert.packageName} in ${alert.manifestPath}`,
     badge: alert.severity,
-    icon: ShieldAlert,
     securityAlert: alert,
   }
 }
@@ -126,10 +109,7 @@ function advisoryToItem(advisory: RepositoryAdvisory): ContextMentionItem {
     type: 'advisory',
     label: advisory.ghsaId,
     title: advisory.summary,
-    subtitle:
-      advisory.cveId ?? `${advisory.vulnerabilities.length} vulnerabilities`,
     badge: advisory.severity,
-    icon: Siren,
     advisory,
   }
 }
@@ -140,9 +120,7 @@ function linearToItem(issue: LinearIssue): ContextMentionItem {
     type: 'linear',
     label: issue.identifier,
     title: issue.title,
-    subtitle: `${issue.state.name}${issue.assignee ? ` • ${issue.assignee.displayName}` : ''}`,
     badge: issue.priorityLabel,
-    icon: LinearIcon,
     linearIssue: issue,
   }
 }

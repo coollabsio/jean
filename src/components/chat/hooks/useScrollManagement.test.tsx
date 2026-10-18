@@ -102,15 +102,14 @@ function setupHook({
     msgs: ChatMessage[]
     sending: boolean
   }) {
-    const { isAtBottom, scrollViewportRef, handleScroll } = useScrollManagement(
-      {
+    const { isAtBottom, scrollViewportRef, handleScroll, stopFollowingTail } =
+      useScrollManagement({
         messages: msgs,
         virtualizedListRef,
         activeSessionId: sessionId,
         contentReady: ready,
         isSending: sending,
-      }
-    )
+      })
 
     return (
       <div
@@ -124,6 +123,7 @@ function setupHook({
         onScroll={handleScroll}
       >
         <span data-testid="is-at-bottom">{String(isAtBottom)}</span>
+        <button data-testid="stop-follow" onClick={stopFollowingTail} />
         <div data-testid="content">
           <div data-plan-display data-testid="plan" />
         </div>
@@ -268,6 +268,17 @@ describe('useScrollManagement streaming auto-scroll', () => {
     expect(viewport.scrollTop).toBe(1500)
   })
 
+  it('does not snap back to the tail after a programmatic jump away', async () => {
+    isMobile = true
+    const { getByTestId, viewport } = setupHook()
+
+    fireEvent.click(getByTestId('stop-follow'))
+    viewport.scrollTop = 500
+    await triggerResize()
+
+    expect(viewport.scrollTop).toBe(500)
+  })
+
   it('resumes streaming auto-scroll after the user returns to bottom', async () => {
     isMobile = true
     const { viewport } = setupHook()
@@ -309,6 +320,35 @@ describe('useScrollManagement streaming auto-scroll', () => {
     })
 
     expect(getByTestId('is-at-bottom')).toHaveTextContent('false')
+  })
+
+  it('stays at bottom when a nested scroller consumes an upward wheel', () => {
+    const { getByTestId } = setupHook({ isSending: false })
+    const nested = getByTestId('content')
+    nested.style.overflowY = 'auto'
+    defineReadonlyNumber(nested, 'clientHeight', 100)
+    defineReadonlyNumber(nested, 'scrollHeight', 300)
+    nested.scrollTop = 50
+
+    act(() => {
+      nested.dispatchEvent(
+        new WheelEvent('wheel', { deltaY: -100, bubbles: true })
+      )
+    })
+
+    expect(getByTestId('is-at-bottom')).toHaveTextContent('true')
+  })
+
+  it('stays at bottom on horizontal swipes with vertical jitter', () => {
+    const { getByTestId, viewport } = setupHook({ isSending: false })
+
+    act(() => {
+      viewport.dispatchEvent(
+        new WheelEvent('wheel', { deltaX: 40, deltaY: -2 })
+      )
+    })
+
+    expect(getByTestId('is-at-bottom')).toHaveTextContent('true')
   })
 
   it('resets stale away-from-bottom state when content no longer overflows', async () => {
@@ -572,11 +612,12 @@ describe('useScrollManagement session scroll retention (issue #594)', () => {
       visibleCount: 40,
     })
 
-    const { viewport, getByTestId, rerenderSession, setScrollHeight } = setupHook({
-      isSending: false,
-      activeSessionId: 'session-a',
-      messages: makeMessages(10),
-    })
+    const { viewport, getByTestId, rerenderSession, setScrollHeight } =
+      setupHook({
+        isSending: false,
+        activeSessionId: 'session-a',
+        messages: makeMessages(10),
+      })
 
     // The new session first renders with the previous session's short history
     // window, so there is temporarily no scrollable overflow.

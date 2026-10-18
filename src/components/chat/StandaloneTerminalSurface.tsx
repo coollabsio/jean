@@ -210,6 +210,7 @@ export function StandaloneTerminalSurface({
       </div>
       {showExtraKeys && (
         <TerminalExtraKeysBar
+          key={terminalId}
           terminalId={terminalId}
           keyboardOpen={keyboardInset > 0}
         />

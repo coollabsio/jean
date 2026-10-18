@@ -245,6 +245,8 @@ fn merge_assistant_message(response: &mut PiResponse, message: &Value) {
                     input,
                     output: None,
                     parent_tool_use_id: None,
+                    is_error: None,
+                    subagent_usage: None,
                 });
                 response
                     .content_blocks
@@ -413,6 +415,8 @@ fn merge_pi_line(response: &mut PiResponse, value: &Value) {
                 input,
                 output: None,
                 parent_tool_use_id: None,
+                is_error: None,
+                subagent_usage: None,
             });
             response
                 .content_blocks

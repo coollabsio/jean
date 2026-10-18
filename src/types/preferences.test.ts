@@ -118,11 +118,11 @@ describe('magic prompt preference resolvers', () => {
     expect(defaultPreferences.default_grok_reasoning_effort).toBe('high')
   })
 
-  it('defaults Claude to Opus 4.8 and Codex/OpenCode to GPT 5.6 Sol', () => {
-    expect(defaultPreferences.selected_model).toBe('claude-opus-4-8[1m]')
-    expect(defaultPreferences.selected_codex_model).toBe('gpt-5.6-sol')
+  it('defaults Claude to Opus 5.5 and Codex/OpenCode to GPT 6.1 Sol', () => {
+    expect(defaultPreferences.selected_model).toBe('claude-opus-5-5')
+    expect(defaultPreferences.selected_codex_model).toBe('gpt-6.1-sol')
     expect(defaultPreferences.selected_opencode_model).toBe(
-      'opencode/gpt-5.6-sol'
+      'opencode/gpt-6.1-sol'
     )
     expect(defaultPreferences.default_codex_model_verbosity).toBe('medium')
   })
@@ -148,7 +148,7 @@ describe('magic prompt preference resolvers', () => {
   it('provides dedicated defaults for Sentry investigations', () => {
     expect(
       defaultPreferences.magic_prompt_models.investigate_sentry_issue_model
-    ).toBe('claude-opus-4-8[1m]')
+    ).toBe('claude-opus-5-5')
     expect(
       defaultPreferences.magic_prompt_modes.investigate_sentry_issue_mode
     ).toBe('plan')
@@ -204,9 +204,13 @@ describe('magic prompt preference resolvers', () => {
     expect(defaultPreferences.auto_recaps_enabled).toBe(true)
   })
 
-  it('enables Codex multi-agent by default with parallel prompting', () => {
-    expect(defaultPreferences.parallel_execution_prompt_enabled).toBe(true)
-    expect(defaultPreferences.codex_multi_agent_enabled).toBe(true)
+  it('always-on parallel prompting falls back to the default prompt', () => {
+    expect(defaultPreferences).not.toHaveProperty(
+      'parallel_execution_prompt_enabled'
+    )
+    expect(defaultPreferences).not.toHaveProperty('codex_multi_agent_enabled')
+    expect(defaultPreferences).not.toHaveProperty('codex_max_agent_threads')
+    expect(defaultPreferences.magic_prompts.parallel_execution).toBeNull()
   })
 
   it('prefers explicit backend overrides', () => {

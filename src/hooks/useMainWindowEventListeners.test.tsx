@@ -16,6 +16,7 @@ import {
   hasBlockingOpenOverlay,
   handleRunEnvironmentStarted,
   isPlainSessionTerminalFocused,
+  resolveShortcutWithBypass,
   shouldAllowKeybindingThroughOpenOverlay,
   shouldLetChatInputHandleAction,
   shouldLetPlanDialogHandleAction,
@@ -48,6 +49,102 @@ describe('shouldLetChatInputHandleAction', () => {
     expect(shouldLetChatInputHandleAction('approve_plan', input, true)).toBe(
       false
     )
+  })
+
+  it('lets Cmd/Ctrl+Arrow move the caret when it is not at the text edge', () => {
+    const input = document.createElement('textarea')
+    input.value = 'draft'
+
+    input.setSelectionRange(2, 2)
+    expect(shouldLetChatInputHandleAction('next_session', input, false)).toBe(
+      true
+    )
+    expect(
+      shouldLetChatInputHandleAction('previous_session', input, false)
+    ).toBe(true)
+
+    // A text selection always belongs to the field
+    input.setSelectionRange(0, 5)
+    expect(shouldLetChatInputHandleAction('next_session', input, false)).toBe(
+      true
+    )
+  })
+
+  it('switches sessions when the caret is already at the text edge', () => {
+    const input = document.createElement('textarea')
+    input.value = 'draft'
+
+    input.setSelectionRange(5, 5)
+    expect(shouldLetChatInputHandleAction('next_session', input, false)).toBe(
+      false
+    )
+    expect(
+      shouldLetChatInputHandleAction('previous_session', input, false)
+    ).toBe(true)
+
+    input.setSelectionRange(0, 0)
+    expect(
+      shouldLetChatInputHandleAction('previous_session', input, false)
+    ).toBe(false)
+    expect(shouldLetChatInputHandleAction('next_session', input, false)).toBe(
+      true
+    )
+  })
+
+  it('switches sessions from an empty text field or a non-text target', () => {
+    const input = document.createElement('textarea')
+
+    expect(shouldLetChatInputHandleAction('next_session', input, false)).toBe(
+      false
+    )
+    expect(
+      shouldLetChatInputHandleAction('previous_session', document.body, false)
+    ).toBe(false)
+  })
+})
+
+describe('resolveShortcutWithBypass', () => {
+  it('maps the modifier-decorated close shortcut to the close action and flags bypass', () => {
+    // Shift held → `mod+shift+w`, which is unbound; strip Shift → `mod+w`.
+    expect(
+      resolveShortcutWithBypass('mod+shift+w', DEFAULT_KEYBINDINGS, 'shift')
+    ).toEqual({
+      matchedAction: 'close_session_or_worktree',
+      bypassConfirm: true,
+    })
+  })
+
+  it('maps the plain close shortcut without a bypass flag', () => {
+    expect(
+      resolveShortcutWithBypass('mod+w', DEFAULT_KEYBINDINGS, 'shift')
+    ).toEqual({
+      matchedAction: 'close_session_or_worktree',
+      bypassConfirm: false,
+    })
+  })
+
+  it('does not strip-and-retry when the bypass modifier is off', () => {
+    expect(
+      resolveShortcutWithBypass('mod+shift+w', DEFAULT_KEYBINDINGS, 'none')
+    ).toEqual({ matchedAction: null, bypassConfirm: false })
+  })
+
+  it('rejects the retry when the stripped shortcut maps to a non-close action', () => {
+    // Alt held → `mod+alt+t` (unbound); strip Alt → `mod+t` = new_session.
+    // Narrow acceptance: only the close action may ride the stripped retry.
+    expect(
+      resolveShortcutWithBypass('mod+alt+t', DEFAULT_KEYBINDINGS, 'alt')
+    ).toEqual({ matchedAction: null, bypassConfirm: false })
+  })
+
+  it('prefers a direct user binding of the decorated shortcut over the bypass', () => {
+    const keybindings = {
+      ...DEFAULT_KEYBINDINGS,
+      new_worktree: 'mod+shift+w',
+    }
+    expect(
+      resolveShortcutWithBypass('mod+shift+w', keybindings, 'shift')
+    ).toEqual({ matchedAction: 'new_worktree', bypassConfirm: false })
   })
 })
 
@@ -229,7 +326,6 @@ describe('useMainWindowEventListeners terminal shortcuts', () => {
       updatePrModalOpen: false,
       planDialogOpen: false,
       gitDiffModalOpen: false,
-      githubDashboardOpen: false,
       sessionPrimarySurface: {},
       sessionTerminalIds: {},
       newSessionModeTarget: null,
@@ -550,6 +646,7 @@ describe('dialog overlay keybinding passthrough', () => {
     useUIStore.setState({
       gitDiffModalOpen: false,
       openInModalOpen: false,
+      commandPaletteOpen: false,
     })
   })
 
@@ -582,6 +679,24 @@ describe('dialog overlay keybinding passthrough', () => {
         useUIStore.getState()
       )
     ).toBe(false)
+  })
+
+  it('lets the command palette shortcut close the open palette only', () => {
+    expect(
+      shouldAllowKeybindingThroughOpenOverlay(
+        'open_command_palette',
+        useUIStore.getState()
+      )
+    ).toBe(false)
+
+    useUIStore.setState({ commandPaletteOpen: true })
+
+    expect(
+      shouldAllowKeybindingThroughOpenOverlay(
+        'open_command_palette',
+        useUIStore.getState()
+      )
+    ).toBe(true)
   })
 
   it('does not allow Open In through other dialogs', () => {
@@ -709,6 +824,20 @@ describe('applySessionRenamedToCaches', () => {
 })
 
 describe('applyCacheInvalidationKeys', () => {
+  it('refreshes the multi-server sidebar project list on project changes', () => {
+    const queryClient = new QueryClient()
+    const multiServerKey = ['multi-server', 'projects', 'server-1:true']
+    queryClient.setQueryData(projectsQueryKeys.list(), [])
+    queryClient.setQueryData(multiServerKey, [])
+
+    applyCacheInvalidationKeys(queryClient, ['projects'])
+
+    expect(
+      queryClient.getQueryState(projectsQueryKeys.list())?.isInvalidated
+    ).toBe(true)
+    expect(queryClient.getQueryState(multiServerKey)?.isInvalidated).toBe(true)
+  })
+
   it('refreshes Recent when a first prompt is persisted', () => {
     const queryClient = new QueryClient()
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
@@ -719,6 +848,19 @@ describe('applyCacheInvalidationKeys', () => {
       queryKey: ['recent-worktrees'],
     })
     expect(invalidateSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('refreshes the finished-sessions bell when a new run starts', () => {
+    const queryClient = new QueryClient()
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    applyCacheInvalidationKeys(queryClient, ['unread-sessions'])
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['unread-session-count'],
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['all-sessions'] })
+    expect(invalidateSpy).toHaveBeenCalledTimes(2)
   })
 
   it('refreshes Claude usage when a run reports rate-limit usage', () => {
@@ -782,5 +924,16 @@ describe('applyCacheInvalidationKeys', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ['all-sessions'],
     })
+  })
+})
+
+describe('removed keybindings', () => {
+  it('ignores obsolete shortcuts saved in preferences', () => {
+    expect(
+      findKeybindingAction('mod+shift+d', {
+        ...DEFAULT_KEYBINDINGS,
+        open_github_dashboard: 'mod+shift+d',
+      })
+    ).toBeNull()
   })
 })

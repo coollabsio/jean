@@ -51,8 +51,9 @@ pub fn next_poll_interval(had_data: bool, quiet_for: Duration) -> Duration {
 /// since the last poll.
 pub struct NdjsonTailer {
     reader: BufReader<File>,
-    /// Buffer for incomplete lines (no trailing newline yet)
-    buffer: String,
+    /// Raw bytes of an incomplete line (no trailing newline yet). Kept as bytes
+    /// so a multi-byte UTF-8 character split across writes is not rejected.
+    buffer: Vec<u8>,
 }
 
 impl NdjsonTailer {
@@ -73,7 +74,7 @@ impl NdjsonTailer {
 
         Ok(Self {
             reader,
-            buffer: String::new(),
+            buffer: Vec::new(),
         })
     }
 
@@ -88,7 +89,7 @@ impl NdjsonTailer {
 
         Ok(Self {
             reader,
-            buffer: String::new(),
+            buffer: Vec::new(),
         })
     }
 
@@ -96,29 +97,25 @@ impl NdjsonTailer {
     ///
     /// Returns a vector of complete lines (without trailing newlines).
     /// Incomplete lines (no newline yet) are buffered until complete.
+    /// Invalid UTF-8 is replaced with U+FFFD instead of failing the run.
     pub fn poll(&mut self) -> Result<Vec<String>, String> {
         let mut lines = Vec::new();
 
         loop {
-            let mut line = String::new();
-            match self.reader.read_line(&mut line) {
+            match self.reader.read_until(b'\n', &mut self.buffer) {
                 Ok(0) => {
                     // EOF reached, no more data available right now
                     break;
                 }
                 Ok(_) => {
-                    // Add to buffer
-                    self.buffer.push_str(&line);
-
-                    // Check if we have a complete line (ends with newline)
-                    if self.buffer.ends_with('\n') {
-                        // Remove the trailing newline and add to results
-                        let complete_line = self.buffer.trim_end_matches(['\n', '\r']).to_string();
-                        lines.push(complete_line);
+                    // Only emit complete lines; keep partial data buffered
+                    if self.buffer.ends_with(b"\n") {
+                        let line = String::from_utf8_lossy(&self.buffer);
+                        lines.push(line.trim_end_matches(['\n', '\r']).to_string());
                         self.buffer.clear();
                     }
-                    // If no newline, keep buffering (incomplete line)
                 }
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(e) => {
                     return Err(format!("Error reading line: {e}"));
                 }
@@ -136,7 +133,8 @@ impl NdjsonTailer {
 
     /// Drain and return any buffered incomplete data.
     pub fn drain_buffer(&mut self) -> String {
-        std::mem::take(&mut self.buffer)
+        let bytes = std::mem::take(&mut self.buffer);
+        String::from_utf8_lossy(&bytes).into_owned()
     }
 }
 
@@ -338,8 +336,41 @@ mod tests {
 
         let lines = tailer.poll().unwrap();
         assert_eq!(lines.len(), 1);
-        // trim_end_matches('\n') leaves \r, but that's OK for JSON parsing
-        assert!(lines[0].contains(r#""type": "crlf""#));
+        assert_eq!(lines[0], r#"{"type": "crlf"}"#);
+    }
+
+    #[test]
+    fn test_tailer_multibyte_char_split_across_writes() {
+        let mut file = NamedTempFile::new().unwrap();
+        let path = file.path().to_path_buf();
+        let mut tailer = NdjsonTailer::new_from_start(&path).unwrap();
+
+        // "é" is 0xC3 0xA9 — write only the first byte of it.
+        file.write_all(b"{\"text\": \"caf\xC3").unwrap();
+        file.flush().unwrap();
+        assert!(tailer.poll().unwrap().is_empty());
+        assert!(tailer.has_incomplete_data());
+
+        file.write_all(b"\xA9\"}\n").unwrap();
+        file.flush().unwrap();
+        let lines = tailer.poll().unwrap();
+        assert_eq!(lines, vec![r#"{"text": "café"}"#.to_string()]);
+    }
+
+    #[test]
+    fn test_tailer_invalid_utf8_is_replaced_not_fatal() {
+        let mut file = NamedTempFile::new().unwrap();
+        let path = file.path().to_path_buf();
+        let mut tailer = NdjsonTailer::new_from_start(&path).unwrap();
+
+        file.write_all(b"bad \xFF byte\n").unwrap();
+        writeln!(file, r#"{{"type": "next"}}"#).unwrap();
+        file.flush().unwrap();
+
+        let lines = tailer.poll().unwrap();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0], "bad \u{FFFD} byte");
+        assert!(lines[1].contains("next"));
     }
 
     #[test]

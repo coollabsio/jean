@@ -18,7 +18,7 @@ import { cn } from '@/lib/utils'
 import { invoke, invokeForServer } from '@/lib/transport'
 import { parseServerResourceKey } from '@/lib/server-resource'
 import { useQueryClient } from '@tanstack/react-query'
-import { chatQueryKeys, useAllSessions } from '@/services/chat'
+import { chatQueryKeys, useUnreadSessions } from '@/services/chat'
 import { usePreferences } from '@/services/preferences'
 import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
@@ -73,42 +73,42 @@ function getSessionStatus(session: Session, isSending: boolean) {
     return {
       icon: AlertTriangle,
       label: 'Permission required',
-      className: 'text-yellow-500',
+      className: 'text-warning',
     }
   }
   if (hasCodexCommand) {
     return {
       icon: AlertTriangle,
       label: 'Command approval required',
-      className: 'text-yellow-500',
+      className: 'text-warning',
     }
   }
   if (hasCodexTool) {
     return {
       icon: AlertTriangle,
       label: 'Tool approval required',
-      className: 'text-yellow-500',
+      className: 'text-warning',
     }
   }
   if (hasCodexMcp) {
     return {
       icon: HelpCircle,
       label: 'MCP input required',
-      className: 'text-yellow-500',
+      className: 'text-warning',
     }
   }
   if (hasCodexUserInput) {
     return {
       icon: HelpCircle,
       label: 'Input required',
-      className: 'text-yellow-500',
+      className: 'text-warning',
     }
   }
   if (isSending) {
     return {
       icon: Loader2,
       label: 'Running',
-      className: 'text-green-500 animate-spin',
+      className: 'text-foreground animate-spin dark:text-success',
     }
   }
   if (session.waiting_for_input) {
@@ -116,14 +116,14 @@ function getSessionStatus(session: Session, isSending: boolean) {
     return {
       icon: isPlan ? FileText : HelpCircle,
       label: isPlan ? 'Plan approval required' : 'Input required',
-      className: 'text-yellow-500',
+      className: 'text-warning',
     }
   }
   if (session.scheduled_wakeup) {
     return {
       icon: CirclePause,
       label: 'Scheduled',
-      className: 'text-cyan-500',
+      className: 'text-info',
     }
   }
   const config: Record<
@@ -133,7 +133,7 @@ function getSessionStatus(session: Session, isSending: boolean) {
     completed: {
       icon: CheckCircle2,
       label: 'Completed',
-      className: 'text-green-500',
+      className: 'text-success',
     },
     cancelled: {
       icon: CirclePause,
@@ -169,7 +169,8 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
   const { data: preferences } = usePreferences()
   const animationEnabled =
     preferences?.finished_session_animation_enabled ?? true
-  const { data: allSessions, isLoading, isFetching } = useAllSessions(open)
+  // Unread-only query: staleTime 0 refetches on open, cached rows show meanwhile.
+  const { data: allSessions, isLoading, isFetching } = useUnreadSessions(open)
   const sendingSessionIds = useChatStore(state => state.sendingSessionIds)
   // Listen for command palette event to open the popover
   useEffect(() => {
@@ -179,13 +180,13 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
       window.removeEventListener('command:open-unread-sessions', handler)
   }, [])
 
-  // Invalidate cache each time popover opens
+  // Refresh the count each time popover opens. The unread list refetches by
+  // itself on enable; invalidating it too would cancel and restart that fetch.
   useEffect(() => {
     if (open) {
       queryClient.invalidateQueries({
         queryKey: chatQueryKeys.unreadSessionCount(),
       })
-      queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
       setFocusedIndex(0)
     }
   }, [open, queryClient])
@@ -267,7 +268,7 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
     (sessionIds: string[]) => {
       const now = Math.floor(Date.now() / 1000)
       const sessionIdSet = new Set(sessionIds)
-      queryClient.setQueryData(['all-sessions'], old => {
+      queryClient.setQueriesData({ queryKey: ['all-sessions'] }, old => {
         if (!old) return old
         const data = old as { entries?: { sessions?: Session[] }[] }
         if (!data.entries) return old
@@ -384,9 +385,10 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
 
       // Queue auto-open via store so it survives lazy-mount + Suspense + remount.
       // ProjectCanvasView consumes pendingAutoOpenSessionIds in its own effect.
-      useUIStore
-        .getState()
-        .markWorktreeForAutoOpenSession(item.worktreeId, item.session.id)
+      const ui = useUIStore.getState()
+      ui.markWorktreeForAutoOpenSession(item.worktreeId, item.session.id)
+      // Leave the Agents page so the project canvas can open the session
+      ui.setRailSection('workspace')
 
       // Mark read AFTER auto-open is queued so unreadCount->0 unmount can't race
       // the modal-open path. Bell popover closes via the unreadCount===0 check.
@@ -494,7 +496,7 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
           <button
             type="button"
             onClick={handleTriggerClick}
-            className="relative z-[1] flex items-center gap-1.5 truncate rounded-md bg-background px-1.5 text-sm font-medium text-yellow-400 cursor-pointer"
+            className="relative z-[1] flex items-center gap-1.5 truncate rounded-md bg-background px-1.5 text-sm font-medium text-warning cursor-pointer"
           >
             <BellDot
               className={cn(
@@ -520,7 +522,6 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
         className="w-[min(440px,calc(100vw-2rem))] p-0"
         tabIndex={-1}
         onKeyDown={handleKeyDown}
-        onEscapeKeyDown={e => e.stopPropagation()}
         onOpenAutoFocus={e => {
           e.preventDefault()
           contentRef.current?.focus()

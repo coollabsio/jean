@@ -65,7 +65,7 @@ export function SentryIssueItem({
       {isCreating ? (
         <Loader2 className="h-4 w-4 mt-0.5 animate-spin text-muted-foreground shrink-0" />
       ) : (
-        <AlertTriangle className="h-4 w-4 mt-0.5 text-orange-500 shrink-0" />
+        <AlertTriangle className="h-4 w-4 mt-0.5 text-warning shrink-0" />
       )}
       <button
         type="button"
@@ -141,7 +141,7 @@ export function SentryIssueItem({
             aria-label="Investigate"
             className="inline-flex h-6 w-6 items-center justify-center rounded text-foreground/80 hover:bg-muted disabled:opacity-30"
           >
-            <Wand2 className="h-3 w-3 dark:text-yellow-400" />
+            <Wand2 className="h-3 w-3" />
           </button>
         </TooltipTrigger>
         <TooltipContent>Investigate ({getModifierSymbol()}+M)</TooltipContent>

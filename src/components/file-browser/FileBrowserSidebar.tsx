@@ -331,6 +331,17 @@ export function FileBrowserSidebar({ className }: FileBrowserSidebarProps) {
           </TooltipTrigger>
           <TooltipContent side="bottom">Refresh</TooltipContent>
         </Tooltip>
+        {isMobile && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 shrink-0"
+            onClick={() => setFileBrowserVisible(false)}
+            aria-label="Close file browser"
+          >
+            <X className="size-4" />
+          </Button>
+        )}
       </div>
 
       {/* Tree */}

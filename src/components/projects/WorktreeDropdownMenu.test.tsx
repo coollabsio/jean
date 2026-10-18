@@ -58,6 +58,7 @@ vi.mock('./useWorktreeMenuActions', () => ({
   useWorktreeMenuActions: () => ({
     showDeleteConfirm: false,
     setShowDeleteConfirm: vi.fn(),
+    deleteSkipTeardown: false,
     isBase: false,
     runScripts: actionMocks.runScripts,
     preferences: {},
@@ -67,6 +68,7 @@ vi.mock('./useWorktreeMenuActions', () => ({
     handleOpenInTerminal: vi.fn(),
     handleOpenInEditor: vi.fn(),
     handleArchiveOrClose: vi.fn(),
+    openDeleteConfirm: vi.fn(),
     handleDelete: vi.fn(),
   }),
 }))
@@ -112,6 +114,46 @@ describe('WorktreeDropdownMenu', () => {
 
     expect(screen.queryByRole('menuitem', { name: /run/i })).toBeNull()
     expect(actionMocks.handleRun).not.toHaveBeenCalled()
+  })
+
+  it('shows the Git item in web access when there are no changes', async () => {
+    const user = userEvent.setup()
+    const onUncommittedDiffClick = vi.fn()
+    envMocks.isMobile = false
+
+    render(
+      <WorktreeDropdownMenu
+        worktree={worktree}
+        projectId="project-1"
+        projectPath="/tmp/project"
+        onUncommittedDiffClick={onUncommittedDiffClick}
+      />
+    )
+
+    await user.click(screen.getByRole('button'))
+    await user.click(screen.getByRole('menuitem', { name: 'Git' }))
+
+    expect(onUncommittedDiffClick).toHaveBeenCalled()
+  })
+
+  it('hides the Git item on native desktop', async () => {
+    const user = userEvent.setup()
+    envMocks.isNativeApp = true
+    envMocks.isMobile = false
+
+    render(
+      <WorktreeDropdownMenu
+        worktree={worktree}
+        projectId="project-1"
+        projectPath="/tmp/project"
+        uncommittedAdded={3}
+        onUncommittedDiffClick={vi.fn()}
+      />
+    )
+
+    await user.click(screen.getByRole('button'))
+
+    expect(screen.queryByRole('menuitem', { name: /^git/i })).toBeNull()
   })
 
   it('hides open-in editor/terminal/finder on remote connections without native open', async () => {

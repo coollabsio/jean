@@ -328,7 +328,7 @@ function ReleaseItem({
             {release.name || release.tagName}
           </span>
           {release.isLatest && (
-            <span className="rounded bg-green-500/10 px-1.5 py-0.5 text-xs text-green-600">
+            <span className="rounded bg-success/10 px-1.5 py-0.5 text-xs text-success">
               Latest
             </span>
           )}

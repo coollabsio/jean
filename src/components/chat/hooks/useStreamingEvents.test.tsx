@@ -127,7 +127,9 @@ describe('useStreamingEvents sending mode sync', () => {
     renderHook(() => useStreamingEvents({ queryClient }), {
       wrapper: createWrapper(queryClient),
     })
-    await waitFor(() => expect(registeredListeners.has('chat:sending')).toBe(true))
+    await waitFor(() =>
+      expect(registeredListeners.has('chat:sending')).toBe(true)
+    )
 
     // Rust removes the first prompt from its queue, then reports the exact
     // prompt that it started. The second prompt remains queued.
@@ -146,14 +148,16 @@ describe('useStreamingEvents sending mode sync', () => {
     })
 
     expect(
-      queryClient.getQueryData<{ messages: { content: string }[] }>([
-        'chat',
-        'session',
-        'session-1',
-      ])?.messages.map(message => message.content)
+      queryClient
+        .getQueryData<{
+          messages: { content: string }[]
+        }>(['chat', 'session', 'session-1'])
+        ?.messages.map(message => message.content)
     ).toEqual(['first queued prompt'])
     expect(
-      useChatStore.getState().messageQueues['session-1']?.map(message => message.id)
+      useChatStore
+        .getState()
+        .messageQueues['session-1']?.map(message => message.id)
     ).toEqual(['second'])
   })
 
@@ -222,17 +226,21 @@ describe('useStreamingEvents sending mode sync', () => {
     })
     useChatStore.setState({
       pendingPermissionDenials: {
-        'session-1': [{
-          tool_name: 'Bash',
-          tool_use_id: 'old-denial',
-          tool_input: {},
-        }],
+        'session-1': [
+          {
+            tool_name: 'Bash',
+            tool_use_id: 'old-denial',
+            tool_input: {},
+          },
+        ],
       },
     })
     renderHook(() => useStreamingEvents({ queryClient }), {
       wrapper: createWrapper(queryClient),
     })
-    await waitFor(() => expect(registeredListeners.has('chat:sending')).toBe(true))
+    await waitFor(() =>
+      expect(registeredListeners.has('chat:sending')).toBe(true)
+    )
 
     registeredListeners.get('chat:sending')?.({
       payload: {
@@ -243,7 +251,9 @@ describe('useStreamingEvents sending mode sync', () => {
       },
     })
 
-    expect(useChatStore.getState().pendingPermissionDenials['session-1']).toBeUndefined()
+    expect(
+      useChatStore.getState().pendingPermissionDenials['session-1']
+    ).toBeUndefined()
     expect(
       queryClient.getQueryData<{ pending_permission_denials: unknown[] }>([
         'chat',
@@ -1172,6 +1182,68 @@ describe('useStreamingEvents cancellation sanitization', () => {
     expect(useChatStore.getState().isSessionReviewing('session-1')).toBe(true)
   })
 
+  it('keeps the sent prompt on chat:error after tool calls without text', async () => {
+    const queryClient = createQueryClient()
+    const wrapper = createWrapper(queryClient)
+    mockInvoke.mockImplementation((command: string) => {
+      if (command === 'list_pending_wakeups') return Promise.resolve([])
+      return Promise.resolve(undefined)
+    })
+
+    queryClient.setQueryData(['chat', 'session', 'session-1'], {
+      id: 'session-1',
+      name: 'Test',
+      order: 0,
+      created_at: 1,
+      updated_at: 1,
+      messages: [
+        {
+          id: 'current-user',
+          session_id: 'session-1',
+          role: 'user',
+          content: 'run tools',
+          timestamp: 1,
+          tool_calls: [],
+        },
+      ],
+    })
+
+    useChatStore.setState({
+      streamingContents: {},
+      streamingContentBlocks: {},
+      streamingThinkingContent: {},
+      activeToolCalls: {
+        'session-1': [{ id: 'tool-1', name: 'Read', input: {} }],
+      },
+      sendingSessionIds: { 'session-1': true },
+      sessionWorktreeMap: { 'session-1': 'worktree-1' },
+      lastSentMessages: { 'session-1': 'run tools' },
+      inputDrafts: { 'session-1': '' },
+    })
+
+    renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
+
+    await waitFor(() =>
+      expect(registeredListeners.has('chat:error')).toBe(true)
+    )
+
+    registeredListeners.get('chat:error')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        error: 'API Error: overloaded',
+      },
+    })
+
+    const session = queryClient.getQueryData<{
+      messages: { id: string }[]
+    }>(['chat', 'session', 'session-1'])
+    expect(session?.messages.map(message => message.id)).toContain(
+      'current-user'
+    )
+    expect(useChatStore.getState().inputDrafts['session-1']).toBe('')
+  })
+
   it('restores text and images when an already-running prompt is cancelled before output', async () => {
     const queryClient = createQueryClient()
     const wrapper = createWrapper(queryClient)
@@ -1497,6 +1569,116 @@ describe('useStreamingEvents cancellation sanitization', () => {
       expect.anything()
     )
   })
+
+  // Backend may not have saved the cancelled prompt yet, or saved only the
+  // prompt. Either way, the earlier reply must not clear the restored draft.
+  const priorMessages = [
+    {
+      id: 'old-user',
+      session_id: 'session-1',
+      role: 'user',
+      content: 'old prompt',
+      timestamp: 1,
+      tool_calls: [],
+    },
+    {
+      id: 'old-assistant',
+      session_id: 'session-1',
+      role: 'assistant',
+      content: 'old answer',
+      timestamp: 2,
+      tool_calls: [],
+    },
+  ]
+  const currentUser = {
+    id: 'current-user',
+    session_id: 'session-1',
+    role: 'user',
+    content: 'cancel this',
+    timestamp: 3,
+    tool_calls: [],
+  }
+
+  it.each([
+    ['without the cancelled prompt', priorMessages],
+    ['with only the cancelled prompt', [...priorMessages, currentUser]],
+  ])(
+    'keeps the restored draft when the backend has an earlier reply %s',
+    async (_label, backendMessages) => {
+      const queryClient = createQueryClient()
+      const wrapper = createWrapper(queryClient)
+
+      mockInvoke.mockImplementation((command: string) => {
+        if (command === 'list_pending_wakeups') return Promise.resolve([])
+        if (command === 'get_session')
+          return Promise.resolve({
+            id: 'session-1',
+            name: 'Test',
+            order: 0,
+            created_at: 1,
+            updated_at: 3,
+            messages: backendMessages,
+          })
+        return Promise.resolve(undefined)
+      })
+
+      queryClient.setQueryData(['chat', 'session', 'session-1'], {
+        id: 'session-1',
+        name: 'Test',
+        order: 0,
+        created_at: 1,
+        updated_at: 3,
+        messages: [...priorMessages, currentUser],
+      })
+
+      useChatStore.setState({
+        streamingContents: {},
+        streamingContentBlocks: {},
+        streamingThinkingContent: {},
+        activeToolCalls: {},
+        sendingSessionIds: { 'session-1': true },
+        sendStartedAt: { 'session-1': 1000 },
+        sessionWorktreeMap: { 'session-1': 'worktree-1' },
+        worktreePaths: { 'worktree-1': '/tmp/worktree' },
+        lastSentMessages: { 'session-1': 'cancel this' },
+        inputDrafts: { 'session-1': '' },
+      })
+
+      renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
+
+      await waitFor(() =>
+        expect(registeredListeners.has('chat:cancelled')).toBe(true)
+      )
+
+      mockInvoke.mockClear()
+      registeredListeners.get('chat:cancelled')?.({
+        payload: {
+          session_id: 'session-1',
+          worktree_id: 'worktree-1',
+          undo_send: false,
+          emitted_at_ms: 2000,
+          run_id: `run-${backendMessages.length}`,
+        },
+      })
+
+      expect(useChatStore.getState().inputDrafts['session-1']).toBe(
+        'cancel this'
+      )
+
+      await waitFor(() =>
+        expect(mockInvoke).toHaveBeenCalledWith('get_session', {
+          sessionId: 'session-1',
+          worktreeId: 'worktree-1',
+          worktreePath: '/tmp/worktree',
+        })
+      )
+      await new Promise(resolve => setTimeout(resolve, 0))
+
+      expect(useChatStore.getState().inputDrafts['session-1']).toBe(
+        'cancel this'
+      )
+    }
+  )
 
   it('hydrates persisted cancelled output without clearing a newer input draft', async () => {
     const queryClient = createQueryClient()
@@ -2229,5 +2411,139 @@ describe('useStreamingEvents replay dedupe', () => {
     expect(
       useChatStore.getState().streamingReplayContentBlocks['session-1']
     ).toBeUndefined()
+  })
+})
+
+describe('useStreamingEvents ordered blocks flush buffered stream', () => {
+  beforeEach(() => {
+    setupListenMock()
+    // Never fire animation frames: chunks/thinking stay buffered until an
+    // ordered event (tool block, steer) forces a flush.
+    vi.stubGlobal('requestAnimationFrame', () => 1)
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+
+    useChatStore.setState({
+      sendingSessionIds: { 'session-1': true },
+      reviewingSessions: {},
+      streamingContents: {},
+      streamingContentBlocks: {},
+      streamingReplayContentBlocks: {},
+      activeToolCalls: {},
+    })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('commits buffered thinking and text before adding a tool block', async () => {
+    const queryClient = createQueryClient()
+    const wrapper = createWrapper(queryClient)
+
+    renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
+
+    await waitFor(() =>
+      expect(registeredListeners.has('chat:tool_block')).toBe(true)
+    )
+
+    registeredListeners.get('chat:thinking')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        content: 'Considering.',
+      },
+    })
+    registeredListeners.get('chat:chunk')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        content: 'Let me check.',
+      },
+    })
+    registeredListeners.get('chat:tool_block')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        tool_call_id: 'tool-1',
+      },
+    })
+
+    expect(useChatStore.getState().streamingContentBlocks['session-1']).toEqual(
+      [
+        { type: 'thinking', thinking: 'Considering.' },
+        { type: 'text', text: 'Let me check.' },
+        { type: 'tool_use', tool_call_id: 'tool-1' },
+      ]
+    )
+    expect(useChatStore.getState().streamingContents['session-1']).toBe(
+      'Let me check.'
+    )
+  })
+
+  it('commits buffered text before a steered user input block', async () => {
+    const queryClient = createQueryClient()
+    const wrapper = createWrapper(queryClient)
+
+    renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
+
+    await waitFor(() =>
+      expect(registeredListeners.has('chat:steered')).toBe(true)
+    )
+
+    registeredListeners.get('chat:chunk')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        content: 'Working on it.',
+      },
+    })
+    registeredListeners.get('chat:steered')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        text: 'also do X',
+      },
+    })
+
+    const blocks = useChatStore.getState().streamingContentBlocks['session-1']
+    expect(blocks?.[0]).toEqual({ type: 'text', text: 'Working on it.' })
+    expect(blocks?.[1]?.type).toBe('user_input')
+  })
+})
+
+describe('useStreamingEvents tool results', () => {
+  beforeEach(() => {
+    setupListenMock()
+    useChatStore.setState({
+      pendingPermissionDenials: {},
+      activeToolCalls: {
+        'session-1': [{ id: 'tool-1', name: 'Bash', input: { command: 'x' } }],
+      },
+    })
+  })
+
+  it('stores is_error from chat:tool_result on the tool call', async () => {
+    const queryClient = createQueryClient()
+    const wrapper = createWrapper(queryClient)
+
+    renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
+
+    await waitFor(() =>
+      expect(registeredListeners.has('chat:tool_result')).toBe(true)
+    )
+
+    registeredListeners.get('chat:tool_result')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        tool_use_id: 'tool-1',
+        output: 'command not found',
+        is_error: true,
+      },
+    })
+
+    const toolCall = useChatStore.getState().activeToolCalls['session-1']?.[0]
+    expect(toolCall?.output).toBe('command not found')
+    expect(toolCall?.is_error).toBe(true)
   })
 })

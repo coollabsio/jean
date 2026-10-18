@@ -89,6 +89,20 @@ export function TitleBar({
         className
       )}
     >
+      {/* Desktop: Jean logo above the 36px sidebar tab rail (macOS native
+          uses this corner for the traffic lights) */}
+      {!isMobile && !(native && isClientMacOS) && (
+        <div className="pointer-events-none absolute inset-y-0 left-0 flex w-9 items-center justify-center pt-1">
+          <img
+            src="/logo.png"
+            alt="Jean"
+            width={18}
+            height={18}
+            className="size-[18px]"
+            draggable={false}
+          />
+        </div>
+      )}
       {/* Left side - Window Controls + Left Actions (hidden in zen mode) */}
       <div
         className="flex items-center"
@@ -103,7 +117,11 @@ export function TitleBar({
           <div
             className={cn(
               'relative z-10 flex items-center gap-1',
-              native && isClientMacOS ? 'mac-titlebar-actions' : 'pl-2 pt-1'
+              native && isClientMacOS
+                ? 'mac-titlebar-actions'
+                : isMobile
+                  ? 'pl-2 pt-1'
+                  : 'pl-9 pt-1' // Start after the 36px sidebar tab rail
             )}
           >
             <Tooltip>
@@ -154,7 +172,7 @@ export function TitleBar({
                     }
                     variant="ghost"
                     size="icon"
-                    className="h-6 w-6 rounded-none text-pink-500 hover:text-pink-400"
+                    className="h-6 w-6 rounded-none text-pink-600 hover:text-pink-500 dark:text-pink-500 dark:hover:text-pink-400"
                   >
                     <Heart className="size-3.5" />
                   </Button>

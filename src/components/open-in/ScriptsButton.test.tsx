@@ -56,9 +56,9 @@ describe('ScriptsButton', () => {
     )
 
     expect(screen.getByRole('button', { name: 'Scripts' })).toHaveClass(
-      'border-border/50',
-      'bg-muted/50',
-      'text-muted-foreground'
+      'bg-primary',
+      'text-primary-foreground/85',
+      'dark:bg-muted/50'
     )
   })
 
@@ -92,8 +92,8 @@ describe('ScriptsButton', () => {
       favoriteButtons.map(button => button.getAttribute('aria-label'))
     ).toEqual(['Unfavorite test:unit', 'Favorite dev'])
     expect(favoriteButtons[0]?.querySelector('svg')).toHaveClass(
-      'fill-yellow-500',
-      'text-yellow-500'
+      'fill-warning',
+      'text-warning'
     )
 
     await user.click(within(menu).getByRole('button', { name: 'Favorite dev' }))

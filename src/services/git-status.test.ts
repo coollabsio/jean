@@ -7,13 +7,9 @@ import {
   gitStatusQueryKeys,
   setAppFocusState,
   setActiveWorktreeForPolling,
-  setGitPollInterval,
-  getGitPollInterval,
   triggerImmediateGitPoll,
   gitPull,
   getGitRemotes,
-  setRemotePollInterval,
-  getRemotePollInterval,
   triggerImmediateRemotePoll,
   getGitDiff,
   areGitStatusValuesEqual,
@@ -304,39 +300,6 @@ describe('git-status service', () => {
     })
   })
 
-  describe('setGitPollInterval', () => {
-    it('calls invoke with seconds', async () => {
-      mockInvoke.mockResolvedValueOnce(undefined)
-
-      await setGitPollInterval(30)
-
-      expect(mockInvoke).toHaveBeenCalledWith('set_git_poll_interval', {
-        seconds: 30,
-      })
-    })
-  })
-
-  describe('getGitPollInterval', () => {
-    it('returns interval from backend', async () => {
-      mockInvoke.mockResolvedValueOnce(45)
-
-      const result = await getGitPollInterval()
-
-      expect(result).toBe(45)
-      expect(mockInvoke).toHaveBeenCalledWith('get_git_poll_interval')
-    })
-
-    it('returns default when not in Tauri', async () => {
-      const { isTauri } = vi.mocked(await import('@/services/projects'))
-      isTauri.mockReturnValue(false)
-
-      const result = await getGitPollInterval()
-
-      expect(result).toBe(60)
-      expect(mockInvoke).not.toHaveBeenCalled()
-    })
-  })
-
   describe('triggerImmediateGitPoll', () => {
     it('calls invoke', async () => {
       mockInvoke.mockResolvedValueOnce(undefined)
@@ -371,18 +334,6 @@ describe('git-status service', () => {
     })
   })
 
-  describe('setRemotePollInterval', () => {
-    it('calls invoke with seconds', async () => {
-      mockInvoke.mockResolvedValueOnce(undefined)
-
-      await setRemotePollInterval(120)
-
-      expect(mockInvoke).toHaveBeenCalledWith('set_remote_poll_interval', {
-        seconds: 120,
-      })
-    })
-  })
-
   describe('getGitRemotes', () => {
     it('returns remotes with origin first', async () => {
       mockInvoke.mockResolvedValueOnce([
@@ -409,25 +360,6 @@ describe('git-status service', () => {
       const result = await getGitRemotes('/path/to/repo')
 
       expect(result).toEqual([{ name: 'upstream' }, { name: 'fork' }])
-    })
-  })
-
-  describe('getRemotePollInterval', () => {
-    it('returns interval from backend', async () => {
-      mockInvoke.mockResolvedValueOnce(90)
-
-      const result = await getRemotePollInterval()
-
-      expect(result).toBe(90)
-    })
-
-    it('returns default when not in Tauri', async () => {
-      const { isTauri } = vi.mocked(await import('@/services/projects'))
-      isTauri.mockReturnValue(false)
-
-      const result = await getRemotePollInterval()
-
-      expect(result).toBe(60)
     })
   })
 

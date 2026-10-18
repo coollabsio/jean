@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
@@ -40,17 +40,17 @@ const severityConfig: Record<
 > = {
   error: {
     icon: AlertCircle,
-    color: 'text-red-500',
+    color: 'text-destructive',
     label: 'Error',
   },
   warning: {
     icon: AlertTriangle,
-    color: 'text-yellow-500',
+    color: 'text-warning',
     label: 'Warning',
   },
   info: {
     icon: Info,
-    color: 'text-blue-500',
+    color: 'text-info',
     label: 'Info',
   },
 }
@@ -137,7 +137,7 @@ export function ReviewFindingBlock({
             {isFixed && (
               <Badge
                 variant="outline"
-                className="text-xs text-green-500 border-green-500"
+                className="text-xs text-success border-success"
               >
                 Fixed
               </Badge>
@@ -324,10 +324,9 @@ export function ReviewFindingsList({
   disabled = false,
 }: ReviewFindingsListProps) {
   const [isFixingAll, setIsFixingAll] = useState(false)
-  // Track selected suggestions for each finding (keyed by index)
-  const [selectedSuggestions, setSelectedSuggestions] = useState<
-    Record<number, string>
-  >({})
+  // Track selected suggestions for each finding (keyed by index). Only read
+  // by handleFixAll, so a ref avoids re-rendering the list on every change.
+  const selectedSuggestionsRef = useRef<Record<number, string>>({})
 
   if (findings.length === 0) {
     return null
@@ -350,7 +349,7 @@ export function ReviewFindingsList({
         const finding = findings[index]
         if (!finding) continue
         if (isFixedFn(getFindingKey(finding, index))) continue
-        const selected = selectedSuggestions[index]
+        const selected = selectedSuggestionsRef.current[index]
         let suggestion: string | undefined
         if (selected === CUSTOM_OPTION) {
           // Custom suggestions would need to be tracked separately - for now use first suggestion
@@ -371,7 +370,7 @@ export function ReviewFindingsList({
   }
 
   const handleSelectionChange = (index: number, selection: string) => {
-    setSelectedSuggestions(prev => ({ ...prev, [index]: selection }))
+    selectedSuggestionsRef.current[index] = selection
   }
 
   return (
@@ -384,7 +383,7 @@ export function ReviewFindingsList({
         <span className="text-sm font-medium">
           {findings.length} finding{findings.length === 1 ? '' : 's'}
           {fixedCount > 0 && (
-            <span className="text-green-500 ml-1">({fixedCount} fixed)</span>
+            <span className="text-success ml-1">({fixedCount} fixed)</span>
           )}
         </span>
         {unfixedCount > 0 && (

@@ -745,7 +745,7 @@ export function ArchivedModal({ open, onOpenChange }: ArchivedModalProps) {
             <AlertDialogAction
               onClick={confirmDelete}
               disabled={isDeletingAll}
-              className="bg-destructive text-white hover:bg-destructive/90"
+              variant="destructive"
             >
               {permanentlyDeleteWorktree.isPending ||
               deleteArchivedSession.isPending ||
@@ -1020,9 +1020,7 @@ function SearchResultItem({
           <div
             className={cn(
               'flex items-center justify-center w-7 h-7 rounded-md mt-0.5 shrink-0',
-              type === 'worktree'
-                ? 'bg-blue-500/10 text-blue-500'
-                : 'bg-orange-500/10 text-orange-500'
+              'bg-muted text-foreground'
             )}
           >
             <Icon className="h-3.5 w-3.5" />

@@ -18,20 +18,18 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
   description,
   actions,
   anchorId,
-  variant = 'default',
+  variant = 'card',
   children,
 }) => (
-  <div
-    id={anchorId}
-    className={cn(
-      'space-y-4',
-      variant === 'card' &&
-        '[&_.settings-inline-field]:rounded-lg [&_.settings-inline-field]:border [&_.settings-inline-field]:p-4 sm:[&_.settings-inline-field]:justify-between sm:[&_.settings-inline-field>div:first-child]:w-auto'
-    )}
-  >
-    <div>
+  <div id={anchorId} className="min-w-0 space-y-3">
+    <div className={variant === 'card' ? 'px-1 sm:px-2' : undefined}>
       <div className="flex flex-wrap items-center gap-3">
-        <h3 className={cn('font-medium text-foreground', 'text-lg')}>
+        <h3
+          className={cn(
+            'font-medium text-foreground',
+            variant === 'card' ? 'text-base' : 'text-lg'
+          )}
+        >
           {title}
         </h3>
         {actions && (
@@ -48,20 +46,30 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
       {description && (
         <p className="mt-1 text-sm text-muted-foreground">{description}</p>
       )}
-      <Separator className="mt-2" />
+      {variant === 'default' && <Separator className="mt-2" />}
     </div>
-    {children}
+    <div
+      className={cn(
+        'space-y-4',
+        variant === 'card' &&
+          'min-w-0 rounded-xl border border-border bg-muted/30 p-4 sm:p-5 sm:[&_.settings-inline-field]:flex-wrap sm:[&_.settings-inline-field]:justify-between sm:[&_.settings-inline-field>div:first-child]:w-auto [&_.settings-inline-field>div:first-child]:min-w-32 [&_.settings-inline-field>div:first-child]:flex-1 [&_.settings-inline-field>div:first-child]:break-words'
+      )}
+    >
+      {children}
+    </div>
   </div>
 )
 
 export const BackendPaneHeader: React.FC<{
   backend: CliBackend
-  description: React.ReactNode
+  description?: React.ReactNode
 }> = ({ backend, description }) => (
   <div>
     <h2 className="flex items-center gap-2 text-lg font-semibold">
       <BackendLabel backend={backend} />
     </h2>
-    <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+    {description && (
+      <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+    )}
   </div>
 )

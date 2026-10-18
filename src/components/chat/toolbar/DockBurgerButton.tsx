@@ -3,7 +3,6 @@ import {
   Archive,
   BarChart3,
   Command,
-  LayoutDashboard,
   Menu,
   Plus,
   Github,
@@ -67,9 +66,9 @@ export function DockBurgerButton({ className }: DockBurgerButtonProps = {}) {
     return () => window.removeEventListener('toggle-quick-menu', handler)
   }, [toggleMenu])
 
-  const githubShortcut = formatShortcutDisplay(
-    (preferences?.keybindings?.open_github_dashboard ??
-      DEFAULT_KEYBINDINGS.open_github_dashboard) as string
+  const commandPaletteShortcut = formatShortcutDisplay(
+    (preferences?.keybindings?.open_command_palette ??
+      DEFAULT_KEYBINDINGS.open_command_palette) as string
   )
   const menuShortcut = formatShortcutDisplay(
     (preferences?.keybindings?.open_quick_menu ??
@@ -96,12 +95,7 @@ export function DockBurgerButton({ className }: DockBurgerButtonProps = {}) {
         </TooltipTrigger>
         <TooltipContent>Menu ({menuShortcut})</TooltipContent>
       </Tooltip>
-      <DropdownMenuContent
-        side="top"
-        align="start"
-        className="min-w-[240px]"
-        onEscapeKeyDown={e => e.stopPropagation()}
-      >
+      <DropdownMenuContent side="top" align="start" className="min-w-[240px]">
         <DropdownMenuItem
           onClick={() =>
             useProjectsStore.getState().setAddProjectDialogOpen(true)
@@ -123,15 +117,10 @@ export function DockBurgerButton({ className }: DockBurgerButtonProps = {}) {
         >
           <Command className="mr-2 h-4 w-4" />
           Command Palette
-          {!isMobile && <DropdownMenuShortcut>⌘K</DropdownMenuShortcut>}
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() => useUIStore.getState().setGitHubDashboardOpen(true)}
-        >
-          <LayoutDashboard className="mr-2 h-4 w-4" />
-          GitHub Dashboard
           {!isMobile && (
-            <DropdownMenuShortcut>{githubShortcut}</DropdownMenuShortcut>
+            <DropdownMenuShortcut>
+              {commandPaletteShortcut}
+            </DropdownMenuShortcut>
           )}
         </DropdownMenuItem>
         {isMobile && (
@@ -146,7 +135,7 @@ export function DockBurgerButton({ className }: DockBurgerButtonProps = {}) {
             <DropdownMenuItem
               onClick={() => openExternal('https://jean.build/sponsorships/')}
             >
-              <Heart className="mr-2 h-4 w-4 text-pink-500" />
+              <Heart className="mr-2 h-4 w-4 text-pink-600 dark:text-pink-500" />
               Sponsor Jean
             </DropdownMenuItem>
           </>

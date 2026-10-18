@@ -4,6 +4,8 @@ import { FileBrowserSidebar } from './FileBrowserSidebar'
 import type * as FilesService from '@/services/files'
 import type * as ProjectsService from '@/services/projects'
 import { useChatStore } from '@/store/chat-store'
+import { useUIStore } from '@/store/ui-store'
+import userEvent from '@testing-library/user-event'
 
 /**
  * Regression for #628: when useWorktreeFiles returns undefined data
@@ -39,8 +41,10 @@ vi.mock('@/services/projects', async () => {
   }
 })
 
+const mobile = vi.hoisted(() => ({ isMobile: false }))
+
 vi.mock('@/hooks/use-mobile', () => ({
-  useIsMobile: () => false,
+  useIsMobile: () => mobile.isMobile,
 }))
 
 describe('FileBrowserSidebar', () => {
@@ -77,5 +81,19 @@ describe('FileBrowserSidebar', () => {
 
     unmount()
     useChatStore.setState({ activeWorktreePath: null })
+  })
+
+  it('shows a close button on mobile that hides the file browser', async () => {
+    const user = userEvent.setup()
+    mobile.isMobile = true
+    useUIStore.setState({ fileBrowserVisible: true })
+
+    render(<FileBrowserSidebar />)
+    await user.click(
+      screen.getByRole('button', { name: 'Close file browser' })
+    )
+
+    expect(useUIStore.getState().fileBrowserVisible).toBe(false)
+    mobile.isMobile = false
   })
 })

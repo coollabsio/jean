@@ -26,7 +26,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { useProjects, useUpdateProjectSettings } from '@/services/projects'
+import {
+  useAutoFixStatus,
+  useClearAutoFixFailures,
+  useProjects,
+  useUpdateProjectSettings,
+} from '@/services/projects'
 import type { ProjectAutoFixSettings } from '@/types/projects'
 import {
   codexDefaultModelOptions,
@@ -52,6 +57,8 @@ import { usePreferences } from '@/services/preferences'
 export const MR_ROBOT_SETTINGS_BADGE = 'Beta'
 const BACKEND_DEFAULT_MODEL_VALUE = '__backend_default__'
 const ANTHROPIC_PROVIDER_VALUE = '__anthropic__'
+/** Must match the backend retry limit for failed Mr. Robot issues. */
+const AUTO_FIX_MAX_ATTEMPTS = 3
 
 /** Structural defaults. Backend values are resolved via installed CLIs. */
 const DEFAULT_AUTO_FIX_SETTINGS: ProjectAutoFixSettings = {
@@ -376,10 +383,7 @@ function AutoFixProviderSelect({
       }
       disabled={disabled}
     >
-      <SelectTrigger
-        aria-label={`Choose ${label} provider`}
-        className="w-full"
-      >
+      <SelectTrigger aria-label={`Choose ${label} provider`} className="w-full">
         <SelectValue placeholder="Anthropic" />
       </SelectTrigger>
       <SelectContent>
@@ -440,8 +444,7 @@ function AutoFixBackendModelPicker({
   const handleBackendModelChange = useCallback(
     (nextBackend: CliBackend, nextModel: string) => {
       // Switching backends drops Claude-only custom providers.
-      const nextProvider =
-        nextBackend === 'claude' ? selectedProvider : null
+      const nextProvider = nextBackend === 'claude' ? selectedProvider : null
       onChange(
         nextBackend,
         nextModel === BACKEND_DEFAULT_MODEL_VALUE ? null : nextModel,
@@ -496,6 +499,161 @@ function AutoFixBackendModelPicker({
         />
       </PopoverContent>
     </Popover>
+  )
+}
+
+/** "3 min ago" / "in 5 min" style relative time for a unix-seconds timestamp. */
+export function formatAutoFixRelativeTime(
+  unixSeconds: number,
+  nowMs: number = Date.now()
+): string {
+  const diffSeconds = Math.round(unixSeconds - nowMs / 1000)
+  const abs = Math.abs(diffSeconds)
+  if (abs < 60) return diffSeconds >= 0 ? 'in <1 min' : 'just now'
+  let value: string
+  if (abs < 3600) value = `${Math.floor(abs / 60)} min`
+  else if (abs < 86_400) value = `${Math.floor(abs / 3600)} h`
+  else value = `${Math.floor(abs / 86_400)} d`
+  return diffSeconds >= 0 ? `in ${value}` : `${value} ago`
+}
+
+function formatClockTime(unixSeconds: number): string {
+  return new Date(unixSeconds * 1000).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function StatusRow({
+  label,
+  children,
+}: {
+  label: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-4">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="text-right text-foreground">{children}</dd>
+    </div>
+  )
+}
+
+function AutoFixStatusSection({ projectId }: { projectId: string }) {
+  const {
+    data: status,
+    dataUpdatedAt,
+    isLoading,
+    error,
+  } = useAutoFixStatus(projectId, true)
+  const clearFailures = useClearAutoFixFailures()
+
+  // Relative times are anchored to the last poll (refreshes every 10s).
+  const now = dataUpdatedAt
+  const rateLimited =
+    status?.rateLimitedUntil != null && status.rateLimitedUntil * 1000 > now
+  const failedIssues = status?.failedIssues ?? []
+  const canRetry = failedIssues.length > 0 || Boolean(status?.lastError)
+
+  return (
+    <div className="rounded-lg border p-4">
+      <div className="mb-3 flex items-center justify-between gap-4">
+        <h4 className="text-sm font-medium text-foreground">Status</h4>
+        {canRetry && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => clearFailures.mutate(projectId)}
+            disabled={clearFailures.isPending}
+          >
+            {clearFailures.isPending && (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            )}
+            Retry failed issues
+          </Button>
+        )}
+      </div>
+
+      {isLoading ? (
+        <p className="text-xs text-muted-foreground">Loading status...</p>
+      ) : error || !status ? (
+        <p className="text-xs text-muted-foreground">Status unavailable.</p>
+      ) : (
+        <div className="space-y-3 text-xs">
+          <dl className="space-y-1.5">
+            <StatusRow label="Last scan">
+              {status.lastScanAt != null
+                ? formatAutoFixRelativeTime(status.lastScanAt, now)
+                : 'Not yet'}
+            </StatusRow>
+            <StatusRow label="Next scan">
+              {status.nextScanAt != null
+                ? formatAutoFixRelativeTime(status.nextScanAt, now)
+                : '—'}
+            </StatusRow>
+            <StatusRow label="Starting issues">
+              {status.startingIssues.length}
+            </StatusRow>
+            <StatusRow label="Plans waiting for automatic approval">
+              {status.pendingYoloSessions}
+            </StatusRow>
+          </dl>
+
+          {rateLimited && status.rateLimitedUntil != null && (
+            <p className="text-muted-foreground">
+              Waiting for GitHub rate limit until{' '}
+              {formatClockTime(status.rateLimitedUntil)}
+            </p>
+          )}
+
+          {status.lastError && (
+            <p
+              className="line-clamp-3 break-words text-destructive"
+              title={status.lastError.message}
+            >
+              <span className="font-medium">Last error</span> (
+              {formatAutoFixRelativeTime(status.lastError.at, now)}):{' '}
+              {status.lastError.message}
+            </p>
+          )}
+
+          {failedIssues.length > 0 && (
+            <div className="space-y-1">
+              <div className="text-muted-foreground">Failed issues</div>
+              <ul className="space-y-1">
+                {failedIssues.map(issue => (
+                  <li
+                    key={issue.issueNumber}
+                    className="flex min-w-0 items-center gap-2"
+                  >
+                    <span className="shrink-0 font-medium text-foreground">
+                      #{issue.issueNumber}
+                    </span>
+                    <span className="shrink-0 text-muted-foreground">
+                      — {issue.attempts}/{AUTO_FIX_MAX_ATTEMPTS} attempts —
+                    </span>
+                    <span
+                      className="min-w-0 truncate text-muted-foreground"
+                      title={issue.error}
+                    >
+                      {issue.error}
+                    </span>
+                    {issue.gaveUp && (
+                      <Badge
+                        variant="outline"
+                        className="shrink-0 px-1.5 py-0 text-[10px] text-destructive"
+                      >
+                        Gave up
+                      </Badge>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -594,7 +752,6 @@ export function AutoFixPane({ projectId }: { projectId: string }) {
               {MR_ROBOT_SETTINGS_BADGE}
             </Badge>
           </div>
-          <Separator className="mt-2" />
         </div>
 
         <div className="flex items-start justify-between gap-4 rounded-lg border bg-muted/20 p-4">
@@ -604,7 +761,8 @@ export function AutoFixPane({ projectId }: { projectId: string }) {
             </Label>
             <p className="mt-1 text-xs text-muted-foreground">
               Poll open GitHub issues, create one Jean worktree per issue, and
-              draft a focused plan. Optionally let Mr. Robot yolo the plan too.
+              draft a focused plan. Optionally let Mr. Robot run the plan with
+              Full access too.
             </p>
           </div>
           <Switch
@@ -613,6 +771,10 @@ export function AutoFixPane({ projectId }: { projectId: string }) {
             disabled={updateSettings.isPending}
           />
         </div>
+
+        {initialSettings.enabled && (
+          <AutoFixStatusSection projectId={projectId} />
+        )}
 
         <div className="rounded-lg border p-4">
           <h4 className="mb-4 text-sm font-medium text-foreground">
@@ -809,9 +971,7 @@ export function AutoFixPane({ projectId }: { projectId: string }) {
                     planning_backend,
                     planning_model,
                     planning_provider:
-                      planning_backend === 'claude'
-                        ? planning_provider
-                        : null,
+                      planning_backend === 'claude' ? planning_provider : null,
                   }))
                 }
               />
@@ -822,14 +982,14 @@ export function AutoFixPane({ projectId }: { projectId: string }) {
             <div className="mb-4 flex items-start justify-between gap-4">
               <div>
                 <h4 className="text-sm font-medium text-foreground">
-                  Yolo execution
+                  Full-access execution
                 </h4>
                 <p className="mt-1 text-xs text-muted-foreground">
                   Automatically approve ready plans and start execution.
                 </p>
               </div>
               <Checkbox
-                aria-label="Also yolo approved plans"
+                aria-label="Automatically approve plans with Full access"
                 checked={settings.auto_yolo_enabled ?? false}
                 onCheckedChange={checked =>
                   handleAutoYoloEnabledChange(checked === true)
@@ -845,7 +1005,7 @@ export function AutoFixPane({ projectId }: { projectId: string }) {
                     description="Claude custom CLI profile (Settings → Providers)."
                   >
                     <AutoFixProviderSelect
-                      label="yolo"
+                      label="Full access"
                       provider={settings.yolo_provider}
                       profiles={customCliProfiles}
                       disabled={
@@ -874,7 +1034,7 @@ export function AutoFixPane({ projectId }: { projectId: string }) {
               )}
             <Field label="Backend + model">
               <AutoFixBackendModelPicker
-                label="yolo"
+                label="Full access"
                 backend={settings.yolo_backend}
                 model={settings.yolo_model}
                 provider={settings.yolo_provider}

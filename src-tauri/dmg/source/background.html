@@ -1,0 +1,218 @@
+<!doctype html>
+<!--
+  Source for the macOS DMG installer background (src-tauri/dmg/background.png).
+  Render with: bun run dmg:background
+  Layout must match bundle.macOS.dmg in tauri.conf.json:
+  window 660x400, app icon at (180, 210), Applications at (480, 210),
+  icon size 128, label text size 16 (bundle_dmg defaults).
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      @font-face {
+        font-family: 'Geist Sans';
+        src: url('./geist-sans-variable.woff2') format('woff2');
+        font-weight: 100 900;
+      }
+
+      :root {
+        --gold: #fdd14f;
+        --gold-dim: #7a6530;
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 660px;
+        height: 400px;
+        overflow: hidden;
+      }
+
+      body {
+        position: relative;
+        font-family: 'Geist Sans', sans-serif;
+        color: #f5f5f5;
+        background:
+          radial-gradient(
+            ellipse 520px 360px at 0% 0%,
+            rgba(253, 209, 79, 0.16),
+            transparent 70%
+          ),
+          radial-gradient(
+            ellipse 260px 140px at 50% 58%,
+            rgba(253, 209, 79, 0.07),
+            transparent 75%
+          ),
+          linear-gradient(180deg, #0f0e0b 0%, #0a0a0a 100%);
+      }
+
+      .swoosh {
+        position: absolute;
+        inset: 0;
+      }
+
+      .brand {
+        position: absolute;
+        top: 22px;
+        left: 26px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 15px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+
+      .brand img {
+        width: 20px;
+        height: 20px;
+      }
+
+      .title {
+        position: absolute;
+        top: 52px;
+        width: 100%;
+        text-align: center;
+        font-size: 34px;
+        font-weight: 400;
+        letter-spacing: -0.035em;
+      }
+
+      .title b {
+        color: var(--gold);
+        font-weight: 650;
+      }
+
+      .subtitle {
+        position: absolute;
+        top: 101px;
+        width: 100%;
+        text-align: center;
+        font-size: 13px;
+        color: #9a9a9a;
+      }
+
+      .subtitle b {
+        color: #f0f0f0;
+        font-weight: 500;
+      }
+
+      .divider {
+        position: absolute;
+        top: 128px;
+        left: 50%;
+        width: 44px;
+        height: 1px;
+        transform: translateX(-50%);
+        background: linear-gradient(
+          90deg,
+          transparent,
+          var(--gold),
+          transparent
+        );
+      }
+
+      /* Soft tiles behind the icons */
+      .tile {
+        position: absolute;
+        top: 146px;
+        width: 128px;
+        height: 128px;
+        border-radius: 30px;
+        background: radial-gradient(
+          circle at 50% 40%,
+          rgba(255, 255, 255, 0.05),
+          transparent 70%
+        );
+      }
+
+      /* Pills keep Finder labels readable in light and dark mode */
+      .pill {
+        position: absolute;
+        top: 278px;
+        height: 26px;
+        border-radius: 13px;
+        transform: translateX(-50%);
+        background: #6b6b6b;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+      }
+
+      .arrows {
+        position: absolute;
+        top: 192px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        gap: 2px;
+      }
+    </style>
+  </head>
+  <body>
+    <svg class="swoosh" viewBox="0 0 660 400" aria-hidden="true">
+      <defs>
+        <linearGradient id="swoosh" x1="0" y1="1" x2="1" y2="0">
+          <stop offset="0" stop-color="#fdd14f" stop-opacity="0" />
+          <stop offset="0.55" stop-color="#fdd14f" stop-opacity="0.35" />
+          <stop offset="1" stop-color="#fdd14f" stop-opacity="0" />
+        </linearGradient>
+        <filter id="blur" x="-20%" y="-20%" width="140%" height="140%">
+          <feGaussianBlur stdDeviation="6" />
+        </filter>
+      </defs>
+      <path
+        d="M -40 420 C 160 300, 420 420, 700 230"
+        fill="none"
+        stroke="url(#swoosh)"
+        stroke-width="28"
+        filter="url(#blur)"
+      />
+      <path
+        d="M -40 420 C 160 300, 420 420, 700 230"
+        fill="none"
+        stroke="url(#swoosh)"
+        stroke-width="1.5"
+      />
+    </svg>
+
+    <div class="brand">
+      <img src="../../../public/logo.png" alt="" />
+      Jean
+    </div>
+
+    <h1 class="title">Welcome to <b>Jean</b></h1>
+    <p class="subtitle">To install, drag <b>Jean</b> to <b>Applications</b></p>
+    <div class="divider"></div>
+
+    <div class="tile" style="left: 116px"></div>
+    <div class="tile" style="left: 416px"></div>
+
+    <svg
+      class="arrows"
+      width="78"
+      height="36"
+      viewBox="0 0 78 36"
+      aria-hidden="true"
+    >
+      <g
+        fill="none"
+        stroke="#fdd14f"
+        stroke-width="3.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <path d="M 8 6 L 20 18 L 8 30" stroke-opacity="0.3" />
+        <path d="M 32 6 L 44 18 L 32 30" stroke-opacity="0.6" />
+        <path d="M 56 6 L 68 18 L 56 30" />
+      </g>
+    </svg>
+
+    <div class="pill" style="left: 180px; width: 72px"></div>
+    <div class="pill" style="left: 480px; width: 124px"></div>
+  </body>
+</html>

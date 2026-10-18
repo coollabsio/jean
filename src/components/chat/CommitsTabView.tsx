@@ -257,7 +257,7 @@ export function CommitsTabView({
     } catch {
       return []
     }
-  }, [commitDiff?.raw_patch])
+  }, [commitDiff])
 
   const filteredFiles = useMemo(() => {
     if (!fileFilter) return flattenedFiles
@@ -420,12 +420,12 @@ export function CommitsTabView({
                       </span>
                       <span>{formatRelativeDate(commit.authorDate)}</span>
                       {commit.additions > 0 && (
-                        <span className="text-green-500">
+                        <span className="text-success">
                           +{commit.additions}
                         </span>
                       )}
                       {commit.deletions > 0 && (
-                        <span className="text-red-500">
+                        <span className="text-destructive">
                           -{commit.deletions}
                         </span>
                       )}
@@ -550,8 +550,8 @@ export function CommitsTabView({
                     <span className="min-w-0 flex-1 truncate">
                       {file.fileName}
                     </span>
-                    <span className="text-green-500">+{file.additions}</span>
-                    <span className="text-red-500">-{file.deletions}</span>
+                    <span className="text-success">+{file.additions}</span>
+                    <span className="text-destructive">-{file.deletions}</span>
                   </button>
                 ))}
               </div>
@@ -714,13 +714,13 @@ export function CommitsTabView({
                       {(commit.additions > 0 || commit.deletions > 0) && (
                         <span className="ml-auto shrink-0">
                           {commit.additions > 0 && (
-                            <span className="text-green-500">
+                            <span className="text-success">
                               +{commit.additions}
                             </span>
                           )}
                           {commit.additions > 0 && commit.deletions > 0 && ' '}
                           {commit.deletions > 0 && (
-                            <span className="text-red-500">
+                            <span className="text-destructive">
                               -{commit.deletions}
                             </span>
                           )}
@@ -822,12 +822,12 @@ export function CommitsTabView({
                           </span>
                           <div className="flex items-center gap-1 shrink-0">
                             {file.additions > 0 && (
-                              <span className="text-green-500">
+                              <span className="text-success">
                                 +{file.additions}
                               </span>
                             )}
                             {file.deletions > 0 && (
-                              <span className="text-red-500">
+                              <span className="text-destructive">
                                 -{file.deletions}
                               </span>
                             )}

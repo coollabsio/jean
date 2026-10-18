@@ -78,8 +78,12 @@ export function useSaveUIState() {
       }
     },
     onSuccess: (_, uiState) => {
-      // Update the cache with the new UI state
-      queryClient.setQueryData(uiStateQueryKeys.state(), uiState)
+      // Update the cache with the new UI state. Saves never change pins; they
+      // change only through set_recent_session_pinned.
+      queryClient.setQueryData<UIState>(uiStateQueryKeys.state(), current => ({
+        ...uiState,
+        pinned_recent_session_ids: current?.pinned_recent_session_ids,
+      }))
       logger.debug('UI state cache updated')
       // No toast for UI state - silent operation
     },

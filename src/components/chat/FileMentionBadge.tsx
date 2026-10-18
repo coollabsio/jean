@@ -106,7 +106,7 @@ export function FileMentionBadge({
             )}
           >
             {isDirectory ? (
-              <FolderIcon className="h-3.5 w-3.5 shrink-0 text-blue-400" />
+              <FolderIcon className="h-3.5 w-3.5 shrink-0 text-blue-600 dark:text-blue-400" />
             ) : (
               <FileIcon
                 className={cn(
@@ -129,7 +129,7 @@ export function FileMentionBadge({
         <DialogContent className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-auto sm:max-h-[85vh] sm:!rounded-lg sm:p-4 bg-background/95">
           <DialogTitle className="text-sm font-medium flex items-center gap-2">
             {isDirectory ? (
-              <FolderIcon className="h-4 w-4 text-blue-400" />
+              <FolderIcon className="h-4 w-4 text-blue-600 dark:text-blue-400" />
             ) : (
               <FileIcon
                 className={cn('h-4 w-4', getExtensionColor(extension))}

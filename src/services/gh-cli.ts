@@ -6,7 +6,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { invoke, useWsConnectionStatus } from '@/lib/transport'
+import { invokeForOptionalServer, useWsConnectionStatus } from '@/lib/transport'
 import { listen } from '@/lib/transport'
 import { toast } from 'sonner'
 import { useCallback, useEffect, useState } from 'react'
@@ -19,6 +19,7 @@ import type {
 } from '@/types/gh-cli'
 
 import { hasBackendTransport } from '@/lib/environment'
+import { useOptionalSettingsTargetServerId } from '@/lib/settings-target'
 
 const isTauri = hasBackendTransport
 
@@ -34,8 +35,9 @@ export const ghCliQueryKeys = {
  * Hook to detect GitHub CLI in system PATH
  */
 export function useGhPathDetection(options?: { enabled?: boolean }) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: [...ghCliQueryKeys.all, 'path-detection'],
+    queryKey: [...ghCliQueryKeys.all, 'path-detection', serverId ?? 'local'],
     queryFn: async (): Promise<{
       found: boolean
       path: string | null
@@ -51,12 +53,12 @@ export function useGhPathDetection(options?: { enabled?: boolean }) {
         }
       }
       try {
-        const result = await invoke<{
+        const result = await invokeForOptionalServer<{
           found: boolean
           path: string | null
           version: string | null
           package_manager: string | null
-        }>('detect_gh_in_path')
+        }>(serverId, 'detect_gh_in_path')
         console.debug('[ONBOARDING:SVC] gh path detection:', result)
         return result
       } catch (err) {
@@ -78,9 +80,14 @@ export function useGhPathDetection(options?: { enabled?: boolean }) {
 /**
  * Hook to check if GitHub CLI is installed and get its status
  */
-export function useGhCliStatus(options?: { enabled?: boolean }) {
+export function useGhCliStatus(options?: {
+  enabled?: boolean
+  serverId?: string
+}) {
+  const settingsServerId = useOptionalSettingsTargetServerId()
+  const serverId = options?.serverId ?? settingsServerId
   return useQuery({
-    queryKey: ghCliQueryKeys.status(),
+    queryKey: [...ghCliQueryKeys.status(), serverId ?? 'local'],
     queryFn: async (): Promise<GhCliStatus> => {
       if (!isTauri()) {
         logger.debug('Not in Tauri context, returning mock gh CLI status')
@@ -89,7 +96,10 @@ export function useGhCliStatus(options?: { enabled?: boolean }) {
 
       try {
         console.debug('[ONBOARDING:SVC] gh: checking installed status...')
-        const status = await invoke<GhCliStatus>('check_gh_cli_installed')
+        const status = await invokeForOptionalServer<GhCliStatus>(
+          serverId,
+          'check_gh_cli_installed'
+        )
         console.debug('[ONBOARDING:SVC] gh: status =', status)
         return status
       } catch (error) {
@@ -113,8 +123,9 @@ export function useGhCliAuth(options?: {
   gcTime?: number
   refetchOnMount?: boolean | 'always'
 }) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: ghCliQueryKeys.auth(),
+    queryKey: [...ghCliQueryKeys.auth(), serverId ?? 'local'],
     queryFn: async (): Promise<GhAuthStatus> => {
       if (!isTauri()) {
         logger.debug('Not in Tauri context, returning mock gh auth status')
@@ -123,7 +134,10 @@ export function useGhCliAuth(options?: {
 
       try {
         console.debug('[ONBOARDING:SVC] gh: checking auth status...')
-        const status = await invoke<GhAuthStatus>('check_gh_cli_auth')
+        const status = await invokeForOptionalServer<GhAuthStatus>(
+          serverId,
+          'check_gh_cli_auth'
+        )
         console.debug('[ONBOARDING:SVC] gh: auth =', status)
         return status
       } catch (error) {
@@ -145,8 +159,9 @@ export function useGhCliAuth(options?: {
  * Hook to fetch available GitHub CLI versions from GitHub releases
  */
 export function useAvailableGhVersions(options?: { enabled?: boolean }) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: ghCliQueryKeys.versions(),
+    queryKey: [...ghCliQueryKeys.versions(), serverId ?? 'local'],
     queryFn: async (): Promise<GhReleaseInfo[]> => {
       if (!isTauri()) {
         logger.debug('Not in Tauri context, returning empty versions list')
@@ -156,14 +171,14 @@ export function useAvailableGhVersions(options?: { enabled?: boolean }) {
       try {
         logger.debug('Fetching available GitHub CLI versions')
         // Transform snake_case from Rust to camelCase
-        const versions = await invoke<
+        const versions = await invokeForOptionalServer<
           {
             version: string
             tag_name: string
             published_at: string
             prerelease: boolean
           }[]
-        >('get_available_gh_versions')
+        >(serverId, 'get_available_gh_versions')
 
         return versions.map(v => ({
           version: v.version,
@@ -188,11 +203,14 @@ export function useAvailableGhVersions(options?: { enabled?: boolean }) {
  */
 export function useInstallGhCli() {
   const queryClient = useQueryClient()
+  const serverId = useOptionalSettingsTargetServerId()
 
   return useMutation({
     mutationFn: async (version?: string) => {
       logger.info('Installing GitHub CLI', { version })
-      await invoke('install_gh_cli', { version: version ?? null })
+      await invokeForOptionalServer(serverId, 'install_gh_cli', {
+        version: version ?? null,
+      })
     },
     // Disable retry - installation should not be retried automatically
     retry: false,
@@ -269,11 +287,16 @@ export function useGhInstallProgress(): [GhInstallProgress | null, () => void] {
 /**
  * Combined hook for gh CLI setup flow
  */
-function checkManualVersion(version: string) {
-  return invoke<boolean>('check_gh_cli_version_exists', { version })
+function checkManualVersion(version: string, serverId?: string) {
+  return invokeForOptionalServer<boolean>(
+    serverId,
+    'check_gh_cli_version_exists',
+    { version }
+  )
 }
 
 export function useGhCliSetup() {
+  const serverId = useOptionalSettingsTargetServerId()
   const status = useGhCliStatus()
   const versions = useAvailableGhVersions()
   const installMutation = useInstallGhCli()
@@ -307,7 +330,6 @@ export function useGhCliSetup() {
     })
   }
 
-
   return {
     status: status.data,
     isStatusLoading: status.isLoading,
@@ -320,7 +342,8 @@ export function useGhCliSetup() {
     installError: installMutation.error,
     progress,
     install,
-    checkManualVersion,
+    checkManualVersion: (version: string) =>
+      checkManualVersion(version, serverId),
     refetchStatus: status.refetch,
   }
 }

@@ -44,6 +44,26 @@ const DialogOverlay = React.forwardRef<
 ))
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 
+/** True if a popover/select opened after the dialog that holds `target`. */
+function hasChildPopupOpen(target: EventTarget | null): boolean {
+  const content =
+    (target instanceof Element &&
+      target.closest('[data-slot="dialog-content"]')) ||
+    Array.from(document.querySelectorAll('[data-slot="dialog-content"]')).at(-1)
+  return Array.from(
+    document.querySelectorAll(
+      '[data-slot="popover-content"], [data-slot="select-content"]'
+    )
+  ).some(
+    popup =>
+      !content ||
+      Boolean(
+        content.compareDocumentPosition(popup) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+      )
+  )
+}
+
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
@@ -93,12 +113,10 @@ const DialogContent = React.forwardRef<
             e.preventDefault()
             return
           }
-          // Don't close dialog if a child popover/select dropdown is open
-          if (
-            document.querySelector(
-              '[data-slot="popover-content"], [data-slot="select-content"]'
-            )
-          ) {
+          // Don't close dialog if a child popover/select dropdown is open.
+          // A popover that opened this dialog (e.g. a list with a preview
+          // button) is not a child, so it must not block ESC.
+          if (hasChildPopupOpen(e.target)) {
             console.log('[ESC-DEBUG] DialogContent: BLOCKED (child popup open)')
             e.preventDefault()
             return

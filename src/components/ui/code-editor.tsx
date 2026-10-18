@@ -1,4 +1,4 @@
-import { useMemo, memo, useRef } from 'react'
+import { useLayoutEffect, useMemo, memo, useRef } from 'react'
 import { File } from '@pierre/diffs/react'
 import type { FileContents } from '@pierre/diffs'
 import type { EditorOptions } from '@pierre/diffs/edit'
@@ -49,7 +49,9 @@ export const CodeEditor = memo(function CodeEditor({
   const { theme } = useTheme()
   const { data: preferences } = usePreferences()
   const onChangeRef = useRef(onChange)
-  onChangeRef.current = onChange
+  useLayoutEffect(() => {
+    onChangeRef.current = onChange
+  }, [onChange])
 
   const resolvedTheme = useMemo((): 'dark' | 'light' => {
     if (theme === 'system') {

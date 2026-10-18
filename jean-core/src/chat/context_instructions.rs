@@ -67,22 +67,25 @@ fn build_system_prompt_parts(
         parts.push(format!("Respond to the user in {lang}."));
     }
 
-    let global_prompt = prefs
-        .as_ref()
-        .and_then(|prefs| trimmed_non_empty(prefs.magic_prompts.global_system_prompt.as_deref()))
-        .unwrap_or_else(crate::default_global_system_prompt);
-    parts.push(global_prompt);
+    let global_prompt =
+        crate::projects::server_system_prompt(app, worktree_id).unwrap_or_else(|| {
+            prefs
+                .as_ref()
+                .and_then(|prefs| {
+                    trimmed_non_empty(prefs.magic_prompts.global_system_prompt.as_deref())
+                })
+                .unwrap_or_else(crate::default_global_system_prompt)
+        });
+    parts.push(crate::apply_agent_browser_preference(
+        global_prompt,
+        prefs.as_ref(),
+    ));
 
-    if prefs
+    let parallel_prompt = prefs
         .as_ref()
-        .is_some_and(|prefs| prefs.parallel_execution_prompt_enabled)
-    {
-        let parallel_prompt = prefs
-            .as_ref()
-            .and_then(|prefs| trimmed_non_empty(prefs.magic_prompts.parallel_execution.as_deref()))
-            .unwrap_or_else(crate::default_parallel_execution_prompt);
-        parts.push(parallel_prompt);
-    }
+        .and_then(|prefs| trimmed_non_empty(prefs.magic_prompts.parallel_execution.as_deref()))
+        .unwrap_or_else(crate::default_parallel_execution_prompt);
+    parts.push(parallel_prompt);
 
     if let Ok(data) = load_projects_data(app) {
         if let Some(worktree) = data.find_worktree(worktree_id) {
@@ -374,6 +377,14 @@ fn toml_basic_string(value: &str) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string())
 }
 
+fn codex_terminal_context_args(content: &str) -> Vec<String> {
+    // Add Jean's context without replacing Codex's core instructions.
+    vec![
+        "--config".to_string(),
+        format!("developer_instructions={}", toml_basic_string(content)),
+    ]
+}
+
 pub fn prepare_backend_terminal_context(
     app: &tauri::AppHandle,
     session_id: &str,
@@ -389,10 +400,7 @@ pub fn prepare_backend_terminal_context(
         TerminalContextBackend::Codex => {
             let content = std::fs::read_to_string(&context_file)
                 .map_err(|e| format!("Failed to read terminal context file: {e}"))?;
-            vec![
-                "--config".to_string(),
-                format!("base_instructions={}", toml_basic_string(&content)),
-            ]
+            codex_terminal_context_args(&content)
         }
         TerminalContextBackend::Opencode
         | TerminalContextBackend::Cursor
@@ -426,5 +434,17 @@ mod tests {
     fn toml_basic_string_escapes_multiline_context() {
         let encoded = toml_basic_string("hello\n\"quoted\"");
         assert_eq!(encoded, "\"hello\\n\\\"quoted\\\"\"");
+    }
+
+    #[test]
+    fn codex_terminal_context_adds_developer_instructions() {
+        let content = "# Jean context\n\"quoted\" \\ path\n日本語";
+        let args = codex_terminal_context_args(content);
+
+        assert_eq!(args.len(), 2);
+        assert_eq!(args[0], "--config");
+        let config: toml::Value = toml::from_str(&args[1]).unwrap();
+        assert_eq!(config["developer_instructions"].as_str(), Some(content));
+        assert!(config.get("base_instructions").is_none());
     }
 }

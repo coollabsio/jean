@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest'
 
 describe('mobile community menu actions', () => {
   for (const path of [
-    'src/components/ui/floating-dock.tsx',
     'src/components/chat/toolbar/DockBurgerButton.tsx',
   ]) {
     it(`puts GitHub and Sponsor in ${path}`, () => {

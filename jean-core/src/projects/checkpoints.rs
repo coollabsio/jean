@@ -1640,39 +1640,8 @@ fn map_ai_restore_files(
 }
 
 fn extract_structured_json_from_stream(output: &str) -> Result<String, String> {
-    for line in output.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let parsed: serde_json::Value = match serde_json::from_str(line) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        if parsed.get("type").and_then(|t| t.as_str()) == Some("assistant") {
-            if let Some(content) = parsed
-                .get("message")
-                .and_then(|m| m.get("content"))
-                .and_then(|c| c.as_array())
-            {
-                for block in content {
-                    if block.get("type").and_then(|t| t.as_str()) == Some("tool_use")
-                        && block.get("name").and_then(|n| n.as_str()) == Some("StructuredOutput")
-                    {
-                        if let Some(input) = block.get("input") {
-                            return Ok(input.to_string());
-                        }
-                    }
-                }
-            }
-        }
-        if parsed.get("type").and_then(|t| t.as_str()) == Some("result") {
-            if let Some(result) = parsed.get("result") {
-                if result.is_object() {
-                    return Ok(result.to_string());
-                }
-            }
-        }
+    if let Some(value) = crate::chat::claude::extract_claude_structured_output(output) {
+        return Ok(value.to_string());
     }
     // Fallback: first balanced JSON object in text.
     extract_json_object(output)

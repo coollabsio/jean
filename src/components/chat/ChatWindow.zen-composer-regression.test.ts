@@ -43,7 +43,7 @@ describe('ChatWindow zen composer', () => {
     expect(source).toMatch(/\{!zenMode &&\s*activeTodos\.length > 0 &&/)
     expect(source).toMatch(/\{!zenMode &&\s*activeAgents\.length > 0 &&/)
     expect(source).toMatch(
-      /\{!zenMode &&\s*!terminalPanelOpen &&\s*\(activeTodos\.length > 0 \|\|/
+      /\{!zenMode &&\s*!terminalPanelOpen &&\s*activeTodos\.length > 0 &&/
     )
   })
 })

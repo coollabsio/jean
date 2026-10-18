@@ -586,15 +586,15 @@ export function LoadContextModal({
                 <DialogHeader>
                   <DialogTitle className="flex items-center gap-2">
                     {handlers.viewingContext.type === 'security' ? (
-                      <Shield className="h-4 w-4 text-orange-500" />
+                      <Shield className="h-4 w-4 text-warning" />
                     ) : handlers.viewingContext.type === 'advisory' ? (
-                      <ShieldAlert className="h-4 w-4 text-orange-500" />
+                      <ShieldAlert className="h-4 w-4 text-warning" />
                     ) : handlers.viewingContext.type === 'linear' ? (
-                      <LinearIcon className="h-4 w-4 text-violet-500" />
+                      <LinearIcon className="h-4 w-4 text-violet-600 dark:text-violet-400" />
                     ) : handlers.viewingContext.type === 'sentry' ? (
-                      <Sentry className="h-4 w-4 text-orange-500" />
+                      <Sentry className="h-4 w-4 text-warning" />
                     ) : (
-                      <FolderOpen className="h-4 w-4 text-blue-500" />
+                      <FolderOpen className="h-4 w-4 text-muted-foreground" />
                     )}
                     {handlers.viewingContext.title}
                   </DialogTitle>

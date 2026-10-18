@@ -49,7 +49,7 @@ export function isCodexDecisionAvailable(
 }
 
 /**
- * Decision sent to Codex when the user clicks Jean's Approve (yolo).
+ * Decision sent to Codex when the user clicks Jean's Approve (Full access).
  * Prefer acceptForSession when Codex allows it; otherwise fall back to accept
  * and rely on Jean's mid-turn auto-approve flag.
  */

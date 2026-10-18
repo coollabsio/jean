@@ -16,8 +16,8 @@ import {
 import {
   formatGrokModelOptionLabel,
   formatGrokPromptModelLabel,
-  sortModelOptionsByRawModel,
 } from '@/components/chat/toolbar/toolbar-utils'
+import { sortModelOptionsByRawModel } from '@/lib/model-utils'
 import {
   getCatalogModelFastInfo,
   getCatalogModelOptions,

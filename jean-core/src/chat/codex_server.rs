@@ -1327,6 +1327,11 @@ pub fn unregister_session(thread_id: &str) {
     }
     drop(guard);
 
+    release_usage();
+}
+
+/// Release one `ensure_running()` usage and schedule idle shutdown if it was the last.
+pub fn release_usage() {
     let prev = USAGE_COUNT.fetch_sub(1, Ordering::SeqCst);
     if prev == 1 {
         let keep_warm = APP_HANDLE

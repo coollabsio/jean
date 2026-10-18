@@ -70,10 +70,20 @@ export default defineConfig(async () => ({
     rollupOptions: {
       output: {
         manualChunks(id) {
+          // Vite's preload helper is shared by every lazy import. Pin it to the
+          // boot-time React chunk so Rollup doesn't hoist it into a lazy chunk
+          // (e.g. terminal) and force the entry to preload that chunk.
+          if (id.includes('vite/preload-helper')) return 'react'
           if (!id.includes('node_modules')) return undefined
 
           if (id.includes('@xterm') || id.includes('ghostty-web')) {
             return 'terminal'
+          }
+          // Keep React in its own vendor chunk; otherwise Rollup folds it into
+          // the first manual chunk that uses it (markdown) and the entry has
+          // to preload markdown just to get React.
+          if (/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) {
+            return 'react'
           }
           if (
             id.includes('react-markdown') ||

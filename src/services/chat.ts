@@ -10,6 +10,7 @@ import { toast } from 'sonner'
 import { logger } from '@/lib/logger'
 import { generateId } from '@/lib/uuid'
 import { disposeTerminal } from '@/lib/terminal-instances'
+import { readCloseBypassDetail } from '@/lib/confirm-bypass'
 import {
   beginSessionStateHydration,
   endSessionStateHydration,
@@ -27,10 +28,12 @@ import type {
   QuestionAnswer,
   ThinkingLevel,
   ExecutionMode,
+  PermissionMode,
   EffortLevel,
   LabelData,
   QueuedMessage,
   Backend,
+  PinnedTable,
 } from '@/types/chat'
 import { isTauri, projectsQueryKeys } from '@/services/projects'
 import { hasBackendTransport } from '@/lib/environment'
@@ -54,7 +57,11 @@ import type {
   Worktree,
 } from '@/types/projects'
 import { preserveQueryCacheOnError } from '@/lib/query-error'
-import { useConsolidatedAllSessions } from './multi-server-sessions'
+import { renameTableKeyMessage } from '@/lib/pinned-table-reveal'
+import {
+  useConsolidatedAllSessions,
+  useConsolidatedUnreadSessions,
+} from './multi-server-sessions'
 
 /** Default number of recent runs loaded on initial session fetch. */
 export const INITIAL_RUN_LIMIT = 10
@@ -125,7 +132,7 @@ export function removeSessionFromAllSessionsCache(
   queryClient: QueryClient,
   sessionId: string
 ): void {
-  queryClient.setQueryData(['all-sessions'], old => {
+  queryClient.setQueriesData({ queryKey: ['all-sessions'] }, old => {
     const data = old as { entries?: { sessions?: Session[] }[] } | undefined
     if (!data?.entries) return old
     return {
@@ -154,17 +161,20 @@ export async function refreshWorktreeSessionsCaches(
       worktreePath,
     })
     queryClient.setQueryData(chatQueryKeys.sessions(worktreeId), sessions)
-    queryClient.setQueryData<AllSessionsResponse>(['all-sessions'], old => {
-      if (!old?.entries) return old
-      return {
-        ...old,
-        entries: old.entries.map(entry =>
-          entry.worktree_id === worktreeId
-            ? { ...entry, sessions: sessions.sessions }
-            : entry
-        ),
+    queryClient.setQueriesData<AllSessionsResponse>(
+      { queryKey: ['all-sessions'] },
+      old => {
+        if (!old?.entries) return old
+        return {
+          ...old,
+          entries: old.entries.map(entry =>
+            entry.worktree_id === worktreeId
+              ? { ...entry, sessions: sessions.sessions }
+              : entry
+          ),
+        }
       }
-    })
+    )
     return sessions
   } catch (error) {
     logger.warn('Failed to refresh worktree sessions caches', {
@@ -470,6 +480,7 @@ export async function prefetchSessions(
     > = {}
     const waitingUpdates: Record<string, boolean> = {}
     const executionModeUpdates: Record<string, ExecutionMode> = {}
+    const permissionModeUpdates: Record<string, PermissionMode> = {}
     const primarySurfaceUpdates: Record<string, 'chat' | 'terminal'> = {}
     const labelUpdates: Record<string, LabelData> = {}
     const reviewResultsUpdates: Record<string, StoredReviewResults> = {}
@@ -511,6 +522,8 @@ export async function prefetchSessions(
       if (session.selected_execution_mode) {
         executionModeUpdates[session.id] = session.selected_execution_mode
       }
+      if (session.selected_permission_mode)
+        permissionModeUpdates[session.id] = session.selected_permission_mode
       if (session.primary_surface) {
         primarySurfaceUpdates[session.id] = session.primary_surface
       }
@@ -580,6 +593,12 @@ export async function prefetchSessions(
       storeUpdates.executionModes = {
         ...currentState.executionModes,
         ...executionModeUpdates,
+      }
+    }
+    if (Object.keys(permissionModeUpdates).length > 0) {
+      storeUpdates.permissionModes = {
+        ...currentState.permissionModes,
+        ...permissionModeUpdates,
       }
     }
     if (Object.keys(primarySurfaceUpdates).length > 0) {
@@ -655,6 +674,11 @@ export async function prefetchSessions(
  */
 export function useAllSessions(enabled = true) {
   return useConsolidatedAllSessions(enabled)
+}
+
+/** Unread sessions only (finished-session popover); much lighter than all. */
+export function useUnreadSessions(enabled = true) {
+  return useConsolidatedUnreadSessions(enabled)
 }
 
 export const MIN_SESSION_SEARCH_LEN = 3
@@ -1020,7 +1044,10 @@ export function useUpdateSessionState() {
       pendingPlanMessageId,
       enabledMcpServers,
       selectedExecutionMode,
+      selectedPermissionMode,
       tableCheckedRows,
+      hiddenTableChecklists,
+      pinnedTables,
     }: {
       worktreeId: string
       worktreePath: string
@@ -1098,7 +1125,10 @@ export function useUpdateSessionState() {
       pendingPlanMessageId?: string | null
       enabledMcpServers?: string[] | null
       selectedExecutionMode?: ExecutionMode | null
+      selectedPermissionMode?: PermissionMode
       tableCheckedRows?: Record<string, number[]>
+      hiddenTableChecklists?: string[]
+      pinnedTables?: PinnedTable[]
     }): Promise<void> => {
       if (!isTauri()) {
         throw new Error('Not in Tauri context')
@@ -1126,7 +1156,10 @@ export function useUpdateSessionState() {
         pendingPlanMessageId,
         enabledMcpServers,
         selectedExecutionMode,
+        selectedPermissionMode,
         tableCheckedRows,
+        hiddenTableChecklists,
+        pinnedTables,
       })
       logger.debug('Session state updated')
     },
@@ -1594,15 +1627,21 @@ export function useCloseSessionOrWorktreeKeybinding(
   }, [archiveSession, closeSession, queryClient])
 
   useEffect(() => {
-    const handleCloseSessionOrWorktree = () => {
+    const handleCloseSessionOrWorktree = (e: Event) => {
       // Skip when session modal is open — SessionChatModal handles CMD+W in that case
       if (useUIStore.getState().sessionChatModalOpen) return
+
+      const bypassConfirm = readCloseBypassDetail(e)
 
       // Check if confirmation is required
       const preferences = queryClient.getQueryData<AppPreferences>(
         preferencesQueryKeys.preferences()
       )
-      if (preferences?.confirm_session_close !== false && onConfirmRequired) {
+      if (
+        !bypassConfirm &&
+        preferences?.confirm_session_close !== false &&
+        onConfirmRequired
+      ) {
         // Find branch name and session count for the dialog
         const { activeWorktreeId } = useChatStore.getState()
         if (activeWorktreeId) {
@@ -1782,10 +1821,8 @@ export function useSetActiveSession() {
  * from an earlier turn — chat:done and the invoke response can each arrive
  * first, and either can be missing.
  */
-export function upsertTurnAssistantMessage(
-  messages: ChatMessage[],
-  reply: ChatMessage
-): ChatMessage[] {
+/** Index of the first assistant message after the last user message, or -1 */
+function findTurnReplyIndex(messages: ChatMessage[]): number {
   let lastUserIdx = -1
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i]?.role === 'user') {
@@ -1793,9 +1830,16 @@ export function upsertTurnAssistantMessage(
       break
     }
   }
-  const turnReplyIdx = messages.findIndex(
+  return messages.findIndex(
     (message, index) => index > lastUserIdx && message.role === 'assistant'
   )
+}
+
+export function upsertTurnAssistantMessage(
+  messages: ChatMessage[],
+  reply: ChatMessage
+): ChatMessage[] {
+  const turnReplyIdx = findTurnReplyIndex(messages)
   if (turnReplyIdx < 0) return [...messages, reply]
   const updated = [...messages]
   updated[turnReplyIdx] = reply
@@ -1851,6 +1895,30 @@ export function useSendMessage() {
       if (!isTauri()) {
         throw new Error('Not in Tauri context')
       }
+
+      // Snapshot the exact send args so a background auto-continue (after a
+      // usage limit resets) can replay this send without the active-session UI.
+      // Any new send supersedes an armed auto-continue for the session.
+      const { setLastSentArgs, disarmAutoResume } = useChatStore.getState()
+      disarmAutoResume(sessionId)
+      setLastSentArgs(sessionId, {
+        sessionId,
+        worktreeId,
+        worktreePath,
+        message,
+        model,
+        executionMode,
+        thinkingLevel,
+        effortLevel,
+        parallelExecutionPrompt,
+        aiLanguage,
+        allowedTools,
+        mcpConfig,
+        chromeEnabled,
+        customProfileName,
+        backend,
+        includeRecap,
+      })
 
       console.log(
         `[SendMutation] mutationFn CALLED sessionId=${sessionId} worktreeId=${worktreeId}`
@@ -2017,6 +2085,17 @@ export function useSendMessage() {
 
       // Replace this turn's optimistic assistant message (from chat:done) with
       // the complete one from the backend, which has all content_blocks.
+      // Tables pinned or checked on the optimistic message follow the new id.
+      const cachedMessages = queryClient.getQueryData<Session>(
+        chatQueryKeys.session(sessionId)
+      )?.messages
+      const optimisticId =
+        cachedMessages?.[findTurnReplyIndex(cachedMessages)]?.id
+      if (optimisticId && optimisticId !== response.id) {
+        store.renameTableKeys(sessionId, key =>
+          renameTableKeyMessage(key, optimisticId, response.id)
+        )
+      }
       queryClient.setQueryData<Session>(
         chatQueryKeys.session(sessionId),
         old =>
@@ -2161,6 +2240,13 @@ export function useSendMessage() {
 
       // Real errors with no streamed content — rollback to previous state
       setError(sessionId, errorMessage || 'Unknown error occurred')
+
+      // The composer is cleared before the async mutation starts. Restore the
+      // submitted text after a rejected send, but never replace newer typing.
+      const { inputDrafts, setInputDraft } = useChatStore.getState()
+      if (!inputDrafts[sessionId]) {
+        setInputDraft(sessionId, variables.message)
+      }
 
       if (context?.previous) {
         queryClient.setQueryData(

@@ -1,3 +1,4 @@
+import { AcpPermissionsRequest } from './AcpPermissionsRequest'
 import {
   useCallback,
   useDeferredValue,
@@ -7,6 +8,7 @@ import {
   useRef,
   useState,
   lazy,
+  memo,
   Suspense,
 } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
@@ -28,7 +30,14 @@ import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { invoke } from '@/lib/transport'
 import { hydrateRunningSnapshot } from '@/lib/hydrate-running-snapshot'
 import { generateId } from '@/lib/uuid'
-import { GitBranch, GitMerge, Layers, Loader2 } from '@/components/icons/reicon'
+import {
+  ArrowDown,
+  ArrowUp,
+  GitBranch,
+  GitMerge,
+  Layers,
+  Loader2,
+} from '@/components/icons/reicon'
 import {
   useSession,
   useSessions,
@@ -50,10 +59,20 @@ import {
   useRunScripts,
   usePackageScripts,
   type PackageScript,
+  invalidateProjectLists,
   projectsQueryKeys,
 } from '@/services/projects'
 import { useProjectsStore } from '@/store/projects-store'
 import type { Worktree } from '@/types/projects'
+import type {
+  AttachedSavedContext,
+  LoadedAdvisoryContext,
+  LoadedIssueContext,
+  LoadedPullRequestContext,
+  LoadedSecurityAlertContext,
+} from '@/types/github'
+import type { LoadedLinearIssueContext } from '@/types/linear'
+import type { SentryIssueContext } from '@/types/sentry'
 import {
   useLoadedIssueContexts,
   useLoadedPRContexts,
@@ -70,10 +89,13 @@ import { parseServerResourceKey } from '@/lib/server-resource'
 import { SettingsTargetProvider } from '@/lib/settings-target'
 import {
   DEFAULT_PARALLEL_EXECUTION_PROMPT,
+  DEFAULT_PRE_RELEASE_REVIEW_PROMPT,
   PREDEFINED_CLI_PROFILES,
   resolveMagicPromptBackend,
   resolveMagicPromptProvider,
   type CliBackend,
+  type CodexProviderProfile,
+  type CustomCliProfile,
 } from '@/types/preferences'
 import type {
   ChatMessage,
@@ -135,6 +157,14 @@ import { ReviewMethodModal } from './ReviewMethodModal'
 import { QueuedPromptsPanel } from './QueuedPromptsPanel'
 import { useQueuedPromptActions } from './hooks/useQueuedPromptActions'
 import { FloatingButtons } from './FloatingButtons'
+import { GoalBadge } from './GoalBadge'
+import { PinnedTablesButton } from './PinnedTablesButton'
+import {
+  capturePrependScrollAnchor,
+  restorePrependScrollAnchor,
+  type PrependScrollAnchor,
+} from './message-scroll-anchor'
+import { useShowTableInChat } from './hooks/useShowTableInChat'
 import type { ApprovalModelOverride } from './ApprovalModelSubmenu'
 import { resolveApprovalLabel } from './approval-label-utils'
 import { StreamingMessage } from './StreamingMessage'
@@ -144,7 +174,6 @@ import {
   getCurrentPromptWindow,
   remapIndexForWindow,
 } from './compact-history-window'
-import { CodexGoalBanner } from './CodexGoalBanner'
 import { StreamingStatusBar } from './StreamingStatusBar'
 import { ChatErrorFallback } from './ChatErrorFallback'
 import { logger } from '@/lib/logger'
@@ -169,6 +198,7 @@ import { useUIStore } from '@/store/ui-store'
 import { buildMcpConfigJson } from '@/services/mcp'
 import { CHECK_GITHUB_ISSUES_PROMPT } from '@/lib/github-discovery-prompt'
 import { buildCommentAndCloseIssuePrompt } from '@/lib/github-issue-close-prompt'
+import { buildCommitInSessionPrompt } from '@/lib/commit-in-session-prompt'
 import type { McpServerInfo } from '@/types/chat'
 import { useGitStatus } from '@/services/git-status'
 import { useRemotePicker } from '@/hooks/useRemotePicker'
@@ -177,7 +207,9 @@ import {
   supportsAdaptiveThinking,
 } from '@/lib/model-utils'
 import { copyToClipboard, copyHtmlToClipboard } from '@/lib/clipboard'
-import { useClaudeCliStatus } from '@/services/claude-cli'
+import { useClaudeCliStatus, useClaudeUsage } from '@/services/claude-cli'
+import { useCodexUsage } from '@/services/codex-cli'
+import { getLimitResetAtMs, isUsageLimitError } from '@/lib/usage-limit'
 import {
   getCatalogModelReasoning,
   useModelCatalog,
@@ -241,8 +273,11 @@ import { useMessageSending } from './hooks/useMessageSending'
 import { usePlanState } from './hooks/usePlanState'
 import { useActiveTodosAndAgents } from './hooks/useActiveTodosAndAgents'
 import { usePendingAttachments } from './hooks/usePendingAttachments'
-import { dedupeInFlightAssistantMessage } from './in-flight-message-dedupe'
-import { shouldShowPermissionApproval } from './permission-approval-utils'
+import { shouldHideInFlightAssistantMessage } from './in-flight-message-dedupe'
+import {
+  isLivePermissionRequest,
+  shouldShowPermissionApproval,
+} from './permission-approval-utils'
 import { navigateToForkedSession } from './fork-session-navigation'
 
 // PERFORMANCE: Stable empty array references to prevent infinite render loops
@@ -254,9 +289,6 @@ const EMPTY_PENDING_IMAGES: PendingImage[] = []
 const EMPTY_PENDING_TEXT_FILES: PendingTextFile[] = []
 const EMPTY_PENDING_FILES: PendingFile[] = []
 
-// Process-wide count so remount races cannot leave reviewSurfaceMounted stuck true
-// (or false while another full-width review surface is still mounted).
-let reviewSurfaceMountCount = 0
 const EMPTY_PENDING_SKILLS: PendingSkill[] = []
 const EMPTY_QUEUED_MESSAGES: QueuedMessage[] = []
 const EMPTY_PERMISSION_DENIALS: PermissionDenial[] = []
@@ -266,6 +298,29 @@ const EMPTY_CODEX_COMMAND_APPROVAL_REQUESTS: CodexCommandApprovalRequest[] = []
 const EMPTY_CODEX_USER_INPUT_REQUESTS: CodexUserInputRequest[] = []
 const EMPTY_CODEX_MCP_ELICITATION_REQUESTS: CodexMcpElicitationRequest[] = []
 const EMPTY_CODEX_DYNAMIC_TOOL_CALL_REQUESTS: CodexDynamicToolCallRequest[] = []
+const EMPTY_MESSAGES: ChatMessage[] = []
+const EMPTY_ISSUE_CONTEXTS: LoadedIssueContext[] = []
+const EMPTY_PR_CONTEXTS: LoadedPullRequestContext[] = []
+const EMPTY_SECURITY_CONTEXTS: LoadedSecurityAlertContext[] = []
+const EMPTY_ADVISORY_CONTEXTS: LoadedAdvisoryContext[] = []
+const EMPTY_LINEAR_CONTEXTS: LoadedLinearIssueContext[] = []
+const EMPTY_SENTRY_CONTEXTS: SentryIssueContext[] = []
+const EMPTY_SAVED_CONTEXTS: AttachedSavedContext[] = []
+const EMPTY_CLI_PROFILES: CustomCliProfile[] = []
+const EMPTY_CODEX_PROVIDERS: CodexProviderProfile[] = []
+
+/**
+ * PERFORMANCE: TanStack Query v5's useMutation returns a new result object on
+ * every render, but its `mutate` / `mutateAsync` functions are stable. Expose
+ * only those so callbacks that depend on the mutation stay referentially
+ * stable across streaming re-renders.
+ */
+function useStableMutation<T extends { mutate: unknown; mutateAsync: unknown }>(
+  mutation: T
+): Pick<T, 'mutate' | 'mutateAsync'> {
+  const { mutate, mutateAsync } = mutation
+  return useMemo(() => ({ mutate, mutateAsync }), [mutate, mutateAsync])
+}
 
 interface ChatWindowProps {
   /** When true, hides terminal panel and other elements not needed in modal */
@@ -276,7 +331,11 @@ interface ChatWindowProps {
   worktreePath?: string
 }
 
-export function ChatWindow(props: ChatWindowProps = {}) {
+// PERFORMANCE: memoized - props are primitives, so parents re-rendering
+// (e.g. SessionChatModal) don't force this large tree to re-render.
+export const ChatWindow = memo(function ChatWindow(
+  props: ChatWindowProps = {}
+) {
   const storeWorktreeId = useChatStore(state => state.activeWorktreeId)
   const worktreeId = props.worktreeId ?? storeWorktreeId
   const serverId = worktreeId
@@ -288,9 +347,9 @@ export function ChatWindow(props: ChatWindowProps = {}) {
       <ChatWindowContent {...props} />
     </SettingsTargetProvider>
   )
-}
+})
 
-function ChatWindowContent({
+const ChatWindowContent = memo(function ChatWindowContent({
   isModal = false,
   worktreeId: propWorktreeId,
   worktreePath: propWorktreePath,
@@ -411,6 +470,8 @@ function ChatWindowContent({
     setExecutionMode,
     setError,
     dismissSetupScript,
+    armAutoResume,
+    disarmAutoResume,
   } = useChatStore.getState()
 
   const queryClient = useQueryClient()
@@ -544,21 +605,6 @@ function ChatWindowContent({
     isMobile,
     isDedicatedEmptyCodeReview,
   ])
-
-  // Full-width review replaces the chat toolbar, so FloatingDock would reappear
-  // over the Send Separately / Send to Chat footer. Hide it while this surface
-  // is active (same mount-count pattern as ChatToolbar → chatToolbarMounted).
-  useEffect(() => {
-    if (!showReviewFullWidth) return
-    reviewSurfaceMountCount += 1
-    useUIStore.getState().setReviewSurfaceMounted(true)
-    return () => {
-      reviewSurfaceMountCount = Math.max(0, reviewSurfaceMountCount - 1)
-      if (reviewSurfaceMountCount === 0) {
-        useUIStore.getState().setReviewSurfaceMounted(false)
-      }
-    }
-  }, [showReviewFullWidth])
 
   useEffect(() => {
     const panel = reviewPanelRef.current
@@ -705,13 +751,15 @@ function ChatWindowContent({
     (preferences?.keybindings?.approve_plan_clear_context_build ??
       DEFAULT_KEYBINDINGS.approve_plan_clear_context_build) as string
   )
-  const sendMessage = useSendMessage()
-  const createSession = useCreateSession()
-  const setSessionModel = useSetSessionModel()
-  const setSessionThinkingLevel = useSetSessionThinkingLevel()
-  const setSessionEffortLevel = useSetSessionEffortLevel()
-  const setSessionBackend = useSetSessionBackend()
-  const setSessionProvider = useSetSessionProvider()
+  const sendMessage = useStableMutation(useSendMessage())
+  const createSession = useStableMutation(useCreateSession())
+  const setSessionModel = useStableMutation(useSetSessionModel())
+  const setSessionThinkingLevel = useStableMutation(
+    useSetSessionThinkingLevel()
+  )
+  const setSessionEffortLevel = useStableMutation(useSetSessionEffortLevel())
+  const setSessionBackend = useStableMutation(useSetSessionBackend())
+  const setSessionProvider = useStableMutation(useSetSessionProvider())
 
   // Fetch worktree data for PR link display
   const { data: worktree } = useWorktree(activeWorktreeId ?? null)
@@ -1052,9 +1100,9 @@ function ChatWindowContent({
   // ChatInput notifies on mount, session change, and empty/non-empty boundary changes
   const [hasInputValue, setHasInputValue] = useState(false)
   const [steerModifierActive, setSteerModifierActive] = useState(false)
-  // Per-session execution mode (defaults to preference or 'plan' for new sessions)
+  // Per-session execution mode (defaults to preference or Full access for new sessions)
   // Uses deferredSessionId for display consistency with other content
-  const defaultExecutionMode = preferences?.default_execution_mode ?? 'plan'
+  const defaultExecutionMode = preferences?.default_execution_mode ?? 'yolo'
   const executionMode = useChatStore(state =>
     deferredSessionId
       ? (state.executionModes[deferredSessionId] ??
@@ -1062,13 +1110,6 @@ function ChatWindowContent({
         defaultExecutionMode)
       : defaultExecutionMode
   )
-  // Executing mode - the mode the currently-running prompt was sent with
-  // Uses activeSessionId for immediate status feedback (not deferred)
-  const executingMode = useChatStore(state =>
-    activeSessionId ? state.executingModes[activeSessionId] : undefined
-  )
-  // Streaming execution mode - uses executing mode when sending, otherwise selected mode
-  const streamingExecutionMode = executingMode ?? executionMode
   // Whether this session is waiting for user input (AskUserQuestion/ExitPlanMode)
   const rawIsWaitingForInput = useChatStore(state =>
     activeSessionId
@@ -1099,6 +1140,29 @@ function ChatWindowContent({
   const currentError = useChatStore(state =>
     deferredSessionId ? (state.errors[deferredSessionId] ?? null) : null
   )
+
+  // Auto-continue: offer only for usage/rate-limit errors on backends that
+  // expose a reset time (Claude, Codex). Reset time comes from the usage cache.
+  const isLimitError = isUsageLimitError(currentError)
+  const supportsAutoResume =
+    isLimitError &&
+    (resolvedBackend === 'claude' || resolvedBackend === 'codex')
+  const { data: claudeUsage } = useClaudeUsage({
+    enabled: supportsAutoResume && resolvedBackend === 'claude',
+  })
+  const { data: codexUsage } = useCodexUsage({
+    enabled: supportsAutoResume && resolvedBackend === 'codex',
+  })
+  const limitResetAtMs = supportsAutoResume
+    ? getLimitResetAtMs(resolvedBackend === 'claude' ? claudeUsage : codexUsage)
+    : null
+  // Without a known reset time, arming would resend straight into the limit.
+  const canAutoResume =
+    supportsAutoResume && limitResetAtMs != null && deferredSessionId != null
+  const autoResumeAtMs = useChatStore(state =>
+    deferredSessionId ? (state.autoResume[deferredSessionId] ?? null) : null
+  )
+
   // Per-worktree setup script result (stays at worktree level)
   const setupScriptResult = useChatStore(state =>
     activeWorktreeId ? state.setupScriptResults[activeWorktreeId] : undefined
@@ -1199,6 +1263,7 @@ function ChatWindowContent({
     isSending,
     executionMode,
     isCodexBackend,
+    hasLiveRequest: pendingDenials.some(isLivePermissionRequest),
   })
   const activeCodexCommandApprovalRequest =
     pendingCodexCommandApprovalRequests[0]
@@ -1341,6 +1406,32 @@ function ChatWindowContent({
   const approveButtonRef = useRef<HTMLButtonElement>(null)
   const triggerChatAttachRef = useRef<(() => void) | null>(null)
 
+  // PERFORMANCE: Stable ref-backed callbacks for memoized ChatInput/ChatToolbar
+  const handleRegisterClearHandler = useCallback(
+    (handler: (() => void) | null) => {
+      clearChatInputStateRef.current = handler
+    },
+    []
+  )
+  const handleRegisterAttachHandler = useCallback(
+    (handler: (() => void) | null) => {
+      triggerChatAttachRef.current = handler
+    },
+    []
+  )
+  const handleClearChatInputState = useCallback(
+    () => clearChatInputStateRef.current?.(),
+    []
+  )
+  const handleToolbarAttach = useCallback(
+    () => triggerChatAttachRef.current?.(),
+    []
+  )
+  const getCustomProfileName = useCallback(
+    () => selectedProviderRef.current ?? undefined,
+    []
+  )
+
   // Terminal panel ref for imperative collapse/expand
   const terminalPanelRef = useRef<ImperativePanelHandle>(null)
   // Review sidebar panel ref for imperative collapse/expand
@@ -1358,6 +1449,7 @@ function ChatWindowContent({
     scrollToFindings,
     handleScroll,
     handleScrollToBottomHandled,
+    stopFollowingTail,
   } = useScrollManagement({
     messages: session?.messages,
     virtualizedListRef,
@@ -1368,6 +1460,34 @@ function ChatWindowContent({
       !isLoading && !isSessionsLoading && !isSessionSwitching && !!session,
     isSending,
   })
+
+  // The composer floats over the messages so text stays visible beside it.
+  // Publish its height as a CSS var: messages pad by it so the last line can
+  // scroll above the composer, and floating buttons sit above it.
+  const composerOverlayObserverRef = useRef<ResizeObserver | null>(null)
+  const setComposerOverlayNode = useCallback(
+    (node: HTMLDivElement | null) => {
+      composerOverlayObserverRef.current?.disconnect()
+      composerOverlayObserverRef.current = null
+      const container = node?.parentElement
+      if (!node || !container || typeof ResizeObserver === 'undefined') return
+      const observer = new ResizeObserver(() => {
+        const viewport = scrollViewportRef.current
+        const wasAtBottom =
+          !!viewport &&
+          viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 2
+        container.style.setProperty(
+          '--chat-composer-height',
+          `${node.offsetHeight}px`
+        )
+        // Keep the tail visible when the composer grows (subagents, queue)
+        if (wasAtBottom && viewport) viewport.scrollTop = viewport.scrollHeight
+      })
+      observer.observe(node)
+      composerOverlayObserverRef.current = observer
+    },
+    [scrollViewportRef]
+  )
 
   // Drag and drop images into chat input
   const { isDragging } = useDragAndDropImages(activeSessionId)
@@ -1384,6 +1504,13 @@ function ChatWindowContent({
     return () => useUIStore.getState().setGitDiffModalOpen(false)
   }, [diffRequest])
 
+  // Subagents panel expanded state, remembered per session (collapsed by default)
+  const isAgentWidgetExpanded = useChatStore(state =>
+    activeSessionId
+      ? (state.expandedAgentWidgetSessions[activeSessionId] ?? false)
+      : false
+  )
+
   // Active todos and agents from streaming/persisted tool calls (with dismissal tracking)
   const {
     activeTodos,
@@ -1393,7 +1520,6 @@ function ChatWindowContent({
     setDismissedTodoMessageId,
     activeAgents,
     agentSourceMessageId,
-    agentIsFromStreaming,
     dismissedAgentMessageId,
     setDismissedAgentMessageId,
   } = useActiveTodosAndAgents({
@@ -1403,13 +1529,10 @@ function ChatWindowContent({
     lastAssistantMessage,
   })
 
-  // Plan state: finished pending plan, content, file path
+  // Plan state: finished pending plan awaiting approval
   const { pendingPlanMessage, hasPendingPlanApproval } = usePlanState({
     sessionMessages: session?.messages,
     pendingPlanMessageId: session?.pending_plan_message_id,
-    currentToolCalls,
-    currentStreamingContent: streamingContent,
-    currentStreamingContentBlocks,
     isSending,
   })
 
@@ -1559,10 +1682,8 @@ function ChatWindowContent({
             backend
           ),
           parallelExecutionPrompt:
-            preferences?.parallel_execution_prompt_enabled
-              ? (preferences.magic_prompts?.parallel_execution ??
-                DEFAULT_PARALLEL_EXECUTION_PROMPT)
-              : undefined,
+            preferences?.magic_prompts?.parallel_execution ??
+            DEFAULT_PARALLEL_EXECUTION_PROMPT,
           chromeEnabled: preferences?.chrome_enabled ?? false,
           aiLanguage: preferences?.ai_language,
         })
@@ -1616,10 +1737,14 @@ function ChatWindowContent({
     createSession,
     queryClient,
     markAtBottom,
-    sessionsData,
     clearInputDraft,
-    clearChatInputState: () => clearChatInputStateRef.current?.(),
+    clearChatInputState: handleClearChatInputState,
   })
+
+  const handleSteer = useCallback(
+    () => handleSubmit(undefined, { forceSteer: true }),
+    [handleSubmit]
+  )
 
   const handleCheckGitHubIssues = useCallback(() => {
     sendMessageNow({
@@ -1642,14 +1767,12 @@ function ChatWindowContent({
     })
   }, [getMcpConfig, sendMessageNow])
 
-  const handleCommentAndCloseIssue = useCallback(() => {
-    if (!loadedIssueContexts?.length) {
-      toast.error('No GitHub issue attached to this session or worktree')
-      return
-    }
+  const handlePreReleaseReview = useCallback(() => {
     sendMessageNow({
       id: generateId(),
-      message: buildCommentAndCloseIssuePrompt(loadedIssueContexts),
+      message:
+        preferences?.magic_prompts?.pre_release_review ??
+        DEFAULT_PRE_RELEASE_REVIEW_PROMPT,
       pendingImages: [],
       pendingFiles: [],
       pendingSkills: [],
@@ -1665,7 +1788,101 @@ function ChatWindowContent({
       backend: selectedBackendRef.current,
       queuedAt: Date.now(),
     })
-  }, [getMcpConfig, loadedIssueContexts, sendMessageNow])
+  }, [
+    getMcpConfig,
+    preferences?.magic_prompts?.pre_release_review,
+    sendMessageNow,
+  ])
+
+  // Claude's goal lives in the CLI session: queue `/goal clear` (a local CLI
+  // command, no model turn) and cancel a running goal loop so the queue drains.
+  const handleClearClaudeGoal = useCallback(async () => {
+    if (!activeSessionId) return
+    const wasSending = useChatStore.getState().isSending(activeSessionId)
+    sendMessageNow({
+      id: generateId(),
+      message: '/goal clear',
+      pendingImages: [],
+      pendingFiles: [],
+      pendingSkills: [],
+      pendingTextFiles: [],
+      model: selectedModelRef.current,
+      provider: selectedProviderRef.current,
+      executionMode: executionModeRef.current,
+      thinkingLevel: selectedThinkingLevelRef.current,
+      effortLevel: useAdaptiveThinkingRef.current
+        ? selectedEffortLevelRef.current
+        : undefined,
+      mcpConfig: getMcpConfig(),
+      backend: selectedBackendRef.current,
+      queuedAt: Date.now(),
+    })
+    if (wasSending) await handleCancel()
+  }, [activeSessionId, getMcpConfig, handleCancel, sendMessageNow])
+
+  // Used by the composer goal tab: clear Jean's goal mirror,
+  // then (Claude only) clear the goal kept in the CLI session.
+  const handleClearGoal = useCallback(async () => {
+    if (!activeSessionId || !activeWorktreeId || !activeWorktreePath) return
+    await invoke('codex_goal_clear', {
+      worktreeId: activeWorktreeId,
+      worktreePath: activeWorktreePath,
+      sessionId: activeSessionId,
+    })
+    if (selectedBackendRef.current === 'claude') await handleClearClaudeGoal()
+  }, [
+    activeSessionId,
+    activeWorktreeId,
+    activeWorktreePath,
+    handleClearClaudeGoal,
+  ])
+
+  // Sends a magic prompt to this session with the selected backend/model/mode
+  const sendMagicPrompt = useCallback(
+    (message: string) =>
+      sendMessageNow({
+        id: generateId(),
+        message,
+        pendingImages: [],
+        pendingFiles: [],
+        pendingSkills: [],
+        pendingTextFiles: [],
+        model: selectedModelRef.current,
+        provider: selectedProviderRef.current,
+        executionMode: executionModeRef.current,
+        thinkingLevel: selectedThinkingLevelRef.current,
+        effortLevel: useAdaptiveThinkingRef.current
+          ? selectedEffortLevelRef.current
+          : undefined,
+        mcpConfig: getMcpConfig(),
+        backend: selectedBackendRef.current,
+        queuedAt: Date.now(),
+      }),
+    [getMcpConfig, sendMessageNow]
+  )
+
+  const handleCommitInSession = useCallback(() => {
+    const closeIssueNumbers = preferences?.commit_close_issue
+      ? [
+          ...(worktree?.issue_number ? [worktree.issue_number] : []),
+          ...(loadedIssueContexts ?? []).map(ctx => ctx.number),
+        ]
+      : []
+    sendMagicPrompt(buildCommitInSessionPrompt(closeIssueNumbers))
+  }, [
+    loadedIssueContexts,
+    preferences?.commit_close_issue,
+    sendMagicPrompt,
+    worktree?.issue_number,
+  ])
+
+  const handleCommentAndCloseIssue = useCallback(() => {
+    if (!loadedIssueContexts?.length) {
+      toast.error('No GitHub issue attached to this session or worktree')
+      return
+    }
+    sendMagicPrompt(buildCommentAndCloseIssuePrompt(loadedIssueContexts))
+  }, [loadedIssueContexts, sendMagicPrompt])
 
   // Git operations hook - handles commit, PR, review, merge operations
   const {
@@ -1835,6 +2052,10 @@ function ChatWindowContent({
   })
 
   const [reviewMethodModalOpen, setReviewMethodModalOpen] = useState(false)
+  const handleOpenReviewMethodModal = useCallback(
+    () => setReviewMethodModalOpen(true),
+    []
+  )
 
   // Linked projects modal state
   const linkedProjectsModalOpen = useUIStore(
@@ -1872,7 +2093,7 @@ function ChatWindowContent({
         chatQueryKeys.session(forkedSession.id),
         forkedSession
       )
-      queryClient.invalidateQueries({ queryKey: projectsQueryKeys.list() })
+      invalidateProjectLists(queryClient)
       queryClient.invalidateQueries({
         queryKey: projectsQueryKeys.worktrees(forkedWorktree.project_id),
       })
@@ -1926,8 +2147,10 @@ function ChatWindowContent({
     handleLinkedProjects,
     handleForkSession,
     handleCheckGitHubIssues,
+    handlePreReleaseReview,
     handleCommit,
     handleCommitAndPush: handleCommitAndPushWithPicker,
+    handleCommitInSession,
     handleCommentAndCloseIssue,
     handlePull: handlePullWithPicker,
     handlePush: handlePushWithPicker,
@@ -1982,9 +2205,7 @@ function ChatWindowContent({
     yoloThinkingLevelRef,
     yoloEffortLevelRef,
     selectedBackendRef,
-    getCustomProfileName: () => {
-      return selectedProviderRef.current ?? undefined
-    },
+    getCustomProfileName,
     executionModeRef,
     selectedThinkingLevelRef,
     selectedEffortLevelRef,
@@ -2234,14 +2455,29 @@ function ChatWindowContent({
     sendMessageNow,
   })
 
-  // Pre-calculate last plan message index for approve button logic
-  const lastPlanMessageIndex = useMemo(() => {
-    const messages = dedupeInFlightAssistantMessage(session?.messages ?? [], {
+  // Messages for rendering - hide the in-flight trailing assistant snapshot
+  // while streaming. PERFORMANCE: compute a boolean per render and memoize the
+  // slice on it, so the array reference stays stable across streaming flushes.
+  const rawSessionMessages = session?.messages ?? EMPTY_MESSAGES
+  const hideTrailingInFlightMessage = shouldHideInFlightAssistantMessage(
+    rawSessionMessages,
+    {
       isSending,
       streamingContent,
       streamingContentBlocks: currentStreamingContentBlocks,
       streamingToolCalls: currentToolCalls,
-    })
+    }
+  )
+  const messages = useMemo(
+    () =>
+      hideTrailingInFlightMessage
+        ? rawSessionMessages.slice(0, -1)
+        : rawSessionMessages,
+    [rawSessionMessages, hideTrailingInFlightMessage]
+  )
+
+  // Pre-calculate last plan message index for approve button logic
+  const lastPlanMessageIndex = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i]
       if (
@@ -2253,43 +2489,20 @@ function ChatWindowContent({
       }
     }
     return -1
-  }, [
-    session?.messages,
-    isSending,
-    streamingContent,
-    currentStreamingContentBlocks,
-    currentToolCalls,
-  ])
-
-  // Messages for rendering - memoize to ensure stable reference
-  const messages = useMemo(
-    () =>
-      dedupeInFlightAssistantMessage(session?.messages ?? [], {
-        isSending,
-        streamingContent,
-        streamingContentBlocks: currentStreamingContentBlocks,
-        streamingToolCalls: currentToolCalls,
-      }),
-    [
-      session?.messages,
-      isSending,
-      streamingContent,
-      currentStreamingContentBlocks,
-      currentToolCalls,
-    ]
-  )
+  }, [messages])
 
   const compactHistoryWindow = useMemo(
     () => getCurrentPromptWindow(messages),
     [messages]
   )
-  const compactScopeKey = `${deferredSessionId ?? 'no-session'}:${
-    messages[compactHistoryWindow.startIndex]?.id ?? 'empty'
-  }`
-  const [expandedCompactScopeKey, setExpandedCompactScopeKey] = useState<
+  // Keep history expanded for the whole session, so a new prompt or a finished
+  // run does not collapse it again.
+  const [expandedCompactSessionId, setExpandedCompactSessionId] = useState<
     string | null
   >(null)
-  const isCompactHistoryExpanded = expandedCompactScopeKey === compactScopeKey
+  const isCompactHistoryExpanded =
+    !!deferredSessionId && expandedCompactSessionId === deferredSessionId
+  const compactExpandAnchorRef = useRef<PrependScrollAnchor | null>(null)
   const compactMessages = useMemo(
     () =>
       isCompactHistoryExpanded
@@ -2301,8 +2514,30 @@ function ChatWindowContent({
     ? lastPlanMessageIndex
     : remapIndexForWindow(lastPlanMessageIndex, compactHistoryWindow.startIndex)
   const handleShowHiddenCompactPrompts = useCallback(() => {
-    setExpandedCompactScopeKey(compactScopeKey)
-  }, [compactScopeKey])
+    const viewport = scrollViewportRef.current
+    compactExpandAnchorRef.current = viewport
+      ? capturePrependScrollAnchor(viewport)
+      : null
+    setExpandedCompactSessionId(deferredSessionId ?? null)
+  }, [scrollViewportRef, deferredSessionId])
+  // Older prompts are prepended above the view. Keep the visible message in
+  // place so the chat does not jump.
+  useLayoutEffect(() => {
+    const anchor = compactExpandAnchorRef.current
+    const viewport = scrollViewportRef.current
+    if (!isCompactHistoryExpanded || !anchor || !viewport) return
+    compactExpandAnchorRef.current = null
+    restorePrependScrollAnchor(viewport, anchor)
+  }, [isCompactHistoryExpanded, scrollViewportRef])
+  const handleShowTableInChat = useShowTableInChat({
+    sessionId: deferredSessionId,
+    isCompact: Boolean(preferences?.compact_chat_view_enabled),
+    compactStartIndex: compactHistoryWindow.startIndex,
+    isCompactHistoryExpanded,
+    onExpandCompactHistory: handleShowHiddenCompactPrompts,
+    listRef: virtualizedListRef,
+    stopFollowingTail,
+  })
 
   // Virtualizer for message list - always use virtualization for consistent performance
   // Even small conversations benefit from virtualization when messages have heavy content
@@ -2439,20 +2674,22 @@ function ChatWindowContent({
                   minSize={isMobile || isModal ? 0 : 30}
                   className="min-h-0"
                 >
-                  <div className="flex h-full min-h-0 flex-col">
+                  <div className="relative flex h-full min-h-0 flex-col">
                     {/* Messages area */}
                     <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
-                      {/* Session label badge - absolute positioned to avoid covering content */}
+                      {/* Top-right session label - absolute positioned to avoid covering content */}
                       {sessionLabel && (
-                        <span
-                          className="absolute top-2 right-4 z-20 inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium"
-                          style={{
-                            backgroundColor: sessionLabel.color,
-                            color: getLabelTextColor(sessionLabel.color),
-                          }}
-                        >
-                          {sessionLabel.name}
-                        </span>
+                        <div className="absolute top-2 right-4 z-20">
+                          <span
+                            className="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium"
+                            style={{
+                              backgroundColor: sessionLabel.color,
+                              color: getLabelTextColor(sessionLabel.color),
+                            }}
+                          >
+                            {sessionLabel.name}
+                          </span>
+                        </div>
                       )}
                       <ChatSearchBar scrollContainerRef={scrollViewportRef} />
                       {/* Bottom fade gradient so messages don't hard-cut at the input area */}
@@ -2463,7 +2700,7 @@ function ChatWindowContent({
                         viewportClassName="will-change-scroll"
                         onScroll={handleScroll}
                       >
-                        <div className="mx-auto max-w-7xl px-4 pt-4 pb-6 md:px-6 min-w-0 w-full">
+                        <div className="mx-auto max-w-7xl px-4 pt-4 pb-[calc(var(--chat-composer-height,0px)+1.5rem)] md:px-6 min-w-0 w-full">
                           <div
                             className="select-text space-y-4 font-mono text-sm min-w-0 break-words overflow-x-hidden"
                             // Suppress browser default menu on empty thread chrome
@@ -2527,12 +2764,6 @@ function ChatWindowContent({
                                   }
                                 />
                               )}
-                            <CodexGoalBanner
-                              sessionId={activeSessionId ?? null}
-                              worktreeId={activeWorktreeId ?? null}
-                              worktreePath={activeWorktreePath ?? null}
-                              isCodexBackend={isCodexBackend}
-                            />
                             {isLoading ||
                             isSessionsLoading ||
                             isSessionSwitching ? (
@@ -2755,9 +2986,6 @@ function ChatWindowContent({
                                 <StreamingStatusBar
                                   isSending={isSending}
                                   sendStartedAt={sendStartedAt}
-                                  streamingExecutionMode={
-                                    streamingExecutionMode
-                                  }
                                   restoredRunStatus={
                                     !isSending &&
                                     !isWaitingForInput &&
@@ -2838,6 +3066,14 @@ function ChatWindowContent({
                                 }
                               />
                             )}
+
+                            {activeSessionId &&
+                              (selectedBackend === 'grok' ||
+                                selectedBackend === 'kimi') && (
+                                <AcpPermissionsRequest
+                                  sessionId={activeSessionId}
+                                />
+                              )}
 
                             {activeOpencodePermissionRequest && (
                               <OpenCodePermissionsRequest
@@ -2923,63 +3159,160 @@ function ChatWindowContent({
                           </div>
                         </div>
                       </ScrollArea>
-
-                      {/* Floating scroll buttons */}
-                      <FloatingButtons
-                        showApproveButton={hasPendingPlanApproval}
-                        showFindingsButton={!areFindingsVisible}
-                        isAtBottom={isAtBottom || messages.length === 0}
-                        isSending={isSending}
-                        hiddenPromptCount={
-                          preferences?.compact_chat_view_enabled &&
-                          !zenMode &&
-                          !isCompactHistoryExpanded
-                            ? compactHistoryWindow.hiddenPromptCount
-                            : 0
-                        }
-                        onShowHiddenPrompts={handleShowHiddenCompactPrompts}
-                        approveShortcut={approveShortcut}
-                        buildDefaultModelLabel={buildNewContextLabel}
-                        yoloDefaultModelLabel={yoloNewContextLabel}
-                        onApprove={floatingApprove}
-                        onYoloApprove={floatingYoloApprove}
-                        onClearContextBuildApprove={
-                          floatingClearContextBuildApprove
-                        }
-                        onClearContextApprove={floatingClearContextApprove}
-                        onWorktreeBuildApprove={
-                          worktree?.project_id
-                            ? floatingWorktreeBuildApprove
-                            : undefined
-                        }
-                        onWorktreeYoloApprove={
-                          worktree?.project_id
-                            ? floatingWorktreeYoloApprove
-                            : undefined
-                        }
-                        onScrollToFindings={scrollToFindings}
-                        onScrollToBottom={scrollToBottom}
-                      />
                     </div>
 
-                    {/* Error banner - shows when request fails */}
-                    {currentError && (
-                      <ErrorBanner
-                        error={currentError}
-                        onDismiss={() =>
-                          activeSessionId && setError(activeSessionId, null)
-                        }
-                      />
-                    )}
-
-                    {/* Input container - full width, centered content */}
-                    <div className="bg-background">
+                    {/* Input container - floats over the messages so the sides stay see-through */}
+                    <div
+                      ref={setComposerOverlayNode}
+                      className="pointer-events-none absolute inset-x-0 bottom-0 z-20"
+                    >
+                      {/* Error banner - shows when request fails */}
+                      {currentError && (
+                        <div className="pointer-events-auto bg-background">
+                          <ErrorBanner
+                            error={currentError}
+                            onDismiss={() => {
+                              if (!activeSessionId) return
+                              // The banner is the only cancel control.
+                              disarmAutoResume(activeSessionId)
+                              setError(activeSessionId, null)
+                            }}
+                            onAutoContinue={
+                              canAutoResume
+                                ? () =>
+                                    armAutoResume(
+                                      deferredSessionId,
+                                      limitResetAtMs
+                                    )
+                                : undefined
+                            }
+                            onCancelAutoContinue={
+                              deferredSessionId
+                                ? () => disarmAutoResume(deferredSessionId)
+                                : undefined
+                            }
+                            isAutoResumeArmed={autoResumeAtMs != null}
+                            limitResetAtMs={autoResumeAtMs ?? limitResetAtMs}
+                          />
+                        </div>
+                      )}
                       <div className="mx-auto max-w-7xl">
                         <div
                           ref={setChatComposerNode}
                           data-chat-composer=""
-                          className="relative sm:mx-auto sm:mb-3 sm:max-w-3xl xl:max-w-4xl"
+                          className="pointer-events-auto relative sm:mx-auto sm:mb-3 sm:max-w-3xl xl:max-w-4xl"
                         >
+                          {/* Goal, hidden history, pinned tables, and scroll-to-bottom tabs - attached to the top edge of the composer */}
+                          <div className="absolute right-3 bottom-full flex items-end gap-1">
+                            {!zenMode && (
+                              <GoalBadge
+                                sessionId={activeSessionId}
+                                onClearGoal={handleClearGoal}
+                              />
+                            )}
+                            {preferences?.compact_chat_view_enabled &&
+                              !zenMode &&
+                              !isCompactHistoryExpanded &&
+                              compactHistoryWindow.hiddenPromptCount > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={handleShowHiddenCompactPrompts}
+                                  aria-label={`Show ${compactHistoryWindow.hiddenPromptCount} earlier prompts`}
+                                  title="Show earlier prompts"
+                                  className="flex h-6 items-center gap-1 rounded-t-md border border-b-0 border-border bg-card px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                >
+                                  <ArrowUp className="h-3.5 w-3.5" />
+                                  <span>
+                                    {compactHistoryWindow.hiddenPromptCount}
+                                  </span>
+                                </button>
+                              )}
+                            <PinnedTablesButton
+                              sessionId={activeSessionId}
+                              onShowInChat={handleShowTableInChat}
+                            />
+                            <FloatingButtons
+                              showApproveButton={hasPendingPlanApproval}
+                              showFindingsButton={!areFindingsVisible}
+                              isAtBottom={isAtBottom || messages.length === 0}
+                              approveShortcut={approveShortcut}
+                              buildDefaultModelLabel={buildNewContextLabel}
+                              yoloDefaultModelLabel={yoloNewContextLabel}
+                              onApprove={floatingApprove}
+                              onYoloApprove={floatingYoloApprove}
+                              onClearContextBuildApprove={
+                                floatingClearContextBuildApprove
+                              }
+                              onClearContextApprove={
+                                floatingClearContextApprove
+                              }
+                              onWorktreeBuildApprove={
+                                worktree?.project_id
+                                  ? floatingWorktreeBuildApprove
+                                  : undefined
+                              }
+                              onWorktreeYoloApprove={
+                                worktree?.project_id
+                                  ? floatingWorktreeYoloApprove
+                                  : undefined
+                              }
+                              onScrollToFindings={scrollToFindings}
+                              onScrollToBottom={scrollToBottom}
+                            />
+                            {!isAtBottom && messages.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => scrollToBottom(true)}
+                                aria-label="Scroll to bottom"
+                                title="Scroll to bottom"
+                                className="relative flex h-6 items-center gap-1 rounded-t-md border border-b-0 border-border bg-card px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                              >
+                                <ArrowDown className="h-3.5 w-3.5" />
+                                <span>Bottom</span>
+                                {isSending && (
+                                  <span
+                                    aria-hidden="true"
+                                    className="absolute -top-0.5 -right-0.5 flex h-2 w-2"
+                                  >
+                                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
+                                    <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
+                                  </span>
+                                )}
+                              </button>
+                            )}
+                          </div>
+                          {/* Subagents panel - separate section above the chat input */}
+                          {!zenMode &&
+                            activeAgents.length > 0 &&
+                            (dismissedAgentMessageId === null ||
+                              activeAgents.some(
+                                agent => agent.status === 'in_progress'
+                              ) ||
+                              (agentSourceMessageId !== null &&
+                                agentSourceMessageId !==
+                                  dismissedAgentMessageId)) && (
+                              <AgentWidget
+                                key={activeSessionId ?? undefined}
+                                className="sm:mb-2"
+                                agents={activeAgents}
+                                onFileClick={setViewingFilePath}
+                                open={isAgentWidgetExpanded}
+                                onOpenChange={open =>
+                                  activeSessionId &&
+                                  useChatStore
+                                    .getState()
+                                    .setAgentWidgetExpanded(
+                                      activeSessionId,
+                                      open
+                                    )
+                                }
+                                onClose={() =>
+                                  setDismissedAgentMessageId(
+                                    agentSourceMessageId ?? '__streaming__'
+                                  )
+                                }
+                              />
+                            )}
                           {/* Queued prompts - rendered as an extension above the chat input */}
                           {activeSessionId &&
                             currentQueuedMessages.length > 0 && (
@@ -3077,32 +3410,6 @@ function ChatWindowContent({
                                 </div>
                               )}
 
-                            {/* Agent widget - inline fallback for narrow screens */}
-                            {!zenMode &&
-                              activeAgents.length > 0 &&
-                              (dismissedAgentMessageId === null ||
-                                (agentSourceMessageId !== null &&
-                                  agentSourceMessageId !==
-                                    dismissedAgentMessageId)) && (
-                                <div
-                                  className={
-                                    terminalPanelOpen
-                                      ? 'px-4 md:px-6 pt-2'
-                                      : 'px-4 md:px-6 pt-2 xl:hidden'
-                                  }
-                                >
-                                  <AgentWidget
-                                    agents={activeAgents}
-                                    isStreaming={agentIsFromStreaming}
-                                    onClose={() =>
-                                      setDismissedAgentMessageId(
-                                        agentSourceMessageId ?? '__streaming__'
-                                      )
-                                    }
-                                  />
-                                </div>
-                              )}
-
                             <div
                               className={cn(
                                 zenMode && 'flex items-center overflow-hidden',
@@ -3119,6 +3426,7 @@ function ChatWindowContent({
                                 <ChatInput
                                   activeSessionId={activeSessionId}
                                   activeWorktreePath={activeWorktreePath}
+                                  activeWorktreeId={worktree?.id ?? null}
                                   activeProjectId={worktree?.project_id ?? null}
                                   isSending={isSending}
                                   executionMode={executionMode}
@@ -3141,14 +3449,12 @@ function ChatWindowContent({
                                   investigatePRPrompt={
                                     preferences?.magic_prompts?.investigate_pr
                                   }
-                                  onRegisterClearHandler={(
-                                    handler: (() => void) | null
-                                  ) => {
-                                    clearChatInputStateRef.current = handler
-                                  }}
-                                  onRegisterAttachHandler={handler => {
-                                    triggerChatAttachRef.current = handler
-                                  }}
+                                  onRegisterClearHandler={
+                                    handleRegisterClearHandler
+                                  }
+                                  onRegisterAttachHandler={
+                                    handleRegisterAttachHandler
+                                  }
                                   formRef={formRef}
                                   inputRef={inputRef}
                                   installedBackends={installedBackends}
@@ -3186,11 +3492,7 @@ function ChatWindowContent({
                                       currentQueuedMessages.length
                                     }
                                     onCancel={handleCancel}
-                                    onSteer={() =>
-                                      handleSubmit(undefined, {
-                                        forceSteer: true,
-                                      })
-                                    }
+                                    onSteer={handleSteer}
                                   />
                                 </div>
                               ) : (
@@ -3244,25 +3546,37 @@ function ChatWindowContent({
                                     projectId={worktree?.project_id}
                                     runScripts={runScripts}
                                     loadedIssueContexts={
-                                      loadedIssueContexts ?? []
+                                      loadedIssueContexts ??
+                                      EMPTY_ISSUE_CONTEXTS
                                     }
-                                    loadedPRContexts={loadedPRContexts ?? []}
+                                    loadedPRContexts={
+                                      loadedPRContexts ?? EMPTY_PR_CONTEXTS
+                                    }
                                     loadedSecurityContexts={
-                                      loadedSecurityContexts ?? []
+                                      loadedSecurityContexts ??
+                                      EMPTY_SECURITY_CONTEXTS
                                     }
                                     loadedAdvisoryContexts={
-                                      loadedAdvisoryContexts ?? []
+                                      loadedAdvisoryContexts ??
+                                      EMPTY_ADVISORY_CONTEXTS
                                     }
                                     loadedLinearContexts={
-                                      loadedLinearContexts ?? []
+                                      loadedLinearContexts ??
+                                      EMPTY_LINEAR_CONTEXTS
                                     }
                                     loadedSentryContexts={
-                                      loadedSentryContexts ?? []
+                                      loadedSentryContexts ??
+                                      EMPTY_SENTRY_CONTEXTS
                                     }
                                     attachedSavedContexts={
-                                      attachedSavedContexts ?? []
+                                      attachedSavedContexts ??
+                                      EMPTY_SAVED_CONTEXTS
                                     }
-                                    onOpenMagicModal={handleOpenMagicModal}
+                                    onOpenMagicModal={
+                                      project?.server
+                                        ? undefined
+                                        : handleOpenMagicModal
+                                    }
                                     onSaveContext={handleSaveContext}
                                     onLoadContext={handleLoadContext}
                                     onCommit={handleCommit}
@@ -3270,9 +3584,7 @@ function ChatWindowContent({
                                       handleCommitAndPushWithPicker
                                     }
                                     onOpenPr={handleOpenPr}
-                                    onReview={() =>
-                                      setReviewMethodModalOpen(true)
-                                    }
+                                    onReview={handleOpenReviewMethodModal}
                                     onMerge={handleMerge}
                                     onMergePr={handleMergePr}
                                     onResolvePrConflicts={
@@ -3292,10 +3604,12 @@ function ChatWindowContent({
                                       handleToolbarProviderChange
                                     }
                                     customCliProfiles={
-                                      preferences?.custom_cli_profiles ?? []
+                                      preferences?.custom_cli_profiles ??
+                                      EMPTY_CLI_PROFILES
                                     }
                                     customCodexProviders={
-                                      preferences?.custom_codex_providers ?? []
+                                      preferences?.custom_codex_providers ??
+                                      EMPTY_CODEX_PROVIDERS
                                     }
                                     onThinkingLevelChange={
                                       handleToolbarThinkingLevelChange
@@ -3306,9 +3620,7 @@ function ChatWindowContent({
                                     onSetExecutionMode={
                                       handleToolbarSetExecutionMode
                                     }
-                                    onAttach={() =>
-                                      triggerChatAttachRef.current?.()
-                                    }
+                                    onAttach={handleToolbarAttach}
                                     onCancel={handleCancel}
                                     willSteer={
                                       isBackendAutoSteerEnabled(
@@ -3328,11 +3640,7 @@ function ChatWindowContent({
                                     canSteer={isSteerCapableBackend(
                                       selectedBackend
                                     )}
-                                    onSteer={() =>
-                                      handleSubmit(undefined, {
-                                        forceSteer: true,
-                                      })
-                                    }
+                                    onSteer={handleSteer}
                                     queuedMessageCount={
                                       currentQueuedMessages.length
                                     }
@@ -3357,11 +3665,10 @@ function ChatWindowContent({
                             </div>
                           </form>
 
-                          {/* Side panel widgets (Tasks + Agents) for wide screens */}
+                          {/* Side panel widget (Tasks) for wide screens */}
                           {!zenMode &&
                             !terminalPanelOpen &&
-                            (activeTodos.length > 0 ||
-                              activeAgents.length > 0) && (
+                            activeTodos.length > 0 && (
                               <div className="hidden xl:flex flex-col gap-2 absolute left-full bottom-0 ml-3 w-64 z-20">
                                 {activeTodos.length > 0 &&
                                   (dismissedTodoMessageId === null ||
@@ -3379,22 +3686,6 @@ function ChatWindowContent({
                                       onClose={() =>
                                         setDismissedTodoMessageId(
                                           todoSourceMessageId ?? '__streaming__'
-                                        )
-                                      }
-                                    />
-                                  )}
-                                {activeAgents.length > 0 &&
-                                  (dismissedAgentMessageId === null ||
-                                    (agentSourceMessageId !== null &&
-                                      agentSourceMessageId !==
-                                        dismissedAgentMessageId)) && (
-                                    <AgentWidget
-                                      agents={activeAgents}
-                                      isStreaming={agentIsFromStreaming}
-                                      onClose={() =>
-                                        setDismissedAgentMessageId(
-                                          agentSourceMessageId ??
-                                            '__streaming__'
                                         )
                                       }
                                     />
@@ -3580,4 +3871,4 @@ function ChatWindowContent({
       </div>
     </ErrorBoundary>
   )
-}
+})

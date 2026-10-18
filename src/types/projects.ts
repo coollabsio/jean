@@ -31,6 +31,49 @@ export interface ProjectAutoFixSettings {
   active_hours_end?: number
 }
 
+/** A GitHub issue Mr. Robot failed to start (in-memory backend state). */
+export interface AutoFixFailedIssue {
+  issueNumber: number
+  attempts: number
+  error: string
+  /** Unix seconds */
+  failedAt: number
+  gaveUp: boolean
+}
+
+/**
+ * Runtime Mr. Robot status for a project (`get_auto_fix_status`).
+ * All timestamps are unix seconds. Resets when the app restarts.
+ */
+export interface AutoFixStatus {
+  lastScanAt: number | null
+  nextScanAt: number | null
+  /** GitHub rate limit backoff */
+  rateLimitedUntil: number | null
+  lastError: { message: string; at: number } | null
+  failedIssues: AutoFixFailedIssue[]
+  startingIssues: number[]
+  pendingYoloSessions: number
+  scanning?: boolean
+  /** Active hours use the owning server's clock, not the browser clock. */
+  activeNow?: boolean
+  lastScanSummary?: string | null
+  activity?: AutoFixActivity[]
+}
+
+export interface AutoFixActivity {
+  at: number
+  message: string
+  issueNumber: number | null
+}
+
+export interface AutoFixIssuePreview {
+  issueNumber: number
+  labels: string[]
+  reason: string
+  selected: boolean
+}
+
 /**
  * Status of a worktree (for tracking background operations)
  */
@@ -46,6 +89,19 @@ export function isBaseSession(worktree: Worktree): boolean {
 /**
  * A git project that has been added to Jean, or a folder for organizing projects
  */
+/** SSH target of a server project (a project with `server` set is a server). */
+export interface ProjectServer {
+  host: string
+  user?: string | null
+  port?: number | null
+  /** Private key for `ssh -i` (null = ssh config / agent defaults) */
+  identity_file?: string | null
+  /** Legacy: old copy of a Jean remote connection (deleted by the app) */
+  jean_connection_id?: string | null
+  /** The machine Jean runs on: commands run directly, without SSH */
+  local?: boolean
+}
+
 export interface Project {
   /** Client-only owning server for native multi-server views. */
   serverId?: string
@@ -107,6 +163,22 @@ export interface Project {
   worktree_count?: number
   /** Whether an active base-branch session exists */
   has_base_session?: boolean
+  /** SSH target when this project is a managed server */
+  server?: ProjectServer | null
+}
+
+export function isServerProject(project: Project): boolean {
+  return !!project.server
+}
+
+/** `user@host` (or `host`), with `:port` when not 22 — for display. */
+export function formatServerTarget(server: ProjectServer): string {
+  const destination = server.user
+    ? `${server.user}@${server.host}`
+    : server.host
+  return server.port && server.port !== 22
+    ? `${destination}:${server.port}`
+    : destination
 }
 
 export interface DirEntry {

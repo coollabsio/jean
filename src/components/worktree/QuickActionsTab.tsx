@@ -64,6 +64,8 @@ export interface QuickActionsTabProps {
 const INVALID_BRANCH_CHAR = /[\s:?*~^[\\]/
 /** Stable default so omit/undefined doesn't allocate a new [] each render. */
 const EMPTY_BRANCHES: string[] = []
+const EMPTY_FAVORITE_KEYS: string[] = []
+const EMPTY_REMOTES: ProjectRemote[] = []
 
 function isInvalidBranchName(trimmed: string): boolean {
   if (trimmed.length === 0) return false
@@ -101,7 +103,8 @@ export function QuickActionsTab({
 
   const { data: preferences } = usePreferences()
   const patchPreferences = usePatchPreferences()
-  const favoriteKeys = preferences?.favorite_base_branches ?? []
+  const favoriteKeys =
+    preferences?.favorite_base_branches ?? EMPTY_FAVORITE_KEYS
   const favoritePrefix = projectId ? `${projectId}:` : null
   const starredBranches = useMemo(
     () =>
@@ -138,8 +141,7 @@ export function QuickActionsTab({
     })
   }, [defaultBranch, branches])
 
-  const effectiveBaseBranch =
-    selectedBaseBranch || defaultBranch || undefined
+  const effectiveBaseBranch = selectedBaseBranch || defaultBranch || undefined
 
   // Remotes that actually have the *selected* base branch fetched. Parent may
   // pass default-branch remotes as a fallback while this query loads.
@@ -155,7 +157,9 @@ export function QuickActionsTab({
   // With several remotes (e.g. upstream + fork) the single "New Worktree"
   // action is ambiguous, so offer one explicit start point per remote instead.
   const remoteOptions =
-    effectiveBaseBranch && activeRemotes.length > 1 ? activeRemotes : []
+    effectiveBaseBranch && activeRemotes.length > 1
+      ? activeRemotes
+      : EMPTY_REMOTES
   const hasRemoteOptions = remoteOptions.length > 0
   const remoteNameSet = useMemo(
     () => new Set(remoteOptions.map(r => r.name)),
@@ -303,9 +307,7 @@ export function QuickActionsTab({
                             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
                           )}
                           aria-label={
-                            isStarred
-                              ? `Unstar ${branch}`
-                              : `Star ${branch}`
+                            isStarred ? `Unstar ${branch}` : `Star ${branch}`
                           }
                           aria-pressed={isStarred}
                           onClick={event => {
@@ -322,7 +324,7 @@ export function QuickActionsTab({
                           <Star
                             className={cn(
                               'h-3.5 w-3.5',
-                              isStarred && 'fill-yellow-500 text-yellow-500'
+                              isStarred && 'fill-warning text-warning'
                             )}
                           />
                         </button>

@@ -22,6 +22,7 @@ import type {
   PendingSkill,
   PendingTextFile,
   ReadTextResponse,
+  SendMessageArgs,
 } from '@/types/chat'
 import type {
   PendingImageDraft,
@@ -130,23 +131,12 @@ export function useUIStatePersistence() {
   const { mutateAsync: saveUIState } = useSaveUIState()
   const [isInitialized, setIsInitialized] = useState(false)
 
-  // Create stable debounced save function
+  // Create stable debounced save function. The UI state snapshot is built
+  // when the timer fires (or is flushed), not on every store change, so bursts
+  // of store updates only serialize the state once.
   const debouncedSaveRef = useRef<ReturnType<
-    typeof debounce<(state: UIState) => void>
+    typeof debounce<() => void>
   > | null>(null)
-
-  // Initialize debounced save function
-  useEffect(() => {
-    debouncedSaveRef.current = debounce((state: UIState) => {
-      logger.debug('Saving UI state (debounced)')
-      void saveUIState(state)
-    }, 500)
-
-    return () => {
-      debouncedSaveRef.current?.flush()
-      debouncedSaveRef.current?.cancel()
-    }
-  }, [saveUIState])
 
   // The last active session is part of the debounced UI-state snapshot. Flush
   // it when the native window is closing so a recent session switch is not
@@ -183,9 +173,25 @@ export function useUIStatePersistence() {
       dismissedSetupScripts,
       reviewSidebarVisible,
       lastOpenedPerProject,
+      autoResume,
+      lastSentArgs,
     } = useChatStore.getState()
-    const { selectedProjectId, pinnedRecentSessionIds } =
-      useProjectsStore.getState()
+    // Persist only armed sessions that still have replayable send args.
+    const autoResumeForPersist = Object.entries(autoResume).flatMap(
+      ([sessionId, resumeAtMs]) => {
+        const sendArgs = lastSentArgs[sessionId]
+        return sendArgs
+          ? [
+              {
+                session_id: sessionId,
+                resume_at_ms: resumeAtMs,
+                send_args: sendArgs,
+              },
+            ]
+          : []
+      }
+    )
+    const { selectedProjectId } = useProjectsStore.getState()
     const {
       sessionTerminalIds,
       sessionPrimarySurface,
@@ -264,7 +270,7 @@ export function useUIStatePersistence() {
       browser_tabs: browserTabsForPersist,
       browser_active_tab_ids: browserState.activeTabIds,
       project_canvas_settings: getPinnedCanvasSettings(),
-      pinned_recent_session_ids: pinnedRecentSessionIds,
+      // Pinned recent sessions change only through set_recent_session_pinned.
       // Last opened worktree+session per project (convert camelCase → snake_case keys)
       last_opened_per_project: Object.fromEntries(
         Object.entries(lastOpenedPerProject).map(([projectId, entry]) => [
@@ -273,9 +279,23 @@ export function useUIStatePersistence() {
         ])
       ),
       seen_failed_workflow_run_ids: seenFailedWorkflowRunIds,
+      auto_resume: autoResumeForPersist,
       version: 1, // Reset for first release
     }
   }, [])
+
+  // Initialize debounced save function
+  useEffect(() => {
+    debouncedSaveRef.current = debounce(() => {
+      logger.debug('Saving UI state (debounced)')
+      void saveUIState(getCurrentUIState())
+    }, 500)
+
+    return () => {
+      debouncedSaveRef.current?.flush()
+      debouncedSaveRef.current?.cancel()
+    }
+  }, [getCurrentUIState, saveUIState])
 
   useEffect(() => {
     registerUIStateRelaunchSaver(async () => {
@@ -947,17 +967,6 @@ export function useUIStatePersistence() {
       .getState()
       .setPinnedRecentSessionIds(uiState.pinned_recent_session_ids ?? [])
 
-    const githubDashboardFavoriteProjectIds =
-      uiState.github_dashboard_favorite_project_ids ?? []
-    if (githubDashboardFavoriteProjectIds.length > 0) {
-      logger.debug('Restoring GitHub dashboard favorite projects', {
-        count: githubDashboardFavoriteProjectIds.length,
-      })
-      useProjectsStore
-        .getState()
-        .setGitHubDashboardFavoriteProjectIds(githubDashboardFavoriteProjectIds)
-    }
-
     const seenFailedWorkflowRunIds = uiState.seen_failed_workflow_run_ids ?? []
     if (seenFailedWorkflowRunIds.length > 0) {
       logger.debug('Restoring seen failed workflow run IDs', {
@@ -966,6 +975,29 @@ export function useUIStatePersistence() {
       useUIStore
         .getState()
         .setSeenFailedWorkflowRunIds(seenFailedWorkflowRunIds)
+    }
+
+    // Restore armed auto-continue sessions (sessionId → reset epoch ms) plus
+    // their replayable send args. The watcher (useAutoResume) fires them.
+    const persistedAutoResume = uiState.auto_resume ?? []
+    if (persistedAutoResume.length > 0) {
+      const autoResume: Record<string, number> = {}
+      const lastSentArgs: Record<string, SendMessageArgs> = {}
+      for (const entry of persistedAutoResume) {
+        if (!entry?.session_id || !entry.send_args) continue
+        if (typeof entry.resume_at_ms !== 'number') continue
+        autoResume[entry.session_id] = entry.resume_at_ms
+        lastSentArgs[entry.session_id] = entry.send_args
+      }
+      if (Object.keys(autoResume).length > 0) {
+        logger.debug('Restoring armed auto-continue sessions', {
+          count: Object.keys(autoResume).length,
+        })
+        useChatStore.setState(state => ({
+          autoResume: { ...state.autoResume, ...autoResume },
+          lastSentArgs: { ...state.lastSentArgs, ...lastSentArgs },
+        }))
+      }
     }
 
     // Restore browser pane state (per-worktree tabs + 3-surface visibility)
@@ -1113,13 +1145,12 @@ export function useUIStatePersistence() {
   }, [uiStateLoaded, uiState, projects, projectsLoaded, isInitialized])
 
   // Pinned recent sessions are shared across native and web clients. Apply
-  // them again whenever another client's save refetches the UI state.
-  const serverPinnedRecentSessionIdsRef = useRef<string[] | null>(null)
+  // them again whenever another client's change refetches the UI state.
   useEffect(() => {
     if (!isInitialized || !uiState) return
-    const pinned = uiState.pinned_recent_session_ids ?? []
-    serverPinnedRecentSessionIdsRef.current = pinned
-    useProjectsStore.getState().setPinnedRecentSessionIds(pinned)
+    useProjectsStore
+      .getState()
+      .setPinnedRecentSessionIds(uiState.pinned_recent_session_ids ?? [])
   }, [isInitialized, uiState])
 
   // Step 2: Subscribe to store changes and save (debounced)
@@ -1130,8 +1161,6 @@ export function useUIStatePersistence() {
     // Track previous values to detect actual changes
     let prevSelectedProjectId = useProjectsStore.getState().selectedProjectId
     let prevPinnedCanvasSettings = JSON.stringify(getPinnedCanvasSettings())
-    let prevPinnedRecentSessionIds =
-      useProjectsStore.getState().pinnedRecentSessionIds
     let prevSessionTerminalIds = useUIStore.getState().sessionTerminalIds
     let prevSessionPrimarySurface = useUIStore.getState().sessionPrimarySurface
     let prevSeenFailedWorkflowRunIds =
@@ -1149,6 +1178,7 @@ export function useUIStatePersistence() {
       useChatStore.getState().dismissedSetupScripts
     let prevReviewSidebarVisible = useChatStore.getState().reviewSidebarVisible
     let prevLastOpenedPerProject = useChatStore.getState().lastOpenedPerProject
+    let prevAutoResume = useChatStore.getState().autoResume
     let prevTerminalInstances = useTerminalStore.getState().terminals
     let prevTerminalActiveIds = useTerminalStore.getState().activeTerminalIds
     let prevBrowserTabs = useBrowserStore.getState().tabs
@@ -1162,21 +1192,11 @@ export function useUIStatePersistence() {
       const nextPinnedCanvasSettings = JSON.stringify(getPinnedCanvasSettings())
       const pinnedCanvasSettingsChanged =
         nextPinnedCanvasSettings !== prevPinnedCanvasSettings
-      // Do not save pins that came from the server; that only echoes them.
-      const pinnedRecentSessionIdsChanged =
-        state.pinnedRecentSessionIds !== prevPinnedRecentSessionIds &&
-        state.pinnedRecentSessionIds !== serverPinnedRecentSessionIdsRef.current
 
-      if (
-        selectedProjectChanged ||
-        pinnedCanvasSettingsChanged ||
-        pinnedRecentSessionIdsChanged
-      ) {
+      if (selectedProjectChanged || pinnedCanvasSettingsChanged) {
         prevSelectedProjectId = state.selectedProjectId
         prevPinnedCanvasSettings = nextPinnedCanvasSettings
-        prevPinnedRecentSessionIds = state.pinnedRecentSessionIds
-        const currentState = getCurrentUIState()
-        debouncedSaveRef.current?.(currentState)
+        debouncedSaveRef.current?.()
       }
     })
 
@@ -1197,8 +1217,7 @@ export function useUIStatePersistence() {
         prevSessionTerminalIds = state.sessionTerminalIds
         prevSessionPrimarySurface = state.sessionPrimarySurface
         prevSeenFailedWorkflowRunIds = state.seenFailedWorkflowRunIds
-        const currentState = getCurrentUIState()
-        debouncedSaveRef.current?.(currentState)
+        debouncedSaveRef.current?.()
       }
     })
 
@@ -1224,6 +1243,7 @@ export function useUIStatePersistence() {
         state.reviewSidebarVisible !== prevReviewSidebarVisible
       const lastOpenedChanged =
         state.lastOpenedPerProject !== prevLastOpenedPerProject
+      const autoResumeChanged = state.autoResume !== prevAutoResume
 
       if (
         worktreeChanged ||
@@ -1235,7 +1255,8 @@ export function useUIStatePersistence() {
         pendingSkillsChanged ||
         dismissedSetupScriptsChanged ||
         reviewSidebarChanged ||
-        lastOpenedChanged
+        lastOpenedChanged ||
+        autoResumeChanged
       ) {
         prevWorktreeId = state.activeWorktreeId
         prevWorktreePath = state.activeWorktreePath
@@ -1249,8 +1270,8 @@ export function useUIStatePersistence() {
         prevDismissedSetupScripts = state.dismissedSetupScripts
         prevReviewSidebarVisible = state.reviewSidebarVisible
         prevLastOpenedPerProject = state.lastOpenedPerProject
-        const currentState = getCurrentUIState()
-        debouncedSaveRef.current?.(currentState)
+        prevAutoResume = state.autoResume
+        debouncedSaveRef.current?.()
       }
     })
 
@@ -1261,8 +1282,7 @@ export function useUIStatePersistence() {
       if (terminalsChanged || activeIdsChanged) {
         prevTerminalInstances = state.terminals
         prevTerminalActiveIds = state.activeTerminalIds
-        const currentState = getCurrentUIState()
-        debouncedSaveRef.current?.(currentState)
+        debouncedSaveRef.current?.()
       }
     })
 
@@ -1288,8 +1308,7 @@ export function useUIStatePersistence() {
         }
         prevBrowserTabs = state.tabs
         prevBrowserActiveTabIds = state.activeTabIds
-        const currentState = getCurrentUIState()
-        debouncedSaveRef.current?.(currentState)
+        debouncedSaveRef.current?.()
       }
     })
 
@@ -1305,7 +1324,7 @@ export function useUIStatePersistence() {
       debouncedSaveRef.current?.cancel()
       logger.debug('UI state persistence subscriptions cleaned up')
     }
-  }, [isInitialized, getCurrentUIState])
+  }, [isInitialized])
 
   return { isInitialized }
 }

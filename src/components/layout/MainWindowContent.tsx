@@ -1,6 +1,7 @@
 import {
   Suspense,
   lazy,
+  memo,
   useCallback,
   useEffect,
   useState,
@@ -20,6 +21,9 @@ import { useInstalledBackends } from '@/hooks/useInstalledBackends'
 import { scheduleIdleWork } from '@/lib/idle'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { JeanLoadingScreen } from '@/components/shared/JeanLoadingScreen'
+import { AgentPage } from '@/components/agents/AgentPage'
+import { AgentNotificationsListener } from '@/components/agents/AgentNotificationsListener'
+import { useShowAgents } from '@/components/agents/agents-feature'
 
 const ChatWindow = lazy(() =>
   import('@/components/chat/ChatWindow').then(mod => ({
@@ -44,13 +48,14 @@ interface MainWindowContentProps {
   }
 }
 
-export function MainWindowContent({
+export const MainWindowContent = memo(function MainWindowContent({
   children,
   className,
   sidebarSwipeContainerRef,
   sidebarSwipeIndicator,
 }: MainWindowContentProps) {
   const activeWorktreePath = useChatStore(state => state.activeWorktreePath)
+  const showAgents = useShowAgents()
   const isMobile = useIsMobile()
 
   const selectedProjectId = useProjectsStore(state => state.selectedProjectId)
@@ -66,7 +71,8 @@ export function MainWindowContent({
 
   const realProjects = projects.filter(p => !isFolder(p))
 
-  const showWelcome = !activeWorktreePath && !selectedProjectId && !children
+  const showWelcome =
+    !showAgents && !activeWorktreePath && !selectedProjectId && !children
   const shouldCheckBackends = backendCheckReady && showWelcome
   const { installedBackends, isLoading: backendsLoading } =
     useInstalledBackends({
@@ -189,6 +195,7 @@ export function MainWindowContent({
         className
       )}
     >
+      <AgentNotificationsListener />
       {sidebarSwipeIndicator?.isSwiping && (
         <div
           className="pointer-events-none absolute top-1/2 z-[60] flex -translate-y-1/2 items-center justify-center"
@@ -205,7 +212,7 @@ export function MainWindowContent({
           />
         </div>
       )}
-      {activeWorktreePath ? (
+      {activeWorktreePath && !showAgents ? (
         <div
           ref={isMobile ? sidebarSwipeContainerRef : undefined}
           className="relative h-full w-full"
@@ -229,11 +236,11 @@ export function MainWindowContent({
           className="relative flex h-full w-full min-w-0 flex-col bg-background"
           data-testid="mobile-swipe-open-sidebar"
         >
-          {nonChatContent}
+          {showAgents ? <AgentPage /> : nonChatContent}
         </div>
       )}
     </div>
   )
-}
+})
 
 export default MainWindowContent

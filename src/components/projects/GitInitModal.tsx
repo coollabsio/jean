@@ -1,6 +1,11 @@
 import { useState, useCallback, useEffect } from 'react'
 import { invoke } from '@/lib/transport'
-import { Loader2, GitBranch, FolderOpen, AlertCircle } from '@/components/icons/reicon'
+import {
+  Loader2,
+  GitBranch,
+  FolderOpen,
+  AlertCircle,
+} from '@/components/icons/reicon'
 import {
   Dialog,
   DialogContent,

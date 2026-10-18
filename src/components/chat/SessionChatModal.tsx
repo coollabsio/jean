@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useEffect,
   useEffectEvent,
@@ -14,6 +15,7 @@ import {
   Copy,
   GitBranchPlus,
   GitPullRequestArrow,
+  Globe,
   Maximize,
   Minimize,
   Pencil,
@@ -21,11 +23,11 @@ import {
   Tag,
   Play,
   Plus,
+  Terminal,
   Trash2,
 } from '@/components/icons/reicon'
 import { ModalCloseButton } from '@/components/ui/modal-close-button'
 import { cn } from '@/lib/utils'
-import { dismissibleToast } from '@/lib/dismissible-toast'
 import { Button } from '@/components/ui/button'
 import {
   Tooltip,
@@ -36,11 +38,16 @@ import { DismissButton } from '@/components/ui/dismiss-button'
 import { StatusIndicator } from '@/components/ui/status-indicator'
 import { GitStatusBadges } from '@/components/ui/git-status-badges'
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
-import { CloseWorktreeDialog } from './CloseWorktreeDialog'
+import {
+  CloseWorktreeDialog,
+  type CloseConfirmMode,
+} from './CloseWorktreeDialog'
 import { useChatStore } from '@/store/chat-store'
+import { isSessionEmpty } from '@/components/projects/worktree-close-decision'
 import { useTerminalStore } from '@/store/terminal-store'
 import { useBrowserStore } from '@/store/browser-store'
 import { useUIStore } from '@/store/ui-store'
+import { useProjectsStore } from '@/store/projects-store'
 import {
   useSessions,
   useSession,
@@ -52,18 +59,15 @@ import {
 } from '@/services/chat'
 import { resolveBackendCliPath } from '@/services/cli-binary'
 import { usePreferences } from '@/services/preferences'
+import {
+  hasCloseConfirmBypassModifier,
+  readCloseBypassDetail,
+} from '@/lib/confirm-bypass'
 import { parseServerResourceKey } from '@/lib/server-resource'
 import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import { usePackageScripts, type PackageScript } from '@/services/projects'
 import { useGitHubPRs } from '@/services/github'
-import {
-  useGitStatus,
-  gitPush,
-  fetchWorktreesStatus,
-  triggerImmediateGitPoll,
-  performGitPull,
-  performGitSync,
-} from '@/services/git-status'
+import { useGitStatus, performGitSync } from '@/services/git-status'
 import { isBaseSession, type Project, type Worktree } from '@/types/projects'
 import type { Session } from '@/types/chat'
 import { isNativeApp } from '@/lib/environment'
@@ -79,14 +83,12 @@ import { DevToolsDropdown } from './DevToolsDropdown'
 import { DEFAULT_KEYBINDINGS, formatShortcutDisplay } from '@/types/keybindings'
 import {
   buildNativeClientSessionInput,
-  computeSessionCardData,
+  createSessionCardDataCache,
   getResumeCommand,
   isActionableWaitingStatus,
   statusConfig,
-  type ManualSessionStatus,
   type SessionCardData,
 } from './session-card-utils'
-import { SessionStatusMenu } from './SessionStatusMenu'
 import {
   resolveModalSessionId,
   sessionsForTabBar,
@@ -104,6 +106,10 @@ import { WorktreeDropdownMenu } from '@/components/projects/WorktreeDropdownMenu
 import { LabelModal } from './LabelModal'
 import { useSessionArchive } from './hooks/useSessionArchive'
 import { useIsMobile } from '@/hooks/use-mobile'
+import {
+  isModOnlyHeld,
+  useModifierHintsVisible,
+} from '@/hooks/useModifierHintsVisible'
 import { pushNeedsRemotePicker, useRemotePicker } from '@/hooks/useRemotePicker'
 import { useIsTouchDevice } from '@/hooks/use-touch-device'
 import { useSwipeBack } from '@/hooks/useSwipeBack'
@@ -169,6 +175,48 @@ function useOffScreenWaiting(
   return { hasLeft, hasRight }
 }
 
+function HeaderSurfaceToggle({
+  label,
+  icon: Icon,
+  isOpen,
+  shortcut,
+  onClick,
+}: {
+  label: string
+  icon: typeof Terminal
+  isOpen: boolean
+  shortcut: string | undefined
+  onClick: () => void
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn(
+            'h-7 w-7 text-muted-foreground hover:text-foreground',
+            isOpen && 'bg-muted text-foreground'
+          )}
+          aria-label={`Toggle ${label.toLowerCase()}`}
+          aria-pressed={isOpen}
+          onClick={onClick}
+        >
+          <Icon className="h-4 w-4" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>
+        {label}
+        {isNativeApp() && (
+          <kbd className="ml-1 text-[0.625rem] opacity-60">
+            {formatShortcutDisplay(shortcut)}
+          </kbd>
+        )}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
 interface SessionChatModalProps {
   worktreeId: string
   worktreePath: string
@@ -179,7 +227,7 @@ interface SessionChatModalProps {
   onRequestCloseWorktree: () => void
 }
 
-export function SessionChatModal({
+export const SessionChatModal = memo(function SessionChatModal({
   worktreeId,
   worktreePath,
   worktree,
@@ -196,6 +244,16 @@ export function SessionChatModal({
     state => state.modalTerminalOpen[worktreeId] ?? false
   )
   const leftSidebarVisible = useUIStore(state => state.leftSidebarVisible)
+  // While the Recent list is visible, Cmd/Ctrl+1-9 opens Recent sessions,
+  // so the session tab number hints are hidden.
+  const recentTabActive = useProjectsStore(
+    state => state.sidebarActiveTab === 'recent'
+  )
+  const recentShortcutsActive = leftSidebarVisible && recentTabActive
+  const showTabShortcutHints = useModifierHintsVisible(
+    isModOnlyHeld,
+    isOpen && isNativeApp() && !isMobile && !recentShortcutsActive
+  )
   // Left-edge swipe right: open the sidebar without leaving the worktree.
   const swipeOpenSidebar = useCallback(() => {
     useUIStore.getState().setLeftSidebarVisible(true)
@@ -266,6 +324,7 @@ export function SessionChatModal({
   const showSessionTabs = tabSessions.length > 0 || !!currentSessionId
   const serverId = parseServerResourceKey(worktreeId)?.serverId
   const { data: preferences } = usePreferences(serverId)
+  const bypassModifier = preferences?.close_confirm_bypass_modifier
   const { data: packageScripts = [] } = usePackageScripts(worktreePath)
   const modalTerminalDockMode = useTerminalStore(
     state => state.modalTerminalDockMode
@@ -300,11 +359,14 @@ export function SessionChatModal({
     tabSessions.find(session => session.id === currentSessionId) ?? null
   // Canonical store state shared with canvas for consistent status derivation.
   const storeState = useCanvasStoreState()
+  // Per-session card cache: a store update for one session only recomputes
+  // that session's card instead of rescanning every tab's messages.
+  const sessionCardDataCache = useMemo(() => createSessionCardDataCache(), [])
   // Compute card data once per session — same derivation as ProjectCanvasView,
   // so canvas badges and modal tab badges stay in sync.
   const cards = useMemo(
-    () => tabSessions.map(s => computeSessionCardData(s, storeState)),
-    [storeState, tabSessions]
+    () => tabSessions.map(s => sessionCardDataCache(s, storeState)),
+    [sessionCardDataCache, storeState, tabSessions]
   )
 
   const cardForSession = useCallback(
@@ -521,9 +583,8 @@ export function SessionChatModal({
 
   // CMD+W: close the active session tab, or close modal if last tab
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)
-  const [closeConfirmMode, setCloseConfirmMode] = useState<
-    'worktree' | 'session'
-  >('session')
+  const [closeConfirmMode, setCloseConfirmMode] =
+    useState<CloseConfirmMode>('session')
   const pendingCloseAction = useRef<(() => void) | null>(null)
 
   const executeCloseAction = useCallback(() => {
@@ -532,19 +593,35 @@ export function SessionChatModal({
     setCloseConfirmOpen(false)
   }, [])
 
+  // Close (delete or archive per removal behavior) or explicitly archive a
+  // session tab, asking for confirmation first.
   const removeSessionTab = useCallback(
-    (session: Session) => {
+    (
+      session: Session,
+      options: { archive?: boolean; bypassConfirm?: boolean } = {}
+    ) => {
+      const { archive = false, bypassConfirm = false } = options
       const activeSessions = tabSessions.filter(s => !s.archived_at)
-      const sessionIsEmpty = !session.message_count
+      const sessionIsEmpty = isSessionEmpty(
+        session,
+        useChatStore.getState().inputDrafts
+      )
       // Confirm any non-empty session when preference is on (default). Only
       // confirming the last tab allowed held/cascade closes to wipe chats
-      // without a prompt (issue #56). Empty sessions close immediately.
+      // without a prompt (issue #56). Empty sessions (no messages and no
+      // unsent draft) close immediately.
       const needsConfirm =
-        preferences?.confirm_session_close !== false && !sessionIsEmpty
+        !bypassConfirm &&
+        preferences?.confirm_session_close !== false &&
+        !sessionIsEmpty
 
       const action = () => {
         if (activeSessions.length > 1) {
           selectVisualNeighbor(session.id)
+        }
+        if (archive) {
+          handleArchiveSession(session.id)
+          return
         }
         // The mutation selects the backend-created empty session after success
         // when this was the last session.
@@ -552,7 +629,7 @@ export function SessionChatModal({
       }
 
       if (needsConfirm) {
-        setCloseConfirmMode('session')
+        setCloseConfirmMode(archive ? 'session-archive' : 'session')
         pendingCloseAction.current = action
         setCloseConfirmOpen(true)
       } else {
@@ -561,6 +638,7 @@ export function SessionChatModal({
     },
     [
       tabSessions,
+      handleArchiveSession,
       handleDeleteSession,
       preferences?.confirm_session_close,
       selectVisualNeighbor,
@@ -572,22 +650,30 @@ export function SessionChatModal({
       if (e.button !== 1) return
       e.preventDefault()
       e.stopPropagation()
-      removeSessionTab(session)
+      removeSessionTab(session, {
+        bypassConfirm: hasCloseConfirmBypassModifier(e, bypassModifier),
+      })
     },
-    [removeSessionTab]
+    [removeSessionTab, bypassModifier]
   )
 
   useEffect(() => {
     if (!isOpen) return
     const handler = (e: Event) => {
       e.stopImmediatePropagation()
+      const bypassConfirm = readCloseBypassDetail(e)
       const activeSessions = tabSessions.filter(s => !s.archived_at)
       if (activeSessions.length === 0) {
-        setCloseConfirmMode('worktree')
-        pendingCloseAction.current = () => {
+        const closeWorktree = () => {
           onRequestCloseWorktree()
           onClose()
         }
+        if (bypassConfirm) {
+          closeWorktree()
+          return
+        }
+        setCloseConfirmMode('worktree')
+        pendingCloseAction.current = closeWorktree
         setCloseConfirmOpen(true)
         return
       }
@@ -602,8 +688,14 @@ export function SessionChatModal({
         }
       }
       const currentSession = tabSessions.find(s => s.id === currentSessionId)
-      const sessionIsEmpty = !currentSession?.message_count
-      if (preferences?.confirm_session_close !== false && !sessionIsEmpty) {
+      const sessionIsEmpty =
+        !currentSession ||
+        isSessionEmpty(currentSession, useChatStore.getState().inputDrafts)
+      if (
+        !bypassConfirm &&
+        preferences?.confirm_session_close !== false &&
+        !sessionIsEmpty
+      ) {
         setCloseConfirmMode('session')
         pendingCloseAction.current = action
         setCloseConfirmOpen(true)
@@ -744,7 +836,7 @@ export function SessionChatModal({
       })
   }, [isOpen, worktreeId, worktreePath])
 
-  // Keep Code Review first, then show the most recently updated sessions.
+  // Keep Code Review first, then running sessions, then most recently updated.
   const sortedCards = useMemo(() => {
     return sortSessionCardsForTabs(cards)
   }, [cards])
@@ -829,74 +921,10 @@ export function SessionChatModal({
       window.removeEventListener('switch-session', handleSwitchSession)
   }, [isOpen, sortedSessions, currentSessionId, worktreeId])
 
-  const handlePull = useCallback(
-    async (e: React.MouseEvent) => {
-      e.stopPropagation()
-      await performGitPull({
-        worktreeId,
-        worktreePath,
-        baseBranch: worktree?.base_branch ?? defaultBranch,
-        projectId: project?.id,
-        remote: worktree?.base_remote,
-      })
-    },
-    [
-      worktreeId,
-      worktreePath,
-      worktree?.base_branch,
-      worktree?.base_remote,
-      defaultBranch,
-      project?.id,
-    ]
-  )
-
   const pickRemoteOrRun = useRemotePicker(worktreePath)
-
-  const handlePush = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation()
-
-      const runPush = async (remote?: string) => {
-        const opToast = dismissibleToast.loading('Pushing changes...')
-        try {
-          const result = await gitPush(
-            worktreePath,
-            worktree?.pr_number,
-            remote,
-            worktree?.id
-          )
-          triggerImmediateGitPoll()
-          if (project) fetchWorktreesStatus(project.id)
-          if (result.permissionDenied) {
-            opToast.error('Push failed', {
-              duration: Infinity,
-              description:
-                result.output.trim() || 'The remote rejected the push.',
-            })
-          } else if (result.fellBack) {
-            opToast.warning(
-              'Could not push to PR branch, pushed to new branch instead'
-            )
-          } else {
-            opToast.success('Changes pushed')
-          }
-        } catch (error) {
-          opToast.error(`Push failed: ${error}`)
-        }
-      }
-
-      if (pushNeedsRemotePicker(worktree?.pr_number)) {
-        pickRemoteOrRun(runPush)
-      } else {
-        runPush()
-      }
-    },
-    [pickRemoteOrRun, worktree, worktreePath, project]
-  )
 
   // Display preference of this client, not of the worktree's server
   const { data: localPreferences } = usePreferences(LOCAL_SERVER_ID)
-  const gitSyncButton = localPreferences?.git_sync_button ?? true
 
   const handleSync = useCallback(
     (e: React.MouseEvent) => {
@@ -1009,6 +1037,25 @@ export function SessionChatModal({
 
   if (!isOpen || !worktreeId) return null
 
+  const worktreeMenu = !zenMode && worktree && project && (
+    <WorktreeDropdownMenu
+      worktree={worktree}
+      projectId={project.id}
+      projectPath={project.path}
+      uncommittedAdded={uncommittedAdded}
+      uncommittedRemoved={uncommittedRemoved}
+      branchDiffAdded={isBase ? 0 : branchDiffAdded}
+      branchDiffRemoved={isBase ? 0 : branchDiffRemoved}
+      onUncommittedDiffClick={handleUncommittedDiffClick}
+      onBranchDiffClick={handleBranchDiffClick}
+      onToggleTerminal={handleToggleModalTerminal}
+      onToggleBrowser={isNativeApp() ? handleToggleModalBrowser : undefined}
+      packageScripts={packageScripts}
+      onRunPackageScript={handlePackageScript}
+      serverProject={project.server ? project : null}
+    />
+  )
+
   return (
     <>
       <div
@@ -1055,25 +1102,43 @@ export function SessionChatModal({
                 )}
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  <h2 className="text-sm font-medium min-w-0 flex-1 truncate">
-                    {project && !isMobile && (
-                      <span className="text-muted-foreground font-normal">
-                        <button
-                          type="button"
-                          className="hover:text-foreground transition-colors cursor-pointer text-foreground text-lg font-semibold"
-                          onClick={handleClose}
-                        >
-                          {project.name}
-                        </button>
-                        <span className="mx-1.5 text-muted-foreground/50">
-                          ›
-                        </span>
-                      </span>
+                  {/* Mobile: menu sits right after the title; the title truncates so git badges stay visible */}
+                  <div
+                    className={cn(
+                      isMobile ? 'flex min-w-0 items-center gap-2' : 'contents'
                     )}
-                    {isBase ? 'Base Session' : (worktree?.name ?? 'Worktree')}
-                  </h2>
+                  >
+                    <h2
+                      className={cn(
+                        'text-sm font-medium min-w-0 truncate',
+                        !isMobile && 'flex-1'
+                      )}
+                    >
+                      {project && !isMobile && (
+                        <span className="text-muted-foreground font-normal">
+                          <button
+                            type="button"
+                            className="hover:text-foreground transition-colors cursor-pointer text-foreground text-lg font-semibold"
+                            onClick={handleClose}
+                          >
+                            {project.name}
+                          </button>
+                          <span className="mx-1.5 text-muted-foreground/50">
+                            ›
+                          </span>
+                        </span>
+                      )}
+                      {isBase ? 'Base Session' : (worktree?.name ?? 'Worktree')}
+                    </h2>
+                    {isMobile && worktreeMenu}
+                  </div>
                   {!zenMode && stackedBaseBranch && (
-                    <span className="inline-flex shrink min-w-0 items-center gap-1 rounded border border-border/50 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
+                    <span
+                      className={cn(
+                        'inline-flex min-w-0 items-center gap-1 rounded border border-border/50 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground',
+                        isMobile ? 'shrink-0' : 'shrink'
+                      )}
+                    >
                       <GitBranchPlus className="h-2.5 w-2.5" />
                       <span className="max-w-16 sm:max-w-40 truncate">
                         {stackedBaseBranch}
@@ -1095,33 +1160,12 @@ export function SessionChatModal({
                       diffRemoved={uncommittedRemoved}
                       branchDiffAdded={isBase ? 0 : branchDiffAdded}
                       branchDiffRemoved={isBase ? 0 : branchDiffRemoved}
-                      syncMode={gitSyncButton}
-                      onPull={handlePull}
-                      onPush={handlePush}
                       onSync={handleSync}
                       onDiffClick={handleUncommittedDiffClick}
                       onBranchDiffClick={handleBranchDiffClick}
                     />
                   )}
-                  {!zenMode && worktree && project && (
-                    <WorktreeDropdownMenu
-                      worktree={worktree}
-                      projectId={project.id}
-                      projectPath={project.path}
-                      uncommittedAdded={uncommittedAdded}
-                      uncommittedRemoved={uncommittedRemoved}
-                      branchDiffAdded={isBase ? 0 : branchDiffAdded}
-                      branchDiffRemoved={isBase ? 0 : branchDiffRemoved}
-                      onUncommittedDiffClick={handleUncommittedDiffClick}
-                      onBranchDiffClick={handleBranchDiffClick}
-                      onToggleTerminal={handleToggleModalTerminal}
-                      onToggleBrowser={
-                        isNativeApp() ? handleToggleModalBrowser : undefined
-                      }
-                      packageScripts={packageScripts}
-                      onRunPackageScript={handlePackageScript}
-                    />
-                  )}
+                  {!isMobile && worktreeMenu}
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
                   {isMobile && (
@@ -1158,12 +1202,39 @@ export function SessionChatModal({
                   )}
                   {!zenMode && (
                     <>
+                      {!isMobile && !project?.server && (
+                        <>
+                          <HeaderSurfaceToggle
+                            label="Terminal"
+                            icon={Terminal}
+                            isOpen={isModalTerminalOpen}
+                            shortcut={
+                              localPreferences?.keybindings?.toggle_terminal ??
+                              DEFAULT_KEYBINDINGS.toggle_terminal
+                            }
+                            onClick={handleToggleModalTerminal}
+                          />
+                          {isNativeApp() && (
+                            <HeaderSurfaceToggle
+                              label="Browser"
+                              icon={Globe}
+                              isOpen={isBrowserModalOpen}
+                              shortcut={
+                                localPreferences?.keybindings?.toggle_browser ??
+                                DEFAULT_KEYBINDINGS.toggle_browser
+                              }
+                              onClick={handleToggleModalBrowser}
+                            />
+                          )}
+                        </>
+                      )}
                       {/* Desktop: secondary tools that are not in the menu */}
                       <div className="hidden lg:flex items-center gap-1">
                         <OpenInButton
                           worktreePath={worktreePath}
                           serverId={worktree?.serverId}
                           branch={worktree?.branch}
+                          server={project?.server}
                         />
                         <ScriptsButton
                           projectId={worktree?.project_id}
@@ -1205,7 +1276,7 @@ export function SessionChatModal({
                 <button
                   type="button"
                   onClick={() => scrollToFirstWaiting('left')}
-                  className="absolute left-0 top-0 bottom-0 w-1 bg-yellow-500 animate-blink rounded-r z-10 cursor-pointer"
+                  className="absolute left-0 top-0 bottom-0 w-1 bg-warning animate-blink rounded-r z-10 cursor-pointer"
                   aria-label="Scroll to waiting session"
                 />
               )}
@@ -1213,7 +1284,7 @@ export function SessionChatModal({
                 <button
                   type="button"
                   onClick={() => scrollToFirstWaiting('right')}
-                  className="absolute right-0 top-0 bottom-0 w-1 bg-yellow-500 animate-blink rounded-l z-10 cursor-pointer"
+                  className="absolute right-0 top-0 bottom-0 w-1 bg-warning animate-blink rounded-l z-10 cursor-pointer"
                   aria-label="Scroll to waiting session"
                 />
               )}
@@ -1256,19 +1327,18 @@ export function SessionChatModal({
                                 isUnreadSession(session) &&
                                 'bg-muted/60 text-foreground/90 hover:bg-muted/80',
                               isActionableWaitingStatus(status) &&
-                                'bg-yellow-500/10 text-yellow-700 border-yellow-500 hover:bg-yellow-500/20 hover:text-yellow-800 dark:bg-yellow-400/10 dark:text-yellow-300 dark:border-yellow-400 dark:hover:bg-yellow-400/20 dark:hover:text-yellow-200'
+                                'bg-warning/10 text-warning border-warning hover:bg-warning/20 hover:text-warning'
                             )}
                           >
                             <StatusIndicator
                               status={config.indicatorStatus}
-                              variant={config.indicatorVariant}
                               shape={config.indicatorShape}
                               label={config.label}
                               className="h-1.5 w-1.5"
                             />
-                            {idx < 9 && (
+                            {showTabShortcutHints && idx < 9 && (
                               <kbd className="shrink-0 rounded border border-border/50 px-1 py-px text-[9px] font-medium leading-none text-muted-foreground/70">
-                                ⌘{idx + 1}
+                                {formatShortcutDisplay(`mod+${idx + 1}`)}
                               </kbd>
                             )}
                             {renamingSessionId === session.id ? (
@@ -1309,7 +1379,13 @@ export function SessionChatModal({
                                 tooltip={'Remove session'}
                                 onClick={e => {
                                   e.stopPropagation()
-                                  removeSessionTab(session)
+                                  removeSessionTab(session, {
+                                    bypassConfirm:
+                                      hasCloseConfirmBypassModifier(
+                                        e,
+                                        bypassModifier
+                                      ),
+                                  })
                                 }}
                                 className="ml-0.5 opacity-60 sm:opacity-0 sm:group-hover/tab:opacity-60 hover:!opacity-100"
                                 size="xs"
@@ -1318,17 +1394,6 @@ export function SessionChatModal({
                           </div>
                         </ContextMenuTrigger>
                         <ContextMenuContent className="w-64">
-                          <SessionStatusMenu
-                            statusOverride={card.statusOverride}
-                            automaticStatus={card.automaticStatus}
-                            onSetStatusOverride={(
-                              next: ManualSessionStatus | null
-                            ) => {
-                              useChatStore
-                                .getState()
-                                .setSessionStatusOverride(session.id, next)
-                            }}
-                          />
                           <ContextMenuItem
                             onSelect={() =>
                               handleStartRename(session.id, session.name)
@@ -1388,13 +1453,6 @@ export function SessionChatModal({
                               Reconnect
                             </ContextMenuItem>
                           )}
-                          <ContextMenuSeparator />
-                          <ContextMenuItem
-                            onSelect={() => handleArchiveSession(session.id)}
-                          >
-                            <Archive className="mr-2 h-4 w-4" />
-                            Archive Session
-                          </ContextMenuItem>
                           <ContextMenuItem
                             onSelect={() => {
                               void copyToClipboard(session.id)
@@ -1409,8 +1467,16 @@ export function SessionChatModal({
                           </ContextMenuItem>
                           <ContextMenuSeparator />
                           <ContextMenuItem
+                            onSelect={() =>
+                              removeSessionTab(session, { archive: true })
+                            }
+                          >
+                            <Archive className="mr-2 h-4 w-4" />
+                            Archive Session
+                          </ContextMenuItem>
+                          <ContextMenuItem
                             variant="destructive"
-                            onSelect={() => handleDeleteSession(session.id)}
+                            onSelect={() => removeSessionTab(session)}
                           >
                             <Trash2 className="mr-2 h-4 w-4" />
                             Delete Session
@@ -1524,4 +1590,4 @@ export function SessionChatModal({
       />
     </>
   )
-}
+})

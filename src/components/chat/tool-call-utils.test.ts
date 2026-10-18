@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildTimeline,
   coalesceContentBlocks,
+  findPlanFilePath,
   getIntroTextBeforeDuplicatePlan,
   restoreOmittedStreamingPrefix,
   isDuplicatePlanTextBlock,
@@ -513,5 +514,99 @@ describe('buildTimeline with fragmented text deltas', () => {
     ])
     expect(timeline[0]).toMatchObject({ text: 'intro-start' })
     expect(timeline[2]).toMatchObject({ text: 'mid-summary' })
+  })
+})
+
+describe('findPlanFilePath', () => {
+  it('finds Write to a POSIX plan file', () => {
+    expect(
+      findPlanFilePath([
+        {
+          id: 'w',
+          name: 'Write',
+          input: { file_path: '/home/u/.claude/plans/plan.md', content: 'x' },
+        },
+      ])
+    ).toBe('/home/u/.claude/plans/plan.md')
+  })
+
+  it('handles Windows backslash plan paths', () => {
+    const path = 'C:\\Users\\u\\.claude\\plans\\plan.md'
+    expect(
+      findPlanFilePath([{ id: 'w', name: 'Write', input: { file_path: path } }])
+    ).toBe(path)
+  })
+
+  it('handles Edit and MultiEdit to plan files', () => {
+    expect(
+      findPlanFilePath([
+        {
+          id: 'e',
+          name: 'Edit',
+          input: { file_path: '/u/.claude/plans/a.md', old_string: 'a' },
+        },
+      ])
+    ).toBe('/u/.claude/plans/a.md')
+    expect(
+      findPlanFilePath([
+        {
+          id: 'm',
+          name: 'MultiEdit',
+          input: { file_path: '/u/.claude/plans/b.md', edits: [] },
+        },
+      ])
+    ).toBe('/u/.claude/plans/b.md')
+  })
+
+  it('prefers ExitPlanMode planFilePath', () => {
+    expect(
+      findPlanFilePath([
+        {
+          id: 'w',
+          name: 'Write',
+          input: { file_path: '/u/.claude/plans/old.md' },
+        },
+        {
+          id: 'x',
+          name: 'ExitPlanMode',
+          input: { plan: '# Plan', planFilePath: '/u/.claude/plans/new.md' },
+        },
+      ])
+    ).toBe('/u/.claude/plans/new.md')
+  })
+
+  it('ignores non-plan files and other tools', () => {
+    expect(
+      findPlanFilePath([
+        { id: 'w', name: 'Write', input: { file_path: '/src/plans/a.md' } },
+        {
+          id: 'r',
+          name: 'Read',
+          input: { file_path: '/u/.claude/plans/a.md' },
+        },
+      ])
+    ).toBeNull()
+  })
+})
+
+describe('buildTimeline nested agents', () => {
+  it('exposes fallback-grouped sub-tools of nested agents', () => {
+    const toolCalls: ToolCall[] = [
+      { id: 'outer', name: 'Agent', input: {} },
+      { id: 'inner', name: 'Agent', input: {}, parent_tool_use_id: 'outer' },
+      // Old-style child without parent_tool_use_id, grouped by content order
+      { id: 'grep', name: 'Grep', input: { pattern: 'x' } },
+    ]
+    const blocks: ContentBlock[] = [
+      { type: 'tool_use', tool_call_id: 'outer' },
+      { type: 'tool_use', tool_call_id: 'inner' },
+      { type: 'tool_use', tool_call_id: 'grep' },
+    ]
+    const timeline = buildTimeline(blocks, toolCalls)
+    expect(timeline).toHaveLength(1)
+    const task = timeline[0]
+    if (task?.type !== 'task') throw new Error('expected task item')
+    expect(task.subTools.map(t => t.id)).toEqual(['inner'])
+    expect(task.nestedSubTools?.inner?.map(t => t.id)).toEqual(['grep'])
   })
 })

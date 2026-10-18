@@ -13,9 +13,23 @@
 //!   [mcp_servers.notion]
 //!   url = "https://mcp.notion.com/mcp"
 //!   enabled = true
+//!
+//! Plugin servers and ChatGPT apps (`codex_apps`) are not in these files. Jean
+//! finds them with the app-server `mcpServerStatus/list` request
+//! (see [`crate::chat::mcp_external`]).
 
-use crate::chat::McpServerInfo;
+use crate::chat::mcp_external::{self, ExternalServer};
+use crate::chat::{McpHealthStatus, McpServerInfo};
+use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
+use std::io::{BufRead, BufReader, Write};
+use std::process::Stdio;
+use std::time::Duration;
+use tauri::AppHandle;
+
+/// Time limit for the one-shot app-server list. It waits for every MCP server
+/// to start, so allow more than a plain CLI call.
+const APP_SERVER_LIST_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Top-level Codex config, only the mcp_servers section is parsed.
 #[derive(serde::Deserialize, Debug)]
@@ -70,7 +84,129 @@ pub fn get_mcp_servers(worktree_path: Option<&str>) -> Vec<McpServerInfo> {
         collect_from_toml(&global_config, "user", &mut servers, &mut seen_names);
     }
 
+    // 3. Plugin servers and ChatGPT apps (cached app-server list)
+    mcp_external::append("codex", worktree_path, &mut servers);
+
     servers
+}
+
+/// List every MCP server Codex loads, with a short-lived `codex app-server`.
+/// A separate process keeps this away from the shared chat app-server.
+pub fn list_app_server_servers(
+    app: &AppHandle,
+    worktree_path: Option<&str>,
+) -> Result<Vec<ExternalServer>, String> {
+    let binary = super::resolve_cli_binary(app)?;
+    if !binary.exists() {
+        return Err("Codex CLI not installed".to_string());
+    }
+    let mut child = crate::platform::cli_command(
+        &binary.to_string_lossy(),
+        worktree_path.map(std::path::Path::new),
+    )
+    .arg("app-server")
+    .stdin(Stdio::piped())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::null())
+    .spawn()
+    .map_err(|e| format!("Failed to start codex app-server: {e}"))?;
+
+    let result = request_server_status_list(&mut child);
+    drop(child.stdin.take());
+    let _ = child.kill();
+    let _ = child.wait();
+    Ok(parse_server_status_list(&result?))
+}
+
+fn request_server_status_list(child: &mut std::process::Child) -> Result<Value, String> {
+    let mut stdin = child.stdin.take().ok_or("No stdin for codex app-server")?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or("No stdout for codex app-server")?;
+    let (tx, rx) = std::sync::mpsc::channel::<Value>();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if let Ok(value) = serde_json::from_str::<Value>(&line) {
+                if value.get("id").is_some() && tx.send(value).is_err() {
+                    break;
+                }
+            }
+        }
+    });
+    let mut send = |message: Value| {
+        writeln!(stdin, "{message}")
+            .map_err(|e| format!("Failed to write to codex app-server: {e}"))
+    };
+    let wait_for = |id: u64| -> Result<Value, String> {
+        let deadline = std::time::Instant::now() + APP_SERVER_LIST_TIMEOUT;
+        loop {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            let value = rx
+                .recv_timeout(left)
+                .map_err(|_| "codex app-server did not answer in time".to_string())?;
+            if value.get("id").and_then(Value::as_u64) != Some(id) {
+                continue;
+            }
+            if let Some(error) = value.get("error") {
+                return Err(format!("codex app-server error: {error}"));
+            }
+            return Ok(value.get("result").cloned().unwrap_or(Value::Null));
+        }
+    };
+
+    send(json!({
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "clientInfo": { "name": "jean", "version": env!("CARGO_PKG_VERSION") },
+            "capabilities": { "experimentalApi": true },
+        },
+    }))?;
+    wait_for(1)?;
+    send(json!({ "method": "initialized" }))?;
+    send(json!({
+        "id": 2,
+        "method": "mcpServerStatus/list",
+        "params": { "detail": "toolsAndAuthOnly", "limit": 500 },
+    }))?;
+    wait_for(2)
+}
+
+/// Convert an `mcpServerStatus/list` result into servers with health.
+fn parse_server_status_list(result: &Value) -> Vec<ExternalServer> {
+    let Some(data) = result.get("data").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    data.iter()
+        .filter_map(|server| {
+            let name = server.get("name")?.as_str()?;
+            let scope = if server.get("pluginId").is_some_and(|id| !id.is_null()) {
+                "plugin"
+            } else if name == "codex_apps" {
+                "apps"
+            } else {
+                "cli"
+            };
+            let target = server
+                .get("httpOrigin")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let has_tools = server
+                .get("tools")
+                .and_then(Value::as_object)
+                .is_some_and(|tools| !tools.is_empty());
+            let status = match server.get("authStatus").and_then(Value::as_str) {
+                Some("notLoggedIn") => McpHealthStatus::NeedsAuthentication,
+                _ if has_tools => McpHealthStatus::Connected,
+                Some("bearerToken" | "oAuth") => McpHealthStatus::Authenticated,
+                _ => McpHealthStatus::Unknown,
+            };
+            let mut external = ExternalServer::new(name, target, scope);
+            external.status = Some(status);
+            Some(external)
+        })
+        .collect()
 }
 
 fn collect_from_toml(
@@ -142,6 +278,28 @@ fn entry_to_json_map(entry: &CodexMcpServerEntry) -> serde_json::Map<String, ser
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_app_server_status_list() {
+        let servers = parse_server_status_list(&json!({
+            "data": [
+                { "name": "codex_apps", "authStatus": "bearerToken",
+                  "httpOrigin": "https://chatgpt.com", "tools": { "a": {} } },
+                { "name": "linear", "authStatus": "notLoggedIn", "pluginId": "linear@m", "tools": {} },
+                { "name": "local", "authStatus": "unsupported", "tools": {} },
+            ]
+        }));
+        assert_eq!(servers[0].scope, "apps");
+        assert_eq!(servers[0].target, "https://chatgpt.com");
+        assert_eq!(servers[0].status, Some(McpHealthStatus::Connected));
+        assert_eq!(servers[1].scope, "plugin");
+        assert_eq!(
+            servers[1].status,
+            Some(McpHealthStatus::NeedsAuthentication)
+        );
+        assert_eq!(servers[2].scope, "cli");
+        assert_eq!(servers[2].status, Some(McpHealthStatus::Unknown));
+    }
 
     #[test]
     fn discovers_enabled_oauth_http_server_without_explicit_enabled_flag() {

@@ -122,7 +122,12 @@ fn lock_recover<'a, T>(mutex: &'a Mutex<T>, name: &str) -> std::sync::MutexGuard
     }
 }
 
-fn emit_cancelled_event(app: &AppHandle, session_id: &str, worktree_id: &str, undo_send: bool) {
+pub(crate) fn emit_cancelled_event(
+    app: &AppHandle,
+    session_id: &str,
+    worktree_id: &str,
+    undo_send: bool,
+) {
     let emitted_at_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
@@ -302,6 +307,27 @@ pub fn unregister_process(session_id: &str) {
     }
     drop(registry);
     lock_recover(&DETACHED_SESSIONS, "DETACHED_SESSIONS").remove(session_id);
+}
+
+/// Remove a session's process entry only while it still belongs to `pid`.
+///
+/// A tailer of a cancelled run must not unregister a newer run that already
+/// registered a different PID for the same session.
+pub fn unregister_process_if_owned(session_id: &str, pid: u32) {
+    let mut registry = lock_recover(&PROCESS_REGISTRY, "PROCESS_REGISTRY");
+    if registry.get(session_id) != Some(&pid) {
+        return;
+    }
+    registry.remove(session_id);
+    drop(registry);
+    lock_recover(&DETACHED_SESSIONS, "DETACHED_SESSIONS").remove(session_id);
+    log::trace!("Unregistered process {pid} for session: {session_id}");
+}
+
+/// Whether `pid` is still the registered process for this session.
+/// False after cancel removed it, or once a newer run replaced it.
+pub fn is_process_registered(session_id: &str, pid: u32) -> bool {
+    lock_recover(&PROCESS_REGISTRY, "PROCESS_REGISTRY").get(session_id) == Some(&pid)
 }
 
 /// Register a cancellation flag for an OpenCode session.
@@ -773,6 +799,31 @@ mod tests {
 
         cleanup_owned_session_registrations("session", Some(222), None);
         assert!(!is_session_actively_managed("session"));
+
+        clear_registries();
+    }
+
+    #[test]
+    fn owned_unregister_keeps_newer_run_registration() {
+        let _guard = lock_recover(&TEST_LOCK, "TEST_LOCK");
+        clear_registries();
+
+        assert!(register_detached_process("session".to_string(), 111));
+        assert!(is_process_registered("session", 111));
+
+        // Cancel removed the old run, then a new run registered pid 222.
+        lock_recover(&PROCESS_REGISTRY, "PROCESS_REGISTRY").remove("session");
+        assert!(register_detached_process("session".to_string(), 222));
+
+        // Old tailer sees its run is gone, and must not remove the new entry.
+        assert!(!is_process_registered("session", 111));
+        unregister_process_if_owned("session", 111);
+        assert!(is_process_registered("session", 222));
+        assert!(lock_recover(&DETACHED_SESSIONS, "DETACHED_SESSIONS").contains("session"));
+
+        unregister_process_if_owned("session", 222);
+        assert!(!is_session_actively_managed("session"));
+        assert!(!lock_recover(&DETACHED_SESSIONS, "DETACHED_SESSIONS").contains("session"));
 
         clear_registries();
     }

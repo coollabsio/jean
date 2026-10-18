@@ -48,6 +48,22 @@ describe('loadAllSessionsForServers', () => {
     ])
   })
 
+  it('loads only unread sessions when asked', async () => {
+    const invoke = vi.fn(async (serverId: string) => response(serverId))
+
+    await loadAllSessionsForServers(
+      [
+        { serverId: 'local', name: 'Local', online: true },
+        { serverId: 'remote-1', name: 'Build box', online: true },
+      ],
+      invoke,
+      'list_unread_sessions'
+    )
+
+    expect(invoke).toHaveBeenCalledWith('local', 'list_unread_sessions')
+    expect(invoke).toHaveBeenCalledWith('remote-1', 'list_unread_sessions')
+  })
+
   it('keeps available servers when one request fails', async () => {
     const invoke = vi.fn(async (serverId: string) => {
       if (serverId === 'remote-1') throw new Error('disconnected')

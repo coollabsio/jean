@@ -58,6 +58,8 @@ interface UseScrollManagementReturn {
   beginKeyboardScroll: () => void
   /** End a user-initiated keyboard scroll: unblocks handleScroll updates */
   endKeyboardScroll: () => void
+  /** Stop following the tail before a programmatic scroll away from bottom */
+  stopFollowingTail: () => void
 }
 
 const SCROLL_EPSILON_PX = 2
@@ -79,6 +81,31 @@ function isViewportAtBottom(viewport: HTMLDivElement) {
     viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <
     SCROLL_EPSILON_PX
   )
+}
+
+/**
+ * True when an upward wheel will scroll a nested element (code block, tool
+ * output) instead of the chat viewport. The browser only chains the scroll to
+ * the viewport once the inner element reaches its top.
+ */
+function nestedScrollerConsumesWheelUp(
+  target: EventTarget | null,
+  viewport: HTMLDivElement
+) {
+  let el = target instanceof Element ? target : null
+  while (el && el !== viewport) {
+    if (el instanceof HTMLElement && el.scrollTop > 0) {
+      const { overflowY } = getComputedStyle(el)
+      if (
+        (overflowY === 'auto' || overflowY === 'scroll') &&
+        el.scrollHeight > el.clientHeight
+      ) {
+        return true
+      }
+    }
+    el = el.parentElement
+  }
+  return false
 }
 
 function scrollToTail(viewport: HTMLDivElement) {
@@ -263,6 +290,15 @@ export function useScrollManagement({
     if (!viewport) return
 
     const handleWheel = (e: WheelEvent) => {
+      // Horizontal swipes (code blocks, tables) carry small vertical jitter,
+      // and a nested scroller can consume an upward wheel. Neither moves the
+      // viewport, so they must not mark the chat as scrolled away; real
+      // viewport scrolls are still detected by handleScroll.
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return
+      if (e.deltaY < 0 && nestedScrollerConsumesWheelUp(e.target, viewport)) {
+        return
+      }
+
       if (e.deltaY < 0) {
         // User scrolling up — cancel auto-scroll and block re-activation for 1s
         if (scrollTimeoutRef.current) {
@@ -584,7 +620,7 @@ export function useScrollManagement({
     if (!wasSendingRef.current && isSending) {
       const viewport = scrollViewportRef.current
       // Only follow if user was already at bottom. Otherwise leave them where they are —
-      // FloatingButtons' "Bottom" button is the manual escape hatch.
+      // The composer's "Bottom" tab is the manual escape hatch.
       if (
         viewport &&
         isFollowingTailRef.current &&
@@ -946,5 +982,6 @@ export function useScrollManagement({
     endKeyboardScroll,
     scrollToFindings,
     handleScroll,
+    stopFollowingTail,
   }
 }

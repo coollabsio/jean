@@ -1,25 +1,5 @@
-import { useState } from 'react'
-import {
-  ArrowDownToLine,
-  ArrowDownUp,
-  ArrowUpToLine,
-  BookmarkPlus,
-  Bug,
-  Sentry,
-  Eye,
-  FileText,
-  GitBranchPlus,
-  GitCommitHorizontal,
-  GitMerge,
-  GitPullRequest,
-  GitPullRequestArrow,
-  Link2,
-  MessageSquare,
-  RefreshCw,
-  ShieldAlert,
-  Undo2,
-  Wand2,
-} from '@/components/icons/reicon'
+import { Fragment, useMemo, useState } from 'react'
+import { Wand2 } from '@/components/icons/reicon'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -30,6 +10,11 @@ import {
 import { useUIStore } from '@/store/ui-store'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { cn } from '@/lib/utils'
+import {
+  buildMagicColumns,
+  isMagicOptionUnavailable,
+  type MagicMenuOption,
+} from '@/components/magic/magic-options'
 
 interface MobileToolbarMenuProps {
   isDisabled: boolean
@@ -75,6 +60,64 @@ export function MobileToolbarMenu({
 }: MobileToolbarMenuProps) {
   const isMobile = useIsMobile()
   const [menuOpen, setMenuOpen] = useState(false)
+  const magicColumns = useMemo(() => buildMagicColumns(hasOpenPr), [hasOpenPr])
+  const availability = {
+    hasOpenPr,
+    hasIssueContexts,
+    hasSentryContexts,
+    hasPrContexts,
+    hasAdvisoryContexts,
+  }
+
+  const dispatchMagicCommand = (detail: Record<string, unknown>) =>
+    window.dispatchEvent(new CustomEvent('magic-command', { detail }))
+
+  // Record over every menu option: a new shared item fails typecheck here
+  // until it gets a mobile handler.
+  const handlers: Record<MagicMenuOption, () => void> = {
+    'save-context': onSaveContext,
+    'inject-session': onLoadContext,
+    'linked-projects': () =>
+      useUIStore.getState().setLinkedProjectsModalOpen(true),
+    'fork-session': () => dispatchMagicCommand({ command: 'fork-session' }),
+    'check-github-issues': () =>
+      dispatchMagicCommand({ command: 'check-github-issues' }),
+    commit: onCommit,
+    'commit-and-push': onCommitAndPush,
+    'commit-in-session': () =>
+      dispatchMagicCommand({ command: 'commit-in-session' }),
+    'comment-and-close-issue': () =>
+      dispatchMagicCommand({ command: 'comment-and-close-issue' }),
+    'revert-last-commit': onRevertLastCommit,
+    sync: handleSyncClick,
+    pull: handlePullClick,
+    push: handlePushClick,
+    'open-pr': onOpenPr,
+    'link-pr': () =>
+      window.dispatchEvent(
+        new CustomEvent('magic-option', { detail: 'link-pr' })
+      ),
+    review: onReview,
+    'review-comments': () =>
+      useUIStore.getState().setReviewCommentsModalOpen(true),
+    'merge-pr': onMergePr,
+    'release-notes': () => useUIStore.getState().setReleaseNotesModalOpen(true),
+    'update-pr': () => useUIStore.getState().setUpdatePrModalOpen(true),
+    'pre-release-review': () =>
+      dispatchMagicCommand({ command: 'pre-release-review' }),
+    'investigate-issue': () =>
+      dispatchMagicCommand({
+        command: 'investigate',
+        type: hasIssueContexts ? 'issue' : 'sentry-issue',
+      }),
+    'investigate-pr': () =>
+      dispatchMagicCommand({ command: 'investigate', type: 'pr' }),
+    'investigate-advisory': () =>
+      dispatchMagicCommand({ command: 'investigate', type: 'advisory' }),
+    merge: onMerge,
+    'resolve-conflicts': () =>
+      useUIStore.getState().setResolveConflictsDialogOpen(true),
+  }
 
   return (
     <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
@@ -95,446 +138,37 @@ export function MobileToolbarMenu({
           isMobile ? 'w-[calc(100vw-1rem)] max-w-none grid grid-cols-2' : 'w-56'
         )}
       >
-        <div className="col-span-2 px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
-          Context
-        </div>
-        <DropdownMenuItem onClick={onSaveContext}>
-          <BookmarkPlus className="h-4 w-4" />
-          Save Context
-          <span
-            className={cn(
-              'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
-              isMobile && 'hidden'
+        {magicColumns.all.map((section, sectionIndex) => (
+          <Fragment key={section.header}>
+            {sectionIndex > 0 && (
+              <DropdownMenuSeparator className="col-span-2" />
             )}
-          >
-            S
-          </span>
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={onLoadContext}>
-          <MessageSquare className="h-4 w-4" />
-          Inject Context
-          <span
-            className={cn(
-              'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
-              isMobile && 'hidden'
-            )}
-          >
-            J
-          </span>
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() => {
-            setMenuOpen(false)
-            useUIStore.getState().setLinkedProjectsModalOpen(true)
-          }}
-        >
-          <Link2 className="h-4 w-4" />
-          Linked Projects
-          <span
-            className={cn(
-              'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
-              isMobile && 'hidden'
-            )}
-          >
-            K
-          </span>
-        </DropdownMenuItem>
-
-        <DropdownMenuItem
-          onClick={() => {
-            setMenuOpen(false)
-            window.dispatchEvent(
-              new CustomEvent('magic-command', {
-                detail: { command: 'fork-session' },
-              })
-            )
-          }}
-        >
-          <GitBranchPlus className="h-4 w-4" />
-          Fork Session
-          <span
-            className={cn(
-              'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
-              isMobile && 'hidden'
-            )}
-          >
-            W
-          </span>
-        </DropdownMenuItem>
-
-        <DropdownMenuItem
-          onClick={() => {
-            setMenuOpen(false)
-            window.dispatchEvent(
-              new CustomEvent('magic-command', {
-                detail: { command: 'check-github-issues' },
-              })
-            )
-          }}
-        >
-          <Bug className="h-4 w-4" />
-          Check GitHub Issues
-          <span
-            className={cn(
-              'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
-              isMobile && 'hidden'
-            )}
-          >
-            Q
-          </span>
-        </DropdownMenuItem>
-
-        <DropdownMenuSeparator className="col-span-2" />
-
-        <div className="col-span-2 px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
-          Commit
-        </div>
-        <DropdownMenuItem onClick={onCommit}>
-          <GitCommitHorizontal className="h-4 w-4" />
-          Commit
-          <span
-            className={cn(
-              'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
-              isMobile && 'hidden'
-            )}
-          >
-            C
-          </span>
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={onCommitAndPush}>
-          <GitCommitHorizontal className="h-4 w-4" />
-          Commit & Push
-          <span
-            className={cn(
-              'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
-              isMobile && 'hidden'
-            )}
-          >
-            P
-          </span>
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          disabled={!hasIssueContexts}
-          onClick={() => {
-            setMenuOpen(false)
-            window.dispatchEvent(
-              new CustomEvent('magic-command', {
-                detail: { command: 'comment-and-close-issue' },
-              })
-            )
-          }}
-        >
-          <Bug className="h-4 w-4" />
-          Comment & Close Issue
-          <span
-            className={cn(
-              'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
-              isMobile && 'hidden'
-            )}
-          >
-            H
-          </span>
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() => {
-            setMenuOpen(false)
-            onRevertLastCommit()
-          }}
-        >
-          <Undo2 className="h-4 w-4" />
-          Revert Commit
-          <span
-            className={cn(
-              'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
-              isMobile && 'hidden'
-            )}
-          >
-            Z
-          </span>
-        </DropdownMenuItem>
-
-        <DropdownMenuSeparator className="col-span-2" />
-
-        <div className="col-span-2 px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
-          Sync
-        </div>
-        <DropdownMenuItem onClick={handleSyncClick}>
-          <ArrowDownUp className="h-4 w-4" />
-          Sync
-          <span
-            className={cn(
-              'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
-              isMobile && 'hidden'
-            )}
-          >
-            T
-          </span>
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={handlePullClick}>
-          <ArrowDownToLine className="h-4 w-4" />
-          Pull
-          <span
-            className={cn(
-              'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
-              isMobile && 'hidden'
-            )}
-          >
-            D
-          </span>
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={handlePushClick}>
-          <ArrowUpToLine className="h-4 w-4" />
-          Push
-          <span
-            className={cn(
-              'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
-              isMobile && 'hidden'
-            )}
-          >
-            U
-          </span>
-        </DropdownMenuItem>
-
-        <DropdownMenuSeparator className="col-span-2" />
-
-        <div className="col-span-2 px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
-          Pull Request
-        </div>
-        <DropdownMenuItem onClick={onOpenPr}>
-          <GitPullRequest className="h-4 w-4" />
-          {hasOpenPr ? 'Open' : 'Create'}
-          <span
-            className={cn(
-              'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
-              isMobile && 'hidden'
-            )}
-          >
-            O
-          </span>
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() => {
-            setMenuOpen(false)
-            window.dispatchEvent(
-              new CustomEvent('magic-option', { detail: 'link-pr' })
-            )
-          }}
-        >
-          <Link2 className="h-4 w-4" />
-          Link PR
-          <span
-            className={cn(
-              'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
-              isMobile && 'hidden'
-            )}
-          >
-            B
-          </span>
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={onReview}>
-          <Eye className="h-4 w-4" />
-          Review
-          <span
-            className={cn(
-              'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
-              isMobile && 'hidden'
-            )}
-          >
-            R
-          </span>
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          disabled={!hasOpenPr}
-          onClick={() => {
-            setMenuOpen(false)
-            useUIStore.getState().setReviewCommentsModalOpen(true)
-          }}
-        >
-          <MessageSquare className="h-4 w-4" />
-          PR Comments
-          <span
-            className={cn(
-              'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
-              isMobile && 'hidden'
-            )}
-          >
-            V
-          </span>
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          disabled={!hasOpenPr}
-          onClick={() => {
-            setMenuOpen(false)
-            onMergePr()
-          }}
-        >
-          <GitMerge className="h-4 w-4" />
-          Merge
-          <span
-            className={cn(
-              'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
-              isMobile && 'hidden'
-            )}
-          >
-            N
-          </span>
-        </DropdownMenuItem>
-
-        <DropdownMenuSeparator className="col-span-2" />
-
-        <div className="col-span-2 px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
-          Release
-        </div>
-        <DropdownMenuItem
-          onClick={() => {
-            setMenuOpen(false)
-            useUIStore.getState().setReleaseNotesModalOpen(true)
-          }}
-        >
-          <FileText className="h-4 w-4" />
-          Generate Release Notes
-          <span
-            className={cn(
-              'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
-              isMobile && 'hidden'
-            )}
-          >
-            G
-          </span>
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() => {
-            setMenuOpen(false)
-            useUIStore.getState().setUpdatePrModalOpen(true)
-          }}
-        >
-          <RefreshCw className="h-4 w-4" />
-          Generate PR Description
-          <span
-            className={cn(
-              'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
-              isMobile && 'hidden'
-            )}
-          >
-            E
-          </span>
-        </DropdownMenuItem>
-
-        <DropdownMenuSeparator className="col-span-2" />
-
-        <div className="col-span-2 px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
-          Investigate
-        </div>
-        <DropdownMenuItem
-          disabled={!hasIssueContexts && !hasSentryContexts}
-          onClick={() => {
-            if (!hasIssueContexts && !hasSentryContexts) return
-            setMenuOpen(false)
-            window.dispatchEvent(
-              new CustomEvent('magic-command', {
-                detail: {
-                  command: 'investigate',
-                  type: hasIssueContexts ? 'issue' : 'sentry-issue',
-                },
-              })
-            )
-          }}
-        >
-          {hasIssueContexts ? (
-            <Bug className="h-4 w-4" />
-          ) : (
-            <Sentry className="h-4 w-4" />
-          )}
-          Issue
-          <span
-            className={cn(
-              'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
-              isMobile && 'hidden'
-            )}
-          >
-            I
-          </span>
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          disabled={!hasPrContexts}
-          onClick={() => {
-            if (!hasPrContexts) return
-            setMenuOpen(false)
-            window.dispatchEvent(
-              new CustomEvent('magic-command', {
-                detail: { command: 'investigate', type: 'pr' },
-              })
-            )
-          }}
-        >
-          <GitPullRequestArrow className="h-4 w-4" />
-          PR
-          <span
-            className={cn(
-              'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
-              isMobile && 'hidden'
-            )}
-          >
-            A
-          </span>
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          disabled={!hasAdvisoryContexts}
-          onClick={() => {
-            if (!hasAdvisoryContexts) return
-            setMenuOpen(false)
-            window.dispatchEvent(
-              new CustomEvent('magic-command', {
-                detail: { command: 'investigate', type: 'advisory' },
-              })
-            )
-          }}
-        >
-          <ShieldAlert className="h-4 w-4" />
-          Advisory
-          <span
-            className={cn(
-              'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
-              isMobile && 'hidden'
-            )}
-          >
-            Y
-          </span>
-        </DropdownMenuItem>
-
-        <DropdownMenuSeparator className="col-span-2" />
-
-        <div className="col-span-2 px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
-          Branch
-        </div>
-        <DropdownMenuItem onClick={onMerge}>
-          <GitMerge className="h-4 w-4" />
-          Merge to Base
-          <span
-            className={cn(
-              'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
-              isMobile && 'hidden'
-            )}
-          >
-            M
-          </span>
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() =>
-            useUIStore.getState().setResolveConflictsDialogOpen(true)
-          }
-        >
-          <GitMerge className="h-4 w-4" />
-          Resolve Conflicts
-          <span
-            className={cn(
-              'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
-              isMobile && 'hidden'
-            )}
-          >
-            F
-          </span>
-        </DropdownMenuItem>
+            <div className="col-span-2 px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              {section.header}
+            </div>
+            {section.options.map(option => {
+              const Icon = option.icon
+              return (
+                <DropdownMenuItem
+                  key={option.id}
+                  disabled={isMagicOptionUnavailable(option.id, availability)}
+                  onSelect={handlers[option.id]}
+                >
+                  <Icon className="h-4 w-4" />
+                  {option.label}
+                  <span
+                    className={cn(
+                      'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
+                      isMobile && 'hidden'
+                    )}
+                  >
+                    {option.key}
+                  </span>
+                </DropdownMenuItem>
+              )
+            })}
+          </Fragment>
+        ))}
       </DropdownMenuContent>
     </DropdownMenu>
   )

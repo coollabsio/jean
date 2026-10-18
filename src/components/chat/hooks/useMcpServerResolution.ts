@@ -1,10 +1,10 @@
 import { useEffect, useMemo } from 'react'
+import { parseServerResourceKey } from '@/lib/server-resource'
 import { useChatStore } from '@/store/chat-store'
 import {
   useMcpServers,
   invalidateMcpServers,
   getNewServersToAutoEnable,
-  isRequiredMcpServer,
   mcpKey,
 } from '@/services/mcp'
 import type { Project } from '@/types/projects'
@@ -35,7 +35,9 @@ export function useMcpServerResolution({
 }: UseMcpServerResolutionParams) {
   const { data: mcpServersData } = useMcpServers(
     activeWorktreePath,
-    selectedBackend
+    selectedBackend,
+    parseServerResourceKey(project?.id ?? deferredSessionId ?? '')?.serverId ??
+      'local'
   )
   const availableMcpServers = useMemo(
     () => mcpServersData ?? [],
@@ -68,13 +70,10 @@ export function useMcpServerResolution({
   ])
 
   const effectiveBaseEnabledMcpServers = useMemo(() => {
+    if (selectedBackend !== 'antigravity') return baseEnabledMcpServers
     const automatic = availableMcpServers
-      .filter(
-        server =>
-          isRequiredMcpServer(server.name) ||
-          (selectedBackend === 'antigravity' && !server.disabled)
-      )
-      .map(server => mcpKey(selectedBackend, server.name))
+      .filter(server => !server.disabled)
+      .map(server => mcpKey('antigravity', server.name))
     return [...new Set([...baseEnabledMcpServers, ...automatic])]
   }, [availableMcpServers, baseEnabledMcpServers, selectedBackend])
 

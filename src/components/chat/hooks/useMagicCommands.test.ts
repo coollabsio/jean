@@ -12,8 +12,10 @@ function renderUseMagicCommands(
     handleLinkedProjects: vi.fn(),
     handleForkSession: vi.fn(),
     handleCheckGitHubIssues: vi.fn(),
+    handlePreReleaseReview: vi.fn(),
     handleCommit: vi.fn(),
     handleCommitAndPush: vi.fn(),
+    handleCommitInSession: vi.fn(),
     handleCommentAndCloseIssue: vi.fn(),
     handlePull: vi.fn(),
     handlePush: vi.fn(),
@@ -62,6 +64,30 @@ describe('useMagicCommands review comments batch', () => {
     expect(handlers.handleCheckGitHubIssues).toHaveBeenCalledTimes(1)
   })
 
+  it('dispatches the pre-release review magic command', () => {
+    const handlers = renderUseMagicCommands()
+
+    window.dispatchEvent(
+      new CustomEvent('magic-command', {
+        detail: { command: 'pre-release-review' },
+      })
+    )
+
+    expect(handlers.handlePreReleaseReview).toHaveBeenCalledTimes(1)
+  })
+
+  it('dispatches the commit in session command to the current chat', () => {
+    const handlers = renderUseMagicCommands()
+
+    window.dispatchEvent(
+      new CustomEvent('magic-command', {
+        detail: { command: 'commit-in-session' },
+      })
+    )
+
+    expect(handlers.handleCommitInSession).toHaveBeenCalledTimes(1)
+  })
+
   it('dispatches the comment and close issue command to the current chat', () => {
     const handlers = renderUseMagicCommands()
 
@@ -83,13 +109,17 @@ describe('useMagicCommands review comments batch', () => {
           command: 'review-comments',
           prompts: ['prompt one', 'prompt two'],
           executionMode: 'plan',
+          override: { backend: 'codex', model: 'gpt-6.1-sol' },
         },
       })
     )
 
     expect(handlers.handleReviewComments).toHaveBeenCalledWith(
       ['prompt one', 'prompt two'],
-      { executionMode: 'plan' }
+      {
+        executionMode: 'plan',
+        override: { backend: 'codex', model: 'gpt-6.1-sol' },
+      }
     )
   })
 
@@ -98,13 +128,17 @@ describe('useMagicCommands review comments batch', () => {
       command: 'review-comments',
       prompts: ['pending one', 'pending two'],
       executionMode: 'plan',
+      override: { backend: 'codex', model: 'gpt-6.1-sol' },
     })
 
     const handlers = renderUseMagicCommands()
 
     expect(handlers.handleReviewComments).toHaveBeenCalledWith(
       ['pending one', 'pending two'],
-      { executionMode: 'plan' }
+      {
+        executionMode: 'plan',
+        override: { backend: 'codex', model: 'gpt-6.1-sol' },
+      }
     )
   })
 })

@@ -6,6 +6,7 @@ import {
   isJeanMcpToolName,
   normalizeToolCallForDisplay,
   StackedGroup,
+  summarizeToolCall,
   TaskCallInline,
   ToolCallInline,
 } from './ToolCallInline'
@@ -96,9 +97,7 @@ describe('ToolCallInline', () => {
     )
     expect(command.closest('.tool-call-row')).toHaveClass('select-none')
     expect(
-      screen.queryByText(
-        '$ php artisan test --compact tests/Unit/DockerStopCo'
-      )
+      screen.queryByText('$ php artisan test --compact tests/Unit/DockerStopCo')
     ).not.toBeInTheDocument()
 
     fireEvent.click(command)
@@ -124,9 +123,7 @@ describe('ToolCallInline', () => {
     fireEvent.click(screen.getByRole('button', { name: /open example\.ts/i }))
 
     expect(onFileClick).toHaveBeenCalledWith('/tmp/example.ts')
-    expect(
-      screen.queryByText('Path: /tmp/example.ts')
-    ).not.toBeInTheDocument()
+    expect(screen.queryByText('Path: /tmp/example.ts')).not.toBeInTheDocument()
   })
 
   it('renders Cursor EnterPlanMode instructions', () => {
@@ -226,7 +223,9 @@ describe('ToolCallInline', () => {
 
     clickExpandTrigger()
 
-    expect(screen.getByText(/The request can fail silently/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/The request can fail silently/)
+    ).toBeInTheDocument()
     expect(screen.getByText(/The failure path has no test/)).toBeInTheDocument()
   })
 
@@ -425,7 +424,10 @@ describe('ToolCallInline', () => {
     ],
     [
       'write_to_file',
-      { TargetFile: '/Users/example/project/src/new.ts', CodeContent: 'export {}' },
+      {
+        TargetFile: '/Users/example/project/src/new.ts',
+        CodeContent: 'export {}',
+      },
       'Write',
       'new.ts',
     ],
@@ -457,19 +459,30 @@ describe('ToolCallInline', () => {
       'List',
       '/Users/example/project/src',
     ],
-    ['search_web', { Query: 'Antigravity CLI docs' }, 'Web Search', 'Antigravity CLI docs'],
-    ['read_url_content', { Url: 'https://antigravity.google' }, 'Web Fetch', 'https://antigravity.google'],
-  ])('renders Antigravity %s with the common renderer', (name, input, label, detail) => {
-    render(
-      <ToolCallInline
-        toolCall={{ id: `antigravity-${name}`, name, input }}
-      />
-    )
+    [
+      'search_web',
+      { Query: 'Antigravity CLI docs' },
+      'Web Search',
+      'Antigravity CLI docs',
+    ],
+    [
+      'read_url_content',
+      { Url: 'https://antigravity.google' },
+      'Web Fetch',
+      'https://antigravity.google',
+    ],
+  ])(
+    'renders Antigravity %s with the common renderer',
+    (name, input, label, detail) => {
+      render(
+        <ToolCallInline toolCall={{ id: `antigravity-${name}`, name, input }} />
+      )
 
-    expect(screen.getByText(label)).toBeInTheDocument()
-    expect(screen.getByText(detail)).toBeInTheDocument()
-    expect(screen.queryByText(/unhandled tool/i)).not.toBeInTheDocument()
-  })
+      expect(screen.getByText(label)).toBeInTheDocument()
+      expect(screen.getByText(detail)).toBeInTheDocument()
+      expect(screen.queryByText(/unhandled tool/i)).not.toBeInTheDocument()
+    }
+  )
 
   it.each([
     'browser_click',
@@ -1060,5 +1073,295 @@ describe('TaskCallInline', () => {
     expect(screen.getByText('Nested agent finished.')).toBeInTheDocument()
     // Nested Agent renders as another TaskCallInline row, not a SubToolItem
     expect(screen.getByText('Child agent')).toBeInTheDocument()
+  })
+})
+
+describe('tool output rendering', () => {
+  it('does not render a raw Output panel for Read (live and history match)', () => {
+    render(
+      <ToolCallInline
+        toolCall={{
+          id: 'read-with-output',
+          name: 'Read',
+          input: { file_path: '/tmp/big.ts' },
+          output: 'export const huge = 1',
+        }}
+      />
+    )
+    clickExpandTrigger()
+    expect(screen.getByText('Path: /tmp/big.ts')).toBeInTheDocument()
+    expect(screen.queryByText('Output:')).not.toBeInTheDocument()
+    expect(screen.queryByText('export const huge = 1')).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['mcp__github__get_issue', { issue: 1 }],
+    ['mcp__jean__list_projects', {}],
+    ['SomeFutureTool', { foo: 'bar' }],
+    ['CodeSearch', { query: 'needle' }],
+    ['List', { path: '/tmp' }],
+    ['WaitForAgents', { receiver_thread_ids: ['a'] }],
+    ['lsp', { action: 'hover', filePath: '/tmp/a.ts' }],
+  ])('renders %s output exactly once', (name, input) => {
+    render(
+      <ToolCallInline
+        toolCall={{ id: `once-${name}`, name, input, output: 'RESULT-TEXT' }}
+      />
+    )
+    clickExpandTrigger()
+    expect(screen.getAllByText('RESULT-TEXT')).toHaveLength(1)
+    expect(screen.getByText('Output:')).toBeInTheDocument()
+  })
+})
+
+describe('Claude Code tool renderers', () => {
+  it.each([
+    ['BashOutput', { bash_id: 'shell-1' }, 'Bash Output', 'shell-1'],
+    ['TaskOutput', { task_id: 'task-9', block: true }, 'Task Output', 'task-9'],
+    ['KillShell', { shell_id: 'shell-2' }, 'Kill Shell', 'shell-2'],
+    ['KillBash', { shell_id: 'shell-3' }, 'Kill Shell', 'shell-3'],
+    ['TaskStop', { task_id: 'task-4' }, 'Stop Task', 'task-4'],
+    ['PowerShell', { command: 'Get-ChildItem' }, 'PowerShell', 'Get-ChildItem'],
+    [
+      'LSP',
+      { operation: 'goToDefinition', filePath: '/src/a.ts', line: 1 },
+      'LSP',
+      'goToDefinition a.ts',
+    ],
+    [
+      'SendMessage',
+      { to: 'researcher', message: 'hi' },
+      'Send Message',
+      'researcher',
+    ],
+    ['EnterWorktree', { name: 'feat-x' }, 'Enter Worktree', 'feat-x'],
+    ['ExitWorktree', { action: 'keep' }, 'Exit Worktree', 'keep'],
+    [
+      'CronCreate',
+      { cron: '*/5 * * * *', prompt: 'p' },
+      'Schedule Prompt',
+      '*/5 * * * *',
+    ],
+    ['CronDelete', { id: 'job-1' }, 'Delete Schedule', 'job-1'],
+    [
+      'ReadMcpResourceTool',
+      { server: 's', uri: 'file://x' },
+      'Read MCP Resource',
+      'file://x',
+    ],
+    [
+      'ListMcpResourcesTool',
+      { server: 'github' },
+      'List MCP Resources',
+      'github',
+    ],
+    ['TaskCreate', { subject: 'Write tests' }, 'Create Task', 'Write tests'],
+    [
+      'TaskUpdate',
+      { taskId: '3', status: 'completed' },
+      'Update Task',
+      'completed',
+    ],
+    ['TaskGet', { taskId: '3' }, 'Get Task', '3'],
+    ['Workflow', { description: 'Refactor all' }, 'Workflow', 'Refactor all'],
+    [
+      'PushNotification',
+      { message: 'build done' },
+      'Push Notification',
+      'build done',
+    ],
+    [
+      'WaitForMcpServers',
+      { servers: ['github', 'linear'] },
+      'Wait for MCP Servers',
+      'github, linear',
+    ],
+  ])('renders %s with a label and detail', (name, input, label, detail) => {
+    render(<ToolCallInline toolCall={{ id: `cc-${name}`, name, input }} />)
+    expect(screen.getByText(label)).toBeInTheDocument()
+    expect(screen.getByText(detail)).toBeInTheDocument()
+    expect(screen.queryByText(/unhandled tool/)).not.toBeInTheDocument()
+  })
+
+  it.each(['ListAgents', 'CronList', 'TaskList'])(
+    'renders parameterless %s without the unhandled fallback',
+    name => {
+      render(
+        <ToolCallInline toolCall={{ id: `cc-${name}`, name, input: {} }} />
+      )
+      expect(screen.queryByText(/unhandled tool/)).not.toBeInTheDocument()
+    }
+  )
+
+  it('renders MultiEdit with file, edit count, and one diff per edit', () => {
+    inlineFileDiffProps.length = 0
+    render(
+      <ToolCallInline
+        toolCall={{
+          id: 'multi-edit',
+          name: 'MultiEdit',
+          input: {
+            file_path: '/src/app.ts',
+            edits: [
+              { old_string: 'a', new_string: 'b' },
+              { old_string: 'c', new_string: 'd' },
+            ],
+          },
+        }}
+      />
+    )
+    expect(screen.getByText('Multi Edit')).toBeInTheDocument()
+    expect(screen.getByText('app.ts · 2 edits')).toBeInTheDocument()
+    clickExpandTrigger()
+    expect(
+      inlineFileDiffProps.filter(p => p.filePath === '/src/app.ts')
+    ).toHaveLength(2)
+  })
+
+  it('renders NotebookEdit with notebook, mode and cell', () => {
+    render(
+      <ToolCallInline
+        toolCall={{
+          id: 'nb-edit',
+          name: 'NotebookEdit',
+          input: {
+            notebook_path: '/nb/analysis.ipynb',
+            cell_id: 'cell-3',
+            edit_mode: 'insert',
+            new_source: 'print(1)',
+          },
+        }}
+      />
+    )
+    expect(screen.getByText('Notebook insert')).toBeInTheDocument()
+    expect(screen.getByText('analysis.ipynb · cell-3')).toBeInTheDocument()
+  })
+})
+
+describe('tool error indicator', () => {
+  it('marks tool rows whose result is an error', () => {
+    render(
+      <ToolCallInline
+        toolCall={{
+          id: 'err-tool',
+          name: 'Bash',
+          input: { command: 'false' },
+          output: 'exit 1',
+          is_error: true,
+        }}
+      />
+    )
+    expect(screen.getByText('failed')).toBeInTheDocument()
+  })
+
+  it('does not mark Bash rows that only exited non-zero', () => {
+    render(
+      <ToolCallInline
+        toolCall={{
+          id: 'exit-tool',
+          name: 'Bash',
+          input: { command: 'which missing' },
+          output: 'Exit code 127\nsh: missing: not found',
+          is_error: true,
+        }}
+      />
+    )
+    expect(screen.queryByText('failed')).not.toBeInTheDocument()
+  })
+
+  it('does not mark successful tool rows', () => {
+    render(
+      <ToolCallInline
+        toolCall={{ id: 'ok-tool', name: 'Bash', input: { command: 'true' } }}
+      />
+    )
+    expect(screen.queryByText('failed')).not.toBeInTheDocument()
+  })
+})
+
+describe('summarizeToolCall', () => {
+  it('labels Codex sub-agent activity with the agent path', () => {
+    expect(
+      summarizeToolCall({
+        id: 'sa1',
+        name: 'SpawnAgent',
+        input: {
+          type: 'sub_agent_activity',
+          kind: 'started',
+          prompt: '/root/demo_one',
+          receiver_thread_ids: ['t1'],
+        },
+      })
+    ).toEqual({ label: 'Spawn Agent', detail: '/root/demo_one' })
+  })
+
+  it('uses the same friendly labels as the tool rows', () => {
+    expect(
+      summarizeToolCall({
+        id: 's1',
+        name: 'mcp__jean__create_session',
+        input: { backend: 'claude' },
+      })
+    ).toEqual({ label: 'Jean: Create Session', detail: 'claude' })
+    expect(
+      summarizeToolCall({
+        id: 's2',
+        name: 'read_file',
+        input: { target_file: '/src/a.ts' },
+      })
+    ).toEqual({ label: 'Read', detail: '/src/a.ts' })
+    expect(
+      summarizeToolCall({ id: 's3', name: 'TaskStop', input: { task_id: 't' } })
+    ).toEqual({ label: 'Stop Task', detail: 't' })
+  })
+
+  it('keeps the tail of long paths', () => {
+    const longPath = `/very/${'deep/'.repeat(30)}file.ts`
+    const summary = summarizeToolCall({
+      id: 's4',
+      name: 'Edit',
+      input: { file_path: longPath },
+    })
+    expect(summary.detail?.startsWith('…')).toBe(true)
+    expect(summary.detail?.endsWith('file.ts')).toBe(true)
+  })
+})
+
+describe('TaskCallInline nested agents', () => {
+  it('uses resolved nested sub-tools and shows a spinner while running', () => {
+    const nested = {
+      id: 'nested-agent-2',
+      name: 'Agent',
+      input: { description: 'Child agent' },
+      parent_tool_use_id: 'parent-agent-2',
+    }
+    // Fallback-grouped child: no parent_tool_use_id
+    const grandchild = {
+      id: 'nested-grep-2',
+      name: 'Grep',
+      input: { pattern: 'needle' },
+    }
+    const { container } = render(
+      <TaskCallInline
+        taskToolCall={{
+          id: 'parent-agent-2',
+          name: 'Agent',
+          input: { description: 'Parent agent' },
+        }}
+        subToolCalls={[nested]}
+        allToolCalls={[nested, grandchild]}
+        nestedSubTools={{
+          'parent-agent-2': [nested],
+          'nested-agent-2': [grandchild],
+        }}
+        isStreaming
+        isIncomplete
+      />
+    )
+    clickExpandTrigger()
+    // Parent + nested agent both show the working waveform
+    expect(container.querySelectorAll('.working-waveform')).toHaveLength(2)
+    // Nested agent reports its fallback-grouped child
+    expect(screen.getAllByText('1 tool')).toHaveLength(2)
   })
 })

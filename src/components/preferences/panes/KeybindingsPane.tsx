@@ -38,7 +38,7 @@ const KeybindingRow: React.FC<{
     id={rowId}
     data-settings-target={definition.action}
     className={cn(
-      'grid gap-3 rounded-lg border border-border bg-background p-3 transition-colors sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center',
+      'grid gap-2 rounded-md px-2 py-1.5 transition-colors sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center',
       highlighted ? 'bg-accent/60 ring-1 ring-inset ring-border' : ''
     )}
   >
@@ -163,7 +163,7 @@ export const KeybindingsPane: React.FC<KeybindingsPaneProps> = ({
         title="Keybindings"
         anchorId="pref-keybindings-section-keybindings"
       >
-        <div className="grid gap-2 xl:grid-cols-2">
+        <div className="grid gap-x-4 gap-y-0.5 xl:grid-cols-2">
           {sortedBindings.map(def => (
             <KeybindingRow
               key={def.action}

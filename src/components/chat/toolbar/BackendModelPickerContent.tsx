@@ -7,6 +7,13 @@ import {
   useRef,
   useState,
 } from 'react'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
 import {
   Command,
@@ -63,6 +70,7 @@ interface BackendModelPickerContentProps {
   customCliProfiles: CustomCliProfile[]
   sessionHasMessages?: boolean
   providerLocked?: boolean
+  onProviderChange?: (provider: string) => void
   onModelChange: (model: string) => void
   onBackendModelChange: (backend: CliBackend, model: string) => void
   onRequestClose: () => void
@@ -83,6 +91,7 @@ export function BackendModelPickerContent({
   customCliProfiles,
   sessionHasMessages: _sessionHasMessages,
   providerLocked: _providerLocked,
+  onProviderChange,
   onModelChange,
   onBackendModelChange,
   onRequestClose,
@@ -626,10 +635,34 @@ export function BackendModelPickerContent({
             )}
           </div>
 
-          {showProviderHint && (
-            <div className="px-4 pt-2 text-xs text-muted-foreground">
-              Provider: {getProviderDisplayName(selectedProvider)}
+          {onProviderChange && activeBackend === 'claude' ? (
+            <div className="px-4 py-2">
+              <Select
+                value={selectedProvider ?? '__anthropic__'}
+                onValueChange={onProviderChange}
+              >
+                <SelectTrigger
+                  className="h-8 text-xs"
+                  aria-label="Investigation provider"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__anthropic__">Anthropic</SelectItem>
+                  {customCliProfiles.map(profile => (
+                    <SelectItem key={profile.name} value={profile.name}>
+                      {profile.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
+          ) : (
+            showProviderHint && (
+              <div className="px-4 pt-2 text-xs text-muted-foreground">
+                Provider: {getProviderDisplayName(selectedProvider)}
+              </div>
+            )
           )}
 
           <CommandList
@@ -724,8 +757,7 @@ export function BackendModelPickerContent({
                               <Zap
                                 className={cn(
                                   'h-3 w-3',
-                                  isSelectedFast &&
-                                    'fill-yellow-500 text-yellow-500'
+                                  isSelectedFast && 'fill-warning text-warning'
                                 )}
                               />
                               <span>Fast</span>
@@ -769,7 +801,7 @@ export function BackendModelPickerContent({
                           <Star
                             className={cn(
                               'h-3.5 w-3.5',
-                              isFavorite && 'fill-yellow-500 text-yellow-500'
+                              isFavorite && 'fill-warning text-warning'
                             )}
                           />
                         </button>
@@ -871,7 +903,7 @@ function SidebarBackends({
                 {isBetaBackend(backend) && (
                   <span
                     aria-hidden
-                    className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-yellow-500"
+                    className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-warning"
                   />
                 )}
               </button>

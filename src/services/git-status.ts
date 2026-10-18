@@ -178,23 +178,6 @@ export async function setActiveWorktreeForPolling(
 }
 
 /**
- * Set the git polling interval in seconds.
- * Valid range: 10-600 seconds (10 seconds to 10 minutes).
- */
-export async function setGitPollInterval(seconds: number): Promise<void> {
-  if (!isTauri()) return
-  await invoke('set_git_poll_interval', { seconds })
-}
-
-/**
- * Get the current git polling interval in seconds.
- */
-export async function getGitPollInterval(): Promise<number> {
-  if (!isTauri()) return 60 // Default for non-Tauri
-  return await invoke<number>('get_git_poll_interval')
-}
-
-/**
  * Trigger an immediate git status poll.
  *
  * This bypasses the normal polling interval and debounce timer.
@@ -341,7 +324,7 @@ export async function performGitPull(opts: GitPullOptions): Promise<boolean> {
         useChatStore.getState().isWorktreeRunningNonPlan(worktreeId)
       ) {
         toast.error(
-          'Cannot auto-stash: a build/yolo session is running on this worktree. Stop it first.',
+          'Cannot auto-stash: a Build or Full access session is running on this worktree. Stop it first.',
           { id: toastId }
         )
         return false
@@ -580,24 +563,6 @@ export async function fetchWorktreesStatus(projectId: string): Promise<void> {
 // ============================================================================
 // Remote polling (PR status, etc.)
 // ============================================================================
-
-/**
- * Set the remote polling interval in seconds.
- * Valid range: 30-600 seconds (30 seconds to 10 minutes).
- * This controls how often remote API calls (like PR status) are made.
- */
-export async function setRemotePollInterval(seconds: number): Promise<void> {
-  if (!isTauri()) return
-  await invoke('set_remote_poll_interval', { seconds })
-}
-
-/**
- * Get the current remote polling interval in seconds.
- */
-export async function getRemotePollInterval(): Promise<number> {
-  if (!isTauri()) return 60 // Default for non-Tauri
-  return await invoke<number>('get_remote_poll_interval')
-}
 
 /**
  * Set all worktrees with open PRs for background sweep polling.

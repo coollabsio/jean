@@ -43,7 +43,7 @@ export function FilePreview({ files, onRemove, disabled }: FilePreviewProps) {
           <TooltipTrigger asChild>
             <div className="group relative flex items-center gap-1.5 rounded-md bg-muted/50 px-2 py-1 text-sm">
               {file.isDirectory ? (
-                <FolderIcon className="h-3.5 w-3.5 shrink-0 text-blue-400" />
+                <FolderIcon className="h-3.5 w-3.5 shrink-0 text-blue-600 dark:text-blue-400" />
               ) : (
                 <FileIcon
                   className={cn(

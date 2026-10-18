@@ -1,6 +1,7 @@
 import {
   memo,
   useState,
+  useEffect,
   useCallback,
   useRef,
   useMemo,
@@ -18,7 +19,8 @@ import rehypeRaw from 'rehype-raw'
 import remarkGfm from 'remark-gfm'
 import remend from 'remend'
 import { remarkFixInterruptedLists } from '@/lib/remark-fix-interrupted-lists'
-import { Copy, Check, Table, ListChecks } from '@/components/icons/reicon'
+import { Copy, Check, ListChecks, Thumbtack } from '@/components/icons/reicon'
+import { MarkdownIcon } from '@/components/icons/MarkdownIcon'
 import { toast } from 'sonner'
 import { copyToClipboard } from '@/lib/clipboard'
 import { extractFilePath, openLocalFile } from '@/lib/local-file'
@@ -28,9 +30,15 @@ import {
   TooltipContent,
 } from '@/components/ui/tooltip'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
+import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
 import { useChatStore } from '@/store/chat-store'
-import { convertFileSrc } from '@/lib/transport'
+import { useIsMobile } from '@/hooks/use-mobile'
+import { convertServerFileSrc, invokeForOptionalServer } from '@/lib/transport'
+import { parseServerResourceKey } from '@/lib/server-resource'
+import { tableToMarkdown, setTableRowInPrompt } from '@/lib/table-rows-prompt'
 
 interface MarkdownProps {
   children: string
@@ -49,29 +57,46 @@ interface MarkdownProps {
   sessionId?: string
   /** Smaller mobile heading + spacing for narrow modal contexts */
   compact?: boolean
+  /**
+   * Fixed key for every table in this markdown. Used to render a pinned table
+   * outside its message so checklist and pin state stay shared.
+   */
+  tableKey?: string
 }
 
 interface MarkdownTableContextValue {
   messageId: string | null
   sessionId: string | null
+  tableKey: string | null
+  source: string
 }
 
 const MarkdownTableContext = createContext<MarkdownTableContextValue>({
   messageId: null,
   sessionId: null,
+  tableKey: null,
+  source: '',
 })
 
-interface ChecklistInjectionContextValue {
+interface TableRowsContextValue {
+  /** Checked row indices, or null when checklist mode is off */
   checkedRows: Set<number> | null
   onToggle: (rowIndex: number) => void
+  /** Rows added to the prompt chip, or null when rows cannot be added */
+  promptRows: Set<number> | null
+  /** Notes for rows in the prompt chip, by row index */
+  promptNotes: Record<number, string>
+  /** Add or update a row in the prompt; `note === null` removes it */
+  onSetPromptRow: (rowIndex: number, note: string | null) => void
 }
 
-const ChecklistInjectionContext = createContext<ChecklistInjectionContextValue>(
-  {
-    checkedRows: null,
-    onToggle: () => undefined,
-  }
-)
+const TableRowsContext = createContext<TableRowsContextValue>({
+  checkedRows: null,
+  onToggle: () => undefined,
+  promptRows: null,
+  promptNotes: {},
+  onSetPromptRow: () => undefined,
+})
 
 function extractText(node: ReactNode): string {
   if (typeof node === 'string') return node
@@ -89,7 +114,13 @@ function openLocalFileLink(href: string | undefined): boolean {
     return false
   }
 
-  return openLocalFile(decodeURIComponent(href))
+  let path = href
+  try {
+    path = decodeURIComponent(href)
+  } catch {
+    // Malformed percent-escape (e.g. a lone `%`) — use the raw href
+  }
+  return openLocalFile(path)
 }
 
 function handleFilePathClick(event: React.MouseEvent<HTMLElement>) {
@@ -150,36 +181,76 @@ function tableToTsv(data: string[][]): string {
   return data.map(row => row.join('\t')).join('\n')
 }
 
-function tableToMarkdown(data: string[][]): string {
-  if (data.length === 0) return ''
-  const [header, ...rows] = data
-  if (!header) return ''
-  const headerLine = `| ${header.join(' | ')} |`
-  const separator = `| ${header.map(() => '---').join(' | ')} |`
-  const bodyLines = rows.map(row => `| ${row.join(' | ')} |`)
-  return [headerLine, separator, ...bodyLines].join('\n')
-}
+function MarkdownImage({ src, alt }: { src?: string; alt?: string }) {
+  const { sessionId } = useContext(MarkdownTableContext)
+  const serverId = sessionId
+    ? parseServerResourceKey(sessionId)?.serverId
+    : undefined
+  const isUrl = !src || /^(https?:|data:|blob:|asset:|\/api\/|#)/i.test(src)
+  const isAppData = Boolean(src && /com\.jean\.desktop[/\\]/.test(src))
+  const [loadedImage, setLoadedImage] = useState<{
+    path: string
+    serverId?: string
+    url: string
+  } | null>(null)
 
-function markdownImageSrc(src: string | undefined): string | undefined {
-  if (!src) return src
-  if (/^(https?:|data:|blob:|asset:|\/api\/|#)/i.test(src)) return src
-  return convertFileSrc(src)
+  // Screenshots can live outside app data and project roots (for example /tmp).
+  // Use the same owner-routed file reader as the file viewer for those paths.
+  useEffect(() => {
+    if (!src || isUrl || isAppData) return
+    let cancelled = false
+    void invokeForOptionalServer<{ mimeType: string; data: string }>(
+      serverId,
+      'read_file_base64',
+      { path: src }
+    )
+      .then(result => {
+        if (!cancelled) {
+          setLoadedImage({
+            path: src,
+            serverId,
+            url: `data:${result.mimeType};base64,${result.data}`,
+          })
+        }
+      })
+      .catch(error => {
+        if (!cancelled) console.error('Failed to load markdown image:', error)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [src, serverId, isUrl, isAppData])
+
+  const imageSrc = isUrl
+    ? src
+    : isAppData && src
+      ? convertServerFileSrc(serverId, src)
+      : loadedImage?.path === src && loadedImage?.serverId === serverId
+        ? loadedImage.url
+        : undefined
+
+  return (
+    <img
+      src={imageSrc}
+      alt={alt || ''}
+      className="max-w-full h-auto rounded-md my-4"
+    />
+  )
 }
 
 /**
- * Prepend a leading checkbox cell into a row by cloning the tr element and
- * injecting the new cell before the original children. `leading` must be a
- * cell element (th/td) carrying data-checklist-cell so extraction ignores it
- * for markdown / TSV copy.
+ * Prepend leading cells into a row by cloning the tr element. Each leading
+ * cell must carry data-checklist-cell so extraction ignores it for markdown /
+ * TSV copy.
  */
-function cloneRowWithLeadingCell(
+function cloneRowWithLeadingCells(
   row: ReactNode,
-  leading: ReactNode
+  leading: ReactNode[]
 ): ReactNode {
-  if (!isValidElement(row)) return row
+  if (!isValidElement(row) || leading.length === 0) return row
   const rowEl = row as ReactElement<{ children?: ReactNode }>
   const original = rowEl.props.children
-  return cloneElement(rowEl, {}, [leading, original])
+  return cloneElement(rowEl, {}, [...leading, original])
 }
 
 const CHECKLIST_THEAD_LEADING = (
@@ -191,60 +262,301 @@ const CHECKLIST_THEAD_LEADING = (
   />
 )
 
-function ChecklistAwareThead({ children }: { children?: ReactNode }) {
-  const { checkedRows } = useContext(ChecklistInjectionContext)
-  if (!checkedRows) {
-    return <thead className="bg-muted/50">{children}</thead>
+/** Clicks on these elements keep their own action and do not pick the row. */
+const ROW_CLICK_IGNORE =
+  'a, button, input, textarea, label, [role="checkbox"], [data-file-path]'
+
+interface PromptRowProps {
+  row: ReactElement<{ className?: string }>
+  rowIndex: number
+  inPrompt: boolean
+  note: string
+  onSave: (rowIndex: number, note: string | null) => void
+}
+
+/** Move focus to the previous or next prompt row in the same table body. */
+function focusSiblingRow(row: HTMLElement, step: 1 | -1) {
+  const sibling =
+    step === 1 ? row.nextElementSibling : row.previousElementSibling
+  if (sibling instanceof HTMLElement) sibling.focus()
+}
+
+/**
+ * Table row that adds itself to the prompt chip on click and opens a small
+ * form under the row, with focus in the note field. The form also edits the
+ * note of a row that is already in the prompt, or removes the row.
+ *
+ * Keyboard: Up/Down move between rows, Enter opens the note form (a second
+ * Enter adds the row to the prompt), Delete/Backspace remove the row.
+ *
+ * Closing the form: Enter/Save keep the note, Escape discards it. After a
+ * click-opened form, Enter/Save move focus to the chat input; otherwise focus
+ * returns to the row. A click outside keeps a changed note, and leaves focus
+ * where the click put it.
+ */
+function PromptRow({ row, rowIndex, inPrompt, note, onSave }: PromptRowProps) {
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState(note)
+  const rowRef = useRef<HTMLElement>(null)
+  const noteRef = useRef<HTMLTextAreaElement>(null)
+  // Where focus goes when the form closes from inside (Enter, Save, Remove,
+  // Escape). Null after a click outside: focus stays where the click put it.
+  const closeFocusRef = useRef<'row' | 'chat' | null>(null)
+  // A click opened the form, and the click added the row to the prompt.
+  const fromClickRef = useRef(false)
+  const isMobile = useIsMobile()
+  const rowNumber = rowIndex + 1
+
+  const openForm = (fromClick: boolean) => {
+    closeFocusRef.current = null
+    fromClickRef.current = fromClick
+    setDraft(note)
+    setOpen(true)
   }
-  const augmented = Children.map(children, row =>
-    cloneRowWithLeadingCell(row, CHECKLIST_THEAD_LEADING)
+  const closeForm = (focus: 'row' | 'chat' | null) => {
+    closeFocusRef.current = focus
+    setOpen(false)
+  }
+  const saveNote = () => {
+    if (!inPrompt || draft.trim() !== note) onSave(rowIndex, draft)
+    // Skip the chat input on mobile to avoid the on-screen keyboard popup.
+    closeForm(fromClickRef.current && !isMobile ? 'chat' : 'row')
+  }
+
+  return (
+    <Popover
+      open={open}
+      onOpenChange={next => {
+        if (next) return
+        // Only a click or focus outside the form gets here (Escape is
+        // handled below). Keep a changed note instead of losing it.
+        const added = inPrompt || fromClickRef.current
+        if (added && draft.trim() !== note) onSave(rowIndex, draft)
+        closeForm(null)
+      }}
+    >
+      <PopoverAnchor asChild>
+        {cloneElement(row, {
+          ref: rowRef,
+          className: cn(
+            row.props.className,
+            'cursor-pointer transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/60',
+            inPrompt
+              ? 'bg-primary/10 shadow-[inset_3px_0_0_var(--primary)] hover:bg-primary/15'
+              : 'hover:bg-muted/50 focus-visible:bg-muted/50'
+          ),
+          tabIndex: 0,
+          'aria-selected': inPrompt,
+          title: note || undefined,
+          onClick: (event: React.MouseEvent<HTMLElement>) => {
+            const target = event.target as HTMLElement
+            if (target.closest(ROW_CLICK_IGNORE)) return
+            if (window.getSelection()?.toString()) return
+            if (open) {
+              // A click on the row of the open form keeps the form open.
+              noteRef.current?.focus()
+              return
+            }
+            if (!inPrompt) onSave(rowIndex, '')
+            openForm(true)
+          },
+          onKeyDown: (event: React.KeyboardEvent<HTMLElement>) => {
+            if (event.target !== event.currentTarget) return
+            if (event.metaKey || event.ctrlKey || event.altKey) return
+            const row = event.currentTarget
+            if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+              focusSiblingRow(row, event.key === 'ArrowDown' ? 1 : -1)
+            } else if (event.key === 'Enter' || event.key === ' ') {
+              openForm(false)
+            } else if (event.key === 'Delete' || event.key === 'Backspace') {
+              if (inPrompt) onSave(rowIndex, null)
+            } else {
+              return
+            }
+            event.preventDefault()
+            event.stopPropagation()
+          },
+        } as Record<string, unknown>)}
+      </PopoverAnchor>
+      <PopoverContent
+        align="start"
+        className="w-80 p-3"
+        onInteractOutside={event => {
+          // The row is the anchor: a click on it must not close the form.
+          if (rowRef.current?.contains(event.target as Node)) {
+            event.preventDefault()
+          }
+        }}
+        onEscapeKeyDown={event => {
+          event.preventDefault()
+          closeForm('row')
+        }}
+        onCloseAutoFocus={event => {
+          // Radix runs this after the close animation. After a click outside,
+          // focus is already on the clicked element (another row's form, the
+          // chat input): never pull it back.
+          event.preventDefault()
+          if (closeFocusRef.current === 'chat') {
+            window.dispatchEvent(new CustomEvent('focus-chat-input'))
+          } else if (closeFocusRef.current === 'row') {
+            rowRef.current?.focus({ preventScroll: true })
+          }
+        }}
+      >
+        <form
+          className="flex flex-col gap-2"
+          onSubmit={event => {
+            event.preventDefault()
+            saveNote()
+          }}
+        >
+          <label
+            htmlFor={`prompt-row-note-${rowIndex}`}
+            className="text-xs font-medium text-muted-foreground"
+          >
+            {inPrompt
+              ? `Row ${rowNumber} is in the prompt. Add a note (optional)`
+              : `Add row ${rowNumber} to the prompt. Note (optional)`}
+          </label>
+          <Textarea
+            ref={noteRef}
+            id={`prompt-row-note-${rowIndex}`}
+            value={draft}
+            onChange={event => setDraft(event.target.value)}
+            onKeyDown={event => {
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault()
+                saveNote()
+              }
+            }}
+            placeholder="e.g. Fix this one first"
+            className="min-h-16 text-sm"
+            autoFocus
+            onFocus={event => {
+              const end = event.currentTarget.value.length
+              event.currentTarget.setSelectionRange(end, end)
+            }}
+          />
+          <div className="flex justify-end gap-2">
+            {inPrompt && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  onSave(rowIndex, null)
+                  closeForm('row')
+                }}
+              >
+                Remove
+              </Button>
+            )}
+            <Button type="submit" size="sm">
+              {inPrompt ? 'Save' : 'Add'}
+            </Button>
+          </div>
+        </form>
+      </PopoverContent>
+    </Popover>
   )
+}
+
+function ChecklistAwareThead({ children }: { children?: ReactNode }) {
+  const { checkedRows } = useContext(TableRowsContext)
+  const augmented = checkedRows
+    ? Children.map(children, row =>
+        cloneRowWithLeadingCells(row, [CHECKLIST_THEAD_LEADING])
+      )
+    : children
   return <thead className="bg-muted/50">{augmented}</thead>
 }
 
 function ChecklistAwareTbody({ children }: { children?: ReactNode }) {
-  const { checkedRows, onToggle } = useContext(ChecklistInjectionContext)
-  if (!checkedRows) {
+  const { checkedRows, onToggle, promptRows, promptNotes, onSetPromptRow } =
+    useContext(TableRowsContext)
+  if (!checkedRows && !promptRows) {
     return <tbody>{children}</tbody>
   }
   let rowIdx = 0
   const augmented = Children.map(children, row => {
     if (!isValidElement(row)) return row
     const idx = rowIdx++
-    const isChecked = checkedRows.has(idx)
-    const leading = (
-      <td
-        key="__checklist__"
-        data-checklist-cell="true"
-        className="w-10 px-2 align-middle"
-      >
-        <Checkbox
-          checked={isChecked}
-          onCheckedChange={() => onToggle(idx)}
-          aria-label={`Toggle row ${idx + 1}`}
-          className="cursor-pointer"
-        />
-      </td>
+    const withCells = checkedRows
+      ? cloneRowWithLeadingCells(row, [
+          <td
+            key="__checklist__"
+            data-checklist-cell="true"
+            className="w-10 px-2 align-middle"
+          >
+            <Checkbox
+              checked={checkedRows.has(idx)}
+              onCheckedChange={() => onToggle(idx)}
+              aria-label={`Toggle row ${idx + 1}`}
+              className="cursor-pointer"
+            />
+          </td>,
+        ])
+      : row
+    if (!promptRows) return withCells
+    return (
+      <PromptRow
+        key={idx}
+        row={withCells as ReactElement<{ className?: string }>}
+        rowIndex={idx}
+        inPrompt={promptRows.has(idx)}
+        note={promptNotes[idx] ?? ''}
+        onSave={onSetPromptRow}
+      />
     )
-    return cloneRowWithLeadingCell(row, leading)
   })
   return <tbody>{augmented}</tbody>
+}
+
+const NO_TABLE_ROWS = { rows: [] as number[], notes: undefined }
+const NO_NOTES: Record<number, string> = {}
+
+/**
+ * Text of the nearest heading (`## Title` or a bold-only `**Title**` line)
+ * before `offset` in the markdown source. Used as the pinned table title.
+ */
+export function headingBefore(source: string, offset: number): string | null {
+  const lines = source.slice(0, offset).split('\n')
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]?.trim() ?? ''
+    const match =
+      /^#{1,6}\s+(.+?)\s*#*$/.exec(line) ?? /^\*\*(.+)\*\*:?$/.exec(line)
+    if (!match?.[1]) continue
+    const text = match[1].replace(/[*_`]/g, '').replace(/:$/, '').trim()
+    if (text) return text
+  }
+  return null
 }
 
 interface TableBlockProps {
   children: ReactNode
   tableOffset: number
+  tableEndOffset: number | undefined
 }
 
-function TableBlock({ children, tableOffset }: TableBlockProps) {
+function TableBlock({
+  children,
+  tableOffset,
+  tableEndOffset,
+}: TableBlockProps) {
   const tableRef = useRef<HTMLTableElement>(null)
+  const isMobile = useIsMobile()
   const [copiedFormat, setCopiedFormat] = useState<'markdown' | 'tsv' | null>(
     null
   )
 
-  const { messageId, sessionId: ctxSessionId } =
-    useContext(MarkdownTableContext)
-  const tableKey = messageId ? `${messageId}:${tableOffset}` : null
+  const {
+    messageId,
+    sessionId: ctxSessionId,
+    tableKey: fixedTableKey,
+    source,
+  } = useContext(MarkdownTableContext)
+  const tableKey =
+    fixedTableKey ?? (messageId ? `${messageId}:${tableOffset}` : null)
 
   const storeSessionId = useChatStore(state => {
     if (state.activeWorktreeId) {
@@ -254,12 +566,30 @@ function TableBlock({ children, tableOffset }: TableBlockProps) {
   })
   const sessionId = ctxSessionId ?? storeSessionId
   const checkedRows = useChatStore(state =>
-    sessionId && tableKey
+    sessionId &&
+    tableKey &&
+    !state.hiddenTableChecklists[sessionId]?.includes(tableKey)
       ? (state.tableCheckedRows[sessionId]?.[tableKey] ?? null)
       : null
   )
   const checklistEnabled = checkedRows !== null
   const canUseChecklist = Boolean(sessionId && tableKey)
+  const promptTableRows = useChatStore(state =>
+    sessionId && tableKey
+      ? (state.pendingTextFiles[sessionId]?.find(
+          tf => tf.tableRows?.tableKey === tableKey
+        )?.tableRows ?? NO_TABLE_ROWS)
+      : null
+  )
+  const promptRows = useMemo(
+    () => (promptTableRows ? new Set(promptTableRows.rows) : null),
+    [promptTableRows]
+  )
+  const isPinned = useChatStore(state =>
+    sessionId && tableKey
+      ? (state.pinnedTables[sessionId]?.some(p => p.key === tableKey) ?? false)
+      : false
+  )
 
   const handleCopy = useCallback((format: 'markdown' | 'tsv') => {
     if (!tableRef.current) return
@@ -277,12 +607,51 @@ function TableBlock({ children, tableOffset }: TableBlockProps) {
   const handleToggleChecklist = useCallback(() => {
     if (!sessionId || !tableKey) return
     const store = useChatStore.getState()
-    if (store.tableCheckedRows[sessionId]?.[tableKey]) {
+    const hidden = store.hiddenTableChecklists[sessionId]?.includes(tableKey)
+    if (store.tableCheckedRows[sessionId]?.[tableKey] && !hidden) {
       store.disableTableChecklist(sessionId, tableKey)
     } else {
       store.enableTableChecklist(sessionId, tableKey)
     }
   }, [sessionId, tableKey])
+
+  const handleTogglePin = useCallback(() => {
+    if (!sessionId || !tableKey) return
+    const fromSource =
+      tableEndOffset !== undefined
+        ? source.slice(tableOffset, tableEndOffset).trim()
+        : ''
+    const markdown =
+      fromSource ||
+      (tableRef.current
+        ? tableToMarkdown(extractTableData(tableRef.current))
+        : '')
+    const title = headingBefore(source, tableOffset)
+    useChatStore.getState().togglePinnedTable(sessionId, {
+      key: tableKey,
+      markdown,
+      ...(title ? { title } : {}),
+    })
+  }, [sessionId, tableKey, source, tableOffset, tableEndOffset])
+
+  const handleSetPromptRow = useCallback(
+    (rowIndex: number, note: string | null) => {
+      if (!sessionId || !tableKey || !tableRef.current) return
+      // Adding a row to the prompt also checks it in the table checklist,
+      // even when checklist mode is off (the check shows once it is on).
+      if (note !== null) {
+        useChatStore.getState().checkTableRow(sessionId, tableKey, rowIndex)
+      }
+      void setTableRowInPrompt(
+        sessionId,
+        tableKey,
+        rowIndex,
+        extractTableData(tableRef.current),
+        note
+      )
+    },
+    [sessionId, tableKey]
+  )
 
   const handleToggleRow = useCallback(
     (rowIndex: number) => {
@@ -294,9 +663,21 @@ function TableBlock({ children, tableOffset }: TableBlockProps) {
     [sessionId, tableKey]
   )
 
-  const checklistCtxValue = useMemo(
-    () => ({ checkedRows, onToggle: handleToggleRow }),
-    [checkedRows, handleToggleRow]
+  const rowsCtxValue = useMemo(
+    () => ({
+      checkedRows,
+      onToggle: handleToggleRow,
+      promptRows,
+      promptNotes: promptTableRows?.notes ?? NO_NOTES,
+      onSetPromptRow: handleSetPromptRow,
+    }),
+    [
+      checkedRows,
+      handleToggleRow,
+      promptRows,
+      promptTableRows,
+      handleSetPromptRow,
+    ]
   )
 
   const btnClass =
@@ -305,8 +686,37 @@ function TableBlock({ children, tableOffset }: TableBlockProps) {
     'opacity-100 transition-opacity p-1.5 rounded-md bg-background/80 text-foreground cursor-pointer'
 
   return (
-    <div className="my-5">
-      <div className="mb-2 flex justify-end gap-0.5">
+    <div
+      className="my-5 scroll-mt-12 rounded-md"
+      data-table-key={tableKey ?? undefined}
+    >
+      <div className="mb-2 flex items-center justify-end gap-0.5">
+        {promptRows && (
+          <span className="mr-auto text-xs text-muted-foreground">
+            {isMobile ? 'Tap' : 'Click'} a row to add it to the prompt
+          </span>
+        )}
+        {canUseChecklist && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={handleTogglePin}
+                className={isPinned ? activeBtnClass : btnClass}
+                aria-label={isPinned ? 'Unpin table' : 'Pin table'}
+                aria-pressed={isPinned}
+              >
+                <Thumbtack
+                  className="size-4"
+                  weight={isPinned ? 'Filled' : 'Outline'}
+                />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {isPinned ? 'Unpin table' : 'Pin table'}
+            </TooltipContent>
+          </Tooltip>
+        )}
         {canUseChecklist && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -338,7 +748,7 @@ function TableBlock({ children, tableOffset }: TableBlockProps) {
               {copiedFormat === 'markdown' ? (
                 <Check className="size-4" />
               ) : (
-                <Table className="size-4" />
+                <MarkdownIcon className="size-4" />
               )}
             </button>
           </TooltipTrigger>
@@ -363,11 +773,11 @@ function TableBlock({ children, tableOffset }: TableBlockProps) {
         </Tooltip>
       </div>
       <div className="overflow-x-auto">
-        <ChecklistInjectionContext.Provider value={checklistCtxValue}>
+        <TableRowsContext.Provider value={rowsCtxValue}>
           <table ref={tableRef} className="min-w-full border-collapse text-sm">
             {children}
           </table>
-        </ChecklistInjectionContext.Provider>
+        </TableRowsContext.Provider>
       </div>
     </div>
   )
@@ -443,13 +853,7 @@ const components: Components = {
   pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
 
   // Images
-  img: ({ src, alt }) => (
-    <img
-      src={markdownImageSrc(src)}
-      alt={alt || ''}
-      className="max-w-full h-auto rounded-md my-4"
-    />
-  ),
+  img: MarkdownImage,
 
   // Links
   a: ({ href, children }) => (
@@ -527,7 +931,14 @@ const components: Components = {
   // Tables
   table: ({ children, node }) => {
     const offset = node?.position?.start?.offset ?? 0
-    return <TableBlock tableOffset={offset}>{children}</TableBlock>
+    return (
+      <TableBlock
+        tableOffset={offset}
+        tableEndOffset={node?.position?.end?.offset}
+      >
+        {children}
+      </TableBlock>
+    )
   },
   thead: ({ children }) => (
     <ChecklistAwareThead>{children}</ChecklistAwareThead>
@@ -535,7 +946,13 @@ const components: Components = {
   tbody: ({ children }) => (
     <ChecklistAwareTbody>{children}</ChecklistAwareTbody>
   ),
-  tr: ({ children }) => <tr className="border-b border-border">{children}</tr>,
+  // Spread props so PromptRow can add its click handler and row classes.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  tr: ({ children, className, node, ...props }) => (
+    <tr {...props} className={cn('border-b border-border', className)}>
+      {children}
+    </tr>
+  ),
   th: ({ children }) => (
     <th className="px-4 py-2.5 text-left font-semibold">{children}</th>
   ),
@@ -630,6 +1047,7 @@ const Markdown = memo(function Markdown({
   messageId,
   sessionId,
   compact = false,
+  tableKey,
 }: MarkdownProps) {
   // Apply remend preprocessing for streaming content to auto-close incomplete
   // markdown. remend strips a single trailing space (incomplete-markdown
@@ -647,8 +1065,13 @@ const Markdown = memo(function Markdown({
     : children
 
   const contextValue = useMemo(
-    () => ({ messageId: messageId ?? null, sessionId: sessionId ?? null }),
-    [messageId, sessionId]
+    () => ({
+      messageId: messageId ?? null,
+      sessionId: sessionId ?? null,
+      tableKey: tableKey ?? null,
+      source: content,
+    }),
+    [messageId, sessionId, tableKey, content]
   )
 
   const componentsToUse = streaming

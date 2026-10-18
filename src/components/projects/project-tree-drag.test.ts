@@ -17,8 +17,8 @@ describe('project tree drag ownership', () => {
     expect(
       haveSameProjectServer(project('one', 'remote'), project('two', 'other'))
     ).toBe(false)
-    expect(haveSameProjectServer(project('one'), project('two', 'remote'))).toBe(
-      false
-    )
+    expect(
+      haveSameProjectServer(project('one'), project('two', 'remote'))
+    ).toBe(false)
   })
 })

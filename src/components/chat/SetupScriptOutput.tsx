@@ -31,7 +31,7 @@ export function SetupScriptOutput({
   const [isExpanded, setIsExpanded] = useState(!result.success)
 
   const StatusIcon = result.success ? CheckCircle2 : XCircle
-  const statusColor = result.success ? 'text-green-500' : 'text-destructive'
+  const statusColor = result.success ? 'text-success' : 'text-destructive'
   const statusText = result.success
     ? `Setup script completed for ${result.worktreeName}`
     : `Setup script failed for ${result.worktreeName}`

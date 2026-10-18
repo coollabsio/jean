@@ -701,7 +701,7 @@ mod tests {
             r"C:\Users\John Smith\AppData\Roaming\com.jean.desktop\combined-contexts\s-terminal-context.md"
                 .to_string(),
             "--config".to_string(),
-            "base_instructions=\"Run `ls > out` and $(date)\"".to_string(),
+            "developer_instructions=\"Run `ls > out` and $(date)\"".to_string(),
         ];
 
         assert_eq!(
@@ -721,7 +721,7 @@ mod tests {
                 "--append-system-prompt-file",
                 "/mnt/c/Users/John Smith/AppData/Roaming/com.jean.desktop/combined-contexts/s-terminal-context.md",
                 "--config",
-                "base_instructions=\"Run `ls > out` and $(date)\"",
+                "developer_instructions=\"Run `ls > out` and $(date)\"",
             ]
         );
     }

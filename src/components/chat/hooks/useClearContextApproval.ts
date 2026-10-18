@@ -12,6 +12,7 @@ import {
   chatQueryKeys,
 } from '@/services/chat'
 import { invoke } from '@/lib/transport'
+import { archiveOriginalPlanSession } from './plan-approval-state'
 import type {
   EffortLevel,
   Session,
@@ -81,10 +82,10 @@ function getDefaultModelForBackend(
     | undefined
 ): string {
   if (backend === 'codex') {
-    return preferences?.selected_codex_model ?? 'gpt-5.6-sol'
+    return preferences?.selected_codex_model ?? 'gpt-6.1-sol'
   }
   if (backend === 'opencode') {
-    return preferences?.selected_opencode_model ?? 'opencode/gpt-5.6-sol'
+    return preferences?.selected_opencode_model ?? 'opencode/gpt-6.1-sol'
   }
   if (backend === 'cursor') {
     return preferences?.selected_cursor_model ?? 'cursor/auto'
@@ -104,7 +105,7 @@ function getDefaultModelForBackend(
   if (backend === 'antigravity') {
     return preferences?.selected_antigravity_model ?? 'antigravity/auto'
   }
-  return preferences?.selected_model ?? 'claude-opus-4-8[1m]'
+  return preferences?.selected_model ?? 'claude-opus-5-5'
 }
 
 interface UseClearContextApprovalParams {
@@ -273,7 +274,7 @@ export function useClearContextApproval({
       // Step 5: Send plan as first message using mode-specific overrides
       // Fallback chain: mode override → original session → global default
       const isYolo = mode === 'yolo'
-      const modeLabel = isYolo ? 'Yolo' : 'Build'
+      const modeLabel = isYolo ? 'Full access' : 'Build'
       const originalBackend = card.session.backend as CliBackend | undefined
       const modeBackendPref = isYolo
         ? preferences?.yolo_backend
@@ -436,46 +437,15 @@ export function useClearContextApproval({
         backend,
       })
 
-      // Optionally close the original session immediately.
-      // cancel_process_if_running (used by close/archive commands) safely skips
-      // idle sessions, so no spurious chat:cancelled events are emitted.
-      // The with_sessions_mut mutex in storage.rs serializes concurrent writes,
-      // so there's no file-level race with send_chat_message.
+      // Optionally archive the original session (keeps history restorable)
       if (preferences?.close_original_on_clear_context) {
-        const command =
-          preferences.removal_behavior === 'archive'
-            ? 'archive_session'
-            : 'close_session'
-
-        // Optimistically remove from UI immediately so the user sees it gone at once
-        queryClient.setQueryData<WorktreeSessions>(
-          chatQueryKeys.sessions(worktreeId),
-          old => {
-            if (!old) return old
-            return {
-              ...old,
-              sessions: old.sessions.filter(s => s.id !== sessionId),
-              active_session_id:
-                old.active_session_id === sessionId
-                  ? newSession.id
-                  : old.active_session_id,
-            }
-          }
-        )
-
-        // Close in background, then sync with backend
-        invoke(command, { worktreeId, worktreePath, sessionId })
-          .then(() =>
-            queryClient.invalidateQueries({
-              queryKey: chatQueryKeys.sessions(worktreeId),
-            })
-          )
-          .catch(err =>
-            console.error(
-              '[useClearContextApproval] Failed to close original session:',
-              err
-            )
-          )
+        archiveOriginalPlanSession({
+          queryClient,
+          worktreeId,
+          worktreePath,
+          sessionId,
+          replacementSessionId: newSession.id,
+        })
       }
     },
     [

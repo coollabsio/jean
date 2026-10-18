@@ -75,8 +75,7 @@ function renderHandlers({
           ...defaultPreferences,
           magic_prompt_modes: {
             ...defaultPreferences.magic_prompt_modes,
-            review_comments_mode:
-              executionMode === 'build' ? 'plan' : executionMode,
+            review_comments_mode: executionMode === 'yolo' ? 'yolo' : 'plan',
           },
         },
         defaultBackend: 'claude',
@@ -425,6 +424,28 @@ describe('useInvestigateHandlers', () => {
     )
     expect(useChatStore.getState().executionModes['comment-session-2']).toBe(
       'yolo'
+    )
+  })
+
+  it('uses backend and model override for review comments', async () => {
+    const { result, sendMessage } = renderHandlers()
+
+    await act(async () => {
+      await result.current.handleReviewComments(['fix one'], {
+        override: { backend: 'codex', model: 'gpt-6.1-sol' },
+      })
+    })
+
+    expect(sendMessage.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'comment-session-1',
+        backend: 'codex',
+        model: 'gpt-6.1-sol',
+      }),
+      expect.any(Object)
+    )
+    expect(useChatStore.getState().selectedBackends['comment-session-1']).toBe(
+      'codex'
     )
   })
 

@@ -23,6 +23,10 @@ vi.mock('@/lib/environment', async importOriginal => ({
   isNativeApp: () => settingsServerMocks.native,
 }))
 
+vi.mock('@/hooks/use-window-maximized', () => ({
+  useWindowMaximized: () => false,
+}))
+
 vi.mock('@/lib/remote-connections', () => ({
   useRemoteConnections: () => settingsServerMocks.connections,
 }))
@@ -161,7 +165,7 @@ describe('PreferencesDialog', () => {
 
     const dialog = screen.getByRole('dialog')
     const desktopHeaderActions = dialog.querySelector<HTMLElement>(
-      'div[class~="ml-auto"][class~="lg:flex"]'
+      '[data-slot="sidebar"]'
     )
 
     if (!desktopHeaderActions) {
@@ -172,8 +176,12 @@ describe('PreferencesDialog', () => {
       within(desktopHeaderActions).getByPlaceholderText('Search settings...')
     await user.type(desktopSearchInput, 'provider')
 
+    const headerActions = dialog.querySelector<HTMLElement>('header .ml-auto')
+    if (!headerActions) {
+      throw new Error('Expected header actions to be rendered')
+    }
     await user.click(
-      within(desktopHeaderActions).getByRole('button', { name: 'Close' })
+      within(headerActions).getByRole('button', { name: 'Close' })
     )
 
     await waitFor(() => {
@@ -258,7 +266,7 @@ describe('PreferencesDialog', () => {
     }
 
     expect(within(antigravityButton).getByText('Beta')).toHaveClass(
-      'bg-yellow-500/10'
+      'bg-warning/10'
     )
 
     const kimiButton = within(navigationMenu)
@@ -273,6 +281,20 @@ describe('PreferencesDialog', () => {
     )
   })
 
+  it('shows Web Access but hides Keybindings in the mobile pane selector', async () => {
+    const user = userEvent.setup()
+
+    render(<PreferencesDialog />)
+
+    await user.click(screen.getByRole('combobox'))
+
+    const options = screen
+      .getAllByRole('option')
+      .map(option => option.textContent?.trim())
+    expect(options).toContain('Web Access')
+    expect(options).not.toContain('Keybindings')
+  })
+
   it('keeps the dialog open when Escape clears the desktop search', async () => {
     const user = userEvent.setup()
 
@@ -280,7 +302,7 @@ describe('PreferencesDialog', () => {
 
     const dialog = screen.getByRole('dialog')
     const desktopHeaderActions = dialog.querySelector<HTMLElement>(
-      'div[class~="ml-auto"][class~="lg:flex"]'
+      '[data-slot="sidebar"]'
     )
 
     if (!desktopHeaderActions) {
@@ -337,7 +359,7 @@ describe('PreferencesDialog', () => {
 
     const dialog = screen.getByRole('dialog')
     const desktopHeaderActions = dialog.querySelector<HTMLElement>(
-      'div[class~="ml-auto"][class~="lg:flex"]'
+      '[data-slot="sidebar"]'
     )
 
     if (!desktopHeaderActions) {

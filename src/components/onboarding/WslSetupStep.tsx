@@ -18,7 +18,13 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { usePatchPreferences } from '@/services/preferences'
-import { Loader2, CheckCircle2, XCircle, Monitor, Terminal } from '@/components/icons/reicon'
+import {
+  Loader2,
+  CheckCircle2,
+  XCircle,
+  Monitor,
+  Terminal,
+} from '@/components/icons/reicon'
 
 interface WslSetupStepProps {
   onComplete: () => void
@@ -182,7 +188,7 @@ export function WslSetupStep({ onComplete }: WslSetupStepProps) {
               <span>WSL</span>
               <Badge
                 variant="outline"
-                className="rounded-sm border-yellow-500/40 bg-yellow-500/10 px-1.5 py-0 text-[10px] leading-4 tracking-wide text-yellow-600 uppercase dark:text-yellow-400"
+                className="rounded-sm border-warning/40 bg-warning/10 px-1.5 py-0 text-[10px] leading-4 tracking-wide text-warning uppercase"
               >
                 Beta
               </Badge>
@@ -205,10 +211,7 @@ export function WslSetupStep({ onComplete }: WslSetupStepProps) {
       {mode === 'wsl' && (
         <div className="space-y-3">
           <div className="space-y-1.5">
-            <label
-              htmlFor="wsl-distribution"
-              className="text-sm font-medium"
-            >
+            <label htmlFor="wsl-distribution" className="text-sm font-medium">
               WSL Distribution
             </label>
             {loadingDistros ? (
@@ -243,7 +246,7 @@ export function WslSetupStep({ onComplete }: WslSetupStepProps) {
                 <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
               )}
               {validation === 'valid' && (
-                <CheckCircle2 className="h-4 w-4 text-green-500" />
+                <CheckCircle2 className="h-4 w-4 text-success" />
               )}
               {validation === 'invalid' && (
                 <XCircle className="h-4 w-4 text-destructive" />

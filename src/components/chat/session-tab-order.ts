@@ -1,6 +1,18 @@
 import type { Session, WorktreeSessions } from '@/types/chat'
-import type { SessionCardData } from './session-card-utils'
+import type { SessionCardData, SessionStatus } from './session-card-utils'
 
+const RUNNING_STATUSES: readonly SessionStatus[] = [
+  'planning',
+  'vibing',
+  'yoloing',
+  'reviewing',
+]
+
+function isRunning(card: SessionCardData): boolean {
+  return RUNNING_STATUSES.includes(card.status)
+}
+
+/** Code Review first, then running sessions, then most recently updated. */
 export function sortSessionCardsForTabs(
   cards: SessionCardData[]
 ): SessionCardData[] {
@@ -8,6 +20,10 @@ export function sortSessionCardsForTabs(
     const aIsCodeReview = a.session.name.startsWith('Code Review')
     const bIsCodeReview = b.session.name.startsWith('Code Review')
     if (aIsCodeReview !== bIsCodeReview) return aIsCodeReview ? -1 : 1
+
+    const aIsRunning = isRunning(a)
+    const bIsRunning = isRunning(b)
+    if (aIsRunning !== bIsRunning) return aIsRunning ? -1 : 1
 
     if (a.session.updated_at !== b.session.updated_at) {
       return b.session.updated_at - a.session.updated_at

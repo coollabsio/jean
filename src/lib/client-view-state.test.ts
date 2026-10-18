@@ -28,7 +28,6 @@ describe('client view state', () => {
       expanded_worktree_ids: ['server-a:worktree-1'],
       project_access_timestamps: { 'server-a:project-1': 123 },
       dashboard_worktree_collapse_overrides: { 'server-a:worktree-1': true },
-      github_dashboard_favorite_project_ids: ['server-a:project-1'],
       project_canvas_settings: {
         'server-a:project-1': {
           worktree_sort_mode: 'manual' as const,
@@ -67,6 +66,35 @@ describe('client view state', () => {
     saveClientViewState(state)
 
     expect(loadClientViewState()).toEqual(state)
+  })
+
+  it('restores the open Agents view and falls back for invalid values', () => {
+    saveClientViewState({
+      ...defaultClientViewState,
+      rail_section: 'agents',
+      selected_agent_id: 'reviewer',
+    })
+    expect(loadClientViewState().rail_section).toBe('agents')
+    expect(loadClientViewState().selected_agent_id).toBe('reviewer')
+
+    const saved = JSON.parse(storage.get(CLIENT_VIEW_STATE_STORAGE_KEY) ?? '{}')
+    storage.set(
+      CLIENT_VIEW_STATE_STORAGE_KEY,
+      JSON.stringify({ ...saved, rail_section: 'bogus', selected_agent_id: '' })
+    )
+    expect(loadClientViewState().rail_section).toBe('workspace')
+    expect(loadClientViewState().selected_agent_id).toBe('jean')
+  })
+
+  it('opens the Projects view for a saved Servers tab', () => {
+    saveClientViewState({ ...defaultClientViewState })
+    const saved = JSON.parse(storage.get(CLIENT_VIEW_STATE_STORAGE_KEY) ?? '{}')
+    storage.set(
+      CLIENT_VIEW_STATE_STORAGE_KEY,
+      JSON.stringify({ ...saved, sidebar_active_tab: 'servers' })
+    )
+
+    expect(loadClientViewState().sidebar_active_tab).toBe('projects')
   })
 
   it('returns defaults for missing, malformed, or unsupported data', () => {

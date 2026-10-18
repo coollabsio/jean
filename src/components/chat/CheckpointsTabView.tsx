@@ -363,12 +363,12 @@ export function CheckpointsTabView({
                         </span>
                       )}
                       {cp.totalAdditions > 0 && (
-                        <span className="text-green-500">
+                        <span className="text-success">
                           +{cp.totalAdditions}
                         </span>
                       )}
                       {cp.totalDeletions > 0 && (
-                        <span className="text-red-500">
+                        <span className="text-destructive">
                           -{cp.totalDeletions}
                         </span>
                       )}
@@ -488,8 +488,10 @@ export function CheckpointsTabView({
                       <span className="min-w-0 flex-1 truncate">
                         {file.fileName}
                       </span>
-                      <span className="text-green-500">+{file.additions}</span>
-                      <span className="text-red-500">-{file.deletions}</span>
+                      <span className="text-success">+{file.additions}</span>
+                      <span className="text-destructive">
+                        -{file.deletions}
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -587,10 +589,10 @@ export function CheckpointsTabView({
                           )}
                           {(cp.totalAdditions > 0 || cp.totalDeletions > 0) && (
                             <>
-                              <span className="text-green-500">
+                              <span className="text-success">
                                 +{cp.totalAdditions}
                               </span>
-                              <span className="text-red-500">
+                              <span className="text-destructive">
                                 -{cp.totalDeletions}
                               </span>
                             </>
@@ -703,11 +705,11 @@ export function CheckpointsTabView({
                           {getFilename(file.fileName)}
                           {(file.additions > 0 || file.deletions > 0) && (
                             <span className="ml-1.5 font-sans text-[10px] text-muted-foreground">
-                              <span className="text-green-500">
+                              <span className="text-success">
                                 +{file.additions}
                               </span>
                               <span className="mx-0.5">/</span>
-                              <span className="text-red-500">
+                              <span className="text-destructive">
                                 -{file.deletions}
                               </span>
                             </span>
@@ -818,8 +820,8 @@ export function CheckpointsTabView({
             <AlertDialogTitle>Undo this file?</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-3 text-sm text-muted-foreground">
-                <div className="flex gap-2 rounded-md border border-amber-500/35 bg-amber-500/10 px-2.5 py-2 text-left text-xs leading-snug text-amber-950 dark:text-amber-100">
-                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+                <div className="flex gap-2 rounded-md border border-warning/35 bg-warning/10 px-2.5 py-2 text-left text-xs leading-snug text-warning">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
                   <p>
                     Restore can make mistakes — this overwrites the current
                     working-tree content for this path. Prefer a git commit

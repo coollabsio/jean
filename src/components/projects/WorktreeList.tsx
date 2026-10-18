@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueries } from '@tanstack/react-query'
 import {
   draggable,
@@ -14,6 +14,7 @@ import { isBaseSession, type Worktree } from '@/types/projects'
 import type { WorktreeSessions } from '@/types/chat'
 import { invoke } from '@/lib/transport'
 import { cn } from '@/lib/utils'
+import { useIsTouchDevice } from '@/hooks/use-touch-device'
 import { chatQueryKeys } from '@/services/chat'
 import { isTauri, useReorderWorktrees } from '@/services/projects'
 import { useProjectsStore } from '@/store/projects-store'
@@ -53,7 +54,7 @@ interface SortableWorktreeProps {
   closestEdge: Edge | null
 }
 
-function SortableWorktree({
+const SortableWorktree = memo(function SortableWorktree({
   worktree,
   projectId,
   projectPath,
@@ -143,7 +144,7 @@ function SortableWorktree({
       />
     </div>
   )
-}
+})
 
 function cnWorktreeDragClass(disabled: boolean, isDragging: boolean) {
   return cn(
@@ -176,6 +177,9 @@ export function WorktreeList({
   loadSessionCounts = true,
 }: WorktreeListProps) {
   const reorderWorktrees = useReorderWorktrees()
+  // draggable="true" makes mobile browsers lift the row on long-press, which
+  // fights the context menu; touch has no reorder gesture anyway.
+  const isTouchDevice = useIsTouchDevice()
   const worktreeSortMode = useProjectsStore(
     state =>
       state.projectCanvasSettings[projectId]?.worktreeSortMode ?? 'created'
@@ -529,6 +533,7 @@ export function WorktreeList({
             projectPath={projectPath}
             defaultBranch={defaultBranch}
             disabled={
+              isTouchDevice ||
               searchActive ||
               reorderWorktrees.isPending ||
               !canReorderWorktree(worktree)

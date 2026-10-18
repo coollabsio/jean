@@ -257,8 +257,11 @@ fn get_cli_model_alias(model: &str) -> &'static str {
 /// Also accepts StructuredOutput tool_use blocks (from --json-schema) so naming
 /// keeps working if Claude returns JSON via the tool-call path instead of text.
 fn extract_text_from_stream_json(output: &str) -> Result<String, String> {
+    if let Some(value) = super::claude::extract_claude_structured_output(output) {
+        return Ok(value.to_string());
+    }
+
     let mut text_content = String::new();
-    let mut structured_json: Option<String> = None;
 
     for line in output.lines() {
         let line = line.trim();
@@ -275,17 +278,9 @@ fn extract_text_from_stream_json(output: &str) -> Result<String, String> {
             if let Some(message) = parsed.get("message") {
                 if let Some(content) = message.get("content").and_then(|c| c.as_array()) {
                     for block in content {
-                        let block_type = block.get("type").and_then(|t| t.as_str());
-                        if block_type == Some("text") {
+                        if block.get("type").and_then(|t| t.as_str()) == Some("text") {
                             if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
                                 text_content.push_str(text);
-                            }
-                        } else if block_type == Some("tool_use")
-                            && block.get("name").and_then(|n| n.as_str())
-                                == Some("StructuredOutput")
-                        {
-                            if let Some(input) = block.get("input") {
-                                structured_json = Some(input.to_string());
                             }
                         }
                     }
@@ -300,10 +295,6 @@ fn extract_text_from_stream_json(output: &str) -> Result<String, String> {
                 }
             }
         }
-    }
-
-    if let Some(json) = structured_json {
-        return Ok(json);
     }
 
     if text_content.is_empty() {

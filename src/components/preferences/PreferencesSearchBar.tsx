@@ -69,7 +69,7 @@ export const PreferencesSearchBar: React.FC<PreferencesSearchBarProps> = ({
         <div
           className={
             isDesktop
-              ? 'flex h-8 w-52 items-center gap-2 rounded-md border border-input bg-background px-2.5 text-sm focus-within:ring-1 focus-within:ring-ring focus-within:border-ring transition-colors'
+              ? 'flex h-9 w-full items-center gap-2 rounded-md border border-input bg-background px-2.5 text-sm focus-within:ring-1 focus-within:ring-ring focus-within:border-ring transition-colors'
               : 'flex h-9 w-full items-center gap-2 rounded-md border border-input bg-background px-3 text-sm focus-within:ring-1 focus-within:ring-ring focus-within:border-ring transition-colors'
           }
         >
@@ -86,7 +86,7 @@ export const PreferencesSearchBar: React.FC<PreferencesSearchBarProps> = ({
             onFocus={() => {
               if (searchValue.trim()) onSearchOpenChange(true)
             }}
-            className="flex-1 bg-transparent outline-none placeholder:text-muted-foreground text-sm"
+            className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground text-sm"
           />
           {isDesktop && !searchValue && (
             <kbd className="pointer-events-none text-[10px] font-mono text-muted-foreground/60">
@@ -99,7 +99,7 @@ export const PreferencesSearchBar: React.FC<PreferencesSearchBarProps> = ({
           <CommandList
             className={
               isDesktop
-                ? 'absolute top-full right-0 mt-1.5 w-80 max-h-[360px] overflow-y-auto rounded-lg border border-border bg-popover shadow-lg z-50'
+                ? 'absolute top-full left-0 mt-1.5 w-80 max-w-[calc(100vw-2rem)] max-h-[360px] overflow-y-auto rounded-lg border border-border bg-popover shadow-lg z-50'
                 : 'absolute top-full left-0 right-0 mt-1.5 max-h-[320px] overflow-y-auto rounded-lg border border-border bg-popover shadow-lg z-50'
             }
           >

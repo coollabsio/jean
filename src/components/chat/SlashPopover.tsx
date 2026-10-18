@@ -19,6 +19,7 @@ import { useAllBackendSkills } from '@/services/skills'
 import type { ClaudeSkill, ClaudeCommand, PendingSkill } from '@/types/chat'
 import type { CliBackend } from '@/types/preferences'
 import { cn } from '@/lib/utils'
+import { BOTTOM_UP_LIST_CLASS } from './mention-list'
 import { generateId } from '@/lib/uuid'
 import { fuzzySearchItems } from '@/lib/fuzzy-search'
 import { getBackendLabel } from '@/components/ui/backend-label'
@@ -97,7 +98,9 @@ export function SlashPopover({
     if (
       triggerKind !== 'skill' &&
       isAtPromptStart &&
-      (sessionBackend === 'codex' || sessionBackend === 'grok')
+      (sessionBackend === 'codex' ||
+        sessionBackend === 'grok' ||
+        sessionBackend === 'claude')
     ) {
       fuzzySearchItems([GOAL_BUILTIN], searchQuery, 1).forEach(cmd => {
         items.push({ type: 'command', backend: sessionBackend, data: cmd })
@@ -131,13 +134,7 @@ export function SlashPopover({
     }
 
     return items.slice(0, 15)
-  }, [
-    backendGroups,
-    searchQuery,
-    isAtPromptStart,
-    sessionBackend,
-    triggerKind,
-  ])
+  }, [backendGroups, searchQuery, isAtPromptStart, sessionBackend, triggerKind])
 
   const renderGroups = useMemo(() => {
     const groups: RenderGroup[] = []
@@ -210,11 +207,14 @@ export function SlashPopover({
 
   useImperativeHandle(handleRef, () => {
     return {
+      // List renders bottom-up: ArrowUp moves to the next (worse) match.
       moveUp: () => {
-        setSelectedIndex(i => Math.max(i - 1, 0))
+        setSelectedIndex(i =>
+          Math.min(i + 1, Math.max(0, filteredItems.length - 1))
+        )
       },
       moveDown: () => {
-        setSelectedIndex(i => Math.min(i + 1, filteredItems.length - 1))
+        setSelectedIndex(i => Math.max(i - 1, 0))
       },
       selectCurrent: () => {
         selectHighlighted()
@@ -275,7 +275,10 @@ export function SlashPopover({
         onCloseAutoFocus={e => e.preventDefault()}
       >
         <Command shouldFilter={false}>
-          <CommandList ref={listRef} className="max-h-[250px]">
+          <CommandList
+            ref={listRef}
+            className={cn('max-h-[250px]', BOTTOM_UP_LIST_CLASS)}
+          >
             {filteredItems.length === 0 ? (
               <CommandEmpty>
                 {triggerKind === 'skill'
@@ -308,9 +311,9 @@ export function SlashPopover({
                           )}
                         >
                           {isCommand ? (
-                            <Terminal className="h-4 w-4 shrink-0 text-blue-500" />
+                            <Terminal className="h-4 w-4 shrink-0 text-muted-foreground" />
                           ) : (
-                            <Wand2 className="h-4 w-4 shrink-0 text-purple-500" />
+                            <Wand2 className="h-4 w-4 shrink-0 text-purple-600 dark:text-purple-400" />
                           )}
                           <div className="flex flex-col min-w-0">
                             <span className="truncate text-sm font-medium">

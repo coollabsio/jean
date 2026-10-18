@@ -247,6 +247,25 @@ describe('computeSessionCardData', () => {
     }
   }
 
+  it.each(['supervised', 'auto'] as const)(
+    'shows %s turns as running Build work',
+    mode => {
+      const session = createBaseSession({ selected_execution_mode: mode })
+      const state = createBaseStoreState({
+        sendingSessionIds: { 'session-1': true },
+        executionModes: { 'session-1': mode },
+      })
+      expect(computeSessionCardData(session, state).status).toBe('vibing')
+      const restored = createBaseSession({
+        last_run_status: 'running',
+        last_run_execution_mode: mode,
+      })
+      expect(
+        computeSessionCardData(restored, createBaseStoreState()).status
+      ).toBe('vibing')
+    }
+  )
+
   it('reuses a card when unrelated session state changes', () => {
     const session = createBaseSession()
     const cache = createSessionCardDataCache()
@@ -509,8 +528,42 @@ describe('computeSessionCardData', () => {
     expect(card.status).toBe('reviewing')
     expect(statusConfig[card.status]).toMatchObject({
       indicatorStatus: 'running',
-      indicatorVariant: 'loading',
     })
+  })
+
+  it('shows a code review tab as loading while its review job is running', () => {
+    const session = createBaseSession({
+      name: 'Code Review · Codex · gpt-5.6-sol',
+      is_reviewing: true,
+      review_results: {
+        reviews: [
+          { backend: 'codex', model: 'gpt-5.6-sol', status: 'running' },
+        ],
+      },
+    })
+
+    const card = computeSessionCardData(
+      session,
+      createBaseStoreState({ reviewingSessions: { [session.id]: true } })
+    )
+
+    expect(card.status).toBe('reviewing')
+  })
+
+  it('shows a code review tab as review ready when its review job completed', () => {
+    const session = createBaseSession({
+      name: 'Code Review · Codex · gpt-5.6-sol',
+      is_reviewing: false,
+      review_results: {
+        reviews: [
+          { backend: 'codex', model: 'gpt-5.6-sol', status: 'completed' },
+        ],
+      },
+    })
+
+    const card = computeSessionCardData(session, createBaseStoreState())
+
+    expect(card.status).toBe('review')
   })
 
   it('ignores stale Zustand waiting flag when remote run completed normally', () => {

@@ -97,14 +97,19 @@ function hasMeaningfulPersistedPayload(message: ChatMessage): boolean {
 
 /**
  * While a session is actively streaming, React Query can briefly contain a
- * persisted assistant snapshot for the same in-flight turn. Hide that trailing
- * assistant so the live StreamingMessage is the only thing rendered.
+ * persisted assistant snapshot for the same in-flight turn. Returns true when
+ * that trailing assistant should be hidden so the live StreamingMessage is the
+ * only thing rendered.
+ *
+ * Returns a boolean (rather than a sliced array) so callers can memoize the
+ * slice on `[messages, hide]` and keep a stable array reference across
+ * streaming flushes.
  */
-export function dedupeInFlightAssistantMessage(
+export function shouldHideInFlightAssistantMessage(
   messages: ChatMessage[],
   options: InFlightMessageDedupOptions
-): ChatMessage[] {
-  if (!options.isSending || messages.length < 2) return messages
+): boolean {
+  if (!options.isSending || messages.length < 2) return false
 
   const lastMessage = messages[messages.length - 1]
   const previousMessage = messages[messages.length - 2]
@@ -114,8 +119,12 @@ export function dedupeInFlightAssistantMessage(
   // message to disk before streaming content reaches the frontend, creating a
   // one-render window where the message appears then gets removed by dedupe —
   // causing visible flicker (message count bounces N → N+1 → N).
-  if (lastMessage?.role !== 'assistant' || previousMessage?.role !== 'user') {
-    return messages
+  if (
+    !lastMessage ||
+    lastMessage.role !== 'assistant' ||
+    previousMessage?.role !== 'user'
+  ) {
+    return false
   }
 
   const hasLiveStreaming =
@@ -130,11 +139,20 @@ export function dedupeInFlightAssistantMessage(
   // empty placeholders (backend persisted the assistant early).
   if (!hasLiveStreaming) {
     return !hasMeaningfulPersistedPayload(lastMessage)
-      ? messages.slice(0, -1)
-      : messages
   }
 
   return isTransientTrailingAssistant(lastMessage, options)
+}
+
+/**
+ * Array-returning convenience wrapper around
+ * `shouldHideInFlightAssistantMessage`.
+ */
+export function dedupeInFlightAssistantMessage(
+  messages: ChatMessage[],
+  options: InFlightMessageDedupOptions
+): ChatMessage[] {
+  return shouldHideInFlightAssistantMessage(messages, options)
     ? messages.slice(0, -1)
     : messages
 }

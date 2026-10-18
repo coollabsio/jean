@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { invoke } from '@/lib/transport'
+import { invoke, invokeForOptionalServer } from '@/lib/transport'
 import { isTauri } from '@/services/projects'
 import { queryClient } from '@/lib/query-client'
 import type {
@@ -12,11 +12,6 @@ import type { CliBackend } from '@/types/preferences'
 
 /** Query key prefix for MCP server queries */
 export const MCP_SERVERS_KEY = 'mcp-servers'
-export const REQUIRED_MCP_SERVER_NAMES = new Set(['agent-browser'])
-
-export function isRequiredMcpServer(name: string): boolean {
-  return REQUIRED_MCP_SERVER_NAMES.has(name)
-}
 
 /**
  * Invalidate MCP server queries so they are re-fetched from disk.
@@ -67,16 +62,21 @@ export function invalidateAllMcpServers(
  */
 export function useMcpServers(
   worktreePath: string | null | undefined,
-  backend: CliBackend = 'claude'
+  backend: CliBackend = 'claude',
+  serverId = 'local'
 ) {
   return useQuery({
-    queryKey: [MCP_SERVERS_KEY, worktreePath ?? '', backend],
+    queryKey: [MCP_SERVERS_KEY, worktreePath ?? '', backend, serverId],
     queryFn: async () => {
       if (!isTauri()) return []
-      return invoke<McpServerInfo[]>('get_mcp_servers', {
-        backend,
-        worktreePath: worktreePath ?? null,
-      })
+      return invokeForOptionalServer<McpServerInfo[]>(
+        serverId,
+        'get_mcp_servers',
+        {
+          backend,
+          worktreePath: worktreePath ?? null,
+        }
+      )
     },
     enabled: isTauri(),
     staleTime: 1000 * 60 * 5, // 5 min cache
@@ -89,15 +89,16 @@ export function useMcpServers(
  */
 export function useAllBackendsMcpServers(
   worktreePath: string | null | undefined,
-  installedBackends: CliBackend[]
+  installedBackends: CliBackend[],
+  serverId?: string
 ) {
-  const claude = useMcpServers(worktreePath, 'claude')
-  const codex = useMcpServers(worktreePath, 'codex')
-  const opencode = useMcpServers(worktreePath, 'opencode')
-  const cursor = useMcpServers(worktreePath, 'cursor')
-  const grok = useMcpServers(worktreePath, 'grok')
-  const kimi = useMcpServers(worktreePath, 'kimi')
-  const antigravity = useMcpServers(worktreePath, 'antigravity')
+  const claude = useMcpServers(worktreePath, 'claude', serverId)
+  const codex = useMcpServers(worktreePath, 'codex', serverId)
+  const opencode = useMcpServers(worktreePath, 'opencode', serverId)
+  const cursor = useMcpServers(worktreePath, 'cursor', serverId)
+  const grok = useMcpServers(worktreePath, 'grok', serverId)
+  const kimi = useMcpServers(worktreePath, 'kimi', serverId)
+  const antigravity = useMcpServers(worktreePath, 'antigravity', serverId)
 
   const has = useMemo(() => new Set(installedBackends), [installedBackends])
 
@@ -145,16 +146,21 @@ export const MCP_HEALTH_KEY = 'mcp-health'
  */
 export function useMcpHealthCheck(
   backend: CliBackend = 'claude',
-  worktreePath?: string | null
+  worktreePath?: string | null,
+  serverId = 'local'
 ) {
   return useQuery({
-    queryKey: [MCP_HEALTH_KEY, backend, worktreePath ?? ''],
+    queryKey: [MCP_HEALTH_KEY, backend, worktreePath ?? '', serverId],
     queryFn: async () => {
       if (!isTauri()) return { statuses: {} } as McpHealthResult
-      return invoke<McpHealthResult>('check_mcp_health', {
-        backend,
-        worktreePath: worktreePath ?? null,
-      })
+      return invokeForOptionalServer<McpHealthResult>(
+        serverId,
+        'check_mcp_health',
+        {
+          backend,
+          worktreePath: worktreePath ?? null,
+        }
+      )
     },
     enabled: false,
     staleTime: 30_000,
@@ -168,32 +174,33 @@ export function useMcpHealthCheck(
  */
 export function useAllBackendsMcpHealth(
   installedBackends: CliBackend[],
-  worktreePath?: string | null
+  worktreePath?: string | null,
+  serverId?: string
 ) {
-  const claude = useMcpHealthCheck('claude', worktreePath)
-  const codex = useMcpHealthCheck('codex', worktreePath)
-  const opencode = useMcpHealthCheck('opencode', worktreePath)
-  const cursor = useMcpHealthCheck('cursor', worktreePath)
-  const grok = useMcpHealthCheck('grok', worktreePath)
-  const kimi = useMcpHealthCheck('kimi', worktreePath)
-  const antigravity = useMcpHealthCheck('antigravity', worktreePath)
+  const claude = useMcpHealthCheck('claude', worktreePath, serverId)
+  const codex = useMcpHealthCheck('codex', worktreePath, serverId)
+  const opencode = useMcpHealthCheck('opencode', worktreePath, serverId)
+  const cursor = useMcpHealthCheck('cursor', worktreePath, serverId)
+  const grok = useMcpHealthCheck('grok', worktreePath, serverId)
+  const kimi = useMcpHealthCheck('kimi', worktreePath, serverId)
+  const antigravity = useMcpHealthCheck('antigravity', worktreePath, serverId)
 
   const has = useMemo(() => new Set(installedBackends), [installedBackends])
 
   const statuses = useMemo(() => {
     const merged: Record<string, McpHealthStatus> = {}
-    const entries: [CliBackend, typeof claude][] = [
-      ['claude', claude],
-      ['codex', codex],
-      ['opencode', opencode],
-      ['cursor', cursor],
-      ['grok', grok],
-      ['kimi', kimi],
-      ['antigravity', antigravity],
+    const entries: [CliBackend, typeof claude.data][] = [
+      ['claude', claude.data],
+      ['codex', codex.data],
+      ['opencode', opencode.data],
+      ['cursor', cursor.data],
+      ['grok', grok.data],
+      ['kimi', kimi.data],
+      ['antigravity', antigravity.data],
     ]
-    for (const [backend, query] of entries) {
-      if (has.has(backend) && query.data?.statuses) {
-        for (const [name, status] of Object.entries(query.data.statuses)) {
+    for (const [backend, data] of entries) {
+      if (has.has(backend) && data?.statuses) {
+        for (const [name, status] of Object.entries(data.statuses)) {
           merged[mcpKey(backend, name)] = status
         }
       }
@@ -328,12 +335,7 @@ export function resolveEnabledMcpServers(options: {
   const antigravityEnabled = options.availableServers
     .filter(server => server.backend === 'antigravity' && !server.disabled)
     .map(server => mcpKey('antigravity', server.name))
-  const requiredEnabled = options.availableServers
-    .filter(server => isRequiredMcpServer(server.name))
-    .map(server => mcpKey(server.backend, server.name))
-  const effectiveBase = [
-    ...new Set([...baseEnabled, ...antigravityEnabled, ...requiredEnabled]),
-  ]
+  const effectiveBase = [...new Set([...baseEnabled, ...antigravityEnabled])]
 
   if (hasSessionOverride) return effectiveBase
 

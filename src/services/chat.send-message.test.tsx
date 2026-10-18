@@ -135,6 +135,7 @@ describe('useSendMessage completion', () => {
       streamingContentBlocks: {},
       activeToolCalls: {},
       sendStartedAt: {},
+      inputDrafts: {},
     })
   })
 
@@ -226,4 +227,36 @@ describe('useSendMessage completion', () => {
     ])
     expect(useChatStore.getState().sendingSessionIds['session-1']).toBe(true)
   })
+
+  it.each(['', 'newer draft'])(
+    'preserves text after a rejected send (newer draft: %s)',
+    async newerDraft => {
+      const { hook, session } = setup([
+        message('question-1', 'user', 'first question'),
+        message('reply-1', 'assistant', 'first answer'),
+      ])
+      useChatStore.getState().setInputDraft('session-1', newerDraft)
+      mockInvoke.mockRejectedValue('Session not found: session-1')
+
+      await act(async () => {
+        await expect(
+          hook.result.current.mutateAsync({
+            sessionId: 'session-1',
+            worktreeId: 'worktree-1',
+            worktreePath: '/tmp/worktree-1',
+            message: 'do not lose this text',
+            backend: 'claude',
+          })
+        ).rejects.toBe('Session not found: session-1')
+      })
+
+      expect(useChatStore.getState().inputDrafts['session-1']).toBe(
+        newerDraft || 'do not lose this text'
+      )
+      expect(contents(session()?.messages)).toEqual([
+        'first question',
+        'first answer',
+      ])
+    }
+  )
 })

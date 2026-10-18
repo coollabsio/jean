@@ -215,11 +215,12 @@ const DESKTOP_ONLY_COMMANDS = new Set([
   'open_project_on_github',
   'open_branch_on_github',
   'open_log_directory',
-  'set_project_avatar',
   'save_file_as',
   'start_http_server',
   'stop_http_server',
   'install_remote_jean_server',
+  'list_ssh_config_hosts',
+  'test_ssh_connection',
   'browser_create',
   'browser_navigate',
   'browser_back',
@@ -250,6 +251,8 @@ const LOCAL_SHELL_COMMANDS = new Set([
   // survive client exit, and the remote WS may be down while loading/switching.
   'has_running_sessions',
   'install_remote_jean_server',
+  'list_ssh_config_hosts',
+  'test_ssh_connection',
   'browser_create',
   'browser_navigate',
   'browser_back',
@@ -365,6 +368,58 @@ export async function invoke<T>(
   return wsTransport.invoke<T>(command, args)
 }
 
+/**
+ * Save a chat attachment on the server that owns the session. Remote and
+ * browser clients POST raw bytes over HTTP: one base64 WebSocket message over
+ * 16 MiB makes the server close the socket.
+ */
+export async function savePastedFile<T>(
+  file: File,
+  sessionId: string
+): Promise<T> {
+  const target = await resolveUploadTarget(sessionId)
+  if (!target) {
+    const { fileToBase64 } = await import('./file-base64')
+    return invoke<T>('save_pasted_file', {
+      data: await fileToBase64(file),
+      filename: file.name,
+      sessionId,
+    })
+  }
+
+  const base = `${target.url.replace(/\/+$/, '')}/`
+  const url = new URL('api/pasted-files', base)
+  url.searchParams.set('filename', file.name)
+  // Query token, not a Bearer header: CORS `Allow-Headers: *` does not cover
+  // Authorization, so native clients could not reach remote servers.
+  if (target.token) url.searchParams.set('token', target.token)
+  const response = await fetch(url, { method: 'POST', body: file })
+  if (response.status === 413) throw new Error('File too large')
+  if (!response.ok) {
+    throw new Error((await response.text()) || 'Failed to upload file')
+  }
+  return response.json() as Promise<T>
+}
+
+/** HTTP server for an upload, or null when native Tauri IPC owns it. */
+async function resolveUploadTarget(
+  sessionId: string
+): Promise<{ url: string; token: string } | null> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if ((window as any).__JEAN_E2E_MOCK__) return null
+  if (!isNativeApp()) {
+    return { url: getWebBackendBaseUrl(), token: getWebBackendToken() }
+  }
+
+  const { resolveServerCommand } = await import('./server-command-routing')
+  const serverId = resolveServerCommand({ sessionId })?.serverId
+  if (serverId === 'local') return null
+  const remote = serverId
+    ? getRemoteConnections().find(connection => connection.id === serverId)
+    : getActiveRemoteConnection()
+  return remote ? { url: remote.url, token: remote.token } : null
+}
+
 /** Invoke through the active transport unless a specific server owns the request. */
 export function invokeForOptionalServer<T>(
   serverId: string | undefined,
@@ -400,9 +455,11 @@ export async function invokeForServer<T>(
   }
 
   const { invokeOnServer } = await import('./server-connections')
+  const { stripServerScope } = await import('./server-command-routing')
+  const serverArgs = stripServerScope(serverId, args)
   let value: T
   try {
-    value = await invokeOnServer<T>(serverId, command, args)
+    value = await invokeOnServer<T>(serverId, command, serverArgs)
   } catch (error) {
     const { getActiveConnectionId } = await import('./remote-connections')
     if (

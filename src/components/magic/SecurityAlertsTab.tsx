@@ -1,4 +1,9 @@
-import { Search, Loader2, RefreshCw, AlertCircle } from '@/components/icons/reicon'
+import {
+  Search,
+  Loader2,
+  RefreshCw,
+  AlertCircle,
+} from '@/components/icons/reicon'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -38,14 +43,14 @@ const ADVISORY_STATE_LABELS: Record<string, string> = {
 }
 
 const STATE_DOT_COLORS: Record<string, string> = {
-  open: 'bg-orange-500',
-  published: 'bg-orange-500',
-  fixed: 'bg-green-500',
+  open: 'bg-warning',
+  published: 'bg-warning',
+  fixed: 'bg-success',
   closed: 'bg-muted-foreground',
   dismissed: 'bg-muted-foreground',
   auto_dismissed: 'bg-muted-foreground',
-  triage: 'bg-yellow-500',
-  draft: 'bg-blue-500',
+  triage: 'bg-warning',
+  draft: 'bg-info',
 }
 
 interface SecurityAlertsTabProps {

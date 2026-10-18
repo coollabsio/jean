@@ -72,8 +72,7 @@ export function TodoWidget({
             <span
               className={cn(
                 'rounded bg-muted/50 px-1.5 py-0.5 text-xs',
-                allCompleted &&
-                  'bg-green-500/20 text-green-600 dark:text-green-400'
+                allCompleted && 'bg-success/20 text-success'
               )}
             >
               {completedCount}/{totalCount}
@@ -114,9 +113,9 @@ function TodoItem({ todo }: TodoItemProps) {
     <li className="flex items-start gap-2 py-0.5 text-xs">
       <span className="mt-0.5 shrink-0">
         {todo.status === 'completed' ? (
-          <CheckCircle2 className="h-4 w-4 text-green-500" />
+          <CheckCircle2 className="h-4 w-4 text-success" />
         ) : todo.status === 'cancelled' ? (
-          <XCircle className="h-4 w-4 text-amber-500" />
+          <XCircle className="h-4 w-4 text-warning" />
         ) : todo.status === 'in_progress' ? (
           <Loader2 className="h-4 w-4 animate-spin text-primary" />
         ) : (

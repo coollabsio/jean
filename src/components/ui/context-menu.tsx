@@ -2,7 +2,11 @@
 
 import * as React from 'react'
 import * as ContextMenuPrimitive from '@radix-ui/react-context-menu'
-import { CheckIcon, ChevronRightIcon, CircleIcon } from '@/components/icons/reicon'
+import {
+  CheckIcon,
+  ChevronRightIcon,
+  CircleIcon,
+} from '@/components/icons/reicon'
 
 import { cn } from '@/lib/utils'
 
@@ -79,11 +83,17 @@ function ContextMenuSubTrigger({
 
 function ContextMenuSubContent({
   className,
+  onEscapeKeyDown,
   ...props
 }: React.ComponentProps<typeof ContextMenuPrimitive.SubContent>) {
   return (
     <ContextMenuPrimitive.SubContent
       data-slot="context-menu-sub-content"
+      onEscapeKeyDown={e => {
+        // Keep ESC from reaching window-level handlers (e.g. SessionChatModal)
+        e.stopPropagation()
+        onEscapeKeyDown?.(e)
+      }}
       className={cn(
         'bg-popover text-popover-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-[80] min-w-[8rem] origin-(--radix-context-menu-content-transform-origin) overflow-hidden rounded-md border p-1 shadow-lg',
         className
@@ -95,12 +105,18 @@ function ContextMenuSubContent({
 
 function ContextMenuContent({
   className,
+  onEscapeKeyDown,
   ...props
 }: React.ComponentProps<typeof ContextMenuPrimitive.Content>) {
   return (
     <ContextMenuPrimitive.Portal>
       <ContextMenuPrimitive.Content
         data-slot="context-menu-content"
+        onEscapeKeyDown={e => {
+          // Keep ESC from reaching window-level handlers (e.g. SessionChatModal)
+          e.stopPropagation()
+          onEscapeKeyDown?.(e)
+        }}
         className={cn(
           'bg-popover text-popover-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-[80] max-h-(--radix-context-menu-content-available-height) min-w-[8rem] origin-(--radix-context-menu-content-transform-origin) overflow-hidden rounded-md border p-1 shadow-md',
           className
@@ -176,7 +192,7 @@ function ContextMenuRadioItem({
     >
       <span className="pointer-events-none absolute left-2 flex size-3.5 items-center justify-center">
         <ContextMenuPrimitive.ItemIndicator>
-          <CircleIcon className="size-2 fill-current" />
+          <CircleIcon weight="Filled" className="size-2" />
         </ContextMenuPrimitive.ItemIndicator>
       </span>
       {children}

@@ -74,7 +74,7 @@ describe('resolveEnabledMcpServers', () => {
     expect(enabled).not.toContain(mcpKey('claude', 'jean'))
   })
 
-  it('keeps required agent-browser enabled despite an empty session override', () => {
+  it('respects an empty session override for agent-browser', () => {
     const enabled = resolveEnabledMcpServers({
       availableServers: [agentBrowserServer, otherServer],
       sessionEnabled: [],
@@ -82,7 +82,7 @@ describe('resolveEnabledMcpServers', () => {
       knownServers: [mcpKey('claude', 'agent-browser')],
     })
 
-    expect(enabled).toEqual([mcpKey('claude', 'agent-browser')])
+    expect(enabled).toEqual([])
   })
 
   it('does not re-enable known-but-disabled servers', () => {

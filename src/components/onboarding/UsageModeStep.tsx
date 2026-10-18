@@ -1,13 +1,12 @@
 /**
- * First onboarding step: configure local only, or also add a remote server.
+ * First native onboarding step: where Jean runs AI backends.
  *
- * Local continues into WSL (Windows) / CLI setup.
- * Remote continues into jean-server install or existing Web Access URL.
+ * Local continues into WSL (Windows) / backend setup on this machine.
+ * Remote installs jean-server over SSH (or connects an existing Web Access
+ * URL), then continues into backend setup on that server.
  */
 
-import { Monitor, Server } from '@/components/icons/reicon'
-import { Button } from '@/components/ui/button'
-import { useState } from 'react'
+import { ChevronRight, Monitor, Server } from '@/components/icons/reicon'
 
 export type OnboardingUsageMode = 'local' | 'remote'
 
@@ -15,60 +14,43 @@ interface UsageModeStepProps {
   onSelect: (mode: OnboardingUsageMode) => void
 }
 
+const MODES = [
+  {
+    id: 'local',
+    icon: Monitor,
+    title: 'This computer',
+    hint: 'Run everything locally',
+  },
+  {
+    id: 'remote',
+    icon: Server,
+    title: 'Remote server',
+    hint: 'Set up over SSH',
+  },
+] as const
+
 export function UsageModeStep({ onSelect }: UsageModeStepProps) {
-  const [mode, setMode] = useState<OnboardingUsageMode>('local')
-
   return (
-    <div className="space-y-6">
-      <div className="space-y-2 text-center">
-        <h3 className="text-lg font-semibold">How will you use Jean?</h3>
-        <p className="text-muted-foreground text-sm">
-          Jean always uses the local core. You can also add a remote server to
-          the combined dashboard.
-        </p>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
+    <div className="grid gap-3 sm:grid-cols-2">
+      {MODES.map(mode => (
         <button
+          key={mode.id}
           type="button"
-          onClick={() => setMode('local')}
-          className={`flex flex-col items-center gap-3 rounded-lg border-2 p-4 text-left transition-colors ${
-            mode === 'local'
-              ? 'border-primary bg-primary/5'
-              : 'border-border hover:border-muted-foreground/30'
-          }`}
+          onClick={() => onSelect(mode.id)}
+          className="group flex items-center gap-4 rounded-xl border bg-card p-5 text-left transition-colors hover:border-primary/60 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <Monitor className="h-8 w-8 text-muted-foreground" />
-          <div className="text-center">
-            <div className="font-medium">Local</div>
-            <div className="text-muted-foreground mt-1 text-xs">
-              Install AI CLIs and run projects on this machine
-            </div>
-          </div>
+          <span className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground transition-colors group-hover:bg-primary/10 group-hover:text-primary">
+            <mode.icon className="size-5" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-medium">{mode.title}</span>
+            <span className="block text-xs text-muted-foreground">
+              {mode.hint}
+            </span>
+          </span>
+          <ChevronRight className="size-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
         </button>
-
-        <button
-          type="button"
-          onClick={() => setMode('remote')}
-          className={`flex flex-col items-center gap-3 rounded-lg border-2 p-4 text-left transition-colors ${
-            mode === 'remote'
-              ? 'border-primary bg-primary/5'
-              : 'border-border hover:border-muted-foreground/30'
-          }`}
-        >
-          <Server className="h-8 w-8 text-muted-foreground" />
-          <div className="text-center">
-            <div className="font-medium">Local + remote</div>
-            <div className="text-muted-foreground mt-1 text-xs">
-              Add a jean-server via SSH install or Web Access URL
-            </div>
-          </div>
-        </button>
-      </div>
-
-      <Button className="w-full" size="lg" onClick={() => onSelect(mode)}>
-        Continue
-      </Button>
+      ))}
     </div>
   )
 }

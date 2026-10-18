@@ -1,193 +1,242 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { useSyncExternalStore } from 'react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { backendOptions } from '@/types/preferences'
 import { useUIStore } from '@/store/ui-store'
+import { useProjectsStore } from '@/store/projects-store'
 import type * as PlatformModule from '@/lib/platform'
 import type * as EnvironmentModule from '@/lib/environment'
 import type * as CliSetupComponentsModule from './CliSetupComponents'
-import { AI_BACKENDS, CursorSetupState } from './OnboardingDialog'
+import { AI_BACKENDS, OnboardingDialog } from './OnboardingDialog'
 
-const mocks = vi.hoisted(() => ({
-  nativeApp: true,
-  cursorInstalled: false,
-  cursorAuthenticated: false,
-  cursorAuthRefetchCount: 0,
-  cursorInstallSucceeds: true,
-  patchPreferences: vi.fn(
-    (_patch: unknown, options?: { onSuccess?: () => void }) =>
-      options?.onSuccess?.()
-  ),
-  patchPreferencesAsync: vi.fn().mockResolvedValue(undefined),
-}))
+type CliKey =
+  | 'claude'
+  | 'codex'
+  | 'opencode'
+  | 'cursor'
+  | 'pi'
+  | 'commandcode'
+  | 'grok'
+  | 'kimi'
+  | 'antigravity'
+  | 'gh'
 
-vi.mock('@/lib/environment', async importOriginal => ({
-  ...(await importOriginal<typeof EnvironmentModule>()),
-  isNativeApp: () => mocks.nativeApp,
-}))
+interface CliMock {
+  installed: boolean
+  authenticated: boolean
+  pathFound: boolean
+  install: ReturnType<typeof vi.fn>
+}
 
-function setupResult(installed = false, path: string | null = null) {
+const mocks = vi.hoisted(() => {
+  const keys = [
+    'claude',
+    'codex',
+    'opencode',
+    'cursor',
+    'pi',
+    'commandcode',
+    'grok',
+    'kimi',
+    'antigravity',
+    'gh',
+  ] as const
+  const cli = Object.fromEntries(
+    keys.map(key => [
+      key,
+      {
+        installed: false,
+        authenticated: false,
+        pathFound: false,
+        install: vi.fn(),
+      },
+    ])
+  )
   return {
-    status: { installed, version: installed ? '1.0.0' : null, path },
+    keys,
+    cli: cli as Record<(typeof keys)[number], CliMock>,
+    nativeApp: true,
+    serverWindows: false,
+    wslChosen: true,
+    patchPreferencesAsync: vi.fn(),
+    // Mock hook state lives outside React; bump to re-render subscribers the
+    // way a React Query update would.
+    version: 0,
+    listeners: new Set<() => void>(),
+    checkSystemPrerequisites: vi.fn(),
+  }
+})
+
+function useMockVersion() {
+  return useSyncExternalStore(
+    listener => {
+      mocks.listeners.add(listener)
+      return () => mocks.listeners.delete(listener)
+    },
+    () => mocks.version
+  )
+}
+
+function useSetupResult(key: CliKey) {
+  useMockVersion()
+  const state = mocks.cli[key]
+  return {
+    status: {
+      installed: state.installed,
+      version: state.installed ? '1.0.0' : null,
+      path: state.installed ? `/usr/bin/${key}` : null,
+      supports_auth_command: true,
+    },
     isStatusLoading: false,
-    versions: [],
+    versions: [
+      { version: '3.0.0-beta.1', prerelease: true },
+      { version: '2.0.0', prerelease: false },
+    ],
     isVersionsLoading: false,
     isVersionsError: false,
     refetchVersions: vi.fn(),
     isInstalling: false,
     installError: null,
     progress: null,
-    install: vi.fn(),
-    refetchStatus: vi.fn(),
+    install: state.install,
+    refetchStatus: vi.fn(async () => ({
+      data: { installed: mocks.cli[key].installed },
+    })),
   }
 }
 
-function authResult(authenticated = false) {
+function authResult(key: CliKey) {
+  const state = mocks.cli[key]
   return {
-    data: { authenticated },
+    data: { authenticated: state.authenticated },
     isLoading: false,
     isFetching: false,
-    status: 'success',
-    fetchStatus: 'idle',
-    error: null,
-    refetch: vi.fn().mockResolvedValue({ data: { authenticated } }),
+    refetch: vi.fn(async () => ({
+      data: { authenticated: mocks.cli[key].authenticated },
+    })),
   }
 }
 
-function pathResult(found = false, path: string | null = null) {
+function pathResult(key: CliKey) {
+  const state = mocks.cli[key]
   return {
-    data: { found, path, version: found ? '1.0.0' : null },
+    data: {
+      found: state.pathFound,
+      path: state.pathFound ? `/usr/local/bin/${key}` : null,
+      version: state.pathFound ? '1.0.0' : null,
+    },
+    isLoading: false,
   }
 }
+
+vi.mock('@/lib/environment', async importOriginal => ({
+  ...(await importOriginal<typeof EnvironmentModule>()),
+  isNativeApp: () => mocks.nativeApp,
+}))
+
+vi.mock('@/lib/platform', async importOriginal => ({
+  ...(await importOriginal<typeof PlatformModule>()),
+  isServerWindows: () => mocks.serverWindows,
+}))
 
 vi.mock('@/services/claude-cli', () => ({
-  useClaudeCliSetup: () => setupResult(),
-  useClaudeCliAuth: () => authResult(),
-  useClaudePathDetection: () => pathResult(),
+  useClaudeCliSetup: () => useSetupResult('claude'),
+  useClaudeCliAuth: () => authResult('claude'),
+  useClaudePathDetection: () => pathResult('claude'),
 }))
-
 vi.mock('@/services/codex-cli', () => ({
-  useCodexCliSetup: () => setupResult(),
-  useCodexCliAuth: () => authResult(),
-  useCodexPathDetection: () => pathResult(),
+  useCodexCliSetup: () => useSetupResult('codex'),
+  useCodexCliAuth: () => authResult('codex'),
+  useCodexPathDetection: () => pathResult('codex'),
 }))
-
 vi.mock('@/services/opencode-cli', () => ({
-  useOpenCodeCliSetup: () => setupResult(),
-  useOpenCodeCliAuth: () => authResult(),
-  useOpenCodePathDetection: () => pathResult(),
+  useOpenCodeCliSetup: () => useSetupResult('opencode'),
+  useOpenCodeCliAuth: () => authResult('opencode'),
+  useOpenCodePathDetection: () => pathResult('opencode'),
 }))
-
 vi.mock('@/services/cursor-cli', () => ({
   getCursorInstallCommand: vi.fn().mockResolvedValue({
     command: '/bin/sh',
     args: ['-c', 'install-cursor'],
   }),
-  useCursorPathDetection: () => pathResult(),
-  useCursorCliStatus: () => ({
-    data: {
-      installed: mocks.cursorInstalled,
-      version: null,
-      path: mocks.cursorInstalled ? '/home/test/.local/bin/agent' : null,
-    },
-    isLoading: false,
-    refetch: vi.fn().mockImplementation(async () => {
-      mocks.cursorInstalled = mocks.cursorInstallSucceeds
-      return {
-        data: {
-          installed: mocks.cursorInstalled,
-          version: null,
-          path: mocks.cursorInstalled ? '/home/test/.local/bin/agent' : null,
-        },
-      }
-    }),
-  }),
-  useCursorCliAuth: () => ({
-    ...authResult(mocks.cursorAuthenticated),
-    refetch: vi.fn().mockImplementation(async () => {
-      mocks.cursorAuthRefetchCount += 1
-      mocks.cursorAuthenticated =
-        mocks.cursorInstalled && mocks.cursorAuthRefetchCount >= 2
-      return { data: { authenticated: mocks.cursorAuthenticated } }
-    }),
-  }),
+  useCursorCliStatus: () => {
+    const setup = useSetupResult('cursor')
+    return {
+      data: setup.status,
+      isLoading: false,
+      refetch: setup.refetchStatus,
+    }
+  },
+  useCursorCliAuth: () => authResult('cursor'),
+  useCursorPathDetection: () => pathResult('cursor'),
 }))
-
 vi.mock('@/services/pi-cli', () => ({
-  usePiCliSetup: () => setupResult(),
-  usePiCliAuth: () => authResult(),
-  usePiPathDetection: () => pathResult(),
+  usePiCliSetup: () => useSetupResult('pi'),
+  usePiCliAuth: () => authResult('pi'),
+  usePiPathDetection: () => pathResult('pi'),
 }))
-
 vi.mock('@/services/commandcode-cli', () => ({
-  useCommandCodeCliSetup: () => setupResult(),
-  useCommandCodeCliAuth: () => authResult(),
-  useCommandCodePathDetection: () => pathResult(),
+  useCommandCodeCliSetup: () => useSetupResult('commandcode'),
+  useCommandCodeCliAuth: () => authResult('commandcode'),
+  useCommandCodePathDetection: () => pathResult('commandcode'),
 }))
-
 vi.mock('@/services/grok-cli', () => ({
-  useGrokCliSetup: () => setupResult(),
-  useGrokCliAuth: () => authResult(),
-  useGrokPathDetection: () => pathResult(),
+  useGrokCliSetup: () => useSetupResult('grok'),
+  useGrokCliAuth: () => authResult('grok'),
+  useGrokPathDetection: () => pathResult('grok'),
 }))
-
 vi.mock('@/services/kimi-cli', () => ({
-  useKimiCliSetup: () => setupResult(),
-  useKimiCliAuth: () => authResult(),
-  useKimiPathDetection: () => pathResult(),
+  useKimiCliSetup: () => useSetupResult('kimi'),
+  useKimiCliAuth: () => authResult('kimi'),
+  useKimiPathDetection: () => pathResult('kimi'),
 }))
-
 vi.mock('@/services/antigravity-cli', () => ({
-  useAntigravityCliSetup: () => setupResult(),
-  useAntigravityCliAuth: () => authResult(),
-  useAntigravityPathDetection: () => pathResult(),
+  useAntigravityCliSetup: () => useSetupResult('antigravity'),
+  useAntigravityCliAuth: () => authResult('antigravity'),
+  useAntigravityPathDetection: () => pathResult('antigravity'),
 }))
-
 vi.mock('@/services/gh-cli', () => ({
-  useGhCliSetup: () => setupResult(true, '/usr/bin/gh'),
-  useGhCliAuth: () => authResult(true),
-  useGhPathDetection: () => pathResult(true, '/usr/bin/gh'),
+  useGhCliSetup: () => useSetupResult('gh'),
+  useGhCliAuth: () => authResult('gh'),
+  useGhPathDetection: () => pathResult('gh'),
 }))
 
 vi.mock('@/services/prerequisites', () => ({
-  checkSystemPrerequisites: vi.fn().mockResolvedValue({
-    gitInstalled: true,
-    gitVersion: '2.50.0',
-    nodeInstalled: true,
-    nodeVersion: '24.0.0',
-    npmInstalled: true,
-    npmVersion: '11.0.0',
-    platform: 'linux',
-    automaticInstallSupported: false,
-    automaticInstallCommand: null,
-    manualInstallUrl: 'https://nodejs.org/en/download',
-  }),
+  checkSystemPrerequisites: mocks.checkSystemPrerequisites,
 }))
 
 vi.mock('@/services/preferences', () => ({
   usePreferences: () => ({
     data: {
-      wsl_mode_chosen: true,
-      claude_cli_source: 'path',
-      codex_cli_source: 'path',
-      opencode_cli_source: 'path',
-      pi_cli_source: 'path',
-      commandcode_cli_source: 'path',
-      grok_cli_source: 'path',
-      kimi_cli_source: 'path',
-      antigravity_cli_source: 'path',
-      gh_cli_source: 'path',
+      wsl_mode_chosen: mocks.wslChosen,
+      claude_cli_source: 'jean',
+      codex_cli_source: 'jean',
+      opencode_cli_source: 'jean',
+      pi_cli_source: 'jean',
+      commandcode_cli_source: 'jean',
+      grok_cli_source: 'jean',
+      kimi_cli_source: 'jean',
+      antigravity_cli_source: 'jean',
+      gh_cli_source: 'jean',
     },
   }),
   usePatchPreferences: () => ({
-    mutate: mocks.patchPreferences,
+    mutate: vi.fn(),
     mutateAsync: mocks.patchPreferencesAsync,
   }),
 }))
 
-vi.mock('@/lib/platform', async importOriginal => ({
-  ...(await importOriginal<typeof PlatformModule>()),
-  isServerWindows: () => false,
+vi.mock('./RemoteSetupStep', () => ({
+  RemoteSetupStep: ({
+    onComplete,
+  }: {
+    onComplete: (serverId: string) => void
+  }) => <button onClick={() => onComplete('remote-1')}>Finish remote</button>,
+}))
+
+vi.mock('./WslSetupStep', () => ({
+  WslSetupStep: () => <div>WSL step</div>,
 }))
 
 vi.mock('./CliSetupComponents', async importOriginal => {
@@ -195,170 +244,346 @@ vi.mock('./CliSetupComponents', async importOriginal => {
   return {
     ...original,
     AuthLoginState: ({
+      cliName,
       action = 'login',
       onComplete,
     }: {
+      cliName: string
       action?: 'login' | 'install'
       onComplete: () => void
-    }) => <button onClick={onComplete}>Complete Cursor {action}</button>,
-    AuthCheckingState: ({ cliName }: { cliName: string }) => (
-      <div>Checking {cliName}</div>
+    }) => (
+      <button onClick={onComplete}>
+        Complete {cliName} {action}
+      </button>
     ),
-    CliPathSelector: ({
-      cliName,
-      onSelectPath,
-    }: {
-      cliName: string
-      onSelectPath: () => void
-    }) => <button onClick={onSelectPath}>Use {cliName} from PATH</button>,
   }
 })
 
-describe('OnboardingDialog backends', () => {
+function setCli(key: CliKey, state: Partial<Omit<CliMock, 'install'>>) {
+  Object.assign(mocks.cli[key], state)
+  mocks.version += 1
+  for (const listener of mocks.listeners) listener()
+}
+
+async function chooseLocal(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(
+    await screen.findByRole('button', { name: /This computer/i })
+  )
+}
+
+async function goToSetup(user: ReturnType<typeof userEvent.setup>) {
+  await chooseLocal(user)
+  await user.click(await screen.findByRole('button', { name: 'Continue' }))
+}
+
+describe('OnboardingDialog', () => {
   beforeEach(() => {
     mocks.nativeApp = true
-    mocks.cursorInstalled = false
-    mocks.cursorAuthenticated = false
-    mocks.cursorAuthRefetchCount = 0
-    mocks.cursorInstallSucceeds = true
-    mocks.patchPreferences.mockClear()
-    mocks.patchPreferencesAsync.mockClear()
+    mocks.serverWindows = false
+    mocks.wslChosen = true
+    for (const key of mocks.keys) {
+      setCli(key, { installed: false, authenticated: false, pathFound: false })
+      mocks.cli[key].install.mockReset()
+    }
+    // GitHub CLI ready by default.
+    setCli('gh', { installed: true, authenticated: true, pathFound: true })
+    mocks.patchPreferencesAsync.mockReset()
+    mocks.patchPreferencesAsync.mockResolvedValue(undefined)
+    mocks.checkSystemPrerequisites.mockReset()
+    mocks.checkSystemPrerequisites.mockResolvedValue({
+      gitInstalled: true,
+      gitVersion: '2.50.0',
+      nodeInstalled: true,
+      nodeVersion: '24.0.0',
+      npmInstalled: true,
+      npmVersion: '11.0.0',
+      platform: 'linux',
+      automaticInstallSupported: false,
+      automaticInstallCommand: null,
+      manualInstallUrl: 'https://nodejs.org/en/download',
+    })
     useUIStore.setState({
       onboardingOpen: true,
       onboardingStartStep: null,
       onboardingManuallyTriggered: true,
       onboardingDismissed: false,
+      featureTourOpen: false,
     })
+    useProjectsStore.setState({ addProjectDialogOpen: false })
   })
 
   it('offers every supported chat backend', () => {
     expect(AI_BACKENDS).toEqual(backendOptions.map(option => option.value))
   })
 
-  it('lets users choose an installed Cursor Agent or run its installer', () => {
-    const onUsePath = vi.fn()
-    const onInstall = vi.fn()
-
-    render(
-      <CursorSetupState
-        pathFound
-        pathVersion="1.2.3"
-        pathPath="/usr/local/bin/agent"
-        onUsePath={onUsePath}
-        onInstall={onInstall}
-      />
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: /use system cursor/i }))
-    fireEvent.click(screen.getByRole('button', { name: /official installer/i }))
-
-    expect(onUsePath).toHaveBeenCalledOnce()
-    expect(onInstall).toHaveBeenCalledOnce()
-  })
-
-  async function chooseLocalAndContinue(
-    user: ReturnType<typeof userEvent.setup>
-  ) {
-    expect(
-      await screen.findByText('How will you use Jean?')
-    ).toBeInTheDocument()
-    // Local is the default selection
-    await user.click(screen.getByRole('button', { name: 'Continue' }))
-  }
-
-  it('starts with local vs remote selection', async () => {
-    const { OnboardingDialog } = await import('./OnboardingDialog')
-    render(<OnboardingDialog />)
-
-    expect(
-      await screen.findByText('How will you use Jean?')
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole('button', { name: /^Local Install/i })
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole('button', { name: /^Local \+ remote/i })
-    ).toBeInTheDocument()
-  })
-
-  it('skips local vs remote selection in Jean Server Web Access', async () => {
-    mocks.nativeApp = false
-    const { OnboardingDialog } = await import('./OnboardingDialog')
-    render(<OnboardingDialog />)
-
-    expect(
-      await screen.findByText(/Select additional AI backends to install/i)
-    ).toBeInTheDocument()
-    expect(screen.queryByText('How will you use Jean?')).not.toBeInTheDocument()
-  })
-
-  it('shows remote setup after choosing remote', async () => {
-    const user = userEvent.setup()
-    const { OnboardingDialog } = await import('./OnboardingDialog')
-    render(<OnboardingDialog />)
-
-    await user.click(await screen.findByRole('button', { name: /Remote/i }))
-    await user.click(screen.getByRole('button', { name: 'Continue' }))
-
-    expect(
-      await screen.findByText(/Install jean-server over SSH/i)
-    ).toBeInTheDocument()
-  })
-
-  it('installs and authenticates Cursor before continuing to GitHub setup', async () => {
-    const user = userEvent.setup()
-    const { OnboardingDialog } = await import('./OnboardingDialog')
-    render(<OnboardingDialog />)
-
-    await chooseLocalAndContinue(user)
-    await user.click(
-      await screen.findByRole('checkbox', { name: /cursor cli/i })
-    )
-    await user.click(screen.getByRole('button', { name: 'Continue' }))
-    await user.click(
-      await screen.findByRole('button', { name: /^Install Cursor Agent/ })
-    )
-    await user.click(
-      await screen.findByRole('button', { name: 'Complete Cursor install' })
-    )
-    await user.click(
-      await screen.findByRole('button', { name: 'Complete Cursor login' })
-    )
-    await user.click(
-      await screen.findByRole('button', { name: 'Use GitHub CLI from PATH' })
-    )
-
-    expect(await screen.findByText('All Tools Ready')).toBeInTheDocument()
-    expect(screen.getByText('Cursor CLI: Installed')).toBeInTheDocument()
-  })
-
-  it('returns to backend selection after a failed Cursor install check and Back', async () => {
-    const user = userEvent.setup()
-    mocks.cursorInstallSucceeds = false
-    const { OnboardingDialog } = await import('./OnboardingDialog')
-    render(<OnboardingDialog />)
-
-    await chooseLocalAndContinue(user)
-    await user.click(
-      await screen.findByRole('checkbox', { name: /cursor cli/i })
-    )
-    await user.click(screen.getByRole('button', { name: 'Continue' }))
-    await user.click(
-      await screen.findByRole('button', { name: /^Install Cursor Agent/ })
-    )
-    await user.click(
-      await screen.findByRole('button', { name: 'Complete Cursor install' })
-    )
-
-    await waitFor(() =>
+  describe('start', () => {
+    it('starts with local vs remote cards in the native app', async () => {
+      render(<OnboardingDialog />)
       expect(
-        screen.getByRole('button', { name: /^Install Cursor Agent/ })
+        await screen.findByRole('button', { name: /This computer/i })
       ).toBeInTheDocument()
-    )
-    await user.click(screen.getByRole('button', { name: 'Back' }))
+      expect(
+        screen.getByRole('button', { name: /Remote server/i })
+      ).toBeInTheDocument()
+    })
 
-    expect(
-      await screen.findByText(/Select additional AI backends to install/i)
-    ).toBeInTheDocument()
+    it('starts at backends in Web Access', async () => {
+      mocks.nativeApp = false
+      render(<OnboardingDialog />)
+      expect(
+        await screen.findByText('Pick your AI backends')
+      ).toBeInTheDocument()
+      expect(
+        screen.queryByRole('button', { name: /This computer/i })
+      ).not.toBeInTheDocument()
+    })
+
+    it('shows the WSL step on local Windows when not chosen yet', async () => {
+      mocks.serverWindows = true
+      mocks.wslChosen = false
+      const user = userEvent.setup()
+      render(<OnboardingDialog />)
+      await chooseLocal(user)
+      expect(await screen.findByText('WSL step')).toBeInTheDocument()
+    })
+  })
+
+  describe('backend detection', () => {
+    it('preselects a CLI found on PATH and marks it Found', async () => {
+      setCli('codex', { pathFound: true })
+      const user = userEvent.setup()
+      render(<OnboardingDialog />)
+      await chooseLocal(user)
+
+      const codex = await screen.findByRole('checkbox', { name: /Codex/ })
+      expect(codex).toBeChecked()
+      expect(screen.getByRole('checkbox', { name: /Claude/ })).not.toBeChecked()
+      expect(
+        within(codex.closest('label') as HTMLElement).getByText('Found')
+      ).toBeInTheDocument()
+    })
+
+    it('preselects Claude when nothing is found', async () => {
+      const user = userEvent.setup()
+      render(<OnboardingDialog />)
+      await chooseLocal(user)
+      expect(
+        await screen.findByRole('checkbox', { name: /Claude/ })
+      ).toBeChecked()
+      expect(screen.queryByText('Found')).not.toBeInTheDocument()
+    })
+  })
+
+  describe('setup checklist', () => {
+    it('starts every missing install in parallel without user action', async () => {
+      const user = userEvent.setup()
+      render(<OnboardingDialog />)
+      await chooseLocal(user)
+      await user.click(await screen.findByRole('checkbox', { name: /Codex/ }))
+      await user.click(screen.getByRole('button', { name: 'Continue' }))
+
+      await waitFor(() => {
+        expect(mocks.cli.claude.install).toHaveBeenCalledWith(
+          '2.0.0',
+          expect.anything()
+        )
+        expect(mocks.cli.codex.install).toHaveBeenCalledWith(
+          '2.0.0',
+          expect.anything()
+        )
+      })
+      expect(mocks.patchPreferencesAsync).toHaveBeenCalledWith({
+        claude_cli_source: 'jean',
+      })
+      expect(mocks.patchPreferencesAsync).toHaveBeenCalledWith({
+        codex_cli_source: 'jean',
+      })
+    })
+
+    it('uses a CLI found on PATH instead of installing it', async () => {
+      setCli('claude', { pathFound: true })
+      mocks.patchPreferencesAsync.mockImplementation(async patch => {
+        if (patch.claude_cli_source === 'path')
+          setCli('claude', { installed: true })
+      })
+      const user = userEvent.setup()
+      render(<OnboardingDialog />)
+      await goToSetup(user)
+
+      await waitFor(() =>
+        expect(mocks.patchPreferencesAsync).toHaveBeenCalledWith({
+          claude_cli_source: 'path',
+        })
+      )
+      expect(
+        await screen.findByRole('button', { name: 'Complete Claude login' })
+      ).toBeInTheDocument()
+      expect(mocks.cli.claude.install).not.toHaveBeenCalled()
+    })
+
+    it('shows only one sign-in at a time', async () => {
+      setCli('claude', { installed: true })
+      setCli('codex', { installed: true })
+      const user = userEvent.setup()
+      render(<OnboardingDialog />)
+      await goToSetup(user)
+
+      expect(
+        await screen.findByRole('button', { name: 'Complete Claude login' })
+      ).toBeInTheDocument()
+      expect(
+        screen.queryByRole('button', { name: 'Complete Codex login' })
+      ).not.toBeInTheDocument()
+
+      const codexRow = screen.getByTestId('setup-row-codex')
+      expect(within(codexRow).getByText('Waiting')).toBeInTheDocument()
+      await user.click(
+        within(codexRow).getByRole('button', { name: 'Sign in' })
+      )
+
+      expect(
+        screen.getByRole('button', { name: 'Complete Codex login' })
+      ).toBeInTheDocument()
+      expect(
+        screen.queryByRole('button', { name: 'Complete Claude login' })
+      ).not.toBeInTheDocument()
+    })
+
+    it('shows "Not signed in yet." when sign-in did not finish', async () => {
+      setCli('claude', { installed: true })
+      const user = userEvent.setup()
+      render(<OnboardingDialog />)
+      await goToSetup(user)
+
+      await user.click(
+        await screen.findByRole('button', { name: 'Complete Claude login' })
+      )
+      expect(await screen.findByText('Not signed in yet.')).toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: 'Retry' }))
+      expect(
+        await screen.findByRole('button', { name: 'Complete Claude login' })
+      ).toBeInTheDocument()
+    })
+
+    it('shows an inline error when install fails and retries it', async () => {
+      mocks.cli.claude.install.mockImplementation(
+        (_version: string, options?: { onError?: (error: Error) => void }) =>
+          options?.onError?.(new Error('npm failed\nfull install log'))
+      )
+      const user = userEvent.setup()
+      render(<OnboardingDialog />)
+      await goToSetup(user)
+
+      const alert = await screen.findByRole('alert')
+      expect(within(alert).getByText('npm failed')).toBeInTheDocument()
+      expect(mocks.cli.claude.install).toHaveBeenCalledTimes(1)
+
+      await user.click(within(alert).getByRole('button', { name: 'Retry' }))
+      await waitFor(() =>
+        expect(mocks.cli.claude.install).toHaveBeenCalledTimes(2)
+      )
+    })
+
+    it('enables Finish only when GitHub CLI and one AI backend are ready', async () => {
+      setCli('claude', { installed: true, authenticated: true })
+      setCli('gh', { installed: true, authenticated: false })
+      const user = userEvent.setup()
+      render(<OnboardingDialog />)
+      await goToSetup(user)
+
+      const finish = await screen.findByRole('button', { name: 'Finish' })
+      expect(finish).toBeDisabled()
+
+      // Sign in to GitHub CLI; the auth query then reports signed in.
+      await user.click(
+        screen.getByRole('button', { name: 'Complete GitHub CLI login' })
+      )
+      act(() => setCli('gh', { authenticated: true }))
+      await waitFor(() => expect(finish).toBeEnabled())
+      await user.click(finish)
+
+      expect(await screen.findByText("You're ready")).toBeInTheDocument()
+    })
+  })
+
+  describe('success', () => {
+    async function reachSuccess(user: ReturnType<typeof userEvent.setup>) {
+      setCli('codex', { installed: true, authenticated: true })
+      render(<OnboardingDialog />)
+      await goToSetup(user)
+      await user.click(await screen.findByRole('button', { name: 'Finish' }))
+      await screen.findByText("You're ready")
+    }
+
+    it('"Add a project" saves the default backend, then opens add project', async () => {
+      const user = userEvent.setup()
+      await reachSuccess(user)
+      await user.click(screen.getByRole('button', { name: /Add a project/ }))
+
+      await waitFor(() =>
+        expect(useProjectsStore.getState().addProjectDialogOpen).toBe(true)
+      )
+      expect(mocks.patchPreferencesAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ default_backend: 'codex' })
+      )
+      const ui = useUIStore.getState()
+      expect(ui.onboardingOpen).toBe(false)
+      expect(ui.onboardingDismissed).toBe(true)
+      expect(ui.featureTourOpen).toBe(false)
+    })
+
+    it('"Take the tour" opens the feature tour', async () => {
+      const user = userEvent.setup()
+      await reachSuccess(user)
+      await user.click(screen.getByRole('button', { name: /Take the tour/ }))
+
+      await waitFor(() =>
+        expect(useUIStore.getState().featureTourOpen).toBe(true)
+      )
+      expect(useUIStore.getState().onboardingOpen).toBe(false)
+    })
+  })
+
+  describe('remote', () => {
+    it('continues to backends on the new remote server', async () => {
+      const user = userEvent.setup()
+      render(<OnboardingDialog />)
+      await user.click(
+        await screen.findByRole('button', { name: /Remote server/i })
+      )
+      expect(
+        await screen.findByText(/Jean installs itself over SSH/i)
+      ).toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: 'Finish remote' }))
+
+      expect(
+        await screen.findByText(/Installs on the remote server/i)
+      ).toBeInTheDocument()
+      expect(
+        screen.getByRole('checkbox', { name: /Claude/ })
+      ).toBeInTheDocument()
+      await waitFor(() =>
+        expect(mocks.checkSystemPrerequisites).toHaveBeenLastCalledWith(
+          'remote-1'
+        )
+      )
+    })
+
+    it('skips to done when the remote is already ready', async () => {
+      setCli('claude', { installed: true, authenticated: true })
+      const user = userEvent.setup()
+      render(<OnboardingDialog />)
+      await user.click(
+        await screen.findByRole('button', { name: /Remote server/i })
+      )
+      await user.click(
+        await screen.findByRole('button', { name: 'Finish remote' })
+      )
+
+      expect(await screen.findByText("You're ready")).toBeInTheDocument()
+      expect(
+        screen.getByText('Jean is set up on the remote server.')
+      ).toBeInTheDocument()
+    })
   })
 })

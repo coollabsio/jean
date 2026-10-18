@@ -206,9 +206,9 @@ export const JeanMcpSection: React.FC<JeanMcpSectionProps> = ({
   return (
     <>
       <SettingsSection title="Jean MCP Server" anchorId="pref-mcp-section-jean">
-        <div className="flex flex-col gap-2 rounded-md border px-4 py-3 sm:flex-row sm:items-center sm:gap-3">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
           <div className="flex min-w-0 flex-1 items-center gap-2 text-sm font-medium">
-            <CheckCircle className="size-4 text-green-600 dark:text-green-400" />
+            <CheckCircle className="size-4 text-success" />
             Required · Automatic
           </div>
           {checkingServer && (
@@ -218,7 +218,7 @@ export const JeanMcpSection: React.FC<JeanMcpSectionProps> = ({
             </span>
           )}
           {!checkingServer && !serverRunning && (
-            <span className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+            <span className="flex items-center gap-1.5 text-xs text-warning">
               <PlugZap className="size-3.5 shrink-0" />
               MCP socket not running
             </span>
@@ -247,7 +247,7 @@ export const JeanMcpSection: React.FC<JeanMcpSectionProps> = ({
             className={cn(
               'h-7',
               installState === 'success' &&
-                'border-green-600 bg-green-600 text-white hover:bg-green-700'
+                'border-success bg-success text-success-foreground hover:bg-success/90'
             )}
             aria-live="polite"
             title={installMessage}
@@ -256,8 +256,8 @@ export const JeanMcpSection: React.FC<JeanMcpSectionProps> = ({
           </Button>
         </div>
 
-        <details className="rounded-md border px-4 py-3">
-          <summary className="cursor-pointer text-sm font-medium">
+        <details>
+          <summary className="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground">
             Advanced limits
           </summary>
           <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">

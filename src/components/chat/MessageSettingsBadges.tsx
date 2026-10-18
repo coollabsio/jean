@@ -45,7 +45,13 @@ export const MessageSettingsBadges = memo(function MessageSettingsBadges({
     isPiModel(model) ||
     model.startsWith('pi/')
   const executionModeLabel = executionMode
-    ? executionMode.charAt(0).toUpperCase() + executionMode.slice(1)
+    ? {
+        plan: 'Plan',
+        build: 'Auto-accept edits',
+        yolo: 'Full access',
+        supervised: 'Supervised',
+        auto: 'Auto',
+      }[executionMode]
     : null
 
   const effortOptions = model.startsWith('pi/')

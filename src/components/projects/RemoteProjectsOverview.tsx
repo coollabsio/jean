@@ -72,7 +72,7 @@ export function RemoteProjectsOverview() {
               {project.serverName}
             </span>
             {project.offline && (
-              <span className="flex shrink-0 items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400">
+              <span className="flex shrink-0 items-center gap-1 text-[10px] text-warning">
                 <WifiOff className="size-3" />
                 Offline
               </span>

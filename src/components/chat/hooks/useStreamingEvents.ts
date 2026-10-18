@@ -25,6 +25,10 @@ import {
 } from '@/types/chat'
 import { playNotificationSound } from '@/lib/sounds'
 import {
+  markSessionOpened,
+  markSessionOpenedWhenSeen,
+} from '@/lib/session-read'
+import {
   notifyIfBackground,
   notifySessionNeedsAttention,
 } from '@/lib/session-notifications'
@@ -36,10 +40,13 @@ import {
 } from '@/lib/backend-persist-guard'
 import type {
   ChunkEvent,
+  ExecutionMode,
+  PermissionMode,
   ToolUseEvent,
   ToolBlockEvent,
   ToolResultEvent,
   ToolEventEvent,
+  SubagentUsageEvent,
   DoneEvent,
   ErrorEvent,
   CancelledEvent,
@@ -89,9 +96,22 @@ import {
   isCodexBubblewrapError,
   rewriteCodexBubblewrapErrorMessage,
 } from '@/lib/cli-auth'
+import { isLivePermissionRequest } from '@/components/chat/permission-approval-utils'
 
 interface UseStreamingEventsParams {
   queryClient: QueryClient
+}
+
+/** Drop live Claude permission requests once the run that waits for them ends. */
+function clearLivePermissionRequests(sessionId: string) {
+  const { pendingPermissionDenials, setPendingDenials } =
+    useChatStore.getState()
+  const denials = pendingPermissionDenials[sessionId]
+  if (!denials?.some(isLivePermissionRequest)) return
+  setPendingDenials(
+    sessionId,
+    denials.filter(d => !isLivePermissionRequest(d))
+  )
 }
 
 function getTextContentFromBlocks(
@@ -592,6 +612,9 @@ export default function useStreamingEvents({
         ) {
           return
         }
+        // Buffered text/thinking arrived before this tool; commit it first so
+        // the tool block lands after it (not above it) while streaming.
+        flushPendingStreamFor(session_id)
         addToolBlock(session_id, tool_call_id)
       }
     )
@@ -623,6 +646,26 @@ export default function useStreamingEvents({
         addThinkingBlock(sid, buffered)
       }
       thinkingBuffer = {}
+    }
+
+    /**
+     * Commit one session's buffered thinking + text immediately. Call before
+     * adding ordered content blocks (tool/user-input) so they land after the
+     * text that preceded them. Pending timers stay armed for other sessions.
+     */
+    function flushPendingStreamFor(sessionId: string) {
+      const thinking = thinkingBuffer[sessionId]
+      if (thinking) {
+        const { [sessionId]: _thinking, ...restThinking } = thinkingBuffer
+        thinkingBuffer = restThinking
+        addThinkingBlock(sessionId, thinking)
+      }
+      const text = chunkBuffer[sessionId]
+      if (text) {
+        const { [sessionId]: _text, ...restChunks } = chunkBuffer
+        chunkBuffer = restChunks
+        appendStreamingChunk(sessionId, text)
+      }
     }
 
     function scheduleThinkingFlush() {
@@ -689,6 +732,7 @@ export default function useStreamingEvents({
       ) {
         return
       }
+      flushPendingStreamFor(session_id)
       addUserInputBlock(session_id, text)
     })
 
@@ -696,7 +740,7 @@ export default function useStreamingEvents({
     const unlistenToolResult = listen<ToolResultEvent>(
       'chat:tool_result',
       event => {
-        const { session_id, tool_use_id, output } = event.payload
+        const { session_id, tool_use_id, output, is_error } = event.payload
 
         // Check if this tool was in pending denials - if so, it ran anyway
         // (e.g., yolo mode, or tool was pre-approved via allowedTools)
@@ -724,11 +768,14 @@ export default function useStreamingEvents({
         // in both the "Final output" block and the outer raw-output panel.
         if (toolCall?.name === 'Monitor') return
 
-        // For Read tools, store empty placeholder instead of full content (can be large)
+        // For Read tools, store empty placeholder instead of full content (can be large).
+        // Read output is never rendered (see shouldRenderRawOutput), so live and
+        // reloaded history look the same.
         updateToolCallOutput(
           session_id,
           tool_use_id,
-          toolCall?.name === 'Read' ? '' : output
+          toolCall?.name === 'Read' ? '' : output,
+          is_error
         )
       }
     )
@@ -746,6 +793,17 @@ export default function useStreamingEvents({
       }
     )
 
+    // Claude subagent (Task/Agent) token/tool/time totals
+    const unlistenSubagentUsage = listen<SubagentUsageEvent>(
+      'chat:subagent_usage',
+      event => {
+        const { session_id, tool_use_id, usage } = event.payload
+        useChatStore
+          .getState()
+          .setToolCallSubagentUsage(session_id, tool_use_id, usage)
+      }
+    )
+
     // Handle permission denied events (tools that require approval)
     const unlistenPermissionDenied = listen<PermissionDeniedEvent>(
       'chat:permission_denied',
@@ -753,6 +811,7 @@ export default function useStreamingEvents({
         const { session_id, worktree_id, denials } = event.payload
         const {
           setPendingDenials,
+          pendingPermissionDenials,
           lastSentMessages,
           setDeniedMessageContext,
           executionModes,
@@ -760,6 +819,19 @@ export default function useStreamingEvents({
           selectedModels,
           worktreePaths,
         } = useChatStore.getState()
+
+        // Live Claude request (Supervised): the run waits for the answer.
+        // Add it to the card; do not persist it, its rpc_id dies with the run.
+        if (denials.some(isLivePermissionRequest)) {
+          const current = pendingPermissionDenials[session_id] ?? []
+          setPendingDenials(session_id, [
+            ...current.filter(
+              d => !denials.some(denial => denial.rpc_id === d.rpc_id)
+            ),
+            ...denials,
+          ])
+          return
+        }
 
         // Store the denials for the approval UI
         setPendingDenials(session_id, denials)
@@ -951,6 +1023,7 @@ export default function useStreamingEvents({
           input: { questions },
         }
         addToolCall(session_id, toolCall)
+        flushPendingStreamFor(session_id)
         addToolBlock(session_id, toolCall.id)
 
         if (next === current) return
@@ -1023,6 +1096,7 @@ export default function useStreamingEvents({
     const unlistenDone = listen<DoneEvent>('chat:done', event => {
       const sessionId = event.payload.session_id
       const worktreeId = event.payload.worktree_id
+      clearLivePermissionRequests(sessionId)
 
       // Flush any buffered chunks/thinking so streaming state is up to date
       if (
@@ -1072,17 +1146,17 @@ export default function useStreamingEvents({
 
       const isCurrentlyViewing = isViewingInFullView || isViewingInModal
 
-      // If user is currently viewing this session, bump last_opened_at so it
+      // If user is viewing this session (window focused), bump last_opened_at so it
       // doesn't appear as "unread" (updated_at will be newer after the run ends).
       // Also auto-mark user-initiated sessions (e.g. Clear Context & YOLO) as opened.
       const { userInitiatedSessionIds, removeUserInitiatedSession } =
         useChatStore.getState()
       const isUserInitiated = !!userInitiatedSessionIds[sessionId]
-      if (isCurrentlyViewing || isUserInitiated) {
-        if (isUserInitiated) removeUserInitiatedSession(sessionId)
-        invoke('set_session_last_opened', { sessionId })
-          .then(() => window.dispatchEvent(new CustomEvent('session-opened')))
-          .catch(() => undefined)
+      if (isUserInitiated) {
+        removeUserInitiatedSession(sessionId)
+        markSessionOpened(sessionId)
+      } else if (isCurrentlyViewing) {
+        markSessionOpenedWhenSeen(sessionId)
       }
 
       const preferences = queryClient.getQueryData<AppPreferences>(
@@ -1721,11 +1795,13 @@ export default function useStreamingEvents({
     // Handle errors from any CLI backend (Claude, Codex, OpenCode, Cursor)
     const unlistenError = listen<ErrorEvent>('chat:error', event => {
       const { session_id, error } = event.payload
+      clearLivePermissionRequests(session_id)
 
       // Store error for inline display and restore input
       const {
         lastSentMessages,
         streamingContents,
+        activeToolCalls,
         setInputDraft,
         clearLastSentMessage,
         setError,
@@ -1753,7 +1829,7 @@ export default function useStreamingEvents({
 
       const isCurrentlyViewing = isViewingInFullView || isViewingInModal
 
-      // If user is currently viewing this session, bump last_opened_at so it
+      // If user is viewing this session (window focused), bump last_opened_at so it
       // doesn't appear as "unread" (updated_at will be newer after the run ends).
       // Also auto-mark user-initiated sessions (e.g. Clear Context & YOLO) as opened.
       const {
@@ -1761,11 +1837,11 @@ export default function useStreamingEvents({
         removeUserInitiatedSession: rusErr,
       } = useChatStore.getState()
       const isUserInitiatedErr = !!uisErr[session_id]
-      if (isCurrentlyViewing || isUserInitiatedErr) {
-        if (isUserInitiatedErr) rusErr(session_id)
-        invoke('set_session_last_opened', { sessionId: session_id })
-          .then(() => window.dispatchEvent(new CustomEvent('session-opened')))
-          .catch(() => undefined)
+      if (isUserInitiatedErr) {
+        rusErr(session_id)
+        markSessionOpened(session_id)
+      } else if (isCurrentlyViewing) {
+        markSessionOpenedWhenSeen(session_id)
       }
 
       // Auth failures from headless CLIs (e.g. Claude "Please run /login")
@@ -1786,9 +1862,11 @@ export default function useStreamingEvents({
       setError(session_id, displayError)
 
       // Check if CLI produced streaming content BEFORE clearing state.
-      // If content was streamed, the CLI ran — don't remove the user message
-      // or rollback, as the conversation is persisted in JSONL on disk (#209).
-      const hasStreamedContent = !!streamingContents[session_id]
+      // If content or tool calls were streamed, the CLI ran — don't remove the
+      // user message or rollback, as the conversation is persisted on disk (#209).
+      const hasStreamedContent =
+        !!streamingContents[session_id] ||
+        (activeToolCalls[session_id]?.length ?? 0) > 0
 
       // Restore the input that failed so user can retry
       const lastMessage = lastSentMessages[session_id]
@@ -1878,6 +1956,7 @@ export default function useStreamingEvents({
           emitted_at_ms,
           run_id: eventRunId,
         } = event.payload
+        clearLivePermissionRequests(session_id)
 
         // Flush any buffered chunks/thinking so streaming state is up to date
         if (
@@ -1952,7 +2031,7 @@ export default function useStreamingEvents({
 
         const isCurrentlyViewing = isViewingInFullView || isViewingInModal
 
-        // If user is currently viewing this session, bump last_opened_at so it
+        // If user is viewing this session (window focused), bump last_opened_at so it
         // doesn't appear as "unread" (updated_at will be newer after the run ends).
         // Also auto-mark user-initiated sessions (e.g. Clear Context & YOLO) as opened.
         const {
@@ -1960,11 +2039,11 @@ export default function useStreamingEvents({
           removeUserInitiatedSession: rusCan,
         } = useChatStore.getState()
         const isUserInitiatedCan = !!uisCan[session_id]
-        if (isCurrentlyViewing || isUserInitiatedCan) {
-          if (isUserInitiatedCan) rusCan(session_id)
-          invoke('set_session_last_opened', { sessionId: session_id })
-            .then(() => window.dispatchEvent(new CustomEvent('session-opened')))
-            .catch(() => undefined)
+        if (isUserInitiatedCan) {
+          rusCan(session_id)
+          markSessionOpened(session_id)
+        } else if (isCurrentlyViewing) {
+          markSessionOpenedWhenSeen(session_id)
         }
 
         // Clear compacting state (safety net)
@@ -1989,6 +2068,15 @@ export default function useStreamingEvents({
         const shouldRestoreMessage =
           !hasContent && !hasQueuedMessages && !hasCurrentDraft
         const shouldHydrateCancelledFromBackend = !undo_send && !hasContent
+        // Assistant replies from earlier turns, known before this cancel.
+        const priorAssistantIds = new Set(
+          (
+            queryClient.getQueryData<Session>(chatQueryKeys.session(session_id))
+              ?.messages ?? []
+          )
+            .filter(message => message.role === 'assistant')
+            .map(message => message.id)
+        )
 
         const removeLatestUserMessageFromCache = () => {
           queryClient.setQueryData<Session>(
@@ -2174,13 +2262,14 @@ export default function useStreamingEvents({
                 session_id,
                 resolvedWorktreeId
               ).then(session => {
-                const assistant = session
-                  ? [...session.messages]
-                      .reverse()
-                      .find(message => message.role === 'assistant')
-                  : undefined
+                // Only output of the cancelled turn counts. A reply from an
+                // earlier turn must not retract the restored draft.
+                const lastMessage = session?.messages.at(-1)
+                const assistant =
+                  lastMessage?.role === 'assistant' ? lastMessage : undefined
                 if (
                   !assistant ||
+                  priorAssistantIds.has(assistant.id) ||
                   !hasMeaningfulAssistantPayload(
                     assistant.content,
                     assistant.content_blocks,
@@ -2391,7 +2480,10 @@ export default function useStreamingEvents({
           )
           break
         case 'executionMode':
-          store.setExecutionMode(session_id, value as 'plan' | 'build' | 'yolo')
+          store.setExecutionMode(session_id, value as ExecutionMode)
+          break
+        case 'permissionMode':
+          store.setPermissionMode(session_id, value as PermissionMode)
           break
         case 'provider':
           store.setSelectedProvider(
@@ -2454,6 +2546,7 @@ export default function useStreamingEvents({
       unlistenSteered.then(f => f())
       unlistenToolResult.then(f => f())
       unlistenToolEvent.then(f => f())
+      unlistenSubagentUsage.then(f => f())
       unlistenPermissionDenied.then(f => f())
       unlistenCodexPermissionRequest.then(f => f())
       unlistenOpencodePermissionRequest.then(f => f())

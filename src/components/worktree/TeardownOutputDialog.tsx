@@ -63,7 +63,7 @@ export function TeardownOutputDialog() {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Icon
-              className={`size-4 ${success ? 'text-green-500' : 'text-destructive'}`}
+              className={`size-4 ${success ? 'text-success' : 'text-destructive'}`}
             />
             {success ? 'Teardown Completed' : 'Teardown Failed'}
           </DialogTitle>

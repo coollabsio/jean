@@ -4,10 +4,7 @@ use std::collections::HashMap;
 
 use tauri::{AppHandle, State};
 
-use super::{
-    BackgroundTaskManager, MAX_POLL_INTERVAL, MAX_REMOTE_POLL_INTERVAL, MIN_POLL_INTERVAL,
-    MIN_REMOTE_POLL_INTERVAL,
-};
+use super::BackgroundTaskManager;
 use crate::projects::git_status::ActiveWorktreeInfo;
 use crate::projects::storage::load_projects_data;
 use serde::Deserialize;
@@ -83,7 +80,7 @@ pub fn set_active_worktree_for_polling(
     pr_url: Option<String>,
 ) -> Result<(), String> {
     let info = match (worktree_id, worktree_path, base_branch) {
-        (Some(id), Some(path), Some(branch)) => {
+        (Some(id), Some(path), Some(branch)) if !crate::projects::is_server_worktree(&app, &id) => {
             let context = lookup_status_context(&app, &id);
             Some(ActiveWorktreeInfo {
                 worktree_id: id,
@@ -103,28 +100,6 @@ pub fn set_active_worktree_for_polling(
     Ok(())
 }
 
-/// Set the git polling interval in seconds
-///
-/// The interval must be between 10 and 600 seconds (10 seconds to 10 minutes).
-/// Values outside this range will be clamped.
-pub fn set_git_poll_interval(
-    state: State<'_, BackgroundTaskManager>,
-    seconds: u64,
-) -> Result<(), String> {
-    if !(MIN_POLL_INTERVAL..=MAX_POLL_INTERVAL).contains(&seconds) {
-        log::warn!(
-            "Git poll interval {seconds} out of range, will be clamped to {MIN_POLL_INTERVAL}-{MAX_POLL_INTERVAL}"
-        );
-    }
-    state.set_poll_interval(seconds);
-    Ok(())
-}
-
-/// Get the current git polling interval in seconds
-pub fn get_git_poll_interval(state: State<'_, BackgroundTaskManager>) -> Result<u64, String> {
-    Ok(state.get_poll_interval())
-}
-
 /// Trigger an immediate local git status poll
 ///
 /// This bypasses the normal polling interval and debounce timer
@@ -132,29 +107,6 @@ pub fn get_git_poll_interval(state: State<'_, BackgroundTaskManager>) -> Result<
 pub fn trigger_immediate_git_poll(state: State<'_, BackgroundTaskManager>) -> Result<(), String> {
     state.trigger_immediate_poll();
     Ok(())
-}
-
-/// Set the remote polling interval in seconds
-///
-/// The interval must be between 30 and 600 seconds (30 seconds to 10 minutes).
-/// Values outside this range will be clamped.
-/// This controls how often remote API calls (like PR status via `gh`) are made.
-pub fn set_remote_poll_interval(
-    state: State<'_, BackgroundTaskManager>,
-    seconds: u64,
-) -> Result<(), String> {
-    if !(MIN_REMOTE_POLL_INTERVAL..=MAX_REMOTE_POLL_INTERVAL).contains(&seconds) {
-        log::warn!(
-            "Remote poll interval {seconds} out of range, will be clamped to {MIN_REMOTE_POLL_INTERVAL}-{MAX_REMOTE_POLL_INTERVAL}"
-        );
-    }
-    state.set_remote_poll_interval(seconds);
-    Ok(())
-}
-
-/// Get the current remote polling interval in seconds
-pub fn get_remote_poll_interval(state: State<'_, BackgroundTaskManager>) -> Result<u64, String> {
-    Ok(state.get_remote_poll_interval())
 }
 
 /// Trigger an immediate remote poll
@@ -228,8 +180,10 @@ pub fn set_all_worktrees_for_polling(
     worktrees: Vec<AllWorktreeInfo>,
 ) -> Result<(), String> {
     let contexts = load_status_contexts(&app);
+    let server_worktrees = crate::projects::server_worktree_ids(&app);
     let infos: Vec<ActiveWorktreeInfo> = worktrees
         .into_iter()
+        .filter(|w| !server_worktrees.contains(&w.worktree_id))
         .map(|w| {
             let context = contexts.get(&w.worktree_id).cloned().unwrap_or_default();
             ActiveWorktreeInfo {

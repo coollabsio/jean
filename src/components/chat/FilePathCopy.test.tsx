@@ -71,13 +71,13 @@ describe('FilePathCopyRow', () => {
 
     const button = clickCopyButton()
     expect(toastSuccess).not.toHaveBeenCalled()
-    expect(button.querySelector('svg')).not.toHaveClass('text-green-500')
+    expect(button.querySelector('svg')).not.toHaveClass('text-success')
 
     resolveCopy()
     await waitFor(() =>
       expect(toastSuccess).toHaveBeenCalledWith('Copied file path to clipboard')
     )
-    expect(button.querySelector('svg')).toHaveClass('text-green-500')
+    expect(button.querySelector('svg')).toHaveClass('text-success')
   })
 
   it('reports copy failures without a success checkmark', async () => {
@@ -91,7 +91,7 @@ describe('FilePathCopyRow', () => {
       )
     )
     expect(toastSuccess).not.toHaveBeenCalled()
-    expect(button.querySelector('svg')).not.toHaveClass('text-green-500')
+    expect(button.querySelector('svg')).not.toHaveClass('text-success')
   })
 
   it('does not show a checkmark on a new path when an in-flight copy resolves', async () => {
@@ -114,7 +114,7 @@ describe('FilePathCopyRow', () => {
       screen
         .getByRole('button', { name: 'Copy file path' })
         .querySelector('svg')
-    ).not.toHaveClass('text-green-500')
+    ).not.toHaveClass('text-success')
   })
 })
 
@@ -176,7 +176,7 @@ describe('file path copy buttons', () => {
       fireEvent.click(button)
 
       expect(toastSuccess).not.toHaveBeenCalled()
-      expect(button.querySelector('svg')).not.toHaveClass('text-green-500')
+      expect(button.querySelector('svg')).not.toHaveClass('text-success')
 
       resolveCopy()
       await waitFor(() =>
@@ -184,7 +184,7 @@ describe('file path copy buttons', () => {
           'Copied file path to clipboard'
         )
       )
-      expect(button.querySelector('svg')).toHaveClass('text-green-500')
+      expect(button.querySelector('svg')).toHaveClass('text-success')
     }
   )
 
@@ -235,6 +235,6 @@ describe('file path copy buttons', () => {
       )
     )
     expect(toastSuccess).not.toHaveBeenCalled()
-    expect(button.querySelector('svg')).not.toHaveClass('text-green-500')
+    expect(button.querySelector('svg')).not.toHaveClass('text-success')
   })
 })

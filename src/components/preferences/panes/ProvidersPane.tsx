@@ -110,8 +110,8 @@ export const ProvidersPane: React.FC = () => {
             <div>
               <p className="text-sm font-medium">Default Codex Provider</p>
               <p className="text-xs text-muted-foreground">
-                Provider used for new Codex sessions (null keeps ChatGPT / OpenAI
-                default)
+                Provider used for new Codex sessions (null keeps ChatGPT /
+                OpenAI default)
               </p>
             </div>
             <Select
@@ -122,7 +122,9 @@ export const ProvidersPane: React.FC = () => {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="default">Default (OpenAI / ChatGPT)</SelectItem>
+                <SelectItem value="default">
+                  Default (OpenAI / ChatGPT)
+                </SelectItem>
                 {codexProviders.map(p => (
                   <SelectItem key={p.name} value={p.name}>
                     {p.name}
@@ -254,12 +256,9 @@ const CliProfilesEditor: React.FC<{
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-1">
       {profiles.map((profile, index) => (
-        <div
-          key={profile.name}
-          className="flex items-center gap-2 rounded-md border border-border px-3 py-2"
-        >
+        <div key={profile.name} className="flex items-center gap-2 py-1">
           <div className="flex-1 min-w-0">
             <span className="text-sm font-medium">{profile.name}</span>
             {profile.file_path && (
@@ -288,7 +287,7 @@ const CliProfilesEditor: React.FC<{
       ))}
 
       {(isAdding || editingIndex !== null) && (
-        <div className="space-y-2 rounded-md border border-border p-3">
+        <div className="space-y-2">
           <Input
             placeholder="Profile name"
             value={editName}
@@ -423,7 +422,9 @@ const CodexProvidersEditor: React.FC<{
       return
     }
     if (!envKey) {
-      setError('Env key is required (API key lives in that environment variable)')
+      setError(
+        'Env key is required (API key lives in that environment variable)'
+      )
       return
     }
     const duplicate = providers.some(
@@ -460,12 +461,9 @@ const CodexProvidersEditor: React.FC<{
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-1">
       {providers.map((provider, index) => (
-        <div
-          key={provider.name}
-          className="flex items-center gap-2 rounded-md border border-border px-3 py-2"
-        >
+        <div key={provider.name} className="flex items-center gap-2 py-1">
           <div className="flex-1 min-w-0">
             <span className="text-sm font-medium">{provider.name}</span>
             <p className="text-xs text-muted-foreground truncate">
@@ -493,7 +491,7 @@ const CodexProvidersEditor: React.FC<{
       ))}
 
       {(isAdding || editingIndex !== null) && (
-        <div className="space-y-2 rounded-md border border-border p-3">
+        <div className="space-y-2">
           <Input
             placeholder="Display name (e.g. OpenRouter)"
             value={editName}
@@ -662,7 +660,9 @@ const PiProvidersEditor: React.FC<{
     }
     const models = parseModels()
     if (!models) {
-      setError('At least one model id is required (one per line, optional id|name)')
+      setError(
+        'At least one model id is required (one per line, optional id|name)'
+      )
       return
     }
     const duplicate = providers.some(
@@ -677,9 +677,7 @@ const PiProvidersEditor: React.FC<{
       name,
       base_url: baseUrl,
       api: editApi,
-      ...(editApiKeyEnv.trim()
-        ? { api_key_env: editApiKeyEnv.trim() }
-        : {}),
+      ...(editApiKeyEnv.trim() ? { api_key_env: editApiKeyEnv.trim() } : {}),
       models,
     }
 
@@ -720,12 +718,9 @@ const PiProvidersEditor: React.FC<{
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-1">
       {providers.map((provider, index) => (
-        <div
-          key={provider.name}
-          className="flex items-center gap-2 rounded-md border border-border px-3 py-2"
-        >
+        <div key={provider.name} className="flex items-center gap-2 py-1">
           <div className="flex-1 min-w-0">
             <span className="text-sm font-medium">{provider.name}</span>
             <p className="text-xs text-muted-foreground truncate">
@@ -754,7 +749,7 @@ const PiProvidersEditor: React.FC<{
       ))}
 
       {(isAdding || editingIndex !== null) && (
-        <div className="space-y-2 rounded-md border border-border p-3">
+        <div className="space-y-2">
           <Input
             placeholder="Provider id (e.g. openrouter)"
             value={editName}

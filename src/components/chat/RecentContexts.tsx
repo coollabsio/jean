@@ -1,7 +1,14 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useQuery, type QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { FileText, Loader2, Check, Link2, Eye, Ellipsis } from '@/components/icons/reicon'
+import {
+  FileText,
+  Loader2,
+  Check,
+  Link2,
+  Eye,
+  Ellipsis,
+} from '@/components/icons/reicon'
 import { useUIStore } from '@/store/ui-store'
 import {
   Dialog,
@@ -180,7 +187,7 @@ export function RecentContexts({
           {isLoading ? (
             <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
           ) : isAttached ? (
-            <Check className="h-3 w-3 shrink-0 text-green-500" />
+            <Check className="h-3 w-3 shrink-0 text-success" />
           ) : (
             <FileText className="h-3 w-3 shrink-0 text-muted-foreground" />
           )}

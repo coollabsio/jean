@@ -36,7 +36,7 @@ vi.mock('./MemoizedFileDiff', () => ({
       </button>
     </div>
   ),
-  getStatusColor: () => 'text-blue-500',
+  getStatusColor: () => 'text-info',
 }))
 
 const mockDiff: GitDiff = {

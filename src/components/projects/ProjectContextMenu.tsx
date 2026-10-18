@@ -32,7 +32,7 @@ import {
 } from '@/services/projects'
 import { usePreferences } from '@/services/preferences'
 import { useProjectsStore } from '@/store/projects-store'
-import { useUIStore } from '@/store/ui-store'
+import { closeLeftSidebarOnMobile, useUIStore } from '@/store/ui-store'
 import { getEditorLabel, getTerminalLabel } from '@/types/preferences'
 import { getFileManagerName } from '@/lib/platform'
 import { canOpenInFinder } from '@/lib/environment'
@@ -58,16 +58,17 @@ export function ProjectContextMenu({
   const cachedWorktrees = queryClient.getQueryData<Worktree[]>(
     projectsQueryKeys.worktrees(project.id)
   )
-  const worktreeCount = Math.max(
-    project.worktree_count ?? 0,
-    cachedWorktrees?.length ?? 0
-  )
+  // Prefer loaded worktrees: project.worktree_count can be stale
+  const worktreeCount = cachedWorktrees?.length ?? project.worktree_count ?? 0
   const hasBaseSession =
     project.has_base_session === true ||
     (cachedWorktrees?.some(worktree => worktree.session_type === 'base') ??
       false)
   const { data: preferences } = usePreferences()
-  const { openProjectSettings, selectProject } = useProjectsStore()
+  const openProjectSettings = useProjectsStore(
+    state => state.openProjectSettings
+  )
+  const selectProject = useProjectsStore(state => state.selectProject)
   const setNewWorktreeModalOpen = useUIStore(
     state => state.setNewWorktreeModalOpen
   )
@@ -103,6 +104,7 @@ export function ProjectContextMenu({
   }
 
   const handleNewBaseSession = () => {
+    closeLeftSidebarOnMobile()
     createBaseSession.mutate(project.id)
   }
 

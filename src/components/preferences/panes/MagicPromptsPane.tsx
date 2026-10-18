@@ -6,8 +6,10 @@ import {
   RotateCcw,
   Trash2,
 } from '@/components/icons/reicon'
+import { BackendModelPickerContent } from '@/components/chat/toolbar/BackendModelPickerContent'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import { Switch } from '@/components/ui/switch'
 import {
   Select,
   SelectContent,
@@ -41,6 +43,7 @@ import { useAvailableAntigravityModels } from '@/services/antigravity-cli'
 import {
   getCatalogModelOptions,
   getCatalogDefaultModelOptions,
+  getCatalogModelFastInfo,
   getCatalogModelReasoning,
   useModelCatalog,
 } from '@/services/model-catalog'
@@ -73,9 +76,11 @@ import {
   DEFAULT_INVESTIGATE_SENTRY_ISSUE_PROMPT,
   DEFAULT_RELEASE_NOTES_PROMPT,
   DEFAULT_REVIEW_COMMENTS_PROMPT,
+  DEFAULT_PRE_RELEASE_REVIEW_PROMPT,
   DEFAULT_SESSION_NAMING_PROMPT,
   DEFAULT_PARALLEL_EXECUTION_PROMPT,
   DEFAULT_GLOBAL_SYSTEM_PROMPT,
+  DEFAULT_SERVER_SYSTEM_PROMPT,
   DEFAULT_PROVIDER_SWITCH_HANDOFF_PROMPT,
   DEFAULT_MAGIC_PROMPTS,
   DEFAULT_MAGIC_PROMPT_MODELS,
@@ -161,7 +166,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
           },
         ],
         defaultValue: DEFAULT_INVESTIGATE_ISSUE_PROMPT,
-        defaultModel: 'claude-opus-4-8[1m]',
+        defaultModel: 'claude-opus-5-5',
       },
       {
         key: 'investigate_pr',
@@ -184,7 +189,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
           },
         ],
         defaultValue: DEFAULT_INVESTIGATE_PR_PROMPT,
-        defaultModel: 'claude-opus-4-8[1m]',
+        defaultModel: 'claude-opus-5-5',
       },
       {
         key: 'investigate_workflow_run',
@@ -213,7 +218,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
           },
         ],
         defaultValue: DEFAULT_INVESTIGATE_WORKFLOW_RUN_PROMPT,
-        defaultModel: 'claude-opus-4-8[1m]',
+        defaultModel: 'claude-opus-5-5',
       },
       {
         key: 'investigate_security_alert',
@@ -237,7 +242,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
           },
         ],
         defaultValue: DEFAULT_INVESTIGATE_SECURITY_ALERT_PROMPT,
-        defaultModel: 'claude-opus-4-8[1m]',
+        defaultModel: 'claude-opus-5-5',
       },
       {
         key: 'investigate_advisory',
@@ -259,7 +264,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
           },
         ],
         defaultValue: DEFAULT_INVESTIGATE_ADVISORY_PROMPT,
-        defaultModel: 'claude-opus-4-8[1m]',
+        defaultModel: 'claude-opus-5-5',
       },
       {
         key: 'investigate_linear_issue',
@@ -286,7 +291,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
           },
         ],
         defaultValue: DEFAULT_INVESTIGATE_LINEAR_ISSUE_PROMPT,
-        defaultModel: 'claude-opus-4-8[1m]',
+        defaultModel: 'claude-opus-5-5',
       },
       {
         key: 'investigate_sentry_issue',
@@ -313,7 +318,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
           },
         ],
         defaultValue: DEFAULT_INVESTIGATE_SENTRY_ISSUE_PROMPT,
-        defaultModel: 'claude-opus-4-8[1m]',
+        defaultModel: 'claude-opus-5-5',
       },
     ],
   },
@@ -342,7 +347,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
           },
         ],
         defaultValue: DEFAULT_CODE_REVIEW_PROMPT,
-        defaultModel: 'claude-opus-4-8[1m]',
+        defaultModel: 'claude-opus-5-5',
       },
       {
         key: 'review_comments',
@@ -366,7 +371,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
           },
         ],
         defaultValue: DEFAULT_REVIEW_COMMENTS_PROMPT,
-        defaultModel: 'claude-opus-4-8[1m]',
+        defaultModel: 'claude-opus-5-5',
       },
       {
         key: 'commit_message',
@@ -440,7 +445,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
         description: 'Instructions appended to conflict resolution prompts.',
         variables: [],
         defaultValue: DEFAULT_RESOLVE_CONFLICTS_PROMPT,
-        defaultModel: 'claude-opus-4-8[1m]',
+        defaultModel: 'claude-opus-5-5',
       },
       {
         key: 'release_notes',
@@ -477,6 +482,14 @@ const PROMPT_SECTIONS: PromptSection[] = [
         ],
         defaultValue: DEFAULT_RELEASE_NOTES_PROMPT,
         defaultModel: 'sonnet',
+      },
+      {
+        key: 'pre_release_review',
+        label: 'Pre-release Review',
+        description:
+          'Prompt sent to the current session from Magic → Pre-release Review. Reviews all changes since the last production release. Uses the session’s current model and mode.',
+        variables: [],
+        defaultValue: DEFAULT_PRE_RELEASE_REVIEW_PROMPT,
       },
     ],
   },
@@ -533,7 +546,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
         key: 'parallel_execution',
         label: 'Parallel Execution',
         description:
-          'System prompt appended to every chat session when enabled in General defaults. Encourages sub-agent parallelization.',
+          'System prompt appended to every chat session. Encourages sub-agent parallelization.',
         variables: [],
         defaultValue: DEFAULT_PARALLEL_EXECUTION_PROMPT,
       },
@@ -544,6 +557,25 @@ const PROMPT_SECTIONS: PromptSection[] = [
           'Global system prompt appended to every chat session (like ~/.claude/CLAUDE.md).',
         variables: [],
         defaultValue: DEFAULT_GLOBAL_SYSTEM_PROMPT,
+      },
+      {
+        key: 'server_system_prompt',
+        label: 'Server System Prompt',
+        description:
+          'Replaces the global system prompt in sessions of servers (Servers tab). Server sessions start in Supervised mode.',
+        variables: [
+          { name: '{server_name}', description: 'Server display name' },
+          {
+            name: '{connection}',
+            description:
+              'How to run commands: the SSH line for remote servers, or "run directly" for Local',
+          },
+          {
+            name: '{ssh_command}',
+            description: 'Non-interactive SSH command prefix (empty for Local)',
+          },
+        ],
+        defaultValue: DEFAULT_SERVER_SYSTEM_PROMPT,
       },
       {
         key: 'provider_switch_handoff',
@@ -686,6 +718,13 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
   const [localValue, setLocalValue] = useState('')
   const [modelPopoverOpen, setModelPopoverOpen] = useState(false)
   const [bulkModelPopoverOpen, setBulkModelPopoverOpen] = useState(false)
+  const [bulkSelection, setBulkSelection] = useState<{
+    backend: CliBackend
+    model: MagicPromptModel
+    label: string
+  } | null>(null)
+  const [bulkFast, setBulkFast] = useState(false)
+  const [bulkMode, setBulkMode] = useState<MagicPromptExecutionMode>('plan')
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const highlightTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
@@ -1457,43 +1496,68 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     [preferences, patchPreferences, currentModes, selectedConfig.modeKey]
   )
 
-  const handleApplyModelToAll = useCallback(
-    (backend: CliBackend, model: MagicPromptModel) => {
-      if (!preferences || !installedBackends.includes(backend)) return
-      const models = { ...currentModels }
-      const backends = { ...currentBackends }
-      for (const config of PROMPT_CONFIGS) {
-        if (config.modelKey) models[config.modelKey] = model
-        if (config.backendKey) backends[config.backendKey] = backend
-      }
-      patchPreferences.mutate({
-        magic_prompt_models: models,
-        magic_code_review_configs: [
-          {
-            ...makeCodeReviewConfig(modelCatalog, backend, model),
-            fix_mode: currentModes.code_review_fix_mode,
-          },
-        ],
-        magic_prompt_providers: DEFAULT_MAGIC_PROMPT_PROVIDERS,
-        magic_prompt_backends: backends,
-        magic_prompt_efforts: getMagicPromptReasoningDefaults(
-          modelCatalog,
-          backend,
-          models
-        ),
-      })
-      setBulkModelPopoverOpen(false)
-    },
-    [
-      preferences,
-      installedBackends,
-      currentModels,
-      currentBackends,
-      currentModes.code_review_fix_mode,
-      patchPreferences,
-      modelCatalog,
-    ]
-  )
+  const handleBulkModelChange = (backend: CliBackend, model: string) => {
+    const options =
+      backend === 'claude' ? claudeModelOptions : getReviewModelOptions(backend)
+    setBulkSelection({
+      backend,
+      model: model as MagicPromptModel,
+      label: options.find(option => option.value === model)?.label ?? model,
+    })
+  }
+
+  const bulkFastModel = bulkSelection
+    ? getCatalogModelFastInfo(
+        modelCatalog,
+        bulkSelection.backend,
+        bulkSelection.model
+      ).fastModel
+    : undefined
+
+  const handleApplyToAll = useCallback(() => {
+    if (!preferences || !bulkSelection) return
+    const { backend } = bulkSelection
+    if (!installedBackends.includes(backend)) return
+    const model = ((bulkFast && bulkFastModel) ||
+      bulkSelection.model) as MagicPromptModel
+    const models = { ...currentModels }
+    const backends = { ...currentBackends }
+    const modes = { ...currentModes, code_review_fix_mode: bulkMode }
+    for (const config of PROMPT_CONFIGS) {
+      if (config.modelKey) models[config.modelKey] = model
+      if (config.backendKey) backends[config.backendKey] = backend
+      if (config.modeKey) modes[config.modeKey] = bulkMode
+    }
+    patchPreferences.mutate({
+      magic_prompt_models: models,
+      magic_code_review_configs: [
+        {
+          ...makeCodeReviewConfig(modelCatalog, backend, model),
+          fix_mode: bulkMode,
+        },
+      ],
+      magic_prompt_providers: DEFAULT_MAGIC_PROMPT_PROVIDERS,
+      magic_prompt_backends: backends,
+      magic_prompt_modes: modes,
+      magic_prompt_efforts: getMagicPromptReasoningDefaults(
+        modelCatalog,
+        backend,
+        models
+      ),
+    })
+  }, [
+    preferences,
+    bulkSelection,
+    bulkFast,
+    bulkFastModel,
+    bulkMode,
+    installedBackends,
+    currentModels,
+    currentBackends,
+    currentModes,
+    patchPreferences,
+    modelCatalog,
+  ])
 
   // Flush pending save when switching prompts
   const prevSelectedKeyRef = useRef(selectedKey)
@@ -1525,7 +1589,11 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
 
   return (
     <div className="flex flex-col min-h-0 flex-1">
-      <div className="mb-3 shrink-0">
+      <div
+        data-testid="magic-prompts-bulk-controls"
+        className="mb-3 flex shrink-0 flex-wrap items-center gap-2"
+      >
+        <span className="text-xs text-muted-foreground">All prompts:</span>
         <Popover
           open={bulkModelPopoverOpen}
           onOpenChange={setBulkModelPopoverOpen}
@@ -1535,48 +1603,86 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
               variant="outline"
               size="sm"
               role="combobox"
-              aria-label="Set model for all prompts"
+              aria-label="Model for all prompts"
+              disabled={installedBackends.length === 0}
               aria-expanded={bulkModelPopoverOpen}
               className="h-7 text-xs"
             >
-              Set model for all prompts
+              {bulkSelection ? (
+                <>
+                  {getBackendPlainLabel(bulkSelection.backend)} ·{' '}
+                  {bulkSelection.label}
+                </>
+              ) : (
+                'Select model'
+              )}
               <ChevronsUpDown className="size-3.5" />
             </Button>
           </PopoverTrigger>
           <PopoverContent
             align="start"
-            className="w-80 max-w-[calc(100vw-2rem)] p-0"
+            className="w-[min(36rem,calc(100vw-2rem))] p-0"
           >
-            <Command>
-              <CommandInput placeholder="Search backends and models..." />
-              <CommandList>
-                <CommandEmpty>No available models found.</CommandEmpty>
-                {installedBackends.map(backend => (
-                  <CommandGroup
-                    key={backend}
-                    heading={getBackendPlainLabel(backend)}
-                  >
-                    {(backend === 'claude'
-                      ? claudeModelOptions
-                      : getReviewModelOptions(backend)
-                    ).map(option => (
-                      <CommandItem
-                        key={option.value}
-                        value={`${backend} ${option.value} ${option.label}`}
-                        keywords={[getBackendPlainLabel(backend)]}
-                        onSelect={() =>
-                          handleApplyModelToAll(backend, option.value)
-                        }
-                      >
-                        {option.label}
-                      </CommandItem>
-                    ))}
-                  </CommandGroup>
-                ))}
-              </CommandList>
-            </Command>
+            <BackendModelPickerContent
+              open={bulkModelPopoverOpen}
+              selectedBackend={
+                bulkSelection?.backend ?? installedBackends[0] ?? 'claude'
+              }
+              selectedModel={bulkSelection?.model ?? ''}
+              selectedProvider={null}
+              installedBackends={installedBackends}
+              customCliProfiles={profiles}
+              onModelChange={model =>
+                handleBulkModelChange(
+                  bulkSelection?.backend ?? installedBackends[0] ?? 'claude',
+                  model
+                )
+              }
+              onBackendModelChange={handleBulkModelChange}
+              onRequestClose={() => setBulkModelPopoverOpen(false)}
+            />
           </PopoverContent>
         </Popover>
+        <label
+          className={cn(
+            'flex items-center gap-1.5 text-xs',
+            !bulkFastModel && 'opacity-50'
+          )}
+        >
+          <Switch
+            aria-label="Fast mode for all prompts"
+            checked={bulkFast && Boolean(bulkFastModel)}
+            disabled={!bulkFastModel}
+            onCheckedChange={setBulkFast}
+          />
+          Fast
+        </label>
+        <Select
+          value={bulkMode}
+          onValueChange={value =>
+            setBulkMode(value as MagicPromptExecutionMode)
+          }
+        >
+          <SelectTrigger
+            aria-label="Mode for all prompts"
+            size="sm"
+            className="h-7 w-24 text-xs"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="plan">Plan</SelectItem>
+            <SelectItem value="yolo">Full access</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button
+          size="sm"
+          className="h-7 text-xs"
+          disabled={!bulkSelection}
+          onClick={handleApplyToAll}
+        >
+          Apply to all prompts
+        </Button>
       </div>
 
       {/* Master-detail layout */}
@@ -1661,7 +1767,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
             className={cn(
               'mb-2 shrink-0',
               hasPromptConfigControls
-                ? 'flex w-full flex-col gap-2 rounded-lg border border-border/60 p-2.5'
+                ? 'flex w-full flex-col gap-2'
                 : 'flex flex-wrap items-center gap-2'
             )}
           >
@@ -1680,7 +1786,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                     <div
                       data-testid={`magic-code-review-config-${index}`}
                       key={codeReviewConfigKey(config)}
-                      className="flex flex-col gap-2 rounded-lg border border-border/60 p-2.5"
+                      className="flex flex-col gap-2"
                     >
                       <div className="flex h-7 items-center justify-between">
                         <span className="text-xs font-medium">
@@ -1858,7 +1964,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="plan">Plan</SelectItem>
-                            <SelectItem value="yolo">Yolo</SelectItem>
+                            <SelectItem value="yolo">Full access</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -2350,9 +2456,23 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="plan">Plan</SelectItem>
-                    <SelectItem value="yolo">Yolo</SelectItem>
+                    <SelectItem value="yolo">Full access</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+            )}
+            {selectedKey === 'commit_message' && (
+              <div className="flex flex-col gap-2">
+                <label className="flex items-center gap-2 text-xs">
+                  <Switch
+                    checked={preferences?.commit_close_issue ?? false}
+                    onCheckedChange={checked =>
+                      patchPreferences.mutate({ commit_close_issue: checked })
+                    }
+                  />
+                  Add &quot;Closes #issue&quot; when the worktree has a linked
+                  GitHub issue
+                </label>
               </div>
             )}
             <Button

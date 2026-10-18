@@ -83,7 +83,6 @@ export type { ChatToolbarProps }
 const EMPTY_CODEX_PROVIDERS: CodexProviderProfile[] = []
 
 /** Tracks concurrent ChatToolbar mounts (remount races during session switch). */
-let chatToolbarMountCount = 0
 
 export const ChatToolbar = memo(function ChatToolbar({
   isSending,
@@ -192,21 +191,6 @@ export const ChatToolbar = memo(function ChatToolbar({
     setThinkingDropdownOpen,
   })
 
-  // Signal to FloatingDock that its burger counterpart now lives in this toolbar.
-  // Use a process-wide mount count so React remount races (session key change)
-  // cannot leave chatToolbarMounted=false while a newer toolbar is mounted —
-  // that would show FloatingDock over a blank-looking chat on mobile/web.
-  useEffect(() => {
-    chatToolbarMountCount += 1
-    useUIStore.getState().setChatToolbarMounted(true)
-    return () => {
-      chatToolbarMountCount = Math.max(0, chatToolbarMountCount - 1)
-      if (chatToolbarMountCount === 0) {
-        useUIStore.getState().setChatToolbarMounted(false)
-      }
-    }
-  }, [])
-
   const { data: availableOpencodeModels } = useAvailableOpencodeModels({
     enabled: selectedBackend === 'opencode',
   })
@@ -283,7 +267,7 @@ export const ChatToolbar = memo(function ChatToolbar({
         <span className="truncate">· {selectedModelLabel}</span>
         {getModelFastInfo(selectedBackend, selectedModel).isFast && (
           <Zap
-            className="h-3 w-3 shrink-0 fill-current text-yellow-500"
+            className="h-3 w-3 shrink-0 fill-current text-warning"
             aria-label="Fast mode"
           />
         )}
@@ -518,26 +502,28 @@ export const ChatToolbar = memo(function ChatToolbar({
           <div className={zenMode ? 'hidden' : 'contents'}>
             <DockBurgerButton className="flex @xl:hidden" />
 
-            <MobileToolbarMenu
-              isDisabled={false}
-              hasOpenPr={hasOpenPr}
-              hasIssueContexts={loadedIssueContexts.length > 0}
-              hasSentryContexts={loadedSentryContexts.length > 0}
-              hasPrContexts={loadedPRContexts.length > 0}
-              hasAdvisoryContexts={loadedAdvisoryContexts.length > 0}
-              onSaveContext={onSaveContext}
-              onLoadContext={onLoadContext}
-              onCommit={onCommit}
-              onCommitAndPush={onCommitAndPush}
-              onRevertLastCommit={handleRevertLastCommit}
-              onOpenPr={onOpenPr}
-              onReview={onReview}
-              onMerge={onMerge}
-              onMergePr={onMergePr}
-              handleSyncClick={handleSyncClick}
-              handlePullClick={handlePullClick}
-              handlePushClick={handlePushClick}
-            />
+            {onOpenMagicModal && (
+              <MobileToolbarMenu
+                isDisabled={false}
+                hasOpenPr={hasOpenPr}
+                hasIssueContexts={loadedIssueContexts.length > 0}
+                hasSentryContexts={loadedSentryContexts.length > 0}
+                hasPrContexts={loadedPRContexts.length > 0}
+                hasAdvisoryContexts={loadedAdvisoryContexts.length > 0}
+                onSaveContext={onSaveContext}
+                onLoadContext={onLoadContext}
+                onCommit={onCommit}
+                onCommitAndPush={onCommitAndPush}
+                onRevertLastCommit={handleRevertLastCommit}
+                onOpenPr={onOpenPr}
+                onReview={onReview}
+                onMerge={onMerge}
+                onMergePr={onMergePr}
+                handleSyncClick={handleSyncClick}
+                handlePullClick={handlePullClick}
+                handlePushClick={handlePushClick}
+              />
+            )}
 
             <MobileSettingsMenu
               isDisabled={false}
@@ -614,15 +600,17 @@ export const ChatToolbar = memo(function ChatToolbar({
             <div className="block @xl:hidden h-4 w-px shrink-0 bg-border/50" />
 
             <ExecutionModeDropdown
+              backend={selectedBackend}
+              sessionId={activeSessionId}
               executionMode={executionMode}
               availableModes={availableExecutionModes}
-              disabled={hasPendingQuestions}
               onSetExecutionMode={onSetExecutionMode}
               className="flex @xl:hidden shrink-0"
               align="end"
             />
 
             <DesktopToolbarControls
+              activeSessionId={activeSessionId}
               hasPendingQuestions={hasPendingQuestions}
               selectedBackend={selectedBackend}
               selectedModel={selectedModel}
@@ -687,7 +675,7 @@ export const ChatToolbar = memo(function ChatToolbar({
             <div className="h-4 w-px shrink-0 bg-border/50" />
           </div>
 
-          <div className="shrink-0">
+          <div className="shrink-0 py-1">
             <SendCancelButton
               isSending={isSending}
               canSend={canSend}

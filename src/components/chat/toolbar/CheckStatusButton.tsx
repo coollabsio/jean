@@ -41,13 +41,11 @@ export function CheckStatusButton({
       break
     case 'failure':
     case 'error':
-      className =
-        'bg-red-500/10 text-red-600 hover:bg-red-500/20 dark:text-red-400'
+      className = 'bg-destructive/10 text-destructive hover:bg-destructive/20'
       tooltip = 'Checks failing'
       break
     case 'pending':
-      className =
-        'bg-yellow-500/10 text-yellow-600 animate-pulse hover:bg-yellow-500/20 dark:text-yellow-400'
+      className = 'bg-warning/10 text-warning animate-pulse hover:bg-warning/20'
       tooltip = 'Checks pending'
       break
     default:

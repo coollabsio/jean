@@ -14,10 +14,27 @@ const LeftSideBar = lazy(() =>
   }))
 )
 
+// Keep in sync with the `3rem` gutter in the drawer width class below.
+const DRAWER_GUTTER_PX = 48
+
+/** Real drawer width in px, so sidebar content can size itself correctly. */
+function useDrawerWidth() {
+  const [width, setWidth] = useState(
+    () => window.innerWidth - DRAWER_GUTTER_PX
+  )
+
+  useEffect(() => {
+    const onResize = () => setWidth(window.innerWidth - DRAWER_GUTTER_PX)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  return width
+}
+
 interface MobileLeftSidebarProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  width: number
   isDragging?: boolean
   dragOffset?: number
   dragTransition?: string
@@ -30,12 +47,12 @@ interface MobileLeftSidebarProps {
 export function MobileLeftSidebar({
   open,
   onOpenChange,
-  width,
   isDragging = false,
   dragOffset = 0,
   dragTransition = '',
 }: MobileLeftSidebarProps) {
   const [openedByDrag, setOpenedByDrag] = useState(false)
+  const width = useDrawerWidth()
 
   useEffect(() => {
     if (isDragging) {
@@ -58,10 +75,10 @@ export function MobileLeftSidebar({
         // Don't autofocus the first tree control (Expand all) — that opens its
         // tooltip on focus when the drawer slides in on mobile.
         onOpenAutoFocus={e => e.preventDefault()}
-        className="bg-sidebar text-sidebar-foreground dark:bg-[#0b0b0b] w-[min(85vw,var(--mobile-sidebar-width))] gap-0 border-r p-0 sm:max-w-[min(85vw,var(--mobile-sidebar-width))]"
+        // Almost full width; the thin dimmed strip on the right still dismisses.
+        className="bg-sidebar text-sidebar-foreground dark:bg-[#0b0b0b] w-[calc(100vw-3rem)] gap-0 border-r p-0 sm:max-w-[calc(100vw-3rem)]"
         style={
           {
-            '--mobile-sidebar-width': `${width}px`,
             ...(isDragging
               ? {
                   transform: `translate3d(min(0px, calc(-100% + ${dragOffset}px)), 0, 0)`,

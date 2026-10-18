@@ -18,6 +18,8 @@ import type {
   CodexMcpElicitationRequest,
   CodexDynamicToolCallRequest,
   ExecutionMode,
+  PermissionMode,
+  PinnedTable,
 } from '@/types/chat'
 
 // Simple debounce implementation with flush support
@@ -83,7 +85,10 @@ interface SessionState {
   pendingPlanMessageId: string | null
   enabledMcpServers: string[] | null
   selectedExecutionMode: ExecutionMode | null
+  selectedPermissionMode: PermissionMode | undefined
   tableCheckedRows: Record<string, number[]>
+  hiddenTableChecklists: string[]
+  pinnedTables: PinnedTable[]
 }
 
 /**
@@ -175,7 +180,10 @@ export function useSessionStatePersistence() {
         pendingPlanMessageIds,
         enabledMcpServers,
         executionModes,
+        permissionModes,
         tableCheckedRows,
+        hiddenTableChecklists,
+        pinnedTables,
       } = useChatStore.getState()
 
       const ctx = deniedMessageContext[sessionId]
@@ -216,11 +224,14 @@ export function useSessionStatePersistence() {
         pendingPlanMessageId: pendingPlanMessageIds[sessionId] ?? null,
         enabledMcpServers: enabledMcpServers[sessionId] ?? null,
         selectedExecutionMode: executionModes[sessionId] ?? null,
+        selectedPermissionMode: permissionModes[sessionId],
         tableCheckedRows: Object.fromEntries(
           Object.entries(tableCheckedRows[sessionId] ?? {}).map(
             ([key, set]) => [key, Array.from(set).sort((a, b) => a - b)]
           )
         ),
+        hiddenTableChecklists: hiddenTableChecklists[sessionId] ?? [],
+        pinnedTables: pinnedTables[sessionId] ?? [],
       }
     },
     []
@@ -271,7 +282,10 @@ export function useSessionStatePersistence() {
         pendingPlanMessageId: state.pendingPlanMessageId,
         enabledMcpServers: state.enabledMcpServers,
         selectedExecutionMode: state.selectedExecutionMode,
+        selectedPermissionMode: state.selectedPermissionMode,
         tableCheckedRows: state.tableCheckedRows,
+        hiddenTableChecklists: state.hiddenTableChecklists,
+        pinnedTables: state.pinnedTables,
       })
     }, 500)
 
@@ -581,6 +595,13 @@ export function useSessionStatePersistence() {
         }
       }
 
+      if (session.selected_permission_mode) {
+        updates.permissionModes = {
+          ...currentState.permissionModes,
+          [activeSessionId]: session.selected_permission_mode,
+        }
+      }
+
       // Load per-table checklist state (tableKey -> Set of checked row indices)
       if (
         session.table_checked_rows &&
@@ -595,6 +616,24 @@ export function useSessionStatePersistence() {
         updates.tableCheckedRows = {
           ...currentState.tableCheckedRows,
           [activeSessionId]: hydrated,
+        }
+      }
+
+      if (
+        session.hidden_table_checklists &&
+        session.hidden_table_checklists.length > 0
+      ) {
+        updates.hiddenTableChecklists = {
+          ...currentState.hiddenTableChecklists,
+          [activeSessionId]: session.hidden_table_checklists,
+        }
+      }
+
+      // Load pinned tables
+      if (session.pinned_tables && session.pinned_tables.length > 0) {
+        updates.pinnedTables = {
+          ...currentState.pinnedTables,
+          [activeSessionId]: session.pinned_tables,
         }
       }
 
@@ -683,8 +722,12 @@ export function useSessionStatePersistence() {
     let prevEnabledMcpServers =
       useChatStore.getState().enabledMcpServers[sessionId]
     let prevExecutionMode = useChatStore.getState().executionModes[sessionId]
+    let prevPermissionMode = useChatStore.getState().permissionModes[sessionId]
     let prevTableCheckedRows =
       useChatStore.getState().tableCheckedRows[sessionId]
+    let prevHiddenTableChecklists =
+      useChatStore.getState().hiddenTableChecklists[sessionId]
+    let prevPinnedTables = useChatStore.getState().pinnedTables[sessionId]
 
     const unsubscribe = useChatStore.subscribe(state => {
       if (isLoadingRef.current) return
@@ -713,7 +756,11 @@ export function useSessionStatePersistence() {
       const currentPendingPlanMessageId = state.pendingPlanMessageIds[sessionId]
       const currentEnabledMcpServers = state.enabledMcpServers[sessionId]
       const currentExecutionMode = state.executionModes[sessionId]
+      const currentPermissionMode = state.permissionModes[sessionId]
       const currentTableCheckedRows = state.tableCheckedRows[sessionId]
+      const currentHiddenTableChecklists =
+        state.hiddenTableChecklists[sessionId]
+      const currentPinnedTables = state.pinnedTables[sessionId]
 
       const hasChanges =
         currentAnswered !== prevAnsweredQuestions ||
@@ -736,7 +783,10 @@ export function useSessionStatePersistence() {
         currentPendingPlanMessageId !== prevPendingPlanMessageId ||
         currentEnabledMcpServers !== prevEnabledMcpServers ||
         currentExecutionMode !== prevExecutionMode ||
-        currentTableCheckedRows !== prevTableCheckedRows
+        currentPermissionMode !== prevPermissionMode ||
+        currentTableCheckedRows !== prevTableCheckedRows ||
+        currentHiddenTableChecklists !== prevHiddenTableChecklists ||
+        currentPinnedTables !== prevPinnedTables
 
       if (hasChanges) {
         prevAnsweredQuestions = currentAnswered
@@ -759,7 +809,10 @@ export function useSessionStatePersistence() {
         prevPendingPlanMessageId = currentPendingPlanMessageId
         prevEnabledMcpServers = currentEnabledMcpServers
         prevExecutionMode = currentExecutionMode
+        prevPermissionMode = currentPermissionMode
         prevTableCheckedRows = currentTableCheckedRows
+        prevHiddenTableChecklists = currentHiddenTableChecklists
+        prevPinnedTables = currentPinnedTables
 
         const currentState = getCurrentSessionState(sessionId)
         debouncedSaveRef.current?.(currentState)

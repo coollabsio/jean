@@ -3,7 +3,7 @@
  */
 
 import { useQuery } from '@tanstack/react-query'
-import { invoke, invokeForOptionalServer } from '@/lib/transport'
+import { invokeForOptionalServer } from '@/lib/transport'
 import { logger } from '@/lib/logger'
 import type {
   CursorAuthStatus,
@@ -25,8 +25,13 @@ export const cursorCliQueryKeys = {
 }
 
 export function useCursorPathDetection(options?: { enabled?: boolean }) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: [...cursorCliQueryKeys.all, 'path-detection'],
+    queryKey: [
+      ...cursorCliQueryKeys.all,
+      'path-detection',
+      serverId ?? 'local',
+    ],
     queryFn: async (): Promise<{
       found: boolean
       path: string | null
@@ -42,12 +47,12 @@ export function useCursorPathDetection(options?: { enabled?: boolean }) {
         }
       }
       try {
-        return await invoke<{
+        return await invokeForOptionalServer<{
           found: boolean
           path: string | null
           version: string | null
           package_manager: string | null
-        }>('detect_cursor_in_path')
+        }>(serverId, 'detect_cursor_in_path')
       } catch (error) {
         logger.debug('Cursor path detection failed', { error })
         return {
@@ -68,8 +73,10 @@ export function useCursorCliStatus(options?: {
   enabled?: boolean
   serverId?: string
 }) {
+  const settingsServerId = useOptionalSettingsTargetServerId()
+  const serverId = options?.serverId ?? settingsServerId
   return useQuery({
-    queryKey: [...cursorCliQueryKeys.status(), options?.serverId ?? 'local'],
+    queryKey: [...cursorCliQueryKeys.status(), serverId ?? 'local'],
     queryFn: async (): Promise<CursorCliStatus> => {
       if (!isTauri()) {
         return { installed: false, version: null, path: null }
@@ -77,7 +84,7 @@ export function useCursorCliStatus(options?: {
 
       try {
         return await invokeForOptionalServer<CursorCliStatus>(
-          options?.serverId,
+          serverId,
           'check_cursor_cli_installed'
         )
       } catch (error) {
@@ -93,8 +100,9 @@ export function useCursorCliStatus(options?: {
 }
 
 export function useCursorCliAuth(options?: { enabled?: boolean }) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: cursorCliQueryKeys.auth(),
+    queryKey: [...cursorCliQueryKeys.auth(), serverId ?? 'local'],
     queryFn: async (): Promise<CursorAuthStatus> => {
       if (!isTauri()) {
         return {
@@ -105,7 +113,10 @@ export function useCursorCliAuth(options?: { enabled?: boolean }) {
       }
 
       try {
-        return await invoke<CursorAuthStatus>('check_cursor_cli_auth')
+        return await invokeForOptionalServer<CursorAuthStatus>(
+          serverId,
+          'check_cursor_cli_auth'
+        )
       } catch (error) {
         logger.error('Failed to check Cursor CLI auth', { error })
         return {
@@ -144,6 +155,11 @@ export function useAvailableCursorModels(options?: { enabled?: boolean }) {
   })
 }
 
-export async function getCursorInstallCommand(): Promise<CursorInstallCommand> {
-  return invoke<CursorInstallCommand>('get_cursor_install_command')
+export async function getCursorInstallCommand(
+  serverId?: string
+): Promise<CursorInstallCommand> {
+  return invokeForOptionalServer<CursorInstallCommand>(
+    serverId,
+    'get_cursor_install_command'
+  )
 }

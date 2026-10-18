@@ -14,9 +14,14 @@ describe('SessionChatModal responsive header actions', () => {
     expect(source).not.toContain('@/components/shared/FailedRunsBadge')
   })
 
-  it('does not duplicate terminal, browser, or run actions in the desktop header', () => {
-    expect(source).not.toContain('aria-label="Toggle terminal"')
-    expect(source).not.toContain('aria-label="Toggle browser"')
+  it('shows terminal and browser toggles in the desktop header', () => {
+    expect(source).toContain('label="Terminal"')
+    expect(source).toContain('label="Browser"')
+    expect(source).toContain('onClick={handleToggleModalTerminal}')
+    expect(source).toContain('onClick={handleToggleModalBrowser}')
+  })
+
+  it('does not duplicate run actions in the desktop header', () => {
     expect(source).not.toContain('aria-label="Run"')
     expect(source).not.toContain('aria-label="Run first command"')
     expect(source).not.toContain('aria-label="Choose run command"')

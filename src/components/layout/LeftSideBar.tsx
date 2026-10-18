@@ -1,5 +1,7 @@
 import { cn } from '@/lib/utils'
 import { ProjectsSidebar } from '@/components/projects'
+import { AgentsSidebar } from '@/components/agents/AgentsSidebar'
+import { useShowAgents } from '@/components/agents/agents-feature'
 
 interface LeftSideBarProps {
   children?: React.ReactNode
@@ -7,6 +9,7 @@ interface LeftSideBarProps {
 }
 
 export function LeftSideBar({ children, className }: LeftSideBarProps) {
+  const showAgents = useShowAgents()
   return (
     <div
       className={cn(
@@ -14,7 +17,7 @@ export function LeftSideBar({ children, className }: LeftSideBarProps) {
         className
       )}
     >
-      <ProjectsSidebar />
+      {showAgents ? <AgentsSidebar /> : <ProjectsSidebar />}
       {children}
     </div>
   )

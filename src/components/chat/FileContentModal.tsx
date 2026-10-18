@@ -9,6 +9,7 @@ import {
 import {
   FileText,
   ImageIcon,
+  Video,
   Loader2,
   AlertCircle,
   Pencil,
@@ -44,6 +45,10 @@ import { FilePathCopyRow } from './FilePathCopyRow'
 // Lazy load CodeEditor (Pierre File + edit mode) so the main bundle stays lean
 const CodeEditor = lazy(() => import('@/components/ui/code-editor'))
 
+// Match the dialog close (X) button: same height, grey icon, square on mobile
+const HEADER_ICON_BUTTON_CLASS =
+  'h-7 text-muted-foreground max-sm:w-7 max-sm:px-0'
+
 function isMarkdownFile(filename: string | null | undefined): boolean {
   if (!filename) return false
   return /\.(md|markdown)$/i.test(filename)
@@ -52,6 +57,11 @@ function isMarkdownFile(filename: string | null | undefined): boolean {
 function isImageFile(filename: string | null | undefined): boolean {
   if (!filename) return false
   return /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(filename)
+}
+
+function isVideoFile(filename: string | null | undefined): boolean {
+  if (!filename) return false
+  return /\.(mp4|m4v|webm|mov|ogv)$/i.test(filename)
 }
 
 interface FileContentModalProps {
@@ -129,7 +139,7 @@ export function FileContentModal({
   const [isEditing, setIsEditing] = useState(false)
   const [imageError, setImageError] = useState(false)
   const [imageLoaded, setImageLoaded] = useState(false)
-  /** data: URL for images loaded via backend (works for /tmp and remote) */
+  /** data: URL for images/videos loaded via backend (works for /tmp and remote) */
   const [imageSrc, setImageSrc] = useState<string | null>(null)
 
   const { theme } = useTheme()
@@ -184,7 +194,7 @@ export function FileContentModal({
     [serverId]
   )
 
-  // Load images through the backend so remote/web and paths outside project
+  // Load images and videos through the backend so remote/web and paths outside project
   // roots (e.g. /tmp screenshots) work — convertProjectFileSrc only serves
   // known project/worktree directories.
   const loadImageContent = useCallback(
@@ -231,7 +241,7 @@ export function FileContentModal({
         signal.cancelled = true
       }
     }
-    if (isImageFile(filePath)) {
+    if (isImageFile(filePath) || isVideoFile(filePath)) {
       setContent(null)
       setEditedContent(null)
       setIsEditing(false)
@@ -246,7 +256,8 @@ export function FileContentModal({
 
   const filename = filePath ? getFilename(filePath) : filePath
 
-  const isImage = isImageFile(filename)
+  const isVideo = isVideoFile(filename)
+  const isMedia = isImageFile(filename) || isVideo
   const isMarkdown = isMarkdownFile(filename)
   const language = filePath ? getLanguageFromPath(filePath) : 'text'
 
@@ -300,8 +311,8 @@ export function FileContentModal({
     setIsEditing(!isEditing)
   }, [isEditing, hasChanges, content])
 
-  // Only the explicit X / DialogClose should dismiss — not outside click,
-  // ESC, or a parent sheet closing underneath on mobile.
+  // Only the explicit X / DialogClose or ESC should dismiss — not outside
+  // click or a parent sheet closing underneath on mobile.
   const handleOpenChange = useCallback(
     (open: boolean) => {
       if (!open) {
@@ -318,29 +329,36 @@ export function FileContentModal({
   return (
     <Dialog open={!!filePath} onOpenChange={handleOpenChange}>
       <DialogContent
-        preventClose
+        onInteractOutside={e => e.preventDefault()}
+        // Keep unsaved edits: ESC only closes when there is nothing to lose
+        onEscapeKeyDown={e => {
+          if (hasChanges) e.preventDefault()
+        }}
         // Sit above mobile sheets (z-80) so the viewer is interactive
         overlayClassName="z-[90]"
         className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-auto sm:max-h-[85vh] sm:!rounded-lg sm:p-4 bg-background/95 z-[90]"
       >
-        <div className="flex flex-col gap-1 px-4 pt-4 pr-14 sm:px-0 sm:pt-0 sm:pr-8">
+        <div className="flex min-w-0 flex-col gap-1 px-4 pt-4 pr-14 sm:px-0 sm:pt-0 sm:pr-8">
           <DialogTitle>
             <div className="flex items-center gap-2">
-              {isImage ? (
+              {isVideo ? (
+                <Video className="h-4 w-4 shrink-0" />
+              ) : isMedia ? (
                 <ImageIcon className="h-4 w-4 shrink-0" />
               ) : (
                 <FileText className="h-4 w-4 shrink-0" />
               )}
               <span className="truncate">{filename}</span>
 
-              {/* Action buttons - only for non-image files */}
-              {!isImage && content !== null && (
+              {/* Action buttons - only for non-media files */}
+              {!isMedia && content !== null && (
                 <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
                   {isEditing ? (
                     <>
                       <Button
                         variant="ghost"
                         size="sm"
+                        className={HEADER_ICON_BUTTON_CLASS}
                         onClick={handleToggleEdit}
                         disabled={isSaving}
                       >
@@ -350,6 +368,7 @@ export function FileContentModal({
                       <Button
                         variant="default"
                         size="sm"
+                        className="h-7 max-sm:w-7 max-sm:px-0"
                         onClick={handleSave}
                         disabled={!hasChanges || isSaving}
                       >
@@ -365,6 +384,7 @@ export function FileContentModal({
                     <Button
                       variant="ghost"
                       size="sm"
+                      className={HEADER_ICON_BUTTON_CLASS}
                       onClick={handleToggleEdit}
                     >
                       <Pencil className="h-4 w-4 sm:mr-1" />
@@ -375,6 +395,7 @@ export function FileContentModal({
                     <Button
                       variant="ghost"
                       size="sm"
+                      className={HEADER_ICON_BUTTON_CLASS}
                       onClick={handleOpenExternal}
                     >
                       <ExternalLink className="h-4 w-4 sm:mr-1" />
@@ -433,21 +454,39 @@ export function FileContentModal({
           </div>
         ) : !isLoading && !error ? (
           <ScrollArea className="h-[calc(100dvh-7rem)] sm:h-[calc(85vh-6rem)] mt-2 px-4 pb-4 sm:px-0 sm:pb-0">
-            {isImage ? (
+            {isMedia ? (
               <div className="flex flex-col items-center justify-center gap-3 p-4 min-h-[12rem]">
                 {!imageLoaded && !imageError && imageSrc && (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Loader2 className="h-5 w-5 animate-spin" />
-                    Loading image…
+                    {isVideo ? 'Loading video…' : 'Loading image…'}
                   </div>
                 )}
                 {imageError ? (
                   <div className="flex items-center gap-2 py-4 px-3 bg-destructive/10 text-destructive rounded-md max-w-full">
                     <AlertCircle className="h-4 w-4 shrink-0" />
                     <span className="text-sm break-words">
-                      {error ?? 'Failed to load image'}
+                      {error ??
+                        (isVideo
+                          ? 'This video format cannot be played here'
+                          : 'Failed to load image')}
                     </span>
                   </div>
+                ) : imageSrc && isVideo ? (
+                  <video
+                    src={imageSrc}
+                    controls
+                    playsInline
+                    className={cn(
+                      'max-w-full max-h-[calc(85vh-8rem)] rounded-md',
+                      !imageLoaded && 'hidden'
+                    )}
+                    onLoadedData={() => setImageLoaded(true)}
+                    onError={() => {
+                      setImageError(true)
+                      setImageLoaded(false)
+                    }}
+                  />
                 ) : imageSrc ? (
                   <img
                     src={imageSrc}

@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { useProjectsStore } from './projects-store'
+import { useUIStore } from './ui-store'
 
 describe('ProjectsStore', () => {
   beforeEach(() => {
@@ -13,7 +14,6 @@ describe('ProjectsStore', () => {
       sidebarServerFilter: null,
       sidebarActiveTab: 'projects',
       pinnedRecentSessionIds: [],
-      githubDashboardFavoriteProjectIds: [],
       addProjectDialogOpen: false,
       projectSettingsDialogOpen: false,
       projectSettingsProjectId: null,
@@ -256,18 +256,6 @@ describe('ProjectsStore', () => {
       expect(useProjectsStore.getState().sidebarActiveTab).toBe('recent')
     })
 
-    it('pins and unpins a recent session', () => {
-      const { toggleRecentSessionPinned } = useProjectsStore.getState()
-
-      toggleRecentSessionPinned('session-1')
-      expect(useProjectsStore.getState().pinnedRecentSessionIds).toEqual([
-        'session-1',
-      ])
-
-      toggleRecentSessionPinned('session-1')
-      expect(useProjectsStore.getState().pinnedRecentSessionIds).toEqual([])
-    })
-
     it('stores worktree sort mode per project', () => {
       const { setProjectCanvasWorktreeSortMode } = useProjectsStore.getState()
 
@@ -304,19 +292,51 @@ describe('ProjectsStore', () => {
       })
     })
   })
+})
 
-  describe('GitHub dashboard favorites', () => {
-    it('toggles favorite project IDs without duplicating them', () => {
-      const { toggleGitHubDashboardFavoriteProject } =
-        useProjectsStore.getState()
+describe('dialogs close the mobile left sidebar', () => {
+  const desktopWidth = window.innerWidth
 
-      toggleGitHubDashboardFavoriteProject('project-2')
-      toggleGitHubDashboardFavoriteProject('project-1')
-      toggleGitHubDashboardFavoriteProject('project-2')
-
-      expect(
-        useProjectsStore.getState().githubDashboardFavoriteProjectIds
-      ).toEqual(['project-1'])
+  function setViewportWidth(width: number) {
+    Object.defineProperty(window, 'innerWidth', {
+      value: width,
+      configurable: true,
+      writable: true,
     })
+  }
+
+  beforeEach(() => {
+    useUIStore.setState({ leftSidebarVisible: true })
+  })
+
+  afterEach(() => {
+    setViewportWidth(desktopWidth)
+  })
+
+  it.each([
+    [
+      'project settings',
+      () => useProjectsStore.getState().openProjectSettings('p-1'),
+    ],
+    [
+      'add project dialog',
+      () => useProjectsStore.getState().setAddProjectDialogOpen(true),
+    ],
+    ['server dialog', () => useProjectsStore.getState().setServerDialog({})],
+  ])('closes it on mobile when opening the %s', (_, open) => {
+    setViewportWidth(390)
+
+    open()
+
+    expect(useUIStore.getState().leftSidebarVisible).toBe(false)
+  })
+
+  it('keeps it open on desktop', () => {
+    setViewportWidth(1280)
+
+    useProjectsStore.getState().openProjectSettings('p-1')
+
+    expect(useUIStore.getState().leftSidebarVisible).toBe(true)
+    expect(useProjectsStore.getState().projectSettingsDialogOpen).toBe(true)
   })
 })

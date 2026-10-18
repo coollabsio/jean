@@ -64,25 +64,25 @@ export function ContextViewerDialog({
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               {viewingContext.type === 'issue' && (
-                <CircleDot className="h-4 w-4 text-green-500" />
+                <CircleDot className="h-4 w-4 text-success" />
               )}
               {viewingContext.type === 'pr' && (
-                <GitPullRequest className="h-4 w-4 text-green-500" />
+                <GitPullRequest className="h-4 w-4 text-success" />
               )}
               {viewingContext.type === 'saved' && (
-                <FolderOpen className="h-4 w-4 text-blue-500" />
+                <FolderOpen className="h-4 w-4 text-info" />
               )}
               {viewingContext.type === 'security' && (
-                <Shield className="h-4 w-4 text-orange-500" />
+                <Shield className="h-4 w-4 text-warning" />
               )}
               {viewingContext.type === 'advisory' && (
-                <ShieldAlert className="h-4 w-4 text-orange-500" />
+                <ShieldAlert className="h-4 w-4 text-warning" />
               )}
               {viewingContext.type === 'linear' && (
-                <LinearIcon className="h-4 w-4 text-violet-500" />
+                <LinearIcon className="h-4 w-4 text-violet-600 dark:text-violet-400" />
               )}
               {viewingContext.type === 'sentry' && (
-                <Sentry className="h-4 w-4 text-orange-500" />
+                <Sentry className="h-4 w-4 text-warning" />
               )}
               {titlePrefix}
             </DialogTitle>

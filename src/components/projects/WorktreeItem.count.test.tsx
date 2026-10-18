@@ -15,7 +15,8 @@ vi.mock('@/hooks/useRemotePicker', () => ({
   pushNeedsRemotePicker: () => false,
 }))
 vi.mock('@/components/layout/SidebarWidthContext', () => ({
-  useSidebarWidth: () => 280,
+  // Session count badges only render at status-badge widths (>= 320px).
+  useSidebarWidth: () => 320,
 }))
 vi.mock('@/hooks/useWorktreeTerminalStatus', () => ({
   TerminalStatusIndicator: () => null,
@@ -33,7 +34,7 @@ vi.mock('@/components/chat/hooks/useCanvasStoreState', () => ({
   useCanvasStoreState: () => ({}),
 }))
 vi.mock('@/components/chat/session-card-utils', () => ({
-  computeSessionCardData: () => ({}),
+  createSessionCardDataCache: () => () => ({}),
   groupCardsByStatus: () => [],
   statusConfig: {},
 }))

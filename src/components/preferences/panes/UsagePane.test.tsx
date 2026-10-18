@@ -261,4 +261,22 @@ describe('UsagePane', () => {
     await user.click(retryButton)
     expect(refetch).toHaveBeenCalled()
   })
+  it('keeps showing Claude usage when a refetch fails', () => {
+    mocks.useClaudeUsage.mockReturnValue({
+      ...idleQuery({
+        planType: 'max',
+        session: { usedPercent: 48, resetsAt: null },
+        weekly: null,
+        sonnetWeekly: null,
+        fetchedAt: 1,
+      }),
+      isError: true,
+      error: new Error('Claude usage API is rate-limiting requests.'),
+    })
+
+    render(<UsagePane />)
+
+    expect(screen.getByText('5-hour session')).toBeInTheDocument()
+    expect(screen.queryByText(/rate-limiting requests/)).not.toBeInTheDocument()
+  })
 })

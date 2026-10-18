@@ -1,5 +1,6 @@
 import { toast } from 'sonner'
-import { invoke } from '@/lib/transport'
+import { invoke, savePastedFile } from '@/lib/transport'
+import { fileToBase64 } from '@/lib/file-base64'
 import { useChatStore } from '@/store/chat-store'
 import type {
   SaveFileResponse,
@@ -10,6 +11,7 @@ import {
   ALLOWED_IMAGE_EXTENSIONS,
   ALLOWED_IMAGE_TYPES,
   getImageMimeTypeFromFilename,
+  MAX_FILE_SIZE,
   MAX_IMAGE_SIZE,
   MAX_TEXT_SIZE,
   SVG_MIME_TYPE,
@@ -21,18 +23,6 @@ function createPlaceholderId(prefix: string): string {
 
 function getExtension(filename: string): string {
   return filename.split('.').pop()?.toLowerCase() ?? ''
-}
-
-async function fileToBase64(file: File): Promise<string> {
-  const bytes = new Uint8Array(await file.arrayBuffer())
-  // Concatenate in chunks: `binary += fromCharCode(byte)` per byte is O(n²) and
-  // janks on multi-MB images; apply() over ~32KB slices keeps it linear.
-  let binary = ''
-  const CHUNK = 0x8000
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
-  }
-  return btoa(binary)
 }
 
 export type AttachmentFileKind = 'raster' | 'text' | 'file'
@@ -169,12 +159,12 @@ export async function processAttachmentFile(
   }
 
   if (kind === 'file') {
+    if (file.size > MAX_FILE_SIZE) {
+      toast.error('File too large', { description: 'Maximum size is 50MB' })
+      return
+    }
     try {
-      const result = await invoke<SaveFileResponse>('save_pasted_file', {
-        data: await fileToBase64(file),
-        filename: file.name,
-        sessionId,
-      })
+      const result = await savePastedFile<SaveFileResponse>(file, sessionId)
       useChatStore.getState().addPendingFile(sessionId, {
         id: result.id,
         relativePath: result.path,

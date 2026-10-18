@@ -37,6 +37,8 @@ describe('ChatStore', () => {
       reviewSidebarVisible: false,
       fixedReviewFindings: {},
       tableCheckedRows: {},
+      hiddenTableChecklists: {},
+      pinnedTables: {},
       worktreePaths: {},
       sendingSessionIds: {},
       namingSessionIds: {},
@@ -51,6 +53,7 @@ describe('ChatStore', () => {
       streamingThinkingContent: {},
       inputDrafts: {},
       executionModes: {},
+      permissionModes: {},
       thinkingLevels: {},
       selectedModels: {},
       scheduledWakeups: {},
@@ -558,6 +561,47 @@ describe('ChatStore', () => {
       expect(toolCalls?.[0]?.output).toBe('file contents')
     })
 
+    it('stores is_error from tool results only when true', () => {
+      const { addToolCall, updateToolCallOutput } = useChatStore.getState()
+
+      addToolCall('session-1', mockToolCall)
+      updateToolCallOutput('session-1', 'tool-1', 'denied', true)
+      let toolCall = useChatStore.getState().activeToolCalls['session-1']?.[0]
+      expect(toolCall?.output).toBe('denied')
+      expect(toolCall?.is_error).toBe(true)
+
+      // Same output + flag is a no-op (no new state reference)
+      const before = useChatStore.getState().activeToolCalls
+      updateToolCallOutput('session-1', 'tool-1', 'denied', true)
+      expect(useChatStore.getState().activeToolCalls).toBe(before)
+
+      // Omitted flag keeps the existing error state
+      updateToolCallOutput('session-1', 'tool-1', 'denied again')
+      toolCall = useChatStore.getState().activeToolCalls['session-1']?.[0]
+      expect(toolCall?.is_error).toBe(true)
+
+      // Explicit false clears the key entirely
+      updateToolCallOutput('session-1', 'tool-1', 'ok', false)
+      toolCall = useChatStore.getState().activeToolCalls['session-1']?.[0]
+      expect(toolCall?.output).toBe('ok')
+      expect(toolCall && 'is_error' in toolCall).toBe(false)
+    })
+
+    it('keeps is_error on an early tool_result stub', () => {
+      const { addToolCall, updateToolCallOutput } = useChatStore.getState()
+
+      updateToolCallOutput('session-1', 'tool-edit-1', 'failed', true)
+      addToolCall('session-1', {
+        id: 'tool-edit-1',
+        name: 'Edit',
+        input: { file_path: '/a.ts', old_string: 'a', new_string: 'b' },
+      })
+
+      const toolCall = useChatStore.getState().activeToolCalls['session-1']?.[0]
+      expect(toolCall?.name).toBe('Edit')
+      expect(toolCall?.is_error).toBe(true)
+    })
+
     it('keeps tool_result when it arrives before tool_use (issue #572)', () => {
       const { addToolCall, updateToolCallOutput } = useChatStore.getState()
 
@@ -594,8 +638,7 @@ describe('ChatStore', () => {
         input: { file_path: '/large-file.txt' },
       })
 
-      const toolCall =
-        useChatStore.getState().activeToolCalls['session-1']?.[0]
+      const toolCall = useChatStore.getState().activeToolCalls['session-1']?.[0]
       expect(toolCall?.name).toBe('Read')
       expect(toolCall?.input).toEqual({ file_path: '/large-file.txt' })
       expect(toolCall?.output).toBe('')
@@ -611,8 +654,7 @@ describe('ChatStore', () => {
         input: {},
       })
 
-      const toolCall =
-        useChatStore.getState().activeToolCalls['session-1']?.[0]
+      const toolCall = useChatStore.getState().activeToolCalls['session-1']?.[0]
       expect(toolCall?.name).toBe('Monitor')
       expect(toolCall?.output).toBeUndefined()
     })
@@ -627,8 +669,7 @@ describe('ChatStore', () => {
         input: { questions: [{ question: 'Continue?' }] },
       })
 
-      const toolCall =
-        useChatStore.getState().activeToolCalls['session-1']?.[0]
+      const toolCall = useChatStore.getState().activeToolCalls['session-1']?.[0]
       expect(toolCall?.name).toBe('question')
       expect(toolCall?.output).toBe('Answer questions?')
     })
@@ -813,9 +854,9 @@ describe('ChatStore', () => {
 
       store.setStreamingReplayContentBlocks('session-1', replayBlocks)
 
-      expect(
-        store.consumeStreamingReplayToolBlock('session-1', 'tool-1')
-      ).toBe(true)
+      expect(store.consumeStreamingReplayToolBlock('session-1', 'tool-1')).toBe(
+        true
+      )
       expect(store.consumeStreamingReplayText('session-1', 'After tool.')).toBe(
         ''
       )
@@ -846,9 +887,9 @@ describe('ChatStore', () => {
       store.addTextBlock('session-1', 'After tool.')
       store.setStreamingReplayContentBlocks('session-1', replayBlocks)
 
-      expect(store.consumeStreamingReplayText('session-1', 'Before tool. ')).toBe(
-        ''
-      )
+      expect(
+        store.consumeStreamingReplayText('session-1', 'Before tool. ')
+      ).toBe('')
       expect(store.consumeStreamingReplayToolBlock('session-1', 'tool-1')).toBe(
         true
       )
@@ -869,19 +910,35 @@ describe('ChatStore', () => {
   })
 
   describe('execution mode', () => {
-    it('cycles execution mode', () => {
-      const { cycleExecutionMode, getExecutionMode } = useChatStore.getState()
+    it('starts with Full access and toggles workflow without changing permissions', () => {
+      const store = useChatStore.getState()
+      expect(store.getExecutionMode('session-1')).toBe('yolo')
+      store.cycleExecutionMode('session-1')
+      expect(store.getExecutionMode('session-1')).toBe('plan')
+      store.cycleExecutionMode('session-1')
+      expect(store.getExecutionMode('session-1')).toBe('yolo')
+    })
 
-      expect(getExecutionMode('session-1')).toBe('plan')
+    it.each(['supervised', 'build', 'auto', 'yolo'] as const)(
+      'retains %s permissions through Plan',
+      mode => {
+        const store = useChatStore.getState()
+        store.setExecutionMode('session-1', mode)
+        store.cycleExecutionMode('session-1')
+        expect(useChatStore.getState().permissionModes['session-1']).toBe(mode)
+        expect(store.getExecutionMode('session-1')).toBe('plan')
+        store.cycleExecutionMode('session-1')
+        expect(store.getExecutionMode('session-1')).toBe(mode)
+      }
+    )
 
-      cycleExecutionMode('session-1')
-      expect(getExecutionMode('session-1')).toBe('build')
-
-      cycleExecutionMode('session-1')
-      expect(getExecutionMode('session-1')).toBe('yolo')
-
-      cycleExecutionMode('session-1')
-      expect(getExecutionMode('session-1')).toBe('plan')
+    it('can change Build permissions without leaving Plan', () => {
+      const store = useChatStore.getState()
+      store.setExecutionMode('session-1', 'plan')
+      store.setPermissionMode('session-1', 'supervised')
+      expect(store.getExecutionMode('session-1')).toBe('plan')
+      store.cycleExecutionMode('session-1')
+      expect(store.getExecutionMode('session-1')).toBe('supervised')
     })
 
     it('sets execution mode directly', () => {
@@ -960,6 +1017,24 @@ describe('ChatStore', () => {
 
       setQuestionsSkipped('session-1', false)
       expect(areQuestionsSkipped('session-1')).toBe(false)
+    })
+
+    it('tracks subagents panel expansion per session', () => {
+      useChatStore.setState({ expandedAgentWidgetSessions: {} })
+      const { setAgentWidgetExpanded } = useChatStore.getState()
+
+      setAgentWidgetExpanded('session-1', true)
+      expect(useChatStore.getState().expandedAgentWidgetSessions).toEqual({
+        'session-1': true,
+      })
+
+      // No-op update keeps the same reference
+      const before = useChatStore.getState().expandedAgentWidgetSessions
+      setAgentWidgetExpanded('session-1', true)
+      expect(useChatStore.getState().expandedAgentWidgetSessions).toBe(before)
+
+      setAgentWidgetExpanded('session-1', false)
+      expect(useChatStore.getState().expandedAgentWidgetSessions).toEqual({})
     })
   })
 
@@ -1325,6 +1400,7 @@ describe('ChatStore', () => {
         'streamingThinkingContent',
         'inputDrafts',
         'executionModes',
+        'permissionModes',
         'thinkingLevels',
         'effortLevels',
         'selectedBackends',
@@ -1407,11 +1483,7 @@ describe('ChatStore', () => {
         .setScheduledWakeup('tool-target', wakeup, targetSessionId)
       useChatStore
         .getState()
-        .setScheduledWakeup(
-          'tool-retained',
-          retainedWakeup,
-          retainedSessionId
-        )
+        .setScheduledWakeup('tool-retained', retainedWakeup, retainedSessionId)
 
       useChatStore
         .getState()
@@ -1423,7 +1495,9 @@ describe('ChatStore', () => {
         expect(record[targetSessionId]).toBeUndefined()
         expect(record[retainedSessionId]).toBe('retained-value')
       }
-      expect(state.activeSessionIds).toEqual({ 'worktree-2': retainedSessionId })
+      expect(state.activeSessionIds).toEqual({
+        'worktree-2': retainedSessionId,
+      })
       expect(state.sessionWorktreeMap).toEqual({
         [retainedSessionId]: 'worktree-2',
       })
@@ -1962,6 +2036,104 @@ describe('ChatStore', () => {
       expect(
         useChatStore.getState().pendingFiles['session-1']?.map(file => file.id)
       ).toEqual(['file-current', 'file-linked'])
+    })
+  })
+
+  describe('pinned tables', () => {
+    const tableA = { key: 'msg-1:10', markdown: '| a |\n| - |\n| 1 |' }
+    const tableB = { key: 'msg-2:0', markdown: '| b |\n| - |\n| 2 |' }
+
+    it('pins tables in order and unpins by key', () => {
+      const { togglePinnedTable } = useChatStore.getState()
+      togglePinnedTable('session-1', tableA)
+      togglePinnedTable('session-1', tableB)
+      expect(useChatStore.getState().pinnedTables['session-1']).toEqual([
+        tableA,
+        tableB,
+      ])
+
+      togglePinnedTable('session-1', { ...tableA, markdown: 'changed' })
+      expect(useChatStore.getState().pinnedTables['session-1']).toEqual([
+        tableB,
+      ])
+    })
+
+    it('removes the session entry when the last pin is removed', () => {
+      const { togglePinnedTable } = useChatStore.getState()
+      togglePinnedTable('session-1', tableA)
+      togglePinnedTable('session-1', tableA)
+      expect('session-1' in useChatStore.getState().pinnedTables).toBe(false)
+    })
+
+    it('renames pin and checklist keys', () => {
+      const store = useChatStore.getState()
+      store.togglePinnedTable('session-1', tableA)
+      store.togglePinnedTable('session-1', tableB)
+      store.enableTableChecklist('session-1', tableA.key)
+      store.toggleTableRowChecked('session-1', tableA.key, 2)
+
+      store.renameTableKeys('session-1', key =>
+        key.replace('msg-1:', 'saved-1:')
+      )
+
+      const state = useChatStore.getState()
+      expect(state.pinnedTables['session-1']?.map(p => p.key)).toEqual([
+        'saved-1:10',
+        'msg-2:0',
+      ])
+      expect(state.tableCheckedRows['session-1']).toEqual({
+        'saved-1:10': new Set([2]),
+      })
+    })
+
+    it('keeps state when no key changes', () => {
+      useChatStore.getState().togglePinnedTable('session-1', tableA)
+      const before = useChatStore.getState()
+      before.renameTableKeys('session-1', key => key)
+      expect(useChatStore.getState().pinnedTables).toBe(before.pinnedTables)
+    })
+  })
+
+  describe('table checklist', () => {
+    it('keeps rows checked while checklist mode is off and shows them when on', () => {
+      const store = useChatStore.getState()
+      store.checkTableRow('session-1', 'msg-1:0', 1)
+
+      let state = useChatStore.getState()
+      expect(state.tableCheckedRows['session-1']?.['msg-1:0']).toEqual(
+        new Set([1])
+      )
+      expect(state.hiddenTableChecklists['session-1']).toEqual(['msg-1:0'])
+
+      store.enableTableChecklist('session-1', 'msg-1:0')
+      state = useChatStore.getState()
+      expect(state.hiddenTableChecklists['session-1']).toBeUndefined()
+      expect(state.tableCheckedRows['session-1']?.['msg-1:0']).toEqual(
+        new Set([1])
+      )
+    })
+
+    it('checks rows directly when checklist mode is on', () => {
+      const store = useChatStore.getState()
+      store.enableTableChecklist('session-1', 'msg-1:0')
+      store.checkTableRow('session-1', 'msg-1:0', 2)
+
+      const state = useChatStore.getState()
+      expect(state.tableCheckedRows['session-1']?.['msg-1:0']).toEqual(
+        new Set([2])
+      )
+      expect(state.hiddenTableChecklists['session-1']).toBeUndefined()
+    })
+
+    it('renames hidden checklist keys', () => {
+      const store = useChatStore.getState()
+      store.checkTableRow('session-1', 'msg-1:0', 0)
+      store.renameTableKeys('session-1', key =>
+        key.replace('msg-1:', 'saved-1:')
+      )
+      expect(
+        useChatStore.getState().hiddenTableChecklists['session-1']
+      ).toEqual(['saved-1:0'])
     })
   })
 })

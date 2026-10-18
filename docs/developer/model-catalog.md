@@ -11,16 +11,18 @@ reasoning capability.
 
 ## Applying a model to all Magic Prompts
 
-Settings → Magic Prompts provides a searchable **Set model for all prompts**
-picker grouped by installed backend. It uses the same catalog/discovered model
-options as the individual prompt controls, including Codex fast variants.
-Do not add model-specific presets to this menu.
+Settings → Magic Prompts has an **All prompts** row: a searchable model
+picker grouped by installed backend, a **Fast** switch, a **Mode** select
+(Plan/Yolo), and an **Apply to all prompts** button. The picker uses the same
+catalog/discovered model options as the individual prompt controls, but lists
+only base models; the Fast switch picks the fast variant when the selected
+model has one. Do not add model-specific presets to this menu.
 
-Selecting a model updates every configurable prompt's backend, model, and
+Apply updates every configurable prompt's backend, model, execution mode, and
 supported default reasoning level, and replaces the Code Review runners with
-one matching runner. It clears provider overrides so a custom Claude profile
-cannot redirect the selected first-party model. Prompt text and execution modes
-are preserved.
+one matching runner (its fix mode uses the selected mode). It clears provider
+overrides so a custom Claude profile cannot redirect the selected first-party
+model. Prompt text is not changed.
 
 ## Reasoning capability
 

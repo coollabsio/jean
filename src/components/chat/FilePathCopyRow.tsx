@@ -77,7 +77,7 @@ export function FilePathCopyRow({
       aria-label="Copy file path"
     >
       {copied ? (
-        <Check className="size-3 text-green-500" />
+        <Check className="size-3 text-success" />
       ) : (
         <Copy className="size-3 text-muted-foreground" />
       )}

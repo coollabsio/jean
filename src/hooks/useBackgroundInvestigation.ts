@@ -28,7 +28,7 @@ import type { Worktree } from '@/types/projects'
 import { parseServerResourceKey } from '@/lib/server-resource'
 import { LOCAL_SERVER_ID } from '@/types/server-resource'
 
-type InvestigationType =
+export type InvestigationType =
   | 'issue'
   | 'pr'
   | 'security-alert'
@@ -84,7 +84,9 @@ export function useBackgroundInvestigation(): void {
   useEffect(() => {
     if (!hasAutoInvestigate) return
     return queryClient.getQueryCache().subscribe(event => {
-      if (event.type !== 'updated') return
+      // Only new data matters; fetch-status transitions (fetch/pending/
+      // invalidate) would just re-render App without a ready worktree.
+      if (event.type !== 'updated' || event.action.type !== 'success') return
       const key = event.query.queryKey
       if (
         key[0] === projectsQueryKeys.all[0] &&
@@ -523,7 +525,7 @@ const investigationConfig = {
  * Process a single background investigation: build prompt, then ask the backend
  * to reuse the same active/first session selection and send flow as Jean MCP.
  */
-async function processBackgroundInvestigation(
+export async function processBackgroundInvestigation(
   worktreeId: string,
   type: InvestigationType,
   localPreferences: ReturnType<typeof usePreferences>['data'],
@@ -619,14 +621,14 @@ async function processBackgroundInvestigation(
     provider,
     effortLevel,
     customProfileName,
-    parallelExecutionPrompt: preferences?.parallel_execution_prompt_enabled
-      ? (preferences.magic_prompts?.parallel_execution ??
-        DEFAULT_PARALLEL_EXECUTION_PROMPT)
-      : undefined,
+    parallelExecutionPrompt:
+      preferences?.magic_prompts?.parallel_execution ??
+      DEFAULT_PARALLEL_EXECUTION_PROMPT,
     chromeEnabled: preferences?.chrome_enabled ?? false,
     aiLanguage: preferences?.ai_language,
     executionMode,
     forceNewSession: override?.forceNewSession,
+    sessionId: override?.sessionId,
     issueContext: override?.issueContext,
   })
 
@@ -638,6 +640,7 @@ async function processBackgroundInvestigation(
     setSelectedModel,
     setSelectedProvider,
     setSelectedBackend,
+    setExecutionMode,
     setExecutingMode,
     clearStreamingContent,
     clearToolCalls,
@@ -666,6 +669,7 @@ async function processBackgroundInvestigation(
   setSelectedModel(sessionId, selectedModel)
   setSelectedProvider(sessionId, provider)
   setSelectedBackend(sessionId, backend)
+  setExecutionMode(sessionId, executionMode)
   setExecutingMode(sessionId, executionMode)
   clearStreamingContent(sessionId)
   clearToolCalls(sessionId)

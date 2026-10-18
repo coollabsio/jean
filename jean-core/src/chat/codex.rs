@@ -627,6 +627,8 @@ fn upsert_codex_plan_tool_call(
         input,
         output: None,
         parent_tool_use_id: None,
+        is_error: None,
+        subagent_usage: None,
     });
     content_blocks.push(ContentBlock::ToolUse {
         tool_call_id: tool_id.to_string(),
@@ -684,6 +686,10 @@ fn emit_codex_plan_tool_call(
 /// to end in `-fast` are left unchanged.
 pub(crate) fn split_fast_model(model: &str) -> (&str, bool) {
     match model {
+        "gpt-6.1-sol-fast" => ("gpt-6.1-sol", true),
+        "gpt-6-astra-fast" => ("gpt-6-astra", true),
+        "gpt-6-sol-fast" => ("gpt-6-sol", true),
+        "gpt-6-luna-fast" => ("gpt-6-luna", true),
         "gpt-5.6" | "gpt-5-6-sol" => ("gpt-5.6-sol", false),
         "gpt-5-6-terra" => ("gpt-5.6-terra", false),
         "gpt-5-6-luna" => ("gpt-5.6-luna", false),
@@ -744,6 +750,9 @@ pub fn apply_codex_provider_to_config(
     );
 }
 
+/// Max concurrent Codex subagent threads.
+const CODEX_MAX_AGENT_THREADS: u32 = 3;
+
 /// Build JSON-RPC params for `thread/start`.
 #[allow(clippy::too_many_arguments)]
 pub fn build_thread_start_params(
@@ -751,9 +760,7 @@ pub fn build_thread_start_params(
     model: Option<&str>,
     execution_mode: Option<&str>,
     search_enabled: bool,
-    base_instructions_content: Option<&str>,
-    multi_agent_enabled: bool,
-    max_agent_threads: Option<u32>,
+    developer_instructions_content: Option<&str>,
     model_verbosity: Option<&str>,
     codex_provider: Option<&crate::CodexProviderProfile>,
 ) -> serde_json::Value {
@@ -777,6 +784,8 @@ pub fn build_thread_start_params(
         }
     }
 
+    params["approvalsReviewer"] = serde_json::json!("user");
+
     // Permission mode mapping.
     //
     // Plan mode must never ask the user for permissions. It is read-only, so
@@ -789,7 +798,7 @@ pub fn build_thread_start_params(
     // whether MCP servers are configured — but setting mcp_elicitations=false
     // is a no-op when no MCP servers exist, so it's safe to use in build mode.
     match execution_mode.unwrap_or("plan") {
-        "build" => {
+        "build" | "auto" => {
             params["approvalPolicy"] = serde_json::json!({
                 "granular": {
                     "mcp_elicitations": false,
@@ -799,6 +808,19 @@ pub fn build_thread_start_params(
                 }
             });
             params["sandbox"] = serde_json::json!("workspace-write");
+            params["approvalsReviewer"] = serde_json::json!(if execution_mode == Some("auto") {
+                "auto_review"
+            } else {
+                "user"
+            });
+            if execution_mode == Some("auto") {
+                params["approvalPolicy"] = serde_json::json!("on-request");
+            }
+        }
+        "supervised" => {
+            params["approvalPolicy"] = serde_json::json!("untrusted");
+            params["approvalsReviewer"] = serde_json::json!("user");
+            params["sandbox"] = serde_json::json!("read-only");
         }
         "yolo" => {
             params["approvalPolicy"] = serde_json::json!("never");
@@ -811,10 +833,11 @@ pub fn build_thread_start_params(
         }
     }
 
-    // Base instructions (system-level context: issues, PRs, custom prompts)
-    if let Some(content) = base_instructions_content {
+    // Jean context (global prompt, issues, PRs, custom prompts) is additive
+    // developer guidance. `baseInstructions` would replace Codex's own prompt.
+    if let Some(content) = developer_instructions_content {
         if !content.is_empty() {
-            params["baseInstructions"] = serde_json::json!(content);
+            params["developerInstructions"] = serde_json::json!(content);
         }
     }
 
@@ -832,17 +855,15 @@ pub fn build_thread_start_params(
         serde_json::json!(if search_enabled { "live" } else { "disabled" }),
     );
 
-    // Multi-agent
-    if multi_agent_enabled {
-        let mut features = serde_json::Map::new();
-        features.insert("multi_agent".to_string(), serde_json::json!(true));
-        config.insert("features".to_string(), serde_json::Value::Object(features));
-        if let Some(threads) = max_agent_threads {
-            let mut agents = serde_json::Map::new();
-            agents.insert("max_threads".to_string(), serde_json::json!(threads));
-            config.insert("agents".to_string(), serde_json::Value::Object(agents));
-        }
-    }
+    // Multi-agent (always on, so Codex can run subagents in parallel)
+    config.insert(
+        "features".to_string(),
+        serde_json::json!({ "multi_agent": true }),
+    );
+    config.insert(
+        "agents".to_string(),
+        serde_json::json!({ "max_threads": CODEX_MAX_AGENT_THREADS }),
+    );
 
     if let Some(provider) = codex_provider {
         apply_codex_provider_to_config(&mut config, provider);
@@ -922,6 +943,11 @@ pub fn build_turn_start_params(
     // accidentally re-sandbox yolo turns and break tools such as Playwright on
     // macOS (issue #328 / PR #362).
     let mode = execution_mode.unwrap_or("plan");
+    params["approvalsReviewer"] = serde_json::json!(if mode == "auto" {
+        "auto_review"
+    } else {
+        "user"
+    });
     match mode {
         "yolo" => {
             params["approvalPolicy"] = serde_json::json!("never");
@@ -929,7 +955,7 @@ pub fn build_turn_start_params(
                 "type": "dangerFullAccess",
             });
         }
-        "build" => {
+        "build" | "auto" => {
             params["approvalPolicy"] = serde_json::json!({
                 "granular": {
                     "mcp_elicitations": false,
@@ -938,6 +964,9 @@ pub fn build_turn_start_params(
                     "request_permissions": true,
                 }
             });
+            if mode == "auto" {
+                params["approvalPolicy"] = serde_json::json!("on-request");
+            }
             let mut writable_roots = vec![serde_json::json!(working_dir.to_string_lossy())];
             for dir in add_dirs {
                 writable_roots.push(serde_json::json!(dir));
@@ -952,6 +981,11 @@ pub fn build_turn_start_params(
                 "excludeTmpdirEnvVar": false,
                 "excludeSlashTmp": false,
             });
+        }
+        "supervised" => {
+            params["approvalPolicy"] = serde_json::json!("untrusted");
+            params["sandboxPolicy"] =
+                serde_json::json!({ "type": "readOnly", "networkAccess": true });
         }
         // "plan" or default: read-only, never ask for approvals
         _ => {
@@ -1036,9 +1070,7 @@ pub fn execute_codex_via_server(
     search_enabled: bool,
     add_dirs: &[String],
     prompt: &str,
-    base_instructions_content: Option<&str>,
-    multi_agent_enabled: bool,
-    max_agent_threads: Option<u32>,
+    developer_instructions_content: Option<&str>,
     codex_provider: Option<&crate::CodexProviderProfile>,
 ) -> Result<CodexResponse, String> {
     use super::codex_server;
@@ -1074,17 +1106,16 @@ pub fn execute_codex_via_server(
     let thread_id = match (|| -> Result<String, String> {
         if let Some(tid) = existing_thread_id {
             // Resume existing thread
-            let resume_params = build_thread_start_params(
+            let mut resume_params = build_thread_start_params(
                 working_dir,
                 model,
                 execution_mode,
                 search_enabled,
-                base_instructions_content,
-                multi_agent_enabled,
-                max_agent_threads,
+                developer_instructions_content,
                 Some(model_verbosity),
                 codex_provider,
             );
+            apply_agent_browser_session(&mut resume_params, session_id);
             let mut full_params =
                 serde_json::json!({ "threadId": tid, "persistExtendedHistory": true });
             // Copy overridable fields
@@ -1092,10 +1123,11 @@ pub fn execute_codex_via_server(
                 "model",
                 "cwd",
                 "approvalPolicy",
+                "approvalsReviewer",
                 "sandbox",
                 "config",
                 "serviceTier",
-                "baseInstructions",
+                "developerInstructions",
             ] {
                 if let Some(v) = resume_params.get(key) {
                     full_params[key] = v.clone();
@@ -1106,13 +1138,12 @@ pub fn execute_codex_via_server(
                 Err(e) => {
                     log::warn!("Failed to resume thread {tid}: {e}, starting new thread");
                     start_new_thread(
+                        session_id,
                         working_dir,
                         model,
                         execution_mode,
                         search_enabled,
-                        base_instructions_content,
-                        multi_agent_enabled,
-                        max_agent_threads,
+                        developer_instructions_content,
                         Some(model_verbosity),
                         codex_provider,
                     )
@@ -1120,13 +1151,12 @@ pub fn execute_codex_via_server(
             }
         } else {
             start_new_thread(
+                session_id,
                 working_dir,
                 model,
                 execution_mode,
                 search_enabled,
-                base_instructions_content,
-                multi_agent_enabled,
-                max_agent_threads,
+                developer_instructions_content,
                 Some(model_verbosity),
                 codex_provider,
             )
@@ -1814,30 +1844,44 @@ pub fn resume_codex_after_crash(
 
 /// Start a new Codex thread via app-server.
 #[allow(clippy::too_many_arguments)]
+/// Give this thread's agent-browser MCP server its own browser session, so
+/// parallel Jean sessions do not share one browser.
+fn apply_agent_browser_session(params: &mut serde_json::Value, session_id: &str) {
+    let overrides = [
+        crate::agent_browser::codex_session_config_override(session_id),
+        // Jean MCP must see the real session (agents, approvals, current context).
+        crate::jean_mcp_config::codex_session_config_override(session_id),
+    ];
+    for (key, value) in overrides.into_iter().flatten() {
+        if !params["config"].is_object() {
+            params["config"] = serde_json::json!({});
+        }
+        params["config"][key] = value;
+    }
+}
+
 fn start_new_thread(
+    session_id: &str,
     working_dir: &std::path::Path,
     model: Option<&str>,
     execution_mode: Option<&str>,
     search_enabled: bool,
-    base_instructions_content: Option<&str>,
-    multi_agent_enabled: bool,
-    max_agent_threads: Option<u32>,
+    developer_instructions_content: Option<&str>,
     model_verbosity: Option<&str>,
     codex_provider: Option<&crate::CodexProviderProfile>,
 ) -> Result<String, String> {
     use super::codex_server;
 
-    let params = build_thread_start_params(
+    let mut params = build_thread_start_params(
         working_dir,
         model,
         execution_mode,
         search_enabled,
-        base_instructions_content,
-        multi_agent_enabled,
-        max_agent_threads,
+        developer_instructions_content,
         model_verbosity,
         codex_provider,
     );
+    apply_agent_browser_session(&mut params, session_id);
 
     let result = codex_server::send_request("thread/start", params)?;
     let thread_id = result
@@ -3634,6 +3678,8 @@ fn upsert_file_change_tool_call(
             input: changes,
             output: None,
             parent_tool_use_id: None,
+            is_error: None,
+            subagent_usage: None,
         });
         content_blocks.push(ContentBlock::ToolUse {
             tool_call_id: tool_id.clone(),
@@ -3692,6 +3738,8 @@ fn process_codex_event(
                         input: serde_json::json!({ "command": command }),
                         output: None,
                         parent_tool_use_id: None,
+                        is_error: None,
+                        subagent_usage: None,
                     });
                     content_blocks.push(ContentBlock::ToolUse {
                         tool_call_id: tool_id.clone(),
@@ -3776,6 +3824,8 @@ fn process_codex_event(
                         input: arguments.clone(),
                         output: None,
                         parent_tool_use_id: None,
+                        is_error: None,
+                        subagent_usage: None,
                     });
                     content_blocks.push(ContentBlock::ToolUse {
                         tool_call_id: tool_id.clone(),
@@ -3821,6 +3871,8 @@ fn process_codex_event(
                         input: input.clone(),
                         output: None,
                         parent_tool_use_id: None,
+                        is_error: None,
+                        subagent_usage: None,
                     });
                     content_blocks.push(ContentBlock::ToolUse {
                         tool_call_id: tool_id.clone(),
@@ -3861,6 +3913,8 @@ fn process_codex_event(
                         input: input.clone(),
                         output: None,
                         parent_tool_use_id: None,
+                        is_error: None,
+                        subagent_usage: None,
                     });
                     content_blocks.push(ContentBlock::ToolUse {
                         tool_call_id: tool_id.clone(),
@@ -3909,6 +3963,8 @@ fn process_codex_event(
                         input: arguments.clone(),
                         output: None,
                         parent_tool_use_id: None,
+                        is_error: None,
+                        subagent_usage: None,
                     });
                     content_blocks.push(ContentBlock::ToolUse {
                         tool_call_id: tool_id.clone(),
@@ -3979,6 +4035,8 @@ fn process_codex_event(
                         input: input.clone(),
                         output: None,
                         parent_tool_use_id: None,
+                        is_error: None,
+                        subagent_usage: None,
                     });
                     content_blocks.push(ContentBlock::ToolUse {
                         tool_call_id: tool_id.clone(),
@@ -4210,6 +4268,8 @@ fn process_codex_event(
                                 input: input.clone(),
                                 output: Some("completed".to_string()),
                                 parent_tool_use_id: None,
+                                is_error: None,
+                                subagent_usage: None,
                             });
                             content_blocks.push(ContentBlock::ToolUse {
                                 tool_call_id: tool_id.clone(),
@@ -4220,10 +4280,29 @@ fn process_codex_event(
                             &ToolUseEvent {
                                 session_id: session_id.to_string(),
                                 worktree_id: worktree_id.to_string(),
-                                id: tool_id,
+                                id: tool_id.clone(),
                                 name: tool_name.to_string(),
                                 input,
                                 parent_tool_use_id: None,
+                            },
+                        );
+                        // Without a tool block the live message has no content
+                        // blocks and falls back to the raw JSON tool list.
+                        let _ = app.emit_all(
+                            "chat:tool_block",
+                            &ToolBlockEvent {
+                                session_id: session_id.to_string(),
+                                worktree_id: worktree_id.to_string(),
+                                tool_call_id: tool_id.clone(),
+                            },
+                        );
+                        let _ = app.emit_all(
+                            "chat:tool_result",
+                            &ToolResultEvent {
+                                session_id: session_id.to_string(),
+                                worktree_id: worktree_id.to_string(),
+                                tool_use_id: tool_id,
+                                output: "completed".to_string(),
                             },
                         );
                     }
@@ -4255,6 +4334,8 @@ fn process_codex_event(
                             input: input.clone(),
                             output: (!output.is_empty()).then_some(output.clone()),
                             parent_tool_use_id: None,
+                            is_error: None,
+                            subagent_usage: None,
                         });
                         content_blocks.push(ContentBlock::ToolUse {
                             tool_call_id: tool_id.clone(),
@@ -4641,6 +4722,8 @@ pub fn parse_codex_run_to_message(
                             input: serde_json::json!({ "command": command }),
                             output: None,
                             parent_tool_use_id: None,
+                            is_error: None,
+                            subagent_usage: None,
                         });
                         content_blocks.push(ContentBlock::ToolUse {
                             tool_call_id: tool_id.clone(),
@@ -4687,6 +4770,8 @@ pub fn parse_codex_run_to_message(
                             input: arguments,
                             output: None,
                             parent_tool_use_id: None,
+                            is_error: None,
+                            subagent_usage: None,
                         });
                         content_blocks.push(ContentBlock::ToolUse {
                             tool_call_id: tool_id.clone(),
@@ -4713,6 +4798,8 @@ pub fn parse_codex_run_to_message(
                             input: item.clone(),
                             output: None,
                             parent_tool_use_id: None,
+                            is_error: None,
+                            subagent_usage: None,
                         });
                         content_blocks.push(ContentBlock::ToolUse {
                             tool_call_id: tool_id.clone(),
@@ -4734,6 +4821,8 @@ pub fn parse_codex_run_to_message(
                             input: item.clone(),
                             output: None,
                             parent_tool_use_id: None,
+                            is_error: None,
+                            subagent_usage: None,
                         });
                         content_blocks.push(ContentBlock::ToolUse {
                             tool_call_id: tool_id.clone(),
@@ -4757,6 +4846,8 @@ pub fn parse_codex_run_to_message(
                             input,
                             output: None,
                             parent_tool_use_id: None,
+                            is_error: None,
+                            subagent_usage: None,
                         });
                         content_blocks.push(ContentBlock::ToolUse {
                             tool_call_id: tool_id.clone(),
@@ -4966,6 +5057,8 @@ pub fn parse_codex_run_to_message(
                                 input,
                                 output: Some("completed".to_string()),
                                 parent_tool_use_id: None,
+                                is_error: None,
+                                subagent_usage: None,
                             });
                             content_blocks.push(ContentBlock::ToolUse {
                                 tool_call_id: tool_id,
@@ -4996,6 +5089,8 @@ pub fn parse_codex_run_to_message(
                                 input,
                                 output: (!output.is_empty()).then_some(output),
                                 parent_tool_use_id: None,
+                                is_error: None,
+                                subagent_usage: None,
                             });
                             content_blocks.push(ContentBlock::ToolUse {
                                 tool_call_id: tool_id,
@@ -5403,6 +5498,45 @@ mod tests {
     use super::*;
 
     #[test]
+    fn permission_policies_apply_to_threads_and_every_turn() {
+        for (mode, approval, sandbox, reviewer) in [
+            ("supervised", "untrusted", "readOnly", "user"),
+            ("auto", "on-request", "workspaceWrite", "auto_review"),
+            ("yolo", "never", "dangerFullAccess", "user"),
+            ("plan", "never", "readOnly", "user"),
+        ] {
+            let thread = build_thread_start_params(
+                std::path::Path::new("/tmp/worktree"),
+                Some("gpt-5.4"),
+                Some(mode),
+                false,
+                None,
+                None,
+                None,
+            );
+            let turn = build_turn_start_params(
+                "thread-1",
+                "hello",
+                std::path::Path::new("/tmp/worktree"),
+                Some(mode),
+                None,
+                &[],
+                &[],
+                Some("gpt-5.4"),
+            );
+            assert_eq!(thread["approvalPolicy"], approval);
+            assert_eq!(thread["approvalsReviewer"], reviewer);
+            assert_eq!(turn["approvalPolicy"], approval);
+            assert_eq!(turn["approvalsReviewer"], reviewer);
+            assert_eq!(turn["sandboxPolicy"]["type"], sandbox);
+            assert_eq!(
+                turn["collaborationMode"]["mode"],
+                if mode == "plan" { "plan" } else { "default" }
+            );
+        }
+    }
+
+    #[test]
     fn reloads_mcp_servers_with_app_server_protocol_before_thread_start() {
         let result = reload_mcp_servers_before_thread_start(|method, params| {
             assert_eq!(method, "config/mcpServer/reload");
@@ -5780,8 +5914,6 @@ mod tests {
             Some("plan"),
             false,
             None,
-            false,
-            None,
             None,
             None,
         );
@@ -5790,13 +5922,64 @@ mod tests {
     }
 
     #[test]
+    fn jean_context_goes_to_developer_instructions_not_base_instructions() {
+        let params = build_thread_start_params(
+            std::path::Path::new("/tmp"),
+            Some("gpt-5.5"),
+            Some("plan"),
+            false,
+            Some("Jean global system prompt"),
+            None,
+            None,
+        );
+
+        assert_eq!(params["developerInstructions"], "Jean global system prompt");
+        assert!(params.get("baseInstructions").is_none());
+    }
+
+    #[test]
+    fn empty_developer_instructions_are_omitted() {
+        let params = build_thread_start_params(
+            std::path::Path::new("/tmp"),
+            Some("gpt-5.5"),
+            Some("plan"),
+            false,
+            Some(""),
+            None,
+            None,
+        );
+
+        assert!(params.get("developerInstructions").is_none());
+        assert!(params.get("baseInstructions").is_none());
+    }
+
+    #[test]
+    fn thread_params_always_enable_multi_agent() {
+        let params = build_thread_start_params(
+            std::path::Path::new("/tmp"),
+            None,
+            Some("plan"),
+            false,
+            None,
+            None,
+            None,
+        );
+        assert_eq!(
+            params["config"]["features"]["multi_agent"],
+            serde_json::json!(true)
+        );
+        assert_eq!(
+            params["config"]["agents"]["max_threads"],
+            CODEX_MAX_AGENT_THREADS
+        );
+    }
+
+    #[test]
     fn gpt_5_5_fast_enables_fast_service_tier() {
         let params = build_thread_start_params(
             std::path::Path::new("/tmp"),
             Some("gpt-5.5-fast"),
             Some("plan"),
-            false,
-            None,
             false,
             None,
             None,
@@ -5821,6 +6004,15 @@ mod tests {
         assert_eq!(split_fast_model("gpt-5.6"), ("gpt-5.6-sol", false));
         assert_eq!(split_fast_model("gpt-5-6-sol"), ("gpt-5.6-sol", false));
         assert_eq!(split_fast_model("gpt-5-6-sol-fast"), ("gpt-5.6-sol", true));
+    }
+
+    #[test]
+    fn split_fast_model_recognises_gpt_6_fast_models() {
+        assert_eq!(split_fast_model("gpt-6.1-sol-fast"), ("gpt-6.1-sol", true));
+        assert_eq!(split_fast_model("gpt-6-astra-fast"), ("gpt-6-astra", true));
+        assert_eq!(split_fast_model("gpt-6-sol-fast"), ("gpt-6-sol", true));
+        assert_eq!(split_fast_model("gpt-6-luna-fast"), ("gpt-6-luna", true));
+        assert_eq!(split_fast_model("gpt-6.1-sol"), ("gpt-6.1-sol", false));
     }
 
     #[test]
@@ -5891,8 +6083,6 @@ mod tests {
             Some("build"),
             false,
             None,
-            false,
-            None,
             None,
             None,
         );
@@ -5906,8 +6096,6 @@ mod tests {
             std::path::Path::new("/tmp"),
             Some("gpt-5.6-sol"),
             Some("build"),
-            false,
-            None,
             false,
             None,
             Some("high"),
@@ -5954,8 +6142,6 @@ mod tests {
             Some("plan"),
             false,
             None,
-            false,
-            None,
             None,
             None,
         );
@@ -5969,8 +6155,6 @@ mod tests {
             std::path::Path::new("/tmp"),
             Some("gpt-5.4"),
             Some("build"),
-            false,
-            None,
             false,
             None,
             None,
@@ -5989,8 +6173,6 @@ mod tests {
             std::path::Path::new("/tmp"),
             Some("gpt-5.4"),
             Some("plan"),
-            false,
-            None,
             false,
             None,
             None,
@@ -6060,8 +6242,6 @@ mod tests {
             Some("yolo"),
             false,
             None,
-            false,
-            None,
             None,
             None,
         );
@@ -6081,8 +6261,6 @@ mod tests {
             std::path::Path::new("/tmp"),
             Some("gpt-5.4"),
             Some("plan"),
-            false,
-            None,
             false,
             None,
             None,

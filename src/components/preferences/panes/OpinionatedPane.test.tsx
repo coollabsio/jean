@@ -54,7 +54,7 @@ describe('OpinionatedPane', () => {
     await screen.findByRole('button', { name: /Superpowers/i })
 
     const superpowersLabel = screen.getByText('Superpowers')
-    const superpowersRow = superpowersLabel.closest('.rounded-lg')
+    const superpowersRow = superpowersLabel.closest('.rounded-md')
     if (!superpowersRow) throw new Error('Expected Superpowers row')
     const superpowersUninstall = within(
       superpowersRow as HTMLElement
@@ -72,13 +72,17 @@ describe('OpinionatedPane', () => {
     render(<OpinionatedPane />)
 
     const pstackLabel = await screen.findByText('pstack')
-    const pstackCard = pstackLabel.closest('.rounded-lg')?.parentElement
+    const pstackCard = pstackLabel.closest('.rounded-md')?.parentElement
     if (!pstackCard) throw new Error('Expected pstack card')
 
     await userEvent.click(pstackLabel)
 
-    expect(within(pstackCard as HTMLElement).getByText('Codex')).toBeInTheDocument()
-    expect(within(pstackCard as HTMLElement).getByText('Claude')).toBeInTheDocument()
+    expect(
+      within(pstackCard as HTMLElement).getByText('Codex')
+    ).toBeInTheDocument()
+    expect(
+      within(pstackCard as HTMLElement).getByText('Claude')
+    ).toBeInTheDocument()
     expect(
       within(pstackCard as HTMLElement).getByText('Command Code')
     ).toBeInTheDocument()
@@ -96,7 +100,7 @@ describe('OpinionatedPane', () => {
     await screen.findByRole('button', { name: /Superpowers/i })
 
     const superpowersLabel = screen.getByText('Superpowers')
-    const superpowersRow = superpowersLabel.closest('.rounded-lg')
+    const superpowersRow = superpowersLabel.closest('.rounded-md')
     if (!superpowersRow) throw new Error('Expected Superpowers row')
 
     await userEvent.click(
@@ -121,7 +125,7 @@ describe('OpinionatedPane', () => {
     await screen.findByRole('button', { name: /Caveman/i })
 
     const cavemanLabel = screen.getByText('Caveman')
-    const cavemanHeader = cavemanLabel.closest('.rounded-lg')
+    const cavemanHeader = cavemanLabel.closest('.rounded-md')
     if (!cavemanHeader) throw new Error('Expected Caveman card header')
 
     expect(
@@ -138,7 +142,7 @@ describe('OpinionatedPane', () => {
     await screen.findByRole('button', { name: /Superpowers/i })
 
     const superpowersLabel = screen.getByText('Superpowers')
-    const header = superpowersLabel.closest('.rounded-lg')
+    const header = superpowersLabel.closest('.rounded-md')
     if (!header) throw new Error('Expected Superpowers card header')
 
     expect(header).toHaveClass('flex-col')
@@ -173,7 +177,7 @@ describe('OpinionatedPane', () => {
     render(<OpinionatedPane />)
 
     const rtkLabel = await screen.findByText('RTK')
-    const rtkCard = rtkLabel.closest('.rounded-lg')
+    const rtkCard = rtkLabel.closest('.rounded-md')
     if (!rtkCard) throw new Error('Expected RTK card')
 
     expect(

@@ -107,8 +107,9 @@ describe('SessionChatModal removal behavior', () => {
       start === -1 || end === -1 ? '' : source.slice(start, end)
 
     expect(removeSessionTab).toContain('needsConfirm')
-    expect(removeSessionTab).toContain(
-      'preferences?.confirm_session_close !== false && !sessionIsEmpty'
+    // Tolerate Prettier's line breaks in the inlined gate.
+    expect(removeSessionTab).toMatch(
+      /preferences\?\.confirm_session_close !== false &&\s*!sessionIsEmpty/
     )
     // Confirm gate wraps the action for every non-empty tab (not only last).
     expect(removeSessionTab).toMatch(
@@ -162,9 +163,11 @@ describe('SessionChatModal removal behavior', () => {
     expect(modalSource).toContain("setCloseConfirmMode('worktree')")
     expect(modalSource).toContain('onRequestCloseWorktree')
     expect(modalSource).toContain('mode={closeConfirmMode}')
-    expect(canvasSource).toContain('onRequestCloseWorktree={() => {')
     expect(canvasSource).toContain(
-      'closeWorktreeDirectly(selectedWorktreeModal.worktreeId)'
+      'onRequestCloseWorktree={handleRequestCloseModalWorktree}'
+    )
+    expect(canvasSource).toContain(
+      'closeWorktreeDirectlyRef.current(modal.worktreeId)'
     )
   })
 
@@ -256,11 +259,11 @@ describe('SessionChatModal removal behavior', () => {
     )
   })
 
-  it('keeps a yellow background on waiting session tabs', () => {
+  it('keeps a warning background on waiting session tabs', () => {
     const source = readSource('src/components/chat/SessionChatModal.tsx')
 
     expect(source).toContain('isActionableWaitingStatus(status)')
-    expect(source).toContain("'bg-yellow-500/10")
+    expect(source).toContain("'bg-warning/10")
   })
 
   it('uses a subtle grey background only for inactive unread session tabs', () => {
@@ -270,7 +273,7 @@ describe('SessionChatModal removal behavior', () => {
     expect(source).toContain('!isActive')
     expect(source).toContain('!isActionableWaitingStatus(status)')
     expect(source).toContain("'bg-muted/60")
-    expect(source).not.toContain("'bg-green-500/10")
+    expect(source).not.toContain("'bg-success/10")
   })
 
   it('offers to open resumable chat sessions in a separate native client session', () => {

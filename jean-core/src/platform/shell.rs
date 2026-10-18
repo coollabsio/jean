@@ -73,6 +73,52 @@ pub fn fix_headless_path() {
     }
 }
 
+/// Add fnm's default Node.js to PATH when the Windows app cannot find Node.
+///
+/// fnm puts Node on PATH only from shell profiles (`fnm env`), so Jean started
+/// from the Start menu cannot find `node`/`npm` (issue #797). Appending fnm's
+/// `aliases\default` directory makes npm installs and npm CLI shims work.
+/// No-op on other platforms, where the login-shell PATH is loaded instead.
+pub fn add_fnm_node_to_path() {
+    #[cfg(windows)]
+    {
+        use std::env::var_os;
+        let fnm_dirs = [
+            var_os("FNM_DIR").map(std::path::PathBuf::from),
+            var_os("APPDATA").map(|dir| std::path::Path::new(&dir).join("fnm")),
+            var_os("USERPROFILE").map(|dir| std::path::Path::new(&dir).join(".fnm")),
+        ];
+        if let Some(path) =
+            path_with_fnm_default_node(var_os("PATH").as_deref(), fnm_dirs.into_iter().flatten())
+        {
+            std::env::set_var("PATH", path);
+        }
+    }
+}
+
+/// Return PATH with fnm's default Node.js directory appended, or `None` when
+/// PATH already has `node.exe` or no fnm default version exists.
+#[cfg(any(windows, test))]
+fn path_with_fnm_default_node(
+    path: Option<&std::ffi::OsStr>,
+    fnm_dirs: impl IntoIterator<Item = std::path::PathBuf>,
+) -> Option<std::ffi::OsString> {
+    let mut entries: Vec<_> = path
+        .map(std::env::split_paths)
+        .into_iter()
+        .flatten()
+        .collect();
+    if entries.iter().any(|dir| dir.join("node.exe").is_file()) {
+        return None;
+    }
+    let node_dir = fnm_dirs
+        .into_iter()
+        .map(|dir| dir.join("aliases").join("default"))
+        .find(|dir| dir.join("node.exe").is_file())?;
+    entries.push(node_dir);
+    std::env::join_paths(entries).ok()
+}
+
 #[cfg(windows)]
 pub fn get_default_shell() -> String {
     let wsl = super::wsl::get_wsl_config();
@@ -127,4 +173,60 @@ mod tests {
 #[allow(dead_code)]
 pub fn executable_exists(name: &str) -> bool {
     which::which(name).is_ok()
+}
+
+#[cfg(test)]
+mod fnm_path_tests {
+    use super::path_with_fnm_default_node;
+    use std::path::{Path, PathBuf};
+
+    fn fnm_dir_with_default_node(root: &Path) -> PathBuf {
+        let fnm_dir = root.join("fnm");
+        let default_dir = fnm_dir.join("aliases").join("default");
+        std::fs::create_dir_all(&default_dir).expect("create fnm default dir");
+        std::fs::write(default_dir.join("node.exe"), b"").expect("write node.exe");
+        fnm_dir
+    }
+
+    #[test]
+    fn appends_fnm_default_when_node_is_missing_from_path() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let fnm_dir = fnm_dir_with_default_node(root.path());
+        let system = root.path().join("system32");
+        let path = std::env::join_paths([&system]).unwrap();
+
+        let updated = path_with_fnm_default_node(
+            Some(&path),
+            [root.path().join("missing-fnm"), fnm_dir.clone()],
+        )
+        .expect("fnm default should be added");
+
+        assert_eq!(
+            std::env::split_paths(&updated).collect::<Vec<_>>(),
+            vec![system, fnm_dir.join("aliases").join("default")]
+        );
+    }
+
+    #[test]
+    fn keeps_path_when_node_is_already_on_path() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let fnm_dir = fnm_dir_with_default_node(root.path());
+        let nodejs = root.path().join("nodejs");
+        std::fs::create_dir_all(&nodejs).unwrap();
+        std::fs::write(nodejs.join("node.exe"), b"").unwrap();
+        let path = std::env::join_paths([&nodejs]).unwrap();
+
+        assert_eq!(path_with_fnm_default_node(Some(&path), [fnm_dir]), None);
+    }
+
+    #[test]
+    fn keeps_path_when_fnm_has_no_default_version() {
+        let root = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(root.path().join("fnm").join("aliases")).unwrap();
+
+        assert_eq!(
+            path_with_fnm_default_node(None, [root.path().join("fnm")]),
+            None
+        );
+    }
 }

@@ -119,6 +119,8 @@ async fn save_preferences(app: AppHandle, preferences: AppPreferences) -> Result
 
 `write_file_atomically` creates a unique sibling temp file, flushes it, and replaces the destination. It uses the native Windows replacement APIs because `std::fs::rename` cannot overwrite an existing file on Windows; using `std::fs::rename` directly causes every save after the first one to fail.
 
+A rename replaces a symlink itself, so `write_file_atomically` first resolves a symlinked destination (`resolve_write_target`) and replaces the link target instead. Dangling links and cycles return an error and leave the link unchanged. For user config files that need a backup (MCP installers), use `write_file_atomically_with_backup`; it puts the `.bak` copy next to the resolved target.
+
 ### Durable Writes and Recovery for Critical Data
 
 For user data where losing the file can make the application appear empty, an atomic

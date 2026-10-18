@@ -146,4 +146,20 @@ describe('getStartupOnboardingAction', () => {
       })
     ).toBe('open')
   })
+
+  it('does not reopen onboarding for missing local tools when a remote server exists', () => {
+    expect(
+      getStartupOnboardingAction({
+        aiStatuses: [missingStatus],
+        aiAuth: [undefined],
+        ghStatus: missingStatus,
+        ghAuth: undefined,
+        onboardingOpen: false,
+        onboardingDismissed: false,
+        onboardingManuallyTriggered: false,
+        requiresWslChoice: false,
+        hasRemoteServer: true,
+      })
+    ).toBe('none')
+  })
 })

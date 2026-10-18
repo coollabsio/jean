@@ -34,17 +34,15 @@ describe('RecentWorktreesList structure', () => {
   })
 
   it('aligns status, activity, and optional Git changes in grid rows', () => {
-    expect(source).toContain('grid-cols-[minmax(0,1fr)_auto] gap-x-2 gap-y-1')
+    expect(source).toContain('flex w-full flex-col gap-y-1')
+    expect(source).toContain('min-w-0 flex-1 truncate text-[13px]')
+    expect(source).not.toContain('min-w-14')
+    expect(source).toContain('<WorkingWaveform />')
     expect(source).toContain(
-      'recent-working-waveform text-violet-500 dark:text-violet-400'
+      'className="flex shrink-0 items-center justify-end gap-2 text-[10px] tabular-nums"'
     )
-    expect(source).toContain(
-      'className="justify-self-end text-[10px] tabular-nums"'
-    )
-    expect(source).toContain('flex min-h-4 items-center justify-between')
-    expect(source).toContain(
-      '<span className="flex gap-1 text-[10px] font-medium tabular-nums">'
-    )
+    expect(source).toContain('@container flex flex-col')
+    expect(source).toContain('hidden gap-1 font-medium @[15rem]:flex')
     expect(source).not.toContain('pt-4')
     expect(source).not.toContain('absolute right-3 top-2')
   })
@@ -56,11 +54,13 @@ describe('RecentWorktreesList structure', () => {
     expect(source).toContain('const isUnread = isUnreadSession(row.session)')
     expect(source).toContain('{isUnread && (')
     expect(source).toContain('aria-label="Unread session"')
-    expect(source).toContain('text-yellow-400')
+    expect(source).toContain('text-warning')
   })
 
   it('uses fully rounded rows and a full background for the current row', () => {
-    expect(source).toContain('className="flex flex-col gap-2 px-2 py-2"')
+    expect(source).toContain(
+      '@container flex flex-col gap-2 px-2 pt-2'
+    )
     expect(source).toContain('rounded-lg border py-2.5 pl-3 pr-3')
     expect(source).toContain(
       "isCurrent ? 'border-border bg-muted/50 text-foreground shadow'"
@@ -90,15 +90,10 @@ describe('RecentWorktreesList structure', () => {
     expect(source).toContain('getRecentSessionStatus(row.session')
     expect(source).toContain("const isWorking = status.tone === 'working'")
     expect(source).toContain('{isWorking ? (')
-    expect(source).toContain('recent-working-waveform')
-    expect(source).toContain('aria-hidden="true"')
     expect(source).not.toContain('vibing')
     expect(source).not.toContain('planning')
     expect(source).not.toContain('executingModes[row.session.id]')
     expect(source).not.toContain('executionModes[row.session.id]')
-    expect(source).toContain(
-      'recent-working-waveform text-violet-500 dark:text-violet-400'
-    )
     expect(source).not.toContain('border-l-destructive')
     expect(source).not.toContain('border-l-yellow-500')
     expect(source).not.toContain('border-l-green-500')
@@ -123,16 +118,16 @@ describe('RecentWorktreesList structure', () => {
   })
 
   it('pins sessions above recent rows and keeps the pin visible on small screens', () => {
-    expect(source).toContain('<PinTack')
+    expect(source).toContain('<Thumbtack')
     expect(source).toContain("weight={isPinned ? 'Filled' : 'Outline'}")
-    expect(source).toContain('toggleRecentSessionPinned(row.session.id)')
+    expect(source).toContain('void setRecentSessionPinned(')
     expect(source).toContain('pinned.has(row.session.id)')
     expect(source).toContain('return sortRecentRows(')
     expect(source).toContain('opacity-100')
     expect(source).toContain('md:opacity-0')
     expect(source).toContain('md:group-hover:opacity-100')
-    expect(source).toContain('flex size-4 shrink-0')
-    expect(source).toContain('flex min-h-4 items-center justify-between')
+    expect(source).toContain('relative flex w-full cursor-pointer')
+    expect(source).toContain('absolute -left-1.5 -top-1.5 z-10')
     expect(source).not.toContain('absolute right-full')
     expect(source).not.toContain('absolute right-1 top-1')
     expect(source).not.toContain('pr-9')
@@ -143,9 +138,9 @@ describe('RecentWorktreesList structure', () => {
       "isPinned ? 'Unpin session' : 'Pin session'"
     )
     const gitAdded = source.indexOf('+{row.added}')
-    expect(projectName).toBeGreaterThan(-1)
-    expect(pinLabel).toBeGreaterThan(projectName)
-    expect(gitAdded).toBeGreaterThan(pinLabel)
+    expect(pinLabel).toBeGreaterThan(-1)
+    expect(projectName).toBeGreaterThan(pinLabel)
+    expect(gitAdded).toBeGreaterThan(projectName)
     expect(source).toContain("isPinned ? 'Unpin session' : 'Pin session'")
     expect(source).toContain('!isPinned &&')
     expect(source).toContain('showPinnedSeparator')

@@ -76,7 +76,7 @@ export const BrowserView = memo(function BrowserView({
       <div className="relative flex-1 overflow-hidden">
         {activeError && (
           <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-background p-6 text-center">
-            <AlertTriangle className="h-8 w-8 text-amber-500" />
+            <AlertTriangle className="h-8 w-8 text-warning" />
             <div className="text-sm font-medium">Could not load page</div>
             <div className="max-w-md text-xs text-muted-foreground">
               {activeError}

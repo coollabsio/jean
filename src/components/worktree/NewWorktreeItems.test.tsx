@@ -83,9 +83,7 @@ describe('compact issue and PR rows', () => {
     )
 
     await user.keyboard('{Control>}')
-    await user.click(
-      screen.getByRole('button', { name: /#711Web access/i })
-    )
+    await user.click(screen.getByRole('button', { name: /^Web access/i }))
     await user.keyboard('{/Control}')
 
     expect(onClick).toHaveBeenCalledWith(true)
@@ -122,7 +120,9 @@ describe('compact issue and PR rows', () => {
     expect(onInvestigateInNewSession).toHaveBeenCalledTimes(1)
   })
 
-  it('hides labels and uses compact issue text', () => {
+  it('shows issue labels, author and number, and filters by label on click', async () => {
+    const user = userEvent.setup()
+    const onLabelClick = vi.fn()
     render(
       <IssueItem
         issue={{
@@ -140,15 +140,16 @@ describe('compact issue and PR rows', () => {
         onClick={vi.fn()}
         onInvestigate={vi.fn()}
         onPreview={vi.fn()}
+        onLabelClick={onLabelClick}
       />
     )
-    expect(screen.queryByText('Triage')).toBeNull()
-    expect(screen.getByText('A detailed issue title')).toHaveClass(
-      'text-[11px]'
-    )
+    expect(screen.getByText(/#42 opened .* ago/)).toBeInTheDocument()
+    expect(screen.getByText('octocat')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Triage' }))
+    expect(onLabelClick).toHaveBeenCalledWith('Triage')
   })
 
-  it('hides labels and branch names and uses compact PR text', () => {
+  it('shows PR labels and hides branch names', () => {
     const pr = {
       number: 711,
       title: 'feat(web): sign-in screen',
@@ -157,6 +158,8 @@ describe('compact issue and PR rows', () => {
       headRefName: 'feat/web-auth-screen',
       baseRefName: 'main',
       isDraft: false,
+      created_at: '2026-01-01T00:00:00Z',
+      author: { login: 'octocat' },
     } as GitHubPullRequest
     render(
       <PRItem
@@ -172,11 +175,9 @@ describe('compact issue and PR rows', () => {
         onPreview={vi.fn()}
       />
     )
-    expect(screen.queryByText('Feature')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Feature' })).toBeInTheDocument()
     expect(screen.queryByText(/feat\/web-auth-screen/)).toBeNull()
-    expect(screen.getByText('feat(web): sign-in screen')).toHaveClass(
-      'text-[11px]'
-    )
+    expect(screen.getByText(/#711 opened .* ago/)).toBeInTheDocument()
   })
 })
 
@@ -267,5 +268,47 @@ describe('BranchItem', () => {
     expect(screen.getAllByRole('button')).toHaveLength(1)
     await user.click(screen.getByRole('button', { name: 'feature/existing' }))
     expect(onClick).toHaveBeenCalledWith(false)
+  })
+})
+
+describe('existing worktree badge', () => {
+  it('shows where an issue is already used without breaking the row', () => {
+    render(
+      <IssueItem
+        issue={
+          {
+            number: 7,
+            title: 'Crash on start',
+            state: 'OPEN',
+            created_at: '2020-01-01T00:00:00Z',
+          } as GitHubIssue
+        }
+        index={0}
+        isSelected={false}
+        isCreating={false}
+        contextMatches={[
+          {
+            worktreeId: 'wt-1',
+            worktreeName: 'fix-crash',
+            worktreePath: '/repo/fix-crash',
+            sessionId: 's-1',
+            sessionName: 'Investigate',
+          },
+          {
+            worktreeId: 'wt-2',
+            worktreeName: 'other',
+            worktreePath: '/repo/other',
+          },
+        ]}
+        onMouseEnter={vi.fn()}
+        onClick={vi.fn()}
+        onInvestigate={vi.fn()}
+        onPreview={vi.fn()}
+      />
+    )
+
+    const badge = screen.getByTestId('context-link-badge')
+    expect(badge).toHaveTextContent('In fix-crash › Investigate')
+    expect(badge).toHaveTextContent('+1')
   })
 })

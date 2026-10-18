@@ -47,7 +47,7 @@ export function LinuxWindowControls() {
       <ControlButton
         onClick={handleClose}
         aria-label="Close"
-        className="hover:bg-red-600 hover:text-white"
+        className="hover:bg-destructive hover:text-white"
       >
         <X className="size-3.5" />
       </ControlButton>

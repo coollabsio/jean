@@ -10,13 +10,13 @@ import type { CliBackend } from '@/types/preferences'
 function authHint(backend?: CliBackend): string {
   switch (backend) {
     case 'codex':
-      return "Needs authentication — run 'codex mcp auth' to authenticate"
+      return 'Needs authentication — use Sign in in MCP settings'
     case 'opencode':
       return "Needs authentication — run 'opencode mcp auth' to authenticate"
     case 'cursor':
       return "Needs authentication — run 'cursor-agent mcp login <server>' to authenticate"
     default:
-      return "Needs authentication — run 'claude /mcp' to authenticate"
+      return 'Needs authentication — use Sign in in MCP settings'
   }
 }
 
@@ -45,15 +45,18 @@ export function McpStatusDot({
   if (!status) return null
 
   switch (status) {
+    case 'authenticated':
     case 'connected':
       return (
         <Tooltip>
           <TooltipTrigger asChild>
             <span>
-              <CheckCircle className="size-3 text-green-600 dark:text-green-400" />
+              <CheckCircle className="size-3 text-success" />
             </span>
           </TooltipTrigger>
-          <TooltipContent>Connected</TooltipContent>
+          <TooltipContent>
+            {status === 'authenticated' ? 'Signed in' : 'Connected'}
+          </TooltipContent>
         </Tooltip>
       )
     case 'needsAuthentication':
@@ -61,7 +64,7 @@ export function McpStatusDot({
         <Tooltip>
           <TooltipTrigger asChild>
             <span>
-              <ShieldAlert className="size-3 text-amber-600 dark:text-amber-400" />
+              <ShieldAlert className="size-3 text-warning" />
             </span>
           </TooltipTrigger>
           <TooltipContent>{authHint(backend)}</TooltipContent>
@@ -72,7 +75,7 @@ export function McpStatusDot({
         <Tooltip>
           <TooltipTrigger asChild>
             <span>
-              <XCircle className="size-3 text-red-600 dark:text-red-400" />
+              <XCircle className="size-3 text-destructive" />
             </span>
           </TooltipTrigger>
           <TooltipContent>Could not connect to server</TooltipContent>

@@ -251,10 +251,10 @@ describe('BackendModelPickerContent', () => {
       name: 'Antigravity CLI (Beta)',
     })
 
-    expect(cursorTab.querySelector('.bg-yellow-500')).toBeNull()
-    expect(commandCodeTab.querySelector('.bg-yellow-500')).toBeNull()
-    expect(grokTab.querySelector('.bg-yellow-500')).toBeNull()
-    expect(antigravityTab.querySelector('.bg-yellow-500')).not.toBeNull()
+    expect(cursorTab.querySelector('.bg-warning')).toBeNull()
+    expect(commandCodeTab.querySelector('.bg-warning')).toBeNull()
+    expect(grokTab.querySelector('.bg-warning')).toBeNull()
+    expect(antigravityTab.querySelector('.bg-warning')).not.toBeNull()
   })
 
   it('lists CLI-reported Antigravity models ahead of static fallbacks', () => {

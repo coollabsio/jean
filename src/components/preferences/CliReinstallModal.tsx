@@ -450,7 +450,9 @@ function CliReinstallModalUI({
     <Dialog open={open && !minimized} onOpenChange={onOpenChange}>
       <DialogContent
         className="sm:max-w-[450px]"
-        preventClose
+        // ESC closes like the X button; never while an install is running
+        preventClose={step === 'installing'}
+        onInteractOutside={e => e.preventDefault()}
         showCloseButton={step !== 'installing'}
       >
         {step === 'installing' && (
@@ -500,7 +502,7 @@ function CliReinstallModalUI({
           {step === 'complete' ? (
             <div className="space-y-6">
               <div className="flex flex-col items-center gap-4">
-                <CheckCircle2 className="size-10 text-green-500" />
+                <CheckCircle2 className="size-10 text-success" />
                 <div className="text-center">
                   <p className="font-medium">Installation Successful</p>
                   <p className="text-sm text-muted-foreground mt-1">

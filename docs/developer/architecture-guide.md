@@ -16,7 +16,7 @@ High-level architectural overview and mental models for the Jean desktop applica
 
 `load_issue_context` and `load_pr_context` attach references to a session through Inject Context or the chat `#` picker. The chat `@` picker adds files, not issues or PRs. A worktree can also have issue or PR references from its creation. For each type independently, explicit session references replace worktree references in the loaded-context lists and AI prompts. If a session has no references of that type, the worktree references are the fallback. Older sessions can contain copied worktree references; when they also contain a distinct session reference, only the distinct reference is effective. Do not copy worktree references into new sessions or merge the two scopes in a new prompt path. The shared context files remain reference-counted.
 
-In the chat `#` picker, the plus action attaches an issue or PR to the active session and removes the typed `#` query from the chat draft. The sparkle action attaches it first, then replaces that query with the configured investigation magic prompt for the selected issue or PR. It does not send the draft. On native desktop, Enter selects the row and Shift+Enter inserts the investigation prompt; mobile and Web Access show the tap actions without keyboard hints.
+In the chat `#` picker, the plus action attaches an issue or PR to the active session and removes the typed `#` query from the chat draft. The sparkle action replaces that query with the configured investigation magic prompt and sends it right away: `ChatInput` calls `onSubmit` with a `beforeSend` callback that loads the context, and `handleSubmit` awaits it before it sends. The send is bound to the session that was active at submit time, so the user can switch sessions or worktrees while the context loads. If the load fails, the draft is restored and nothing is sent. On native desktop, Enter selects the row and Shift+Enter starts the investigation; mobile and Web Access show the tap actions without keyboard hints.
 
 The picker shows issues and PRs in separate batches of eight. Each group has its own Load more button while more results are available. A new search or picker open resets both groups to eight results. The existing GitHub search finds results beyond the loaded list.
 
@@ -92,6 +92,79 @@ backend/model results together so the review panel can switch between them;
 entries are created with a running status so the dropdown can show loading
 state before each result arrives.
 
+### MCP sign-in
+
+MCP rows in global and project settings offer **Sign in** for Claude and Codex
+servers that need authentication. `prepare_mcp_login` resolves the configured
+backend binary, validates the server name, and checks `mcp login --help` for
+`--no-browser` support. The command is registered in the shared core dispatch,
+which serves both native `dispatch_core_command` and Web Access.
+
+Reuse `CliLoginModal` and `StandaloneTerminalSurface`; do not implement a second
+OAuth credential store. The backend CLI owns credentials, state/PKCE validation,
+and token exchange. The user opens the authorization link and pastes the full
+callback URL into the terminal (or the Web Access/mobile paste field). This
+works even when the browser is on another device and cannot reach the callback
+page. Old CLI versions receive an update message rather than an unusable flow.
+Other backends retain their backend-specific terminal instructions.
+
+The modal's optional `McpLoginContext` records the server name, working directory,
+and owning Jean server. Remote terminal IDs are scoped to that owner. MCP query
+keys include the owner so equal directory paths on different servers cannot
+share health or configuration results. Global settings use the selected Settings
+server; project settings use the project's owner. Closing the login window
+explicitly fetches that owner's manual health queries after cancelling any
+pre-login checks. Invalidation alone does not run disabled health queries.
+
+OAuth URLs and callback output from MCP login must not enter debug logs.
+`codex mcp list --json` reports `auth_status`, not a live connection check:
+`not_logged_in` needs sign-in, while `o_auth`/`bearer_token` are **signed in**, not
+**connected**. Keep this distinction in the UI.
+
+References: [Codex MCP](https://developers.openai.com/codex/mcp), installed
+Claude/Codex `mcp login --help` (`--no-browser` and manual callback input).
+
+### MCP servers outside config files
+
+Config-file discovery misses servers the CLI resolves itself: claude.ai
+connectors and plugins (`claude mcp list`), Codex plugins and ChatGPT apps
+(`codex_apps`, app-server `mcpServerStatus/list`), Grok plugins and gateways
+(`grok mcp doctor --json`), and servers from other Cursor/OpenCode sources
+(`mcp list`). `jean-core/src/chat/mcp_external.rs` caches them per backend and
+worktree and appends them to each `*_cli::mcp::get_mcp_servers`.
+`get_mcp_servers` refreshes the cache in the background (at most every 5
+minutes), and health checks refresh it at once. A change emits
+`cache:invalidate` with `mcp-servers`.
+
+External entries have `config: { "jeanExternal": true, "target": ... }`. Never
+pass them as a server definition. Claude drops `--strict-mcp-config` when one
+is enabled and uses `deniedMcpServers` for known servers that are off. Grok
+disables them through `disabled_mcp_servers`, and Cursor through
+`mcp enable|disable`. Other backends load them automatically.
+
+### Full-screen settings pages
+
+App and project settings share `src/components/preferences/SettingsPage.tsx`.
+This full-window surface uses a non-modal Radix root and content portal, without
+an overlay, centered-dialog sizing, or a focus trap. Radix still manages initial
+focus, focus restoration, and Escape. Open child selects and popovers consume
+Escape before the page closes; settings search can also consume it to clear the
+query. Native window controls and macOS traffic-light spacing remain available.
+
+Keep navigation in the left sidebar, Back at its bottom, and pane content in a
+centered, scrollable `max-w-4xl` column. Below the `md` breakpoint, use the pane
+selector and mobile search instead. Use the shared `SettingsSection` for subtle
+background cards in both app and project panes, with section headings above the
+cards. Preserve existing settings target
+ownership and persistence; the page changes presentation only.
+
+Reference: [Radix Dialog](https://www.radix-ui.com/primitives/docs/components/dialog).
+
+CLI source selectors use `BackendCliSourceSelect`: one compact dropdown for
+Jean-managed and system PATH binaries, with unavailable PATH choices disabled.
+Keep the detected version and path tooltip, and place optional uninstall actions
+below the selector. Cursor stays PATH-only because it has no managed binary.
+
 ### Client and Server Preference Ownership
 
 Preferences use a strict ownership boundary. Display, input, notification, and
@@ -116,6 +189,15 @@ must use scoped server resource IDs. `useClientViewStatePersistence()` migrates 
 server UI-state values on first load and then makes the client record
 authoritative. Keep session data, running terminal metadata, drafts, and other
 operational state in the backend persistence paths.
+
+Each server owns the pins of its own recent sessions. Pins change only through
+`set_recent_session_pinned` (one ID per call); `save_ui_state` keeps the pins
+that are on disk, so a full save from one client cannot drop another client's
+pin. Native Jean reads each remote server's pins with
+`get_pinned_recent_session_ids` and merges them with its local pins
+(`src/services/recent-session-pins.ts`). An "Unknown command" answer marks an
+older server; native Jean then keeps that server's pins in its local UI state
+and moves them to the server after the server is updated.
 
 Servers expose `get_server_preferences`, `update_server_preferences`, and
 `get_server_capabilities`. Server preference responses omit client fields and
@@ -164,22 +246,28 @@ Additional systems (no dedicated docs yet):
   on startup and after managed installs or upgrades. A real system `PATH`
   installation always takes precedence.
 
-- **Required agent integrations** - Jean MCP and Agent Browser are mandatory
-  runtime services. Startup always enables the Jean MCP socket, repairs the
-  supported CLI config entries, and installs Agent Browser plus Chrome for
-  Testing when they are missing. These repairs run in the background so the UI
-  and HTTP server do not wait for a first-run browser download. Legacy
-  `jean_mcp_enabled: false` values are migrated to `true`, and Agent Browser is
-  always included in effective MCP server selection. The Settings controls can
-  report status and retry a failed repair, but cannot disable either service.
+- **Agent integrations** - Jean MCP is a mandatory runtime service. Startup
+  always enables the Jean MCP socket and repairs the supported CLI config
+  entries. Legacy `jean_mcp_enabled: false` values are migrated to `true`.
+  Agent Browser is opt-in through `agent_browser_enabled` (default `false`,
+  Settings → MCP Servers → Agent Browser). When it is on, startup installs
+  Agent Browser plus Chrome for Testing when they are missing and repairs its
+  MCP entries. When it is off, startup removes the Jean-written
+  `agent-browser` MCP entries from the CLI configs. Jean identifies its own
+  entries by `AGENT_BROWSER_RESTORE = "jean"` and keeps user-added entries.
+  When it is off, `apply_agent_browser_preference()` also removes every
+  global system prompt line that mentions Agent Browser before Jean sends it
+  to any backend.
+  These repairs run in the background so the UI and HTTP server do not wait
+  for a first-run browser download.
   Agent Browser installation follows the official `npm install agent-browser`
   and `agent-browser install` flow:
   https://github.com/vercel-labs/agent-browser#installation
   Jean uses `agent-browser@latest` for its managed npm prefix. Do not remove
   the explicit tag: npm otherwise keeps the existing caret range, and a range
   such as `^0.37.1` does not accept `0.38.1` for a pre-1.0 package.
-  After startup settles, the client checks the npm registry for the latest
-  Agent Browser version. When a newer version exists, Jean shows a persistent
+  When Agent Browser is on and startup settles, the client checks the npm
+  registry for the latest Agent Browser version. When a newer version exists, Jean shows a persistent
   notification with **Update** and **Later** actions. Jean does not update the
   browser until the user selects **Update**.
 
@@ -283,7 +371,7 @@ Additional systems (no dedicated docs yet):
   `TERMINAL_SESSIONS`. Don't remove the `uiStateInitialized` guard without
   re-checking the race.
 
-- **Background Tasks** - Git/PR polling with focus-aware intervals (`src-tauri/src/background_tasks/`); Auto Fix issue polling/planning/yolo handoff and scheduler active-hours window via `chrono` local time with midnight-crossing support (`src-tauri/src/auto_fix/`)
+- **Background Tasks** - Git/PR polling with focus-aware intervals (`src-tauri/src/background_tasks/`); Auto Fix (Mr. Robot) issue polling/planning/yolo handoff and scheduler active-hours window via `chrono` local time with midnight-crossing support (`jean-core/src/auto_fix/`). Scans list only issue numbers + labels; worktrees are never auto-archived; closed/ineligible ones stop using capacity, get their queued or running plan-mode investigation stopped, and never go to yolo; failed starts/yolo runs give up after 3 attempts; GitHub rate limits defer the project 15 min. Runtime status (last scan, errors, failed issues) is in memory and exposed via `get_auto_fix_status` / `clear_auto_fix_failures`. See [Mr. Robot workspace](./mr-robot.md) for the canvas controls, preview, activity, and view separation.
 - **HTTP Server** - Tauri-free Axum server + WebSocket from `jean-core`; `src-server` provides the standalone Tokio adapter. See [server-architecture.md](./server-architecture.md).
 - **Diagnostics** - CPU/memory monitoring panel (`src-tauri/src/diagnostics/`)
 - **MCP** - Model Context Protocol server integration with per-project overrides (`src/services/mcp.ts`). First-party **Jean MCP** (`jean-core/src/jean_mcp_core.rs`) exposes project/worktree/session tools, usage + session model controls (`get_usage`, `set_session_model`), Run-command / panel-command dev environments (`get_run_environments`: running state, worktree/base session, startup command, ports, URL), plus the ship loop: `create_commit`, `push_worktree`, `detect_open_pr`, `link_worktree_pr`, `unlink_worktree_pr`, `create_pull_request`, `merge_pull_request`, `run_review` (thin wrappers over existing project commands). MCP `create_session` reuses an empty, idle chat session in the worktree before it creates another session; terminal, queued, running, archived, or previously used sessions are never reused. PR tools resolve repository paths from Jean's worktree ID; creation and linking persist the PR number and URL on the worktree.

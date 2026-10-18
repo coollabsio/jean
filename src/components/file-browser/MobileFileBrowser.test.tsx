@@ -9,7 +9,7 @@ vi.mock('./FileBrowserSidebar', () => ({
 
 describe('MobileFileBrowser', () => {
   it('shows the drawer only when explicitly opened', async () => {
-    render(<MobileFileBrowser open onOpenChange={vi.fn()} width={280} />)
+    render(<MobileFileBrowser open onOpenChange={vi.fn()} />)
 
     const drawer = await screen.findByTestId('mobile-file-browser')
     expect(drawer).toBeVisible()

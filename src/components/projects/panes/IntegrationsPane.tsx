@@ -1,3 +1,4 @@
+import { SettingsSection } from '@/components/preferences/SettingsSection'
 import React, { useCallback, useEffect, useState } from 'react'
 import { Loader2, RefreshCw, RotateCcw } from '@/components/icons/reicon'
 import { useQueryClient } from '@tanstack/react-query'
@@ -5,7 +6,6 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Separator } from '@/components/ui/separator'
 import {
   Select,
   SelectContent,
@@ -22,19 +22,6 @@ import {
   testSentryAuthToken,
   useSentryProjects,
 } from '@/services/sentry'
-
-const SettingsSection: React.FC<{
-  title: string
-  children: React.ReactNode
-}> = ({ title, children }) => (
-  <div className="space-y-4">
-    <div>
-      <h3 className="text-lg font-medium text-foreground">{title}</h3>
-      <Separator className="mt-2" />
-    </div>
-    {children}
-  </div>
-)
 
 const InlineField: React.FC<{
   label: string
@@ -135,8 +122,7 @@ export function IntegrationsPane({ projectId }: { projectId: string }) {
   const selectedSentryProjectId =
     sentryProjects.find(
       sentryProject =>
-        sentryProject.organization.slug ===
-          project?.sentry_organization_slug &&
+        sentryProject.organization.slug === project?.sentry_organization_slug &&
         sentryProject.slug === project?.sentry_project_slug
     )?.id ?? ''
 

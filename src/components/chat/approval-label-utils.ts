@@ -68,9 +68,9 @@ export function resolveApprovalLabel(
     backend ?? sessionBackend ?? preferences.default_backend ?? 'claude'
   const backendDefaultModel =
     resolvedBackend === 'codex'
-      ? (preferences.selected_codex_model ?? 'gpt-5.6-sol')
+      ? (preferences.selected_codex_model ?? 'gpt-6.1-sol')
       : resolvedBackend === 'opencode'
-        ? (preferences.selected_opencode_model ?? 'opencode/gpt-5.6-sol')
+        ? (preferences.selected_opencode_model ?? 'opencode/gpt-6.1-sol')
         : resolvedBackend === 'cursor'
           ? (preferences.selected_cursor_model ?? 'cursor/auto')
           : resolvedBackend === 'commandcode'
@@ -78,8 +78,7 @@ export function resolveApprovalLabel(
             : resolvedBackend === 'pi'
               ? (preferences.selected_pi_model ?? 'pi/sonnet')
               : resolvedBackend === 'grok'
-                ? (preferences.selected_grok_model ??
-                  'grok/grok-4.6')
+                ? (preferences.selected_grok_model ?? 'grok/grok-4.6')
                 : resolvedBackend === 'kimi'
                   ? (preferences.selected_kimi_model ?? 'kimi/default')
                   : resolvedBackend === 'antigravity'

@@ -257,7 +257,7 @@ export function AskUserQuestion({
       >
         <div className="my-2 min-w-0 rounded border border-muted bg-muted/30 font-mono text-sm">
           <CollapsibleTrigger className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-muted-foreground hover:bg-muted/50">
-            <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />
+            <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
             <span className="truncate font-medium">{getAnswerSummary()}</span>
             <ChevronRight
               className={cn(
@@ -319,12 +319,12 @@ export function AskUserQuestion({
                           className={cn(
                             'flex items-start gap-2.5 rounded-md border px-2.5 py-2',
                             isSelected
-                              ? 'border-green-500/40 bg-green-500/10 text-foreground'
+                              ? 'border-success/40 bg-success/10 text-foreground'
                               : 'border-transparent bg-muted/25 text-muted-foreground'
                           )}
                         >
                           {isSelected ? (
-                            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-green-500" />
+                            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" />
                           ) : (
                             <Circle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground/60" />
                           )}
@@ -355,7 +355,7 @@ export function AskUserQuestion({
                         className={cn(
                           'flex items-start gap-2.5 rounded-md border px-2.5 py-2 transition-colors',
                           selectedOptionsSet.has(oIndex)
-                            ? 'border-green-500/40 bg-green-500/10'
+                            ? 'border-success/40 bg-success/10'
                             : 'border-transparent bg-muted/25 hover:bg-muted/40'
                         )}
                       >
@@ -395,7 +395,7 @@ export function AskUserQuestion({
                         className={cn(
                           'flex items-start gap-2.5 rounded-md border px-2.5 py-2 transition-colors',
                           selectedOptionsSet.has(oIndex)
-                            ? 'border-green-500/40 bg-green-500/10'
+                            ? 'border-success/40 bg-success/10'
                             : 'border-transparent bg-muted/25 hover:bg-muted/40'
                         )}
                       >
@@ -425,8 +425,8 @@ export function AskUserQuestion({
                 {/* Show custom text if provided (read-only) or input field (editable) */}
                 {readOnly ? (
                   answer?.customText ? (
-                    <div className="rounded-md border border-green-500/30 bg-green-500/10 px-3 py-2 text-foreground">
-                      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-green-600 dark:text-green-400">
+                    <div className="rounded-md border border-success/30 bg-success/10 px-3 py-2 text-foreground">
+                      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-success">
                         Custom Answer
                       </div>
                       <div className="italic">

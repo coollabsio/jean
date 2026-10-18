@@ -26,10 +26,7 @@ interface UseChatWindowEventsParams {
   // Git diff
   gitStatus: { base_branch?: string; base_remote?: string } | null | undefined
   setDiffRequest: (
-    req:
-      | DiffRequest
-      | null
-      | ((prev: DiffRequest | null) => DiffRequest | null)
+    req: DiffRequest | null | ((prev: DiffRequest | null) => DiffRequest | null)
   ) => void
   // Auto-scroll
   isAtBottom: boolean
@@ -209,6 +206,8 @@ export function useChatWindowEvents({
           worktreePath: activeWorktreePath,
           sessionId: activeSessionId,
           selectedExecutionMode: mode,
+          selectedPermissionMode:
+            useChatStore.getState().permissionModes[activeSessionId],
         }).catch(() => undefined)
       }
     }
@@ -325,7 +324,7 @@ export function useChatWindowEvents({
     }
     window.addEventListener('cancel-prompt', handler)
     return () => window.removeEventListener('cancel-prompt', handler)
-  }, []) // isModal is constant for the lifetime of ChatWindow
+  }, [isModal]) // isModal is constant for the lifetime of ChatWindow
 
   // Context commands (save/load/run-script)
   useEffect(() => {

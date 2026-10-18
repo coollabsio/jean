@@ -122,21 +122,21 @@ const REVIEW_STATE_CONFIG: Record<
 > = {
   APPROVED: {
     icon: CheckCircle2,
-    color: 'text-green-500',
+    color: 'text-success',
     label: 'Approved',
   },
   CHANGES_REQUESTED: {
     icon: XCircle,
-    color: 'text-red-500',
+    color: 'text-destructive',
     label: 'Changes requested',
   },
   COMMENTED: REVIEW_DEFAULT_CONFIG,
   DISMISSED: {
     icon: AlertCircle,
-    color: 'text-yellow-500',
+    color: 'text-warning',
     label: 'Dismissed',
   },
-  PENDING: { icon: Clock, color: 'text-yellow-500', label: 'Pending' },
+  PENDING: { icon: Clock, color: 'text-warning', label: 'Pending' },
 }
 
 function ReviewItem({ review }: { review: GitHubReview }) {
@@ -176,7 +176,9 @@ function IssueContent({ detail }: { detail: GitHubIssueDetail }) {
         <CircleDot
           className={cn(
             'h-5 w-5 mt-0.5 flex-shrink-0',
-            detail.state === 'OPEN' ? 'text-green-500' : 'text-purple-500'
+            detail.state === 'OPEN'
+              ? 'text-success'
+              : 'text-purple-600 dark:text-purple-400'
           )}
         />
         <div className="min-w-0 flex-1 mt-0.5">
@@ -236,14 +238,14 @@ function PRContent({ detail }: { detail: GitHubPullRequestDetail }) {
   const stateIcon = useMemo(() => {
     if (detail.state === 'MERGED')
       return (
-        <GitMerge className="h-5 w-5 mt-0.5 flex-shrink-0 text-purple-500" />
+        <GitMerge className="h-5 w-5 mt-0.5 flex-shrink-0 text-purple-600 dark:text-purple-400" />
       )
     if (detail.state === 'CLOSED')
       return (
-        <GitPullRequest className="h-5 w-5 mt-0.5 flex-shrink-0 text-red-500" />
+        <GitPullRequest className="h-5 w-5 mt-0.5 flex-shrink-0 text-destructive" />
       )
     return (
-      <GitPullRequest className="h-5 w-5 mt-0.5 flex-shrink-0 text-green-500" />
+      <GitPullRequest className="h-5 w-5 mt-0.5 flex-shrink-0 text-success" />
     )
   }, [detail.state])
 
@@ -338,24 +340,24 @@ function PRContent({ detail }: { detail: GitHubPullRequestDetail }) {
 }
 
 const SEVERITY_COLORS: Record<string, string> = {
-  critical: 'bg-red-500/15 text-red-600 border-red-500/30',
-  high: 'bg-orange-500/15 text-orange-600 border-orange-500/30',
-  medium: 'bg-yellow-500/15 text-yellow-600 border-yellow-500/30',
-  low: 'bg-blue-500/15 text-blue-600 border-blue-500/30',
+  critical: 'bg-destructive/15 text-destructive border-destructive/30',
+  high: 'bg-warning/15 text-warning border-warning/30',
+  medium: 'bg-warning/15 text-warning border-warning/30',
+  low: 'bg-info/15 text-info border-info/30',
 }
 
 const SECURITY_ALERT_STATE_COLORS: Record<string, string> = {
-  open: 'text-red-500',
-  fixed: 'text-green-500',
+  open: 'text-destructive',
+  fixed: 'text-success',
   dismissed: 'text-muted-foreground',
   auto_dismissed: 'text-muted-foreground',
 }
 
 const ADVISORY_STATE_COLORS: Record<string, string> = {
-  published: 'text-orange-500',
-  closed: 'text-green-500',
+  published: 'text-warning',
+  closed: 'text-success',
   draft: 'text-muted-foreground',
-  triage: 'text-yellow-500',
+  triage: 'text-warning',
 }
 
 function SecurityAlertContent({ alert }: { alert: DependabotAlert }) {
@@ -370,7 +372,7 @@ function SecurityAlertContent({ alert }: { alert: DependabotAlert }) {
     <>
       {/* Header */}
       <div className="flex items-start gap-3">
-        <ShieldAlert className="h-5 w-5 mt-0.5 flex-shrink-0 text-orange-500" />
+        <ShieldAlert className="h-5 w-5 mt-0.5 flex-shrink-0 text-warning" />
         <div className="min-w-0 flex-1 mt-0.5">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span>opened on {formatDate(alert.createdAt)}</span>
@@ -456,7 +458,7 @@ function AdvisoryContent({ advisory }: { advisory: RepositoryAdvisory }) {
     <>
       {/* Header */}
       <div className="flex items-start gap-3">
-        <ShieldAlert className="h-5 w-5 mt-0.5 flex-shrink-0 text-orange-500" />
+        <ShieldAlert className="h-5 w-5 mt-0.5 flex-shrink-0 text-warning" />
         <div className="min-w-0 flex-1 mt-0.5">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             {advisory.authorLogin && <span>{advisory.authorLogin}</span>}
@@ -635,7 +637,7 @@ export function IssuePreviewModal({
         onOpenChange(open)
       }}
     >
-      <DialogContent className="!fixed !inset-0 !translate-x-0 !translate-y-0 !w-screen !h-[100dvh] !max-w-none !max-h-none !rounded-none !p-4 sm:!p-6 sm:!inset-auto sm:!top-[50%] sm:!left-[50%] sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:!w-[90vw] sm:!max-w-4xl sm:!h-[85vh] sm:!max-h-[85vh] sm:!rounded-lg flex flex-col overflow-hidden z-[80] [&>[data-slot=dialog-close]]:top-4 sm:[&>[data-slot=dialog-close]]:top-6">
+      <DialogContent className="!fixed !inset-0 !translate-x-0 !translate-y-0 !w-screen !h-[100dvh] !max-w-none !max-h-none !rounded-none !p-4 sm:!p-6 sm:!inset-auto sm:!top-[50%] sm:!left-[50%] sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:!w-[96vw] sm:!max-w-[96vw] sm:!h-[94dvh] sm:!max-h-[94dvh] sm:!rounded-lg flex flex-col overflow-hidden z-[80] [&>[data-slot=dialog-close]]:top-4 sm:[&>[data-slot=dialog-close]]:top-6">
         <DialogHeader className="flex-shrink-0 pr-16 text-left">
           <DialogTitle className="text-lg flex items-center gap-3 min-w-0">
             <span className="truncate">

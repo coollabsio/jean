@@ -209,7 +209,7 @@ describe('useUIStatePersistence — terminal restore on web refresh', () => {
     expect(mockSaveUIState).not.toHaveBeenCalled()
   })
 
-  it('saves pinned sessions and labels to server UI state', async () => {
+  it('saves labels but leaves pinned sessions to the pin command', async () => {
     const queryClient = new QueryClient({
       defaultOptions: {
         queries: { retry: false },
@@ -233,7 +233,6 @@ describe('useUIStatePersistence — terminal restore on web refresh', () => {
     await waitFor(() => {
       expect(mockSaveUIState).toHaveBeenLastCalledWith(
         expect.objectContaining({
-          pinned_recent_session_ids: ['session-pinned'],
           project_canvas_settings: {
             'project-1': {
               pinned_labels: [
@@ -244,6 +243,9 @@ describe('useUIStatePersistence — terminal restore on web refresh', () => {
         })
       )
     })
+    expect(mockSaveUIState.mock.lastCall?.[0]).not.toHaveProperty(
+      'pinned_recent_session_ids'
+    )
   })
 
   it('saves the latest active session before a native relaunch', async () => {

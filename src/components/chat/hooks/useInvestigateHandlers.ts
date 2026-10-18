@@ -102,7 +102,6 @@ export function useInvestigateHandlers({
   selectedModelRef,
   selectedThinkingLevelRef,
   selectedEffortLevelRef,
-  executionModeRef,
   mcpServersDataRef,
   enabledMcpServersRef,
   activeWorktreeIdRef,
@@ -550,10 +549,8 @@ export function useInvestigateHandlers({
           ),
           customProfileName: resolvedInvestigateProfile,
           parallelExecutionPrompt:
-            preferences?.parallel_execution_prompt_enabled
-              ? (preferences.magic_prompts?.parallel_execution ??
-                DEFAULT_PARALLEL_EXECUTION_PROMPT)
-              : undefined,
+            preferences?.magic_prompts?.parallel_execution ??
+            DEFAULT_PARALLEL_EXECUTION_PROMPT,
           chromeEnabled: preferences?.chrome_enabled ?? false,
           aiLanguage: preferences?.ai_language,
           backend: investigateBackend,
@@ -574,7 +571,6 @@ export function useInvestigateHandlers({
       preferences?.magic_prompts?.investigate_linear_issue,
       preferences?.magic_prompts?.investigate_sentry_issue,
       preferences?.default_provider,
-      preferences?.parallel_execution_prompt_enabled,
       preferences?.magic_prompts?.parallel_execution,
       preferences?.magic_prompt_models,
       preferences?.magic_prompt_providers,
@@ -592,7 +588,6 @@ export function useInvestigateHandlers({
       selectedModelRef,
       selectedThinkingLevelRef,
       selectedEffortLevelRef,
-      executionModeRef,
       mcpServersDataRef,
       enabledMcpServersRef,
       worktreeProjectId,
@@ -827,10 +822,8 @@ export function useInvestigateHandlers({
             ),
             customProfileName: resolvedInvestigateProfile,
             parallelExecutionPrompt:
-              preferences?.parallel_execution_prompt_enabled
-                ? (preferences.magic_prompts?.parallel_execution ??
-                  DEFAULT_PARALLEL_EXECUTION_PROMPT)
-                : undefined,
+              preferences?.magic_prompts?.parallel_execution ??
+              DEFAULT_PARALLEL_EXECUTION_PROMPT,
             chromeEnabled: preferences?.chrome_enabled ?? false,
             aiLanguage: preferences?.ai_language,
             backend: investigateBackend,
@@ -887,7 +880,6 @@ export function useInvestigateHandlers({
       preferences?.magic_prompts?.investigate_workflow_run,
       preferences?.magic_prompt_models?.investigate_workflow_run_model,
       preferences?.default_provider,
-      preferences?.parallel_execution_prompt_enabled,
       preferences?.magic_prompts?.parallel_execution,
       preferences?.magic_prompt_providers,
       preferences?.magic_prompt_backends,
@@ -906,7 +898,6 @@ export function useInvestigateHandlers({
       selectedModelRef,
       selectedThinkingLevelRef,
       selectedEffortLevelRef,
-      executionModeRef,
       mcpServersDataRef,
       enabledMcpServersRef,
       defaultBackend,
@@ -917,20 +908,28 @@ export function useInvestigateHandlers({
   const handleReviewComments = useCallback(
     async (
       promptOrPrompts: string | string[],
-      options?: { executionMode?: ExecutionMode }
+      options?: {
+        executionMode?: ExecutionMode
+        override?: InvestigateOverride
+      }
     ) => {
       const worktreeId = activeWorktreeIdRef.current
       const worktreePath = activeWorktreePathRef.current
       if (!worktreeId || !worktreePath) return
 
+      const override = options?.override
       const reviewCommentsModel =
+        override?.model ??
         preferences?.magic_prompt_models?.review_comments_model ??
         selectedModelRef.current
-      const reviewCommentsProvider = resolveMagicPromptProvider(
-        preferences?.magic_prompt_providers,
-        'review_comments_provider',
-        preferences?.default_provider
-      )
+      const reviewCommentsProvider =
+        override?.backend && override.backend !== 'claude'
+          ? null
+          : resolveMagicPromptProvider(
+              preferences?.magic_prompt_providers,
+              'review_comments_provider',
+              preferences?.default_provider
+            )
       const { customProfileName: resolvedProfile } = resolveCustomProfile(
         reviewCommentsModel,
         reviewCommentsProvider
@@ -942,11 +941,13 @@ export function useInvestigateHandlers({
       const useAdaptive =
         !isCustom && supportsAdaptiveThinking(reviewCommentsModel, cliVersion)
       const reviewCommentsBackend =
+        override?.backend ??
         resolveMagicPromptBackend(
           preferences?.magic_prompt_backends,
           'review_comments_backend',
           defaultBackend
-        ) ?? resolveBackend(reviewCommentsModel)
+        ) ??
+        resolveBackend(reviewCommentsModel)
 
       const prompts = Array.isArray(promptOrPrompts)
         ? promptOrPrompts.filter(prompt => prompt.trim().length > 0)
@@ -1043,10 +1044,8 @@ export function useInvestigateHandlers({
             ),
             customProfileName: resolvedProfile,
             parallelExecutionPrompt:
-              preferences?.parallel_execution_prompt_enabled
-                ? (preferences.magic_prompts?.parallel_execution ??
-                  DEFAULT_PARALLEL_EXECUTION_PROMPT)
-                : undefined,
+              preferences?.magic_prompts?.parallel_execution ??
+              DEFAULT_PARALLEL_EXECUTION_PROMPT,
             chromeEnabled: preferences?.chrome_enabled ?? false,
             aiLanguage: preferences?.ai_language,
             backend: reviewCommentsBackend,
@@ -1104,7 +1103,6 @@ export function useInvestigateHandlers({
       createSession,
       queryClient,
       preferences?.default_provider,
-      preferences?.parallel_execution_prompt_enabled,
       preferences?.magic_prompts?.parallel_execution,
       preferences?.magic_prompt_models?.review_comments_model,
       preferences?.magic_prompt_providers,
@@ -1123,7 +1121,6 @@ export function useInvestigateHandlers({
       selectedModelRef,
       selectedThinkingLevelRef,
       selectedEffortLevelRef,
-      executionModeRef,
       mcpServersDataRef,
       enabledMcpServersRef,
       defaultBackend,

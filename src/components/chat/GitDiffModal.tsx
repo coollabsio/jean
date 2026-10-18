@@ -39,7 +39,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
+import { Button, edgePrimary, raised } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 import { ModalCloseButton } from '@/components/ui/modal-close-button'
 import {
@@ -170,7 +170,7 @@ const CommentInputBar = memo(function CommentInputBar({
         type="button"
         onClick={handleSubmit}
         disabled={!inputValue.trim()}
-        className="px-2 py-1 bg-black text-white dark:bg-yellow-500 dark:text-black hover:bg-black/80 dark:hover:bg-yellow-400 rounded text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+        className="px-2 py-1 bg-primary text-primary-foreground hover:bg-primary/80 rounded text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
       >
         Add
       </button>
@@ -318,11 +318,15 @@ export function GitDiffModal({
     return theme
   }, [theme])
 
+  // Latest loadDiff call owns diff/error/loading state; older responses are dropped
+  const loadDiffRequestIdRef = useRef(0)
   const loadDiff = useCallback(
     async (request: DiffRequest, isRefresh = false) => {
       if (request.type !== 'uncommitted' && request.type !== 'branch') {
         return
       }
+      const requestId = ++loadDiffRequestIdRef.current
+      const isCurrent = () => requestId === loadDiffRequestIdRef.current
       setIsLoading(true)
       setError(null)
       // Only clear diff on initial load, not on refresh
@@ -337,6 +341,7 @@ export function GitDiffModal({
           request.baseBranch,
           request.baseRemote
         )
+        if (!isCurrent()) return
         setDiff(result)
         // Cache stats with the load so tab switches don't need a chained effect
         const stats: DiffStats = {
@@ -347,9 +352,10 @@ export function GitDiffModal({
         else if (request.type === 'uncommitted')
           setCachedUncommittedStats(stats)
       } catch (err) {
+        if (!isCurrent()) return
         setError(err instanceof Error ? err.message : String(err))
       } finally {
-        setIsLoading(false)
+        if (isCurrent()) setIsLoading(false)
       }
     },
     []
@@ -1091,8 +1097,10 @@ export function GitDiffModal({
                     <Kbd className="hidden h-4 min-w-4 px-1 text-[10px] opacity-70 sm:inline-flex">
                       {DIFF_TYPE_SHORTCUTS.uncommitted}
                     </Kbd>
-                    <span className="text-green-500">+{uncommittedAdded}</span>
-                    <span className="text-red-500">-{uncommittedRemoved}</span>
+                    <span className="text-success">+{uncommittedAdded}</span>
+                    <span className="text-destructive">
+                      -{uncommittedRemoved}
+                    </span>
                   </button>
                   <button
                     type="button"
@@ -1109,8 +1117,8 @@ export function GitDiffModal({
                     <Kbd className="hidden h-4 min-w-4 px-1 text-[10px] opacity-70 sm:inline-flex">
                       {DIFF_TYPE_SHORTCUTS.branch}
                     </Kbd>
-                    <span className="text-green-500">+{branchAdded}</span>
-                    <span className="text-red-500">-{branchRemoved}</span>
+                    <span className="text-success">+{branchAdded}</span>
+                    <span className="text-destructive">-{branchRemoved}</span>
                   </button>
                   <button
                     type="button"
@@ -1259,7 +1267,11 @@ export function GitDiffModal({
                         type="button"
                         disabled={isCommitting}
                         onClick={handleCommitFromDiff}
-                        className="flex h-7 flex-1 items-center justify-center gap-1.5 px-2.5 bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 rounded-md text-xs font-medium transition-colors sm:flex-none sm:shrink-0 sm:px-3"
+                        className={cn(
+                          'flex h-7 flex-1 items-center justify-center gap-1.5 px-2.5 bg-primary text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50 rounded-md text-xs font-medium sm:flex-none sm:shrink-0 sm:px-3',
+                          raised,
+                          edgePrimary
+                        )}
                       >
                         {isCommitting ? (
                           <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
@@ -1513,12 +1525,12 @@ export function GitDiffModal({
                                 </span>
                                 <div className="flex items-center gap-1 shrink-0 text-xs">
                                   {file.additions > 0 && (
-                                    <span className="text-green-500">
+                                    <span className="text-success">
                                       +{file.additions}
                                     </span>
                                   )}
                                   {file.deletions > 0 && (
-                                    <span className="text-red-500">
+                                    <span className="text-destructive">
                                       -{file.deletions}
                                     </span>
                                   )}
@@ -1705,12 +1717,12 @@ export function GitDiffModal({
                                   </span>
                                   <div className="flex items-center gap-1 shrink-0">
                                     {file.additions > 0 && (
-                                      <span className="text-green-500">
+                                      <span className="text-success">
                                         +{file.additions}
                                       </span>
                                     )}
                                     {file.deletions > 0 && (
-                                      <span className="text-red-500">
+                                      <span className="text-destructive">
                                         -{file.deletions}
                                       </span>
                                     )}
@@ -1852,7 +1864,7 @@ export function GitDiffModal({
             <AlertDialogCancel disabled={isReverting}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               data-revert-action
-              className="bg-destructive text-white hover:bg-destructive/90"
+              variant="destructive"
               disabled={isReverting}
               onClick={handleRevertFile}
             >

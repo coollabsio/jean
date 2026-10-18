@@ -59,7 +59,6 @@ export function dismissTransientUi(): void {
     featureTourOpen: false,
     jeanMcpIntroOpen: false,
     chatSearchOpen: false,
-    githubDashboardOpen: false,
     viewingFilePath: null,
     // App update prompt is non-critical during connection recovery.
     updateModalVersion: null,
@@ -71,6 +70,7 @@ export function dismissTransientUi(): void {
   const projects = useProjectsStore.getState()
   if (projects.projectSettingsDialogOpen) projects.closeProjectSettings()
   if (projects.addProjectDialogOpen) projects.setAddProjectDialogOpen(false)
+  if (projects.serverDialog) projects.setServerDialog(null)
   if (projects.gitInitModalOpen) projects.closeGitInitModal()
   if (projects.cloneModalOpen) projects.closeCloneModal()
   if (projects.jeanConfigWizardOpen) projects.closeJeanConfigWizard()

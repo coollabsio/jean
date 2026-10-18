@@ -5,6 +5,7 @@ import {
   decorateServerResult,
   resolveServerCommand,
   registerServerResourcePath,
+  stripServerScope,
 } from './server-command-routing'
 
 describe('server command routing', () => {
@@ -131,6 +132,45 @@ describe('server command routing', () => {
     })
   })
 
+  it('routes remote folder commands and strips the folder id', () => {
+    expect(
+      resolveServerCommand({ folderId: 'remote:folder', name: 'Renamed' })
+    ).toEqual({
+      serverId: 'remote',
+      args: { folderId: 'folder', name: 'Renamed' },
+    })
+  })
+
+  it('decorates a renamed remote folder', () => {
+    expect(
+      decorateServerResult('remote', 'rename_folder', { id: 'folder' })
+    ).toMatchObject({ id: 'remote:folder', serverId: 'remote' })
+  })
+
+  it('scopes remote unread session lists like full session lists', () => {
+    for (const command of ['list_all_sessions', 'list_unread_sessions']) {
+      expect(
+        decorateServerResult('r1', command, {
+          entries: [
+            {
+              project_id: 'p1',
+              worktree_id: 'w1',
+              sessions: [{ id: 's1', worktree_id: 'w1' }],
+            },
+          ],
+        })
+      ).toMatchObject({
+        entries: [
+          {
+            project_id: 'r1:p1',
+            worktree_id: 'r1:w1',
+            sessions: [{ id: 'r1:s1', worktree_id: 'r1:w1' }],
+          },
+        ],
+      })
+    }
+  })
+
   it('decorates a moved remote project', () => {
     expect(
       decorateServerResult('remote', 'move_item', {
@@ -201,6 +241,12 @@ describe('server command routing', () => {
     })
   })
 
+  it('scopes the next active session id returned by close and archive', () => {
+    expect(decorateServerResult('r1', 'close_session', 's2')).toBe('r1:s2')
+    expect(decorateServerResult('r1', 'archive_session', 's2')).toBe('r1:s2')
+    expect(decorateServerResult('r1', 'archive_session', null)).toBeNull()
+  })
+
   it('decorates background investigation session and worktree identities', () => {
     expect(
       decorateServerResult('r1', 'start_background_investigation', {
@@ -213,5 +259,27 @@ describe('server command routing', () => {
       worktreeId: 'r1:w1',
       status: 'investigation_started',
     })
+  })
+
+  it('strips the scope from ids owned by the target server', () => {
+    expect(
+      stripServerScope('remote-1', {
+        path: '/srv/qrcode',
+        parentId: 'remote-1:folder-7',
+      })
+    ).toEqual({ path: '/srv/qrcode', parentId: 'folder-7' })
+  })
+
+  it('keeps ids owned by another server scoped', () => {
+    expect(
+      stripServerScope('remote-1', { parentId: 'remote-2:folder-7' })
+    ).toEqual({ parentId: 'remote-2:folder-7' })
+  })
+
+  it('leaves raw ids and missing arguments alone', () => {
+    expect(stripServerScope('remote-1', { parentId: 'folder-7' })).toEqual({
+      parentId: 'folder-7',
+    })
+    expect(stripServerScope('remote-1')).toBeUndefined()
   })
 })

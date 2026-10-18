@@ -29,15 +29,19 @@ extern crate self as tauri;
 mod runtime;
 pub use runtime::*;
 
+#[cfg(test)]
+mod test_support;
+
 use crate::http_server::EmitExt;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::hash::{Hash, Hasher};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod agent_browser;
+pub mod agents;
 mod antigravity_cli;
 mod auto_fix;
 mod background_tasks;
@@ -78,6 +82,7 @@ pub use platform::open_url_in_browser;
 pub use projects::open_worktree_in_editor;
 
 // Process startup helper shared by the desktop and headless entry points.
+pub use platform::add_fnm_node_to_path;
 pub use platform::raise_fd_limit;
 
 // Validation functions
@@ -203,10 +208,6 @@ pub struct AppPreferences {
     pub chat_font: String, // Font family for chat: jetbrains-mono, fira-code, source-code-pro, inter, geist, roboto, lato
     #[serde(default = "default_font_weight")]
     pub font_weight: String, // Overall font weight: light, normal, medium
-    #[serde(default = "default_git_poll_interval")]
-    pub git_poll_interval: u64, // Git status polling interval in seconds (10-600)
-    #[serde(default = "default_remote_poll_interval")]
-    pub remote_poll_interval: u64, // Remote API polling interval in seconds (30-600)
     #[serde(default = "default_keybindings")]
     pub keybindings: std::collections::HashMap<String, String>, // User-configurable keyboard shortcuts
     #[serde(default = "default_archive_retention_days")]
@@ -215,8 +216,6 @@ pub struct AppPreferences {
     pub syntax_theme_dark: String, // Syntax highlighting theme for dark mode
     #[serde(default = "default_syntax_theme_light")]
     pub syntax_theme_light: String, // Syntax highlighting theme for light mode
-    #[serde(default = "default_parallel_execution_prompt_enabled")]
-    pub parallel_execution_prompt_enabled: bool, // Add system prompt to encourage parallel sub-agent execution
     #[serde(default = "default_compact_chat_view_enabled")]
     pub compact_chat_view_enabled: bool, // Collapse intermediate tool calls into single ticker line
     #[serde(default = "default_auto_recaps_enabled")]
@@ -239,12 +238,12 @@ pub struct AppPreferences {
     pub magic_prompt_modes: MagicPromptModes, // Per-prompt execution modes for chat-style magic prompts
     #[serde(default)]
     pub magic_models_auto_initialized: bool, // Whether magic prompt models were auto-set based on installed backends
+    #[serde(default)]
+    pub commit_close_issue: bool, // Commit magic: add "Closes #N" for the worktree's linked GitHub issue
     #[serde(default = "default_file_edit_mode")]
     pub file_edit_mode: String, // How to edit files: inline (Pierre) or external (VS Code, etc.)
     #[serde(default)]
     pub ai_language: String, // Preferred language for AI responses (empty = default)
-    #[serde(default = "default_allow_web_tools_in_plan_mode")]
-    pub allow_web_tools_in_plan_mode: bool, // Allow WebFetch/WebSearch in plan mode without prompts
     #[serde(default = "default_waiting_sound")]
     pub waiting_sound: String, // Sound when session is waiting for input: none, workwork
     #[serde(default = "default_review_sound")]
@@ -273,13 +272,12 @@ pub struct AppPreferences {
     pub auto_save_context: bool, // Auto-save context after each session completion
     #[serde(default = "default_auto_pull_base_branch")]
     pub auto_pull_base_branch: bool, // Auto-pull base branch before creating a new worktree
-    /// When true, show a single Sync button instead of separate Pull and Push badges
-    #[serde(default = "default_git_sync_button")]
-    pub git_sync_button: bool,
     #[serde(default = "default_auto_archive_on_pr_merged")]
     pub auto_archive_on_pr_merged: bool, // Auto-archive worktrees when their PR is merged
     #[serde(default)]
     pub debug_mode_enabled: bool, // Show debug panel in chat sessions (default: false)
+    #[serde(default)]
+    pub agents_enabled: bool, // Experimental: show the Agents tab (default: false)
     #[serde(default)]
     pub default_enabled_mcp_servers: Vec<String>, // MCP server names enabled by default (empty = none)
     #[serde(default)]
@@ -322,8 +320,10 @@ pub struct AppPreferences {
     pub canvas_layout: String, // Canvas display mode: grid or list
     #[serde(default = "default_confirm_session_close")]
     pub confirm_session_close: bool, // Show confirmation dialog before closing sessions/worktrees
+    #[serde(default = "default_close_confirm_bypass_modifier")]
+    pub close_confirm_bypass_modifier: String, // Modifier that skips the close confirmation ("none" disables)
     #[serde(default = "default_execution_mode")]
-    pub default_execution_mode: String, // Default execution mode: "plan", "build", or "yolo"
+    pub default_execution_mode: String, // Default workflow/permission policy for new sessions
     #[serde(default = "default_backend")]
     pub default_backend: String, // Default CLI backend: "claude", "codex", "opencode", "cursor", "pi", or "commandcode"
     #[serde(default = "default_new_session_kind")]
@@ -352,8 +352,6 @@ pub struct AppPreferences {
     pub default_grok_reasoning_effort: String, // Grok reasoning effort: low, medium, high, xhigh, max
     #[serde(default = "default_codex_goal_execution_mode")]
     pub codex_goal_execution_mode: String, // Codex /goal execution mode: build or yolo
-    #[serde(default = "default_codex_multi_agent_enabled")]
-    pub codex_multi_agent_enabled: bool, // Enable multi-agent collaboration (experimental)
     #[serde(default = "default_codex_auto_steer")]
     pub codex_auto_steer_enabled: bool, // Steer prompts into a running Codex turn instead of queueing (default: false)
     #[serde(default = "default_opencode_auto_steer")]
@@ -366,10 +364,6 @@ pub struct AppPreferences {
     pub kimi_auto_steer_enabled: bool,
     #[serde(default, alias = "gemini_auto_steer_enabled")]
     pub antigravity_auto_steer_enabled: bool,
-    #[serde(default = "default_codex_max_agent_threads")]
-    pub codex_max_agent_threads: u32, // Max concurrent agent threads (1-8)
-    #[serde(default = "default_restore_last_session")]
-    pub restore_last_session: bool, // Restore last session when switching projects (default: true)
     #[serde(default)]
     pub close_original_on_clear_context: bool, // Close original session when using Clear Context and yolo (default: true)
     #[serde(default)]
@@ -436,6 +430,8 @@ pub struct AppPreferences {
     pub jean_mcp_max_depth: u32, // Max recursive spawn depth via Jean MCP (default 3)
     #[serde(default = "default_jean_mcp_rate_limit")]
     pub jean_mcp_rate_limit_per_minute: u32, // Per-source rate limit for session-spawning tools (default 20)
+    #[serde(default)]
+    pub agent_browser_enabled: bool, // Install agent-browser and add its MCP server to CLI configs (default false)
 }
 
 fn default_finished_session_animation_enabled() -> bool {
@@ -456,10 +452,6 @@ fn default_jean_mcp_rate_limit() -> u32 {
 
 fn default_true() -> Option<bool> {
     None
-}
-
-fn default_restore_last_session() -> bool {
-    true
 }
 
 fn default_codex_auto_steer() -> bool {
@@ -576,7 +568,7 @@ fn default_font_weight() -> String {
 }
 
 fn default_model() -> String {
-    "claude-opus-4-8[1m]".to_string()
+    "claude-opus-5-5".to_string()
 }
 
 fn migrate_default_claude_model(model: &str) -> Option<&'static str> {
@@ -628,18 +620,6 @@ fn default_open_in() -> String {
     "editor".to_string()
 }
 
-fn default_git_poll_interval() -> u64 {
-    60 // 1 minute default
-}
-
-fn default_git_sync_button() -> bool {
-    true
-}
-
-fn default_remote_poll_interval() -> u64 {
-    60 // 1 minute default for remote API calls (PR status, etc.)
-}
-
 fn default_keybindings() -> std::collections::HashMap<String, String> {
     let mut map = std::collections::HashMap::new();
     map.insert("focus_chat_input".to_string(), "mod+l".to_string());
@@ -666,10 +646,6 @@ fn default_syntax_theme_light() -> String {
 
 fn default_file_edit_mode() -> String {
     "inline".to_string() // Default to Jean's Pierre inline editor
-}
-
-fn default_parallel_execution_prompt_enabled() -> bool {
-    true // Enabled by default
 }
 
 fn default_compact_chat_view_enabled() -> bool {
@@ -700,8 +676,12 @@ fn default_confirm_session_close() -> bool {
     true // Enabled by default
 }
 
+fn default_close_confirm_bypass_modifier() -> String {
+    "none".to_string() // Off by default — closing stays behind the confirmation dialog
+}
+
 fn default_execution_mode() -> String {
-    "plan".to_string()
+    "yolo".to_string()
 }
 
 fn default_backend() -> String {
@@ -792,11 +772,11 @@ fn maybe_auto_select_system_cli_preferences(
 }
 
 fn default_codex_model() -> String {
-    "gpt-5.6-sol".to_string()
+    "gpt-6.1-sol".to_string()
 }
 
 fn default_opencode_model() -> String {
-    "opencode/gpt-5.6-sol".to_string()
+    "opencode/gpt-6.1-sol".to_string()
 }
 
 fn default_cursor_model() -> String {
@@ -843,24 +823,12 @@ fn default_codex_goal_execution_mode() -> String {
     "build".to_string()
 }
 
-fn default_codex_multi_agent_enabled() -> bool {
-    true
-}
-
-fn default_codex_max_agent_threads() -> u32 {
-    3
-}
-
 fn default_zoom_level() -> u32 {
     100 // 100% = sharpest default (esp. external 1× displays)
 }
 
 fn default_sync_zoom_levels() -> bool {
     true
-}
-
-fn default_allow_web_tools_in_plan_mode() -> bool {
-    true // Enabled by default
 }
 
 fn default_waiting_sound() -> String {
@@ -950,6 +918,25 @@ mod tests {
     }
 
     #[test]
+    fn agent_browser_prompt_lines_follow_preference() {
+        let prompt = default_global_system_prompt();
+        let mut prefs = AppPreferences::default();
+
+        let off = crate::apply_agent_browser_preference(prompt.clone(), Some(&prefs));
+        assert!(!off.to_ascii_lowercase().contains("agent browser"));
+        assert!(off.contains("Verify UI changes in the running app instead."));
+        assert!(
+            !crate::apply_agent_browser_preference(prompt.clone(), None).contains("Agent Browser")
+        );
+
+        prefs.agent_browser_enabled = true;
+        assert_eq!(
+            crate::apply_agent_browser_preference(prompt.clone(), Some(&prefs)),
+            prompt
+        );
+    }
+
+    #[test]
     fn default_global_system_prompt_prefers_interactive_plan_questions() {
         let prompt = default_global_system_prompt();
 
@@ -972,8 +959,9 @@ mod tests {
         assert!(prompt.contains("Jean Run Environment"));
         assert!(prompt.contains("get_run_environments"));
         assert!(prompt.contains("test against its `url`, port, and startup command"));
-        assert!(prompt.contains("use the Agent Browser when it is available"));
-        assert!(prompt.contains("no other browser testing method"));
+        assert!(prompt.contains("start_run_environment"));
+        assert!(!prompt.contains("use the returned/startup command"));
+        assert!(prompt.contains("no other browser tool is available, use the Agent Browser"));
         assert!(prompt.contains("VERY IMPORTANT: Keep Code Simple"));
         assert!(prompt.contains("Always implement the simplest maintainable solution"));
         assert!(prompt.contains("Clickable References"));
@@ -987,28 +975,6 @@ mod tests {
             .contains("Do not add feature-specific, bug-fix-specific, or small/local lessons"));
         assert!(prompt.contains("Remove narrow or specific entries when you detect them"));
         assert!(!prompt.contains("After ANY correction from the user"));
-    }
-
-    #[test]
-    fn codex_multi_agent_defaults_on_with_parallel_prompting() {
-        let prefs = AppPreferences::default();
-
-        assert!(prefs.parallel_execution_prompt_enabled);
-        assert!(prefs.codex_multi_agent_enabled);
-    }
-
-    #[test]
-    fn parallel_prompting_preserves_explicitly_disabled_codex_multi_agent() {
-        let prefs = AppPreferences {
-            parallel_execution_prompt_enabled: true,
-            codex_multi_agent_enabled: false,
-            ..Default::default()
-        };
-        let serialized = serde_json::to_value(prefs).unwrap();
-
-        let loaded: AppPreferences = serde_json::from_value(serialized).unwrap();
-
-        assert!(!loaded.codex_multi_agent_enabled);
     }
 
     #[test]
@@ -1197,20 +1163,6 @@ mod tests {
         let prefs: AppPreferences = serde_json::from_value(prefs_json).unwrap();
 
         assert!(prefs.web_access_sounds_enabled);
-    }
-
-    #[test]
-    fn app_preferences_default_git_sync_button_enabled_for_new_and_missing_prefs() {
-        assert!(AppPreferences::default().git_sync_button);
-
-        let mut prefs_json = serde_json::to_value(AppPreferences::default()).unwrap();
-        prefs_json
-            .as_object_mut()
-            .unwrap()
-            .remove("git_sync_button");
-
-        let prefs: AppPreferences = serde_json::from_value(prefs_json).unwrap();
-        assert!(prefs.git_sync_button);
     }
 
     #[test]
@@ -1505,6 +1457,9 @@ pub struct MagicPrompts {
     pub parallel_execution: Option<String>,
     #[serde(default)]
     pub global_system_prompt: Option<String>,
+    /// Replaces the global system prompt for sessions of server projects
+    #[serde(default)]
+    pub server_system_prompt: Option<String>,
     #[serde(default)]
     pub provider_switch_handoff: Option<String>,
     #[serde(default)]
@@ -1517,6 +1472,8 @@ pub struct MagicPrompts {
     pub investigate_sentry_issue: Option<String>,
     #[serde(default)]
     pub review_comments: Option<String>,
+    #[serde(default)]
+    pub pre_release_review: Option<String>,
 }
 
 pub(crate) fn default_investigate_issue_prompt() -> String {
@@ -1532,7 +1489,10 @@ Investigate the loaded GitHub {issueWord} ({issueRefs})
 1. Validate the issue before deeper investigation:
    - Read the issue context file(s), including its current status, description, and comments
    - Confirm that the issue is still valid, relevant, and not already resolved or superseded
-   - Decide whether it makes sense to work on it now; if not, stop and explain why
+   - Take the request with a grain of salt: do not assume it must be fixed or added just because it was reported
+   - Check whether it is actually needed: is the bug real and reproducible, or is it user error, a misconfiguration, or expected behavior? Does the feature fit the project's scope, or does existing functionality already cover it?
+   - Weigh the value against the cost: how many users it affects, added complexity, maintenance burden, and regression risk
+   - Decide whether it makes sense to work on it now and is worth fixing or adding at all; if not, stop and explain why, and recommend a response (for example: close, ask for more information, or won't fix)
 2. Analyze the problem:
    - What is the expected vs actual behavior?
    - Are there error messages, stack traces, or reproduction steps?
@@ -1563,6 +1523,7 @@ Investigate the loaded GitHub {issueWord} ({issueRefs})
 - Ask clarifying questions if requirements are unclear
 - If multiple solutions exist, explain trade-offs
 - Reference specific file paths and line numbers
+- Present found issues, gaps, risks, and recommended fixes in Markdown tables (for example: | # | Finding | Location | Impact | Recommended fix |), not long prose lists
 
 </guidelines>"#
         .to_string()
@@ -1581,7 +1542,10 @@ Investigate the loaded GitHub {prWord} ({prRefs})
 1. Validate the PR before deeper investigation:
    - Read the PR context file(s), including its current status, description, reviews, and comments
    - Confirm that the PR is still valid, relevant, and not already merged, closed, or superseded
-   - Decide whether it makes sense to work on it now; if not, stop and explain why
+   - Take the PR with a grain of salt: do not assume it should be merged just because it was opened
+   - Check whether it is actually needed: does it solve a real problem, fit the project's scope, and not duplicate existing functionality?
+   - Weigh the value against the cost: added complexity, maintenance burden, regression risk, and the size of the change compared to its benefit
+   - Decide whether it makes sense to work on it now and is worth merging at all; if not, stop and explain why, and recommend a response (for example: close, request changes, or ask for more context)
 2. Understand the changes:
    - What is the PR trying to accomplish?
    - What branches are involved (head → base)?
@@ -1621,6 +1585,7 @@ Investigate the loaded GitHub {prWord} ({prRefs})
 - Flag any security concerns prominently, even minor ones
 - If multiple approaches exist, explain trade-offs
 - Reference specific file paths and line numbers
+- Present found issues, gaps, risks, and recommended fixes in Markdown tables (for example: | # | Finding | Location | Impact | Recommended fix |), not long prose lists
 
 </guidelines>"#
         .to_string()
@@ -1857,6 +1822,7 @@ Investigate the failed GitHub Actions workflow run for "{workflowName}" on branc
 - If the error is in code, reference specific file paths and line numbers
 - If it's a flaky test, suggest how to make it more reliable
 - If progress is blocked by infrastructure, permissions, or a non-actionable external failure, stop and report the blocker clearly
+- Present found issues, gaps, risks, and recommended fixes in Markdown tables (for example: | # | Finding | Location | Impact | Recommended fix |), not long prose lists
 
 </guidelines>"#
         .to_string()
@@ -1916,6 +1882,7 @@ Investigate the loaded Dependabot {alertWord} ({alertRefs})
 - Don't just recommend "upgrade" — assess compatibility impact
 - Reference specific file paths where the affected package is used
 - If multiple alerts are loaded, address each one separately
+- Present found issues, gaps, risks, and recommended fixes in Markdown tables (for example: | # | Finding | Location | Impact | Recommended fix |), not long prose lists
 
 </guidelines>"#
         .to_string()
@@ -1964,6 +1931,7 @@ Investigate the loaded security {advisoryWord} ({advisoryRefs})
 - Check for the same vulnerability pattern across the entire codebase, not just the reported location
 - Reference specific file paths and line numbers
 - If multiple advisories are loaded, address each one separately
+- Present found issues, gaps, risks, and recommended fixes in Markdown tables (for example: | # | Finding | Location | Impact | Recommended fix |), not long prose lists
 
 </guidelines>"#
         .to_string()
@@ -2018,6 +1986,7 @@ Investigate the loaded Linear {linearWord} ({linearRefs})
 - Ask clarifying questions if requirements are unclear
 - If multiple solutions exist, explain trade-offs
 - Reference specific file paths and line numbers
+- Present found issues, gaps, risks, and recommended fixes in Markdown tables (for example: | # | Finding | Location | Impact | Recommended fix |), not long prose lists
 
 </guidelines>"#
         .to_string()
@@ -2062,6 +2031,7 @@ Investigate the loaded Sentry {sentryWord} ({sentryRefs})
 - Be thorough but focused - investigate deeply without getting sidetracked
 - If multiple solutions exist, explain the trade-offs
 - Reference specific file paths and line numbers
+- Present found issues, gaps, risks, and recommended fixes in Markdown tables (for example: | # | Finding | Location | Impact | Recommended fix |), not long prose lists
 
 </guidelines>"#
         .to_string()
@@ -2173,15 +2143,34 @@ When specifying subagent_type for Task tool calls, always use the fully qualifie
         .to_string()
 }
 
+/// Drop Agent Browser instructions from a system prompt when the integration
+/// is off, so agents are not told to use a browser tool that is not there.
+pub(crate) fn apply_agent_browser_preference(
+    prompt: String,
+    preferences: Option<&AppPreferences>,
+) -> String {
+    if preferences.is_some_and(|prefs| prefs.agent_browser_enabled) {
+        return prompt;
+    }
+    prompt
+        .lines()
+        .filter(|line| {
+            let line = line.to_ascii_lowercase();
+            !line.contains("agent browser") && !line.contains("agent-browser")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn default_global_system_prompt() -> String {
     r#"Always use ASD-STE100 Simplified Technical English when you talk to me.
 
 ### 1. Planning Guidance
 - For non-trivial tasks (3+ steps or architectural decisions), prefer planning before implementation when the current execution mode has not already authorized execution.
 - If something goes sideways, STOP and re-plan immediately - don't keep pushing
-- Use plan mode for verification steps when the current execution mode is plan; in build/yolo, verify directly after implementing.
+- Use plan mode for verification steps when the current execution mode is plan; in build/full access, verify directly after implementing.
 - Write detailed specs upfront to reduce ambiguity
-- Keep plans concise but complete enough for zero-context handoff (YOLO/Build in a new worktree must not require re-scanning the repo). Prefer short wording over thin checklists.
+- Keep plans concise but complete enough for zero-context handoff (Full access/Build in a new worktree must not require re-scanning the repo). Prefer short wording over thin checklists.
 - When the current execution mode is plan, use the backend's native plan tool/UI call when available (Claude ExitPlanMode, Codex `<proposed_plan>` / collaboration Plan mode, Cursor/OpenCode equivalent), not plain text only.
 - For unresolved questions while planning, prefer the backend-native interactive question UI instead of plain text when available: Claude AskUserQuestion, Codex request_user_input, OpenCode question. If no such interactive question tool is present in your current tool set (headless/`--print` runs may omit Claude AskUserQuestion), do NOT skip the question and do NOT dead-end on a tool search — instead ask inline as a short numbered list of options (1, 2, 3...) and tell the user to reply with a number.
 - For Codex specifically, when the current execution mode is plan: do not write plan files or code; when the plan is ready wrap it in `<proposed_plan>...</proposed_plan>` so Jean can show the approval UI. Do not use the `update_plan` checklist tool in plan mode.
@@ -2211,9 +2200,13 @@ fn default_global_system_prompt() -> String {
 - Never mark a task complete without proving it works
 - Diff behavior between main and your changes when relevant
 - Ask yourself: "Would a staff engineer approve this?"
-- Run tests, check logs, demonstrate correctness
-- Before UI, HTTP, browser, or end-to-end verification, call Jean MCP `get_run_environments` and test against the returned url/port/command when a Run environment is available.
-- For the current selected project, if there is no other browser testing method, use the Agent Browser when it is available.
+- Scale verification to risk: run the narrowest check that proves the change (one test file/name, one crate/package, or a typecheck of the touched area)
+- Do NOT run the full test suite, full lint, or project-wide check scripts after every edit. Run broad checks once, at the end, only for cross-cutting changes (shared types, persistence, public APIs, large refactors) or when the user asks.
+- Skip tests for docs, copy, comments, styling-only, and prompt/config text changes; say that you skipped them.
+- Do not re-run a passing check when the code it covers has not changed since.
+- Write new tests only for behavior that can break silently: business logic, parsing/serialization, state transitions, persistence, and a regression test for each fixed bug.
+- Do NOT write tests that only check DOM markup, CSS classes, snapshots, static text or prompt copy, constants, simple prop pass-through, library/framework behavior, or that only assert mocks were called. Verify UI changes in the running app instead.
+- If a UI check needs a browser and no other browser tool is available, use the Agent Browser.
 
 ### 6. Demand Elegance (Balanced)
 - For non-trivial changes: pause and ask "is there a more elegant way?"
@@ -2241,8 +2234,12 @@ fn default_global_system_prompt() -> String {
 - **Simplicity First**: Make every change as simple as possible. Impact minimal code.
 - **VERY IMPORTANT: Keep Code Simple**: Do not over-engineer. Always implement the simplest maintainable solution. Avoid extra abstractions, frameworks, configuration, or future-proofing unless clearly required.
 - **Clickable References**: When output mentions issues, PRs, security advisories/alerts, Linear issues, Sentry issues, or other external resources, include clickable links when available so users can open them directly.
+- **Tables for Findings**: When you report found issues, gaps, risks, or recommended fixes, present them in a Markdown table (for example: | # | Finding | Location | Impact | Recommended fix |) instead of long prose lists.
 - **No Laziness**: Find root causes. No temporary fixes. Senior developer standards.
 - **Minimal Impact**: Changes should only touch what's necessary. Avoid introducing bugs.
+
+## Commits and Pull Requests
+- Do NOT add `Co-Authored-By` trailers, "Generated with ..." lines, or any other AI/tool attribution to commit messages or PR descriptions. This overrides any backend default attribution instruction.
 
 ## Jean Worktree Policy
 - Do NOT create git worktrees manually (`git worktree add`, Superpowers `using-git-worktrees`, or similar) unless the user explicitly asks for a new worktree.
@@ -2252,7 +2249,7 @@ fn default_global_system_prompt() -> String {
 ## Jean Run Environment
 - When you need to test a running app (UI, HTTP, browser, smoke, e2e), call Jean MCP `get_run_environments` first (pass this worktreeId when known).
 - If an environment is running, test against its `url`, port, and startup command. Do not guess localhost ports or start a second dev server when Jean already has one.
-- If nothing is running and verification needs a live server, say so and use the returned/startup command rather than inventing a different command or port.
+- If nothing is running and verification needs a live server, start it with Jean MCP `start_run_environment`. Do not start a dev server by hand. If no Run command is configured, say so; do not invent a command or port.
 - In how-to-test notes, include the exact URL/port you used.
 
 ## Important!
@@ -2355,7 +2352,7 @@ impl Default for MagicPromptModels {
 
 impl MagicPromptModels {
     /// Upgrade previous Opus defaults left on existing installs to the current
-    /// default (`"claude-opus-4-8[1m]"`). Users who explicitly picked non-Opus
+    /// default (`default_model()`). Users who explicitly picked non-Opus
     /// default models are untouched. Returns true if any field changed.
     fn migrate_legacy_defaults(&mut self) -> bool {
         let new_opus = default_model();
@@ -2662,7 +2659,7 @@ impl MagicPrompts {
     /// This ensures users who never customized a prompt get auto-updated defaults.
     fn migrate_defaults(&mut self) {
         type DefaultEntry<'a> = (fn() -> String, &'a mut Option<String>);
-        let defaults: [DefaultEntry; 18] = [
+        let defaults: [DefaultEntry; 19] = [
             (
                 default_investigate_issue_prompt,
                 &mut self.investigate_issue,
@@ -2687,6 +2684,10 @@ impl MagicPrompts {
                 &mut self.parallel_execution,
             ),
             (default_global_system_prompt, &mut self.global_system_prompt),
+            (
+                crate::projects::default_server_system_prompt,
+                &mut self.server_system_prompt,
+            ),
             (
                 default_provider_switch_handoff_prompt,
                 &mut self.provider_switch_handoff,
@@ -2750,13 +2751,10 @@ impl Default for AppPreferences {
             ui_font: default_ui_font(),
             chat_font: default_chat_font(),
             font_weight: default_font_weight(),
-            git_poll_interval: default_git_poll_interval(),
-            remote_poll_interval: default_remote_poll_interval(),
             keybindings: default_keybindings(),
             archive_retention_days: default_archive_retention_days(),
             syntax_theme_dark: default_syntax_theme_dark(),
             syntax_theme_light: default_syntax_theme_light(),
-            parallel_execution_prompt_enabled: default_parallel_execution_prompt_enabled(),
             compact_chat_view_enabled: default_compact_chat_view_enabled(),
             auto_recaps_enabled: default_auto_recaps_enabled(),
             keep_ai_servers_warm: default_keep_ai_servers_warm(),
@@ -2768,9 +2766,9 @@ impl Default for AppPreferences {
             magic_prompt_efforts: MagicPromptReasoningEfforts::default(),
             magic_prompt_modes: MagicPromptModes::default(),
             magic_models_auto_initialized: false,
+            commit_close_issue: false,
             file_edit_mode: default_file_edit_mode(),
             ai_language: String::new(),
-            allow_web_tools_in_plan_mode: default_allow_web_tools_in_plan_mode(),
             waiting_sound: default_waiting_sound(),
             review_sound: default_review_sound(),
             web_access_sounds_enabled: default_web_access_sounds_enabled(),
@@ -2785,9 +2783,9 @@ impl Default for AppPreferences {
             removal_behavior: default_removal_behavior(),
             auto_save_context: default_auto_save_context(),
             auto_pull_base_branch: default_auto_pull_base_branch(),
-            git_sync_button: default_git_sync_button(),
             auto_archive_on_pr_merged: default_auto_archive_on_pr_merged(),
             debug_mode_enabled: false,
+            agents_enabled: false,
             default_effort_level: default_effort_level(),
             default_enabled_mcp_servers: Vec::new(),
             known_mcp_servers: Vec::new(),
@@ -2810,6 +2808,7 @@ impl Default for AppPreferences {
             fast_mode_models: Vec::new(),
             canvas_layout: default_canvas_layout(),
             confirm_session_close: default_confirm_session_close(),
+            close_confirm_bypass_modifier: default_close_confirm_bypass_modifier(),
             default_execution_mode: default_execution_mode(),
             default_backend: default_backend(),
             default_new_session_kind: default_new_session_kind(),
@@ -2825,15 +2824,12 @@ impl Default for AppPreferences {
             default_codex_model_verbosity: default_codex_model_verbosity(),
             default_grok_reasoning_effort: default_grok_reasoning_effort(),
             codex_goal_execution_mode: default_codex_goal_execution_mode(),
-            codex_multi_agent_enabled: default_codex_multi_agent_enabled(),
             codex_auto_steer_enabled: default_codex_auto_steer(),
             opencode_auto_steer_enabled: default_opencode_auto_steer(),
             pi_auto_steer_enabled: default_pi_auto_steer(),
             grok_auto_steer_enabled: default_grok_auto_steer(),
             kimi_auto_steer_enabled: false,
             antigravity_auto_steer_enabled: false,
-            codex_max_agent_threads: default_codex_max_agent_threads(),
-            restore_last_session: true,
             close_original_on_clear_context: true,
             build_model: None,
             yolo_model: None,
@@ -2867,6 +2863,7 @@ impl Default for AppPreferences {
             jean_mcp_enabled: default_jean_mcp_enabled(),
             jean_mcp_max_depth: default_jean_mcp_max_depth(),
             jean_mcp_rate_limit_per_minute: default_jean_mcp_rate_limit(),
+            agent_browser_enabled: false,
         }
     }
 }
@@ -3058,10 +3055,6 @@ pub struct UIState {
     #[serde(default)]
     pub pinned_recent_session_ids: Vec<String>,
 
-    /// Favorited projects shown first in the GitHub Dashboard
-    #[serde(default)]
-    pub github_dashboard_favorite_project_ids: Vec<String>,
-
     /// Last opened worktree+session per project: projectId → { worktree_id, session_id }
     #[serde(default)]
     pub last_opened_per_project: std::collections::HashMap<String, LastOpenedEntry>,
@@ -3071,6 +3064,10 @@ pub struct UIState {
     #[serde(default)]
     pub seen_failed_workflow_run_ids: Vec<u64>,
 
+    /// Sessions armed for auto-continue after a usage limit resets
+    #[serde(default)]
+    pub auto_resume: Vec<AutoResumeEntry>,
+
     /// Version for future migration support
     #[serde(default = "default_ui_state_version")]
     pub version: u32,
@@ -3078,6 +3075,16 @@ pub struct UIState {
 
 fn default_ui_state_version() -> u32 {
     1
+}
+
+/// A session armed for auto-continue after a usage limit resets. `send_args`
+/// is the opaque frontend `SendMessageArgs` payload, replayed verbatim.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutoResumeEntry {
+    pub session_id: String,
+    #[serde(default)]
+    pub resume_at_ms: Option<f64>,
+    pub send_args: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3205,9 +3212,9 @@ impl Default for UIState {
             dashboard_worktree_collapse_overrides: std::collections::HashMap::new(),
             project_canvas_settings: std::collections::HashMap::new(),
             pinned_recent_session_ids: Vec::new(),
-            github_dashboard_favorite_project_ids: Vec::new(),
             last_opened_per_project: std::collections::HashMap::new(),
             seen_failed_workflow_run_ids: Vec::new(),
+            auto_resume: Vec::new(),
             version: default_ui_state_version(),
         }
     }
@@ -3294,7 +3301,7 @@ async fn load_preferences(app: AppHandle) -> Result<AppPreferences, String> {
         preferences.selected_model = new_model.to_string();
         needs_resave = true;
     }
-    // Migrate legacy magic-prompt model names ("opus" → "claude-opus-4-8[1m]")
+    // Migrate legacy magic-prompt model names ("opus" → default_model())
     // and legacy auto-naming models ("haiku" → "sonnet")
     needs_resave |= preferences.magic_prompt_models.migrate_legacy_defaults();
     if preferences.branch_naming_model == "haiku" {
@@ -3493,6 +3500,7 @@ const CLIENT_ONLY_PREFERENCE_KEYS: &[&str] = &[
     "mobile_zoom_level",
     "sync_zoom_levels",
     "confirm_session_close",
+    "close_confirm_bypass_modifier",
     "expand_tool_calls_by_default",
     "window_vibrancy",
     "finished_session_animation_enabled",
@@ -3599,6 +3607,7 @@ pub async fn get_server_capabilities() -> Result<ServerCapabilitiesEnvelope, Str
         ("session_naming", "Session naming", default_session_naming_prompt()),
         ("parallel_execution", "Parallel execution", default_parallel_execution_prompt()),
         ("global_system_prompt", "Global system prompt", default_global_system_prompt()),
+        ("server_system_prompt", "Server system prompt", crate::projects::default_server_system_prompt()),
         ("provider_switch_handoff", "Provider switch handoff", default_provider_switch_handoff_prompt()),
         ("investigate_security_alert", "Investigate security alert", default_investigate_security_alert_prompt()),
         ("investigate_advisory", "Investigate advisory", default_investigate_advisory_prompt()),
@@ -3682,25 +3691,112 @@ fn get_ui_state_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app_data_dir.join("ui-state.json"))
 }
 
+/// Serializes read-modify-write cycles on `ui-state.json` within this process.
+/// Only held around synchronous file I/O, never across an `.await`.
+static UI_STATE_WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn lock_ui_state_writes() -> std::sync::MutexGuard<'static, ()> {
+    UI_STATE_WRITE_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
+/// Reads the UI state file, falling back to defaults when it does not exist.
+fn read_ui_state_file(path: &Path) -> Result<UIState, String> {
+    let contents = match std::fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            log::trace!("UI state file not found, using defaults");
+            return Ok(UIState::default());
+        }
+        Err(e) => {
+            log::error!("Failed to read UI state file: {e}");
+            return Err(format!("Failed to read UI state file: {e}"));
+        }
+    };
+
+    serde_json::from_str(&contents).map_err(|e| {
+        log::warn!("Failed to parse UI state JSON, using defaults: {e}");
+        format!("Failed to parse UI state: {e}")
+    })
+}
+
+/// Serializes and atomically writes the UI state. Callers must hold `UI_STATE_WRITE_LOCK`.
+fn write_ui_state_file(path: &Path, ui_state: &UIState) -> Result<(), String> {
+    let json_content = serde_json::to_string_pretty(ui_state).map_err(|e| {
+        log::error!("Failed to serialize UI state: {e}");
+        format!("Failed to serialize UI state: {e}")
+    })?;
+
+    crate::platform::write_file_atomically(path, json_content.as_bytes()).map_err(|error| {
+        log::error!("Failed to save UI state file: {error}");
+        error
+    })
+}
+
+/// Writes a full UI state snapshot but keeps the pinned recent sessions that are on disk.
+///
+/// Pins change only through `set_recent_session_pinned`, so concurrent clients
+/// (native desktop, Web Access) cannot overwrite each other's pins with a stale
+/// full-state save. If the existing file cannot be parsed, the incoming pins are
+/// kept so the rewrite does not silently drop them.
+fn write_ui_state_keeping_pins(path: &Path, mut ui_state: UIState) -> Result<(), String> {
+    let _guard = lock_ui_state_writes();
+
+    match read_ui_state_file(path) {
+        Ok(existing) => ui_state.pinned_recent_session_ids = existing.pinned_recent_session_ids,
+        Err(e) => log::warn!(
+            "Keeping incoming pinned recent sessions, existing UI state is unreadable: {e}"
+        ),
+    }
+
+    write_ui_state_file(path, &ui_state)
+}
+
+/// Adds (appended at the end, no duplicates) or removes one pinned recent session.
+/// Returns the resulting pins and whether the file changed. A corrupt file is
+/// reported as an error and left untouched.
+fn set_pinned_session_in_file(
+    path: &Path,
+    session_id: &str,
+    pinned: bool,
+) -> Result<(Vec<String>, bool), String> {
+    let _guard = lock_ui_state_writes();
+
+    let mut ui_state = read_ui_state_file(path)?;
+    let pins = &mut ui_state.pinned_recent_session_ids;
+    let changed = if pinned {
+        let already_pinned = pins.iter().any(|id| id == session_id);
+        if !already_pinned {
+            pins.push(session_id.to_string());
+        }
+        !already_pinned
+    } else {
+        let previous_len = pins.len();
+        pins.retain(|id| id != session_id);
+        pins.len() != previous_len
+    };
+
+    if changed {
+        write_ui_state_file(path, &ui_state)?;
+    }
+
+    Ok((ui_state.pinned_recent_session_ids, changed))
+}
+
+fn emit_ui_state_invalidation(app: &AppHandle) {
+    if let Err(error) = app.emit_all(
+        "cache:invalidate",
+        &serde_json::json!({ "keys": ["ui-state"] }),
+    ) {
+        log::error!("Failed to emit UI state cache invalidation: {error}");
+    }
+}
+
 async fn load_ui_state(app: AppHandle) -> Result<UIState, String> {
     log::trace!("Loading UI state from disk");
     let state_path = get_ui_state_path(&app)?;
-
-    if !state_path.exists() {
-        log::trace!("UI state file not found, using defaults");
-        return Ok(UIState::default());
-    }
-
-    let contents = std::fs::read_to_string(&state_path).map_err(|e| {
-        log::error!("Failed to read UI state file: {e}");
-        format!("Failed to read UI state file: {e}")
-    })?;
-
-    let ui_state: UIState = serde_json::from_str(&contents).map_err(|e| {
-        log::warn!("Failed to parse UI state JSON, using defaults: {e}");
-        format!("Failed to parse UI state: {e}")
-    })?;
-
+    let ui_state = read_ui_state_file(&state_path)?;
     log::trace!("Successfully loaded UI state");
     Ok(ui_state)
 }
@@ -3709,26 +3805,181 @@ async fn save_ui_state(app: AppHandle, ui_state: UIState) -> Result<(), String> 
     log::trace!("Saving UI state to disk: {ui_state:?}");
     let state_path = get_ui_state_path(&app)?;
 
-    let json_content = serde_json::to_string_pretty(&ui_state).map_err(|e| {
-        log::error!("Failed to serialize UI state: {e}");
-        format!("Failed to serialize UI state: {e}")
-    })?;
-
-    crate::platform::write_file_atomically(&state_path, json_content.as_bytes()).map_err(
-        |error| {
-            log::error!("Failed to save UI state file: {error}");
-            error
-        },
-    )?;
+    write_ui_state_keeping_pins(&state_path, ui_state)?;
 
     log::trace!("Saved UI state to {state_path:?}");
-    if let Err(error) = app.emit_all(
-        "cache:invalidate",
-        &serde_json::json!({ "keys": ["ui-state"] }),
-    ) {
-        log::error!("Failed to emit UI state cache invalidation: {error}");
-    }
+    emit_ui_state_invalidation(&app);
     Ok(())
+}
+
+/// Returns the pinned recent session IDs. Native clients also use this command
+/// to detect that a remote Jean server supports per-ID pin sync.
+async fn get_pinned_recent_session_ids(app: AppHandle) -> Result<Vec<String>, String> {
+    let state_path = get_ui_state_path(&app)?;
+    Ok(read_ui_state_file(&state_path)?.pinned_recent_session_ids)
+}
+
+/// Pins or unpins one recent session and returns the resulting pin list.
+async fn set_recent_session_pinned(
+    app: AppHandle,
+    session_id: String,
+    pinned: bool,
+) -> Result<Vec<String>, String> {
+    if session_id.trim().is_empty() {
+        return Err("Session ID is required".to_string());
+    }
+
+    let state_path = get_ui_state_path(&app)?;
+    let (pins, changed) = set_pinned_session_in_file(&state_path, &session_id, pinned)?;
+
+    if changed {
+        log::trace!("Set recent session {session_id} pinned={pinned}");
+        emit_ui_state_invalidation(&app);
+    }
+    Ok(pins)
+}
+
+#[cfg(test)]
+mod ui_state_pin_tests {
+    use super::{
+        read_ui_state_file, set_pinned_session_in_file, write_ui_state_keeping_pins, UIState,
+    };
+
+    fn pins(ids: &[&str]) -> Vec<String> {
+        ids.iter().map(|id| id.to_string()).collect()
+    }
+
+    fn write_state(path: &std::path::Path, ui_state: &UIState) {
+        std::fs::write(path, serde_json::to_string_pretty(ui_state).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn save_keeps_pins_on_disk_and_ignores_incoming_pins() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ui-state.json");
+        write_state(
+            &path,
+            &UIState {
+                pinned_recent_session_ids: pins(&["pinned-by-other-client"]),
+                ..UIState::default()
+            },
+        );
+
+        let incoming = UIState {
+            active_worktree_id: Some("worktree-1".to_string()),
+            seen_failed_workflow_run_ids: vec![42],
+            pinned_recent_session_ids: pins(&["stale-pin"]),
+            ..UIState::default()
+        };
+        write_ui_state_keeping_pins(&path, incoming).unwrap();
+
+        let saved = read_ui_state_file(&path).unwrap();
+        assert_eq!(
+            saved.pinned_recent_session_ids,
+            pins(&["pinned-by-other-client"])
+        );
+        assert_eq!(saved.active_worktree_id.as_deref(), Some("worktree-1"));
+        assert_eq!(saved.seen_failed_workflow_run_ids, vec![42]);
+    }
+
+    #[test]
+    fn save_without_existing_file_writes_empty_pins() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ui-state.json");
+
+        let incoming = UIState {
+            active_worktree_id: Some("worktree-1".to_string()),
+            pinned_recent_session_ids: pins(&["stale-pin"]),
+            ..UIState::default()
+        };
+        write_ui_state_keeping_pins(&path, incoming).unwrap();
+
+        let saved = read_ui_state_file(&path).unwrap();
+        assert!(saved.pinned_recent_session_ids.is_empty());
+        assert_eq!(saved.active_worktree_id.as_deref(), Some("worktree-1"));
+    }
+
+    #[test]
+    fn save_over_corrupt_file_keeps_incoming_pins() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ui-state.json");
+        std::fs::write(&path, "{ not json").unwrap();
+
+        let incoming = UIState {
+            pinned_recent_session_ids: pins(&["incoming-pin"]),
+            ..UIState::default()
+        };
+        write_ui_state_keeping_pins(&path, incoming).unwrap();
+
+        let saved = read_ui_state_file(&path).unwrap();
+        assert_eq!(saved.pinned_recent_session_ids, pins(&["incoming-pin"]));
+    }
+
+    #[test]
+    fn set_pinned_appends_once_and_removes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ui-state.json");
+        write_state(
+            &path,
+            &UIState {
+                active_worktree_id: Some("worktree-1".to_string()),
+                pinned_recent_session_ids: pins(&["a"]),
+                ..UIState::default()
+            },
+        );
+
+        assert_eq!(
+            set_pinned_session_in_file(&path, "b", true).unwrap(),
+            (pins(&["a", "b"]), true)
+        );
+        assert_eq!(
+            set_pinned_session_in_file(&path, "b", true).unwrap(),
+            (pins(&["a", "b"]), false)
+        );
+        assert_eq!(
+            set_pinned_session_in_file(&path, "a", false).unwrap(),
+            (pins(&["b"]), true)
+        );
+        assert_eq!(
+            set_pinned_session_in_file(&path, "a", false).unwrap(),
+            (pins(&["b"]), false)
+        );
+
+        let saved = read_ui_state_file(&path).unwrap();
+        assert_eq!(saved.pinned_recent_session_ids, pins(&["b"]));
+        assert_eq!(saved.active_worktree_id.as_deref(), Some("worktree-1"));
+    }
+
+    #[test]
+    fn set_pinned_works_without_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ui-state.json");
+
+        assert_eq!(
+            set_pinned_session_in_file(&path, "a", false).unwrap(),
+            (Vec::new(), false)
+        );
+        assert!(!path.exists());
+
+        assert_eq!(
+            set_pinned_session_in_file(&path, "a", true).unwrap(),
+            (pins(&["a"]), true)
+        );
+        assert_eq!(
+            read_ui_state_file(&path).unwrap().pinned_recent_session_ids,
+            pins(&["a"])
+        );
+    }
+
+    #[test]
+    fn set_pinned_on_corrupt_file_errors_and_leaves_file_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ui-state.json");
+        std::fs::write(&path, "{ not json").unwrap();
+
+        assert!(set_pinned_session_in_file(&path, "a", true).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ not json");
+    }
 }
 
 async fn send_native_notification(
@@ -4504,6 +4755,19 @@ fn resolve_headless_token_required(
     }
 }
 
+/// Worker stack size of Jean's tokio runtimes. Debug builds keep very large
+/// async frames (the command and Jean MCP dispatchers), and any Jean MCP call
+/// overflowed tokio's 2 MiB default stack there.
+pub const RUNTIME_THREAD_STACK_SIZE: usize = 8 * 1024 * 1024;
+
+/// Multi-thread tokio runtime for the app and server entry points.
+pub fn build_tokio_runtime() -> std::io::Result<tokio::runtime::Runtime> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(RUNTIME_THREAD_STACK_SIZE)
+        .build()
+}
+
 /// Initialize the shared runtime used by both transport adapters.
 pub fn initialize_runtime(context: &RuntimeContext) -> Result<(), String> {
     let (broadcaster, _) = http_server::WsBroadcaster::new();
@@ -4518,10 +4782,21 @@ pub fn initialize_runtime(context: &RuntimeContext) -> Result<(), String> {
     if let Err(error) = chat::wakeup::load_all_from_disk(context) {
         log::warn!("Failed to restore scheduled wakeups: {error}");
     }
+    // Finish runs orphaned by a crash/reboot before any client connects.
+    // Headless servers otherwise only recover on a full page load, so an
+    // open web tab that just reconnects keeps showing the dead run as running.
+    if let Err(error) = chat::run_log::recover_incomplete_runs(context) {
+        log::warn!("Failed to recover incomplete runs: {error}");
+    }
     let task_manager = background_tasks::BackgroundTaskManager::new(context.clone());
     task_manager.start();
     context.manage(task_manager);
     auto_fix::scheduler::start_auto_fix_scheduler(context.clone());
+    // Agents keep working without clients: open their database and start the loop.
+    match agents::init(context) {
+        Ok(()) => agents::start(context.clone()),
+        Err(error) => log::error!("Agents are unavailable: {error}"),
+    }
 
     let cleanup_context = context.clone();
     async_runtime::spawn_blocking(move || {
@@ -4554,13 +4829,33 @@ pub async fn start_runtime_services(context: RuntimeContext) -> Result<(), Strin
         repair_managed_cli_links(&link_context, &link_preferences);
     });
 
-    // Required integrations are repaired on every launch. Do this outside the
-    // startup path because agent-browser can download Chromium on first use.
+    // Integrations are repaired on every launch. Do this outside the startup
+    // path because agent-browser can download Chromium on first use.
+    let agent_browser_enabled = preferences.agent_browser_enabled;
     async_runtime::spawn(async move {
         if let Err(error) =
             jean_mcp_config::install_jean_mcp_config_impl(context.clone(), None, None).await
         {
             log::warn!("Failed to activate required Jean MCP configs: {error}");
+        }
+
+        // Agent Browser is opt-in. When it is off, remove the MCP entries that
+        // Jean wrote, so CLIs do not start it.
+        if !agent_browser_enabled {
+            match async_runtime::spawn_blocking(agent_browser::remove_agent_browser_mcp_sync).await
+            {
+                Ok(results) => {
+                    for result in results.into_iter().filter(|r| r.status == "error") {
+                        log::warn!(
+                            "Failed to remove agent-browser MCP for {}: {}",
+                            result.backend,
+                            result.message
+                        );
+                    }
+                }
+                Err(error) => log::warn!("agent-browser MCP removal task failed: {error}"),
+            }
+            return;
         }
 
         let status = agent_browser::resolve_agent_browser_binary(&context);
@@ -4571,32 +4866,40 @@ pub async fn start_runtime_services(context: RuntimeContext) -> Result<(), Strin
             })
             .await
             {
-                Ok(Ok(_)) => log::info!("Installed required agent-browser integration"),
+                Ok(Ok(_)) => log::info!("Installed agent-browser integration"),
                 Ok(Err(error)) => {
-                    log::warn!("Failed to install required agent-browser: {error}");
+                    log::warn!("Failed to install agent-browser: {error}");
                     return;
                 }
                 Err(error) => {
-                    log::warn!("Required agent-browser install task failed: {error}");
+                    log::warn!("agent-browser install task failed: {error}");
                     return;
                 }
             }
         }
 
-        match agent_browser::install_agent_browser_mcp(context, None).await {
+        match agent_browser::install_agent_browser_mcp(context.clone(), None).await {
             Ok(results) => {
                 for result in results
                     .into_iter()
                     .filter(|result| result.status == "error")
                 {
                     log::warn!(
-                        "Failed to activate required agent-browser for {}: {}",
+                        "Failed to activate agent-browser for {}: {}",
                         result.backend,
                         result.message
                     );
                 }
             }
-            Err(error) => log::warn!("Failed to activate required agent-browser MCP: {error}"),
+            Err(error) => log::warn!("Failed to activate agent-browser MCP: {error}"),
+        }
+
+        match async_runtime::spawn_blocking(move || agent_browser::import_legacy_profile(&context))
+            .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => log::warn!("{error}"),
+            Err(error) => log::warn!("Legacy agent-browser profile import task failed: {error}"),
         }
     });
 
@@ -4760,15 +5063,6 @@ pub fn expose_managed_cli_in_wsl(distro: &str, tool: &str, managed_binary: &str)
     }
 }
 
-pub async fn set_project_avatar_from_path(
-    context: RuntimeContext,
-    project_id: String,
-    source_path: PathBuf,
-) -> Result<Value, String> {
-    let project = projects::set_project_avatar_from_path(context, project_id, source_path).await?;
-    serde_json::to_value(project).map_err(|error| error.to_string())
-}
-
 pub fn get_project_worktrees_folder(
     context: &RuntimeContext,
     project_id: &str,
@@ -4849,6 +5143,7 @@ pub async fn run_server() -> Result<(), String> {
     async_runtime::set(tokio::runtime::Handle::current());
     #[cfg(target_os = "linux")]
     platform::fix_headless_path();
+    platform::add_fnm_node_to_path();
     let cli = parse_cli_args();
     // WSL headless auto-allows native open; explicit flag covers non-WSL local servers.
     platform::set_allow_native_open(cli.allow_native_open);

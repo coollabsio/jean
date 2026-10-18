@@ -1,11 +1,16 @@
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, within } from '@/test/test-utils'
-import type { Project, ProjectAutoFixSettings } from '@/types/projects'
+import { fireEvent, render, screen, waitFor, within } from '@/test/test-utils'
+import type {
+  AutoFixStatus,
+  Project,
+  ProjectAutoFixSettings,
+} from '@/types/projects'
 import {
   AutoFixPane,
   buildAutoFixSettings,
   firstAvailableBackend,
+  formatAutoFixRelativeTime,
   hasAutoFixSettingsChanges,
   MR_ROBOT_SETTINGS_BADGE,
   normalizeAutoFixProvider,
@@ -32,10 +37,47 @@ class ResizeObserverMock {
 vi.stubGlobal('ResizeObserver', ResizeObserverMock)
 Element.prototype.scrollIntoView = vi.fn()
 
-vi.mock('@/services/projects', () => ({
-  useProjects: () => ({ data: projectsMock }),
-  useUpdateProjectSettings: () => ({ mutate: mutateMock, isPending: false }),
-}))
+const { invokeForServerMock, toastSuccessMock, toastErrorMock } = vi.hoisted(
+  () => ({
+    invokeForServerMock: vi.fn(),
+    toastSuccessMock: vi.fn(),
+    toastErrorMock: vi.fn(),
+  })
+)
+
+vi.mock('@/lib/transport', async () => {
+  const actual = await vi.importActual('@/lib/transport')
+  return { ...actual, invokeForServer: invokeForServerMock }
+})
+
+vi.mock('sonner', async () => {
+  const actual = await vi.importActual('sonner')
+  return {
+    ...actual,
+    toast: { success: toastSuccessMock, error: toastErrorMock },
+  }
+})
+
+// Keep the real Mr. Robot status hooks so tests exercise backend commands.
+vi.mock('@/services/projects', async () => {
+  const actual = await vi.importActual('@/services/projects')
+  return {
+    ...actual,
+    useProjects: () => ({ data: projectsMock }),
+    useUpdateProjectSettings: () => ({ mutate: mutateMock, isPending: false }),
+  }
+})
+
+const emptyAutoFixStatus: AutoFixStatus = {
+  lastScanAt: null,
+  nextScanAt: null,
+  rateLimitedUntil: null,
+  lastError: null,
+  failedIssues: [],
+  startingIssues: [],
+  pendingYoloSessions: 0,
+}
+let autoFixStatusMock: AutoFixStatus = emptyAutoFixStatus
 
 vi.mock('@/services/github', () => ({
   useGitHubLabels: () => ({
@@ -200,6 +242,16 @@ describe('auto-fix backend defaults', () => {
 describe('AutoFixPane', () => {
   beforeEach(() => {
     mutateMock.mockReset()
+    invokeForServerMock.mockReset()
+    invokeForServerMock.mockImplementation(
+      async (_serverId: string, command: string) => {
+        if (command === 'get_auto_fix_status') return autoFixStatusMock
+        return null
+      }
+    )
+    toastSuccessMock.mockReset()
+    toastErrorMock.mockReset()
+    autoFixStatusMock = emptyAutoFixStatus
     projectsMock = [project()]
     installedBackendsMock = ['claude', 'codex', 'cursor']
     preferencesMock.favorite_models = []
@@ -398,16 +450,22 @@ describe('AutoFixPane', () => {
     renderPane()
 
     await user.click(
-      screen.getByRole('button', { name: 'Choose yolo backend and model' })
+      screen.getByRole('button', {
+        name: 'Choose Full access backend and model',
+      })
     )
     await user.click(await screen.findByRole('tab', { name: 'Cursor' }))
     await user.click(await screen.findByText('Auto'))
 
     expect(
-      screen.getByRole('button', { name: 'Choose yolo backend and model' })
+      screen.getByRole('button', {
+        name: 'Choose Full access backend and model',
+      })
     ).toHaveTextContent('Cursor')
     expect(
-      screen.getByRole('button', { name: 'Choose yolo backend and model' })
+      screen.getByRole('button', {
+        name: 'Choose Full access backend and model',
+      })
     ).toHaveTextContent('Auto')
   })
 
@@ -415,7 +473,9 @@ describe('AutoFixPane', () => {
     renderPane()
 
     expect(
-      screen.getByRole('button', { name: 'Choose yolo backend and model' })
+      screen.getByRole('button', {
+        name: 'Choose Full access backend and model',
+      })
     ).toBeDisabled()
   })
 
@@ -433,7 +493,9 @@ describe('AutoFixPane', () => {
       screen.getByRole('button', { name: 'Choose planning backend and model' })
     ).toHaveTextContent('Backend default')
     expect(
-      screen.getByRole('button', { name: 'Choose yolo backend and model' })
+      screen.getByRole('button', {
+        name: 'Choose Full access backend and model',
+      })
     ).toHaveTextContent('Backend default')
   })
 
@@ -456,7 +518,9 @@ describe('AutoFixPane', () => {
       screen.getByRole('button', { name: 'Choose planning backend and model' })
     ).toHaveTextContent('Codex')
     expect(
-      screen.getByRole('button', { name: 'Choose yolo backend and model' })
+      screen.getByRole('button', {
+        name: 'Choose Full access backend and model',
+      })
     ).toHaveTextContent('Codex')
   })
 
@@ -475,7 +539,9 @@ describe('AutoFixPane', () => {
       screen.getByRole('button', { name: 'Choose planning backend and model' })
     ).toHaveTextContent('Codex')
     expect(
-      screen.getByRole('button', { name: 'Choose yolo backend and model' })
+      screen.getByRole('button', {
+        name: 'Choose Full access backend and model',
+      })
     ).toHaveTextContent('Codex')
   })
 
@@ -510,7 +576,9 @@ describe('AutoFixPane', () => {
     await user.keyboard('{Escape}')
 
     await user.click(
-      screen.getByRole('button', { name: 'Choose yolo backend and model' })
+      screen.getByRole('button', {
+        name: 'Choose Full access backend and model',
+      })
     )
     const yoloTabs = screen.getByRole('tablist')
     for (const backend of expectedBackends) {
@@ -543,7 +611,9 @@ describe('AutoFixPane', () => {
     await user.click(await screen.findByText('Backend default'))
 
     await user.click(
-      screen.getByRole('button', { name: 'Choose yolo backend and model' })
+      screen.getByRole('button', {
+        name: 'Choose Full access backend and model',
+      })
     )
     await user.click(await screen.findByRole('tab', { name: 'Cursor' }))
     await user.click(await screen.findByText('Backend default'))
@@ -597,7 +667,7 @@ describe('AutoFixPane', () => {
     })
   })
 
-  it('shows custom Claude providers for planning and yolo', async () => {
+  it('shows custom Claude providers for planning and Full access', async () => {
     const user = userEvent.setup()
     preferencesMock.custom_cli_profiles = [
       {
@@ -625,7 +695,7 @@ describe('AutoFixPane', () => {
       screen.getByRole('combobox', { name: 'Choose planning provider' })
     ).toBeInTheDocument()
     expect(
-      screen.getByRole('combobox', { name: 'Choose yolo provider' })
+      screen.getByRole('combobox', { name: 'Choose Full access provider' })
     ).toBeInTheDocument()
 
     await user.click(
@@ -683,6 +753,147 @@ describe('AutoFixPane', () => {
         planning_model: null,
       }),
     })
+  })
+})
+
+describe('AutoFixPane status', () => {
+  beforeEach(() => {
+    invokeForServerMock.mockReset()
+    invokeForServerMock.mockImplementation(
+      async (_serverId: string, command: string) => {
+        if (command === 'get_auto_fix_status') return autoFixStatusMock
+        return null
+      }
+    )
+    toastSuccessMock.mockReset()
+    toastErrorMock.mockReset()
+    autoFixStatusMock = emptyAutoFixStatus
+    installedBackendsMock = ['claude', 'codex', 'cursor']
+  })
+
+  it('does not poll status when Mr. Robot is disabled', async () => {
+    projectsMock = [project({ enabled: false })]
+    renderPane()
+
+    // Give any stray query a chance to fire.
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(invokeForServerMock).not.toHaveBeenCalledWith(
+      expect.anything(),
+      'get_auto_fix_status',
+      expect.anything()
+    )
+    expect(screen.queryByText('Status')).not.toBeInTheDocument()
+  })
+
+  it('renders last error and failed issues with a gave-up badge', async () => {
+    const nowSeconds = Math.floor(Date.now() / 1000)
+    autoFixStatusMock = {
+      lastScanAt: nowSeconds - 180,
+      nextScanAt: nowSeconds + 630,
+      rateLimitedUntil: nowSeconds + 1200,
+      lastError: {
+        message: 'gh: API rate limit exceeded',
+        at: nowSeconds - 60,
+      },
+      failedIssues: [
+        {
+          issueNumber: 123,
+          attempts: 3,
+          error: 'worktree create failed',
+          failedAt: nowSeconds - 30,
+          gaveUp: true,
+        },
+        {
+          issueNumber: 456,
+          attempts: 1,
+          error: 'planning crashed',
+          failedAt: nowSeconds - 30,
+          gaveUp: false,
+        },
+      ],
+      startingIssues: [789],
+      pendingYoloSessions: 2,
+    }
+    projectsMock = [project({ enabled: true })]
+    renderPane()
+
+    expect(
+      await screen.findByText('gh: API rate limit exceeded', { exact: false })
+    ).toBeInTheDocument()
+    expect(invokeForServerMock).toHaveBeenCalledWith(
+      'local',
+      'get_auto_fix_status',
+      { projectId: 'project-id' }
+    )
+    expect(screen.getByText('3 min ago')).toBeInTheDocument()
+    expect(screen.getByText('in 10 min')).toBeInTheDocument()
+    expect(
+      screen.getByText(/Waiting for GitHub rate limit until/)
+    ).toBeInTheDocument()
+    expect(screen.getByText('#123')).toBeInTheDocument()
+    expect(screen.getByText('worktree create failed')).toBeInTheDocument()
+    expect(screen.getByText('#456')).toBeInTheDocument()
+    expect(screen.getAllByText('Gave up')).toHaveLength(1)
+    expect(
+      screen.getByRole('button', { name: 'Retry failed issues' })
+    ).toBeInTheDocument()
+  })
+
+  it('hides retry when there are no failures or errors', async () => {
+    projectsMock = [project({ enabled: true })]
+    renderPane()
+
+    expect(await screen.findByText('Not yet')).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Retry failed issues' })
+    ).not.toBeInTheDocument()
+  })
+
+  it('clears failures and refetches status when retrying', async () => {
+    autoFixStatusMock = {
+      ...emptyAutoFixStatus,
+      failedIssues: [
+        {
+          issueNumber: 7,
+          attempts: 1,
+          error: 'boom',
+          failedAt: Math.floor(Date.now() / 1000),
+          gaveUp: false,
+        },
+      ],
+    }
+    projectsMock = [project({ enabled: true })]
+    const user = userEvent.setup()
+    renderPane()
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Retry failed issues' })
+    )
+
+    await waitFor(() =>
+      expect(invokeForServerMock).toHaveBeenCalledWith(
+        'local',
+        'clear_auto_fix_failures',
+        { projectId: 'project-id' }
+      )
+    )
+    await waitFor(() => expect(toastSuccessMock).toHaveBeenCalled())
+    const statusCalls = invokeForServerMock.mock.calls.filter(
+      ([, command]) => command === 'get_auto_fix_status'
+    )
+    expect(statusCalls.length).toBeGreaterThanOrEqual(2)
+  })
+})
+
+describe('formatAutoFixRelativeTime', () => {
+  it('formats past and future unix-second timestamps', () => {
+    const nowMs = 1_700_000_000_000
+    const now = nowMs / 1000
+    expect(formatAutoFixRelativeTime(now - 10, nowMs)).toBe('just now')
+    expect(formatAutoFixRelativeTime(now - 180, nowMs)).toBe('3 min ago')
+    expect(formatAutoFixRelativeTime(now + 600, nowMs)).toBe('in 10 min')
+    expect(formatAutoFixRelativeTime(now - 7200, nowMs)).toBe('2 h ago')
+    expect(formatAutoFixRelativeTime(now + 2 * 86_400, nowMs)).toBe('in 2 d')
   })
 })
 

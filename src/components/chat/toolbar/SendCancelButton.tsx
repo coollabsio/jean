@@ -1,5 +1,6 @@
 import { getModifierSymbol, isClientMacOS } from '@/lib/platform'
 import { isNativeApp } from '@/lib/environment'
+import { edgePrimary, raised } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { Kbd } from '@/components/ui/kbd'
 import {
@@ -43,7 +44,9 @@ export function SendCancelButton({
             type="button"
             onClick={onCancel}
             className={cn(
-              'flex h-8 items-center justify-center gap-1.5 px-3 text-xs font-medium transition-colors bg-primary text-primary-foreground hover:bg-primary/90'
+              'flex h-8 items-center justify-center gap-1.5 px-3 text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90',
+              raised,
+              edgePrimary
             )}
           >
             <span>{queuedMessageCount ? 'Skip to Next' : 'Cancel'}</span>
@@ -132,7 +135,11 @@ export function SendCancelButton({
           className={cn(
             'flex h-8 items-center justify-center px-3 text-xs font-medium transition-colors disabled:pointer-events-none disabled:opacity-50',
             canSend
-              ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+              ? cn(
+                  raised,
+                  edgePrimary,
+                  'bg-primary text-primary-foreground hover:bg-primary/90'
+                )
               : 'text-muted-foreground hover:bg-muted/80 hover:text-foreground'
           )}
         >

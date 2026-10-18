@@ -1,5 +1,6 @@
-import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, fireEvent } from '@/test/test-utils'
+import { useChatStore } from '@/store/chat-store'
 import { QueuedPromptsPanel } from './QueuedPromptsPanel'
 import type { QueuedMessage } from '@/types/chat'
 
@@ -25,6 +26,10 @@ const createMessage = (
 describe('QueuedPromptsPanel', () => {
   beforeAll(() => {
     window.HTMLElement.prototype.scrollIntoView = vi.fn()
+  })
+
+  beforeEach(() => {
+    useChatStore.setState({ collapsedQueuedPromptsSessions: {} })
   })
 
   const messages = [
@@ -165,6 +170,34 @@ describe('QueuedPromptsPanel', () => {
     ).not.toBeInTheDocument()
     // Header stays visible
     expect(screen.getByText('Queued prompts')).toBeInTheDocument()
+  })
+
+  it('remembers the collapsed state per session', () => {
+    const { unmount } = renderPanel()
+    fireEvent.click(screen.getByText('Queued prompts'))
+    unmount()
+
+    // Same session stays collapsed after remount (e.g. session switch)
+    const { unmount: unmountAgain } = renderPanel()
+    expect(
+      screen.queryByRole('list', { name: 'Queued prompts' })
+    ).not.toBeInTheDocument()
+    unmountAgain()
+
+    // Other sessions stay expanded
+    render(
+      <QueuedPromptsPanel
+        sessionId="session-2"
+        messages={messages}
+        isSessionBusy={false}
+        onRemove={vi.fn()}
+        onSendNow={vi.fn()}
+        onEdit={vi.fn()}
+      />
+    )
+    expect(
+      screen.getByRole('list', { name: 'Queued prompts' })
+    ).toBeInTheDocument()
   })
 
   it('row buttons call onRemove and onSendNow', () => {

@@ -84,7 +84,8 @@ export interface ChatToolbarProps {
   loadedSentryContexts: SentryIssueContext[]
   attachedSavedContexts: AttachedSavedContext[]
 
-  onOpenMagicModal: () => void
+  /** Undefined hides magic commands (server sessions) */
+  onOpenMagicModal?: () => void
   onSaveContext: () => void
   onLoadContext: () => void
   onCommit: () => void

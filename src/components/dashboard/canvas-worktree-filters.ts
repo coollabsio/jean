@@ -86,6 +86,8 @@ export function matchesCanvasFilterTab(
   worktree: Worktree,
   activeFilterTab: CanvasFilterTab
 ): boolean {
+  if (isAutoFixWorktree(worktree)) return activeFilterTab === 'auto_fix'
+
   if (isLabelFilterTab(activeFilterTab)) {
     const labelName = activeFilterTab.slice('label:'.length).toLowerCase()
     return getWorktreeLabels(worktree).some(

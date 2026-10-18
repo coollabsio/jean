@@ -314,7 +314,7 @@ describe('MobileSettingsMenu', () => {
       within(sheet)
         .getByRole('button', { name: 'Unfavorite lint' })
         .querySelector('svg')
-    ).toHaveClass('fill-yellow-500', 'text-yellow-500')
+    ).toHaveClass('fill-warning', 'text-warning')
     await user.click(
       within(sheet).getByRole('button', { name: 'Favorite test:unit' })
     )

@@ -35,13 +35,13 @@ function getStatusColor(status: RunStatus): string {
   switch (status) {
     case 'completed':
     case 'crashed': // Crashed runs recovered successfully, show as green
-      return 'text-green-500'
+      return 'text-success'
     case 'cancelled':
-      return 'text-yellow-500'
+      return 'text-warning'
     case 'resumable':
-      return 'text-blue-500'
+      return 'text-info'
     case 'running':
-      return 'text-blue-500'
+      return 'text-info'
     default:
       return 'text-muted-foreground'
   }
@@ -204,7 +204,7 @@ export function SessionDebugPanel({
           {debugInfo.total_usage.cache_read_input_tokens ? (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="text-green-500 ml-2">
+                <span className="text-success ml-2">
                   ({formatTokens(debugInfo.total_usage.cache_read_input_tokens)}{' '}
                   cached)
                 </span>

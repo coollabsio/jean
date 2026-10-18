@@ -41,8 +41,7 @@ export function useToasterOffset(): {
   )
   const selectedWorktreeId = useProjectsStore(s => s.selectedWorktreeId)
 
-  // Match FloatingDock's resolution order so the hook tracks whichever
-  // worktree is actually displaying browser surfaces.
+  // Resolve the worktree that is actually displaying browser surfaces.
   const currentWorktreeId = sessionChatModalOpen
     ? (sessionChatModalWorktreeId ?? activeWorktreeId ?? selectedWorktreeId)
     : (activeWorktreeId ?? selectedWorktreeId)

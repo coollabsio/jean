@@ -1,5 +1,10 @@
 import { useState, useMemo, useCallback, memo, useTransition } from 'react'
-import { FileText, Loader2, MessageSquarePlus, X } from '@/components/icons/reicon'
+import {
+  FileText,
+  Loader2,
+  MessageSquarePlus,
+  X,
+} from '@/components/icons/reicon'
 import { FileDiff } from '@pierre/diffs/react'
 import type {
   SelectedLineRange,
@@ -59,14 +64,14 @@ export interface MemoizedFileDiffProps {
 export function getStatusColor(type: string) {
   switch (type) {
     case 'new':
-      return 'text-green-500'
+      return 'text-success'
     case 'deleted':
-      return 'text-red-500'
+      return 'text-destructive'
     case 'rename-pure':
     case 'rename-changed':
-      return 'text-yellow-500'
+      return 'text-warning'
     default:
-      return 'text-blue-500'
+      return 'text-info'
   }
 }
 
@@ -168,10 +173,10 @@ export const MemoizedFileDiff = memo(
           )}
           <div className="ml-auto flex items-center gap-2 shrink-0">
             {stats.additions > 0 && (
-              <span className="text-green-500">+{stats.additions}</span>
+              <span className="text-success">+{stats.additions}</span>
             )}
             {stats.deletions > 0 && (
-              <span className="text-red-500">-{stats.deletions}</span>
+              <span className="text-destructive">-{stats.deletions}</span>
             )}
           </div>
         </div>

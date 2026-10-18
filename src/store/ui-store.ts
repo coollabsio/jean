@@ -4,12 +4,15 @@ import type { CliBackend } from '@/types/preferences'
 import type { IssueContext } from '@/types/github'
 import type { CliType } from '@/lib/cli-update'
 import { mergeSeenFailedWorkflowRunIds } from '@/components/shared/workflow-run-utils'
+import { isMobileViewport } from '@/lib/viewport'
 
 export interface InvestigationOverride {
   backend?: CliBackend
   model?: string
   provider?: string | null
   forceNewSession?: boolean
+  /** Queue the investigation into this existing session */
+  sessionId?: string
   prompt?: string
   promptTemplate?: string
   issueContext?: IssueContext
@@ -97,6 +100,13 @@ export type CliLoginModalType =
   | 'coderabbit'
   | null
 
+export interface McpLoginContext {
+  serverName: string
+  worktreePath: string
+  /** Owner of the backend CLI and terminal, not the viewing client. */
+  serverId?: string
+}
+
 export interface MinimizedCliUpdate {
   type: Exclude<CliLoginModalType, null>
   name: string
@@ -104,8 +114,16 @@ export interface MinimizedCliUpdate {
   progress: number | null
 }
 
+/** Top-level Jean feature selected in the sidebar tab rail */
+export type RailSection = 'workspace' | 'agents'
+
 interface UIState {
   leftSidebarVisible: boolean
+  railSection: RailSection
+  /** Agent open on the Agents page */
+  selectedAgentId: string
+  /** Agents sidebar server filter: 'all' or a server ID */
+  agentsServerFilter: string
   leftSidebarSize: number // Width in pixels, persisted across sessions
   /** File browser (worktree explorer) visibility */
   fileBrowserVisible: boolean
@@ -157,6 +175,7 @@ interface UIState {
   cliLoginModalCommand: string | null
   cliLoginModalCommandArgs: string[] | null
   cliLoginModalAction: 'login' | 'update' | 'install'
+  cliLoginModalMcpContext: McpLoginContext | null
   /** Active CLI update hidden from its modal while the process keeps running. */
   minimizedCliUpdate: MinimizedCliUpdate | null
   /** Worktree IDs that should auto-trigger investigate-issue when created */
@@ -180,12 +199,6 @@ interface UIState {
   pendingAutoOpenSessionIds: Record<string, string>
   /** Whether a session chat modal is open (for magic command keybinding checks) */
   sessionChatModalOpen: boolean
-  /** Whether the chat toolbar is mounted — used to hide the global FloatingDock
-   *  because its burger-menu counterpart now lives in the chat toolbar. */
-  chatToolbarMounted: boolean
-  /** Whether the full-width review results surface is mounted — used to hide the
-   *  global FloatingDock so it does not overlap the review Send buttons. */
-  reviewSurfaceMounted: boolean
   /** Which worktree the session chat modal is for (for magic command worktree resolution) */
   sessionChatModalWorktreeId: string | null
   /** Per-session primary surface shown inside the chat bounds */
@@ -228,6 +241,9 @@ interface UIState {
   availableCliUpdates: PendingCliUpdate[]
   toggleLeftSidebar: () => void
   setLeftSidebarVisible: (visible: boolean) => void
+  setRailSection: (section: RailSection) => void
+  setSelectedAgentId: (agentId: string) => void
+  setAgentsServerFilter: (serverId: string) => void
   setLeftSidebarSize: (size: number) => void
   leftSidebarSwipe: {
     isDragging: boolean
@@ -288,7 +304,8 @@ interface UIState {
     type: Exclude<CliLoginModalType, null>,
     command: string,
     commandArgs?: string[],
-    action?: 'login' | 'update' | 'install'
+    action?: 'login' | 'update' | 'install',
+    mcpContext?: McpLoginContext
   ) => void
   closeCliLoginModal: () => void
   setMinimizedCliUpdate: (update: MinimizedCliUpdate | null) => void
@@ -335,8 +352,6 @@ interface UIState {
   ) => void
   openNewSessionModeModal: (target: NewSessionModeTarget) => void
   closeNewSessionModeModal: () => void
-  setChatToolbarMounted: (mounted: boolean) => void
-  setReviewSurfaceMounted: (mounted: boolean) => void
   setGitDiffModalOpen: (open: boolean) => void
   toggleGitDiffSelectedFile: (filePath: string) => void
   clearGitDiffSelectedFiles: () => void
@@ -354,8 +369,6 @@ interface UIState {
   dismissCliUpdateNotice: (type: PendingCliUpdate['type']) => void
   chatSearchOpen: boolean
   setChatSearchOpen: (open: boolean) => void
-  githubDashboardOpen: boolean
-  setGitHubDashboardOpen: (open: boolean) => void
   /**
    * Zen mode: full-screen the active session chat.
    * Hides session tabs, modal action chrome, and sidebars.
@@ -379,10 +392,28 @@ export function getRemotePickerCallback() {
   return _remotePickerCallback
 }
 
+/**
+ * The mobile left sidebar sheet (z-80) stacks above dialogs and modals, so
+ * any surface opening while it is shown must close it first.
+ */
+function mustCloseMobileSidebar(state: UIState): boolean {
+  return state.leftSidebarVisible && isMobileViewport()
+}
+
+/** Close the mobile left sidebar before opening a dialog it would cover. */
+export function closeLeftSidebarOnMobile() {
+  if (isMobileViewport()) {
+    useUIStore.getState().setLeftSidebarVisible(false)
+  }
+}
+
 export const useUIStore = create<UIState>()(
   devtools(
     (set, get) => ({
       leftSidebarVisible: false,
+      railSection: 'workspace',
+      selectedAgentId: 'jean',
+      agentsServerFilter: 'all',
       leftSidebarSize: 250, // Default width in pixels
       leftSidebarSwipe: {
         isDragging: false,
@@ -424,6 +455,7 @@ export const useUIStore = create<UIState>()(
       cliLoginModalCommand: null,
       cliLoginModalCommandArgs: null,
       cliLoginModalAction: 'login',
+      cliLoginModalMcpContext: null,
       minimizedCliUpdate: null,
       autoInvestigateWorktreeIds: new Set(),
       autoInvestigatePRWorktreeIds: new Set(),
@@ -440,8 +472,6 @@ export const useUIStore = create<UIState>()(
       sessionPrimarySurface: {},
       sessionTerminalIds: {},
       newSessionModeTarget: null,
-      chatToolbarMounted: false,
-      reviewSurfaceMounted: false,
       gitDiffModalOpen: false,
       gitDiffSelectedFiles: new Set<string>(),
       planDialogOpen: false,
@@ -456,7 +486,6 @@ export const useUIStore = create<UIState>()(
       pendingServerUpdate: null,
       availableCliUpdates: [],
       chatSearchOpen: false,
-      githubDashboardOpen: false,
       zenMode: false,
       toggleZenMode: () => {
         const { zenMode } = get()
@@ -507,6 +536,34 @@ export const useUIStore = create<UIState>()(
               : { leftSidebarVisible: visible },
           undefined,
           'setLeftSidebarVisible'
+        ),
+
+      setRailSection: section =>
+        set(
+          state =>
+            state.railSection === section ? state : { railSection: section },
+          undefined,
+          'setRailSection'
+        ),
+
+      setSelectedAgentId: agentId =>
+        set(
+          state =>
+            state.selectedAgentId === agentId
+              ? state
+              : { selectedAgentId: agentId },
+          undefined,
+          'setSelectedAgentId'
+        ),
+
+      setAgentsServerFilter: serverId =>
+        set(
+          state =>
+            state.agentsServerFilter === serverId
+              ? state
+              : { agentsServerFilter: serverId },
+          undefined,
+          'setAgentsServerFilter'
         ),
 
       toggleRightSidebar: () =>
@@ -597,27 +654,54 @@ export const useUIStore = create<UIState>()(
 
       togglePreferences: () =>
         set(
-          state => ({ preferencesOpen: !state.preferencesOpen }),
+          state => ({
+            preferencesOpen: !state.preferencesOpen,
+            ...(!state.preferencesOpen && mustCloseMobileSidebar(state)
+              ? { leftSidebarVisible: false }
+              : {}),
+          }),
           undefined,
           'togglePreferences'
         ),
 
       setPreferencesOpen: open =>
         set(
-          state =>
-            state.preferencesOpen === open && state.preferencesPane === null
-              ? state
-              : { preferencesOpen: open, preferencesPane: null },
+          state => {
+            const closeSidebar = open && mustCloseMobileSidebar(state)
+            if (
+              state.preferencesOpen === open &&
+              state.preferencesPane === null &&
+              !closeSidebar
+            ) {
+              return state
+            }
+            return {
+              preferencesOpen: open,
+              preferencesPane: null,
+              ...(closeSidebar ? { leftSidebarVisible: false } : {}),
+            }
+          },
           undefined,
           'setPreferencesOpen'
         ),
 
       openPreferencesPane: pane =>
         set(
-          state =>
-            state.preferencesOpen && state.preferencesPane === pane
-              ? state
-              : { preferencesOpen: true, preferencesPane: pane },
+          state => {
+            const closeSidebar = mustCloseMobileSidebar(state)
+            if (
+              state.preferencesOpen &&
+              state.preferencesPane === pane &&
+              !closeSidebar
+            ) {
+              return state
+            }
+            return {
+              preferencesOpen: true,
+              preferencesPane: pane,
+              ...(closeSidebar ? { leftSidebarVisible: false } : {}),
+            }
+          },
           undefined,
           'openPreferencesPane'
         ),
@@ -726,10 +810,13 @@ export const useUIStore = create<UIState>()(
 
       setNewWorktreeModalOpen: open =>
         set(
-          {
+          state => ({
             newWorktreeModalOpen: open,
             ...(open ? {} : { newWorktreeModalDefaultTab: null }),
-          },
+            ...(open && mustCloseMobileSidebar(state)
+              ? { leftSidebarVisible: false }
+              : {}),
+          }),
           undefined,
           'setNewWorktreeModalOpen'
         ),
@@ -825,7 +912,7 @@ export const useUIStore = create<UIState>()(
           'closeCliUpdateModal'
         ),
 
-      openCliLoginModal: (type, command, commandArgs, action) =>
+      openCliLoginModal: (type, command, commandArgs, action, mcpContext) =>
         set(
           {
             cliLoginModalOpen: true,
@@ -833,6 +920,7 @@ export const useUIStore = create<UIState>()(
             cliLoginModalCommand: command,
             cliLoginModalCommandArgs: commandArgs ?? null,
             cliLoginModalAction: action ?? 'login',
+            cliLoginModalMcpContext: mcpContext ?? null,
             minimizedCliUpdate: null,
           },
           undefined,
@@ -847,6 +935,7 @@ export const useUIStore = create<UIState>()(
             cliLoginModalCommand: null,
             cliLoginModalCommandArgs: null,
             cliLoginModalAction: 'login',
+            cliLoginModalMcpContext: null,
             minimizedCliUpdate: null,
           },
           undefined,
@@ -1155,9 +1244,21 @@ export const useUIStore = create<UIState>()(
 
       setSessionChatModalOpen: (open: boolean, worktreeId?: string | null) =>
         set(
-          {
-            sessionChatModalOpen: open,
-            sessionChatModalWorktreeId: open ? (worktreeId ?? null) : null,
+          state => {
+            const nextWorktreeId = open ? (worktreeId ?? null) : null
+            const closeSidebar = open && mustCloseMobileSidebar(state)
+            if (
+              state.sessionChatModalOpen === open &&
+              state.sessionChatModalWorktreeId === nextWorktreeId &&
+              !closeSidebar
+            ) {
+              return state
+            }
+            return {
+              sessionChatModalOpen: open,
+              sessionChatModalWorktreeId: nextWorktreeId,
+              ...(closeSidebar ? { leftSidebarVisible: false } : {}),
+            }
           },
           undefined,
           'setSessionChatModalOpen'
@@ -1361,20 +1462,6 @@ export const useUIStore = create<UIState>()(
           'closeNewSessionModeModal'
         ),
 
-      setChatToolbarMounted: (mounted: boolean) =>
-        set(state =>
-          state.chatToolbarMounted === mounted
-            ? state
-            : { chatToolbarMounted: mounted }
-        ),
-
-      setReviewSurfaceMounted: (mounted: boolean) =>
-        set(state =>
-          state.reviewSurfaceMounted === mounted
-            ? state
-            : { reviewSurfaceMounted: mounted }
-        ),
-
       setGitDiffModalOpen: (open: boolean) =>
         set(
           state =>
@@ -1541,16 +1628,6 @@ export const useUIStore = create<UIState>()(
           },
           undefined,
           'setChatSearchOpen'
-        ),
-
-      setGitHubDashboardOpen: (open: boolean) =>
-        set(
-          state =>
-            state.githubDashboardOpen === open
-              ? state
-              : { githubDashboardOpen: open },
-          undefined,
-          'setGitHubDashboardOpen'
         ),
     }),
     {

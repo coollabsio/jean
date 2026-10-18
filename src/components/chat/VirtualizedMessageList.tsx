@@ -473,7 +473,7 @@ export const VirtualizedMessageList = memo(
                   message={message}
                   getMessages={getMessages}
                   messageIndex={globalIndex}
-                  totalMessages={totalMessages}
+                  isLastMessage={globalIndex === totalMessages - 1}
                   lastPlanMessageIndex={lastPlanMessageIndex}
                   hasFollowUpMessage={hasFollowUpMessage}
                   sessionId={sessionId}

@@ -1,10 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import {
-  ArrowDown,
-  ArrowDownUp,
-  ArrowUp,
-  ChevronDown,
-} from '@/components/icons/reicon'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ArrowDownUp, ChevronDown } from '@/components/icons/reicon'
 import {
   convertFileSrc,
   convertProjectFileSrc,
@@ -12,14 +7,12 @@ import {
   convertServerProjectFileSrc,
 } from '@/lib/transport'
 import { cn } from '@/lib/utils'
-import { dismissibleToast } from '@/lib/dismissible-toast'
 import type { Project } from '@/types/projects'
 import { isBaseSession } from '@/types/projects'
 import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import { useIsMobile } from '@/hooks/use-mobile'
-import { useSidebarWidth } from '@/components/layout/SidebarWidthContext'
 import { useRemotePicker } from '@/hooks/useRemotePicker'
 import {
   useAppDataDir,
@@ -29,16 +22,8 @@ import {
 import {
   useFetchWorktreesStatus,
   useGitStatus,
-  gitPush,
-  fetchWorktreesStatus,
-  performGitPull,
   performGitSync,
 } from '@/services/git-status'
-import { usePreferences } from '@/services/preferences'
-import { NewIssuesBadge } from '@/components/shared/NewIssuesBadge'
-import { OpenPRsBadge } from '@/components/shared/OpenPRsBadge'
-import { FailedRunsBadge } from '@/components/shared/FailedRunsBadge'
-import { SecurityAlertsBadge } from '@/components/shared/SecurityAlertsBadge'
 import {
   Tooltip,
   TooltipTrigger,
@@ -54,37 +39,20 @@ interface ProjectTreeItemProps {
   searchQuery?: string
 }
 
-const STATUS_BADGES_MIN_SIDEBAR_WIDTH = 320
-
-export function shouldShowProjectStatusBadges(
-  sidebarWidth: number,
-  isMobile: boolean,
-  isExpanded: boolean,
-  isSelected: boolean
-): boolean {
-  return (
-    !isMobile &&
-    sidebarWidth >= STATUS_BADGES_MIN_SIDEBAR_WIDTH &&
-    (isExpanded || isSelected)
-  )
-}
-
 export function ProjectTreeItem({
   project,
   searchQuery = '',
 }: ProjectTreeItemProps) {
   const isMobile = useIsMobile()
-  const sidebarWidth = useSidebarWidth()
   const isOffline = project.offline === true
-  const { data: preferences } = usePreferences()
-  const gitSyncButton = preferences?.git_sync_button ?? true
-  const {
-    expandedProjectIds,
-    selectedProjectId,
-    selectProject,
-    toggleProjectExpanded,
-  } = useProjectsStore()
-  const isProjectExpanded = expandedProjectIds.has(project.id)
+  const isProjectExpanded = useProjectsStore(state =>
+    state.expandedProjectIds.has(project.id)
+  )
+  const selectedProjectId = useProjectsStore(state => state.selectedProjectId)
+  const selectProject = useProjectsStore(state => state.selectProject)
+  const toggleProjectExpanded = useProjectsStore(
+    state => state.toggleProjectExpanded
+  )
   const shouldLoadWorktrees =
     !isOffline &&
     (Boolean(searchQuery) ||
@@ -96,14 +64,19 @@ export function ProjectTreeItem({
       enabled: shouldLoadWorktrees,
     }
   )
-  const worktrees = loadedWorktrees ?? []
+  const worktrees = useMemo(
+    () =>
+      (loadedWorktrees ?? []).filter(
+        worktree => worktree.origin !== 'auto_fix'
+      ),
+    [loadedWorktrees]
+  )
   const { data: appDataDir = '' } = useAppDataDir()
-  const hasWorktrees =
-    !isOffline && (worktrees.length > 0 || (project.worktree_count ?? 0) > 0)
-  const worktreeCount =
-    shouldLoadWorktrees && loadedWorktrees
-      ? loadedWorktrees.length
-      : (project.worktree_count ?? 0)
+  // Prefer loaded worktrees: project.worktree_count can be stale
+  const worktreeCount = loadedWorktrees
+    ? worktrees.length
+    : (project.worktree_count ?? 0)
+  const hasWorktrees = !isOffline && worktreeCount > 0
   const projectMatchesSearch = matchesProjectSearch(project, searchQuery)
   const hasMatchingWorktree = worktrees.some(worktree =>
     matchesWorktreeSearch(worktree, searchQuery)
@@ -164,12 +137,6 @@ export function ProjectTreeItem({
 
   // Project is only selected if it's the selected project AND no worktree is active
   const isSelected = selectedProjectId === project.id && !activeWorktreeId
-  const showStatusBadges = shouldShowProjectStatusBadges(
-    sidebarWidth,
-    isMobile,
-    isExpanded,
-    isSelected
-  )
 
   // Inline rename (double-click), matching folder/worktree patterns
   const [isEditing, setIsEditing] = useState(false)
@@ -258,50 +225,7 @@ export function ProjectTreeItem({
     [project.id, toggleProjectExpanded]
   )
 
-  const handleBasePull = useCallback(
-    async (e: React.MouseEvent) => {
-      e.stopPropagation()
-      await performGitPull({
-        worktreeId: '',
-        worktreePath: project.path,
-        baseBranch: project.default_branch,
-        projectId: project.id,
-      })
-    },
-    [project.id, project.path, project.default_branch]
-  )
-
   const pickRemoteOrRun = useRemotePicker(project.path)
-
-  const handleBasePush = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation()
-      pickRemoteOrRun(async remote => {
-        const opToast = dismissibleToast.loading('Pushing changes...')
-        try {
-          const result = await gitPush(
-            project.path,
-            undefined,
-            remote,
-            project.id
-          )
-          fetchWorktreesStatus(project.id)
-          if (result.permissionDenied) {
-            opToast.error('Push failed', {
-              duration: Infinity,
-              description:
-                result.output.trim() || 'The remote rejected the push.',
-            })
-          } else {
-            opToast.success('Changes pushed')
-          }
-        } catch (error) {
-          opToast.error(`Push failed: ${error}`)
-        }
-      })
-    },
-    [pickRemoteOrRun, project.id, project.path]
-  )
 
   const handleBaseSync = useCallback(
     (e: React.MouseEvent) => {
@@ -340,9 +264,10 @@ export function ProjectTreeItem({
   }
 
   return (
-    <ProjectContextMenu project={project}>
-      <div>
-        {/* Project Row */}
+    <div>
+      {/* Project Row — only the row is the context-menu trigger, so worktree
+          rows' long-press does not also open this menu on touch. */}
+      <ProjectContextMenu project={project}>
         <div
           className={cn(
             'group relative flex items-center gap-1.5 px-2 py-1.5 overflow-hidden transition-colors duration-150',
@@ -389,7 +314,7 @@ export function ProjectTreeItem({
             <span className="flex flex-1 items-center gap-0.5 truncate text-sm">
               <span className="truncate">{project.name}</span>
               {isOffline && (
-                <span className="shrink-0 rounded bg-amber-500/10 px-1 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">
+                <span className="shrink-0 rounded bg-warning/10 px-1 py-0.5 text-[10px] text-warning">
                   Offline
                 </span>
               )}
@@ -420,95 +345,42 @@ export function ProjectTreeItem({
 
           {/* Base branch pull/push indicators (when no base session) */}
           {!isOffline &&
-          gitSyncButton &&
-          (baseBranchBehindCount > 0 || baseBranchAheadCount > 0) ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={handleBaseSync}
-                  className="shrink-0 rounded bg-violet-500/10 px-1.5 py-0.5 text-[11px] font-medium text-violet-500 transition-colors hover:bg-violet-500/20"
-                >
-                  <span className="flex items-center gap-0.5">
-                    <ArrowDownUp className="h-3 w-3" />
-                    {baseBranchBehindCount > 0 && baseBranchAheadCount > 0
-                      ? `${baseBranchBehindCount}/${baseBranchAheadCount}`
-                      : baseBranchBehindCount > 0
-                        ? baseBranchBehindCount
-                        : baseBranchAheadCount}
-                  </span>
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {(() => {
-                  const parts: string[] = []
-                  if (baseBranchBehindCount > 0) {
-                    parts.push(
-                      `pull ${baseBranchBehindCount} commit${baseBranchBehindCount > 1 ? 's' : ''}`
-                    )
-                  }
-                  if (baseBranchAheadCount > 0) {
-                    parts.push(
-                      `push ${baseBranchAheadCount} commit${baseBranchAheadCount > 1 ? 's' : ''}`
-                    )
-                  }
-                  return `Sync ${project.default_branch}: ${parts.join(', ')}`
-                })()}
-              </TooltipContent>
-            </Tooltip>
-          ) : (
-            <>
-              {baseBranchBehindCount > 0 && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={handleBasePull}
-                      className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/20"
-                    >
-                      <span className="flex items-center gap-0.5">
-                        <ArrowDown className="h-3 w-3" />
-                        {baseBranchBehindCount}
-                      </span>
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>{`Pull ${baseBranchBehindCount} commit${baseBranchBehindCount > 1 ? 's' : ''} on ${project.default_branch}`}</TooltipContent>
-                </Tooltip>
-              )}
-              {baseBranchAheadCount > 0 && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={handleBasePush}
-                      className="shrink-0 rounded bg-orange-500/10 px-1.5 py-0.5 text-[11px] font-medium text-orange-500 transition-colors hover:bg-orange-500/20"
-                    >
-                      <span className="flex items-center gap-0.5">
-                        <ArrowUp className="h-3 w-3" />
-                        {baseBranchAheadCount}
-                      </span>
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>{`Push ${baseBranchAheadCount} commit${baseBranchAheadCount > 1 ? 's' : ''} on ${project.default_branch}`}</TooltipContent>
-                </Tooltip>
-              )}
-            </>
-          )}
-
-          {!isOffline && showStatusBadges && (
-            <div className="flex items-center gap-1">
-              <NewIssuesBadge
-                projectPath={project.path}
-                projectId={project.id}
-              />
-              <OpenPRsBadge projectPath={project.path} projectId={project.id} />
-              <SecurityAlertsBadge
-                projectPath={project.path}
-                projectId={project.id}
-              />
-              <FailedRunsBadge projectPath={project.path} />
-            </div>
-          )}
+            (baseBranchBehindCount > 0 || baseBranchAheadCount > 0) && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={handleBaseSync}
+                    className="shrink-0 rounded bg-violet-500/10 px-1.5 py-0.5 text-[11px] font-medium text-violet-600 dark:text-violet-400 transition-colors hover:bg-violet-500/20"
+                  >
+                    <span className="flex items-center gap-0.5">
+                      <ArrowDownUp className="h-3 w-3" />
+                      {baseBranchBehindCount > 0 && baseBranchAheadCount > 0
+                        ? `${baseBranchBehindCount}/${baseBranchAheadCount}`
+                        : baseBranchBehindCount > 0
+                          ? baseBranchBehindCount
+                          : baseBranchAheadCount}
+                    </span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {(() => {
+                    const parts: string[] = []
+                    if (baseBranchBehindCount > 0) {
+                      parts.push(
+                        `pull ${baseBranchBehindCount} commit${baseBranchBehindCount > 1 ? 's' : ''}`
+                      )
+                    }
+                    if (baseBranchAheadCount > 0) {
+                      parts.push(
+                        `push ${baseBranchAheadCount} commit${baseBranchAheadCount > 1 ? 's' : ''}`
+                      )
+                    }
+                    return `Sync ${project.default_branch}: ${parts.join(', ')}`
+                  })()}
+                </TooltipContent>
+              </Tooltip>
+            )}
 
           <CollapsedCountBadge
             count={worktreeCount}
@@ -516,20 +388,20 @@ export function ProjectTreeItem({
             isExpanded={isExpanded}
           />
         </div>
+      </ProjectContextMenu>
 
-        {/* Worktrees */}
-        {isExpanded && (
-          <WorktreeList
-            projectId={project.id}
-            projectPath={project.path}
-            worktrees={worktrees}
-            defaultBranch={project.default_branch}
-            searchQuery={projectMatchesSearch ? '' : searchQuery}
-            searchActive={Boolean(searchQuery)}
-            loadSessionCounts={!searchQuery}
-          />
-        )}
-      </div>
-    </ProjectContextMenu>
+      {/* Worktrees */}
+      {isExpanded && (
+        <WorktreeList
+          projectId={project.id}
+          projectPath={project.path}
+          worktrees={worktrees}
+          defaultBranch={project.default_branch}
+          searchQuery={projectMatchesSearch ? '' : searchQuery}
+          searchActive={Boolean(searchQuery)}
+          loadSessionCounts={!searchQuery}
+        />
+      )}
+    </div>
   )
 }

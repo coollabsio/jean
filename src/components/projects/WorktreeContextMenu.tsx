@@ -52,6 +52,7 @@ export function WorktreeContextMenu({
   const {
     showDeleteConfirm,
     setShowDeleteConfirm,
+    deleteSkipTeardown,
     isBase,
     runScripts,
     preferences,
@@ -61,6 +62,7 @@ export function WorktreeContextMenu({
     handleOpenInTerminal,
     handleOpenInEditor,
     handleArchiveOrClose,
+    openDeleteConfirm,
     handleDelete,
   } = actions
 
@@ -136,10 +138,16 @@ export function WorktreeContextMenu({
         </ContextMenuItem>
 
         {!isBase && (
-          <ContextMenuItem onClick={() => setShowDeleteConfirm(true)}>
-            <Trash2 className="mr-2 h-4 w-4 text-destructive" />
-            Delete Worktree
-          </ContextMenuItem>
+          <>
+            <ContextMenuItem onClick={() => openDeleteConfirm(false)}>
+              <Trash2 className="mr-2 h-4 w-4 text-destructive" />
+              Delete Worktree
+            </ContextMenuItem>
+            <ContextMenuItem onClick={() => openDeleteConfirm(true)}>
+              <Trash2 className="mr-2 h-4 w-4 text-destructive" />
+              Delete Without Teardown
+            </ContextMenuItem>
+          </>
         )}
       </ContextMenuContent>
 
@@ -155,10 +163,16 @@ export function WorktreeContextMenu({
           }}
         >
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Worktree</AlertDialogTitle>
+            <AlertDialogTitle>
+              {deleteSkipTeardown
+                ? 'Delete Without Teardown'
+                : 'Delete Worktree'}
+            </AlertDialogTitle>
             <AlertDialogDescription>
               This will permanently delete the worktree, its branch, and all
               associated sessions. This action cannot be undone.
+              {deleteSkipTeardown &&
+                ' The teardown script will not run, so resources it manages may need manual cleanup.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -166,7 +180,7 @@ export function WorktreeContextMenu({
             <AlertDialogAction
               autoFocus
               onClick={handleDelete}
-              className="bg-destructive text-white hover:bg-destructive/90"
+              variant="destructive"
             >
               Delete
               <kbd className="ml-1.5 text-xs opacity-70">↵</kbd>

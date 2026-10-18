@@ -4,7 +4,7 @@
 
 import { useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { invoke, invokeForOptionalServer } from '@/lib/transport'
+import { invokeForOptionalServer } from '@/lib/transport'
 import { toast } from 'sonner'
 import { logger } from '@/lib/logger'
 import type {
@@ -29,8 +29,9 @@ export const piCliQueryKeys = {
 }
 
 export function usePiPathDetection(options?: { enabled?: boolean }) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: [...piCliQueryKeys.all, 'path-detection'],
+    queryKey: [...piCliQueryKeys.all, 'path-detection', serverId ?? 'local'],
     queryFn: async (): Promise<{
       found: boolean
       path: string | null
@@ -46,7 +47,7 @@ export function usePiPathDetection(options?: { enabled?: boolean }) {
         }
       }
       try {
-        return await invoke('detect_pi_in_path')
+        return await invokeForOptionalServer(serverId, 'detect_pi_in_path')
       } catch (error) {
         logger.debug('PI path detection failed', { error })
         return {
@@ -67,13 +68,15 @@ export function usePiCliStatus(options?: {
   enabled?: boolean
   serverId?: string
 }) {
+  const settingsServerId = useOptionalSettingsTargetServerId()
+  const serverId = options?.serverId ?? settingsServerId
   return useQuery({
-    queryKey: [...piCliQueryKeys.status(), options?.serverId ?? 'local'],
+    queryKey: [...piCliQueryKeys.status(), serverId ?? 'local'],
     queryFn: async (): Promise<PiCliStatus> => {
       if (!isTauri()) return { installed: false, version: null, path: null }
       try {
         return await invokeForOptionalServer<PiCliStatus>(
-          options?.serverId,
+          serverId,
           'check_pi_cli_installed'
         )
       } catch (error) {
@@ -89,13 +92,17 @@ export function usePiCliStatus(options?: {
 }
 
 export function usePiCliAuth(options?: { enabled?: boolean }) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: piCliQueryKeys.auth(),
+    queryKey: [...piCliQueryKeys.auth(), serverId ?? 'local'],
     queryFn: async (): Promise<PiAuthStatus> => {
       if (!isTauri())
         return { authenticated: false, error: 'Not in Tauri context' }
       try {
-        return await invoke<PiAuthStatus>('check_pi_cli_auth')
+        return await invokeForOptionalServer<PiAuthStatus>(
+          serverId,
+          'check_pi_cli_auth'
+        )
       } catch (error) {
         logger.error('Failed to check PI CLI auth', { error })
         return {
@@ -111,11 +118,15 @@ export function usePiCliAuth(options?: { enabled?: boolean }) {
 }
 
 export function useAvailablePiVersions(options?: { enabled?: boolean }) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: piCliQueryKeys.versions(),
+    queryKey: [...piCliQueryKeys.versions(), serverId ?? 'local'],
     queryFn: async (): Promise<PiReleaseInfo[]> => {
       if (!isTauri()) return []
-      return await invoke<PiReleaseInfo[]>('get_available_pi_versions')
+      return await invokeForOptionalServer<PiReleaseInfo[]>(
+        serverId,
+        'get_available_pi_versions'
+      )
     },
     enabled: options?.enabled ?? true,
     staleTime: 1000 * 60 * 15,
@@ -187,9 +198,12 @@ export function useAvailablePiModels(options?: { enabled?: boolean }) {
 
 export function useInstallPiCli() {
   const queryClient = useQueryClient()
+  const serverId = useOptionalSettingsTargetServerId()
   return useMutation({
     mutationFn: async (version?: string) =>
-      invoke('install_pi_cli', { version: version ?? null }),
+      invokeForOptionalServer(serverId, 'install_pi_cli', {
+        version: version ?? null,
+      }),
     retry: false,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: piCliQueryKeys.all })
@@ -203,11 +217,16 @@ export function useInstallPiCli() {
   })
 }
 
-function checkManualVersion(version: string) {
-  return invoke<boolean>('check_pi_cli_version_exists', { version })
+function checkManualVersion(version: string, serverId?: string) {
+  return invokeForOptionalServer<boolean>(
+    serverId,
+    'check_pi_cli_version_exists',
+    { version }
+  )
 }
 
 export function usePiCliSetup() {
+  const serverId = useOptionalSettingsTargetServerId()
   const status = usePiCliStatus()
   const versions = useAvailablePiVersions()
   const installMutation = useInstallPiCli()
@@ -234,7 +253,8 @@ export function usePiCliSetup() {
     installError: installMutation.error,
     progress: null,
     install,
-    checkManualVersion,
+    checkManualVersion: (version: string) =>
+      checkManualVersion(version, serverId),
     refetchStatus: status.refetch,
   }
 }

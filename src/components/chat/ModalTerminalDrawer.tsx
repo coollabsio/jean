@@ -94,7 +94,7 @@ export const ModalTerminalDrawer = memo(function ModalTerminalDrawer({
   )
 
   const resizeHandleClass = cn(
-    'absolute z-10 hover:bg-blue-500/50',
+    'absolute z-10 hover:bg-primary/50',
     dockMode === 'left' && 'right-0 top-0 bottom-0 w-1 cursor-ew-resize',
     dockMode === 'right' && 'left-0 top-0 bottom-0 w-1 cursor-ew-resize',
     dockMode === 'bottom' && 'left-0 right-0 top-0 h-1 cursor-ns-resize',

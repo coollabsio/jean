@@ -16,7 +16,8 @@ describe('applyYoloInvestigationFixDirective', () => {
   })
 
   it('appends an unconditional fix directive in yolo mode', () => {
-    const prompt = 'Investigate the loaded GitHub issue (#42)\n\nPropose solution'
+    const prompt =
+      'Investigate the loaded GitHub issue (#42)\n\nPropose solution'
     const result = applyYoloInvestigationFixDirective(prompt, 'yolo')
     expect(result).toContain(YOLO_INVESTIGATION_FIX_MARKER)
     expect(result).toContain('After investigation, fix the issue')
@@ -28,10 +29,12 @@ describe('applyYoloInvestigationFixDirective', () => {
     const prompt = `Investigate issue #1
 6. Propose solution
 7. If you are in yolo mode, also apply the fix(es) — implement the changes
-- If you are in yolo mode, also apply the fix(es) after investigation`
+- If you are in yolo mode, also apply the fix(es) after investigation
+- If you are in Full access mode, also apply the fix(es)`
 
     const result = applyYoloInvestigationFixDirective(prompt, 'yolo')
     expect(result).not.toMatch(/If you are in yolo mode/i)
+    expect(result).not.toMatch(/If you are in Full access mode/i)
     expect(result).toContain(YOLO_INVESTIGATION_FIX_MARKER)
     expect(result).toContain('Propose solution')
   })
@@ -58,7 +61,9 @@ Propose solution with files to change.`
   })
 
   it('exposes the full append text for tests and docs', () => {
-    expect(YOLO_INVESTIGATION_FIX_APPEND).toContain(YOLO_INVESTIGATION_FIX_MARKER)
+    expect(YOLO_INVESTIGATION_FIX_APPEND).toContain(
+      YOLO_INVESTIGATION_FIX_MARKER
+    )
     expect(YOLO_INVESTIGATION_FIX_APPEND).toContain(
       'Any earlier instruction to only investigate'
     )

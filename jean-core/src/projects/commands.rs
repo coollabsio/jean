@@ -780,6 +780,7 @@ pub async fn add_project(
         sentry_base_url: None,
         linked_project_ids: Vec::new(),
         auto_fix_settings: None,
+        server: None,
     };
 
     data.add_project(project.clone());
@@ -941,6 +942,7 @@ pub async fn init_project(
         sentry_base_url: None,
         linked_project_ids: Vec::new(),
         auto_fix_settings: None,
+        server: None,
     };
 
     data.add_project(project.clone());
@@ -1000,6 +1002,7 @@ pub async fn clone_project(
         sentry_base_url: None,
         linked_project_ids: Vec::new(),
         auto_fix_settings: None,
+        server: None,
     };
 
     data.add_project(project.clone());
@@ -1158,7 +1161,9 @@ pub async fn get_recent_worktrees(
     let mut items = Vec::new();
     let mut failed_worktree_ids = Vec::new();
     for worktree in data.worktrees.iter().filter(|worktree| {
-        worktree.archived_at.is_none() && project_names.contains_key(&worktree.project_id)
+        worktree.archived_at.is_none()
+            && !matches!(worktree.origin, Some(WorktreeOrigin::AutoFix))
+            && project_names.contains_key(&worktree.project_id)
     }) {
         let sessions = match crate::chat::storage::load_sessions(&app, &worktree.path, &worktree.id)
         {
@@ -4130,7 +4135,11 @@ pub async fn checkout_pr(
 /// - `worktree:deleting` - Emitted immediately when deletion starts
 /// - `worktree:deleted` - Emitted when deletion completes successfully
 /// - `worktree:delete_error` - Emitted if deletion fails
-pub async fn delete_worktree(app: AppHandle, worktree_id: String) -> Result<(), String> {
+pub async fn delete_worktree(
+    app: AppHandle,
+    worktree_id: String,
+    skip_teardown: Option<bool>,
+) -> Result<(), String> {
     log::trace!("Deleting worktree: {worktree_id}");
 
     // Cancel any running Claude processes for this worktree FIRST
@@ -4138,10 +4147,12 @@ pub async fn delete_worktree(app: AppHandle, worktree_id: String) -> Result<(), 
 
     let data = load_projects_data(&app)?;
 
-    let worktree = data
-        .find_worktree(&worktree_id)
-        .ok_or_else(|| format!("Worktree not found: {worktree_id}"))?
-        .clone();
+    // Already gone from storage (e.g. load_projects_data drops worktrees whose folder
+    // was deleted outside Jean). Treat as a no-op so stale clients can remove the row.
+    let Some(worktree) = data.find_worktree(&worktree_id).cloned() else {
+        log::warn!("Worktree {worktree_id} not found in storage, treating delete as done");
+        return Ok(());
+    };
 
     log::trace!(
         "Found worktree: id={}, name={}, branch={}, path={}",
@@ -4167,8 +4178,12 @@ pub async fn delete_worktree(app: AppHandle, worktree_id: String) -> Result<(), 
     log::trace!("Found project: id={}, path={}", project.id, project.path);
 
     // Read jean.json teardown script from the newest project/worktree copy.
-    let teardown_script = git::resolve_jean_config(&worktree.path, Some(&project.path))
-        .and_then(|config| config.scripts.teardown);
+    let teardown_script = if skip_teardown.unwrap_or(false) {
+        None
+    } else {
+        git::resolve_jean_config(&worktree.path, Some(&project.path))
+            .and_then(|config| config.scripts.teardown)
+    };
 
     // Remove from storage SYNCHRONOUSLY to avoid race conditions with other operations
     // (e.g., archive/unarchive could be overwritten if we save in background thread)
@@ -4217,7 +4232,15 @@ pub async fn delete_worktree(app: AppHandle, worktree_id: String) -> Result<(), 
     thread::spawn(move || {
         // Run teardown script before git operations (directory still exists)
         let mut teardown_output: Option<String> = None;
-        if let Some(ref script) = teardown_script {
+        // Skip teardown when the checkout is gone (folder deleted or left empty outside
+        // Jean). The script would fail and block cleanup of a worktree that no longer exists.
+        let checkout_exists = Path::new(&worktree_path).join(".git").exists();
+        if teardown_script.is_some() && !checkout_exists {
+            log::warn!(
+                "Background: Worktree checkout missing at {worktree_path}, skipping teardown script"
+            );
+        }
+        if let Some(ref script) = teardown_script.filter(|_| checkout_exists) {
             log::trace!("Background: Running teardown script for {worktree_name}");
             match git::run_teardown_script(&worktree_path, &project_path, &worktree_branch, script)
             {
@@ -4846,10 +4869,11 @@ pub async fn permanently_delete_worktree(
 
     let data = load_projects_data(&app)?;
 
-    let worktree = data
-        .find_worktree(&worktree_id)
-        .ok_or_else(|| format!("Worktree not found: {worktree_id}"))?
-        .clone();
+    // Already gone from storage (e.g. its folder was deleted outside Jean): nothing to do.
+    let Some(worktree) = data.find_worktree(&worktree_id).cloned() else {
+        log::warn!("Worktree {worktree_id} not found in storage, treating delete as done");
+        return Ok(());
+    };
 
     // Verify it's archived
     if worktree.archived_at.is_none() {
@@ -7672,38 +7696,11 @@ pub async fn cancel_create_pr_with_ai_content(worktree_path: String) -> Result<b
 }
 
 /// Extract structured output from Claude CLI stream-json response
-/// Handles the StructuredOutput tool call pattern used with --json-schema
+/// (`--json-schema`: final `result.structured_output`, else last StructuredOutput call).
 fn extract_structured_output(output: &str) -> Result<String, String> {
-    for line in output.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-
-        let parsed: serde_json::Value = match serde_json::from_str(line) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-
-        if parsed.get("type").and_then(|t| t.as_str()) == Some("assistant") {
-            if let Some(message) = parsed.get("message") {
-                if let Some(content) = message.get("content").and_then(|c| c.as_array()) {
-                    for block in content {
-                        if block.get("type").and_then(|t| t.as_str()) == Some("tool_use")
-                            && block.get("name").and_then(|n| n.as_str())
-                                == Some("StructuredOutput")
-                        {
-                            if let Some(input) = block.get("input") {
-                                return Ok(input.to_string());
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    Err("No structured output found in Claude response".to_string())
+    crate::chat::claude::extract_claude_structured_output(output)
+        .map(|value| value.to_string())
+        .ok_or_else(|| "No structured output found in Claude response".to_string())
 }
 
 fn extract_claude_stream_error(stdout: &str) -> Option<String> {
@@ -9166,6 +9163,17 @@ fn get_recent_commits(repo_path: &str, count: u32) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+/// Insert an extra rule into the prompt's "Rules:" list, or append it.
+fn add_commit_prompt_rule(prompt: &str, rule: &str) -> String {
+    match prompt.find("Rules:\n") {
+        Some(index) => {
+            let insert_at = index + "Rules:\n".len();
+            format!("{}- {rule}\n{}", &prompt[..insert_at], &prompt[insert_at..])
+        }
+        None => format!("{prompt}\n\nAdditional rule:\n- {rule}"),
+    }
+}
+
 /// Stage only specific files. Resets the index first to ensure a clean state.
 fn stage_specific_files(repo_path: &str, files: &[String]) -> Result<(), String> {
     // Reset staging area to ensure only the specified files are staged
@@ -9375,7 +9383,7 @@ fn resolve_commit_message_model(
     if crate::is_codex_model(&preferences.selected_codex_model) {
         preferences.selected_codex_model.clone()
     } else {
-        "gpt-5.6-sol".to_string()
+        crate::default_codex_model()
     }
 }
 
@@ -9568,6 +9576,11 @@ pub async fn create_commit_with_ai(
 ) -> Result<CreateCommitResponse, String> {
     log::trace!("Creating commit for: {worktree_path}");
 
+    let preferences = crate::load_preferences_sync(&app).unwrap_or_default();
+    let worktree = load_projects_data(&app)
+        .ok()
+        .and_then(|d| d.worktrees.into_iter().find(|w| w.path == worktree_path));
+
     // 1. Check for uncommitted changes
     let status = get_git_status(&worktree_path)?;
     if status.trim().is_empty() {
@@ -9619,19 +9632,20 @@ pub async fn create_commit_with_ai(
         .replace("{diff}", &diff)
         .replace("{recent_commits}", &recent_commits)
         .replace("{remote_info}", "");
+    let prompt = match worktree.as_ref().and_then(|w| w.issue_number) {
+        Some(issue_number) if preferences.commit_close_issue => add_commit_prompt_rule(
+            &prompt,
+            &format!("Add a \"Closes #{issue_number}\" footer line so the commit closes GitHub issue #{issue_number}."),
+        ),
+        _ => prompt,
+    };
 
     // 6. Generate commit message with Claude CLI
-    let commit_magic_backend = crate::get_preferences_path(&app)
-        .ok()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|c| serde_json::from_str::<crate::AppPreferences>(&c).ok())
-        .and_then(|p| p.magic_prompt_backends.commit_message_backend);
-    let worktree_id = load_projects_data(&app).ok().and_then(|d| {
-        d.worktrees
-            .iter()
-            .find(|w| w.path == worktree_path)
-            .map(|w| w.id.clone())
-    });
+    let commit_magic_backend = preferences
+        .magic_prompt_backends
+        .commit_message_backend
+        .clone();
+    let worktree_id = worktree.as_ref().map(|w| w.id.clone());
     let response = generate_commit_message(
         &app,
         &prompt,
@@ -10649,8 +10663,6 @@ pub async fn start_review_job(
 
     if let Err(error) = update_review_session_entry(
         &app,
-        &worktree_id,
-        &worktree_path,
         &session_id,
         entry_backend,
         entry_model,
@@ -10731,8 +10743,6 @@ pub async fn start_review_job(
                 {
                     let _ = update_review_session_entry(
                         &task_app,
-                        &worktree_id,
-                        &worktree_path,
                         &session_id,
                         &result_backend,
                         &result_model,
@@ -10759,8 +10769,6 @@ pub async fn start_review_job(
                 };
                 let _ = update_review_session_entry(
                     &task_app,
-                    &worktree_id,
-                    &worktree_path,
                     &session_id,
                     &result_backend,
                     &result_model,
@@ -10780,8 +10788,6 @@ pub async fn start_review_job(
 
 fn update_review_session_entry(
     app: &AppHandle,
-    worktree_id: &str,
-    worktree_path: &str,
     session_id: &str,
     backend: &str,
     model: &str,
@@ -10789,21 +10795,29 @@ fn update_review_session_entry(
     response: Option<&ReviewResponse>,
     error: Option<&str>,
 ) -> Result<(), String> {
-    crate::chat::with_sessions_mut(app, worktree_path, worktree_id, |sessions| {
-        let session = sessions
-            .find_session_mut(session_id)
-            .ok_or_else(|| format!("Session not found: {session_id}"))?;
-        session.review_results = Some(merge_review_entry(
-            session.review_results.take(),
+    let finished = status != ReviewJobStatus::Running;
+    crate::chat::storage::with_existing_metadata_mut(app, session_id, |metadata| {
+        metadata.review_results = Some(merge_review_entry(
+            metadata.review_results.take(),
             backend,
             model,
             status,
             response,
             error,
         )?);
-        session.is_reviewing = REVIEW_JOB_REGISTRY.has_running_for_session(session_id);
-        Ok(())
-    })
+        metadata.is_reviewing = REVIEW_JOB_REGISTRY.has_running_for_session(session_id);
+        if finished {
+            metadata.review_activity_at = Some(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+            );
+        }
+        Ok::<(), String>(())
+    })??;
+    crate::chat::emit_sessions_cache_invalidation(app);
+    Ok(())
 }
 
 pub async fn get_review_job(job_id: String) -> Result<Option<ReviewJob>, String> {
@@ -10875,6 +10889,9 @@ async fn update_review_session_state(
         None,
         None,
         None,
+        None, // hidden_table_checklists
+        None, // pinned_tables
+        None, // selected_permission_mode
     )
     .await
 }
@@ -12936,6 +12953,7 @@ pub async fn create_folder(
         sentry_base_url: None,
         linked_project_ids: Vec::new(),
         auto_fix_settings: None,
+        server: None,
     };
 
     data.add_project(folder.clone());
@@ -12994,10 +13012,11 @@ pub async fn delete_folder(app: AppHandle, folder_id: String) -> Result<(), Stri
 
     let mut data = load_projects_data(&app)?;
 
-    // Verify it's a folder
-    let folder = data
-        .find_project(&folder_id)
-        .ok_or_else(|| format!("Folder not found: {folder_id}"))?;
+    // Already gone: treat as deleted so stale entries can always be removed
+    let Some(folder) = data.find_project(&folder_id) else {
+        log::warn!("Folder not found, treating as already deleted: {folder_id}");
+        return Ok(());
+    };
 
     if !folder.is_folder {
         return Err("Cannot delete: not a folder".to_string());
@@ -13816,13 +13835,70 @@ fn collect_codex_skills(home: &Path, worktree: Option<&Path>) -> Vec<ClaudeSkill
     skills
 }
 
-/// List Codex CLI skills from the current Codex and legacy Jean locations.
-pub async fn list_codex_skills(worktree_path: Option<String>) -> Result<Vec<ClaudeSkill>, String> {
+/// Ask the Codex app-server which skills are enabled for `cwd`, including plugin skills.
+fn list_codex_skills_from_app_server(
+    app: &AppHandle,
+    cwd: &str,
+) -> Result<Vec<ClaudeSkill>, String> {
+    crate::chat::codex_server::ensure_running(app)?;
+    let response = crate::chat::codex_server::send_request(
+        "skills/list",
+        serde_json::json!({ "cwds": [cwd], "forceReload": true }),
+    );
+    crate::chat::codex_server::release_usage();
+    Ok(parse_codex_skills_list(&response?))
+}
+
+/// Parse a `skills/list` response into enabled skills, sorted and deduplicated by name.
+fn parse_codex_skills_list(response: &serde_json::Value) -> Vec<ClaudeSkill> {
+    let mut skills_map = std::collections::HashMap::new();
+    let entries = response["data"].as_array().into_iter().flatten();
+    for skill in entries.flat_map(|entry| entry["skills"].as_array().into_iter().flatten()) {
+        let (Some(name), Some(path)) = (skill["name"].as_str(), skill["path"].as_str()) else {
+            continue;
+        };
+        if !skill["enabled"].as_bool().unwrap_or(true) {
+            continue;
+        }
+        let description = skill["description"]
+            .as_str()
+            .filter(|d| !d.is_empty())
+            .map(str::to_string);
+        skills_map.entry(name.to_string()).or_insert(ClaudeSkill {
+            name: name.to_string(),
+            path: path.to_string(),
+            description,
+        });
+    }
+    let mut skills: Vec<ClaudeSkill> = skills_map.into_values().collect();
+    skills.sort_by(|a, b| a.name.cmp(&b.name));
+    skills
+}
+
+/// List Codex CLI skills. Codex itself is the source of truth (it knows which
+/// plugins are enabled); scan skill directories only when Codex is unavailable.
+pub async fn list_codex_skills(
+    app: AppHandle,
+    worktree_path: Option<String>,
+) -> Result<Vec<ClaudeSkill>, String> {
     log::trace!("Listing Codex CLI skills");
 
-    let skills = get_home_dir()
-        .map(|home| collect_codex_skills(&home, worktree_path.as_deref().map(Path::new)))
-        .unwrap_or_default();
+    let home = get_home_dir();
+    let skills = tokio::task::spawn_blocking(move || {
+        let cwd = worktree_path
+            .clone()
+            .or_else(|| home.as_ref().map(|h| h.to_string_lossy().into_owned()));
+        if let Some(cwd) = cwd {
+            match list_codex_skills_from_app_server(&app, &cwd) {
+                Ok(skills) => return skills,
+                Err(e) => log::debug!("Codex skills/list failed, scanning directories: {e}"),
+            }
+        }
+        home.map(|home| collect_codex_skills(&home, worktree_path.as_deref().map(Path::new)))
+            .unwrap_or_default()
+    })
+    .await
+    .map_err(|e| format!("Failed to list Codex skills: {e}"))?;
     log::trace!("Found {} Codex CLI skills", skills.len());
     Ok(skills)
 }
@@ -13942,7 +14018,7 @@ fn opencode_config_dir(home: &std::path::Path) -> std::path::PathBuf {
 pub struct PluginSkillGroup {
     /// Plugin display name (e.g., "Superpowers", "Frontend Design")
     pub plugin_name: String,
-    /// Skills found in this plugin's skills/ directory
+    /// Skills found in this plugin's skills/ directory, named `<plugin-id>:<skill>`
     pub skills: Vec<ClaudeSkill>,
 }
 
@@ -14050,7 +14126,14 @@ pub async fn list_plugin_skills() -> Result<Vec<PluginSkillGroup>, String> {
         let plugin_id = plugin_key.split('@').next().unwrap_or(plugin_key);
         let plugin_name = plugin_id_to_display_name(plugin_id);
 
-        let mut skills: Vec<ClaudeSkill> = skills_map.into_values().collect();
+        // Namespace like Claude CLI (`pstack:bro`) so users can search by plugin
+        let mut skills: Vec<ClaudeSkill> = skills_map
+            .into_values()
+            .map(|skill| ClaudeSkill {
+                name: format!("{plugin_id}:{}", skill.name),
+                ..skill
+            })
+            .collect();
         skills.sort_by(|a, b| a.name.cmp(&b.name));
 
         groups.push(PluginSkillGroup {
@@ -14128,13 +14211,6 @@ fn get_avatars_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     Ok(avatars_dir)
 }
 
-/// Set a custom avatar image for a project
-/// Opens a file dialog to pick an image, copies it to the avatars directory,
-/// and updates the project's avatar_path field.
-pub async fn set_project_avatar(_app: AppHandle, _project_id: String) -> Result<Project, String> {
-    Err("Project avatar file selection is only available in the desktop app".to_string())
-}
-
 fn project_avatar_destination_name(project_id: &str, extension: &str) -> String {
     format!("{project_id}-{}.{}", Uuid::new_v4(), extension)
 }
@@ -14150,27 +14226,45 @@ fn is_project_avatar_file(file_name: &str, project_id: &str) -> bool {
         .is_some_and(|(id, _)| Uuid::parse_str(id).is_ok())
 }
 
-pub async fn set_project_avatar_from_path(
+const MAX_PROJECT_AVATAR_SIZE: usize = 10 * 1024 * 1024;
+
+/// Set a custom avatar image for a project
+/// The client picks the image and sends its base64 bytes, so this works for
+/// local, remote, and web clients. Saves the image to the avatars directory
+/// and updates the project's avatar_path field.
+pub async fn set_project_avatar(
     app: AppHandle,
     project_id: String,
-    source_path: PathBuf,
+    data: String,
+    mime_type: String,
 ) -> Result<Project, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+
+    let extension = match mime_type.as_str() {
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        _ => return Err(format!("Unsupported avatar image type: {mime_type}")),
+    };
+    let image_data = STANDARD
+        .decode(&data)
+        .map_err(|error| format!("Failed to decode avatar image data: {error}"))?;
+    if image_data.len() > MAX_PROJECT_AVATAR_SIZE {
+        return Err("Avatar image is too large. Maximum size is 10MB".to_string());
+    }
+
     let mut data = load_projects_data(&app)?;
     if data.find_project(&project_id).is_none() {
         return Err(format!("Project not found: {project_id}"));
     }
 
-    let extension = source_path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .unwrap_or("png")
-        .to_lowercase();
     let avatars_dir = get_avatars_dir(&app)?;
-    let destination_name = project_avatar_destination_name(&project_id, &extension);
+    let destination_name = project_avatar_destination_name(&project_id, extension);
     let destination_path = avatars_dir.join(&destination_name);
 
-    std::fs::copy(&source_path, &destination_path)
-        .map_err(|error| format!("Failed to copy avatar file: {error}"))?;
+    std::fs::write(&destination_path, &image_data)
+        .map_err(|error| format!("Failed to save avatar file: {error}"))?;
 
     let project = data
         .find_project_mut(&project_id)
@@ -14332,6 +14426,17 @@ mod tests {
     }
 
     #[test]
+    fn commit_message_uses_latest_codex_default_when_preference_is_invalid() {
+        let mut preferences = crate::AppPreferences::default();
+        preferences.selected_codex_model = "invalid".to_string();
+
+        assert_eq!(
+            resolve_commit_message_model(Backend::Codex, Some("sonnet"), &preferences),
+            "gpt-6.1-sol"
+        );
+    }
+
+    #[test]
     fn commit_message_keeps_explicit_codex_model() {
         let preferences = crate::AppPreferences::default();
 
@@ -14350,6 +14455,47 @@ mod tests {
         assert!(!provided_cached_value_changed(&Some(1), &Some(1)));
         assert!(provided_cached_value_changed(&Some(2), &Some(1)));
         assert!(provided_cached_value_changed(&Some(1), &None));
+    }
+
+    #[test]
+    fn codex_skills_list_keeps_enabled_plugin_and_system_skills() {
+        let response = serde_json::json!({
+            "data": [
+                {
+                    "cwd": "/repo",
+                    "skills": [
+                        { "name": "pages:write-page", "path": "/p/write-page/SKILL.md", "description": "Write a page", "enabled": true, "scope": "user", "pluginId": "pages@openai-curated-remote" },
+                        { "name": "imagegen", "path": "/s/imagegen/SKILL.md", "description": "", "enabled": true, "scope": "system" },
+                        { "name": "off", "path": "/s/off/SKILL.md", "description": "Disabled", "enabled": false, "scope": "user" }
+                    ],
+                    "errors": []
+                },
+                {
+                    "cwd": "/other",
+                    "skills": [
+                        { "name": "imagegen", "path": "/dup/SKILL.md", "description": "dup", "enabled": true, "scope": "system" }
+                    ]
+                }
+            ]
+        });
+
+        let skills = parse_codex_skills_list(&response);
+
+        let summary: Vec<_> = skills
+            .iter()
+            .map(|s| (s.name.as_str(), s.path.as_str(), s.description.as_deref()))
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                ("imagegen", "/s/imagegen/SKILL.md", None),
+                (
+                    "pages:write-page",
+                    "/p/write-page/SKILL.md",
+                    Some("Write a page")
+                ),
+            ]
+        );
     }
 
     #[test]
@@ -15445,6 +15591,7 @@ mod tests {
             sentry_base_url: None,
             linked_project_ids: Vec::new(),
             auto_fix_settings: None,
+            server: None,
         };
 
         attach_default_avatar(&mut project);
@@ -15464,7 +15611,94 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn failed_project_avatar_copy_keeps_the_previous_file() {
+    async fn delete_worktree_can_skip_failed_teardown() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = temp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let repo_path = repo.to_str().unwrap();
+        for args in [
+            vec!["init", "-b", "main"],
+            vec![
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "initial",
+            ],
+        ] {
+            assert!(crate::platform::silent_command("git")
+                .args(args)
+                .current_dir(&repo)
+                .status()
+                .unwrap()
+                .success());
+        }
+        std::fs::write(
+            repo.join("jean.json"),
+            r#"{"scripts":{"teardown":"exit 1"}}"#,
+        )
+        .unwrap();
+        let checkout = temp.path().join("checkout");
+        git::create_worktree(repo_path, checkout.to_str().unwrap(), "test-delete", "main").unwrap();
+        let app = crate::RuntimeContext::new(temp.path().join("data"), temp.path().into()).unwrap();
+        let data: ProjectsData = serde_json::from_value(serde_json::json!({
+            "projects": [{
+                "id": "project", "name": "Test", "path": repo_path,
+                "default_branch": "main", "added_at": 0
+            }],
+            "worktrees": [{
+                "id": "worktree", "project_id": "project", "name": "Test",
+                "path": checkout, "branch": "test-delete", "created_at": 0
+            }]
+        }))
+        .unwrap();
+        save_projects_data(&app, &data).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let error_tx = tx.clone();
+        app.listen("worktree:delete_error", move |_| {
+            error_tx.send(false).unwrap();
+        });
+        app.listen("worktree:deleted", move |_| {
+            tx.send(true).unwrap();
+        });
+
+        delete_worktree(app.clone(), "worktree".into(), None)
+            .await
+            .unwrap();
+        assert!(!rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap());
+        assert!(checkout.exists());
+        assert!(load_projects_data(&app)
+            .unwrap()
+            .find_worktree("worktree")
+            .is_some());
+
+        crate::http_server::dispatch::dispatch_command(
+            &app,
+            "delete_worktree",
+            serde_json::json!({"worktreeId": "worktree", "skipTeardown": true}),
+        )
+        .await
+        .unwrap();
+        assert!(rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap());
+        assert!(!checkout.exists());
+        assert!(load_projects_data(&app)
+            .unwrap()
+            .find_worktree("worktree")
+            .is_none());
+        assert!(!crate::platform::silent_command("git")
+            .args(["show-ref", "--verify", "refs/heads/test-delete"])
+            .current_dir(&repo)
+            .output()
+            .unwrap()
+            .status
+            .success());
+    }
+
+    #[tokio::test]
+    async fn failed_project_avatar_upload_keeps_the_previous_file() {
         let temp = tempfile::tempdir().expect("temp dir");
         let app = crate::RuntimeContext::new(temp.path().into(), temp.path().into())
             .expect("runtime context");
@@ -15498,6 +15732,7 @@ mod tests {
             sentry_project_slug: None,
             linked_project_ids: Vec::new(),
             auto_fix_settings: None,
+            server: None,
         };
         save_projects_data(
             &app,
@@ -15508,10 +15743,11 @@ mod tests {
         )
         .expect("save projects");
 
-        let result = set_project_avatar_from_path(
+        let result = set_project_avatar(
             app,
             "project-1".to_string(),
-            temp.path().join("missing.png"),
+            "not base64!".to_string(),
+            "image/png".to_string(),
         )
         .await;
 
@@ -15664,6 +15900,18 @@ Body
             "Claude CLI failed: reached max turns before producing structured output"
         );
         assert!(!result.contains("Looking at the diff"));
+    }
+
+    #[test]
+    fn add_commit_prompt_rule_inserts_into_rules_or_appends() {
+        let with_rules = add_commit_prompt_rule("Intro\n\nRules:\n- Existing\n\nDiff", "New rule");
+        assert_eq!(
+            with_rules,
+            "Intro\n\nRules:\n- New rule\n- Existing\n\nDiff"
+        );
+
+        let custom = add_commit_prompt_rule("Custom prompt", "New rule");
+        assert_eq!(custom, "Custom prompt\n\nAdditional rule:\n- New rule");
     }
 
     #[test]

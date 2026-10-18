@@ -147,7 +147,7 @@ export const MessageList = memo(function MessageList({
               message={message}
               getMessages={getMessages}
               messageIndex={index}
-              totalMessages={totalMessages}
+              isLastMessage={index === totalMessages - 1}
               lastPlanMessageIndex={lastPlanMessageIndex}
               hasFollowUpMessage={hasFollowUpMessage}
               sessionId={sessionId}

@@ -17,6 +17,10 @@ import {
 } from '@/components/icons/reicon'
 import { Markdown } from '@/components/ui/markdown'
 import {
+  REVEAL_CHAT_MESSAGE_EVENT,
+  type RevealChatMessageDetail,
+} from '@/lib/pinned-table-reveal'
+import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
@@ -40,6 +44,7 @@ import { MessageItem } from './MessageItem'
 import { getProviderChangeBeforeMessage } from './message-settings-labels'
 import { ProviderChangeSeparator } from './ProviderChangeSeparator'
 import { EditedFilesDisplay } from './EditedFilesDisplay'
+import { parseServerResourceKey } from '@/lib/server-resource'
 import { AskUserQuestion } from './AskUserQuestion'
 import { SteeredPromptGroup } from './SteeredPromptGroup'
 import { buildTimeline, coalesceContentBlocks } from './tool-call-utils'
@@ -47,6 +52,7 @@ import { formatDuration, getAssistantDurationMs } from './time-utils'
 import {
   TOOL_CALL_ROW_CLASS,
   TOOL_CALL_DETAIL_PILL_CLASS,
+  summarizeToolCall,
 } from './ToolCallInline'
 import type { VirtualizedMessageListHandle } from './VirtualizedMessageList'
 import {
@@ -61,6 +67,7 @@ import {
 } from './recap-utils'
 
 const SCROLL_THRESHOLD = 300
+const EMPTY_TOOL_CALLS: ToolCall[] = []
 
 interface CompactMessageListProps {
   messages: ChatMessage[]
@@ -301,35 +308,6 @@ function truncate(text: string, max: number): string {
   return oneLine.length > max ? `${oneLine.slice(0, max - 1)}…` : oneLine
 }
 
-function truncatePath(text: string, max: number): string {
-  const oneLine = text.replace(/\s+/g, ' ').trim()
-  if (oneLine.length <= max) return oneLine
-  if (oneLine.includes('/')) return `…${oneLine.slice(-(max - 1))}`
-  return `${oneLine.slice(0, max - 1)}…`
-}
-
-function summarizeToolCall(tc: ToolCall): { label: string; detail?: string } {
-  const input = (tc.input ?? {}) as Record<string, unknown>
-  const filePath =
-    typeof input.file_path === 'string' ? input.file_path : undefined
-  const path = typeof input.path === 'string' ? input.path : undefined
-  const command = typeof input.command === 'string' ? input.command : undefined
-  const url = typeof input.url === 'string' ? input.url : undefined
-  const pattern = typeof input.pattern === 'string' ? input.pattern : undefined
-  const description =
-    typeof input.description === 'string' ? input.description : undefined
-
-  const pathDetail = filePath ?? path
-  if (pathDetail) {
-    return { label: tc.name, detail: truncatePath(pathDetail, 80) }
-  }
-  const detail = command ?? url ?? pattern ?? description ?? undefined
-  return {
-    label: tc.name,
-    detail: detail ? truncate(detail, 80) : undefined,
-  }
-}
-
 /**
  * Walks the latest message in a compact group and returns a one-line summary
  * of the most recent meaningful activity (tool call name, last text snippet,
@@ -406,7 +384,7 @@ interface CompactActivityRowProps {
   editedFilesShownExternally?: boolean
 }
 
-function CompactActivityRow({
+const CompactActivityRow = memo(function CompactActivityRow({
   group,
   total,
   renderMessage,
@@ -416,6 +394,17 @@ function CompactActivityRow({
   editedFilesShownExternally,
 }: CompactActivityRowProps) {
   const [isOpen, setIsOpen] = useState(false)
+  // "Show in chat" on a pinned table opens the row that holds its message.
+  useEffect(() => {
+    const handleReveal = (event: Event) => {
+      const { messageId } = (event as CustomEvent<RevealChatMessageDetail>)
+        .detail
+      if (group.some(item => item.message.id === messageId)) setIsOpen(true)
+    }
+    window.addEventListener(REVEAL_CHAT_MESSAGE_EVENT, handleReveal)
+    return () =>
+      window.removeEventListener(REVEAL_CHAT_MESSAGE_EVENT, handleReveal)
+  }, [group])
   const summary = useMemo(() => summarizeGroup(group), [group])
   const stepCount = useMemo(() => countSteps(group), [group])
   const messageCount = group.length
@@ -519,7 +508,7 @@ function CompactActivityRow({
       </span>
     </Collapsible>
   )
-}
+})
 
 interface CompactQuestionMessageProps {
   message: ChatMessage
@@ -597,12 +586,16 @@ function CompactQuestionMessage({
     }
     return Boolean(stripped.content && stripped.content.trim() !== '')
   }, [stripped])
+  const activityGroup = useMemo(
+    () => [{ message: stripped, globalIndex }],
+    [stripped, globalIndex]
+  )
 
   return (
     <>
       {hasNonQuestionContent && (
         <CompactActivityRow
-          group={[{ message: stripped, globalIndex }]}
+          group={activityGroup}
           total={1}
           renderMessage={renderMessage}
           hasFollowUpFor={hasFollowUpFor}
@@ -872,6 +865,31 @@ export const CompactMessageList = memo(
         return items
       }, [messages, lastIndex, hasFollowUpMap])
 
+      // Tool calls of the latest compact group, surfaced as edited files
+      // under the row. Memoized so EditedFilesDisplay gets a stable array.
+      const latestCompactToolCalls = useMemo(() => {
+        const last = renderItems[renderItems.length - 1]
+        if (!last || last.kind !== 'compact') return EMPTY_TOOL_CALLS
+        return last.messages.flatMap(({ message }) => message.tool_calls ?? [])
+      }, [renderItems])
+
+      // Once the latest turn finishes, its surfaced edited files also list
+      // the turn checkpoint's changes made without file tools (e.g. Bash).
+      const latestTurnUserMessageId = useMemo(() => {
+        if (isSending) return undefined
+        const last = renderItems[renderItems.length - 1]
+        if (!last || last.kind !== 'compact') return undefined
+        const firstIndex = last.messages[0]?.globalIndex ?? 0
+        for (let i = firstIndex - 1; i >= 0; i--) {
+          const message = messages[i]
+          if (message?.role === 'user') return message.id
+        }
+        return undefined
+      }, [renderItems, messages, isSending])
+      const ownerServerId = parseServerResourceKey(
+        worktreeId ?? sessionId
+      )?.serverId
+
       const renderMessageItem = useCallback(
         (
           item: { message: ChatMessage; globalIndex: number },
@@ -886,7 +904,7 @@ export const CompactMessageList = memo(
             message={item.message}
             getMessages={getMessages}
             messageIndex={item.globalIndex}
-            totalMessages={totalMessages}
+            isLastMessage={item.globalIndex === totalMessages - 1}
             lastPlanMessageIndex={lastPlanMessageIndex}
             hasFollowUpMessage={extra.hasFollowUpMessage}
             sessionId={sessionId}
@@ -925,7 +943,7 @@ export const CompactMessageList = memo(
           />
         ),
         [
-          messages,
+          getMessages,
           totalMessages,
           lastPlanMessageIndex,
           sessionId,
@@ -1221,10 +1239,8 @@ export const CompactMessageList = memo(
             const surfaceRecap = latestTextIsRecap && showLatestText
             const surfacedLatestToolCalls =
               isLatestCompact && (showLatestText || hasCancelledMessage)
-                ? item.messages.flatMap(
-                    ({ message }) => message.tool_calls ?? []
-                  )
-                : []
+                ? latestCompactToolCalls
+                : EMPTY_TOOL_CALLS
             return (
               <div key={item.key}>
                 <CompactActivityRow
@@ -1253,6 +1269,11 @@ export const CompactMessageList = memo(
                       <EditedFilesDisplay
                         toolCalls={surfacedLatestToolCalls}
                         worktreePath={worktreePath}
+                        serverId={
+                          ownerServerId === 'local' ? undefined : ownerServerId
+                        }
+                        worktreeId={worktreeId ?? undefined}
+                        turnUserMessageId={latestTurnUserMessageId}
                       />
                     )}
                   </div>

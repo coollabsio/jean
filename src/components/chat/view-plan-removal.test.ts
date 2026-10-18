@@ -6,7 +6,6 @@ const read = (path: string) => readFileSync(path, 'utf8')
 describe('View plan removal', () => {
   it('does not expose the menu action or open-plan event path', () => {
     const sources = [
-      'src/components/ui/floating-dock.tsx',
       'src/components/chat/SessionListRow.tsx',
       'src/components/chat/hooks/useCanvasShortcutEvents.ts',
       'src/components/chat/hooks/useChatWindowEvents.ts',

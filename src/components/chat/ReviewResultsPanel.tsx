@@ -82,29 +82,29 @@ function getSeverityConfig(severity: string) {
     case 'critical':
       return {
         icon: AlertCircle,
-        color: 'text-red-500',
-        bgColor: 'bg-red-500/15 text-red-600 dark:text-red-400',
+        color: 'text-destructive',
+        bgColor: 'bg-destructive/15 text-destructive',
         label: 'Critical',
       }
     case 'warning':
       return {
         icon: AlertTriangle,
-        color: 'text-yellow-500',
-        bgColor: 'bg-yellow-500/15 text-yellow-600 dark:text-yellow-400',
+        color: 'text-warning',
+        bgColor: 'bg-warning/15 text-warning',
         label: 'Warning',
       }
     case 'suggestion':
       return {
         icon: Lightbulb,
-        color: 'text-blue-500',
-        bgColor: 'bg-blue-500/15 text-blue-600 dark:text-blue-400',
+        color: 'text-info',
+        bgColor: 'bg-info/15 text-info',
         label: 'Suggestion',
       }
     case 'praise':
       return {
         icon: CheckCircle2,
-        color: 'text-green-500',
-        bgColor: 'bg-green-500/15 text-green-600 dark:text-green-400',
+        color: 'text-success',
+        bgColor: 'bg-success/15 text-success',
         label: 'Praise',
       }
     default:
@@ -563,19 +563,19 @@ export function ReviewResultsPanel({
       case 'approved':
         return {
           icon: CheckCircle2,
-          color: 'text-green-500',
+          color: 'text-success',
           label: 'Approved',
         }
       case 'changes_requested':
         return {
           icon: AlertTriangle,
-          color: 'text-yellow-500',
+          color: 'text-warning',
           label: 'Changes Requested',
         }
       case 'needs_discussion':
         return {
           icon: MessageSquare,
-          color: 'text-blue-500',
+          color: 'text-info',
           label: 'Needs Discussion',
         }
       default:
@@ -617,7 +617,7 @@ export function ReviewResultsPanel({
             </span>
           </div>
           {fixedCount > 0 && (
-            <span className="inline-flex items-center gap-1 rounded border border-green-500 px-1.5 py-0 text-[10px] font-medium text-green-500">
+            <span className="inline-flex items-center gap-1 rounded border border-success px-1.5 py-0 text-[10px] font-medium text-success">
               {fixedCount} fixed
             </span>
           )}
@@ -734,7 +734,7 @@ export function ReviewResultsPanel({
                             </p>
                             <SeverityBadge severity={finding.severity} />
                             {isFixed && (
-                              <CheckCircle2 className="size-3.5 shrink-0 text-green-500" />
+                              <CheckCircle2 className="size-3.5 shrink-0 text-success" />
                             )}
                           </div>
                           <div className="mt-1 flex min-w-0 items-center gap-2 pl-5 text-xs">
@@ -786,7 +786,7 @@ export function ReviewResultsPanel({
                                 </span>
                               )}
                               {finding.blocking === true && (
-                                <span className="rounded border border-red-500 px-1.5 py-0 text-[10px] text-red-500">
+                                <span className="rounded border border-destructive px-1.5 py-0 text-[10px] text-destructive">
                                   Blocking
                                 </span>
                               )}
@@ -796,7 +796,7 @@ export function ReviewResultsPanel({
                                 </span>
                               )}
                               {isFixed && (
-                                <span className="inline-flex items-center gap-1 rounded border border-green-500 px-1.5 py-0 text-[10px] text-green-500">
+                                <span className="inline-flex items-center gap-1 rounded border border-success px-1.5 py-0 text-[10px] text-success">
                                   <CheckCircle2 className="size-3" />
                                   Fix sent
                                 </span>

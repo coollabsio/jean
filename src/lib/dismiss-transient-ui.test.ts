@@ -17,7 +17,6 @@ describe('dismissTransientUi', () => {
       magicModalOpen: false,
       sessionChatModalOpen: false,
       sessionChatModalWorktreeId: null,
-      githubDashboardOpen: false,
       viewingFilePath: null,
       updateModalVersion: null,
       remotePickerOpen: false,
@@ -48,7 +47,6 @@ describe('dismissTransientUi', () => {
       magicModalOpen: true,
       sessionChatModalOpen: true,
       sessionChatModalWorktreeId: 'wt-1',
-      githubDashboardOpen: true,
       viewingFilePath: '/tmp/a.ts',
       updateModalVersion: '1.2.3',
     })
@@ -66,7 +64,6 @@ describe('dismissTransientUi', () => {
     expect(ui.magicModalOpen).toBe(false)
     expect(ui.sessionChatModalOpen).toBe(false)
     expect(ui.sessionChatModalWorktreeId).toBeNull()
-    expect(ui.githubDashboardOpen).toBe(false)
     expect(ui.viewingFilePath).toBeNull()
     expect(ui.updateModalVersion).toBeNull()
 

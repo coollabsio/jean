@@ -3,7 +3,7 @@ import { foldTodoWriteToolCalls, isPlanToolCall } from '@/types/chat'
 import type {
   ToolCall,
   ChatMessage,
-  CodexAgent,
+  SubAgent,
   Todo,
   PlanToolInput,
   PlanStep,
@@ -81,7 +81,7 @@ function agentStatesField(
 function normalizeCodexAgentStatus(
   agentStatus: unknown,
   toolCallStatus?: unknown
-): CodexAgent['status'] {
+): SubAgent['status'] {
   if (agentStatus === 'completed' || agentStatus === 'shutdown') {
     return 'completed'
   }
@@ -107,8 +107,9 @@ export function extractCodexAgents(
   toolCalls: ToolCall[],
   isSending: boolean,
   parentTurnCancelled = false
-): CodexAgent[] {
-  const agents = new Map<string, CodexAgent>()
+): SubAgent[] {
+  const agents = new Map<string, SubAgent>()
+  const agentToolCalls = new Map<string, ToolCall[]>()
 
   for (const tc of toolCalls) {
     const input = asRecord(tc.input)
@@ -122,6 +123,17 @@ export function extractCodexAgents(
     const agentsStates = agentStatesField(input)
     const toolCallStatus = input.status
 
+    const threadIds = new Set([
+      ...receiverThreadIds,
+      ...Object.keys(agentsStates),
+    ])
+    if (tc.name === 'SpawnAgent') threadIds.add(receiverThreadIds[0] ?? tc.id)
+    for (const threadId of threadIds) {
+      const calls = agentToolCalls.get(threadId) ?? []
+      calls.push(tc)
+      agentToolCalls.set(threadId, calls)
+    }
+
     if (tc.name === 'SpawnAgent') {
       const prompt = stringField(input, 'prompt', 'prompt') ?? ''
       const threadId = receiverThreadIds[0] ?? tc.id
@@ -129,6 +141,7 @@ export function extractCodexAgents(
       agents.set(threadId, {
         id: threadId,
         prompt: truncateAgentPrompt(prompt),
+        fullPrompt: prompt,
         status: normalizeCodexAgentStatus(state?.status, toolCallStatus),
         message: typeof state?.message === 'string' ? state.message : undefined,
       })
@@ -147,6 +160,7 @@ export function extractCodexAgents(
     for (const [threadId, state] of Object.entries(agentsStates)) {
       const existing = agents.get(threadId)
       agents.set(threadId, {
+        ...existing,
         id: existing?.id ?? threadId,
         prompt: existing?.prompt ?? threadId,
         status: normalizeCodexAgentStatus(state.status, toolCallStatus),
@@ -159,7 +173,8 @@ export function extractCodexAgents(
   // Codex sub_agent_activity has no "completed" kind. A normal parent turn end
   // is therefore the terminal completion signal for agents that still have a
   // running state. Keep cancellation distinct so abandoned work is not green.
-  return Array.from(agents.values()).map(agent => {
+  return Array.from(agents.values()).map(rawAgent => {
+    const agent = { ...rawAgent, toolCalls: agentToolCalls.get(rawAgent.id) }
     if (isSending || agent.status !== 'in_progress') return agent
     return {
       ...agent,
@@ -171,6 +186,70 @@ export function extractCodexAgents(
         : agent.message,
     }
   })
+}
+
+/** `claude-opus-5-5` / `claude-haiku-4-5-20251001` → `Opus 5.5` / `Haiku 4.5` */
+export function formatSubagentModel(model: string): string {
+  const match =
+    /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?(?:\[1m\])?$/.exec(model)
+  if (!match) return model
+  const [, family = '', major, minor] = match
+  const name = family.charAt(0).toUpperCase() + family.slice(1)
+  return `${name} ${major}${minor ? `.${minor}` : ''}`
+}
+
+/**
+ * Extract Claude subagents from Task/Agent tool calls. The tool call stays in
+ * the timeline; this only feeds the Subagents panel above the input.
+ */
+export function extractClaudeAgents(
+  toolCalls: ToolCall[],
+  isSending: boolean,
+  parentTurnCancelled = false
+): SubAgent[] {
+  const subToolCalls = new Map<string, ToolCall[]>()
+  for (const tc of toolCalls) {
+    if (tc.parent_tool_use_id) {
+      const calls = subToolCalls.get(tc.parent_tool_use_id) ?? []
+      calls.push(tc)
+      subToolCalls.set(tc.parent_tool_use_id, calls)
+    }
+  }
+
+  const agents: SubAgent[] = []
+  for (const tc of toolCalls) {
+    if (tc.name !== 'Task' && tc.name !== 'Agent') continue
+    const input = asRecord(tc.input) ?? {}
+    const description =
+      stringField(input, 'description', 'description') ??
+      stringField(input, 'prompt', 'prompt') ??
+      ''
+
+    let status: SubAgent['status']
+    if (tc.is_error) status = 'errored'
+    else if (tc.output?.trim()) status = 'completed'
+    else if (isSending) status = 'in_progress'
+    else status = parentTurnCancelled ? 'interrupted' : 'completed'
+
+    const calls = subToolCalls.get(tc.id) ?? []
+    const usage = tc.subagent_usage
+    agents.push({
+      id: tc.id,
+      prompt: truncateAgentPrompt(description),
+      status,
+      label: usage?.model
+        ? formatSubagentModel(usage.model)
+        : (stringField(input, 'subagent_type', 'subagentType') ?? tc.name),
+      toolCount: Math.max(calls.length, usage?.tool_uses ?? 0),
+      tokens: usage?.total_tokens,
+      durationMs: usage?.duration_ms || undefined,
+      fullPrompt: stringField(input, 'prompt', 'prompt'),
+      report: tc.output?.trim() || undefined,
+      toolCalls: calls,
+      allToolCalls: toolCalls,
+    })
+  }
+  return agents
 }
 
 interface UseActiveTodosAndAgentsParams {
@@ -254,7 +333,7 @@ export function useActiveTodosAndAgents({
     string | null
   >(null)
 
-  // Get active agents from Codex collab tool calls
+  // Get active agents from Codex collab tool calls and Claude Task/Agent calls
   const {
     agents: activeAgents,
     sourceMessageId: agentSourceMessageId,
@@ -269,11 +348,11 @@ export function useActiveTodosAndAgents({
       ? currentToolCalls
       : (lastAssistantMessage?.tool_calls ?? [])
 
-    const agents = extractCodexAgents(
-      toolCalls,
-      isSending,
-      lastAssistantMessage?.cancelled === true
-    )
+    const cancelled = lastAssistantMessage?.cancelled === true
+    const agents = [
+      ...extractCodexAgents(toolCalls, isSending, cancelled),
+      ...extractClaudeAgents(toolCalls, isSending, cancelled),
+    ]
 
     const sourceId = isSending ? null : (lastAssistantMessage?.id ?? null)
     return {

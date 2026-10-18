@@ -50,19 +50,40 @@ describe('session tab ordering', () => {
     ])
   })
 
-  it('sorts non-review sessions by most recently updated first', () => {
+  it('sorts non-running sessions by most recently updated first', () => {
     const sorted = sortSessionCardsForTabs([
       card('old-waiting', 'waiting', 0, 100),
       card('new-idle', 'idle', 20, 400),
-      card('middle-running', 'vibing', 10, 300),
+      card('middle-review', 'review', 10, 300),
       card('middle-idle', 'idle', 2, 200),
     ])
 
     expect(sorted.map(item => item.session.id)).toEqual([
       'new-idle',
-      'middle-running',
+      'middle-review',
       'middle-idle',
       'old-waiting',
+    ])
+  })
+
+  it('puts running sessions before sessions updated more recently', () => {
+    const review = card('review-session', 'review', 99, 1)
+    review.session.name = 'Code Review · Claude'
+
+    const sorted = sortSessionCardsForTabs([
+      card('new-review', 'review', 0, 500),
+      card('old-running', 'vibing', 1, 100),
+      review,
+      card('new-idle', 'idle', 2, 400),
+      card('older-planning', 'planning', 3, 50),
+    ])
+
+    expect(sorted.map(item => item.session.id)).toEqual([
+      'review-session',
+      'old-running',
+      'older-planning',
+      'new-review',
+      'new-idle',
     ])
   })
 })
