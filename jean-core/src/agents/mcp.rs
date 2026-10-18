@@ -25,6 +25,9 @@ const AGENT_TOOLS: &[&str] = &[
     "memory_search",
     "memory_update",
     "memory_forget",
+    "memory_supersede",
+    "journal_add",
+    "journal_search",
     "message_agent",
     "notify_user",
     "task_list",
@@ -64,10 +67,13 @@ fn base_tool_definitions() -> Value {
         {"name":"schedule_update","description":"Agent sessions only. Change one of your schedules: name, prompt, paused, or its timing (the same fields as schedule_create).","inputSchema":{"type":"object","properties":{"scheduleId":{"type":"integer"},"name":{"type":"string"},"prompt":{"type":"string"},"paused":{"type":"boolean"},"delayMinutes":{"type":"number","minimum":1},"everyMinutes":{"type":"number","minimum":5},"cron":{"type":"string"},"timezone":{"type":"string"},"event":{"type":"string","enum":["session_finished","session_failed","worktree_archived","pr_merged","approval_resolved"]}},"required":["scheduleId"],"additionalProperties":false}},
         {"name":"schedule_list","description":"Agent sessions only. List your active schedules, including paused ones.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
         {"name":"schedule_cancel","description":"Agent sessions only. Delete one of your schedules.","inputSchema":{"type":"object","properties":{"scheduleId":{"type":"integer"}},"required":["scheduleId"],"additionalProperties":false}},
-        {"name":"memory_save","description":"Agent sessions only. Save a lasting memory: a rule, a fact the code does not show, or open work. Never save secrets or live state. scope 'shared' is visible to all agents. Same text updates the existing entry.","inputSchema":{"type":"object","properties":{"content":{"type":"string","maxLength":1000},"kind":{"type":"string","enum":["rule","fact","open_work"]},"scope":{"type":"string","enum":["agent","shared"]},"projectId":{"type":"string"},"pinned":{"type":"boolean"},"expiresInDays":{"type":"number","minimum":1}},"required":["content","kind"],"additionalProperties":false}},
-        {"name":"memory_search","description":"Agent sessions only. Full-text search of your memories and shared memories. Without query: pinned and newest first.","inputSchema":{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":50}},"additionalProperties":false}},
-        {"name":"memory_update","description":"Agent sessions only. Change the content, kind, or pinned flag of a memory.","inputSchema":{"type":"object","properties":{"memoryId":{"type":"integer"},"content":{"type":"string","maxLength":1000},"kind":{"type":"string","enum":["rule","fact","open_work"]},"pinned":{"type":"boolean"}},"required":["memoryId"],"additionalProperties":false}},
-        {"name":"memory_forget","description":"Agent sessions only. Delete a memory that is wrong or no longer needed.","inputSchema":{"type":"object","properties":{"memoryId":{"type":"integer"}},"required":["memoryId"],"additionalProperties":false}},
+        {"name":"memory_save","description":"Agent sessions only. Save a lasting memory: a rule, a fact the code does not show, or open work. Never save secrets or live state. scope 'agent' is private. scope 'shared' is working memory for every agent (rules, facts, open work), not who the user is. scope 'user' is only facts about the user (name, timezone, preferences) and every agent sees them. Same text in the same scope updates the existing entry.","inputSchema":{"type":"object","properties":{"content":{"type":"string","maxLength":1000},"kind":{"type":"string","enum":["rule","fact","open_work"]},"scope":{"type":"string","enum":["agent","shared","user"]},"projectId":{"type":"string"},"pinned":{"type":"boolean"},"expiresInDays":{"type":"number","minimum":1}},"required":["content","kind"],"additionalProperties":false}},
+        {"name":"memory_search","description":"Agent sessions only. Full-text search of your memories, shared memories, and user facts. Ranked by pinned, then relevance, then recency. Without query: pinned and newest first. from/to are unix seconds on updated_at.","inputSchema":{"type":"object","properties":{"query":{"type":"string"},"kind":{"type":"string","enum":["rule","fact","open_work"]},"scope":{"type":"string","enum":["agent","shared","user"]},"projectId":{"type":"string"},"pinned":{"type":"boolean"},"from":{"type":"integer"},"to":{"type":"integer"},"limit":{"type":"integer","minimum":1,"maximum":50}},"additionalProperties":false}},
+        {"name":"memory_update","description":"Agent sessions only. Change the content, kind, or pinned flag of a memory you can see. The previous text is kept in the change record.","inputSchema":{"type":"object","properties":{"memoryId":{"type":"integer"},"content":{"type":"string","maxLength":1000},"kind":{"type":"string","enum":["rule","fact","open_work"]},"pinned":{"type":"boolean"}},"required":["memoryId"],"additionalProperties":false}},
+        {"name":"memory_forget","description":"Agent sessions only. Delete a memory that is wrong or no longer needed. The previous text is kept in the change record.","inputSchema":{"type":"object","properties":{"memoryId":{"type":"integer"}},"required":["memoryId"],"additionalProperties":false}},
+        {"name":"memory_supersede","description":"Agent sessions only. Correct a fact. The old text drops out of search and prompts and stays in the change record. Use memory_update for rules and open work.","inputSchema":{"type":"object","properties":{"memoryId":{"type":"integer"},"content":{"type":"string","maxLength":1000}},"required":["memoryId","content"],"additionalProperties":false}},
+        {"name":"journal_add","description":"Agent sessions only. Record what happened, a decision, or an outcome. This is dated history, not a lasting fact. Use memory_save for rules and facts.","inputSchema":{"type":"object","properties":{"content":{"type":"string","maxLength":2000},"occurredAt":{"type":"integer","description":"Unix seconds. Default: now."},"projectId":{"type":"string"}},"required":["content"],"additionalProperties":false}},
+        {"name":"journal_search","description":"Agent sessions only. Recall your journal by text and/or date, including chats that were archived. from/to are unix seconds on occurred_at. Other agents' journals are not included.","inputSchema":{"type":"object","properties":{"query":{"type":"string"},"from":{"type":"integer"},"to":{"type":"integer"},"limit":{"type":"integer","minimum":1,"maximum":50}},"additionalProperties":false}},
         {"name":"message_agent","description":"Agent sessions only. Send a request to another agent. Its answer arrives automatically as an update message; end your turn after sending.","inputSchema":{"type":"object","properties":{"agentId":{"type":"string"},"message":{"type":"string"}},"required":["agentId","message"],"additionalProperties":false}},
         {"name":"notify_user","description":"Agent sessions only. Tell the user something they must know: a result of a goal, a question, a failure, or a needed decision (level 'action'). Shows on the agent page and as a notification. Not for routine progress.","inputSchema":{"type":"object","properties":{"message":{"type":"string","maxLength":2000},"level":{"type":"string","enum":["info","action","error"]}},"required":["message"],"additionalProperties":false}},
         {"name":"task_list","description":"Agent sessions only. List your recent background tasks (schedule runs, follow-ups, agent requests) with status and one-line result.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":50}},"additionalProperties":false}},
@@ -290,7 +296,7 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value, source: &str) -> Res
         "memory_save" => {
             let content = required_str(args, "content")?;
             let kind = required_str(args, "kind")?;
-            let shared = str_arg(args, "scope").as_deref() == Some("shared");
+            let scope = str_arg(args, "scope").unwrap_or_else(|| "agent".to_string());
             let project_id = str_arg(args, "projectId");
             let expires_at = int_arg(args, "expiresInDays").map(|d| db::now() + d.max(1) * 86_400);
             let pinned = args.get("pinned").and_then(Value::as_bool).unwrap_or(false);
@@ -298,7 +304,8 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value, source: &str) -> Res
                 db::save_memory(
                     conn,
                     &db::NewMemory {
-                        agent_id: (!shared).then_some(agent.id.as_str()),
+                        agent_id: Some(agent.id.as_str()),
+                        scope: Some(&scope),
                         project_id: project_id.as_deref(),
                         kind: &kind,
                         content: &content,
@@ -306,15 +313,36 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value, source: &str) -> Res
                         source_session_id: Some(source),
                         expires_at,
                     },
+                    Some(&agent.id),
                 )
             })?;
             json!({ "memory": memory })
         }
         "memory_search" => {
             let query = str_arg(args, "query");
+            let kind = str_arg(args, "kind");
+            let scope = str_arg(args, "scope");
+            let project_id = str_arg(args, "projectId");
+            let pinned = args.get("pinned").and_then(Value::as_bool);
+            let from = int_arg(args, "from");
+            let to = int_arg(args, "to");
             let limit = int_arg(args, "limit").unwrap_or(20).clamp(1, 50);
             let memories = super::with_db(app, |conn| {
-                db::search_memories(conn, &agent.id, query.as_deref(), limit)
+                db::search_memories(
+                    conn,
+                    &db::MemorySearch {
+                        agent_id: &agent.id,
+                        query: query.as_deref(),
+                        kind: kind.as_deref(),
+                        scope: scope.as_deref(),
+                        project_id: project_id.as_deref(),
+                        pinned,
+                        from,
+                        to,
+                        include_expired: false,
+                        limit,
+                    },
+                )
             })?;
             json!({ "memories": memories })
         }
@@ -325,16 +353,65 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value, source: &str) -> Res
                 kind: str_arg(args, "kind"),
                 pinned: args.get("pinned").and_then(Value::as_bool),
             };
-            let memory =
-                super::with_db(app, |conn| db::update_memory(conn, &agent.id, id, &patch))?;
+            let memory = super::with_db(app, |conn| {
+                db::update_memory(conn, &agent.id, id, &patch, Some(&agent.id))
+            })?;
             json!({ "memory": memory })
         }
         "memory_forget" => {
             let id = required_int(args, "memoryId")?;
-            if !super::with_db(app, |conn| db::forget_memory(conn, &agent.id, id))? {
+            if !super::with_db(app, |conn| {
+                db::forget_memory(conn, &agent.id, id, Some(&agent.id))
+            })? {
                 return Err(format!("Memory not found: {id}"));
             }
             json!({ "memoryId": id, "forgotten": true })
+        }
+        "memory_supersede" => {
+            let id = required_int(args, "memoryId")?;
+            let content = required_str(args, "content")?;
+            let memory = super::with_db(app, |conn| {
+                db::supersede_memory(conn, &agent.id, Some(&agent.id), id, &content, Some(source))
+            })?;
+            json!({ "memory": memory })
+        }
+        "journal_add" => {
+            let content = required_str(args, "content")?;
+            let occurred_at = int_arg(args, "occurredAt");
+            let project_id = str_arg(args, "projectId");
+            let entry = super::with_db(app, |conn| {
+                db::add_journal(
+                    conn,
+                    &db::NewJournal {
+                        agent_id: &agent.id,
+                        project_id: project_id.as_deref(),
+                        content: &content,
+                        occurred_at,
+                        source: "agent",
+                        source_session_id: Some(source),
+                    },
+                )
+            })?;
+            json!({ "entry": entry })
+        }
+        "journal_search" => {
+            let query = str_arg(args, "query");
+            let from = int_arg(args, "from");
+            let to = int_arg(args, "to");
+            let limit = int_arg(args, "limit").unwrap_or(20).clamp(1, 50);
+            let entries = super::with_db(app, |conn| {
+                db::search_journal(
+                    conn,
+                    &db::JournalSearch {
+                        agent_id: &agent.id,
+                        query: query.as_deref(),
+                        from,
+                        to,
+                        limit,
+                    },
+                )
+            })?;
+            json!({ "entries": entries })
         }
         "message_agent" => {
             let target_id = required_str(args, "agentId")?;

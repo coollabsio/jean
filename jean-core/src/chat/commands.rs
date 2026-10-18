@@ -3582,13 +3582,14 @@ pub async fn send_chat_message(
     // Use passed parameter for parallel execution prompt (None = disabled)
     let parallel_execution_prompt = parallel_execution_prompt.filter(|p| !p.trim().is_empty());
     // Agent sessions: append the agent prompt (role, tools, memory). Every backend receives this prompt.
-    let parallel_execution_prompt = match crate::agents::system_prompt_for(&app, &worktree_id) {
-        Some(agent_prompt) => Some(match parallel_execution_prompt {
-            Some(prompt) => format!("{prompt}\n\n{agent_prompt}"),
-            None => agent_prompt,
-        }),
-        None => parallel_execution_prompt,
-    };
+    let parallel_execution_prompt =
+        match crate::agents::system_prompt_for(&app, &worktree_id, Some(message.as_str())) {
+            Some(agent_prompt) => Some(match parallel_execution_prompt {
+                Some(prompt) => format!("{prompt}\n\n{agent_prompt}"),
+                None => agent_prompt,
+            }),
+            None => parallel_execution_prompt,
+        };
 
     // Use passed parameter for Chrome browser integration (default false - beta)
     let chrome = chrome_enabled.unwrap_or(false);

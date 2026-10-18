@@ -48,6 +48,8 @@ pub struct AgentDetails {
     pub schedules: Vec<db::Schedule>,
     pub approvals: Vec<db::Approval>,
     pub memories: Vec<db::Memory>,
+    pub journal: Vec<db::JournalEntry>,
+    pub memory_changes: Vec<db::MemoryChange>,
     pub tasks: Vec<db::Task>,
     pub notifications: Vec<db::Notification>,
     /// Self-management audit, newest first. Includes changes this agent made.
@@ -152,6 +154,17 @@ pub fn get_agent_details(app: &AppHandle, agent_id: &str) -> Result<AgentDetails
             schedules: db::list_schedules(conn, agent_id)?,
             approvals: db::list_approvals(conn, agent_id, 30)?,
             memories: db::list_memories(conn, agent_id)?,
+            journal: db::search_journal(
+                conn,
+                &db::JournalSearch {
+                    agent_id,
+                    query: None,
+                    from: None,
+                    to: None,
+                    limit: 40,
+                },
+            )?,
+            memory_changes: db::list_memory_changes(conn, agent_id, 30)?,
             tasks: db::list_tasks(conn, agent_id, 50)?,
             notifications: db::list_notifications(conn, agent_id, 30)?,
             changes: db::list_agent_changes(conn, agent_id, 30)?,
@@ -447,25 +460,69 @@ pub fn save_memory(
     agent_id: &str,
     content: &str,
     kind: &str,
+    scope: Option<&str>,
     shared: bool,
     pinned: bool,
+    project_id: Option<&str>,
 ) -> Result<db::Memory, String> {
+    let resolved = scope.unwrap_or(if shared { "shared" } else { "agent" });
     let memory = super::with_db(app, |conn| {
         db::save_memory(
             conn,
             &db::NewMemory {
-                agent_id: (!shared).then_some(agent_id),
-                project_id: None,
+                agent_id: Some(agent_id),
+                scope: Some(resolved),
+                project_id,
                 kind,
                 content,
                 pinned,
                 source_session_id: None,
                 expires_at: None,
             },
+            None,
         )
     })?;
     super::notify_changed(app);
     Ok(memory)
+}
+
+#[derive(Debug, Clone)]
+pub struct MemorySearchRequest {
+    pub query: Option<String>,
+    pub kind: Option<String>,
+    pub scope: Option<String>,
+    pub project_id: Option<String>,
+    pub pinned: Option<bool>,
+    pub from: Option<i64>,
+    pub to: Option<i64>,
+    pub limit: Option<i64>,
+}
+
+pub fn search_memory(
+    app: &AppHandle,
+    agent_id: &str,
+    request: MemorySearchRequest,
+) -> Result<Vec<db::Memory>, String> {
+    super::with_db(app, |conn| {
+        db::search_memories(
+            conn,
+            &db::MemorySearch {
+                agent_id,
+                query: request.query.as_deref().filter(|query| !query.is_empty()),
+                kind: request.kind.as_deref().filter(|kind| !kind.is_empty()),
+                scope: request.scope.as_deref().filter(|scope| !scope.is_empty()),
+                project_id: request
+                    .project_id
+                    .as_deref()
+                    .filter(|project| !project.is_empty()),
+                pinned: request.pinned,
+                from: request.from,
+                to: request.to,
+                include_expired: true,
+                limit: request.limit.unwrap_or(200).clamp(1, 200),
+            },
+        )
+    })
 }
 
 pub fn update_memory(
@@ -475,18 +532,79 @@ pub fn update_memory(
     patch: db::MemoryPatch,
 ) -> Result<db::Memory, String> {
     let memory = super::with_db(app, |conn| {
-        db::update_memory(conn, agent_id, memory_id, &patch)
+        db::update_memory(conn, agent_id, memory_id, &patch, None)
     })?;
     super::notify_changed(app);
     Ok(memory)
 }
 
 pub fn delete_memory(app: &AppHandle, agent_id: &str, memory_id: i64) -> Result<(), String> {
-    if !super::with_db(app, |conn| db::forget_memory(conn, agent_id, memory_id))? {
+    if !super::with_db(app, |conn| {
+        db::forget_memory(conn, agent_id, memory_id, None)
+    })? {
         return Err(format!("Memory not found: {memory_id}"));
     }
     super::notify_changed(app);
     Ok(())
+}
+
+pub fn supersede_memory(
+    app: &AppHandle,
+    agent_id: &str,
+    memory_id: i64,
+    content: &str,
+) -> Result<db::Memory, String> {
+    let memory = super::with_db(app, |conn| {
+        db::supersede_memory(conn, agent_id, None, memory_id, content, None)
+    })?;
+    super::notify_changed(app);
+    Ok(memory)
+}
+
+pub fn save_journal(
+    app: &AppHandle,
+    agent_id: &str,
+    content: &str,
+    occurred_at: Option<i64>,
+    project_id: Option<&str>,
+) -> Result<db::JournalEntry, String> {
+    let entry = super::with_db(app, |conn| {
+        db::add_journal(
+            conn,
+            &db::NewJournal {
+                agent_id,
+                project_id,
+                content,
+                occurred_at,
+                source: "user",
+                source_session_id: None,
+            },
+        )
+    })?;
+    super::notify_changed(app);
+    Ok(entry)
+}
+
+pub fn search_journal(
+    app: &AppHandle,
+    agent_id: &str,
+    query: Option<&str>,
+    from: Option<i64>,
+    to: Option<i64>,
+    limit: Option<i64>,
+) -> Result<Vec<db::JournalEntry>, String> {
+    super::with_db(app, |conn| {
+        db::search_journal(
+            conn,
+            &db::JournalSearch {
+                agent_id,
+                query: query.filter(|query| !query.is_empty()),
+                from,
+                to,
+                limit: limit.unwrap_or(50),
+            },
+        )
+    })
 }
 
 /// Memory as Markdown, for review or backup.
@@ -509,7 +627,9 @@ pub(crate) fn render_memory_markdown(agent_id: &str, memories: &[db::Memory]) ->
         out.push_str(&format!("\n## {title}\n"));
         for m in items {
             let mut tags = Vec::new();
-            if m.agent_id.is_none() {
+            if m.scope == "user" {
+                tags.push("user".to_string());
+            } else if m.agent_id.is_none() || m.scope == "shared" {
                 tags.push("shared".to_string());
             }
             if m.pinned {
@@ -573,6 +693,13 @@ mod tests {
             created_at: 0,
             updated_at: 0,
             expires_at: None,
+            scope: if agent.is_none() {
+                "shared".into()
+            } else {
+                "agent".into()
+            },
+            superseded_by: None,
+            superseded_at: None,
         };
         let md = render_memory_markdown(
             "jean",
