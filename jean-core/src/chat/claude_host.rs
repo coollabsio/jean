@@ -356,6 +356,17 @@ pub fn run_claude_host_from_args() -> Result<(), String> {
     let initial_input = std::fs::read_to_string(&input_file)
         .map_err(|e| format!("Failed to read Claude input file: {e}"))?;
 
+    // Bind before spawning: a bind failure must not leave an orphan Claude child.
+    let _ = std::fs::remove_file(&socket_path);
+    let listener = match UnixListener::bind(&socket_path) {
+        Ok(listener) => listener,
+        Err(e) => {
+            append(&format!("Failed to bind Claude host socket: {e}"));
+            append(&serde_json::json!({ "type": HOST_EXIT_TYPE, "code": null }).to_string());
+            return Err(format!("Failed to bind Claude host socket: {e}"));
+        }
+    };
+
     let mut child = match silent_command(&claude_cli)
         .args(&claude_args)
         .current_dir(&cwd)
@@ -399,10 +410,6 @@ pub fn run_claude_host_from_args() -> Result<(), String> {
             }
         })
     });
-
-    let _ = std::fs::remove_file(&socket_path);
-    let listener = UnixListener::bind(&socket_path)
-        .map_err(|e| format!("Failed to bind Claude host socket: {e}"))?;
 
     let stop = Arc::new(AtomicBool::new(false));
     {

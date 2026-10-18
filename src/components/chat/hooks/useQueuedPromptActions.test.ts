@@ -587,6 +587,33 @@ describe('useQueuedPromptActions', () => {
     ).toEqual(['msg-1', 'msg-2'])
   })
 
+  it('busy remote claude session: uses the remote server steer setting', async () => {
+    queryClient.setQueryData(preferencesQueryKeys.preferences(), {
+      claude_auto_steer_enabled: false,
+    })
+    queryClient.setQueryData(preferencesQueryKeys.preferences('remote-1'), {
+      claude_auto_steer_enabled: true,
+    })
+    useChatStore.setState({
+      sessionWorktreeMap: { 'session-1': 'remote-1:worktree-1' },
+      worktreePaths: { 'remote-1:worktree-1': '/tmp/worktree-1' },
+      sendingSessionIds: { 'session-1': true },
+      selectedBackends: { 'session-1': 'claude' },
+    })
+    const { result } = renderHook(() => useQueuedPromptActions())
+
+    await act(async () => {
+      await result.current.handleSendQueuedNow('session-1', 'msg-3')
+    })
+
+    expect(steerClaudeTurn).toHaveBeenCalledWith(
+      'remote-1:worktree-1',
+      'session-1',
+      'prompt msg-3'
+    )
+    expect(cancelChatMessage).not.toHaveBeenCalled()
+  })
+
   it('busy claude session: steer failure falls back to promote + cancel', async () => {
     queryClient.setQueryData(preferencesQueryKeys.preferences(), {
       claude_auto_steer_enabled: true,
@@ -606,6 +633,34 @@ describe('useQueuedPromptActions', () => {
     expect(
       useChatStore.getState().messageQueues['session-1']?.map(m => m.id)
     ).toEqual(['msg-3', 'msg-1', 'msg-2'])
+    expect(cancelChatMessage).toHaveBeenCalledWith('session-1', 'worktree-1')
+  })
+
+  it('busy claude session: does not steer a prompt queued for another backend', async () => {
+    queryClient.setQueryData(preferencesQueryKeys.preferences(), {
+      claude_auto_steer_enabled: true,
+    })
+    useChatStore.setState({
+      messageQueues: {
+        'session-1': [
+          createMessage('msg-1'),
+          createMessage('msg-2', { backend: 'codex' }),
+        ],
+      },
+      sendingSessionIds: { 'session-1': true },
+      selectedBackends: { 'session-1': 'claude' },
+    })
+    const { result } = renderHook(() => useQueuedPromptActions())
+
+    await act(async () => {
+      await result.current.handleSendQueuedNow('session-1', 'msg-2')
+    })
+
+    expect(steerClaudeTurn).not.toHaveBeenCalled()
+    expect(steerCodexTurn).not.toHaveBeenCalled()
+    expect(
+      useChatStore.getState().messageQueues['session-1']?.map(m => m.id)
+    ).toEqual(['msg-2', 'msg-1'])
     expect(cancelChatMessage).toHaveBeenCalledWith('session-1', 'worktree-1')
   })
 

@@ -27,6 +27,7 @@ import {
   type FileMentionPopoverHandle,
 } from './FileMentionPopover'
 import { queryClient } from '@/lib/query-client'
+import { parseServerResourceKey } from '@/lib/server-resource'
 import { fileQueryKeys } from '@/services/files'
 import { logger } from '@/lib/logger'
 import { reportBulkInvestigateResults } from '@/components/worktree/bulkInvestigateUtils'
@@ -531,7 +532,11 @@ export const ChatInput = memo(function ChatInput({
         isSteerCapableBackend(
           selectedBackend,
           queryClient.getQueryData<AppPreferences>(
-            preferencesQueryKeys.preferences()
+            preferencesQueryKeys.preferences(
+              activeWorktreeId
+                ? parseServerResourceKey(activeWorktreeId)?.serverId
+                : undefined
+            )
           )
         ) &&
         (e.metaKey || e.ctrlKey)
@@ -672,6 +677,7 @@ export const ChatInput = memo(function ChatInput({
     },
     [
       activeSessionId,
+      activeWorktreeId,
       fileMentionOpen,
       contextMentionOpen,
       slashPopoverOpen,

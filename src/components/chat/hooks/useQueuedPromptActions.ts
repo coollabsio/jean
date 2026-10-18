@@ -12,6 +12,7 @@ import {
 } from '@/services/chat'
 import { preferencesQueryKeys } from '@/services/preferences'
 import { queryClient } from '@/lib/query-client'
+import { parseServerResourceKey } from '@/lib/server-resource'
 import { isSteerCapableBackend } from '@/lib/backend-auto-steer'
 import type { AppPreferences } from '@/types/preferences'
 import { buildMessageWithRefs } from '@/components/chat/message-with-refs'
@@ -137,12 +138,20 @@ export function useQueuedPromptActions() {
       // Busy steer-capable session (Codex/OpenCode/Pi/Grok, Claude when its
       // steer setting is on): steer the running turn. All attachments become
       // path refs via buildMessageWithRefs; Codex also gets structured
-      // attachment input when present.
+      // attachment input when present. A prompt queued for a different
+      // backend is never steered into this run.
       const backend = store.selectedBackends[sessionId] ?? 'claude'
       const preferences = queryClient.getQueryData<AppPreferences>(
-        preferencesQueryKeys.preferences()
+        preferencesQueryKeys.preferences(
+          parseServerResourceKey(worktreeId)?.serverId
+        )
       )
-      if (isSteerCapableBackend(backend, preferences) && isSending) {
+      const backendMatches = !msg.backend || msg.backend === backend
+      if (
+        backendMatches &&
+        isSteerCapableBackend(backend, preferences) &&
+        isSending
+      ) {
         try {
           const steerMessage = buildMessageWithRefs(msg)
           if (backend === 'pi') {
