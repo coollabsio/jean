@@ -16,8 +16,9 @@ export function AgentSettings({ agent }: { agent: AgentSummary }) {
   const saved = draftFromAgent(agent)
   const [draft, setDraft] = useState<AgentRunDraft>(saved)
   const [seen, setSeen] = useState<AgentRunDraft>(saved)
-  if (!sameAgentRun(seen, saved) && sameAgentRun(draft, seen)) {
-    setDraft(saved)
+  // Track every saved change. Reset the draft only when it had no edits.
+  if (!sameAgentRun(seen, saved)) {
+    if (sameAgentRun(draft, seen)) setDraft(saved)
     setSeen(saved)
   }
   const dirty = !sameAgentRun(draft, saved)

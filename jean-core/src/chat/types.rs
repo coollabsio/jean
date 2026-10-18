@@ -105,6 +105,7 @@ pub enum Backend {
     Grok,
     Kimi,
     Antigravity,
+    Muse,
 }
 
 impl<'de> Deserialize<'de> for Backend {
@@ -127,6 +128,7 @@ impl<'de> Deserialize<'de> for Backend {
             "grok" => Backend::Grok,
             "kimi" => Backend::Kimi,
             "antigravity" | "gemini" => Backend::Antigravity,
+            "muse" => Backend::Muse,
             "claude" | "" => Backend::Claude,
             other => {
                 log::warn!("Unknown chat backend '{other}', falling back to claude");
@@ -843,6 +845,9 @@ pub struct Session {
         alias = "gemini_session_id"
     )]
     pub antigravity_session_id: Option<String>,
+    /// Muse Code MSP session ID for resuming conversations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub muse_session_id: Option<String>,
     /// Selected model for this session
     #[serde(default)]
     pub selected_model: Option<String>,
@@ -1086,6 +1091,7 @@ impl Session {
             grok_session_id: None,
             kimi_session_id: None,
             antigravity_session_id: None,
+            muse_session_id: None,
             selected_model: None,
             selected_thinking_level: None,
             selected_effort_level: None,
@@ -1458,6 +1464,7 @@ impl SessionMetadata {
             grok_session_id: self.grok_session_id.clone(),
             kimi_session_id: self.kimi_session_id.clone(),
             antigravity_session_id: self.antigravity_session_id.clone(),
+            muse_session_id: self.muse_session_id.clone(),
             selected_model: self.selected_model.clone(),
             selected_thinking_level: self.selected_thinking_level.clone(),
             selected_effort_level: self.selected_effort_level.clone(),
@@ -1528,6 +1535,7 @@ impl SessionMetadata {
         self.grok_session_id = session.grok_session_id.clone();
         self.kimi_session_id = session.kimi_session_id.clone();
         self.antigravity_session_id = session.antigravity_session_id.clone();
+        self.muse_session_id = session.muse_session_id.clone();
         self.selected_model = session.selected_model.clone();
         self.selected_thinking_level = session.selected_thinking_level.clone();
         self.selected_effort_level = session.selected_effort_level.clone();
@@ -1819,6 +1827,9 @@ pub struct RunEntry {
         alias = "gemini_session_id"
     )]
     pub antigravity_session_id: Option<String>,
+    /// Muse Code MSP session ID, persisted per run for conversation continuity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub muse_session_id: Option<String>,
     /// AI change checkpoint id captured before this run (working-tree snapshot).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkpoint_id: Option<String>,
@@ -1912,6 +1923,9 @@ pub struct SessionMetadata {
     /// Antigravity CLI conversation ID for resuming conversations.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub antigravity_session_id: Option<String>,
+    /// Muse Code MSP session ID for resuming conversations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub muse_session_id: Option<String>,
     /// Selected model for this session
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_model: Option<String>,
@@ -2114,6 +2128,9 @@ pub struct SessionDebugInfo {
     /// Antigravity CLI conversation ID for resuming conversations.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub antigravity_session_id: Option<String>,
+    /// Muse Code MSP session ID (if any)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub muse_session_id: Option<String>,
     /// Path to Claude CLI's JSONL file (in ~/.claude/projects/)
     pub claude_jsonl_file: Option<String>,
     /// List of JSONL run log files for this session
@@ -2146,6 +2163,7 @@ impl SessionMetadata {
             grok_session_id: None,
             kimi_session_id: None,
             antigravity_session_id: None,
+            muse_session_id: None,
             selected_model: None,
             selected_thinking_level: None,
             selected_effort_level: None,
@@ -2828,6 +2846,32 @@ mod tests {
     }
 
     #[test]
+    fn test_muse_session_id_roundtrip_via_update_from_session() {
+        let mut session = Session::new("Muse MSP support".to_string(), 0, Backend::Muse);
+        session.muse_session_id = Some("01a14f1f-c834-7492-baab-0dbc3634ef84".to_string());
+        let mut metadata = SessionMetadata::new(
+            session.id.clone(),
+            "wt-muse".to_string(),
+            session.name.clone(),
+            session.order,
+        );
+        metadata.update_from_session(&session);
+        assert_eq!(
+            metadata.muse_session_id.as_deref(),
+            Some("01a14f1f-c834-7492-baab-0dbc3634ef84")
+        );
+        let restored = metadata.to_session();
+        assert_eq!(
+            restored.muse_session_id.as_deref(),
+            Some("01a14f1f-c834-7492-baab-0dbc3634ef84")
+        );
+        assert_eq!(restored.backend, Backend::Muse);
+        assert_eq!(serde_json::to_value(&Backend::Muse).unwrap(), "muse");
+        let parsed: Backend = serde_json::from_str("\"muse\"").unwrap();
+        assert_eq!(parsed, Backend::Muse);
+    }
+
+    #[test]
     fn test_antigravity_session_id_roundtrip_via_update_from_session() {
         let mut session = Session::new(
             "Antigravity conversation support".to_string(),
@@ -2894,6 +2938,7 @@ mod tests {
             grok_session_id: None,
             kimi_session_id: None,
             antigravity_session_id: None,
+            muse_session_id: None,
             checkpoint_id: None,
         });
 
@@ -2939,6 +2984,7 @@ mod tests {
             grok_session_id: None,
             kimi_session_id: None,
             antigravity_session_id: None,
+            muse_session_id: None,
             checkpoint_id: None,
         });
 
@@ -2973,6 +3019,7 @@ mod tests {
             grok_session_id: None,
             kimi_session_id: None,
             antigravity_session_id: None,
+            muse_session_id: None,
             checkpoint_id: None,
         };
 
@@ -3042,6 +3089,7 @@ mod tests {
             grok_session_id: None,
             kimi_session_id: None,
             antigravity_session_id: None,
+            muse_session_id: None,
             checkpoint_id: None,
         });
         metadata.runs.push(RunEntry {
@@ -3069,6 +3117,7 @@ mod tests {
             grok_session_id: None,
             kimi_session_id: None,
             antigravity_session_id: None,
+            muse_session_id: None,
             checkpoint_id: None,
         });
 
@@ -3114,6 +3163,7 @@ mod tests {
             grok_session_id: None,
             kimi_session_id: None,
             antigravity_session_id: None,
+            muse_session_id: None,
             checkpoint_id: None,
         });
 
@@ -3145,6 +3195,7 @@ mod tests {
             grok_session_id: None,
             kimi_session_id: None,
             antigravity_session_id: None,
+            muse_session_id: None,
             checkpoint_id: None,
         });
 

@@ -553,6 +553,78 @@ describe('MobileSettingsMenu', () => {
     expect(screen.queryByText('Ultracode')).not.toBeInTheDocument()
   })
 
+  it('offers exactly the Muse efforts on mobile and shows High for Claude-only levels', async () => {
+    const user = userEvent.setup()
+    const handleEffortLevelChange = vi.fn()
+
+    render(
+      <MobileSettingsMenu
+        {...baseProps}
+        selectedBackend="muse"
+        backendModelLabel="Muse · Default"
+        backendModelLabelText="Muse · Default"
+        selectedEffortLevel="ultracode"
+        selectedThinkingLevel="megathink"
+        isCodex={false}
+        handleEffortLevelChange={handleEffortLevelChange}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: /settings/i }))
+    expect(
+      screen.getByText('Effort').closest('[role="menuitem"]')?.textContent
+    ).toBe('EffortHigh')
+    await user.click(screen.getByText('Effort'))
+
+    const items = screen.getAllByRole('menuitemradio')
+    expect(items.map(item => item.textContent)).toEqual([
+      'NoneNo reasoning',
+      'MinimalMinimal',
+      'LowLow',
+      'MediumModerate',
+      'HighDeep',
+      'xHighExtra high',
+      'MaxMaximum',
+      'UltraBeyond max',
+    ])
+    const ultraItem = items[7]
+    if (!ultraItem) throw new Error('missing Ultra effort item')
+    fireEvent.click(ultraItem)
+
+    expect(handleEffortLevelChange).toHaveBeenCalledWith('ultra')
+  })
+
+  it('shows Muse MCP servers as loaded automatically in the mobile sheet', async () => {
+    const user = userEvent.setup()
+    const onToggleMcpServer = vi.fn()
+    vi.stubGlobal('innerWidth', 390)
+
+    render(
+      <MobileSettingsMenu
+        {...baseProps}
+        selectedBackend="muse"
+        availableMcpServers={[
+          {
+            name: 'docs',
+            config: {},
+            scope: 'user',
+            disabled: false,
+            backend: 'muse',
+          },
+        ]}
+        onToggleMcpServer={onToggleMcpServer}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: /settings/i }))
+    await user.click(screen.getByText('MCP'))
+
+    const sheet = screen.getByRole('dialog', { name: 'Manage MCP servers' })
+    const docsButton = within(sheet).getByRole('button', { name: /docs/i })
+    expect(docsButton.textContent).toBe('docsLoaded automatically by Museuser')
+    expect(docsButton).toBeDisabled()
+  })
+
   it('calls effort change handler when selecting an effort on mobile', async () => {
     const user = userEvent.setup()
     const handleEffortLevelChange = vi.fn()

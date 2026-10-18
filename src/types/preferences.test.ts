@@ -3,6 +3,8 @@ import {
   DEFAULT_RELEASE_NOTES_PROMPT,
   ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_BACKENDS,
   ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_MODELS,
+  MUSE_DEFAULT_MAGIC_PROMPT_BACKENDS,
+  MUSE_DEFAULT_MAGIC_PROMPT_MODELS,
   COMMANDCODE_DEFAULT_MAGIC_PROMPT_BACKENDS,
   COMMANDCODE_DEFAULT_MAGIC_PROMPT_MODELS,
   DEFAULT_INVESTIGATE_ADVISORY_PROMPT,
@@ -68,6 +70,10 @@ describe('magic prompt preference resolvers', () => {
 
   it('uses Jean-managed Antigravity CLI by default', () => {
     expect(defaultPreferences.antigravity_cli_source).toBe('jean')
+  })
+
+  it('uses Jean-managed Muse CLI by default', () => {
+    expect(defaultPreferences.muse_cli_source).toBe('jean')
   })
 
   it('provides magic prompt defaults for Pi', () => {
@@ -143,6 +149,16 @@ describe('magic prompt preference resolvers', () => {
     expect(defaultPreferences.selected_antigravity_model).toBe(
       'antigravity/auto'
     )
+  })
+
+  it('provides magic prompt defaults for Muse', () => {
+    expect(MUSE_DEFAULT_MAGIC_PROMPT_BACKENDS.investigate_issue_backend).toBe(
+      'muse'
+    )
+    expect(MUSE_DEFAULT_MAGIC_PROMPT_MODELS.investigate_issue_model).toBe(
+      'muse/default'
+    )
+    expect(defaultPreferences.selected_muse_model).toBe('muse/default')
   })
 
   it('provides dedicated defaults for Sentry investigations', () => {

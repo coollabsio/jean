@@ -4006,6 +4006,52 @@ pub async fn dispatch_command(
         agent_command if AGENT_COMMANDS.contains(&agent_command) => {
             Box::pin(dispatch_agents_command(app, agent_command, &args)).await
         }
+        muse_command if MUSE_CLI_COMMANDS.contains(&muse_command) => {
+            Box::pin(dispatch_muse_cli_command(app, muse_command, &args)).await
+        }
+        _ => Err(format!("Unknown command: {command}")),
+    }
+}
+
+const MUSE_CLI_COMMANDS: &[&str] = &[
+    "check_muse_cli_installed",
+    "detect_muse_in_path",
+    "check_muse_cli_auth",
+    "list_muse_models",
+    "get_muse_install_command",
+    "install_muse_cli",
+    "uninstall_muse_cli",
+    "update_muse_cli",
+];
+
+async fn dispatch_muse_cli_command(
+    app: &AppHandle,
+    command: &str,
+    args: &Value,
+) -> Result<Value, String> {
+    match command {
+        "check_muse_cli_installed" => {
+            to_value(crate::muse_cli::check_muse_cli_installed(app.clone()).await?)
+        }
+        "detect_muse_in_path" => to_value(crate::muse_cli::detect_muse_in_path(app.clone()).await?),
+        "check_muse_cli_auth" => to_value(crate::muse_cli::check_muse_cli_auth(app.clone()).await?),
+        "list_muse_models" => to_value(crate::muse_cli::list_muse_models(app.clone()).await?),
+        "get_muse_install_command" => {
+            to_value(crate::muse_cli::get_muse_install_command(app.clone()).await?)
+        }
+        "install_muse_cli" => {
+            let version: Option<String> = from_field_opt(args, "version")?;
+            crate::muse_cli::install_muse_cli(app.clone(), version).await?;
+            Ok(Value::Null)
+        }
+        "uninstall_muse_cli" => {
+            crate::muse_cli::uninstall_muse_cli(app.clone()).await?;
+            Ok(Value::Null)
+        }
+        "update_muse_cli" => {
+            crate::muse_cli::update_muse_cli(app.clone()).await?;
+            Ok(Value::Null)
+        }
         _ => Err(format!("Unknown command: {command}")),
     }
 }

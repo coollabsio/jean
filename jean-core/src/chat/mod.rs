@@ -17,6 +17,7 @@ pub mod jean_mcp;
 pub(crate) mod kimi;
 mod mcp_auth;
 pub mod mcp_external;
+pub(crate) mod muse;
 mod naming;
 mod native_history;
 pub(crate) mod opencode;

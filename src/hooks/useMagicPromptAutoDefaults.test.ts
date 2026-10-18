@@ -33,6 +33,12 @@ describe('getFirstInstalledMagicDefaults', () => {
     ).toBe(OPENCODE_DEFAULT_MAGIC_PROMPT_BACKENDS)
   })
 
+  it('selects Muse presets when Muse is the first installed CLI', () => {
+    const defaults = getFirstInstalledMagicDefaults(['muse', 'codex'])
+    expect(defaults?.backends.investigate_issue_backend).toBe('muse')
+    expect(defaults?.models.investigate_issue_model).toBe('muse/default')
+  })
+
   it('waits when no CLI is installed', () => {
     expect(getFirstInstalledMagicDefaults([])).toBeNull()
   })

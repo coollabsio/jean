@@ -20,6 +20,7 @@ const BARE_BACKEND_COMMANDS: Partial<Record<Backend, string>> = {
   grok: 'grok',
   kimi: 'kimi',
   antigravity: 'agy',
+  muse: 'muse',
 }
 
 const STATUS_COMMANDS: Partial<Record<Backend, string>> = {
@@ -32,6 +33,7 @@ const STATUS_COMMANDS: Partial<Record<Backend, string>> = {
   grok: 'check_grok_cli_installed',
   kimi: 'check_kimi_cli_installed',
   antigravity: 'check_antigravity_cli_installed',
+  muse: 'check_muse_cli_installed',
 }
 
 /** True when `command` looks like a bare tool name (not an absolute/relative path). */

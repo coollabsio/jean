@@ -279,6 +279,9 @@ function getDefaultModelForBackend(
   if (backend === 'antigravity') {
     return preferences?.selected_antigravity_model ?? 'antigravity/auto'
   }
+  if (backend === 'muse') {
+    return preferences?.selected_muse_model ?? 'muse/default'
+  }
   return preferences?.selected_model ?? 'claude-opus-5-5'
 }
 
@@ -292,6 +295,7 @@ const SESSION_BACKENDS = new Set<Session['backend']>([
   'grok',
   'kimi',
   'antigravity',
+  'muse',
 ])
 
 function asSessionBackend(
