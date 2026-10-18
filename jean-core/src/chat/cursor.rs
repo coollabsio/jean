@@ -1,8 +1,10 @@
 //! Cursor Agent execution engine.
 
+use super::coalesce::{ChunkCoalescer, FlushBeforeRead};
 use super::types::{ContentBlock, ToolCall, UsageData};
 use crate::http_server::EmitExt;
 use serde_json::Value;
+use std::cell::RefCell;
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
@@ -749,6 +751,8 @@ fn upsert_tool_call(tool_calls: &mut Vec<ToolCall>, parsed: &ParsedToolCall) {
         input: parsed.input.clone(),
         output: None,
         parent_tool_use_id: None,
+        is_error: None,
+        subagent_usage: None,
     });
 }
 
@@ -815,23 +819,54 @@ fn effective_execution_mode(execution_mode: Option<&str>) -> &'static str {
     }
 }
 
+fn cursor_sandbox_mode(is_windows: bool, wsl_enabled: bool) -> &'static str {
+    if is_windows && !wsl_enabled {
+        "disabled"
+    } else {
+        "enabled"
+    }
+}
+
 fn parse_cursor_stream(
     app: &AppHandle,
     session_id: &str,
     worktree_id: &str,
     run_id: &str,
-    reader: impl BufRead,
+    reader: impl Read,
     initial_chat_id: Option<&str>,
     is_plan_mode: bool,
 ) -> Result<CursorResponse, String> {
-    parse_cursor_stream_inner(
-        reader,
+    // Coalesce token deltas into fewer chat:chunk events. Buffered text is
+    // flushed before tool events, before blocking on more CLI output, and
+    // when the stream ends, so event ordering is preserved.
+    let coalescer = RefCell::new(ChunkCoalescer::new());
+    let flush = || {
+        let batch = coalescer.borrow_mut().flush();
+        if let Some(batch) = batch {
+            emit_chunk(app, session_id, worktree_id, run_id, &batch);
+        }
+    };
+    let result = parse_cursor_stream_inner(
+        BufReader::new(FlushBeforeRead::new(reader, flush)),
         initial_chat_id,
         is_plan_mode,
-        |chunk| emit_chunk(app, session_id, worktree_id, run_id, chunk),
-        |tool_call| emit_tool_use(app, session_id, worktree_id, tool_call),
-        |tool_use_id, output| emit_tool_result(app, session_id, worktree_id, tool_use_id, output),
-    )
+        |chunk| {
+            let batch = coalescer.borrow_mut().push(chunk);
+            if let Some(batch) = batch {
+                emit_chunk(app, session_id, worktree_id, run_id, &batch);
+            }
+        },
+        |tool_call| {
+            flush();
+            emit_tool_use(app, session_id, worktree_id, tool_call);
+        },
+        |tool_use_id, output| {
+            flush();
+            emit_tool_result(app, session_id, worktree_id, tool_use_id, output);
+        },
+    );
+    flush();
+    result
 }
 
 fn parse_cursor_stream_inner<ChunkFn, ToolUseFn, ToolResultFn>(
@@ -1082,15 +1117,19 @@ pub fn execute_cursor(
     }
 
     let effective_mode = effective_execution_mode(execution_mode);
+    let sandbox_mode = cursor_sandbox_mode(
+        cfg!(target_os = "windows"),
+        crate::platform::get_wsl_config().enabled,
+    );
     match effective_mode {
         "plan" => {
-            cmd.args(["--mode", "plan", "--sandbox", "enabled"]);
+            cmd.args(["--mode", "plan", "--sandbox", sandbox_mode]);
         }
         "build" | "yolo" => {
             cmd.args(["--yolo", "--sandbox", "disabled", "--force"]);
         }
         _ => {
-            cmd.args(["--sandbox", "enabled"]);
+            cmd.args(["--sandbox", sandbox_mode]);
         }
     }
 
@@ -1106,6 +1145,10 @@ pub fn execute_cursor(
 
     // Jean session/depth context for Jean MCP server (when called back).
     cmd.env("JEAN_SESSION_ID", session_id);
+    cmd.env(
+        crate::agent_browser::SESSION_ENV,
+        crate::agent_browser::session_name(session_id),
+    );
     cmd.env("JEAN_WORKTREE_ID", worktree_id);
     let (depth_key, depth_val) = super::jean_mcp::child_depth_env();
     cmd.env(depth_key, depth_val);
@@ -1146,7 +1189,7 @@ pub fn execute_cursor(
         session_id,
         worktree_id,
         run_id,
-        BufReader::new(stdout),
+        stdout,
         chat_id.as_deref(),
         effective_mode == "plan",
     );
@@ -1213,13 +1256,17 @@ pub fn execute_one_shot_cursor(
     }
 
     let dir = working_dir.unwrap_or_else(|| Path::new("."));
+    let sandbox_mode = cursor_sandbox_mode(
+        cfg!(target_os = "windows"),
+        crate::platform::get_wsl_config().enabled,
+    );
     let mut cmd = crate::platform::cli_command(&cli_path.to_string_lossy(), None);
     cmd.arg("--print")
         .args(["--output-format", "stream-json"])
         .arg("--trust")
         .args(["--workspace"])
         .arg(dir)
-        .args(["--mode", "ask", "--sandbox", "enabled"]);
+        .args(["--mode", "ask", "--sandbox", sandbox_mode]);
 
     let model = raw_cursor_model(Some(model)).unwrap_or("auto");
     cmd.args(["--model", model])
@@ -1315,6 +1362,14 @@ mod tests {
     #[test]
     fn build_mode_falls_back_to_yolo() {
         assert_eq!(effective_execution_mode(Some("build")), "yolo");
+    }
+
+    #[test]
+    fn native_windows_cursor_uses_allowlist_mode() {
+        assert_eq!(cursor_sandbox_mode(true, false), "disabled");
+        assert_eq!(cursor_sandbox_mode(true, true), "enabled");
+        assert_eq!(cursor_sandbox_mode(false, false), "enabled");
+        assert_eq!(cursor_sandbox_mode(false, true), "enabled");
     }
 
     #[test]

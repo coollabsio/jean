@@ -3,10 +3,11 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { invoke } from '@/lib/transport'
+import { invokeForOptionalServer } from '@/lib/transport'
 import { logger } from '@/lib/logger'
 import { toast } from 'sonner'
 import { hasBackendTransport } from '@/lib/environment'
+import { useOptionalSettingsTargetServerId } from '@/lib/settings-target'
 import type {
   KimiAuthStatus,
   KimiCliStatus,
@@ -31,8 +32,9 @@ const fallbackKimiVersions: KimiReleaseInfo[] = [
 ]
 
 export function useKimiPathDetection(options?: { enabled?: boolean }) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: [...kimiCliQueryKeys.all, 'path-detection'],
+    queryKey: [...kimiCliQueryKeys.all, 'path-detection', serverId ?? 'local'],
     queryFn: async (): Promise<{
       found: boolean
       path: string | null
@@ -48,7 +50,7 @@ export function useKimiPathDetection(options?: { enabled?: boolean }) {
         }
       }
       try {
-        return await invoke('detect_kimi_in_path')
+        return await invokeForOptionalServer(serverId, 'detect_kimi_in_path')
       } catch (error) {
         logger.debug('Kimi path detection failed', { error })
         return {
@@ -65,13 +67,21 @@ export function useKimiPathDetection(options?: { enabled?: boolean }) {
   })
 }
 
-export function useKimiCliStatus(options?: { enabled?: boolean }) {
+export function useKimiCliStatus(options?: {
+  enabled?: boolean
+  serverId?: string
+}) {
+  const settingsServerId = useOptionalSettingsTargetServerId()
+  const serverId = options?.serverId ?? settingsServerId
   return useQuery({
-    queryKey: kimiCliQueryKeys.status(),
+    queryKey: [...kimiCliQueryKeys.status(), serverId ?? 'local'],
     queryFn: async (): Promise<KimiCliStatus> => {
       if (!isTauri()) return { installed: false, version: null, path: null }
       try {
-        return await invoke<KimiCliStatus>('check_kimi_cli_installed')
+        return await invokeForOptionalServer<KimiCliStatus>(
+          serverId,
+          'check_kimi_cli_installed'
+        )
       } catch (error) {
         logger.error('Failed to check Kimi CLI status', { error })
         return { installed: false, version: null, path: null }
@@ -85,8 +95,9 @@ export function useKimiCliStatus(options?: { enabled?: boolean }) {
 }
 
 export function useKimiCliAuth(options?: { enabled?: boolean }) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: kimiCliQueryKeys.auth(),
+    queryKey: [...kimiCliQueryKeys.auth(), serverId ?? 'local'],
     queryFn: async (): Promise<KimiAuthStatus> => {
       if (!isTauri()) {
         return {
@@ -96,7 +107,10 @@ export function useKimiCliAuth(options?: { enabled?: boolean }) {
         }
       }
       try {
-        return await invoke<KimiAuthStatus>('check_kimi_cli_auth')
+        return await invokeForOptionalServer<KimiAuthStatus>(
+          serverId,
+          'check_kimi_cli_auth'
+        )
       } catch (error) {
         logger.error('Failed to check Kimi CLI auth', { error })
         return {
@@ -112,15 +126,23 @@ export function useKimiCliAuth(options?: { enabled?: boolean }) {
   })
 }
 
-export function useAvailableKimiModels(options?: { enabled?: boolean }) {
+export function useAvailableKimiModels(options?: {
+  enabled?: boolean
+  serverId?: string
+}) {
+  const settingsServerId = useOptionalSettingsTargetServerId()
+  const serverId = options?.serverId ?? settingsServerId
   return useQuery({
-    queryKey: kimiCliQueryKeys.models(),
+    queryKey: [...kimiCliQueryKeys.models(), serverId ?? 'local'],
     queryFn: async (): Promise<KimiModelInfo[]> => {
       if (!isTauri()) {
         return [{ id: 'default', label: 'Configured default', isDefault: true }]
       }
       try {
-        const models = await invoke<KimiModelInfo[]>('list_kimi_models')
+        const models = await invokeForOptionalServer<KimiModelInfo[]>(
+          serverId,
+          'list_kimi_models'
+        )
         return models.length
           ? models
           : [{ id: 'default', label: 'Configured default', isDefault: true }]
@@ -136,19 +158,20 @@ export function useAvailableKimiModels(options?: { enabled?: boolean }) {
 }
 
 export function useAvailableKimiVersions(options?: { enabled?: boolean }) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: kimiCliQueryKeys.versions(),
+    queryKey: [...kimiCliQueryKeys.versions(), serverId ?? 'local'],
     queryFn: async (): Promise<KimiReleaseInfo[]> => {
       if (!isTauri()) return fallbackKimiVersions
       try {
-        const versions = await invoke<
+        const versions = await invokeForOptionalServer<
           {
             version: string
             tag_name: string
             published_at: string
             prerelease: boolean
           }[]
-        >('get_available_kimi_versions')
+        >(serverId, 'get_available_kimi_versions')
         return versions.map(v => ({
           version: v.version,
           tagName: v.tag_name,
@@ -169,9 +192,12 @@ export function useAvailableKimiVersions(options?: { enabled?: boolean }) {
 
 export function useInstallKimiCli() {
   const queryClient = useQueryClient()
+  const serverId = useOptionalSettingsTargetServerId()
   return useMutation({
     mutationFn: async (version?: string) => {
-      await invoke('install_kimi_cli', { version: version ?? null })
+      await invokeForOptionalServer(serverId, 'install_kimi_cli', {
+        version: version ?? null,
+      })
     },
     retry: false,
     onSuccess: () => {
@@ -187,11 +213,16 @@ export function useInstallKimiCli() {
   })
 }
 
-function checkManualVersion(version: string) {
-  return invoke<boolean>('check_kimi_cli_version_exists', { version })
+function checkManualVersion(version: string, serverId?: string) {
+  return invokeForOptionalServer<boolean>(
+    serverId,
+    'check_kimi_cli_version_exists',
+    { version }
+  )
 }
 
 export function useKimiCliSetup() {
+  const serverId = useOptionalSettingsTargetServerId()
   const status = useKimiCliStatus()
   const versions = useAvailableKimiVersions()
   const installMutation = useInstallKimiCli()
@@ -206,7 +237,6 @@ export function useKimiCliSetup() {
     })
   }
 
-
   return {
     status: status.data,
     isStatusLoading: status.isLoading,
@@ -219,11 +249,17 @@ export function useKimiCliSetup() {
     installError: installMutation.error,
     progress: null,
     install,
-    checkManualVersion,
+    checkManualVersion: (version: string) =>
+      checkManualVersion(version, serverId),
     refetchStatus: status.refetch,
   }
 }
 
-export async function getKimiInstallCommand(): Promise<KimiInstallCommand> {
-  return invoke<KimiInstallCommand>('get_kimi_install_command')
+export async function getKimiInstallCommand(
+  serverId?: string
+): Promise<KimiInstallCommand> {
+  return invokeForOptionalServer<KimiInstallCommand>(
+    serverId,
+    'get_kimi_install_command'
+  )
 }

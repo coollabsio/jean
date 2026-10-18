@@ -34,6 +34,17 @@ describe('getPathUpdateAction', () => {
 })
 
 describe('resolveCliPathUpdateAction', () => {
+  it('resolves a PATH Grok CLI to grok update', () => {
+    expect(
+      resolveCliPathUpdateAction(
+        'grok',
+        '/usr/local/bin/grok',
+        'npm',
+        '1.0.40'
+      )
+    ).toEqual(['/usr/local/bin/grok', ['update']])
+  })
+
   it('resolves Claude path update via self-update even when homebrew detected', () => {
     expect(
       resolveCliPathUpdateAction(

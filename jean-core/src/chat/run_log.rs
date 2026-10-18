@@ -5,7 +5,7 @@
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use uuid::Uuid;
@@ -15,7 +15,7 @@ use super::storage::{
 };
 use super::types::{
     is_claude_compaction_summary_text, Backend, ChatMessage, ContentBlock, LoadedMessages,
-    MessageRole, RunEntry, RunStatus, ToolCall, UsageData,
+    MessageRole, RunEntry, RunStatus, SessionMetadata, SubagentUsage, ToolCall, UsageData,
 };
 
 // ============================================================================
@@ -350,6 +350,119 @@ impl RunLogWriter {
     }
 }
 
+fn reconcile_completed_running_runs(
+    metadata: &mut SessionMetadata,
+    ended_at: u64,
+    mut has_result: impl FnMut(&str) -> bool,
+    mut extract_provider_session_id: impl FnMut(&str) -> Option<String>,
+) -> bool {
+    let metadata_backend = metadata.backend.clone();
+    let mut reconciled = false;
+    let mut claude_session_id = metadata.claude_session_id.clone();
+    let mut kimi_session_id = metadata.kimi_session_id.clone();
+
+    for run in &mut metadata.runs {
+        if run.status != RunStatus::Running || !has_result(&run.run_id) {
+            continue;
+        }
+
+        run.status = RunStatus::Completed;
+        run.ended_at = Some(ended_at);
+        run.recovered = true;
+        if run.assistant_message_id.is_none() {
+            run.assistant_message_id = Some(Uuid::new_v4().to_string());
+        }
+        if run.backend.as_ref().unwrap_or(&metadata_backend) == &Backend::Kimi {
+            if run.kimi_session_id.is_none() {
+                run.kimi_session_id = extract_provider_session_id(&run.run_id);
+            }
+            if let Some(session_id) = run.kimi_session_id.clone() {
+                kimi_session_id = Some(session_id);
+            }
+        } else {
+            if run.claude_session_id.is_none() {
+                run.claude_session_id = extract_provider_session_id(&run.run_id);
+            }
+            if let Some(session_id) = run.claude_session_id.clone() {
+                claude_session_id = Some(session_id);
+            }
+        }
+        reconciled = true;
+    }
+
+    if reconciled {
+        metadata.claude_session_id = claude_session_id;
+        metadata.kimi_session_id = kimi_session_id;
+        metadata.is_reviewing = false;
+        if metadata.status_override.as_deref() == Some("review") {
+            metadata.status_override = None;
+        }
+    }
+
+    reconciled
+}
+
+/// Mark Running runs without a live process as Crashed. Returns true if any
+/// run changed. Caller must ensure the session is not actively managed.
+fn mark_orphaned_running_runs_crashed(
+    metadata: &mut SessionMetadata,
+    ended_at: u64,
+    mut is_alive: impl FnMut(u32) -> bool,
+) -> bool {
+    let mut changed = false;
+    for run in &mut metadata.runs {
+        if run.status != RunStatus::Running || run.pid.is_some_and(&mut is_alive) {
+            continue;
+        }
+        log::warn!(
+            "Marking orphaned Running run {} as crashed (pid: {:?})",
+            run.run_id,
+            run.pid
+        );
+        run.status = RunStatus::Crashed;
+        run.ended_at.get_or_insert(ended_at);
+        run.recovered = true;
+        if run.assistant_message_id.is_none() {
+            run.assistant_message_id = Some(Uuid::new_v4().to_string());
+        }
+        changed = true;
+    }
+    changed
+}
+
+/// Finish stale Running/Resumable runs for a session that has no managed
+/// process (orphaned by a Jean crash). Runs with a result line become
+/// Completed, the rest Cancelled. Returns true if any run changed.
+pub fn finish_orphaned_runs(app: &tauri::AppHandle, session_id: &str) -> Result<bool, String> {
+    let Some(mut metadata) = load_metadata(app, session_id)? else {
+        return Ok(false);
+    };
+    let now = now_timestamp();
+    let mut changed = reconcile_completed_running_runs(
+        &mut metadata,
+        now,
+        |run_id| jsonl_has_result_line(app, session_id, run_id),
+        |run_id| extract_session_id_from_jsonl(app, session_id, run_id),
+    );
+    for run in &mut metadata.runs {
+        if run.status != RunStatus::Running && run.status != RunStatus::Resumable {
+            continue;
+        }
+        run.status = RunStatus::Cancelled;
+        run.cancelled = true;
+        run.ended_at.get_or_insert(now);
+        run.recovered = true;
+        if run.assistant_message_id.is_none() {
+            run.assistant_message_id = Some(Uuid::new_v4().to_string());
+        }
+        changed = true;
+    }
+    if changed {
+        save_metadata(app, &metadata)?;
+    }
+    Ok(changed)
+}
+
 /// Start a new run - creates JSONL file and updates metadata
 #[allow(clippy::too_many_arguments)]
 pub fn start_run(
@@ -436,6 +549,24 @@ pub fn start_run(
         session_name,
         order,
         |metadata| {
+            // The JSONL journal is the source of truth. If final metadata
+            // persistence was interrupted after a result was written, repair
+            // the stale Running status before applying the duplicate guard.
+            reconcile_completed_running_runs(
+                metadata,
+                now,
+                |run_id| jsonl_has_result_line(app, session_id, run_id),
+                |run_id| extract_session_id_from_jsonl(app, session_id, run_id),
+            );
+
+            // send_chat_message already rejected sessions with a live managed
+            // process, so a Running run whose process is gone was orphaned by a
+            // Jean crash (e.g. disk full) and never recovered. Mark it crashed
+            // instead of blocking every new prompt forever.
+            mark_orphaned_running_runs_crashed(metadata, now, |pid| {
+                super::detached::is_process_alive(pid)
+            });
+
             // Guard: if there's already a Running run, reject to prevent duplicates.
             // This is a safety net — the primary guard is in send_chat_message.
             let has_running = metadata.runs.iter().any(|r| r.status == RunStatus::Running);
@@ -539,6 +670,23 @@ pub fn get_run_log_path(
     Ok(session_dir.join(format!("{run_id}.jsonl")))
 }
 
+/// Drop everything after the `_run_meta` header of a run's output file.
+///
+/// Used before retrying a Claude run in the same output file (e.g. after a
+/// stale `--resume` id), so the retry's tailer does not re-read the failed
+/// attempt's output and history replay does not show it.
+pub fn truncate_run_output_to_header(path: &Path) -> Result<(), String> {
+    let contents =
+        fs::read_to_string(path).map_err(|e| format!("Failed to read run output: {e}"))?;
+    let header: String = contents
+        .lines()
+        .next()
+        .filter(|line| line.contains("\"_run_meta\""))
+        .map(|line| format!("{line}\n"))
+        .unwrap_or_default();
+    fs::write(path, header).map_err(|e| format!("Failed to truncate run output: {e}"))
+}
+
 /// Read all lines from a run's JSONL file
 pub fn read_run_log(
     app: &tauri::AppHandle,
@@ -563,6 +711,8 @@ pub fn read_run_log(
 ///
 /// Content can be a plain string (most tools) OR an array of content blocks
 /// (Task/Agent subagent reports return `[{ "type": "text", "text": "..." }]`).
+/// Image blocks become an `[image]` placeholder so image-only results
+/// (e.g. screenshots) are not empty.
 /// Shared by live streaming and history rebuild so reloaded sessions keep reports.
 pub(crate) fn tool_result_content_to_string(content: &serde_json::Value) -> String {
     if let Some(s) = content.as_str() {
@@ -571,14 +721,13 @@ pub(crate) fn tool_result_content_to_string(content: &serde_json::Value) -> Stri
     if let Some(arr) = content.as_array() {
         return arr
             .iter()
-            .filter_map(|item| {
-                if item.get("type").and_then(|t| t.as_str()) == Some("text") {
-                    item.get("text")
-                        .and_then(|t| t.as_str())
-                        .map(|s| s.to_string())
-                } else {
-                    None
-                }
+            .filter_map(|item| match item.get("type").and_then(|t| t.as_str()) {
+                Some("text") => item
+                    .get("text")
+                    .and_then(|t| t.as_str())
+                    .map(|s| s.to_string()),
+                Some("image") => Some("[image]".to_string()),
+                _ => None,
             })
             .collect::<Vec<_>>()
             .join("\n");
@@ -586,11 +735,111 @@ pub(crate) fn tool_result_content_to_string(content: &serde_json::Value) -> Stri
     String::new()
 }
 
+/// `Some(true)` when a tool_result block is flagged `is_error: true`, else `None`.
+/// Shared by live streaming and history rebuild.
+pub(crate) fn tool_result_is_error(block: &serde_json::Value) -> Option<bool> {
+    (block.get("is_error").and_then(|v| v.as_bool()) == Some(true)).then_some(true)
+}
+
+/// Claude subagent update carried by one stream line, keyed by the parent
+/// Task/Agent tool use id. Live totals come from `system/task_progress` (and
+/// `task_notification` when it has `usage`); final totals and `resolvedModel`
+/// from the `tool_use_result` on the Task/Agent tool_result line. The live
+/// model comes from the subagent's own assistant lines (`parent_tool_use_id`),
+/// which carry no totals (`None`).
+fn claude_subagent_update(
+    msg: &serde_json::Value,
+) -> Option<(String, Option<(u64, u64, u64)>, Option<String>)> {
+    let u64_field = |obj: &serde_json::Value, key: &str| obj.get(key).and_then(|v| v.as_u64());
+    let str_field = |obj: &serde_json::Value, key: &str| {
+        obj.get(key)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    match msg.get("type").and_then(|v| v.as_str())? {
+        "system" => {
+            let subtype = msg.get("subtype").and_then(|v| v.as_str())?;
+            if subtype != "task_progress" && subtype != "task_notification" {
+                return None;
+            }
+            let tool_use_id = msg.get("tool_use_id").and_then(|v| v.as_str())?;
+            let usage = msg.get("usage")?;
+            Some((
+                tool_use_id.to_string(),
+                Some((
+                    u64_field(usage, "total_tokens")?,
+                    u64_field(usage, "tool_uses").unwrap_or(0),
+                    u64_field(usage, "duration_ms").unwrap_or(0),
+                )),
+                None,
+            ))
+        }
+        "assistant" => {
+            let parent = msg.get("parent_tool_use_id").and_then(|v| v.as_str())?;
+            let model = str_field(msg.get("message")?, "model")?;
+            Some((parent.to_string(), None, Some(model)))
+        }
+        "user" => {
+            let result = msg
+                .get("tool_use_result")
+                .or_else(|| msg.get("toolUseResult"))?;
+            let total_tokens = u64_field(result, "totalTokens")?;
+            let tool_use_id = msg
+                .get("message")?
+                .get("content")?
+                .as_array()?
+                .iter()
+                .find(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_result"))?
+                .get("tool_use_id")?
+                .as_str()?;
+            Some((
+                tool_use_id.to_string(),
+                Some((
+                    total_tokens,
+                    u64_field(result, "totalToolUseCount").unwrap_or(0),
+                    u64_field(result, "totalDurationMs").unwrap_or(0),
+                )),
+                str_field(result, "resolvedModel"),
+            ))
+        }
+        _ => None,
+    }
+}
+
+/// Merge one stream line's Claude subagent update into the matching
+/// Task/Agent tool call. Returns the tool use id and new usage when it changed.
+/// Shared by live streaming and history rebuild.
+pub(crate) fn apply_claude_subagent_usage(
+    tool_calls: &mut [ToolCall],
+    msg: &serde_json::Value,
+) -> Option<(String, SubagentUsage)> {
+    let (tool_use_id, totals, model) = claude_subagent_update(msg)?;
+    let tc = tool_calls.iter_mut().find(|t| t.id == tool_use_id)?;
+    let prev = tc.subagent_usage.as_ref();
+    let (total_tokens, tool_uses, duration_ms) = totals.unwrap_or_else(|| {
+        prev.map(|u| (u.total_tokens, u.tool_uses, u.duration_ms))
+            .unwrap_or_default()
+    });
+    let next = SubagentUsage {
+        total_tokens,
+        tool_uses,
+        duration_ms,
+        model: model.or_else(|| prev.and_then(|u| u.model.clone())),
+    };
+    if prev == Some(&next) {
+        return None;
+    }
+    tc.subagent_usage = Some(next.clone());
+    Some((tool_use_id, next))
+}
+
 /// Parse JSONL lines and build a ChatMessage
 /// This replicates the parsing logic from execute_claude_streaming
 pub fn parse_run_to_message(lines: &[String], run: &RunEntry) -> Result<ChatMessage, String> {
     let mut content = String::new();
     let mut tool_calls: Vec<ToolCall> = Vec::new();
+    let mut seen_tool_use_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut content_blocks: Vec<ContentBlock> = Vec::new();
     // Track tool IDs that received error responses (is_error: true).
     // Used to filter out denied blocking tools (AskUserQuestion/ExitPlanMode)
@@ -703,6 +952,8 @@ pub fn parse_run_to_message(lines: &[String], run: &RunEntry) -> Result<ChatMess
 
         let msg_type = msg.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
+        apply_claude_subagent_usage(&mut tool_calls, &msg);
+
         match msg_type {
             "steered_user_message" => {
                 if let Some(text) = msg.get("text").and_then(|v| v.as_str()) {
@@ -712,6 +963,19 @@ pub fn parse_run_to_message(lines: &[String], run: &RunEntry) -> Result<ChatMess
                 }
             }
             "assistant" => {
+                // Synthetic API-error message from Claude CLI (top-level `error`
+                // code, not a subagent). Live streaming reports it as chat:error
+                // and keeps it out of the reply; mirror that here.
+                if msg.get("error").and_then(|v| v.as_str()).is_some()
+                    && current_parent_tool_use_id.is_none()
+                {
+                    continue;
+                }
+
+                // Subagent (Task/Agent) text and thinking are not part of the
+                // main reply (live streaming skips them too). Tool calls stay.
+                let is_subagent = current_parent_tool_use_id.is_some();
+
                 // Text-routing gate (mirrors live-stream logic): if ANY armed
                 // Monitor has initial_turn_finished=true, this assistant turn
                 // is a per-notification wake-up, so skip its text from chat.
@@ -724,7 +988,7 @@ pub fn parse_run_to_message(lines: &[String], run: &RunEntry) -> Result<ChatMess
                                 block.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
                             match block_type {
-                                "text" => {
+                                "text" if !is_subagent => {
                                     if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
                                         // Skip CLI placeholder text emitted when extended
                                         // thinking starts before any real text content
@@ -798,6 +1062,12 @@ pub fn parse_run_to_message(lines: &[String], run: &RunEntry) -> Result<ChatMess
                                         .and_then(|v| v.as_str())
                                         .unwrap_or("")
                                         .to_string();
+                                    // Same tool_use can appear in more than one
+                                    // assistant line; keep the first, like the
+                                    // live parser (`seen_tool_use_ids`).
+                                    if !id.is_empty() && !seen_tool_use_ids.insert(id.clone()) {
+                                        continue;
+                                    }
                                     let name = block
                                         .get("name")
                                         .and_then(|v| v.as_str())
@@ -824,13 +1094,20 @@ pub fn parse_run_to_message(lines: &[String], run: &RunEntry) -> Result<ChatMess
                                         input,
                                         output: None,
                                         parent_tool_use_id: current_parent_tool_use_id.clone(),
+                                        is_error: None,
+                                        subagent_usage: None,
                                     });
 
                                     content_blocks.push(ContentBlock::ToolUse { tool_call_id: id });
                                 }
-                                "thinking" => {
-                                    if let Some(thinking) =
-                                        block.get("thinking").and_then(|v| v.as_str())
+                                "thinking" if !is_subagent => {
+                                    // Newer Claude models emit an empty thinking block
+                                    // before the real one. Live streaming skips it, so
+                                    // the snapshot must too or reopen merges duplicate.
+                                    if let Some(thinking) = block
+                                        .get("thinking")
+                                        .and_then(|v| v.as_str())
+                                        .filter(|t| !t.is_empty())
                                     {
                                         content_blocks.push(ContentBlock::Thinking {
                                             thinking: thinking.to_string(),
@@ -889,6 +1166,7 @@ pub fn parse_run_to_message(lines: &[String], run: &RunEntry) -> Result<ChatMess
                                 {
                                     // Non-Monitor tool: normal output update
                                     tc.output = Some(output);
+                                    tc.is_error = is_error.then_some(true);
                                 }
                             }
                         }
@@ -906,8 +1184,10 @@ pub fn parse_run_to_message(lines: &[String], run: &RunEntry) -> Result<ChatMess
                 if let Some(dur) = msg.get("duration_ms").and_then(|v| v.as_u64()) {
                     last_ms = last_ms.saturating_add(dur);
                 }
-                // Use result if we somehow missed content
-                if content.is_empty() {
+                // Use result if we somehow missed content. Error results
+                // (`is_error: true`) are failures, not reply text.
+                let is_error_result = msg.get("is_error").and_then(|v| v.as_bool()) == Some(true);
+                if content.is_empty() && !is_error_result {
                     if let Some(result) = msg.get("result").and_then(|v| v.as_str()) {
                         content = result.to_string();
                     }
@@ -1089,6 +1369,7 @@ pub fn parse_run_to_message(lines: &[String], run: &RunEntry) -> Result<ChatMess
         execution_mode: None,
         thinking_level: None,
         effort_level: None,
+        custom_profile_name: None,
         recovered: run.recovered,
         usage: run.usage.clone(), // Token usage from metadata
     })
@@ -1111,7 +1392,8 @@ fn should_inject_synthetic_exit_plan(
             .any(|tc| tc.name == "ExitPlanMode" || tc.name == "CodexPlan");
 
     match backend {
-        Backend::Opencode
+        Backend::Claude
+        | Backend::Opencode
         | Backend::Pi
         | Backend::Commandcode
         | Backend::Kimi
@@ -1186,6 +1468,8 @@ fn inject_synthetic_exit_plan(backend: &Backend, run_id: &str, assistant_msg: &m
         input,
         output: None,
         parent_tool_use_id: None,
+        is_error: None,
+        subagent_usage: None,
     });
     assistant_msg.content_blocks.push(ContentBlock::ToolUse {
         tool_call_id: synthetic_id,
@@ -1317,6 +1601,28 @@ fn cancelled_codex_run_has_visible_artifacts(
     )
 }
 
+fn user_message_from_run(session_id: &str, run: &RunEntry) -> ChatMessage {
+    ChatMessage {
+        id: run.user_message_id.clone(),
+        session_id: session_id.to_string(),
+        role: MessageRole::User,
+        content: run.user_message.clone(),
+        timestamp: run.started_at,
+        tool_calls: vec![],
+        content_blocks: vec![],
+        cancelled: false,
+        plan_approved: false,
+        model: run.model.clone(),
+        backend: run.backend.clone(),
+        execution_mode: run.execution_mode.clone(),
+        thinking_level: run.thinking_level.clone(),
+        effort_level: run.effort_level.clone(),
+        custom_profile_name: run.custom_profile_name.clone(),
+        recovered: false,
+        usage: None,
+    }
+}
+
 /// Load a window of messages for a session by parsing JSONL files.
 ///
 /// - `limit`: max number of renderable runs (most recent within window) to parse. `None` = all.
@@ -1371,24 +1677,7 @@ pub fn load_session_messages_window(
         let run = &metadata.runs[*run_index];
 
         // Add user message
-        messages.push(ChatMessage {
-            id: run.user_message_id.clone(),
-            session_id: session_id.to_string(),
-            role: MessageRole::User,
-            content: run.user_message.clone(),
-            timestamp: run.started_at,
-            tool_calls: vec![],
-            content_blocks: vec![],
-            cancelled: false,
-            plan_approved: false,
-            model: run.model.clone(),
-            backend: run.backend.clone(),
-            execution_mode: run.execution_mode.clone(),
-            thinking_level: run.thinking_level.clone(),
-            effort_level: run.effort_level.clone(),
-            recovered: false,
-            usage: None, // User messages don't have token usage
-        });
+        messages.push(user_message_from_run(session_id, run));
 
         // Add assistant message for every run that should render assistant output.
         // Running logs contain partial JSONL snapshots that we can surface on reload.
@@ -1424,10 +1713,11 @@ pub fn load_session_messages_window(
                         execution_mode: run.execution_mode.clone(),
                         thinking_level: run.thinking_level.clone(),
                         effort_level: run.effort_level.clone(),
+                        custom_profile_name: None,
                         recovered: run.recovered,
                         usage: run.usage.clone(),
                     };
-                    if run.status == RunStatus::Running {
+                    if matches!(run.status, RunStatus::Running | RunStatus::Resumable) {
                         placeholder.id = format!("running-{}", run.run_id);
                     }
                     messages.push(placeholder);
@@ -1478,6 +1768,7 @@ pub fn load_session_messages_window(
                         execution_mode: run.execution_mode.clone(),
                         thinking_level: run.thinking_level.clone(),
                         effort_level: run.effort_level.clone(),
+                        custom_profile_name: None,
                         recovered: run.recovered,
                         usage: run.usage.clone(),
                     }
@@ -1504,7 +1795,7 @@ pub fn load_session_messages_window(
             }
             let run_backend = run.backend.as_ref().unwrap_or(&metadata.backend);
             assistant_msg.session_id = session_id.to_string();
-            if run.status == RunStatus::Running {
+            if matches!(run.status, RunStatus::Running | RunStatus::Resumable) {
                 assistant_msg.id = format!("running-{}", run.run_id);
             } else if run.status == RunStatus::Cancelled && run.assistant_message_id.is_none() {
                 assistant_msg.id = format!("cancelled-{}", run.run_id);
@@ -1559,6 +1850,7 @@ pub fn load_session_messages_window(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chat::types::SessionMetadata;
 
     fn sample_run() -> RunEntry {
         RunEntry {
@@ -1588,6 +1880,34 @@ mod tests {
             antigravity_session_id: None,
             checkpoint_id: None,
         }
+    }
+
+    #[test]
+    fn cancelled_grok_result_is_not_a_successful_result() {
+        assert!(jsonl_line_is_cancelled_result(
+            r#"{"type":"result","session_id":"s","cancelled":true}"#
+        ));
+        assert!(jsonl_line_is_cancelled_result(
+            r#"{"type": "result", "cancelled": true}"#
+        ));
+        assert!(!jsonl_line_is_cancelled_result(
+            r#"{"type":"result","session_id":"s"}"#
+        ));
+        assert!(!jsonl_line_is_cancelled_result(
+            r#"{"type":"error","error":"rate limit"}"#
+        ));
+    }
+
+    #[test]
+    fn user_message_exposes_effective_provider_metadata() {
+        let mut run = sample_run();
+        run.custom_profile_name = Some("OpenRouter".to_string());
+
+        let message = user_message_from_run("session-1", &run);
+
+        assert_eq!(message.custom_profile_name.as_deref(), Some("OpenRouter"));
+        assert_eq!(message.backend, Some(Backend::Codex));
+        assert_eq!(message.model.as_deref(), Some("gpt-5.4"));
     }
 
     #[test]
@@ -1627,9 +1947,132 @@ mod tests {
             execution_mode: None,
             thinking_level: None,
             effort_level: None,
+            custom_profile_name: None,
             recovered: false,
             usage: None,
         }
+    }
+
+    #[test]
+    fn completed_jsonl_run_does_not_block_the_next_run() {
+        let mut metadata = SessionMetadata::new(
+            "session-123".to_string(),
+            "worktree-123".to_string(),
+            "Test session".to_string(),
+            0,
+        );
+        let mut run = sample_run();
+        run.status = RunStatus::Running;
+        run.ended_at = None;
+        run.assistant_message_id = None;
+        metadata.runs.push(run);
+        metadata.is_reviewing = true;
+        metadata.status_override = Some("review".to_string());
+
+        let reconciled = reconcile_completed_running_runs(
+            &mut metadata,
+            42,
+            |run_id| run_id == "run-123",
+            |_| None,
+        );
+
+        assert!(reconciled);
+        let run = metadata.find_run("run-123").unwrap();
+        assert_eq!(run.status, RunStatus::Completed);
+        assert_eq!(run.ended_at, Some(42));
+        assert!(run.recovered);
+        assert!(run.assistant_message_id.is_some());
+        assert!(!metadata.is_reviewing);
+        assert!(metadata.status_override.is_none());
+        assert!(!metadata
+            .runs
+            .iter()
+            .any(|run| run.status == RunStatus::Running));
+    }
+
+    #[test]
+    fn running_jsonl_without_result_still_blocks_reconciliation() {
+        let mut metadata = SessionMetadata::new(
+            "session-123".to_string(),
+            "worktree-123".to_string(),
+            "Test session".to_string(),
+            0,
+        );
+        let mut run = sample_run();
+        run.status = RunStatus::Running;
+        run.ended_at = None;
+        metadata.runs.push(run);
+
+        let reconciled = reconcile_completed_running_runs(&mut metadata, 42, |_| false, |_| None);
+
+        assert!(!reconciled);
+        let run = metadata.find_run("run-123").unwrap();
+        assert_eq!(run.status, RunStatus::Running);
+        assert_eq!(run.ended_at, None);
+        assert!(!run.recovered);
+    }
+
+    #[test]
+    fn orphaned_running_run_no_longer_blocks_the_next_run() {
+        let mut metadata = SessionMetadata::new(
+            "session-123".to_string(),
+            "worktree-123".to_string(),
+            "Test session".to_string(),
+            0,
+        );
+        let mut dead = sample_run();
+        dead.status = RunStatus::Running;
+        dead.ended_at = None;
+        dead.assistant_message_id = None;
+        dead.pid = Some(111);
+        let mut no_pid = dead.clone();
+        no_pid.run_id = "run-no-pid".to_string();
+        no_pid.pid = None;
+        let mut alive = dead.clone();
+        alive.run_id = "run-alive".to_string();
+        alive.pid = Some(222);
+        metadata.runs.extend([dead, no_pid, alive]);
+
+        let changed = mark_orphaned_running_runs_crashed(&mut metadata, 42, |pid| pid == 222);
+
+        assert!(changed);
+        for run_id in ["run-123", "run-no-pid"] {
+            let run = metadata.find_run(run_id).unwrap();
+            assert_eq!(run.status, RunStatus::Crashed);
+            assert_eq!(run.ended_at, Some(42));
+            assert!(run.recovered);
+            assert!(run.assistant_message_id.is_some());
+        }
+        // A live process (e.g. detached CLI still working) must keep blocking.
+        assert_eq!(
+            metadata.find_run("run-alive").unwrap().status,
+            RunStatus::Running
+        );
+    }
+
+    #[test]
+    fn reconciled_run_preserves_provider_session_context() {
+        let mut metadata = SessionMetadata::new(
+            "session-123".to_string(),
+            "worktree-123".to_string(),
+            "Test session".to_string(),
+            0,
+        );
+        let mut run = sample_run();
+        run.status = RunStatus::Running;
+        metadata.runs.push(run);
+
+        reconcile_completed_running_runs(
+            &mut metadata,
+            42,
+            |_| true,
+            |_| Some("claude-session-123".to_string()),
+        );
+
+        assert_eq!(
+            metadata.claude_session_id.as_deref(),
+            Some("claude-session-123")
+        );
     }
 
     #[test]
@@ -1644,6 +2087,24 @@ mod tests {
         ));
 
         inject_synthetic_exit_plan(&Backend::Opencode, &run.run_id, &mut msg);
+
+        assert_eq!(msg.tool_calls.len(), 1);
+        assert_eq!(msg.tool_calls[0].name, "ExitPlanMode");
+        assert_eq!(msg.tool_calls[0].id, "synthetic-exit-plan-run-123");
+    }
+
+    #[test]
+    fn injects_synthetic_exit_plan_for_completed_claude_plan_runs() {
+        let run = sample_run();
+        let mut msg = sample_assistant_message();
+
+        assert!(should_inject_synthetic_exit_plan(
+            &Backend::Claude,
+            &run,
+            &msg,
+        ));
+
+        inject_synthetic_exit_plan(&Backend::Claude, &run.run_id, &mut msg);
 
         assert_eq!(msg.tool_calls.len(), 1);
         assert_eq!(msg.tool_calls[0].name, "ExitPlanMode");
@@ -1792,6 +2253,8 @@ Move services between instances without downtime.
             input: serde_json::json!({"plan": "keep existing"}),
             output: None,
             parent_tool_use_id: None,
+            is_error: None,
+            subagent_usage: None,
         });
 
         assert!(!should_inject_synthetic_exit_plan(
@@ -1986,6 +2449,129 @@ Move services between instances without downtime.
     }
 
     #[test]
+    fn parse_run_tracks_subagent_usage_from_progress_and_result() {
+        let run = sample_run();
+        let tool_id = "toolu_agent";
+        let task_use = serde_json::json!({
+            "type": "assistant",
+            "message": {
+                "content": [{
+                    "type": "tool_use",
+                    "id": tool_id,
+                    "name": "Agent",
+                    "input": { "description": "Research", "prompt": "Look it up" }
+                }]
+            }
+        })
+        .to_string();
+        let sub_turn = serde_json::json!({
+            "type": "assistant",
+            "parent_tool_use_id": tool_id,
+            "message": { "model": "claude-sonnet-5-5", "content": [{ "type": "text", "text": "ok" }] }
+        })
+        .to_string();
+        let progress = serde_json::json!({
+            "type": "system",
+            "subtype": "task_progress",
+            "tool_use_id": tool_id,
+            "usage": { "total_tokens": 29316, "tool_uses": 1, "duration_ms": 4832 }
+        })
+        .to_string();
+        let result = serde_json::json!({
+            "type": "user",
+            "message": {
+                "content": [{ "type": "tool_result", "tool_use_id": tool_id, "content": "done" }]
+            },
+            "tool_use_result": {
+                "status": "completed",
+                "totalTokens": 48804,
+                "totalToolUseCount": 8,
+                "totalDurationMs": 61421,
+                "resolvedModel": "claude-opus-5-5"
+            }
+        })
+        .to_string();
+
+        let live = parse_run_to_message(
+            &[task_use.clone(), sub_turn.clone(), progress.clone()],
+            &run,
+        )
+        .unwrap();
+        assert_eq!(
+            live.tool_calls[0].subagent_usage,
+            Some(SubagentUsage {
+                total_tokens: 29316,
+                tool_uses: 1,
+                duration_ms: 4832,
+                model: Some("claude-sonnet-5-5".to_string())
+            })
+        );
+
+        let done = parse_run_to_message(&[task_use, sub_turn, progress, result], &run).unwrap();
+        assert_eq!(
+            done.tool_calls[0].subagent_usage,
+            Some(SubagentUsage {
+                total_tokens: 48804,
+                tool_uses: 8,
+                duration_ms: 61421,
+                model: Some("claude-opus-5-5".to_string())
+            })
+        );
+    }
+
+    #[test]
+    fn parse_run_dedupes_repeated_tool_use_ids() {
+        let run = sample_run();
+        let question = serde_json::json!({
+            "type": "assistant",
+            "message": {
+                "content": [{
+                    "type": "tool_use",
+                    "id": "toolu_question",
+                    "name": "AskUserQuestion",
+                    "input": { "questions": [{ "question": "Which DB?", "options": [] }] }
+                }]
+            }
+        })
+        .to_string();
+        let lines = vec![question.clone(), question];
+
+        let msg = parse_run_to_message(&lines, &run).unwrap();
+
+        assert_eq!(msg.tool_calls.len(), 1);
+        let tool_blocks = msg
+            .content_blocks
+            .iter()
+            .filter(|b| matches!(b, ContentBlock::ToolUse { .. }))
+            .count();
+        assert_eq!(tool_blocks, 1);
+    }
+
+    #[test]
+    fn parse_run_skips_empty_thinking_blocks() {
+        let run = sample_run();
+        let lines = vec![
+            serde_json::json!({
+                "type": "assistant",
+                "message": { "content": [{ "type": "thinking", "thinking": "" }] }
+            })
+            .to_string(),
+            serde_json::json!({
+                "type": "assistant",
+                "message": { "content": [{ "type": "text", "text": "Hello" }] }
+            })
+            .to_string(),
+        ];
+
+        let msg = parse_run_to_message(&lines, &run).unwrap();
+
+        assert!(matches!(
+            msg.content_blocks.as_slice(),
+            [ContentBlock::Text { text }] if text == "Hello"
+        ));
+    }
+
+    #[test]
     fn parse_run_extracts_tool_result_from_string_content() {
         let run = sample_run();
         let tool_id = "toolu_read_file";
@@ -2036,11 +2622,171 @@ Move services between instances without downtime.
                 { "type": "image", "source": {} },
                 { "type": "text", "text": "b" }
             ])),
-            "a\nb"
+            "a\n[image]\nb"
+        );
+        assert_eq!(
+            tool_result_content_to_string(&serde_json::json!([
+                { "type": "image", "source": {} }
+            ])),
+            "[image]"
         );
         assert_eq!(
             tool_result_content_to_string(&serde_json::json!({ "unexpected": true })),
             ""
+        );
+    }
+
+    #[test]
+    fn tool_result_is_error_only_flags_true() {
+        assert_eq!(
+            tool_result_is_error(&serde_json::json!({ "is_error": true })),
+            Some(true)
+        );
+        assert_eq!(
+            tool_result_is_error(&serde_json::json!({ "is_error": false })),
+            None
+        );
+        assert_eq!(tool_result_is_error(&serde_json::json!({})), None);
+    }
+
+    #[test]
+    fn parse_run_skips_subagent_text_and_thinking_but_keeps_its_tools() {
+        let run = sample_run();
+        let lines = vec![
+            serde_json::json!({
+                "type": "assistant",
+                "parent_tool_use_id": null,
+                "message": { "content": [
+                    { "type": "text", "text": "Main reply" },
+                    { "type": "tool_use", "id": "toolu_task", "name": "Task", "input": {} }
+                ]}
+            })
+            .to_string(),
+            serde_json::json!({
+                "type": "assistant",
+                "parent_tool_use_id": "toolu_task",
+                "message": { "content": [
+                    { "type": "thinking", "thinking": "subagent thinking" },
+                    { "type": "text", "text": "subagent text" },
+                    { "type": "tool_use", "id": "toolu_sub_read", "name": "Read", "input": {} }
+                ]}
+            })
+            .to_string(),
+        ];
+
+        let msg = parse_run_to_message(&lines, &run).unwrap();
+
+        assert_eq!(msg.content, "Main reply");
+        assert!(!msg
+            .content_blocks
+            .iter()
+            .any(|b| matches!(b, ContentBlock::Thinking { .. })));
+        assert_eq!(msg.tool_calls.len(), 2);
+        assert_eq!(
+            msg.tool_calls[1].parent_tool_use_id.as_deref(),
+            Some("toolu_task")
+        );
+    }
+
+    #[test]
+    fn parse_run_marks_errored_tool_results() {
+        let run = sample_run();
+        let lines = vec![
+            serde_json::json!({
+                "type": "assistant",
+                "message": { "content": [
+                    { "type": "tool_use", "id": "toolu_ok", "name": "Bash", "input": {} },
+                    { "type": "tool_use", "id": "toolu_bad", "name": "Bash", "input": {} }
+                ]}
+            })
+            .to_string(),
+            serde_json::json!({
+                "type": "user",
+                "message": { "content": [
+                    { "type": "tool_result", "tool_use_id": "toolu_ok", "content": "fine" },
+                    { "type": "tool_result", "tool_use_id": "toolu_bad", "is_error": true, "content": "exit 1" }
+                ]}
+            })
+            .to_string(),
+        ];
+
+        let msg = parse_run_to_message(&lines, &run).unwrap();
+
+        assert_eq!(msg.tool_calls[0].is_error, None);
+        assert_eq!(msg.tool_calls[1].is_error, Some(true));
+        assert_eq!(msg.tool_calls[1].output.as_deref(), Some("exit 1"));
+    }
+
+    #[test]
+    fn parse_run_does_not_use_error_results_or_api_errors_as_content() {
+        let run = sample_run();
+        let error_result = vec![serde_json::json!({
+            "type": "result",
+            "subtype": "error_max_turns",
+            "is_error": true,
+            "result": "Reached max turns"
+        })
+        .to_string()];
+        assert_eq!(
+            parse_run_to_message(&error_result, &run).unwrap().content,
+            ""
+        );
+
+        let api_error_after_partial = vec![
+            serde_json::json!({
+                "type": "assistant",
+                "message": { "content": [{ "type": "text", "text": "Partial" }] }
+            })
+            .to_string(),
+            serde_json::json!({
+                "type": "assistant",
+                "error": "overloaded_error",
+                "parent_tool_use_id": null,
+                "message": { "content": [{ "type": "text", "text": "API Error: Overloaded" }] }
+            })
+            .to_string(),
+            serde_json::json!({
+                "type": "result",
+                "subtype": "success",
+                "is_error": true,
+                "result": "API Error: Overloaded"
+            })
+            .to_string(),
+        ];
+        assert_eq!(
+            parse_run_to_message(&api_error_after_partial, &run)
+                .unwrap()
+                .content,
+            "Partial"
+        );
+
+        let success = vec![serde_json::json!({
+            "type": "result",
+            "subtype": "success",
+            "is_error": false,
+            "result": "Done"
+        })
+        .to_string()];
+        assert_eq!(
+            parse_run_to_message(&success, &run).unwrap().content,
+            "Done"
+        );
+    }
+
+    #[test]
+    fn truncate_run_output_keeps_only_meta_header() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(
+            file.path(),
+            "{\"_run_meta\":true,\"run_id\":\"r1\"}\nNo conversation found with session ID: abc\n",
+        )
+        .unwrap();
+
+        truncate_run_output_to_header(file.path()).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(file.path()).unwrap(),
+            "{\"_run_meta\":true,\"run_id\":\"r1\"}\n"
         );
     }
 
@@ -2443,9 +3189,15 @@ pub fn recover_incomplete_runs(app: &tauri::AppHandle) -> Result<Vec<RecoveredRu
         if actively_managed.contains(&session_id) {
             continue;
         }
-        let mut metadata = match load_metadata(app, &session_id)? {
-            Some(m) => m,
-            None => continue,
+        // One unreadable/unwritable session (corrupt file, full disk) must not
+        // block recovery of every other session.
+        let mut metadata = match load_metadata(app, &session_id) {
+            Ok(Some(m)) => m,
+            Ok(None) => continue,
+            Err(e) => {
+                log::warn!("Skipping run recovery for session {session_id}: {e}");
+                continue;
+            }
         };
         let metadata_backend = metadata.backend.clone();
 
@@ -2478,8 +3230,13 @@ pub fn recover_incomplete_runs(app: &tauri::AppHandle) -> Result<Vec<RecoveredRu
                         run.pid
                     );
                 } else {
-                    // Process is dead - check if it completed successfully
+                    // Process is dead - check if it completed successfully.
+                    // A Grok cancel marker is `type:result` plus `cancelled:true`.
+                    // That is not a successful completion: keep the partial reply
+                    // and mark the run cancelled instead of "content was not captured".
                     let completed = jsonl_has_result_line(app, &session_id, &run.run_id);
+                    let cancelled_result = !completed
+                        && jsonl_has_cancelled_result_line(app, &session_id, &run.run_id);
 
                     if completed {
                         run.status = RunStatus::Completed;
@@ -2526,6 +3283,9 @@ pub fn recover_incomplete_runs(app: &tauri::AppHandle) -> Result<Vec<RecoveredRu
 
                         modified = true;
                         continue;
+                    } else if cancelled_result {
+                        run.status = RunStatus::Cancelled;
+                        run.cancelled = true;
                     } else {
                         run.status = RunStatus::Crashed;
                     }
@@ -2560,7 +3320,10 @@ pub fn recover_incomplete_runs(app: &tauri::AppHandle) -> Result<Vec<RecoveredRu
         }
 
         if modified {
-            save_metadata(app, &metadata)?;
+            if let Err(e) = save_metadata(app, &metadata) {
+                log::warn!("Failed to save recovered runs for session {session_id}: {e}");
+                recovered.retain(|r| r.session_id != session_id);
+            }
         }
     }
 
@@ -2598,10 +3361,14 @@ pub fn jsonl_has_result_line(app: &tauri::AppHandle, session_id: &str, run_id: &
 
     // Prefer error over result: legacy Grok ACP hosts wrote both, and salvaging
     // those as completed produced empty "content was not captured" runs (#580).
+    // A cancelled result is not success either — see jsonl_line_is_cancelled_result.
     let mut has_result = false;
     let mut has_error = false;
     for line in reader.lines() {
         if let Ok(line) = line {
+            if jsonl_line_is_cancelled_result(&line) {
+                continue;
+            }
             // Compact JSON from serde_json::json! uses no space after `:`.
             if line.contains("\"type\":\"error\"") {
                 has_error = true;
@@ -2612,6 +3379,53 @@ pub fn jsonl_has_result_line(app: &tauri::AppHandle, session_id: &str, run_id: &
         }
     }
     has_result && !has_error
+}
+
+/// True when the run log ends in a Grok/Kimi cancel marker rather than success.
+pub fn jsonl_has_cancelled_result_line(
+    app: &tauri::AppHandle,
+    session_id: &str,
+    run_id: &str,
+) -> bool {
+    let session_dir = match get_session_dir(app, session_id) {
+        Ok(d) => d,
+        Err(_) => return false,
+    };
+    let jsonl_path = session_dir.join(format!("{run_id}.jsonl"));
+    let file = match File::open(&jsonl_path) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+    let file_len = file.metadata().map(|m| m.len()).unwrap_or(0);
+    let reader = if file_len > 8192 {
+        use std::io::{Seek, SeekFrom};
+        let mut f = file;
+        let _ = f.seek(SeekFrom::End(-8192));
+        BufReader::new(f)
+    } else {
+        BufReader::new(file)
+    };
+    let mut saw_cancelled = false;
+    let mut saw_success = false;
+    for line in reader.lines().flatten() {
+        if jsonl_line_is_cancelled_result(&line) {
+            saw_cancelled = true;
+        } else if line.contains("\"type\":\"result\"") {
+            saw_success = true;
+        }
+    }
+    saw_cancelled && !saw_success
+}
+
+/// Cancel markers are compact (`"cancelled":true`) or pretty (`"cancelled": true`).
+pub(crate) fn jsonl_line_is_cancelled_result(line: &str) -> bool {
+    if !line.contains("\"type\":\"result\"") && !line.contains("\"type\": \"result\"") {
+        return false;
+    }
+    line.contains("\"cancelled\":true")
+        || line.contains("\"cancelled\": true")
+        || line.contains("\"canceled\":true")
+        || line.contains("\"canceled\": true")
 }
 
 /// Extract the Claude session ID from a run's JSONL file.

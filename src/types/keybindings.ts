@@ -25,7 +25,6 @@ export type KeybindingAction =
   | 'approve_plan_clear_context_build'
   | 'approve_plan_worktree_build'
   | 'approve_plan_worktree_yolo'
-  | 'open_plan'
   | 'restore_last_archived'
   | 'focus_canvas_search'
   | 'toggle_terminal'
@@ -42,9 +41,8 @@ export type KeybindingAction =
   | 'scroll_chat_down_medium'
   | 'scroll_chat_up_small'
   | 'scroll_chat_down_small'
-  | 'open_github_dashboard'
   | 'open_quick_menu'
-  | 'open_usage_dropdown'
+  | 'open_command_palette'
   | 'search_chat'
   | 'toggle_zen_mode'
   | 'clear_session_context'
@@ -78,8 +76,8 @@ export const DEFAULT_KEYBINDINGS: KeybindingsMap = {
   open_magic_modal: 'mod+m',
   new_session: 'mod+t',
   open_new_session_modal: 'mod+shift+t',
-  next_session: 'mod+alt+arrowright',
-  previous_session: 'mod+alt+arrowleft',
+  next_session: 'mod+arrowright',
+  previous_session: 'mod+arrowleft',
   close_session_or_worktree: 'mod+w',
   new_worktree: 'mod+n',
   cycle_execution_mode: 'shift+tab',
@@ -89,7 +87,6 @@ export const DEFAULT_KEYBINDINGS: KeybindingsMap = {
   approve_plan_clear_context_build: 'mod+shift+enter',
   approve_plan_worktree_build: 'mod+alt+enter',
   approve_plan_worktree_yolo: 'mod+alt+y',
-  open_plan: 'p',
   restore_last_archived: 'mod+shift+alt+t',
   focus_canvas_search: 'slash',
   toggle_terminal: 'mod+backquote',
@@ -106,9 +103,8 @@ export const DEFAULT_KEYBINDINGS: KeybindingsMap = {
   scroll_chat_down_medium: 'mod+alt+arrowdown',
   scroll_chat_up_small: 'arrowup',
   scroll_chat_down_small: 'arrowdown',
-  open_github_dashboard: 'mod+shift+d',
   open_quick_menu: 'mod+period',
-  open_usage_dropdown: 'mod+u',
+  open_command_palette: 'mod+k',
   search_chat: 'mod+f',
   toggle_zen_mode: 'mod+shift+z',
   clear_session_context: 'mod+shift+k',
@@ -197,14 +193,14 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
     action: 'next_session',
     label: 'Next session',
     description: 'Switch to the next chat session',
-    default_shortcut: 'mod+alt+arrowright',
+    default_shortcut: 'mod+arrowright',
     category: 'chat',
   },
   {
     action: 'previous_session',
     label: 'Previous session',
     description: 'Switch to the previous chat session',
-    default_shortcut: 'mod+alt+arrowleft',
+    default_shortcut: 'mod+arrowleft',
     category: 'chat',
   },
   {
@@ -218,7 +214,7 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
   {
     action: 'cycle_execution_mode',
     label: 'Cycle execution mode',
-    description: 'Cycle through Plan, Build, and Yolo modes',
+    description: 'Cycle through Plan, Build, and Full access modes',
     default_shortcut: 'shift+tab',
     category: 'chat',
   },
@@ -231,47 +227,42 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
   },
   {
     action: 'approve_plan_yolo',
-    label: 'Approve plan (YOLO)',
-    description: 'Approve the current plan with YOLO mode',
+    label: 'Approve plan (Full access)',
+    description: 'Approve the current plan with Full access',
     default_shortcut: 'mod+y',
     category: 'chat',
   },
   {
     action: 'approve_plan_clear_context',
-    label: 'Clear context and yolo',
-    description: 'Approve plan, clear context, and start a new yolo session',
+    label: 'Clear context with Full access',
+    description:
+      'Approve plan, clear context, and start a new session with Full access',
     default_shortcut: 'mod+shift+y',
     category: 'chat',
   },
   {
     action: 'approve_plan_clear_context_build',
-    label: 'Clear context and build',
-    description: 'Approve plan, clear context, and start a new build session',
+    label: 'Clear context with selected permissions',
+    description:
+      'Approve plan, clear context, and start a new session with selected permissions',
     default_shortcut: 'mod+shift+enter',
     category: 'chat',
   },
   {
     action: 'approve_plan_worktree_build',
-    label: 'Worktree build',
-    description: 'Approve plan and execute in a new worktree (build mode)',
+    label: 'Worktree approval',
+    description:
+      'Approve plan and execute in a new worktree (selected permissions)',
     default_shortcut: 'mod+alt+enter',
     category: 'chat',
   },
   {
     action: 'approve_plan_worktree_yolo',
-    label: 'Worktree yolo',
-    description: 'Approve plan and execute in a new worktree (yolo mode)',
+    label: 'Worktree Full access',
+    description: 'Approve plan and execute in a new worktree (Full access)',
     default_shortcut: 'mod+alt+y',
     category: 'chat',
   },
-  {
-    action: 'open_plan',
-    label: 'Open plan',
-    description: 'Open the plan dialog for the selected session',
-    default_shortcut: 'p',
-    category: 'chat',
-  },
-
   {
     action: 'new_worktree',
     label: 'New worktree',
@@ -407,14 +398,6 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
     category: 'chat',
   },
   {
-    action: 'open_github_dashboard',
-    label: 'GitHub Dashboard',
-    description:
-      'Open the GitHub Dashboard (issues, PRs, security across all projects)',
-    default_shortcut: 'mod+shift+d',
-    category: 'navigation',
-  },
-  {
     action: 'open_quick_menu',
     label: 'Quick menu',
     description: 'Open the floating quick menu',
@@ -422,10 +405,10 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
     category: 'navigation',
   },
   {
-    action: 'open_usage_dropdown',
-    label: 'Usage dropdown',
-    description: 'Open the floating usage dropdown',
-    default_shortcut: 'mod+u',
+    action: 'open_command_palette',
+    label: 'Command palette',
+    description: 'Open or close the command palette',
+    default_shortcut: 'mod+k',
     category: 'navigation',
   },
   {
@@ -444,7 +427,8 @@ export function formatShortcutDisplay(
   if (!shortcut) return ''
 
   // On macOS web, Cmd shortcuts are intercepted by the browser.
-  // Ctrl+key already works (both map to "mod"), so show ⌃ instead of ⌘.
+  // Ctrl+key already works (both map to "mod"). Use a text label because the
+  // Control glyph is not available in all browser fonts.
   const isWeb =
     typeof window !== 'undefined' && !('__TAURI_INTERNALS__' in window)
   const useMacCtrl = isClientMacOS && isWeb
@@ -454,7 +438,7 @@ export function formatShortcutDisplay(
     .map(part => {
       switch (part) {
         case 'mod':
-          return useMacCtrl ? '⌃' : isClientMacOS ? '⌘' : 'Ctrl'
+          return useMacCtrl ? 'Ctrl' : isClientMacOS ? '⌘' : 'Ctrl'
         case 'shift':
           return isClientMacOS ? '⇧' : 'Shift'
         case 'alt':

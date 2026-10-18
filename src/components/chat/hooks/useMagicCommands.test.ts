@@ -11,8 +11,12 @@ function renderUseMagicCommands(
     handleLoadContext: vi.fn(),
     handleLinkedProjects: vi.fn(),
     handleForkSession: vi.fn(),
+    handleCheckGitHubIssues: vi.fn(),
+    handlePreReleaseReview: vi.fn(),
     handleCommit: vi.fn(),
     handleCommitAndPush: vi.fn(),
+    handleCommitInSession: vi.fn(),
+    handleCommentAndCloseIssue: vi.fn(),
     handlePull: vi.fn(),
     handlePush: vi.fn(),
     handleRevertLastCommit: vi.fn(),
@@ -46,6 +50,54 @@ describe('useMagicCommands review comments batch', () => {
     )
 
     expect(handlers.handleForkSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('dispatches the check GitHub issues magic command', () => {
+    const handlers = renderUseMagicCommands()
+
+    window.dispatchEvent(
+      new CustomEvent('magic-command', {
+        detail: { command: 'check-github-issues' },
+      })
+    )
+
+    expect(handlers.handleCheckGitHubIssues).toHaveBeenCalledTimes(1)
+  })
+
+  it('dispatches the pre-release review magic command', () => {
+    const handlers = renderUseMagicCommands()
+
+    window.dispatchEvent(
+      new CustomEvent('magic-command', {
+        detail: { command: 'pre-release-review' },
+      })
+    )
+
+    expect(handlers.handlePreReleaseReview).toHaveBeenCalledTimes(1)
+  })
+
+  it('dispatches the commit in session command to the current chat', () => {
+    const handlers = renderUseMagicCommands()
+
+    window.dispatchEvent(
+      new CustomEvent('magic-command', {
+        detail: { command: 'commit-in-session' },
+      })
+    )
+
+    expect(handlers.handleCommitInSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('dispatches the comment and close issue command to the current chat', () => {
+    const handlers = renderUseMagicCommands()
+
+    window.dispatchEvent(
+      new CustomEvent('magic-command', {
+        detail: { command: 'comment-and-close-issue' },
+      })
+    )
+
+    expect(handlers.handleCommentAndCloseIssue).toHaveBeenCalledTimes(1)
   })
 
   it('passes separate review comment prompts and plan mode from event detail', () => {

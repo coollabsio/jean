@@ -26,9 +26,10 @@ import type {
   AttachedSavedContext,
 } from '@/types/github'
 import type { LoadedLinearIssueContext } from '@/types/linear'
+import type { SentryIssueContext } from '@/types/sentry'
 
 export interface ViewingContext {
-  type: 'issue' | 'pr' | 'saved' | 'security' | 'advisory' | 'linear'
+  type: 'issue' | 'pr' | 'saved' | 'security' | 'advisory' | 'linear' | 'sentry'
   number?: number
   slug?: string
   ghsaId?: string
@@ -80,9 +81,11 @@ export interface ChatToolbarProps {
   loadedSecurityContexts: LoadedSecurityAlertContext[]
   loadedAdvisoryContexts: LoadedAdvisoryContext[]
   loadedLinearContexts: LoadedLinearIssueContext[]
+  loadedSentryContexts: SentryIssueContext[]
   attachedSavedContexts: AttachedSavedContext[]
 
-  onOpenMagicModal: () => void
+  /** Undefined hides magic commands (server sessions) */
+  onOpenMagicModal?: () => void
   onSaveContext: () => void
   onLoadContext: () => void
   onCommit: () => void
@@ -110,6 +113,8 @@ export interface ChatToolbarProps {
   /** When true while sending, the secondary submit button steers instead of queues. */
   willSteer?: boolean
   steerWithModifier?: boolean
+  canSteer?: boolean
+  onSteer?: () => void
   queuedMessageCount?: number
 
   availableMcpServers: McpServerInfo[]

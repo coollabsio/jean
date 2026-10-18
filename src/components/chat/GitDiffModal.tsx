@@ -26,7 +26,7 @@ import {
   ChevronsUpDown,
   PanelLeft,
   Check,
-} from 'lucide-react'
+} from '@/components/icons/reicon'
 import {
   parsePatchFiles,
   type SelectedLineRange,
@@ -39,7 +39,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
+import { Button, edgePrimary, raised } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 import { ModalCloseButton } from '@/components/ui/modal-close-button'
 import {
@@ -170,7 +170,7 @@ const CommentInputBar = memo(function CommentInputBar({
         type="button"
         onClick={handleSubmit}
         disabled={!inputValue.trim()}
-        className="px-2 py-1 bg-black text-white dark:bg-yellow-500 dark:text-black hover:bg-black/80 dark:hover:bg-yellow-400 rounded text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+        className="px-2 py-1 bg-primary text-primary-foreground hover:bg-primary/80 rounded text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
       >
         Add
       </button>
@@ -318,11 +318,15 @@ export function GitDiffModal({
     return theme
   }, [theme])
 
+  // Latest loadDiff call owns diff/error/loading state; older responses are dropped
+  const loadDiffRequestIdRef = useRef(0)
   const loadDiff = useCallback(
     async (request: DiffRequest, isRefresh = false) => {
       if (request.type !== 'uncommitted' && request.type !== 'branch') {
         return
       }
+      const requestId = ++loadDiffRequestIdRef.current
+      const isCurrent = () => requestId === loadDiffRequestIdRef.current
       setIsLoading(true)
       setError(null)
       // Only clear diff on initial load, not on refresh
@@ -337,6 +341,7 @@ export function GitDiffModal({
           request.baseBranch,
           request.baseRemote
         )
+        if (!isCurrent()) return
         setDiff(result)
         // Cache stats with the load so tab switches don't need a chained effect
         const stats: DiffStats = {
@@ -344,11 +349,13 @@ export function GitDiffModal({
           removed: result.total_deletions,
         }
         if (request.type === 'branch') setCachedBranchStats(stats)
-        else if (request.type === 'uncommitted') setCachedUncommittedStats(stats)
+        else if (request.type === 'uncommitted')
+          setCachedUncommittedStats(stats)
       } catch (err) {
+        if (!isCurrent()) return
         setError(err instanceof Error ? err.message : String(err))
       } finally {
-        setIsLoading(false)
+        if (isCurrent()) setIsLoading(false)
       }
     },
     []
@@ -1074,7 +1081,7 @@ export function GitDiffModal({
           <DialogTitle className="flex shrink-0 flex-col gap-2 px-3 pt-3 sm:flex-row sm:items-center sm:px-0 sm:pt-0">
             <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto">
               {showSwitcher ? (
-                <div className="flex w-full min-w-0 items-center bg-muted rounded-lg p-1 sm:w-auto sm:shrink">
+                <div className="flex min-w-0 flex-1 items-center bg-muted rounded-lg p-1 sm:w-auto sm:shrink">
                   <button
                     type="button"
                     onClick={() => handleSwitchDiffType('uncommitted')}
@@ -1090,8 +1097,10 @@ export function GitDiffModal({
                     <Kbd className="hidden h-4 min-w-4 px-1 text-[10px] opacity-70 sm:inline-flex">
                       {DIFF_TYPE_SHORTCUTS.uncommitted}
                     </Kbd>
-                    <span className="text-green-500">+{uncommittedAdded}</span>
-                    <span className="text-red-500">-{uncommittedRemoved}</span>
+                    <span className="text-success">+{uncommittedAdded}</span>
+                    <span className="text-destructive">
+                      -{uncommittedRemoved}
+                    </span>
                   </button>
                   <button
                     type="button"
@@ -1108,8 +1117,8 @@ export function GitDiffModal({
                     <Kbd className="hidden h-4 min-w-4 px-1 text-[10px] opacity-70 sm:inline-flex">
                       {DIFF_TYPE_SHORTCUTS.branch}
                     </Kbd>
-                    <span className="text-green-500">+{branchAdded}</span>
-                    <span className="text-red-500">-{branchRemoved}</span>
+                    <span className="text-success">+{branchAdded}</span>
+                    <span className="text-destructive">-{branchRemoved}</span>
                   </button>
                   <button
                     type="button"
@@ -1150,6 +1159,43 @@ export function GitDiffModal({
                   <span className="truncate">{title}</span>
                 </>
               )}
+              {isMobile && (
+                <div
+                  className="ml-auto flex shrink-0 items-center gap-1"
+                  data-testid="mobile-diff-header-actions"
+                >
+                  {activeDiffType !== 'commits' &&
+                    activeDiffType !== 'checkpoints' && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 shrink-0 p-0"
+                            onClick={() => {
+                              if (!diffRequest) return
+                              loadDiff(
+                                { ...diffRequest, type: activeDiffType },
+                                true
+                              )
+                            }}
+                            disabled={isLoading}
+                            aria-label="Refresh diff"
+                          >
+                            <RefreshCw
+                              className={cn(
+                                'h-4 w-4',
+                                isLoading && 'animate-spin'
+                              )}
+                            />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Refresh diff</TooltipContent>
+                      </Tooltip>
+                    )}
+                  <ModalCloseButton onClick={onClose} />
+                </div>
+              )}
             </div>
 
             <div className="flex w-full min-w-0 flex-wrap items-center justify-between gap-1.5 pb-0.5 sm:ml-auto sm:w-auto sm:flex-nowrap sm:justify-start sm:overflow-visible sm:pb-0">
@@ -1158,45 +1204,47 @@ export function GitDiffModal({
                   {selectedFileCount} selected
                 </span>
               )}
-              {/* View mode toggle */}
-              <div className="flex min-w-0 flex-1 items-center bg-muted rounded-lg p-1 sm:flex-none sm:shrink-0">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={() => setDiffStyle('split')}
-                      className={cn(
-                        'flex flex-1 items-center justify-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium transition-colors sm:flex-none sm:shrink-0 sm:px-3',
-                        diffStyle === 'split'
-                          ? 'bg-background shadow-sm text-foreground'
-                          : 'text-muted-foreground hover:text-foreground'
-                      )}
-                    >
-                      <Columns2 className="h-3.5 w-3.5 shrink-0" />
-                      <span className="hidden sm:inline">Split</span>
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>Side-by-side view</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={() => setDiffStyle('unified')}
-                      className={cn(
-                        'flex flex-1 items-center justify-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium transition-colors sm:flex-none sm:shrink-0 sm:px-3',
-                        diffStyle === 'unified'
-                          ? 'bg-background shadow-sm text-foreground'
-                          : 'text-muted-foreground hover:text-foreground'
-                      )}
-                    >
-                      <Rows3 className="h-3.5 w-3.5 shrink-0" />
-                      <span className="hidden sm:inline">Stacked</span>
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>Unified view</TooltipContent>
-                </Tooltip>
-              </div>
+              {/* Side-by-side diffs are not usable at phone widths. */}
+              {!isMobile && (
+                <div className="flex min-w-0 flex-1 items-center bg-muted rounded-lg p-1 sm:flex-none sm:shrink-0">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => setDiffStyle('split')}
+                        className={cn(
+                          'flex flex-1 items-center justify-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium transition-colors sm:flex-none sm:shrink-0 sm:px-3',
+                          diffStyle === 'split'
+                            ? 'bg-background shadow-sm text-foreground'
+                            : 'text-muted-foreground hover:text-foreground'
+                        )}
+                      >
+                        <Columns2 className="h-3.5 w-3.5 shrink-0" />
+                        <span className="hidden sm:inline">Split</span>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>Side-by-side view</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => setDiffStyle('unified')}
+                        className={cn(
+                          'flex flex-1 items-center justify-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium transition-colors sm:flex-none sm:shrink-0 sm:px-3',
+                          diffStyle === 'unified'
+                            ? 'bg-background shadow-sm text-foreground'
+                            : 'text-muted-foreground hover:text-foreground'
+                        )}
+                      >
+                        <Rows3 className="h-3.5 w-3.5 shrink-0" />
+                        <span className="hidden sm:inline">Stacked</span>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>Unified view</TooltipContent>
+                  </Tooltip>
+                </div>
+              )}
               {/* Add selected comments to a new prompt session */}
               {comments.length > 0 && onAddToPrompt && (
                 <div className="flex shrink-0 items-center gap-1">
@@ -1219,7 +1267,11 @@ export function GitDiffModal({
                         type="button"
                         disabled={isCommitting}
                         onClick={handleCommitFromDiff}
-                        className="flex h-7 flex-1 items-center justify-center gap-1.5 px-2.5 bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 rounded-md text-xs font-medium transition-colors sm:flex-none sm:shrink-0 sm:px-3"
+                        className={cn(
+                          'flex h-7 flex-1 items-center justify-center gap-1.5 px-2.5 bg-primary text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50 rounded-md text-xs font-medium sm:flex-none sm:shrink-0 sm:px-3',
+                          raised,
+                          edgePrimary
+                        )}
                       >
                         {isCommitting ? (
                           <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
@@ -1245,50 +1297,58 @@ export function GitDiffModal({
                   </Tooltip>
                 )}
               {/* Mobile sidebar toggle */}
-              {isMobile && hasFiles && activeDiffType !== 'commits' && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 shrink-0 p-0"
-                      onClick={() => setShowMobileSidebar(v => !v)}
-                    >
-                      <PanelLeft className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Toggle file list</TooltipContent>
-                </Tooltip>
+              {isMobile &&
+                hasFiles &&
+                activeDiffType !== 'commits' &&
+                activeDiffType !== 'checkpoints' && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 shrink-0 p-0"
+                        onClick={() => setShowMobileSidebar(v => !v)}
+                      >
+                        <PanelLeft className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Toggle file list</TooltipContent>
+                  </Tooltip>
+                )}
+              {!isMobile && (
+                <>
+                  {activeDiffType !== 'commits' &&
+                    activeDiffType !== 'checkpoints' && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 shrink-0 p-0"
+                            onClick={() => {
+                              if (!diffRequest) return
+                              loadDiff(
+                                { ...diffRequest, type: activeDiffType },
+                                true
+                              )
+                            }}
+                            disabled={isLoading}
+                            aria-label="Refresh diff"
+                          >
+                            <RefreshCw
+                              className={cn(
+                                'h-4 w-4',
+                                isLoading && 'animate-spin'
+                              )}
+                            />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Refresh diff</TooltipContent>
+                      </Tooltip>
+                    )}
+                  <ModalCloseButton onClick={onClose} />
+                </>
               )}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 shrink-0 p-0"
-                    onClick={() => {
-                      if (
-                        !diffRequest ||
-                        activeDiffType === 'commits' ||
-                        activeDiffType === 'checkpoints'
-                      )
-                        return
-                      loadDiff({ ...diffRequest, type: activeDiffType }, true)
-                    }}
-                    disabled={
-                      isLoading ||
-                      activeDiffType === 'commits' ||
-                      activeDiffType === 'checkpoints'
-                    }
-                  >
-                    <RefreshCw
-                      className={cn('h-4 w-4', isLoading && 'animate-spin')}
-                    />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Refresh diff</TooltipContent>
-              </Tooltip>
-              <ModalCloseButton onClick={onClose} />
             </div>
           </DialogTitle>
           <DialogDescription className="sr-only">
@@ -1299,6 +1359,7 @@ export function GitDiffModal({
           {activeDiffType === 'commits' && diffRequest && (
             <CommitsTabView
               worktreePath={diffRequest.worktreePath}
+              worktreeId={diffRequest.worktreeId}
               baseBranch={diffRequest.baseBranch}
               diffStyle={diffStyle}
               onAddToPrompt={onAddToPrompt}
@@ -1307,15 +1368,14 @@ export function GitDiffModal({
           )}
 
           {/* AI Checkpoints tab */}
-          {activeDiffType === 'checkpoints' &&
-            diffRequest?.worktreeId && (
-              <CheckpointsTabView
-                worktreeId={diffRequest.worktreeId}
-                worktreePath={diffRequest.worktreePath}
-                diffStyle={diffStyle}
-                initialCheckpointId={diffRequest.checkpointId}
-              />
-            )}
+          {activeDiffType === 'checkpoints' && diffRequest?.worktreeId && (
+            <CheckpointsTabView
+              worktreeId={diffRequest.worktreeId}
+              worktreePath={diffRequest.worktreePath}
+              diffStyle={diffStyle}
+              initialCheckpointId={diffRequest.checkpointId}
+            />
+          )}
           {activeDiffType === 'checkpoints' &&
             diffRequest &&
             !diffRequest.worktreeId && (
@@ -1325,8 +1385,7 @@ export function GitDiffModal({
             )}
 
           {/* Diff tabs body (Uncommitted / Branch) */}
-          {activeDiffType !== 'commits' &&
-            activeDiffType !== 'checkpoints' && (
+          {activeDiffType !== 'commits' && activeDiffType !== 'checkpoints' && (
             <>
               {/* Comment bar - above sidebar and main content */}
               {hasFiles && (
@@ -1466,12 +1525,12 @@ export function GitDiffModal({
                                 </span>
                                 <div className="flex items-center gap-1 shrink-0 text-xs">
                                   {file.additions > 0 && (
-                                    <span className="text-green-500">
+                                    <span className="text-success">
                                       +{file.additions}
                                     </span>
                                   )}
                                   {file.deletions > 0 && (
-                                    <span className="text-red-500">
+                                    <span className="text-destructive">
                                       -{file.deletions}
                                     </span>
                                   )}
@@ -1524,6 +1583,7 @@ export function GitDiffModal({
                               fileDiff={selectedFile.fileDiff}
                               fileName={selectedFile.fileName}
                               rootPath={diffRequest?.worktreePath}
+                              resourceOwnerId={diffRequest?.worktreeId}
                               isBinary={selectedFile.isBinary}
                               annotations={getAnnotationsForFile(
                                 selectedFile.fileName
@@ -1657,12 +1717,12 @@ export function GitDiffModal({
                                   </span>
                                   <div className="flex items-center gap-1 shrink-0">
                                     {file.additions > 0 && (
-                                      <span className="text-green-500">
+                                      <span className="text-success">
                                         +{file.additions}
                                       </span>
                                     )}
                                     {file.deletions > 0 && (
-                                      <span className="text-red-500">
+                                      <span className="text-destructive">
                                         -{file.deletions}
                                       </span>
                                     )}
@@ -1732,6 +1792,7 @@ export function GitDiffModal({
                                 fileDiff={selectedFile.fileDiff}
                                 fileName={selectedFile.fileName}
                                 rootPath={diffRequest?.worktreePath}
+                                resourceOwnerId={diffRequest?.worktreeId}
                                 isBinary={selectedFile.isBinary}
                                 annotations={getAnnotationsForFile(
                                   selectedFile.fileName
@@ -1803,7 +1864,7 @@ export function GitDiffModal({
             <AlertDialogCancel disabled={isReverting}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               data-revert-action
-              className="bg-destructive text-white hover:bg-destructive/90"
+              variant="destructive"
               disabled={isReverting}
               onClick={handleRevertFile}
             >

@@ -26,10 +26,16 @@ describe('web connecting overlay', () => {
     expect(source).toContain(
       "import { JeanLoadingScreen } from './components/shared/JeanLoadingScreen'"
     )
-    // One loading screen path (preload and WS-fallback share it) — no stacked phases
+    // Preload and WS fallback share one path; wake check covers the mounted view.
     expect(source.match(/<JeanLoadingScreen \/>/g)).toHaveLength(1)
+    expect(source).toContain('message="Checking connection to Jean..." onTop')
+    expect(source.indexOf('<MainWindow />')).toBeLessThan(
+      source.indexOf('message="Checking connection to Jean..." onTop')
+    )
     expect(source).toContain('connectTransport()')
     expect(source).toContain('blockOnWs')
+    expect(source).toContain('webBackend && wsCheckingConnection &&')
+    expect(source).toContain('Checking connection to Jean...')
     expect(source).not.toContain('Jean is loading...')
     expect(source).not.toContain('Reconnecting to Jean...')
     expect(loadingScreenSource).not.toContain('animate-spin')

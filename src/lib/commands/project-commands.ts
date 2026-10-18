@@ -10,7 +10,7 @@ import {
   Download,
   Pencil,
   RotateCcw,
-} from 'lucide-react'
+} from '@/components/icons/reicon'
 import type { AppCommand } from './types'
 import { useUIStore } from '@/store/ui-store'
 
@@ -185,7 +185,8 @@ export const projectCommands: AppCommand[] = [
     group: 'sessions',
     keywords: ['session', 'chat', 'clear', 'context', 'history', 'reset'],
 
-    isAvailable: context => context.hasActiveSession(),
+    isAvailable: context =>
+      context.hasActiveSession() && !context.hasCurrentSessionRunning(),
 
     execute: context => context.clearSessionHistory(),
   },

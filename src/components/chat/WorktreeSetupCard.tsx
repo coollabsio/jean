@@ -1,5 +1,5 @@
 import { forwardRef } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Loader2 } from '@/components/icons/reicon'
 import { cn } from '@/lib/utils'
 import type { Worktree } from '@/types/projects'
 

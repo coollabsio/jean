@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
-import { FileText, Loader2, Copy } from 'lucide-react'
-import { invoke } from '@/lib/transport'
+import { FileText, Loader2, Copy } from '@/components/icons/reicon'
+import { invokeForOptionalServer } from '@/lib/transport'
 import { toast } from 'sonner'
 import { copyToClipboard } from '@/lib/clipboard'
 import {
@@ -31,13 +31,19 @@ interface TextFileLightboxProps {
   path: string
   /** Optional file size in bytes */
   size?: number
+  /** Owning remote server for persisted attachment paths. */
+  serverId?: string
 }
 
 /**
  * Displays a text file as a clickable pill that opens a preview dialog
  * Content is loaded on-demand when the dialog is opened
  */
-export function TextFileLightbox({ path, size }: TextFileLightboxProps) {
+export function TextFileLightbox({
+  path,
+  size,
+  serverId,
+}: TextFileLightboxProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [content, setContent] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -53,9 +59,11 @@ export function TextFileLightbox({ path, size }: TextFileLightboxProps) {
       setIsLoading(true)
       setError(null)
       try {
-        const response = await invoke<ReadTextResponse>('read_pasted_text', {
-          path,
-        })
+        const response = await invokeForOptionalServer<ReadTextResponse>(
+          serverId,
+          'read_pasted_text',
+          { path }
+        )
         setContent(response.content)
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e))
@@ -63,7 +71,7 @@ export function TextFileLightbox({ path, size }: TextFileLightboxProps) {
         setIsLoading(false)
       }
     }
-  }, [content, isLoading, path])
+  }, [content, isLoading, path, serverId])
 
   const handleCopy = useCallback(() => {
     if (content) {

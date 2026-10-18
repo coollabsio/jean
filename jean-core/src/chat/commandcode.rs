@@ -306,6 +306,8 @@ fn parse_native_commandcode_turn(jsonl: &str) -> Option<ParsedNativeCommandCodeT
                         input,
                         output: None,
                         parent_tool_use_id: None,
+                        is_error: None,
+                        subagent_usage: None,
                     });
                     content_blocks.push(ContentBlock::ToolUse {
                         tool_call_id: id.to_string(),

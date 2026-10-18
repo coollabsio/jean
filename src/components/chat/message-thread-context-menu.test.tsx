@@ -11,6 +11,14 @@ const mocks = vi.hoisted(() => ({
   copyToClipboard: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
+  downloadLocalFile: vi.fn(),
+  openLocalFile: vi.fn(),
+}))
+
+vi.mock('@/lib/local-file', () => ({
+  downloadLocalFile: mocks.downloadLocalFile,
+  openLocalFile: mocks.openLocalFile,
+  resolveWorktreeFilePath: (path: string) => `/repo/${path}`,
 }))
 
 vi.mock('@/lib/clipboard', () => ({
@@ -65,6 +73,169 @@ describe('MessageThreadContextMenu', () => {
     mocks.toastSuccess.mockReset()
     mocks.toastError.mockReset()
     mocks.copyToClipboard.mockResolvedValue(undefined)
+    mocks.downloadLocalFile.mockReset()
+    mocks.downloadLocalFile.mockResolvedValue(undefined)
+  })
+
+  it('downloads a file path from inline code', async () => {
+    const user = userEvent.setup()
+    render(
+      <MessageThreadContextMenu messageText="Full message body">
+        <div>
+          Play <code data-file-path="out/video.mp4">out/video.mp4</code>
+        </div>
+      </MessageThreadContextMenu>
+    )
+
+    fireEvent.contextMenu(screen.getByText('out/video.mp4'))
+    await user.click(
+      await screen.findByRole('menuitem', { name: /download file/i })
+    )
+
+    expect(mocks.downloadLocalFile).toHaveBeenCalledWith('/repo/out/video.mp4')
+  })
+
+  it('opens a file path from inline code in the file viewer', async () => {
+    const user = userEvent.setup()
+    mocks.openLocalFile.mockReturnValue(true)
+    render(
+      <MessageThreadContextMenu messageText="Full message body">
+        <div>
+          Play <code data-file-path="out/video.mp4">out/video.mp4</code>
+        </div>
+      </MessageThreadContextMenu>
+    )
+
+    fireEvent.contextMenu(screen.getByText('out/video.mp4'))
+    await user.click(
+      await screen.findByRole('menuitem', { name: /open file/i })
+    )
+
+    expect(mocks.openLocalFile).toHaveBeenCalledWith('out/video.mp4')
+  })
+
+  it('does not pass the click that ends a long press to the file path', async () => {
+    const onClick = vi.fn()
+    render(
+      <MessageThreadContextMenu messageText="Full message body">
+        <div>
+          Play{' '}
+          <code data-file-path="out/video.mp4" onClick={onClick}>
+            out/video.mp4
+          </code>
+        </div>
+      </MessageThreadContextMenu>
+    )
+
+    const code = screen.getByText('out/video.mp4')
+    fireEvent.pointerDown(code, { pointerType: 'touch' })
+    await screen.findByRole(
+      'menuitem',
+      { name: /download file/i },
+      { timeout: 2000 }
+    )
+    fireEvent.click(code)
+
+    expect(onClick).not.toHaveBeenCalled()
+  })
+
+  it('shows Download file on touch long press without contextmenu (iOS)', async () => {
+    render(
+      <MessageThreadContextMenu messageText="Full message body">
+        <div>
+          Play <code data-file-path="out/video.mp4">out/video.mp4</code>
+        </div>
+      </MessageThreadContextMenu>
+    )
+
+    fireEvent.pointerDown(screen.getByText('out/video.mp4'), {
+      pointerType: 'touch',
+    })
+
+    expect(
+      await screen.findByRole(
+        'menuitem',
+        { name: /download file/i },
+        { timeout: 2000 }
+      )
+    ).toBeInTheDocument()
+  })
+
+  it('opens on touch long press despite small finger jitter', async () => {
+    render(
+      <MessageThreadContextMenu messageText="Full message body">
+        <div>
+          Play <code data-file-path="out/video.mp4">out/video.mp4</code>
+        </div>
+      </MessageThreadContextMenu>
+    )
+
+    const code = screen.getByText('out/video.mp4')
+    fireEvent.pointerDown(code, {
+      pointerType: 'touch',
+      clientX: 20,
+      clientY: 20,
+    })
+    // Radix cancels its own long press on any pointermove.
+    fireEvent.pointerMove(code, {
+      pointerType: 'touch',
+      clientX: 23,
+      clientY: 22,
+    })
+
+    expect(
+      await screen.findByRole(
+        'menuitem',
+        { name: /download file/i },
+        { timeout: 2000 }
+      )
+    ).toBeInTheDocument()
+  })
+
+  it('does not open when the finger moves away (scroll)', async () => {
+    vi.useFakeTimers()
+    try {
+      render(
+        <MessageThreadContextMenu messageText="Full message body">
+          <div>
+            Play <code data-file-path="out/video.mp4">out/video.mp4</code>
+          </div>
+        </MessageThreadContextMenu>
+      )
+
+      const code = screen.getByText('out/video.mp4')
+      fireEvent.pointerDown(code, {
+        pointerType: 'touch',
+        clientX: 20,
+        clientY: 20,
+      })
+      fireEvent.pointerMove(code, {
+        pointerType: 'touch',
+        clientX: 20,
+        clientY: 80,
+      })
+      vi.advanceTimersByTime(1000)
+
+      expect(
+        screen.queryByRole('menuitem', { name: /download file/i })
+      ).not.toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('hides Download file outside file-path code', async () => {
+    render(
+      <MessageThreadContextMenu messageText="Full message body">
+        <div>message body</div>
+      </MessageThreadContextMenu>
+    )
+
+    fireEvent.contextMenu(screen.getByText('message body'))
+    await screen.findByRole('menuitem', { name: /copy message/i })
+    expect(
+      screen.queryByRole('menuitem', { name: /download file/i })
+    ).not.toBeInTheDocument()
   })
 
   it('shows Copy message and copies full text when nothing is selected', async () => {

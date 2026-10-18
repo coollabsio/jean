@@ -97,6 +97,7 @@ const createMockContext = (): CommandContext => ({
   copySessionDebugDetails: vi.fn().mockResolvedValue(undefined),
   // State getters
   hasActiveSession: vi.fn().mockReturnValue(true),
+  hasCurrentSessionRunning: vi.fn().mockReturnValue(false),
   hasActiveWorktree: vi.fn().mockReturnValue(true),
   hasSelectedProject: vi.fn().mockReturnValue(true),
   hasInstalledBackend: vi.fn().mockReturnValue(true),
@@ -157,6 +158,17 @@ describe('Command System', () => {
 
       expect(result.success).toBe(true)
       expect(mockContext.clearSessionHistory).toHaveBeenCalledOnce()
+    })
+    it('hides clear context while the current session is running', () => {
+      Object.assign(mockContext, {
+        hasCurrentSessionRunning: () => true,
+      })
+
+      const commands = getAllCommands(mockContext)
+
+      expect(
+        commands.find(command => command.id === 'clear-session-context')
+      ).toBeUndefined()
     })
     it('handles non-existent command', async () => {
       const result = await executeCommand('non-existent-command', mockContext)

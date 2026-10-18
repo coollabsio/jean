@@ -96,13 +96,13 @@ export function ExitPlanModeButton({
     ? `Approve plan (${shortcut})`
     : 'Approve plan'
   const yoloTooltip = shortcutYolo
-    ? `Approve with yolo mode (${shortcutYolo})`
-    : 'Approve with yolo mode'
+    ? `Approve with Full access (${shortcutYolo})`
+    : 'Approve with Full access'
   return (
     <div className="mt-3 flex flex-wrap items-center gap-2">
       {hasYoloDropdownItems ? (
         <SplitButton
-          label="YOLO"
+          label="Full access"
           tooltip={yoloTooltip}
           onClick={() => onPlanApprovalYolo?.()}
         >
@@ -122,7 +122,7 @@ export function ExitPlanModeButton({
         <Tooltip>
           <TooltipTrigger asChild>
             <Button size="sm" onClick={() => onPlanApprovalYolo?.()}>
-              YOLO
+              Full access
             </Button>
           </TooltipTrigger>
           <TooltipContent>{yoloTooltip}</TooltipContent>

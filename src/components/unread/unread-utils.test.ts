@@ -41,6 +41,33 @@ describe('isUnreadSession', () => {
     ).toBe(true)
   })
 
+  it('does not treat a running review job as unread', () => {
+    expect(
+      isUnreadSession(
+        session({
+          is_reviewing: true,
+          review_results: {
+            reviews: [{ backend: 'claude', model: 'opus', status: 'running' }],
+          },
+        })
+      )
+    ).toBe(false)
+  })
+
+  it('treats a review that finished after the session was opened as unread', () => {
+    expect(
+      isUnreadSession(
+        session({
+          last_opened_at: 1_000,
+          updated_at: 2_000,
+          review_results: {
+            reviews: [{ backend: 'claude', model: 'opus', status: 'completed' }],
+          },
+        })
+      )
+    ).toBe(true)
+  })
+
   it('treats pending Codex command approvals as unread even without waiting_for_input (issue #626)', () => {
     expect(
       isUnreadSession(
@@ -53,6 +80,24 @@ describe('isUnreadSession', () => {
               thread_id: 'thread-1',
               turn_id: 'turn-1',
               command: 'npm test',
+            },
+          ],
+        })
+      )
+    ).toBe(true)
+  })
+
+  it('treats pending OpenCode permissions as unread', () => {
+    expect(
+      isUnreadSession(
+        session({
+          pending_opencode_permission_requests: [
+            {
+              request_id: 'permission-1',
+              opencode_session_id: 'opencode-session-1',
+              permission: 'file_read',
+              patterns: ['src/**'],
+              always: [],
             },
           ],
         })

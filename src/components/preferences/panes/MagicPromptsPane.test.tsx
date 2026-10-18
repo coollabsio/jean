@@ -6,6 +6,7 @@ import { MagicPromptsPane } from './MagicPromptsPane'
 
 const mutateMock = vi.fn()
 let installedBackendsMock = ['claude', 'codex']
+let codexCatalogOptionsMock = [{ value: 'gpt-6-astra', label: 'GPT 6 Astra' }]
 let preferencesMock = { ...defaultPreferences }
 let availableGrokModelsMock:
   | { id: string; label: string; isDefault: boolean }[]
@@ -28,7 +29,6 @@ vi.mock('@/services/preferences', () => ({
         investigate_sentry_issue_mode: 'plan',
         code_review_fix_mode: 'plan',
         review_comments_mode: 'plan',
-        final_review_mode: 'yolo',
         resolve_conflicts_mode: 'yolo',
       },
     },
@@ -41,6 +41,7 @@ vi.mock('@/hooks/useInstalledBackends', () => ({
 }))
 
 vi.mock('@/services/opencode-cli', () => ({
+  useRefreshOpencodeModels: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useAvailableOpencodeModels: () => ({ data: undefined }),
 }))
 
@@ -67,14 +68,18 @@ vi.mock('@/services/antigravity-cli', () => ({
 }))
 
 vi.mock('@/services/model-catalog', () => ({
-  getCatalogModelOptions: (_catalog: unknown, backend: 'claude' | 'codex') =>
+  getCatalogDefaultModelOptions: () => codexCatalogOptionsMock,
+  getCatalogModelOptions: (_catalog: unknown, backend: string) =>
     backend === 'claude'
       ? [
+          { value: 'claude-fable-5-1', label: 'Claude Fable 5.1' },
           { value: 'claude-fable-5', label: 'Claude Fable 5' },
           { value: 'claude-opus-5', label: 'Claude Opus 5' },
           { value: 'claude-sonnet-5', label: 'Claude Sonnet 5' },
         ]
-      : [],
+      : backend === 'codex'
+        ? codexCatalogOptionsMock
+        : [],
   getCatalogModelReasoning: (
     _catalog: unknown,
     backend: string,
@@ -90,7 +95,28 @@ vi.mock('@/services/model-catalog', () => ({
           ],
         }
       : undefined,
+  getCatalogModelFastInfo: (
+    _catalog: unknown,
+    _backend: string,
+    model: string
+  ) =>
+    model.endsWith('-fast')
+      ? {
+          supportsFast: true,
+          isFast: true,
+          baseModel: model.slice(0, -5),
+          fastModel: model,
+        }
+      : model === 'gpt-6-astra'
+        ? {
+            supportsFast: true,
+            isFast: false,
+            baseModel: model,
+            fastModel: `${model}-fast`,
+          }
+        : { supportsFast: false, isFast: false, baseModel: model },
   useModelCatalog: () => ({ data: undefined }),
+  useRefreshModelCatalog: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }))
 
 class ResizeObserverMock {
@@ -108,6 +134,7 @@ class ResizeObserverMock {
 beforeEach(() => {
   mutateMock.mockReset()
   installedBackendsMock = ['claude', 'codex']
+  codexCatalogOptionsMock = [{ value: 'gpt-6-astra', label: 'GPT 6 Astra' }]
   preferencesMock = { ...defaultPreferences }
   availableGrokModelsMock = undefined
   availableAntigravityModelsMock = undefined
@@ -123,7 +150,7 @@ describe('MagicPromptsPane', () => {
     render(<MagicPromptsPane />)
 
     await user.click(screen.getByRole('combobox', { name: 'Default mode' }))
-    await user.click(screen.getByRole('option', { name: 'Yolo' }))
+    await user.click(screen.getByRole('option', { name: 'Full access' }))
 
     expect(mutateMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -162,24 +189,6 @@ describe('MagicPromptsPane', () => {
     expect(screen.getByText('{sentryContext}')).toBeInTheDocument()
   })
 
-  it('provides dedicated Final Review settings', async () => {
-    const user = userEvent.setup()
-    render(<MagicPromptsPane />)
-
-    await user.click(screen.getByRole('button', { name: 'Final Review' }))
-
-    expect(
-      screen.getByRole('combobox', { name: 'Backend' })
-    ).toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: 'Model' })).toBeInTheDocument()
-    expect(
-      screen.getByRole('combobox', { name: 'Default mode' })
-    ).toHaveTextContent('Yolo')
-    expect(
-      screen.getByDisplayValue(/final pre-merge audit/i)
-    ).toBeInTheDocument()
-  })
-
   it('uses the catalog Claude models for magic prompt model choices', async () => {
     const user = userEvent.setup()
     render(<MagicPromptsPane />)
@@ -187,6 +196,29 @@ describe('MagicPromptsPane', () => {
     await user.click(screen.getByRole('combobox', { name: 'Model' }))
 
     expect(screen.getByText('Fable 5')).toBeInTheDocument()
+  })
+
+  it('lets a magic prompt select GPT 6 Astra from the Codex catalog', async () => {
+    preferencesMock = {
+      ...defaultPreferences,
+      magic_prompt_backends: {
+        ...defaultPreferences.magic_prompt_backends,
+        investigate_issue_backend: 'codex',
+      },
+    }
+    const user = userEvent.setup()
+    render(<MagicPromptsPane />)
+
+    await user.click(screen.getByRole('combobox', { name: 'Model' }))
+    await user.click(screen.getByRole('option', { name: /GPT 6 Astra/ }))
+
+    expect(mutateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        magic_prompt_models: expect.objectContaining({
+          investigate_issue_model: 'gpt-6-astra',
+        }),
+      })
+    )
   })
 
   it('lets magic prompts choose Pi, Command Code, and Grok backends', async () => {
@@ -217,6 +249,7 @@ describe('MagicPromptsPane', () => {
 
   it('hides the Antigravity backend option when not installed', async () => {
     installedBackendsMock = ['claude', 'codex']
+    codexCatalogOptionsMock = [{ value: 'gpt-6-astra', label: 'GPT 6 Astra' }]
     const user = userEvent.setup()
     render(<MagicPromptsPane />)
 
@@ -304,10 +337,7 @@ describe('MagicPromptsPane', () => {
   it('keeps magic prompt control labels paired with dropdowns on mobile', () => {
     render(<MagicPromptsPane />)
 
-    expect(screen.getByTestId('magic-prompt-config')).toHaveClass(
-      'border',
-      'rounded-lg'
-    )
+    expect(screen.getByTestId('magic-prompt-config')).toHaveClass('flex-col')
     expect(screen.getByTestId('magic-prompt-backend-control')).toHaveClass(
       'grid-cols-[72px_minmax(0,1fr)]'
     )
@@ -416,142 +446,192 @@ describe('MagicPromptsPane', () => {
     )
   })
 
-  it('shows presets in a dropdown with every GPT 5.6 variant', async () => {
-    const user = userEvent.setup()
-    render(<MagicPromptsPane />)
-
-    expect(screen.queryByRole('button', { name: 'Claude Defaults' })).toBeNull()
-
-    await user.click(screen.getByRole('button', { name: 'Apply preset' }))
-
-    expect(
-      screen.getByRole('menuitem', { name: 'Claude Defaults' })
-    ).toBeVisible()
-    expect(screen.getByRole('menuitem', { name: 'GPT 5.6 Sol' })).toBeVisible()
-    expect(
-      screen.getByRole('menuitem', { name: 'GPT 5.6 Sol Fast' })
-    ).toBeVisible()
-    expect(screen.getByRole('menuitem', { name: 'GPT 5.6 Luna' })).toBeVisible()
-    expect(
-      screen.getByRole('menuitem', { name: 'GPT 5.6 Luna Fast' })
-    ).toBeVisible()
-    expect(
-      screen.getByRole('menuitem', { name: 'GPT 5.6 Terra' })
-    ).toBeVisible()
-    expect(
-      screen.getByRole('menuitem', { name: 'GPT 5.6 Terra Fast' })
-    ).toBeVisible()
-
-    await user.click(
-      screen.getByRole('menuitem', { name: 'GPT 5.6 Luna Fast' })
-    )
-
-    expect(mutateMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        magic_prompt_models: expect.objectContaining({
-          investigate_issue_model: 'gpt-5.6-luna-fast',
-          review_comments_model: 'gpt-5.6-luna-fast',
-        }),
-        magic_prompt_backends: expect.objectContaining({
-          investigate_issue_backend: 'codex',
-          review_comments_backend: 'codex',
-        }),
-        magic_prompt_efforts: expect.objectContaining({
-          investigate_issue_effort: 'low',
-          review_comments_effort: 'low',
-        }),
-        magic_code_review_configs: [
-          {
-            backend: 'codex',
-            model: 'gpt-5.6-luna-fast',
-            reasoning_effort: 'low',
-            fix_mode: 'plan',
-          },
-        ],
-      })
-    )
-  })
-
-  it('uses Luna Fast with low reasoning for Codex commit message presets', async () => {
-    const user = userEvent.setup()
-    render(<MagicPromptsPane />)
-
-    await user.click(screen.getByRole('button', { name: 'Apply preset' }))
-    await user.click(screen.getByRole('menuitem', { name: 'GPT 5.6 Sol' }))
-
-    expect(mutateMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        magic_prompt_models: expect.objectContaining({
-          investigate_issue_model: 'gpt-5.6-sol',
-          commit_message_model: 'gpt-5.6-luna-fast',
-        }),
-        magic_prompt_efforts: expect.objectContaining({
-          commit_message_effort: 'low',
-        }),
-      })
-    )
-  })
-
-  it('applies yolo execution mode for Grok investigation defaults', async () => {
+  it('includes newly discovered models and supports searching', async () => {
+    codexCatalogOptionsMock = [{ value: 'future-model', label: 'Future model' }]
     installedBackendsMock = ['claude', 'codex', 'grok']
+    availableGrokModelsMock = [
+      { id: 'future-grok', label: 'Future Grok', isDefault: true },
+    ]
     const user = userEvent.setup()
     render(<MagicPromptsPane />)
+    await user.click(
+      screen.getByRole('combobox', { name: 'Model for all prompts' })
+    )
+    await user.click(screen.getByRole('tab', { name: 'Codex' }))
+    expect(screen.getByRole('option', { name: /Future model/ })).toBeVisible()
+    await user.click(screen.getByRole('tab', { name: 'Grok' }))
+    expect(screen.getByRole('option', { name: /Future Grok/ })).toBeVisible()
+    await user.type(
+      screen.getByPlaceholderText('Search Grok models...'),
+      'Future Grok'
+    )
+    expect(screen.queryByRole('option', { name: 'Future model' })).toBeNull()
+    await user.click(screen.getByRole('option', { name: /Future Grok/ }))
+    await user.click(
+      screen.getByRole('button', { name: 'Apply to all prompts' })
+    )
+    const patch = mutateMock.mock.calls[0]?.[0]
+    expect(new Set(Object.values(patch.magic_prompt_models))).toEqual(
+      new Set(['grok/future-grok'])
+    )
+    expect(new Set(Object.values(patch.magic_prompt_backends))).toEqual(
+      new Set(['grok'])
+    )
+    expect(screen.queryByPlaceholderText('Search Grok models...')).toBeNull()
+  })
 
-    await user.click(screen.getByRole('button', { name: 'Apply preset' }))
-    await user.click(screen.getByRole('menuitem', { name: 'Grok Defaults' }))
+  it.each([
+    ['GPT 6 Astra', 'codex', 'gpt-6-astra', 'low'],
+    ['Fable 5.1', 'claude', 'claude-fable-5-1', 'high'],
+  ])(
+    'applies %s to every magic prompt',
+    async (label, backend, model, effort) => {
+      const user = userEvent.setup()
+      render(<MagicPromptsPane />)
+      await user.click(
+        screen.getByRole('combobox', { name: 'Model for all prompts' })
+      )
+      await user.click(
+        screen.getByRole('tab', {
+          name: backend === 'codex' ? 'Codex' : 'Claude',
+        })
+      )
+      await user.click(screen.getByRole('option', { name: new RegExp(label) }))
+      expect(mutateMock).not.toHaveBeenCalled()
+      await user.click(
+        screen.getByRole('button', { name: 'Apply to all prompts' })
+      )
 
-    expect(mutateMock).toHaveBeenCalledWith(
+      expect(mutateMock).toHaveBeenCalledTimes(1)
+      const patch = mutateMock.mock.calls[0]?.[0]
+      expect(Object.keys(patch.magic_prompt_models)).toEqual(
+        Object.keys(defaultPreferences.magic_prompt_models)
+      )
+      expect(new Set(Object.values(patch.magic_prompt_models))).toEqual(
+        new Set([model])
+      )
+      expect(new Set(Object.values(patch.magic_prompt_backends))).toEqual(
+        new Set([backend])
+      )
+      expect(patch.magic_prompt_efforts.investigate_issue_effort).toBe(effort)
+      expect(patch.magic_code_review_configs).toEqual([
+        { backend, model, reasoning_effort: effort, fix_mode: 'plan' },
+      ])
+      expect(patch.magic_prompt_providers).toEqual(
+        defaultPreferences.magic_prompt_providers
+      )
+      expect(patch).not.toHaveProperty('magic_prompts')
+      expect(new Set(Object.values(patch.magic_prompt_modes))).toEqual(
+        new Set(['plan'])
+      )
+    }
+  )
+
+  it('applies the fast variant and yolo mode to every magic prompt', async () => {
+    const user = userEvent.setup()
+    render(<MagicPromptsPane />)
+    const fastSwitch = screen.getByRole('switch', {
+      name: 'Fast mode for all prompts',
+    })
+    expect(fastSwitch).toBeDisabled()
+
+    await user.click(
+      screen.getByRole('combobox', { name: 'Model for all prompts' })
+    )
+    expect(screen.queryByRole('option', { name: /Fast/ })).toBeNull()
+    await user.click(screen.getByRole('tab', { name: 'Codex' }))
+    await user.click(screen.getByRole('option', { name: /GPT 6 Astra/ }))
+    expect(fastSwitch).toBeEnabled()
+    await user.click(fastSwitch)
+    await user.click(
+      screen.getByRole('combobox', { name: 'Mode for all prompts' })
+    )
+    await user.click(screen.getByRole('option', { name: 'Full access' }))
+    await user.click(
+      screen.getByRole('button', { name: 'Apply to all prompts' })
+    )
+
+    const patch = mutateMock.mock.calls[0]?.[0]
+    expect(new Set(Object.values(patch.magic_prompt_models))).toEqual(
+      new Set(['gpt-6-astra-fast'])
+    )
+    expect(Object.keys(patch.magic_prompt_modes).sort()).toEqual(
+      Object.keys(defaultPreferences.magic_prompt_modes).sort()
+    )
+    expect(new Set(Object.values(patch.magic_prompt_modes))).toEqual(
+      new Set(['yolo'])
+    )
+    expect(patch.magic_code_review_configs[0]).toEqual(
+      expect.objectContaining({ model: 'gpt-6-astra-fast', fix_mode: 'yolo' })
+    )
+  })
+
+  it.each([
+    ['GPT 6 Astra', 'claude'],
+    ['Fable 5.1', 'codex'],
+  ])('hides %s when its backend is unavailable', async (label, installed) => {
+    installedBackendsMock = [installed]
+    const user = userEvent.setup()
+    render(<MagicPromptsPane />)
+    await user.click(
+      screen.getByRole('combobox', { name: 'Model for all prompts' })
+    )
+    expect(screen.queryByRole('option', { name: label })).toBeNull()
+    expect(
+      screen.getByRole('button', { name: 'Apply to all prompts' })
+    ).toBeDisabled()
+  })
+
+  it.each([
+    'opencode',
+    'cursor',
+    'pi',
+    'commandcode',
+    'grok',
+    'kimi',
+    'antigravity',
+  ])('applies an available %s model to all prompts', async backend => {
+    installedBackendsMock = [backend]
+    const user = userEvent.setup()
+    render(<MagicPromptsPane />)
+    await user.click(
+      screen.getByRole('combobox', { name: 'Model for all prompts' })
+    )
+    const [option] = screen.getAllByRole('option')
+    if (!option) throw new Error('Expected an available model')
+    await user.click(option)
+    await user.click(
+      screen.getByRole('button', { name: 'Apply to all prompts' })
+    )
+    const patch = mutateMock.mock.calls[0]?.[0]
+    expect(new Set(Object.values(patch.magic_prompt_backends))).toEqual(
+      new Set([backend])
+    )
+    const models = Object.values(patch.magic_prompt_models)
+    expect(new Set(models).size).toBe(1)
+    expect(models[0]).toEqual(
+      expect.stringMatching(new RegExp('^' + backend + '/'))
+    )
+    expect(patch.magic_code_review_configs[0]).toEqual(
       expect.objectContaining({
-        magic_prompt_models: expect.objectContaining({
-          investigate_issue_model: 'grok/grok-4.6',
-        }),
-        magic_prompt_backends: expect.objectContaining({
-          investigate_issue_backend: 'grok',
-        }),
-        magic_prompt_modes: expect.objectContaining({
-          investigate_issue_mode: 'yolo',
-          investigate_pr_mode: 'yolo',
-          investigate_workflow_run_mode: 'yolo',
-          investigate_security_alert_mode: 'yolo',
-          investigate_advisory_mode: 'yolo',
-          investigate_linear_issue_mode: 'yolo',
-          investigate_sentry_issue_mode: 'yolo',
-          code_review_fix_mode: 'plan',
-          review_comments_mode: 'plan',
-        }),
+        backend,
+        model: models[0],
       })
     )
   })
 
-  it('applies Antigravity defaults from the preset menu', async () => {
-    installedBackendsMock = ['claude', 'codex', 'antigravity']
+  it('shows an empty state when no backend is installed', async () => {
+    installedBackendsMock = []
     const user = userEvent.setup()
     render(<MagicPromptsPane />)
-
-    await user.click(screen.getByRole('button', { name: 'Apply preset' }))
     await user.click(
-      screen.getByRole('menuitem', { name: 'Antigravity Defaults' })
+      screen.getByRole('combobox', { name: 'Model for all prompts' })
     )
-
-    expect(mutateMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        magic_prompt_models: expect.objectContaining({
-          investigate_issue_model: 'antigravity/auto',
-        }),
-        magic_prompt_backends: expect.objectContaining({
-          investigate_issue_backend: 'antigravity',
-        }),
-        magic_prompt_efforts: expect.objectContaining({
-          investigate_issue_effort: 'adaptive',
-        }),
-        magic_code_review_configs: [
-          expect.objectContaining({
-            backend: 'antigravity',
-            model: 'antigravity/auto',
-          }),
-        ],
-      })
-    )
+    expect(
+      screen.getByRole('combobox', { name: 'Model for all prompts' })
+    ).toBeDisabled()
+    expect(screen.queryAllByRole('option')).toHaveLength(0)
+    expect(mutateMock).not.toHaveBeenCalled()
   })
 
   it('adds a second unique backend and model to code review', async () => {
@@ -645,7 +725,7 @@ describe('MagicPromptsPane', () => {
     ).toHaveTextContent('Plan')
 
     await user.click(screen.getByRole('combobox', { name: 'Review 2 mode' }))
-    await user.click(screen.getByRole('option', { name: 'Yolo' }))
+    await user.click(screen.getByRole('option', { name: 'Full access' }))
 
     expect(mutateMock).toHaveBeenCalledWith(
       expect.objectContaining({

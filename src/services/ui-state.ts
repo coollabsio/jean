@@ -3,8 +3,13 @@ import { invoke } from '@/lib/transport'
 import { logger } from '@/lib/logger'
 import { defaultUIState, type UIState } from '@/types/ui-state'
 
-import { hasBackend, hasBackendTransport } from '@/lib/environment'
+import { hasBackend, hasBackendTransport, isNativeApp } from '@/lib/environment'
 import { preserveQueryCacheOnError } from '@/lib/query-error'
+import { getActiveRemoteConnection } from '@/lib/remote-connections'
+import {
+  scopeUIStateResources,
+  unscopeUIStateResources,
+} from '@/lib/ui-state-resources'
 
 const isTauri = hasBackend
 
@@ -28,8 +33,12 @@ export function useUIState() {
       try {
         logger.debug('Loading UI state from backend')
         const uiState = await invoke<UIState>('load_ui_state')
-        logger.info('UI state loaded successfully', { uiState })
-        return uiState
+        const remote = isNativeApp() ? getActiveRemoteConnection() : null
+        const restoredState = remote
+          ? scopeUIStateResources(uiState, remote.id)
+          : uiState
+        logger.info('UI state loaded successfully', { uiState: restoredState })
+        return restoredState
       } catch (error) {
         // Return defaults if UI state file doesn't exist yet
         logger.warn('Failed to load UI state, using defaults', { error })
@@ -56,7 +65,11 @@ export function useSaveUIState() {
 
       try {
         logger.debug('Saving UI state to backend', { uiState })
-        await invoke('save_ui_state', { uiState })
+        const remote = isNativeApp() ? getActiveRemoteConnection() : null
+        const stateToSave = remote
+          ? unscopeUIStateResources(uiState, remote.id)
+          : uiState
+        await invoke('save_ui_state', { uiState: stateToSave })
         logger.debug('UI state saved successfully')
       } catch (error) {
         // Silent fail for UI state saves - don't bother user with errors
@@ -65,8 +78,12 @@ export function useSaveUIState() {
       }
     },
     onSuccess: (_, uiState) => {
-      // Update the cache with the new UI state
-      queryClient.setQueryData(uiStateQueryKeys.state(), uiState)
+      // Update the cache with the new UI state. Saves never change pins; they
+      // change only through set_recent_session_pinned.
+      queryClient.setQueryData<UIState>(uiStateQueryKeys.state(), current => ({
+        ...uiState,
+        pinned_recent_session_ids: current?.pinned_recent_session_ids,
+      }))
       logger.debug('UI state cache updated')
       // No toast for UI state - silent operation
     },

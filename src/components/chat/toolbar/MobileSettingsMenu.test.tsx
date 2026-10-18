@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import userEvent from '@testing-library/user-event'
-import { Zap } from 'lucide-react'
+import { Zap } from '@/components/icons/reicon'
 import { fireEvent, render, screen, within } from '@/test/test-utils'
 import { MobileSettingsMenu } from './MobileSettingsMenu'
 import * as platform from '@/lib/platform'
@@ -33,7 +33,9 @@ vi.mock('@/services/projects', async importOriginal => {
     ...actual,
     useWorktree: useWorktreeMock as unknown as typeof actual.useWorktree,
     useProjects: () => ({
-      data: [{ id: 'project-1', path: '/repo', name: 'app', default_branch: 'main' }],
+      data: [
+        { id: 'project-1', path: '/repo', name: 'app', default_branch: 'main' },
+      ],
     }),
     usePorts: usePortsMock as unknown as typeof actual.usePorts,
   }
@@ -105,12 +107,14 @@ const baseProps = {
   loadedSecurityContexts: [],
   loadedAdvisoryContexts: [],
   loadedLinearContexts: [],
+  loadedSentryContexts: [],
   attachedSavedContexts: [],
   handleViewIssue: vi.fn(),
   handleViewPR: vi.fn(),
   handleViewSecurityAlert: vi.fn(),
   handleViewAdvisory: vi.fn(),
   handleViewLinear: vi.fn(),
+  handleViewSentry: vi.fn(),
   handleViewSavedContext: vi.fn(),
   availableMcpServers: [],
   enabledMcpServers: [],
@@ -133,7 +137,7 @@ describe('MobileSettingsMenu', () => {
       await user.click(screen.getByRole('button', { name: /settings/i }))
 
       const effortItem = screen.getByText('Effort').closest('[role="menuitem"]')
-      const effortIcon = effortItem?.querySelector('svg.lucide-brain')
+      const effortIcon = effortItem?.querySelector('svg')
       expect(effortIcon).not.toHaveClass('mr-2')
     } finally {
       Object.defineProperty(window, 'innerWidth', {
@@ -167,7 +171,7 @@ describe('MobileSettingsMenu', () => {
     await user.click(screen.getByRole('button', { name: /settings/i }))
 
     const mcpItem = screen.getByText('MCP').closest('[role="menuitem"]')
-    const mcpIcon = mcpItem?.querySelector('svg.lucide-plug')
+    const mcpIcon = mcpItem?.querySelector('svg')
     expect(mcpItem).toHaveAttribute('aria-disabled', 'true')
     expect(mcpIcon).not.toHaveClass('mr-2')
     expect(mcpItem?.querySelector('svg.lucide-chevron-right')).toBeNull()
@@ -310,7 +314,7 @@ describe('MobileSettingsMenu', () => {
       within(sheet)
         .getByRole('button', { name: 'Unfavorite lint' })
         .querySelector('svg')
-    ).toHaveClass('fill-yellow-500', 'text-yellow-500')
+    ).toHaveClass('fill-warning', 'text-warning')
     await user.click(
       within(sheet).getByRole('button', { name: 'Favorite test:unit' })
     )
@@ -402,7 +406,7 @@ describe('MobileSettingsMenu', () => {
     expect(
       within(prRow as HTMLElement).queryByText('Open')
     ).not.toBeInTheDocument()
-    expect(prRow?.querySelector('svg.lucide-external-link')).toBeInTheDocument()
+    expect(prRow?.querySelector('svg')).toBeInTheDocument()
 
     await user.click(screen.getByText('PR #9999'))
     expect(openSpy).toHaveBeenCalledWith(
@@ -436,9 +440,7 @@ describe('MobileSettingsMenu', () => {
       ],
     })
 
-    render(
-      <MobileSettingsMenu {...baseProps} worktreeId="worktree-1" />
-    )
+    render(<MobileSettingsMenu {...baseProps} worktreeId="worktree-1" />)
 
     await user.click(screen.getByRole('button', { name: /settings/i }))
 
@@ -452,9 +454,8 @@ describe('MobileSettingsMenu', () => {
     const portItem = screen
       .getByText('App (localhost:1420)')
       .closest('[role="menuitem"]')
-    expect(githubItem?.querySelector('svg.lucide-external-link')).toBeTruthy()
-    expect(portItem?.querySelector('svg.lucide-globe')).toBeTruthy()
-    expect(portItem?.querySelector('svg.lucide-external-link')).toBeTruthy()
+    expect(githubItem?.querySelector('svg')).toBeInTheDocument()
+    expect(portItem?.querySelectorAll('svg').length).toBeGreaterThanOrEqual(2)
 
     await user.click(screen.getByText('App (localhost:1420)'))
     expect(openSpy).toHaveBeenCalledWith('http://localhost:1420')

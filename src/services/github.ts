@@ -191,10 +191,13 @@ export function useGitHubLabels(
 export function useGitHubIssues(
   projectPath: string | null,
   state: 'open' | 'closed' | 'all' = 'open',
-  options?: { enabled?: boolean; staleTime?: number }
+  options?: { enabled?: boolean; staleTime?: number; ownerId?: string }
 ) {
   return useQuery({
-    queryKey: githubQueryKeys.issues(projectPath ?? '', state),
+    queryKey: [
+      ...githubQueryKeys.issues(projectPath ?? '', state),
+      options?.ownerId ?? '',
+    ],
     queryFn: async (): Promise<GitHubIssueListResult> => {
       if (!isTauri() || !projectPath) {
         return { issues: [], totalCount: 0 }
@@ -207,6 +210,7 @@ export function useGitHubIssues(
           {
             projectPath,
             state,
+            projectId: options?.ownerId,
           }
         )
         logger.info('GitHub issues loaded', {
@@ -468,12 +472,14 @@ export async function loadIssueContext(
 export async function removeIssueContext(
   sessionId: string,
   issueNumber: number,
-  projectPath: string
+  projectPath: string,
+  worktreeId?: string | null
 ): Promise<void> {
   return invoke('remove_issue_context', {
     sessionId,
     issueNumber,
     projectPath,
+    worktreeId,
   })
 }
 
@@ -490,10 +496,13 @@ export async function removeIssueContext(
 export function useGitHubPRs(
   projectPath: string | null,
   state: 'open' | 'closed' | 'merged' | 'all' = 'open',
-  options?: { enabled?: boolean; staleTime?: number }
+  options?: { enabled?: boolean; staleTime?: number; ownerId?: string }
 ) {
   return useQuery({
-    queryKey: githubQueryKeys.prs(projectPath ?? '', state),
+    queryKey: [
+      ...githubQueryKeys.prs(projectPath ?? '', state),
+      options?.ownerId ?? '',
+    ],
     queryFn: async (): Promise<GitHubPullRequest[]> => {
       if (!isTauri() || !projectPath) {
         return []
@@ -504,6 +513,7 @@ export function useGitHubPRs(
         const prs = await invoke<GitHubPullRequest[]>('list_github_prs', {
           projectPath,
           state,
+          projectId: options?.ownerId,
         })
         logger.info('GitHub PRs loaded', { count: prs.length })
         return prs
@@ -633,12 +643,14 @@ export async function removePRContext(
 export async function getIssueContextContent(
   sessionId: string,
   issueNumber: number,
-  projectPath: string
+  projectPath: string,
+  worktreeId?: string | null
 ): Promise<string> {
   return invoke<string>('get_issue_context_content', {
     sessionId,
     issueNumber,
     projectPath,
+    worktreeId,
   })
 }
 
@@ -648,12 +660,14 @@ export async function getIssueContextContent(
 export async function getPRContextContent(
   sessionId: string,
   prNumber: number,
-  projectPath: string
+  projectPath: string,
+  worktreeId?: string | null
 ): Promise<string> {
   return invoke<string>('get_pr_context_content', {
     sessionId,
     prNumber,
     projectPath,
+    worktreeId,
   })
 }
 

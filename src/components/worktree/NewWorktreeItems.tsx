@@ -10,7 +10,8 @@ import {
   Wand2,
   Eye,
   MoreHorizontal,
-} from 'lucide-react'
+  MessageSquarePlus,
+} from '@/components/icons/reicon'
 import {
   Tooltip,
   TooltipTrigger,
@@ -25,9 +26,13 @@ import {
 import { useIsMobile } from '@/hooks/use-mobile'
 import { cn } from '@/lib/utils'
 import { ItemSelectCheckbox } from './ItemSelectCheckbox'
+import { ContextLinkBadge } from './ContextLinkBadge'
+import type { ContextLinkMatch } from '@/hooks/useContextLinkUsage'
 import { isNewIssue } from '@/services/github'
+import { formatRelative } from '@/components/agents/AgentActivity'
 import type {
   GitHubIssue,
+  GitHubLabel,
   GitHubPullRequest,
   DependabotAlert,
   RepositoryAdvisory,
@@ -75,16 +80,85 @@ export function SessionTabBar({
   )
 }
 
+/** GitHub-style list row wrapper shared by issue and PR rows. */
+const githubRowClass = (
+  isSelected: boolean,
+  isChecked: boolean,
+  busy: boolean
+) =>
+  cn(
+    'group w-full flex items-start gap-2.5 px-4 py-2 text-left transition-colors border-b border-border/60 last:border-b-0',
+    'hover:bg-accent/60',
+    isSelected && 'bg-accent',
+    isChecked && !isSelected && 'bg-accent/50',
+    busy && 'opacity-50'
+  )
+
+function LabelPills({
+  labels,
+  onLabelClick,
+}: {
+  labels: GitHubLabel[]
+  onLabelClick?: (label: string) => void
+}) {
+  return labels.map(label => (
+    <button
+      type="button"
+      key={label.name}
+      tabIndex={-1}
+      onClick={e => {
+        e.stopPropagation()
+        onLabelClick?.(label.name)
+      }}
+      className="shrink-0 rounded-full px-2 py-px text-[11px] font-medium leading-4"
+      style={{
+        backgroundColor: `#${label.color}26`,
+        color: `#${label.color}`,
+        border: `1px solid #${label.color}66`,
+      }}
+    >
+      {label.name}
+    </button>
+  ))
+}
+
+/** "#123 opened 3d ago by octocat" */
+function OpenedMeta({
+  number,
+  createdAt,
+  author,
+}: {
+  number: number
+  createdAt: string
+  author?: string
+}) {
+  const time = Date.parse(createdAt)
+  return (
+    <>
+      #{number}
+      {!Number.isNaN(time) && ` opened ${formatRelative(time / 1000)}`}
+      {author && (
+        <>
+          {' by '}
+          <span className="text-foreground/70">{author}</span>
+        </>
+      )}
+    </>
+  )
+}
+
 export interface IssueItemProps {
   issue: GitHubIssue
   index: number
   isSelected: boolean
   isCreating: boolean
+  contextMatches?: ContextLinkMatch[]
   isChecked?: boolean
   onCheckedChange?: (checked: boolean) => void
   onMouseEnter: () => void
   onClick: (background: boolean) => void
   onInvestigate: (background: boolean) => void
+  onInvestigateInNewSession?: () => void
   onPreview: () => void
   onLabelClick?: (label: string) => void
 }
@@ -94,11 +168,13 @@ export function IssueItem({
   index,
   isSelected,
   isCreating,
+  contextMatches,
   isChecked = false,
   onCheckedChange,
   onMouseEnter,
   onClick,
   onInvestigate,
+  onInvestigateInNewSession,
   onPreview,
   onLabelClick,
 }: IssueItemProps) {
@@ -106,13 +182,7 @@ export function IssueItem({
     <div
       data-item-index={index}
       onMouseEnter={onMouseEnter}
-      className={cn(
-        'group w-full flex items-start gap-3 px-3 py-2.5 sm:py-2 text-left transition-colors',
-        'hover:bg-accent',
-        isSelected && 'bg-accent',
-        isChecked && !isSelected && 'bg-accent/50',
-        isCreating && 'opacity-50'
-      )}
+      className={githubRowClass(isSelected, isChecked, isCreating)}
     >
       {onCheckedChange && (
         <ItemSelectCheckbox
@@ -128,71 +198,38 @@ export function IssueItem({
         <CircleDot
           className={cn(
             'h-4 w-4 mt-0.5 flex-shrink-0',
-            issue.state === 'OPEN' ? 'text-green-500' : 'text-purple-500'
+            issue.state === 'OPEN'
+              ? 'text-success'
+              : 'text-purple-600 dark:text-purple-400'
           )}
         />
       )}
       <div className="flex-1 min-w-0">
-        <button
-          type="button"
-          onClick={e => onClick(e.metaKey)}
-          disabled={isCreating}
-          className="w-full min-w-0 text-left focus:outline-none disabled:cursor-not-allowed"
-        >
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">
-              #{issue.number}
+        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+          <button
+            type="button"
+            onClick={e => onClick(e.metaKey || e.ctrlKey)}
+            disabled={isCreating}
+            className="min-w-0 text-left text-sm font-semibold leading-5 hover:text-primary focus:outline-none disabled:cursor-not-allowed"
+          >
+            {issue.title}
+          </button>
+          {isNewIssue(issue.created_at) && (
+            <span className="shrink-0 rounded-full bg-success/10 px-1.5 py-px text-[11px] font-medium text-success border border-success/20">
+              New
             </span>
-            <span className="text-sm font-medium truncate">{issue.title}</span>
-            {isNewIssue(issue.created_at) && (
-              <span className="shrink-0 rounded-full bg-green-500/10 px-1.5 py-0.5 text-[10px] font-medium text-green-600 border border-green-500/20">
-                New
-              </span>
-            )}
-          </div>
-        </button>
-        {issue.labels.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-1">
-            {issue.labels.slice(0, 3).map(label =>
-              onLabelClick ? (
-                <button
-                  key={label.name}
-                  type="button"
-                  className="px-1.5 py-0.5 text-xs rounded-full cursor-pointer hover:opacity-75 transition-opacity"
-                  style={{
-                    backgroundColor: `#${label.color}20`,
-                    color: `#${label.color}`,
-                    border: `1px solid #${label.color}40`,
-                  }}
-                  onClick={e => {
-                    e.stopPropagation()
-                    onLabelClick(label.name)
-                  }}
-                >
-                  {label.name}
-                </button>
-              ) : (
-                <span
-                  key={label.name}
-                  className="px-1.5 py-0.5 text-xs rounded-full"
-                  style={{
-                    backgroundColor: `#${label.color}20`,
-                    color: `#${label.color}`,
-                    border: `1px solid #${label.color}40`,
-                  }}
-                >
-                  {label.name}
-                </span>
-              )
-            )}
-            {issue.labels.length > 3 && (
-              <span className="text-xs text-muted-foreground">
-                +{issue.labels.length - 3}
-              </span>
-            )}
-          </div>
-        )}
+          )}
+          <LabelPills labels={issue.labels ?? []} onLabelClick={onLabelClick} />
+        </div>
+        <div className="mt-0.5 text-xs text-muted-foreground truncate">
+          <OpenedMeta
+            number={issue.number}
+            createdAt={issue.created_at}
+            author={issue.author?.login}
+          />
+        </div>
       </div>
+      <ContextLinkBadge matches={contextMatches} />
       <div className="shrink-0 flex items-center gap-1 self-center">
         <ItemActions
           label="Issue"
@@ -201,6 +238,7 @@ export function IssueItem({
           isCreating={isCreating}
           onPreview={onPreview}
           onInvestigate={onInvestigate}
+          onInvestigateInNewSession={onInvestigateInNewSession}
         />
       </div>
     </div>
@@ -212,6 +250,7 @@ export interface PRItemProps {
   index: number
   isSelected: boolean
   isCreating: boolean
+  contextMatches?: ContextLinkMatch[]
   isStacking: boolean
   isChecked?: boolean
   onCheckedChange?: (checked: boolean) => void
@@ -228,6 +267,7 @@ export function PRItem({
   index,
   isSelected,
   isCreating,
+  contextMatches,
   isStacking,
   isChecked = false,
   onCheckedChange,
@@ -243,13 +283,7 @@ export function PRItem({
     <div
       data-item-index={index}
       onMouseEnter={onMouseEnter}
-      className={cn(
-        'group w-full flex items-start gap-3 px-3 py-2.5 sm:py-2 text-left transition-colors',
-        'hover:bg-accent',
-        isSelected && 'bg-accent',
-        isChecked && !isSelected && 'bg-accent/50',
-        busy && 'opacity-50'
-      )}
+      className={githubRowClass(isSelected, isChecked, busy)}
     >
       {onCheckedChange && (
         <ItemSelectCheckbox
@@ -265,78 +299,42 @@ export function PRItem({
         <GitPullRequest
           className={cn(
             'h-4 w-4 mt-0.5 flex-shrink-0',
-            pr.state === 'OPEN'
-              ? 'text-green-500'
-              : pr.state === 'MERGED'
-                ? 'text-purple-500'
-                : 'text-red-500'
+            pr.isDraft
+              ? 'text-muted-foreground'
+              : pr.state === 'OPEN'
+                ? 'text-success'
+                : pr.state === 'MERGED'
+                  ? 'text-purple-600 dark:text-purple-400'
+                  : 'text-destructive'
           )}
         />
       )}
       <div className="flex-1 min-w-0">
-        <button
-          type="button"
-          onClick={e => onClick(e.metaKey)}
-          disabled={busy}
-          className="w-full min-w-0 text-left focus:outline-none disabled:cursor-not-allowed"
-        >
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">#{pr.number}</span>
-            <span className="text-sm font-medium truncate">{pr.title}</span>
-            {pr.isDraft && (
-              <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                Draft
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2 mt-0.5">
-            <span className="text-xs text-muted-foreground truncate">
-              {pr.headRefName} → {pr.baseRefName}
+        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+          <button
+            type="button"
+            onClick={e => onClick(e.metaKey || e.ctrlKey)}
+            disabled={busy}
+            className="min-w-0 text-left text-sm font-semibold leading-5 hover:text-primary focus:outline-none disabled:cursor-not-allowed"
+          >
+            {pr.title}
+          </button>
+          {pr.isDraft && (
+            <span className="shrink-0 rounded-full border border-border px-1.5 py-px text-[11px] font-medium text-muted-foreground">
+              Draft
             </span>
-          </div>
-        </button>
-        {pr.labels.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-1">
-            {pr.labels.slice(0, 3).map(label =>
-              onLabelClick ? (
-                <button
-                  key={label.name}
-                  type="button"
-                  className="px-1.5 py-0.5 text-xs rounded-full cursor-pointer hover:opacity-75 transition-opacity"
-                  style={{
-                    backgroundColor: `#${label.color}20`,
-                    color: `#${label.color}`,
-                    border: `1px solid #${label.color}40`,
-                  }}
-                  onClick={e => {
-                    e.stopPropagation()
-                    onLabelClick(label.name)
-                  }}
-                >
-                  {label.name}
-                </button>
-              ) : (
-                <span
-                  key={label.name}
-                  className="px-1.5 py-0.5 text-xs rounded-full"
-                  style={{
-                    backgroundColor: `#${label.color}20`,
-                    color: `#${label.color}`,
-                    border: `1px solid #${label.color}40`,
-                  }}
-                >
-                  {label.name}
-                </span>
-              )
-            )}
-            {pr.labels.length > 3 && (
-              <span className="text-xs text-muted-foreground">
-                +{pr.labels.length - 3}
-              </span>
-            )}
-          </div>
-        )}
+          )}
+          <LabelPills labels={pr.labels ?? []} onLabelClick={onLabelClick} />
+        </div>
+        <div className="mt-0.5 text-xs text-muted-foreground truncate">
+          <OpenedMeta
+            number={pr.number}
+            createdAt={pr.created_at}
+            author={pr.author?.login}
+          />
+        </div>
       </div>
+      <ContextLinkBadge matches={contextMatches} />
       <div className="shrink-0 flex items-center gap-1 self-center">
         <ItemActions
           label="PR"
@@ -410,7 +408,7 @@ export function BranchItem({
       )}
       <button
         type="button"
-        onClick={e => onClick(e.metaKey)}
+        onClick={e => onClick(e.metaKey || e.ctrlKey)}
         disabled={isCreating}
         className="flex-1 min-w-0 text-left focus:outline-none disabled:cursor-not-allowed"
       >
@@ -425,10 +423,10 @@ export function BranchItem({
 // =============================================================================
 
 const SEVERITY_COLORS: Record<string, string> = {
-  critical: 'bg-red-500/10 text-red-600 border-red-500/20',
-  high: 'bg-orange-500/10 text-orange-600 border-orange-500/20',
-  medium: 'bg-yellow-500/10 text-yellow-600 border-yellow-500/20',
-  low: 'bg-blue-500/10 text-blue-600 border-blue-500/20',
+  critical: 'bg-destructive/10 text-destructive border-destructive/20',
+  high: 'bg-warning/10 text-warning border-warning/20',
+  medium: 'bg-warning/10 text-warning border-warning/20',
+  low: 'bg-info/10 text-info border-info/20',
 }
 
 function ItemActions({
@@ -438,6 +436,7 @@ function ItemActions({
   isCreating,
   onPreview,
   onInvestigate,
+  onInvestigateInNewSession,
 }: {
   label: string
   previewLabel: string
@@ -445,6 +444,7 @@ function ItemActions({
   isCreating: boolean
   onPreview: () => void
   onInvestigate: (background: boolean) => void
+  onInvestigateInNewSession?: () => void
 }) {
   const isMobile = useIsMobile()
 
@@ -467,11 +467,17 @@ function ItemActions({
             Preview
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => onInvestigate(false)}>
-            <Wand2 className="h-4 w-4 text-current dark:text-yellow-400" />
+            <Wand2 className="h-4 w-4 text-current" />
             Investigate
           </DropdownMenuItem>
+          {onInvestigateInNewSession && (
+            <DropdownMenuItem onClick={onInvestigateInNewSession}>
+              <Wand2 className="h-4 w-4 text-current" />
+              Investigate in the Current Worktree
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem onClick={() => onInvestigate(true)}>
-            <Wand2 className="h-4 w-4 text-current dark:text-yellow-400" />
+            <Wand2 className="h-4 w-4 text-current" />
             Investigate in Background
           </DropdownMenuItem>
         </DropdownMenuContent>
@@ -499,6 +505,25 @@ function ItemActions({
           {previewLabel} ({getModifierSymbol()}O)
         </TooltipContent>
       </Tooltip>
+      {onInvestigateInNewSession && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label={`${investigateLabel} in the current worktree`}
+              onClick={e => {
+                e.stopPropagation()
+                onInvestigateInNewSession()
+              }}
+              disabled={isCreating}
+              className="inline-flex h-6 w-6 items-center justify-center rounded px-1 text-foreground/80 transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30"
+            >
+              <MessageSquarePlus className="h-3.5 w-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>Investigate in the current worktree</TooltipContent>
+        </Tooltip>
+      )}
       <Tooltip>
         <TooltipTrigger asChild>
           <button
@@ -511,7 +536,7 @@ function ItemActions({
             disabled={isCreating}
             className="inline-flex h-6 w-6 items-center justify-center rounded px-1 text-foreground/80 transition-colors hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
           >
-            <Wand2 className="h-3 w-3 text-current dark:text-yellow-400" />
+            <Wand2 className="h-3 w-3 text-current" />
           </button>
         </TooltipTrigger>
         <TooltipContent>
@@ -528,6 +553,7 @@ export interface SecurityAlertItemProps {
   index: number
   isSelected: boolean
   isCreating: boolean
+  contextMatches?: ContextLinkMatch[]
   isChecked?: boolean
   onCheckedChange?: (checked: boolean) => void
   onMouseEnter: () => void
@@ -541,6 +567,7 @@ export function SecurityAlertItem({
   index,
   isSelected,
   isCreating,
+  contextMatches,
   isChecked = false,
   onCheckedChange,
   onMouseEnter,
@@ -578,13 +605,13 @@ export function SecurityAlertItem({
         <Shield
           className={cn(
             'h-4 w-4 mt-0.5 flex-shrink-0',
-            alert.state === 'open' ? 'text-orange-500' : 'text-muted-foreground'
+            alert.state === 'open' ? 'text-warning' : 'text-muted-foreground'
           )}
         />
       )}
       <button
         type="button"
-        onClick={e => onClick(e.metaKey)}
+        onClick={e => onClick(e.metaKey || e.ctrlKey)}
         disabled={isCreating}
         className="flex-1 min-w-0 text-left focus:outline-none disabled:cursor-not-allowed"
       >
@@ -611,6 +638,7 @@ export function SecurityAlertItem({
           </span>
         </div>
       </button>
+      <ContextLinkBadge matches={contextMatches} />
       <div className="shrink-0 flex items-center gap-1 self-center">
         <ItemActions
           label="Alert"
@@ -634,6 +662,7 @@ export interface AdvisoryItemProps {
   index: number
   isSelected: boolean
   isCreating: boolean
+  contextMatches?: ContextLinkMatch[]
   isChecked?: boolean
   onCheckedChange?: (checked: boolean) => void
   onMouseEnter: () => void
@@ -647,6 +676,7 @@ export function AdvisoryItem({
   index,
   isSelected,
   isCreating,
+  contextMatches,
   isChecked = false,
   onCheckedChange,
   onMouseEnter,
@@ -685,14 +715,14 @@ export function AdvisoryItem({
           className={cn(
             'h-4 w-4 mt-0.5 flex-shrink-0',
             advisory.state === 'published'
-              ? 'text-orange-500'
+              ? 'text-warning'
               : 'text-muted-foreground'
           )}
         />
       )}
       <button
         type="button"
-        onClick={e => onClick(e.metaKey)}
+        onClick={e => onClick(e.metaKey || e.ctrlKey)}
         disabled={isCreating}
         className="flex-1 min-w-0 text-left focus:outline-none disabled:cursor-not-allowed"
       >
@@ -721,6 +751,7 @@ export function AdvisoryItem({
           </span>
         </div>
       </button>
+      <ContextLinkBadge matches={contextMatches} />
       <div className="shrink-0 flex items-center gap-1 self-center">
         <ItemActions
           label="Advisory"

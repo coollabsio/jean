@@ -1,4 +1,4 @@
-import { Bug } from 'lucide-react'
+import { Bug } from '@/components/icons/reicon'
 import { toast } from 'sonner'
 import type { AppCommand, CommandContext } from './types'
 import { notifications } from '@/lib/notifications'

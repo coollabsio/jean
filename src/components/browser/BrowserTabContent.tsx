@@ -265,13 +265,26 @@ export const BrowserTabContent = memo(function BrowserTabContent({
     if (!isNativeApp()) return
     const win = getCurrentWindow()
     let unlisten: (() => void) | null = null
+    let cancelled = false
+
+    const dispose = (listener: () => void) => {
+      try {
+        void Promise.resolve(listener()).catch(() => undefined)
+      } catch {
+        // Tauri can remove its JS listener registry before React cleanup runs.
+      }
+    }
+
     void win
       .onScaleChanged(() => scheduleFlush())
       .then(fn => {
-        unlisten = fn
+        if (cancelled) dispose(fn)
+        else unlisten = fn
       })
+      .catch(() => undefined)
     return () => {
-      if (unlisten) unlisten()
+      cancelled = true
+      if (unlisten) dispose(unlisten)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])

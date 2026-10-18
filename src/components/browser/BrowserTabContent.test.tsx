@@ -11,14 +11,16 @@ const browserBackendMock = vi.hoisted(() => ({
   close: vi.fn(),
 }))
 
+const windowMock = vi.hoisted(() => ({
+  onScaleChanged: vi.fn(),
+}))
+
 vi.mock('@/hooks/useBrowserPane', () => ({
   browserBackend: browserBackendMock,
 }))
 
 vi.mock('@tauri-apps/api/window', () => ({
-  getCurrentWindow: () => ({
-    onScaleChanged: vi.fn().mockResolvedValue(vi.fn()),
-  }),
+  getCurrentWindow: () => windowMock,
 }))
 
 class ResizeObserverMock {
@@ -28,6 +30,7 @@ class ResizeObserverMock {
 
 describe('BrowserTabContent', () => {
   beforeEach(() => {
+    vi.stubGlobal('__TAURI_INTERNALS__', { invoke: vi.fn() })
     vi.stubGlobal('ResizeObserver', ResizeObserverMock)
     vi.stubGlobal(
       'requestAnimationFrame',
@@ -39,6 +42,7 @@ describe('BrowserTabContent', () => {
     browserBackendMock.setVisible.mockResolvedValue(undefined)
     browserBackendMock.hasActive.mockResolvedValue(false)
     browserBackendMock.close.mockResolvedValue(undefined)
+    windowMock.onScaleChanged.mockResolvedValue(vi.fn())
   })
 
   afterEach(() => {
@@ -58,5 +62,25 @@ describe('BrowserTabContent', () => {
     })
     expect(browserBackendMock.setBounds).not.toHaveBeenCalled()
     expect(browserBackendMock.setVisible).not.toHaveBeenCalled()
+  })
+
+  it('cleans up a scale listener that finishes registering after unmount', async () => {
+    let finishRegistration: ((listener: () => void) => void) | undefined
+    const listener = vi.fn().mockRejectedValue(
+      new Error("undefined is not an object (evaluating 'listeners[eventId].handlerId')")
+    )
+    windowMock.onScaleChanged.mockReturnValue(
+      new Promise(resolve => {
+        finishRegistration = resolve
+      })
+    )
+
+    const { unmount } = render(
+      <BrowserTabContent tabId="tab-1" isActive={false} />
+    )
+    unmount()
+    finishRegistration?.(listener)
+
+    await waitFor(() => expect(listener).toHaveBeenCalledTimes(1))
   })
 })

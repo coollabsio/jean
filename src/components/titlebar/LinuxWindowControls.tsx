@@ -1,5 +1,5 @@
 import type React from 'react'
-import { Copy, Minus, Square, X } from 'lucide-react'
+import { Copy, Minus, Square, X } from '@/components/icons/reicon'
 import { cn } from '@/lib/utils'
 import { useWindowMaximized } from '@/hooks/use-window-maximized'
 
@@ -47,7 +47,7 @@ export function LinuxWindowControls() {
       <ControlButton
         onClick={handleClose}
         aria-label="Close"
-        className="hover:bg-red-600 hover:text-white"
+        className="hover:bg-destructive hover:text-white"
       >
         <X className="size-3.5" />
       </ControlButton>

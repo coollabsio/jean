@@ -13,7 +13,10 @@ import {
   closeActiveTerminalTabForShortcut,
   findKeybindingAction,
   getTerminalShortcutWorktreeId,
+  hasBlockingOpenOverlay,
+  handleRunEnvironmentStarted,
   isPlainSessionTerminalFocused,
+  resolveShortcutWithBypass,
   shouldAllowKeybindingThroughOpenOverlay,
   shouldLetChatInputHandleAction,
   shouldLetPlanDialogHandleAction,
@@ -46,6 +49,102 @@ describe('shouldLetChatInputHandleAction', () => {
     expect(shouldLetChatInputHandleAction('approve_plan', input, true)).toBe(
       false
     )
+  })
+
+  it('lets Cmd/Ctrl+Arrow move the caret when it is not at the text edge', () => {
+    const input = document.createElement('textarea')
+    input.value = 'draft'
+
+    input.setSelectionRange(2, 2)
+    expect(shouldLetChatInputHandleAction('next_session', input, false)).toBe(
+      true
+    )
+    expect(
+      shouldLetChatInputHandleAction('previous_session', input, false)
+    ).toBe(true)
+
+    // A text selection always belongs to the field
+    input.setSelectionRange(0, 5)
+    expect(shouldLetChatInputHandleAction('next_session', input, false)).toBe(
+      true
+    )
+  })
+
+  it('switches sessions when the caret is already at the text edge', () => {
+    const input = document.createElement('textarea')
+    input.value = 'draft'
+
+    input.setSelectionRange(5, 5)
+    expect(shouldLetChatInputHandleAction('next_session', input, false)).toBe(
+      false
+    )
+    expect(
+      shouldLetChatInputHandleAction('previous_session', input, false)
+    ).toBe(true)
+
+    input.setSelectionRange(0, 0)
+    expect(
+      shouldLetChatInputHandleAction('previous_session', input, false)
+    ).toBe(false)
+    expect(shouldLetChatInputHandleAction('next_session', input, false)).toBe(
+      true
+    )
+  })
+
+  it('switches sessions from an empty text field or a non-text target', () => {
+    const input = document.createElement('textarea')
+
+    expect(shouldLetChatInputHandleAction('next_session', input, false)).toBe(
+      false
+    )
+    expect(
+      shouldLetChatInputHandleAction('previous_session', document.body, false)
+    ).toBe(false)
+  })
+})
+
+describe('resolveShortcutWithBypass', () => {
+  it('maps the modifier-decorated close shortcut to the close action and flags bypass', () => {
+    // Shift held → `mod+shift+w`, which is unbound; strip Shift → `mod+w`.
+    expect(
+      resolveShortcutWithBypass('mod+shift+w', DEFAULT_KEYBINDINGS, 'shift')
+    ).toEqual({
+      matchedAction: 'close_session_or_worktree',
+      bypassConfirm: true,
+    })
+  })
+
+  it('maps the plain close shortcut without a bypass flag', () => {
+    expect(
+      resolveShortcutWithBypass('mod+w', DEFAULT_KEYBINDINGS, 'shift')
+    ).toEqual({
+      matchedAction: 'close_session_or_worktree',
+      bypassConfirm: false,
+    })
+  })
+
+  it('does not strip-and-retry when the bypass modifier is off', () => {
+    expect(
+      resolveShortcutWithBypass('mod+shift+w', DEFAULT_KEYBINDINGS, 'none')
+    ).toEqual({ matchedAction: null, bypassConfirm: false })
+  })
+
+  it('rejects the retry when the stripped shortcut maps to a non-close action', () => {
+    // Alt held → `mod+alt+t` (unbound); strip Alt → `mod+t` = new_session.
+    // Narrow acceptance: only the close action may ride the stripped retry.
+    expect(
+      resolveShortcutWithBypass('mod+alt+t', DEFAULT_KEYBINDINGS, 'alt')
+    ).toEqual({ matchedAction: null, bypassConfirm: false })
+  })
+
+  it('prefers a direct user binding of the decorated shortcut over the bypass', () => {
+    const keybindings = {
+      ...DEFAULT_KEYBINDINGS,
+      new_worktree: 'mod+shift+w',
+    }
+    expect(
+      resolveShortcutWithBypass('mod+shift+w', keybindings, 'shift')
+    ).toEqual({ matchedAction: 'new_worktree', bypassConfirm: false })
   })
 })
 
@@ -227,11 +326,27 @@ describe('useMainWindowEventListeners terminal shortcuts', () => {
       updatePrModalOpen: false,
       planDialogOpen: false,
       gitDiffModalOpen: false,
-      githubDashboardOpen: false,
       sessionPrimarySurface: {},
       sessionTerminalIds: {},
       newSessionModeTarget: null,
     })
+  })
+
+  it('shows an MCP-started run in the active worktree modal', () => {
+    useUIStore.setState({
+      sessionChatModalOpen: true,
+      sessionChatModalWorktreeId: 'worktree-1',
+    })
+
+    handleRunEnvironmentStarted({
+      worktreeId: 'worktree-1',
+      terminalId: 'run-from-mcp',
+      command: 'bun run dev',
+    })
+
+    const state = useTerminalStore.getState()
+    expect(state.terminals['worktree-1']?.[0]?.id).toBe('run-from-mcp')
+    expect(state.modalTerminalOpen['worktree-1']).toBe(true)
   })
 
   it('maps Option+Cmd arrow shortcuts to medium chat scroll actions', () => {
@@ -519,7 +634,9 @@ describe('shouldLetPlanDialogHandleAction', () => {
   })
 
   it('returns false for non-approve actions or when the dialog is closed', () => {
-    expect(shouldLetPlanDialogHandleAction('open_plan', true)).toBe(false)
+    expect(shouldLetPlanDialogHandleAction('focus_chat_input', true)).toBe(
+      false
+    )
     expect(shouldLetPlanDialogHandleAction('approve_plan', false)).toBe(false)
   })
 })
@@ -529,6 +646,7 @@ describe('dialog overlay keybinding passthrough', () => {
     useUIStore.setState({
       gitDiffModalOpen: false,
       openInModalOpen: false,
+      commandPaletteOpen: false,
     })
   })
 
@@ -563,6 +681,24 @@ describe('dialog overlay keybinding passthrough', () => {
     ).toBe(false)
   })
 
+  it('lets the command palette shortcut close the open palette only', () => {
+    expect(
+      shouldAllowKeybindingThroughOpenOverlay(
+        'open_command_palette',
+        useUIStore.getState()
+      )
+    ).toBe(false)
+
+    useUIStore.setState({ commandPaletteOpen: true })
+
+    expect(
+      shouldAllowKeybindingThroughOpenOverlay(
+        'open_command_palette',
+        useUIStore.getState()
+      )
+    ).toBe(true)
+  })
+
   it('does not allow Open In through other dialogs', () => {
     expect(
       shouldAllowKeybindingThroughOpenOverlay(
@@ -570,6 +706,25 @@ describe('dialog overlay keybinding passthrough', () => {
         useUIStore.getState()
       )
     ).toBe(false)
+  })
+
+  it('does not treat the floating terminal host as a blocking dialog', () => {
+    const terminalHost = document.createElement('div')
+    terminalHost.setAttribute('role', 'dialog')
+    terminalHost.setAttribute('data-state', 'open')
+    terminalHost.setAttribute('data-terminal-host', 'true')
+    document.body.appendChild(terminalHost)
+
+    expect(hasBlockingOpenOverlay()).toBe(false)
+  })
+
+  it('still treats other open dialogs as blocking overlays', () => {
+    const dialog = document.createElement('div')
+    dialog.setAttribute('role', 'dialog')
+    dialog.setAttribute('data-state', 'open')
+    document.body.appendChild(dialog)
+
+    expect(hasBlockingOpenOverlay()).toBe(true)
   })
 
   it.each(['toggle_zen_mode', 'clear_session_context'] as const)(
@@ -625,6 +780,13 @@ describe('applySessionRenamedToCaches', () => {
         },
       ],
     })
+    queryClient.setQueryData(['recent-worktrees', 'projects', 10, null], {
+      items: [
+        {
+          session: sessions.sessions[0],
+        },
+      ],
+    })
   }
 
   it('updates base sessions, with-counts, session detail, and all-sessions caches', () => {
@@ -649,15 +811,70 @@ describe('applySessionRenamedToCaches', () => {
       chatQueryKeys.session(sessionId)
     )
     const all = queryClient.getQueryData<AllSessionsResponse>(['all-sessions'])
+    const recent = queryClient.getQueryData<{
+      items: { session: Session }[]
+    }>(['recent-worktrees', 'projects', 10, null])
 
     expect(base?.sessions[0]?.name).toBe('Fix auto naming')
     expect(withCounts?.sessions[0]?.name).toBe('Fix auto naming')
     expect(detail?.name).toBe('Fix auto naming')
     expect(all?.entries[0]?.sessions[0]?.name).toBe('Fix auto naming')
+    expect(recent?.items[0]?.session.name).toBe('Fix auto naming')
   })
 })
 
 describe('applyCacheInvalidationKeys', () => {
+  it('refreshes the multi-server sidebar project list on project changes', () => {
+    const queryClient = new QueryClient()
+    const multiServerKey = ['multi-server', 'projects', 'server-1:true']
+    queryClient.setQueryData(projectsQueryKeys.list(), [])
+    queryClient.setQueryData(multiServerKey, [])
+
+    applyCacheInvalidationKeys(queryClient, ['projects'])
+
+    expect(
+      queryClient.getQueryState(projectsQueryKeys.list())?.isInvalidated
+    ).toBe(true)
+    expect(queryClient.getQueryState(multiServerKey)?.isInvalidated).toBe(true)
+  })
+
+  it('refreshes Recent when a first prompt is persisted', () => {
+    const queryClient = new QueryClient()
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    applyCacheInvalidationKeys(queryClient, ['recent-worktrees'])
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['recent-worktrees'],
+    })
+    expect(invalidateSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('refreshes the finished-sessions bell when a new run starts', () => {
+    const queryClient = new QueryClient()
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    applyCacheInvalidationKeys(queryClient, ['unread-sessions'])
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['unread-session-count'],
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['all-sessions'] })
+    expect(invalidateSpy).toHaveBeenCalledTimes(2)
+  })
+
+  it('refreshes Claude usage when a run reports rate-limit usage', () => {
+    const queryClient = new QueryClient()
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    applyCacheInvalidationKeys(queryClient, ['claude-usage'])
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['claude-cli', 'usage'],
+    })
+    expect(invalidateSpy).toHaveBeenCalledTimes(1)
+  })
+
   it('invalidates chat queries and all-sessions for sessions keys', () => {
     const queryClient = new QueryClient()
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
@@ -669,6 +886,12 @@ describe('applyCacheInvalidationKeys', () => {
     })
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ['all-sessions'],
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: chatQueryKeys.unreadSessionCount(),
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['recent-worktrees'],
     })
   })
 
@@ -701,5 +924,16 @@ describe('applyCacheInvalidationKeys', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ['all-sessions'],
     })
+  })
+})
+
+describe('removed keybindings', () => {
+  it('ignores obsolete shortcuts saved in preferences', () => {
+    expect(
+      findKeybindingAction('mod+shift+d', {
+        ...DEFAULT_KEYBINDINGS,
+        open_github_dashboard: 'mod+shift+d',
+      })
+    ).toBeNull()
   })
 })

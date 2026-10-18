@@ -32,6 +32,18 @@ export function isBackendUsable(
   return authenticated
 }
 
+/** Timeout is unknown, not signed-out — don't collapse it into `false`. */
+function resolvedAuth(
+  installed: boolean | undefined,
+  auth:
+    | { authenticated?: boolean; timedOut?: boolean; timed_out?: boolean }
+    | undefined
+): boolean | undefined {
+  if (!installed) return undefined
+  if (auth?.timedOut || auth?.timed_out) return undefined
+  return auth?.authenticated
+}
+
 /**
  * Returns backends whose CLIs are currently installed.
  *
@@ -40,17 +52,21 @@ export function isBackendUsable(
  * and shown in backend settings — hiding unauthenticated backends made defaults
  * and model pickers look broken when auth probes false-negative (issue #627/#649).
  */
-export function useInstalledBackends(options?: { enabled?: boolean }) {
+export function useInstalledBackends(options?: {
+  enabled?: boolean
+  serverId?: string
+}) {
   const enabled = options?.enabled ?? true
-  const claude = useClaudeCliStatus({ enabled })
-  const codex = useCodexCliStatus({ enabled })
-  const opencode = useOpencodeCliStatus({ enabled })
-  const cursor = useCursorCliStatus({ enabled })
-  const pi = usePiCliStatus({ enabled })
-  const commandcode = useCommandCodeCliStatus({ enabled })
-  const grok = useGrokCliStatus({ enabled })
-  const kimi = useKimiCliStatus({ enabled })
-  const antigravity = useAntigravityCliStatus({ enabled })
+  const serverId = options?.serverId
+  const claude = useClaudeCliStatus({ enabled, serverId })
+  const codex = useCodexCliStatus({ enabled, serverId })
+  const opencode = useOpencodeCliStatus({ enabled, serverId })
+  const cursor = useCursorCliStatus({ enabled, serverId })
+  const pi = usePiCliStatus({ enabled, serverId })
+  const commandcode = useCommandCodeCliStatus({ enabled, serverId })
+  const grok = useGrokCliStatus({ enabled, serverId })
+  const kimi = useKimiCliStatus({ enabled, serverId })
+  const antigravity = useAntigravityCliStatus({ enabled, serverId })
 
   const installedBackends = useMemo(() => {
     const backends: CliBackend[] = []
@@ -139,46 +155,42 @@ export function useBackendAuthStatuses(options?: { enabled?: boolean }) {
 
   const authByBackend = useMemo(() => {
     const map: Partial<Record<CliBackend, boolean | undefined>> = {
-      claude: claude.data?.installed
-        ? claudeAuth.data?.authenticated
-        : undefined,
-      codex: codex.data?.installed ? codexAuth.data?.authenticated : undefined,
-      opencode: opencode.data?.installed
-        ? opencodeAuth.data?.authenticated
-        : undefined,
-      cursor: cursor.data?.installed
-        ? cursorAuth.data?.authenticated
-        : undefined,
-      pi: pi.data?.installed ? piAuth.data?.authenticated : undefined,
-      commandcode: commandcode.data?.installed
-        ? commandcodeAuth.data?.authenticated
-        : undefined,
-      grok: grok.data?.installed ? grokAuth.data?.authenticated : undefined,
-      kimi: kimi.data?.installed ? kimiAuth.data?.authenticated : undefined,
-      antigravity: antigravity.data?.installed
-        ? antigravityAuth.data?.authenticated
-        : undefined,
+      claude: resolvedAuth(claude.data?.installed, claudeAuth.data),
+      codex: resolvedAuth(codex.data?.installed, codexAuth.data),
+      opencode: resolvedAuth(opencode.data?.installed, opencodeAuth.data),
+      cursor: resolvedAuth(cursor.data?.installed, cursorAuth.data),
+      pi: resolvedAuth(pi.data?.installed, piAuth.data),
+      commandcode: resolvedAuth(
+        commandcode.data?.installed,
+        commandcodeAuth.data
+      ),
+      grok: resolvedAuth(grok.data?.installed, grokAuth.data),
+      kimi: resolvedAuth(kimi.data?.installed, kimiAuth.data),
+      antigravity: resolvedAuth(
+        antigravity.data?.installed,
+        antigravityAuth.data
+      ),
     }
     return map
   }, [
     claude.data?.installed,
-    claudeAuth.data?.authenticated,
+    claudeAuth.data,
     codex.data?.installed,
-    codexAuth.data?.authenticated,
+    codexAuth.data,
     opencode.data?.installed,
-    opencodeAuth.data?.authenticated,
+    opencodeAuth.data,
     cursor.data?.installed,
-    cursorAuth.data?.authenticated,
+    cursorAuth.data,
     pi.data?.installed,
-    piAuth.data?.authenticated,
+    piAuth.data,
     commandcode.data?.installed,
-    commandcodeAuth.data?.authenticated,
+    commandcodeAuth.data,
     grok.data?.installed,
-    grokAuth.data?.authenticated,
+    grokAuth.data,
     kimi.data?.installed,
-    kimiAuth.data?.authenticated,
+    kimiAuth.data,
     antigravity.data?.installed,
-    antigravityAuth.data?.authenticated,
+    antigravityAuth.data,
   ])
 
   const isStatusLoading =

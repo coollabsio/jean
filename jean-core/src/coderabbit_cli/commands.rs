@@ -363,6 +363,7 @@ pub async fn install_coderabbit_cli(app: AppHandle, version: Option<String>) -> 
     }
 
     emit_progress(&app, "complete", "CodeRabbit CLI installed.", 100);
+    crate::expose_managed_cli("coderabbit", &get_coderabbit_binary_path(&app)?);
     Ok(())
 }
 

@@ -1,17 +1,20 @@
-//! Jean agent browser: persistent Chromium profile + agent-browser MCP install.
+//! Jean agent browser: agent-browser install + MCP config for CLI backends.
 //!
 //! Engine: [vercel-labs/agent-browser](https://github.com/vercel-labs/agent-browser)
-//! (Vercel Labs). Jean owns the profile directory under app data and writes
-//! backend MCP configs so Claude/Codex/etc. can drive a browser the user logged
-//! into manually. The browser itself is Chromium / Chrome for Testing.
+//! (Vercel Labs). The browser itself is Chromium / Chrome for Testing.
+//!
+//! Each Jean session gets its own agent-browser session (`AGENT_BROWSER_SESSION`
+//! set per run), so parallel sessions get separate Chrome instances with
+//! temporary profiles instead of waiting for one shared browser. Logins are
+//! shared through one restore key: cookies and localStorage are saved when a
+//! session's browser closes and are loaded when the next one starts.
 
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
 
-use crate::platform::{detect_cli_in_path, silent_command};
+use crate::platform::{detect_cli_in_path, host_cli_command};
 
 /// MCP server key written into CLI configs.
 pub const MCP_SERVER_NAME: &str = "agent-browser";
@@ -19,11 +22,31 @@ pub const MCP_SERVER_NAME: &str = "agent-browser";
 /// npm package name for agent-browser.
 pub const NPM_PACKAGE: &str = "agent-browser";
 
+/// Explicit latest tag is required for updates. A plain `npm install
+/// agent-browser` keeps the existing package.json caret range, and npm treats
+/// `^0.37.1` as `<0.38.0` for a pre-1.0 package.
+const NPM_INSTALL_SPEC: &str = "agent-browser@latest";
+
 /// Jean-managed npm install directory under app data.
 pub const CLI_DIR_NAME: &str = "agent-browser-cli";
 
-/// Env var agent-browser uses for a persistent profile directory.
-const PROFILE_ENV: &str = "AGENT_BROWSER_PROFILE";
+/// Env var that selects the agent-browser session (one daemon + browser each).
+pub const SESSION_ENV: &str = "AGENT_BROWSER_SESSION";
+
+/// Env var + shared key for agent-browser auto-save/restore of cookies and
+/// localStorage. One key for all sessions keeps logins shared between them.
+const RESTORE_ENV: &str = "AGENT_BROWSER_RESTORE";
+const RESTORE_KEY: &str = "jean";
+
+/// Close an idle session's browser after 15 minutes to free memory. The
+/// restore state is saved on this shutdown too.
+const IDLE_TIMEOUT_ENV: &str = "AGENT_BROWSER_IDLE_TIMEOUT_MS";
+const IDLE_TIMEOUT_MS: &str = "900000";
+
+/// agent-browser session name for a Jean session.
+pub fn session_name(jean_session_id: &str) -> String {
+    format!("jean-{jean_session_id}")
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,10 +55,6 @@ pub struct AgentBrowserStatus {
     pub installed: bool,
     pub binary_path: Option<String>,
     pub version: Option<String>,
-    /// Absolute path to Jean-managed Chromium user-data-dir.
-    pub profile_path: String,
-    /// Whether the profile directory exists on disk.
-    pub profile_exists: bool,
     /// Jean-managed npm install directory (may not exist yet).
     pub managed_dir: String,
     /// Whether the binary is Jean-managed under app data.
@@ -58,23 +77,36 @@ pub struct AgentBrowserInstallResult {
     pub message: String,
 }
 
-struct McpEntry {
-    command: String,
-    profile_path: String,
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentBrowserUpdateStatus {
+    pub installed: bool,
+    pub current_version: Option<String>,
+    pub latest_version: Option<String>,
+    pub update_available: bool,
 }
 
+struct McpEntry {
+    command: String,
+}
+
+/// Env written into every backend's MCP entry. The per-session
+/// `AGENT_BROWSER_SESSION` is not here: Jean sets it on each run.
+const ENTRY_ENV: [(&str, &str); 2] = [
+    (RESTORE_ENV, RESTORE_KEY),
+    (IDLE_TIMEOUT_ENV, IDLE_TIMEOUT_MS),
+];
+
 impl McpEntry {
-    fn new(command: String, profile_path: String) -> Self {
-        Self {
-            command,
-            profile_path,
-        }
+    fn new(command: String) -> Self {
+        Self { command }
     }
 
     fn env_map(&self) -> serde_json::Map<String, Value> {
-        let mut env = serde_json::Map::new();
-        env.insert(PROFILE_ENV.into(), self.profile_path.clone().into());
-        env
+        ENTRY_ENV
+            .iter()
+            .map(|(key, value)| (key.to_string(), Value::from(*value)))
+            .collect()
     }
 
     fn claude_server_json(&self) -> Value {
@@ -113,12 +145,15 @@ impl McpEntry {
     }
 
     fn codex_snippet(&self) -> String {
+        let env = ENTRY_ENV
+            .iter()
+            .map(|(key, value)| format!("{key} = \"{value}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
         format!(
-            "[mcp_servers.{}]\ncommand = \"{}\"\nargs = [\"mcp\"]\nenv = {{ {} = \"{}\" }}\nenabled = true\n",
+            "[mcp_servers.{}]\ncommand = \"{}\"\nargs = [\"mcp\"]\nenv = {{ {env} }}\nenabled = true\n",
             MCP_SERVER_NAME,
             escape_toml_string(&self.command),
-            PROFILE_ENV,
-            escape_toml_string(&self.profile_path),
         )
     }
 
@@ -127,15 +162,18 @@ impl McpEntry {
         table["command"] = toml_edit::value(self.command.clone());
         table["args"] = toml_edit::value(toml_edit::Array::from_iter(["mcp"]));
         let mut env = toml_edit::InlineTable::new();
-        env.insert(PROFILE_ENV, self.profile_path.clone().into());
+        for (key, value) in ENTRY_ENV {
+            env.insert(key, value.into());
+        }
         table["env"] = toml_edit::value(env);
         table["enabled"] = toml_edit::value(true);
         toml_edit::Item::Table(table)
     }
 }
 
-/// Resolve Jean-managed persistent profile directory.
-pub fn profile_path(app: &AppHandle) -> Result<PathBuf, String> {
+/// Shared persistent profile used by Jean versions before per-session browsers.
+/// Only read once to import its logins (see [`import_legacy_profile`]).
+fn legacy_profile_path(app: &AppHandle) -> Result<PathBuf, String> {
     let app_data = app
         .path()
         .app_data_dir()
@@ -209,7 +247,10 @@ pub struct ResolvedBinary {
 }
 
 fn read_binary_version(path: &Path) -> Option<String> {
-    let output = silent_command(path).arg("--version").output().ok()?;
+    let output = host_cli_command(&path.to_string_lossy(), None)
+        .arg("--version")
+        .output()
+        .ok()?;
     if !output.status.success() {
         return None;
     }
@@ -222,35 +263,92 @@ fn read_binary_version(path: &Path) -> Option<String> {
     }
 }
 
-/// Create the profile directory if missing.
-pub fn ensure_profile(app: &AppHandle) -> Result<PathBuf, String> {
-    let path = profile_path(app)?;
-    std::fs::create_dir_all(&path).map_err(|e| {
-        format!(
-            "Failed to create agent browser profile {}: {e}",
-            path.display()
-        )
-    })?;
-    Ok(path)
-}
-
-fn build_entry(app: &AppHandle) -> Result<McpEntry, String> {
-    let profile = ensure_profile(app)?;
+fn build_entry(app: &AppHandle) -> McpEntry {
     let resolved = resolve_agent_browser_binary(app);
     let command = resolved
         .path
         .filter(|p| !p.is_empty())
         .unwrap_or_else(|| "agent-browser".to_string());
-    Ok(McpEntry::new(
-        command,
-        profile.to_string_lossy().to_string(),
+    McpEntry::new(command)
+}
+
+/// Per-thread Codex config override that sets the agent-browser session.
+///
+/// Codex runs one app-server for all Jean sessions, so Jean cannot set the
+/// session env per run. Codex starts MCP servers per thread, so a dotted
+/// per-thread override works instead. Returns `None` when the Codex config has
+/// no agent-browser server: the override alone would create a partial server
+/// table without `command`, which Codex rejects.
+pub fn codex_session_config_override(jean_session_id: &str) -> Option<(String, Value)> {
+    let path = dirs::home_dir()?.join(".codex").join("config.toml");
+    codex_session_config_override_at(&path, jean_session_id)
+}
+
+fn codex_session_config_override_at(path: &Path, jean_session_id: &str) -> Option<(String, Value)> {
+    let doc = std::fs::read_to_string(path)
+        .ok()?
+        .parse::<toml_edit::DocumentMut>()
+        .ok()?;
+    doc.get("mcp_servers")?.get(MCP_SERVER_NAME)?;
+    Some((
+        format!("mcp_servers.{MCP_SERVER_NAME}.env.{SESSION_ENV}"),
+        Value::from(session_name(jean_session_id)),
     ))
+}
+
+/// One-time import of logins from the legacy shared profile into the shared
+/// restore key. Opening the profile with `--restore` and closing it saves its
+/// cookies as restore state. The profile is then renamed so the import does
+/// not run again. Fails (and retries on the next launch) while a legacy
+/// browser still holds the profile lock.
+pub(crate) fn import_legacy_profile(app: &AppHandle) -> Result<(), String> {
+    let profile = legacy_profile_path(app)?;
+    if !profile.is_dir() {
+        return Ok(());
+    }
+    let Some(binary) = resolve_agent_browser_binary(app)
+        .path
+        .filter(|p| !p.is_empty())
+    else {
+        return Ok(());
+    };
+
+    const IMPORT_SESSION: &str = "jean-profile-import";
+    let profile_arg = profile.to_string_lossy().to_string();
+    let run = |args: &[&str]| -> Result<(), String> {
+        let output = host_cli_command(&binary, None)
+            .args(["--session", IMPORT_SESSION])
+            .args(args)
+            .output()
+            .map_err(|e| format!("Failed to run agent-browser: {e}"))?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+        }
+    };
+    run(&[
+        "--profile",
+        &profile_arg,
+        "--restore",
+        RESTORE_KEY,
+        "open",
+        "about:blank",
+    ])
+    .map_err(|e| format!("Failed to open legacy agent-browser profile: {e}"))?;
+    run(&["close"]).map_err(|e| format!("Failed to save legacy agent-browser logins: {e}"))?;
+
+    let imported = profile.with_file_name("profile-imported");
+    std::fs::rename(&profile, &imported).map_err(|e| {
+        format!(
+            "Imported legacy agent-browser logins, but failed to rename {}: {e}",
+            profile.display()
+        )
+    })
 }
 
 /// Status for Settings UI / operators.
 pub async fn get_agent_browser_status(app: AppHandle) -> Result<AgentBrowserStatus, String> {
-    let profile = profile_path(&app)?;
-    let profile_exists = profile.is_dir();
     let managed_dir = managed_cli_dir(&app)?;
     let resolved = resolve_agent_browser_binary(&app);
     let entry = McpEntry::new(
@@ -259,27 +357,85 @@ pub async fn get_agent_browser_status(app: AppHandle) -> Result<AgentBrowserStat
             .clone()
             .filter(|p| !p.is_empty())
             .unwrap_or_else(|| "agent-browser".to_string()),
-        profile.to_string_lossy().to_string(),
     );
 
     Ok(AgentBrowserStatus {
         installed: resolved.installed,
         binary_path: resolved.path,
         version: resolved.version,
-        profile_path: profile.to_string_lossy().to_string(),
-        profile_exists,
         managed_dir: managed_dir.to_string_lossy().to_string(),
         managed_install: resolved.managed,
         claude_snippet: entry.claude_snippet(),
         codex_snippet: entry.codex_snippet(),
-        install_hint: "Use Install agent-browser in Settings, or: npm install -g agent-browser && agent-browser install".to_string(),
+        install_hint: "Turn on Agent Browser in Settings to install it. Manual fallback: npm install -g agent-browser@latest && agent-browser install".to_string(),
     })
 }
 
-/// Ensure profile dir exists (idempotent).
-pub async fn ensure_agent_browser_profile(app: AppHandle) -> Result<AgentBrowserStatus, String> {
-    ensure_profile(&app)?;
-    get_agent_browser_status(app).await
+/// Check the npm registry for a newer agent-browser release.
+///
+/// Performs synchronous npm/network work; WebSocket dispatch runs this on the
+/// blocking pool.
+pub async fn check_agent_browser_update(
+    app: AppHandle,
+) -> Result<AgentBrowserUpdateStatus, String> {
+    let resolved = resolve_agent_browser_binary(&app);
+    if !resolved.installed {
+        return Ok(AgentBrowserUpdateStatus {
+            installed: false,
+            current_version: None,
+            latest_version: None,
+            update_available: false,
+        });
+    }
+
+    let npm_path = crate::prerequisites::require_npm("agent-browser update check")?;
+    let output = host_cli_command(&npm_path, None)
+        .args(["view", NPM_PACKAGE, "version", "--json"])
+        .output()
+        .map_err(|error| format!("Failed to check agent-browser updates: {error}"))?;
+    if !output.status.success() {
+        let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(format!(
+            "Failed to check agent-browser updates: {}",
+            if error.is_empty() {
+                "npm returned an error"
+            } else {
+                &error
+            }
+        ));
+    }
+
+    let raw = String::from_utf8_lossy(&output.stdout);
+    let latest = serde_json::from_str::<String>(raw.trim())
+        .unwrap_or_else(|_| raw.trim().trim_matches('"').to_string());
+    let latest_version = (!latest.is_empty()).then_some(latest);
+    let update_available = resolved
+        .version
+        .as_deref()
+        .zip(latest_version.as_deref())
+        .is_some_and(|(current, latest)| is_newer_version(latest, current));
+
+    Ok(AgentBrowserUpdateStatus {
+        installed: true,
+        current_version: resolved.version,
+        latest_version,
+        update_available,
+    })
+}
+
+fn is_newer_version(latest: &str, current: &str) -> bool {
+    fn parts(version: &str) -> Vec<u64> {
+        version
+            .trim()
+            .trim_start_matches(|character: char| !character.is_ascii_digit())
+            .split(['.', '-', '+'])
+            .map_while(|part| part.parse::<u64>().ok())
+            .collect()
+    }
+
+    let latest = parts(latest);
+    let current = parts(current);
+    !latest.is_empty() && !current.is_empty() && latest > current
 }
 
 /// Install agent-browser via npm into Jean app data, then download Chromium
@@ -291,7 +447,7 @@ pub async fn install_agent_browser(app: AppHandle) -> Result<AgentBrowserStatus,
     install_agent_browser_sync(&app)
 }
 
-fn install_agent_browser_sync(app: &AppHandle) -> Result<AgentBrowserStatus, String> {
+pub(crate) fn install_agent_browser_sync(app: &AppHandle) -> Result<AgentBrowserStatus, String> {
     let cli_dir = managed_cli_dir(app)?;
     std::fs::create_dir_all(&cli_dir).map_err(|e| {
         format!(
@@ -300,13 +456,12 @@ fn install_agent_browser_sync(app: &AppHandle) -> Result<AgentBrowserStatus, Str
         )
     })?;
 
-    // Ensure profile exists so MCP install can succeed right after.
-    ensure_profile(app)?;
+    let npm_path = crate::prerequisites::require_npm("agent-browser")?;
 
-    let npm_output = silent_command("npm")
+    let npm_output = host_cli_command(&npm_path, None)
         .args(["install", "--prefix"])
         .arg(&cli_dir)
-        .arg(NPM_PACKAGE)
+        .arg(NPM_INSTALL_SPEC)
         .output()
         .map_err(|e| {
             format!("Failed to run npm install for agent-browser (is npm on PATH?): {e}")
@@ -335,7 +490,7 @@ fn install_agent_browser_sync(app: &AppHandle) -> Result<AgentBrowserStatus, Str
 
     // Download Chrome for Testing into agent-browser's cache.
     // Linux servers often need OS shared libs; --with-deps helps when available.
-    let mut install_cmd = silent_command(&binary);
+    let mut install_cmd = host_cli_command(&binary.to_string_lossy(), None);
     install_cmd.arg("install");
     if cfg!(target_os = "linux") {
         install_cmd.arg("--with-deps");
@@ -346,7 +501,7 @@ fn install_agent_browser_sync(app: &AppHandle) -> Result<AgentBrowserStatus, Str
 
     if !chromium_output.status.success() {
         // Retry without --with-deps (flag may not exist on older versions).
-        let retry = silent_command(&binary)
+        let retry = host_cli_command(&binary.to_string_lossy(), None)
             .arg("install")
             .output()
             .map_err(|e| format!("Failed to run `agent-browser install`: {e}"))?;
@@ -369,7 +524,6 @@ fn install_agent_browser_sync(app: &AppHandle) -> Result<AgentBrowserStatus, Str
     }
 
     // Build status without re-entering async.
-    let profile = profile_path(app)?;
     let resolved = resolve_agent_browser_binary(app);
     if !resolved.installed {
         return Err("agent-browser install finished but binary still not detected".to_string());
@@ -379,44 +533,43 @@ fn install_agent_browser_sync(app: &AppHandle) -> Result<AgentBrowserStatus, Str
             .path
             .clone()
             .unwrap_or_else(|| binary.to_string_lossy().to_string()),
-        profile.to_string_lossy().to_string(),
     );
 
     Ok(AgentBrowserStatus {
         installed: true,
         binary_path: resolved.path,
         version: resolved.version,
-        profile_path: profile.to_string_lossy().to_string(),
-        profile_exists: profile.is_dir(),
         managed_dir: cli_dir.to_string_lossy().to_string(),
         managed_install: true,
         claude_snippet: entry.claude_snippet(),
         codex_snippet: entry.codex_snippet(),
-        install_hint: "Use Install agent-browser in Settings, or: npm install -g agent-browser && agent-browser install".to_string(),
+        install_hint: "Turn on Agent Browser in Settings to install it. Manual fallback: npm install -g agent-browser@latest && agent-browser install".to_string(),
     })
 }
 
+/// CLI backends whose config files hold an agent-browser MCP entry.
+const CONFIG_BACKENDS: [&str; 7] = [
+    "claude",
+    "codex",
+    "opencode",
+    "cursor",
+    "grok",
+    "kimi",
+    "antigravity",
+];
+
 /// Install `agent-browser` MCP server into selected CLI backends.
 ///
-/// Creates the Jean profile directory and writes backend config with
-/// `AGENT_BROWSER_PROFILE` pointing at it. Prefers the Jean-managed binary when
-/// present; otherwise requires `agent-browser` on PATH.
+/// Writes the shared restore key and idle timeout into each backend config.
+/// Prefers the Jean-managed binary when present; otherwise requires
+/// `agent-browser` on PATH.
 pub async fn install_agent_browser_mcp(
     app: AppHandle,
     backends: Option<Vec<String>>,
 ) -> Result<Vec<AgentBrowserInstallResult>, String> {
-    let entry = build_entry(&app)?;
-    let backends = backends.unwrap_or_else(|| {
-        vec![
-            "claude".to_string(),
-            "codex".to_string(),
-            "opencode".to_string(),
-            "cursor".to_string(),
-            "grok".to_string(),
-            "kimi".to_string(),
-            "antigravity".to_string(),
-        ]
-    });
+    let entry = build_entry(&app);
+    let backends =
+        backends.unwrap_or_else(|| CONFIG_BACKENDS.iter().map(|b| b.to_string()).collect());
 
     let mut results = Vec::with_capacity(backends.len());
     for backend in backends {
@@ -456,6 +609,139 @@ pub async fn install_agent_browser_mcp(
     }
 
     Ok(results)
+}
+
+/// Remove the Jean-written `agent-browser` MCP entry from every CLI backend
+/// config. Entries without Jean's restore key were added by the user and are
+/// kept.
+pub async fn remove_agent_browser_mcp() -> Result<Vec<AgentBrowserInstallResult>, String> {
+    tauri::async_runtime::spawn_blocking(remove_agent_browser_mcp_sync)
+        .await
+        .map_err(|e| format!("agent-browser MCP removal task failed: {e}"))
+}
+
+pub(crate) fn remove_agent_browser_mcp_sync() -> Vec<AgentBrowserInstallResult> {
+    let Some(home) = dirs::home_dir() else {
+        return Vec::new();
+    };
+    CONFIG_BACKENDS
+        .iter()
+        .filter_map(|backend| {
+            let result = match *backend {
+                "claude" => remove_json_server(&home.join(".claude.json"), "mcpServers", "env"),
+                "cursor" => {
+                    remove_json_server(&home.join(".cursor").join("mcp.json"), "mcpServers", "env")
+                }
+                "kimi" => remove_json_server(
+                    &home.join(".kimi-code").join("mcp.json"),
+                    "mcpServers",
+                    "env",
+                ),
+                "antigravity" => remove_json_server(
+                    &home.join(".gemini").join("config").join("mcp_config.json"),
+                    "mcpServers",
+                    "env",
+                ),
+                "opencode" => match find_opencode_config_path(&home) {
+                    Some(path) => remove_json_server(&path, "mcp", "environment"),
+                    None => Ok(None),
+                },
+                "codex" => remove_toml_server(&home.join(".codex").join("config.toml")),
+                "grok" => remove_toml_server(&home.join(".grok").join("config.toml")),
+                _ => Ok(None),
+            };
+            let (status, path, backup_path, message) = match result {
+                Ok(None) => return None,
+                Ok(Some((path, backup))) => (
+                    "removed",
+                    Some(path.to_string_lossy().to_string()),
+                    backup.map(|p| p.to_string_lossy().to_string()),
+                    format!("Removed {MCP_SERVER_NAME}"),
+                ),
+                Err(error) => ("error", None, None, error),
+            };
+            Some(AgentBrowserInstallResult {
+                backend: backend.to_string(),
+                status: status.to_string(),
+                path,
+                backup_path,
+                server_name: MCP_SERVER_NAME.to_string(),
+                message,
+            })
+        })
+        .collect()
+}
+
+/// Whether an MCP entry env map holds Jean's restore key.
+fn is_jean_env(env: Option<&Value>) -> bool {
+    env.and_then(|env| env.get(RESTORE_ENV))
+        .and_then(Value::as_str)
+        == Some(RESTORE_KEY)
+}
+
+/// Returns `Ok(None)` when the file has no Jean-written entry.
+fn remove_json_server(
+    path: &Path,
+    container_key: &str,
+    env_key: &str,
+) -> Result<Option<(PathBuf, Option<PathBuf>)>, String> {
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("Failed to read {}: {e}", path.display())),
+    };
+    if content.trim().is_empty() {
+        return Ok(None);
+    }
+    let mut root: Value = serde_json::from_str(&strip_jsonc_comments_simple(&content))
+        .map_err(|e| format!("Failed to parse {}: {e}", path.display()))?;
+    let Some(container) = root.get_mut(container_key).and_then(Value::as_object_mut) else {
+        return Ok(None);
+    };
+    if !container
+        .get(MCP_SERVER_NAME)
+        .is_some_and(|server| is_jean_env(server.get(env_key)))
+    {
+        return Ok(None);
+    }
+    container.remove(MCP_SERVER_NAME);
+
+    let updated = serde_json::to_string_pretty(&root)
+        .map_err(|e| format!("Failed to serialize {}: {e}", path.display()))?;
+    let backup = crate::platform::write_file_atomically_with_backup(path, updated.as_bytes())?;
+    Ok(Some((path.to_path_buf(), backup)))
+}
+
+/// Returns `Ok(None)` when the file has no Jean-written entry.
+fn remove_toml_server(path: &Path) -> Result<Option<(PathBuf, Option<PathBuf>)>, String> {
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("Failed to read {}: {e}", path.display())),
+    };
+    let mut doc = content
+        .parse::<toml_edit::DocumentMut>()
+        .map_err(|e| format!("Failed to parse {}: {e}", path.display()))?;
+    let is_jean = doc
+        .get("mcp_servers")
+        .and_then(|servers| servers.get(MCP_SERVER_NAME))
+        .and_then(|server| server.get("env"))
+        .and_then(|env| env.get(RESTORE_ENV))
+        .and_then(|value| value.as_str())
+        == Some(RESTORE_KEY);
+    if !is_jean {
+        return Ok(None);
+    }
+    if let Some(servers) = doc
+        .get_mut("mcp_servers")
+        .and_then(|item| item.as_table_like_mut())
+    {
+        servers.remove(MCP_SERVER_NAME);
+    }
+
+    let backup =
+        crate::platform::write_file_atomically_with_backup(path, doc.to_string().as_bytes())?;
+    Ok(Some((path.to_path_buf(), backup)))
 }
 
 fn enable_in_preferences(
@@ -590,10 +876,7 @@ mod antigravity_install_tests {
     fn installs_agent_browser_in_antigravity_global_config() {
         let temp = tempfile::tempdir().expect("tempdir");
         let path = temp.path().join("mcp_config.json");
-        let entry = McpEntry {
-            command: "agent-browser".to_string(),
-            profile_path: temp.path().join("profile").to_string_lossy().to_string(),
-        };
+        let entry = McpEntry::new("agent-browser".to_string());
 
         install_antigravity_at(path.clone(), &entry).expect("install");
 
@@ -645,7 +928,7 @@ fn install_json_server(
 
     let updated = serde_json::to_string_pretty(&root)
         .map_err(|e| format!("Failed to serialize {}: {e}", path.display()))?;
-    let backup = write_atomic_with_backup(&path, &updated)?;
+    let backup = crate::platform::write_file_atomically_with_backup(&path, updated.as_bytes())?;
     Ok((path, backup))
 }
 
@@ -702,49 +985,8 @@ fn install_toml_server(
     updated
         .parse::<toml_edit::DocumentMut>()
         .map_err(|e| format!("Generated invalid {label} TOML: {e}"))?;
-    let backup = write_atomic_with_backup(&path, &updated)?;
+    let backup = crate::platform::write_file_atomically_with_backup(&path, updated.as_bytes())?;
     Ok((path, backup))
-}
-
-fn write_atomic_with_backup(path: &Path, content: &str) -> Result<Option<PathBuf>, String> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create {}: {e}", parent.display()))?;
-    }
-
-    let backup = if path.exists() {
-        let ts = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or_default();
-        let backup = path.with_extension(format!(
-            "{}.bak.{ts}",
-            path.extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("config")
-        ));
-        std::fs::copy(path, &backup)
-            .map_err(|e| format!("Failed to create backup {}: {e}", backup.display()))?;
-        Some(backup)
-    } else {
-        None
-    };
-
-    let tmp = path.with_extension(format!(
-        "{}.tmp",
-        path.extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("config")
-    ));
-    std::fs::write(&tmp, content).map_err(|e| format!("Failed to write {}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, path).map_err(|e| {
-        format!(
-            "Failed to replace {} with {}: {e}",
-            path.display(),
-            tmp.display()
-        )
-    })?;
-    Ok(backup)
 }
 
 fn strip_jsonc_comments_simple(input: &str) -> String {
@@ -811,26 +1053,60 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn mcp_entry_claude_snippet_includes_profile_env() {
-        let entry = McpEntry::new(
-            "agent-browser".into(),
-            "/tmp/jean-agent-browser/profile".into(),
-        );
-        let snippet = entry.claude_snippet();
-        assert!(snippet.contains("agent-browser"));
-        assert!(snippet.contains("AGENT_BROWSER_PROFILE"));
-        assert!(snippet.contains("/tmp/jean-agent-browser/profile"));
-        assert!(snippet.contains("\"mcp\""));
+    fn mcp_entry_uses_shared_restore_key_without_shared_profile() {
+        let server = McpEntry::new("agent-browser".into()).claude_server_json();
+        assert_eq!(server["args"], json!(["mcp"]));
+        assert_eq!(server["env"]["AGENT_BROWSER_RESTORE"], "jean");
+        assert_eq!(server["env"]["AGENT_BROWSER_IDLE_TIMEOUT_MS"], "900000");
+        // A shared profile is locked by one Chrome and blocks parallel sessions.
+        assert!(server["env"].get("AGENT_BROWSER_PROFILE").is_none());
+        // The session is set per run, never globally.
+        assert!(server["env"].get(SESSION_ENV).is_none());
     }
 
     #[test]
-    fn mcp_entry_codex_snippet_is_toml() {
-        let entry = McpEntry::new("agent-browser".into(), "/data/profile".into());
-        let snippet = entry.codex_snippet();
-        assert!(snippet.contains("[mcp_servers.agent-browser]"));
-        assert!(snippet.contains("AGENT_BROWSER_PROFILE"));
-        assert!(snippet.contains("/data/profile"));
-        assert!(snippet.contains("enabled = true"));
+    fn mcp_entry_codex_snippet_is_valid_toml() {
+        let snippet = McpEntry::new("agent-browser".into()).codex_snippet();
+        let doc = snippet.parse::<toml_edit::DocumentMut>().unwrap();
+        let server = &doc["mcp_servers"]["agent-browser"];
+        assert_eq!(
+            server["env"]["AGENT_BROWSER_RESTORE"].as_str(),
+            Some("jean")
+        );
+        assert_eq!(server["enabled"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn session_name_is_scoped_to_jean_session() {
+        assert_eq!(session_name("abc-123"), "jean-abc-123");
+    }
+
+    #[test]
+    fn codex_override_targets_session_env_of_installed_server() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        install_toml_server(
+            path.clone(),
+            &McpEntry::new("agent-browser".into()),
+            "Codex",
+            false,
+        )
+        .unwrap();
+
+        let (key, value) = codex_session_config_override_at(&path, "s1").unwrap();
+        assert_eq!(key, "mcp_servers.agent-browser.env.AGENT_BROWSER_SESSION");
+        assert_eq!(value, "jean-s1");
+    }
+
+    #[test]
+    fn codex_override_skipped_without_installed_server() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        // Missing file
+        assert!(codex_session_config_override_at(&path, "s1").is_none());
+        // Server not installed: an override would create a partial table.
+        fs::write(&path, "[mcp_servers.other]\ncommand = \"x\"\n").unwrap();
+        assert!(codex_session_config_override_at(&path, "s1").is_none());
     }
 
     #[test]
@@ -843,7 +1119,7 @@ mod tests {
         )
         .unwrap();
 
-        let entry = McpEntry::new("agent-browser".into(), "/p".into());
+        let entry = McpEntry::new("agent-browser".into());
         install_json_server(path.clone(), "mcpServers", entry.claude_server_json()).unwrap();
 
         let parsed: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
@@ -853,8 +1129,8 @@ mod tests {
             "agent-browser"
         );
         assert_eq!(
-            parsed["mcpServers"]["agent-browser"]["env"]["AGENT_BROWSER_PROFILE"],
-            "/p"
+            parsed["mcpServers"]["agent-browser"]["env"]["AGENT_BROWSER_RESTORE"],
+            "jean"
         );
     }
 
@@ -864,14 +1140,67 @@ mod tests {
         let path = dir.path().join("config.toml");
         fs::write(&path, "[mcp_servers.existing]\ncommand = \"foo\"\n").unwrap();
 
-        let entry = McpEntry::new("/usr/bin/agent-browser".into(), "/var/profile".into());
+        let entry = McpEntry::new("/usr/bin/agent-browser".into());
         install_toml_server(path.clone(), &entry, "Codex", false).unwrap();
 
         let content = fs::read_to_string(&path).unwrap();
         assert!(content.contains("[mcp_servers.existing]"));
         assert!(content.contains("[mcp_servers.agent-browser]"));
         assert!(content.contains("/usr/bin/agent-browser"));
-        assert!(content.contains("/var/profile"));
+        assert!(content.contains("AGENT_BROWSER_RESTORE"));
+    }
+
+    #[test]
+    fn remove_json_server_removes_only_jean_entry() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("mcp.json");
+        fs::write(
+            &path,
+            r#"{ "mcpServers": { "other": { "command": "x" } } }"#,
+        )
+        .unwrap();
+        let entry = McpEntry::new("agent-browser".into());
+        install_json_server(path.clone(), "mcpServers", entry.claude_server_json()).unwrap();
+
+        assert!(remove_json_server(&path, "mcpServers", "env")
+            .unwrap()
+            .is_some());
+        let parsed: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(parsed["mcpServers"]["other"].is_object());
+        assert!(parsed["mcpServers"].get(MCP_SERVER_NAME).is_none());
+
+        // A user-added entry without Jean's restore key is kept.
+        fs::write(
+            &path,
+            r#"{ "mcpServers": { "agent-browser": { "command": "agent-browser" } } }"#,
+        )
+        .unwrap();
+        assert!(remove_json_server(&path, "mcpServers", "env")
+            .unwrap()
+            .is_none());
+        let parsed: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(parsed["mcpServers"][MCP_SERVER_NAME].is_object());
+    }
+
+    #[test]
+    fn remove_toml_server_removes_only_jean_entry() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(&path, "[mcp_servers.existing]\ncommand = \"foo\"\n").unwrap();
+        let entry = McpEntry::new("/usr/bin/agent-browser".into());
+        install_toml_server(path.clone(), &entry, "Codex", false).unwrap();
+
+        assert!(remove_toml_server(&path).unwrap().is_some());
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(content.contains("[mcp_servers.existing]"));
+        assert!(!content.contains("agent-browser"));
+        assert!(codex_session_config_override_at(&path, "s").is_none());
+
+        fs::write(&path, "[mcp_servers.agent-browser]\ncommand = \"x\"\n").unwrap();
+        assert!(remove_toml_server(&path).unwrap().is_none());
+        assert!(fs::read_to_string(&path)
+            .unwrap()
+            .contains("[mcp_servers.agent-browser]"));
     }
 
     #[test]
@@ -890,5 +1219,18 @@ mod tests {
         assert!(s.contains("node_modules"));
         assert!(s.contains(".bin"));
         assert!(s.contains("agent-browser"));
+    }
+
+    #[test]
+    fn compares_agent_browser_versions() {
+        assert!(is_newer_version("0.8.1", "agent-browser 0.8.0"));
+        assert!(is_newer_version("1.0.0", "0.99.9"));
+        assert!(!is_newer_version("0.8.0", "agent-browser 0.8.0"));
+        assert!(!is_newer_version("0.7.9", "0.8.0"));
+    }
+
+    #[test]
+    fn managed_install_explicitly_requests_latest_release() {
+        assert_eq!(NPM_INSTALL_SPEC, "agent-browser@latest");
     }
 }

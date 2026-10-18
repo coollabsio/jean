@@ -5,6 +5,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -52,10 +53,17 @@ const CLAUDE_OAUTH_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const CLAUDE_OAUTH_SCOPES: &str =
     "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload";
 const CLAUDE_USAGE_CACHE_TTL_SECS: u64 = 5 * 60;
+/// Max age of the last OAuth API fetch while `rate_limit_event`s from Claude runs
+/// keep session/weekly fresh (sonnet weekly + extra usage only come from the API).
+const CLAUDE_USAGE_API_TTL_SECS: u64 = 30 * 60;
 /// Stale cache is still served on 429 / transient API failures (OpenUsage pattern).
-const CLAUDE_USAGE_STALE_CACHE_MAX_SECS: u64 = 6 * 60 * 60;
+const CLAUDE_USAGE_STALE_CACHE_MAX_SECS: u64 = 24 * 60 * 60;
+/// Cooldown after a 429 without a usable `Retry-After` header.
+const CLAUDE_USAGE_DEFAULT_COOLDOWN_SECS: u64 = 5 * 60;
 const CLAUDE_USAGE_USER_AGENT: &str = "claude-code/2.1.69";
 static CLAUDE_USAGE_FETCH_LOCK: OnceLock<AsyncMutex<()>> = OnceLock::new();
+/// Epoch seconds until which the usage API must not be called (after a 429).
+static CLAUDE_USAGE_COOLDOWN_UNTIL: AtomicU64 = AtomicU64::new(0);
 
 fn claude_usage_fetch_lock() -> &'static AsyncMutex<()> {
     CLAUDE_USAGE_FETCH_LOCK.get_or_init(|| AsyncMutex::new(()))
@@ -517,6 +525,8 @@ pub async fn install_claude_cli(app: AppHandle, version: Option<String>) -> Resu
         crate::platform::wsl_write_bytes(&wsl.distro, &unix_path, &binary_content)
             .map_err(|e| format!("Failed to write binary into WSL: {e}"))?;
         crate::platform::wsl_chmod_exec(&wsl.distro, &unix_path)?;
+        #[cfg(windows)]
+        crate::expose_managed_cli_in_wsl(&wsl.distro, "claude", &unix_path);
         emit_progress(&app, "complete", "Installation complete!", 100);
         log::trace!("Claude CLI installed successfully at WSL:{unix_path}");
         return Ok(());
@@ -565,6 +575,7 @@ pub async fn install_claude_cli(app: AppHandle, version: Option<String>) -> Resu
     emit_progress(&app, "complete", "Installation complete!", 100);
 
     log::trace!("Claude CLI installed successfully at {:?}", binary_path);
+    crate::expose_managed_cli("claude", &binary_path);
     Ok(())
 }
 
@@ -614,7 +625,7 @@ pub struct ClaudeAuthStatus {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClaudeUsageWindowSnapshot {
     pub used_percent: f64,
@@ -625,6 +636,9 @@ pub struct ClaudeUsageWindowSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct ClaudeUsageSnapshot {
     pub plan_type: Option<String>,
+    /// Raw OAuth `rateLimitTier` (e.g. `default_claude_max_20x`) for plan labels.
+    #[serde(default)]
+    pub plan_tier: Option<String>,
     pub session: Option<ClaudeUsageWindowSnapshot>,
     pub weekly: Option<ClaudeUsageWindowSnapshot>,
     pub sonnet_weekly: Option<ClaudeUsageWindowSnapshot>,
@@ -636,7 +650,11 @@ pub struct ClaudeUsageSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ClaudeUsageCacheEntry {
+    /// Last update from any source (OAuth API or a `rate_limit_event`).
     cached_at: u64,
+    /// Last successful OAuth API fetch (0 = never, e.g. seeded from a run).
+    #[serde(default)]
+    api_fetched_at: u64,
     snapshot: ClaudeUsageSnapshot,
 }
 
@@ -694,7 +712,8 @@ struct ClaudeRefreshResponse {
 struct ClaudeUsageWindow {
     #[serde(default, deserialize_with = "de_opt_f64")]
     utilization: Option<f64>,
-    #[serde(default, deserialize_with = "de_opt_u64")]
+    /// API sends an RFC 3339 timestamp; epoch numbers are accepted too.
+    #[serde(default, deserialize_with = "de_opt_epoch_secs")]
     resets_at: Option<u64>,
 }
 
@@ -746,6 +765,22 @@ where
     Ok(match value {
         Value::Number(num) => num.as_u64(),
         Value::String(s) => s.parse::<u64>().ok(),
+        _ => None,
+    })
+}
+
+fn de_opt_epoch_secs<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<Value>::deserialize(deserializer)?;
+    Ok(match value {
+        Some(Value::Number(num)) => num.as_u64(),
+        Some(Value::String(s)) => s.parse::<u64>().ok().or_else(|| {
+            chrono::DateTime::parse_from_rfc3339(&s)
+                .ok()
+                .and_then(|dt| u64::try_from(dt.timestamp()).ok())
+        }),
         _ => None,
     })
 }
@@ -1037,41 +1072,136 @@ fn get_claude_usage_cache_path() -> Option<PathBuf> {
     Some(get_usage_cache_dir()?.join("claude.json"))
 }
 
-fn load_cached_claude_usage(now_secs: u64) -> Option<ClaudeUsageSnapshot> {
-    let path = get_claude_usage_cache_path()?;
-    let content = std::fs::read_to_string(path).ok()?;
-    let entry: ClaudeUsageCacheEntry = serde_json::from_str(&content).ok()?;
-    if now_secs.saturating_sub(entry.cached_at) <= CLAUDE_USAGE_CACHE_TTL_SECS {
-        return Some(entry.snapshot);
-    }
-    None
+fn read_claude_usage_cache_entry() -> Option<ClaudeUsageCacheEntry> {
+    let content = std::fs::read_to_string(get_claude_usage_cache_path()?).ok()?;
+    serde_json::from_str(&content).ok()
 }
 
-/// Serve last-good usage during 429 / transient failures (OpenUsage cooldown pattern).
-fn load_stale_cached_claude_usage(now_secs: u64) -> Option<ClaudeUsageSnapshot> {
-    let path = get_claude_usage_cache_path()?;
-    let content = std::fs::read_to_string(path).ok()?;
-    let entry: ClaudeUsageCacheEntry = serde_json::from_str(&content).ok()?;
-    if now_secs.saturating_sub(entry.cached_at) <= CLAUDE_USAGE_STALE_CACHE_MAX_SECS {
-        return Some(entry.snapshot);
-    }
-    None
-}
-
-fn save_cached_claude_usage(snapshot: &ClaudeUsageSnapshot, now_secs: u64) {
+fn write_claude_usage_cache_entry(entry: &ClaudeUsageCacheEntry) {
     let Some(path) = get_claude_usage_cache_path() else {
         return;
     };
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let entry = ClaudeUsageCacheEntry {
-        cached_at: now_secs,
-        snapshot: snapshot.clone(),
+    let Ok(serialized) = serde_json::to_string_pretty(entry) else {
+        return;
     };
-    if let Ok(serialized) = serde_json::to_string_pretty(&entry) {
-        let _ = std::fs::write(path, serialized);
+    // Write to a unique temp file, then rename. Run streams update this cache on
+    // every `rate_limit_event` while the UI reads it; a plain truncate+write lets
+    // a reader see an empty file and report "rate-limited" with no stale data.
+    static WRITE_SEQ: AtomicU64 = AtomicU64::new(0);
+    let seq = WRITE_SEQ.fetch_add(1, Ordering::Relaxed);
+    let tmp = path.with_extension(format!("json.{}.{seq}.tmp", std::process::id()));
+    if std::fs::write(&tmp, serialized)
+        .and_then(|()| std::fs::rename(&tmp, &path))
+        .is_err()
+    {
+        let _ = std::fs::remove_file(&tmp);
     }
+}
+
+/// Fresh when recently updated (API or run event) AND the API data is not too old.
+fn is_claude_usage_cache_fresh(entry: &ClaudeUsageCacheEntry, now_secs: u64) -> bool {
+    now_secs.saturating_sub(entry.cached_at) <= CLAUDE_USAGE_CACHE_TTL_SECS
+        && now_secs.saturating_sub(entry.api_fetched_at) <= CLAUDE_USAGE_API_TTL_SECS
+}
+
+fn load_cached_claude_usage(now_secs: u64) -> Option<ClaudeUsageSnapshot> {
+    let entry = read_claude_usage_cache_entry()?;
+    is_claude_usage_cache_fresh(&entry, now_secs).then_some(entry.snapshot)
+}
+
+/// Serve last-good usage during 429 / transient failures (OpenUsage cooldown pattern).
+fn load_stale_cached_claude_usage(now_secs: u64) -> Option<ClaudeUsageSnapshot> {
+    let entry = read_claude_usage_cache_entry()?;
+    (now_secs.saturating_sub(entry.cached_at) <= CLAUDE_USAGE_STALE_CACHE_MAX_SECS)
+        .then_some(entry.snapshot)
+}
+
+fn save_cached_claude_usage(snapshot: &ClaudeUsageSnapshot, now_secs: u64) {
+    write_claude_usage_cache_entry(&ClaudeUsageCacheEntry {
+        cached_at: now_secs,
+        api_fetched_at: now_secs,
+        snapshot: snapshot.clone(),
+    });
+}
+
+/// Parse one `unifiedWindows.<name>` entry of a Claude `rate_limit_event`.
+/// `utilization` is a 0..1 fraction there (the OAuth API reports 0..100).
+fn rate_limit_window(windows: &Value, name: &str) -> Option<ClaudeUsageWindowSnapshot> {
+    let window = windows.get(name)?;
+    Some(ClaudeUsageWindowSnapshot {
+        used_percent: window.get("utilization")?.as_f64()? * 100.0,
+        resets_at: window.get("resetsAt").and_then(Value::as_u64),
+    })
+}
+
+/// Merge a window from a run event into the cached one. Within the same reset
+/// window utilization only grows, so replayed (older) events never lower it.
+fn merge_usage_window(
+    cached: Option<ClaudeUsageWindowSnapshot>,
+    incoming: Option<ClaudeUsageWindowSnapshot>,
+) -> Option<ClaudeUsageWindowSnapshot> {
+    match (cached, incoming) {
+        (Some(cached), Some(incoming)) => match (cached.resets_at, incoming.resets_at) {
+            (Some(old), Some(new))
+                if new < old || (new == old && cached.used_percent > incoming.used_percent) =>
+            {
+                Some(cached)
+            }
+            _ => Some(incoming),
+        },
+        (cached, incoming) => incoming.or(cached),
+    }
+}
+
+/// Apply a Claude CLI stream-json `rate_limit_event` to the usage cache, so the
+/// Usage UI updates without calling the rate-limited OAuth usage API.
+/// Returns true when the cached snapshot changed.
+pub fn record_claude_rate_limit_event(msg: &Value) -> bool {
+    let Some(windows) = msg
+        .get("rate_limit_info")
+        .and_then(|info| info.get("unifiedWindows"))
+    else {
+        return false;
+    };
+    let session = rate_limit_window(windows, "five_hour");
+    let weekly = rate_limit_window(windows, "seven_day");
+    if session.is_none() && weekly.is_none() {
+        return false;
+    }
+
+    let now_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let mut entry = read_claude_usage_cache_entry().unwrap_or(ClaudeUsageCacheEntry {
+        cached_at: 0,
+        api_fetched_at: 0,
+        snapshot: ClaudeUsageSnapshot {
+            plan_type: None,
+            plan_tier: None,
+            session: None,
+            weekly: None,
+            sonnet_weekly: None,
+            extra_usage_spent: None,
+            extra_usage_limit: None,
+            fetched_at: 0,
+        },
+    });
+
+    let merged_session = merge_usage_window(entry.snapshot.session.clone(), session);
+    let merged_weekly = merge_usage_window(entry.snapshot.weekly.clone(), weekly);
+    let changed =
+        merged_session != entry.snapshot.session || merged_weekly != entry.snapshot.weekly;
+
+    entry.snapshot.session = merged_session;
+    entry.snapshot.weekly = merged_weekly;
+    entry.snapshot.fetched_at = now_secs;
+    entry.cached_at = now_secs;
+    write_claude_usage_cache_entry(&entry);
+    changed
 }
 
 async fn refresh_claude_access_token(
@@ -1167,17 +1297,84 @@ async fn refresh_claude_access_token(
     Ok(next_oauth.access_token)
 }
 
-/// True when Claude can run via env API key (no OAuth login required).
-fn claude_env_api_key_present() -> bool {
-    std::env::var_os("ANTHROPIC_API_KEY")
-        .map(|v| !v.is_empty())
-        .unwrap_or(false)
+/// Env vars that let Claude run without an Anthropic OAuth login: direct API
+/// key / bearer token, or a third-party provider (Bedrock, Vertex, Foundry).
+const CLAUDE_NON_OAUTH_AUTH_ENV_KEYS: &[&str] = &[
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CODE_USE_FOUNDRY",
+];
+
+fn auth_env_value_enabled(value: &str) -> bool {
+    !matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "" | "0" | "false" | "no" | "off"
+    )
+}
+
+/// True when the Jean process env provides non-OAuth Claude auth.
+fn claude_process_env_provides_auth() -> bool {
+    CLAUDE_NON_OAUTH_AUTH_ENV_KEYS.iter().any(|key| {
+        std::env::var(key)
+            .map(|v| auth_env_value_enabled(&v))
+            .unwrap_or(false)
+    })
+}
+
+/// True when Claude `settings.json` content configures non-OAuth auth via
+/// `apiKeyHelper` or provider/API-key entries in its `env` block.
+fn claude_settings_provide_auth(raw: &str) -> bool {
+    let Ok(settings) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return false;
+    };
+    let has_api_key_helper = settings
+        .get("apiKeyHelper")
+        .and_then(|v| v.as_str())
+        .is_some_and(|v| !v.trim().is_empty());
+    let env_provides_auth = settings
+        .get("env")
+        .and_then(|v| v.as_object())
+        .is_some_and(|env| {
+            CLAUDE_NON_OAUTH_AUTH_ENV_KEYS.iter().any(|key| {
+                env.get(*key)
+                    .and_then(|v| v.as_str())
+                    .is_some_and(auth_env_value_enabled)
+            })
+        });
+    has_api_key_helper || env_provides_auth
+}
+
+/// Read `~/.claude/settings.json` (inside the WSL distro when WSL mode is on,
+/// since the GUI app does not inherit shell env on macOS either).
+fn read_claude_user_settings() -> Option<String> {
+    let wsl = crate::platform::get_wsl_config();
+    if wsl.enabled {
+        let home = crate::platform::get_wsl_home_dir(&wsl.distro).ok()?;
+        let path = format!("{}/.claude/settings.json", home.trim_end_matches('/'));
+        let output = crate::platform::wsl_aware_command("cat", None)
+            .arg(path)
+            .output()
+            .ok()?;
+        return output
+            .status
+            .success()
+            .then(|| String::from_utf8_lossy(&output.stdout).to_string());
+    }
+    let path = dirs::home_dir()?.join(".claude").join("settings.json");
+    std::fs::read_to_string(path).ok()
 }
 
 /// Fallback auth signals when `claude auth status` is false or unavailable.
-/// Covers keychain/credentials.json OAuth tokens and ANTHROPIC_API_KEY.
+/// Covers keychain/credentials.json OAuth tokens, API keys, auth tokens,
+/// third-party providers (Bedrock/Vertex/Foundry) and `apiKeyHelper`, from
+/// either the process env or `~/.claude/settings.json`.
 fn claude_credentials_or_env_authenticated() -> bool {
-    if claude_env_api_key_present() {
+    if claude_process_env_provides_auth() {
+        return true;
+    }
+    if read_claude_user_settings().is_some_and(|raw| claude_settings_provide_auth(&raw)) {
         return true;
     }
     match load_claude_credentials() {
@@ -1283,6 +1480,10 @@ pub async fn get_claude_usage() -> Result<ClaudeUsageSnapshot, String> {
     get_claude_usage_with_source("ui").await
 }
 
+fn claude_usage_rate_limited_error() -> String {
+    "Claude usage API is rate-limiting requests. Usage updates after your next Claude message, or try again in a few minutes.".to_string()
+}
+
 fn claude_usage_request(client: &reqwest::Client, access_token: &str) -> reqwest::RequestBuilder {
     client
         .get(CLAUDE_USAGE_URL)
@@ -1307,6 +1508,12 @@ pub(crate) async fn get_claude_usage_with_source(
     if let Some(cached) = load_cached_claude_usage(now_secs) {
         log::trace!("Claude usage fetch hit cache (source={request_source})");
         return Ok(cached);
+    }
+
+    if now_secs < CLAUDE_USAGE_COOLDOWN_UNTIL.load(Ordering::Relaxed) {
+        log::trace!("Claude usage API in 429 cooldown (source={request_source})");
+        return load_stale_cached_claude_usage(now_secs)
+            .ok_or_else(claude_usage_rate_limited_error);
     }
 
     let (source, mut credentials) = load_claude_credentials()?;
@@ -1362,15 +1569,20 @@ pub(crate) async fn get_claude_usage_with_source(
 
     // OpenUsage: 429 is common — serve stale cache instead of failing hard / re-login.
     if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        let cooldown_secs = response
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .unwrap_or(CLAUDE_USAGE_DEFAULT_COOLDOWN_SECS);
+        CLAUDE_USAGE_COOLDOWN_UNTIL.store(now_secs + cooldown_secs, Ordering::Relaxed);
         if let Some(stale) = load_stale_cached_claude_usage(now_secs) {
             log::info!(
-                "Claude usage rate-limited (429); serving stale cache (source={request_source})"
+                "Claude usage rate-limited (429, cooldown {cooldown_secs}s); serving stale cache (source={request_source})"
             );
             return Ok(stale);
         }
-        return Err(
-            "Claude usage API is rate-limiting requests. Try again in a few minutes.".to_string(),
-        );
+        return Err(claude_usage_rate_limited_error());
     }
 
     if response.status() == reqwest::StatusCode::UNAUTHORIZED
@@ -1434,6 +1646,10 @@ pub(crate) async fn get_claude_usage_with_source(
             .claude_ai_oauth
             .as_ref()
             .and_then(|o| o.subscription_type.clone()),
+        plan_tier: credentials
+            .claude_ai_oauth
+            .as_ref()
+            .and_then(|o| o.rate_limit_tier.clone()),
         session: map_window(usage.five_hour),
         weekly: map_window(usage.seven_day),
         sonnet_weekly: map_window(usage.seven_day_sonnet),
@@ -1545,19 +1761,60 @@ mod tests {
     }
 
     #[test]
-    fn claude_env_api_key_present_when_non_empty() {
-        // SAFETY: test-only env mutation in a single-threaded unit test.
+    fn claude_process_env_detects_third_party_provider() {
+        // SAFETY: test-only env mutation; no other test touches this var.
         unsafe {
-            std::env::remove_var("ANTHROPIC_API_KEY");
+            std::env::set_var("CLAUDE_CODE_USE_FOUNDRY", "1");
         }
-        assert!(!claude_env_api_key_present());
+        assert!(claude_process_env_provides_auth());
         unsafe {
-            std::env::set_var("ANTHROPIC_API_KEY", "sk-test");
+            std::env::remove_var("CLAUDE_CODE_USE_FOUNDRY");
         }
-        assert!(claude_env_api_key_present());
-        unsafe {
-            std::env::remove_var("ANTHROPIC_API_KEY");
+    }
+
+    #[test]
+    fn auth_env_value_enabled_rejects_falsey_values() {
+        assert!(auth_env_value_enabled("1"));
+        assert!(auth_env_value_enabled("true"));
+        assert!(auth_env_value_enabled("sk-ant-123"));
+        for value in ["", " ", "0", "false", "FALSE", "no", "off"] {
+            assert!(!auth_env_value_enabled(value), "{value:?}");
         }
+    }
+
+    #[test]
+    fn claude_settings_auth_detects_providers_and_helpers() {
+        assert!(claude_settings_provide_auth(
+            r#"{"env":{"CLAUDE_CODE_USE_BEDROCK":"1","AWS_REGION":"us-east-1"}}"#
+        ));
+        assert!(claude_settings_provide_auth(
+            r#"{"env":{"CLAUDE_CODE_USE_VERTEX":"true"}}"#
+        ));
+        assert!(claude_settings_provide_auth(
+            r#"{"env":{"CLAUDE_CODE_USE_FOUNDRY":"1"}}"#
+        ));
+        assert!(claude_settings_provide_auth(
+            r#"{"env":{"ANTHROPIC_AUTH_TOKEN":"tok"}}"#
+        ));
+        assert!(claude_settings_provide_auth(
+            r#"{"env":{"ANTHROPIC_API_KEY":"sk-ant"}}"#
+        ));
+        assert!(claude_settings_provide_auth(
+            r#"{"apiKeyHelper":"~/bin/get-key.sh"}"#
+        ));
+    }
+
+    #[test]
+    fn claude_settings_auth_ignores_disabled_or_missing_entries() {
+        assert!(!claude_settings_provide_auth("{}"));
+        assert!(!claude_settings_provide_auth("not json"));
+        assert!(!claude_settings_provide_auth(r#"{"apiKeyHelper":"  "}"#));
+        assert!(!claude_settings_provide_auth(
+            r#"{"env":{"CLAUDE_CODE_USE_BEDROCK":"0","ANTHROPIC_API_KEY":""}}"#
+        ));
+        assert!(!claude_settings_provide_auth(
+            r#"{"env":{"ANTHROPIC_BASE_URL":"https://example.com"}}"#
+        ));
     }
 
     #[test]
@@ -1593,6 +1850,99 @@ mod tests {
             ..Default::default()
         };
         assert!(token_needs_refresh(&secs, now_ms));
+    }
+
+    #[test]
+    fn usage_window_parses_rfc3339_and_epoch_resets_at() {
+        let iso: ClaudeUsageWindow = serde_json::from_str(
+            r#"{"utilization":27.0,"resets_at":"2026-09-25T20:00:00.396935+00:00"}"#,
+        )
+        .expect("parse iso");
+        assert_eq!(iso.resets_at, Some(1790366400));
+
+        let epoch: ClaudeUsageWindow =
+            serde_json::from_str(r#"{"utilization":1,"resets_at":1790366400}"#)
+                .expect("parse epoch");
+        assert_eq!(epoch.resets_at, Some(1790366400));
+    }
+
+    #[test]
+    fn rate_limit_window_converts_fraction_to_percent() {
+        let msg: Value = serde_json::from_str(
+            r#"{"type":"rate_limit_event","rate_limit_info":{"unifiedWindows":{
+                "five_hour":{"utilization":0.33,"resetsAt":1790348400},
+                "seven_day":{"utilization":0.18,"resetsAt":1790510400}}}}"#,
+        )
+        .expect("parse");
+        let windows = &msg["rate_limit_info"]["unifiedWindows"];
+        let session = rate_limit_window(windows, "five_hour").expect("five_hour");
+        assert!((session.used_percent - 33.0).abs() < 1e-9);
+        assert_eq!(session.resets_at, Some(1790348400));
+        assert!(rate_limit_window(windows, "seven_day_sonnet").is_none());
+    }
+
+    #[test]
+    fn merge_usage_window_never_regresses_within_same_window() {
+        let w = |pct: f64, reset: u64| {
+            Some(ClaudeUsageWindowSnapshot {
+                used_percent: pct,
+                resets_at: Some(reset),
+            })
+        };
+        // Replayed older event in the same window keeps the higher value.
+        assert_eq!(merge_usage_window(w(30.0, 100), w(20.0, 100)), w(30.0, 100));
+        // Newer data in the same window wins.
+        assert_eq!(merge_usage_window(w(30.0, 100), w(35.0, 100)), w(35.0, 100));
+        // A new window (later reset) wins even with lower usage.
+        assert_eq!(merge_usage_window(w(90.0, 100), w(1.0, 200)), w(1.0, 200));
+        // An event from an older window is ignored.
+        assert_eq!(merge_usage_window(w(1.0, 200), w(90.0, 100)), w(1.0, 200));
+        assert_eq!(merge_usage_window(None, w(5.0, 100)), w(5.0, 100));
+        assert_eq!(merge_usage_window(w(5.0, 100), None), w(5.0, 100));
+    }
+
+    #[test]
+    fn usage_cache_freshness_requires_recent_api_fetch() {
+        let entry = |cached_at: u64, api_fetched_at: u64| {
+            ClaudeUsageCacheEntry {
+            cached_at,
+            api_fetched_at,
+            snapshot: serde_json::from_str(r#"{"planType":null,"session":null,"weekly":null,"sonnetWeekly":null,"extraUsageSpent":null,"extraUsageLimit":null,"fetchedAt":0}"#).expect("snapshot"),
+        }
+        };
+        let now = 10_000;
+        assert!(is_claude_usage_cache_fresh(&entry(now - 60, now - 60), now));
+        // Run events keep it fresh while the API fetch is < 30 min old.
+        assert!(is_claude_usage_cache_fresh(
+            &entry(now - 60, now - 20 * 60),
+            now
+        ));
+        assert!(!is_claude_usage_cache_fresh(
+            &entry(now - 60, now - 31 * 60),
+            now
+        ));
+        assert!(!is_claude_usage_cache_fresh(
+            &entry(now - 6 * 60, now - 6 * 60),
+            now
+        ));
+        // Seeded only from runs (never fetched from API) → still fetch the API.
+        assert!(!is_claude_usage_cache_fresh(&entry(now, 0), now));
+    }
+
+    #[test]
+    fn usage_snapshot_without_plan_tier_still_parses() {
+        let raw = r#"{
+            "planType": "max",
+            "session": null,
+            "weekly": null,
+            "sonnetWeekly": null,
+            "extraUsageSpent": null,
+            "extraUsageLimit": null,
+            "fetchedAt": 1
+        }"#;
+        let snapshot: ClaudeUsageSnapshot = serde_json::from_str(raw).expect("parse");
+        assert_eq!(snapshot.plan_type.as_deref(), Some("max"));
+        assert_eq!(snapshot.plan_tier, None);
     }
 
     #[test]

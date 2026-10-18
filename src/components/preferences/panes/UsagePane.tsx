@@ -1,6 +1,9 @@
 import React, { useCallback } from 'react'
-import { Loader2, RefreshCw } from 'lucide-react'
+import { Loader2, RefreshCw } from '@/components/icons/reicon'
 import { Button } from '@/components/ui/button'
+import { ClaudeIcon } from '@/components/icons/ClaudeIcon'
+import { CodexIcon } from '@/components/icons/CodexIcon'
+import { GrokIcon } from '@/components/icons/GrokIcon'
 import {
   useClaudeCliAuth,
   useClaudeCliStatus,
@@ -16,23 +19,46 @@ import {
   useGrokCliStatus,
   useGrokUsage,
 } from '@/services/grok-cli'
+import { useNow } from '@/hooks/useNow'
+import {
+  formatCompactDuration,
+  formatPlanName,
+  formatResetAt,
+  formatResetCountdown,
+  toEpochMs,
+} from '@/lib/usage-format'
 import { cn } from '@/lib/utils'
 
-function CompactSection({
+/** One card per backend: icon, name, plan badge, then usage windows. */
+function UsageCard({
   title,
+  Icon,
+  plan,
   anchorId,
   children,
 }: {
   title: string
+  Icon: React.ComponentType<{ className?: string }>
+  plan?: string | null
   anchorId: string
   children: React.ReactNode
 }) {
   return (
-    <section id={anchorId} className="space-y-1.5">
-      <h3 className="border-b border-border pb-1 text-sm font-medium text-foreground">
-        {title}
-      </h3>
-      {children}
+    <section id={anchorId} className="space-y-3">
+      <div className="flex items-center justify-between gap-2 px-1 sm:px-2">
+        <h3 className="flex items-center gap-2 text-sm font-medium text-foreground">
+          <Icon className="size-4 shrink-0" />
+          {title}
+        </h3>
+        {plan ? (
+          <span className="truncate rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+            {plan} plan
+          </span>
+        ) : null}
+      </div>
+      <div className="space-y-3 rounded-xl border border-border bg-muted/30 p-4 sm:p-5">
+        {children}
+      </div>
     </section>
   )
 }
@@ -49,35 +75,21 @@ function clampPercent(value: number): number {
 function barClass(usedPercent: number): string {
   const p = clampPercent(usedPercent)
   if (p >= 90) return 'bg-destructive'
-  if (p >= 70) return 'bg-amber-500'
+  if (p >= 70) return 'bg-warning'
   return 'bg-primary'
 }
 
-/** Compact duration unit (e.g. `2h`, `7d`). */
-export function formatShortDuration(absMs: number): string {
-  const minuteMs = 60_000
-  const hourMs = 60 * minuteMs
-  const dayMs = 24 * hourMs
-  if (absMs < hourMs) return `${Math.max(1, Math.round(absMs / minuteMs))}m`
-  if (absMs < dayMs) return `${Math.max(1, Math.round(absMs / hourMs))}h`
-  return `${Math.max(1, Math.round(absMs / dayMs))}d`
+function percentClass(usedPercent: number): string {
+  const p = clampPercent(usedPercent)
+  if (p >= 90) return 'text-destructive'
+  if (p >= 70) return 'text-warning'
+  return 'text-foreground'
 }
 
-/** Compact relative time until a future reset, or past duration. */
-export function formatShortRelative(
-  atSeconds: number,
-  nowMs = Date.now()
-): string {
-  const targetMs = atSeconds < 1_000_000_000_000 ? atSeconds * 1000 : atSeconds
-  const diffMs = targetMs - nowMs
-  const unit = formatShortDuration(Math.abs(diffMs))
-  return diffMs >= 0 ? unit : `${unit} ago`
-}
-
-/** Age of a past timestamp without trailing "ago" (for `· 2m ago` composition). */
-export function formatShortAge(atSeconds: number, nowMs = Date.now()): string {
-  const targetMs = atSeconds < 1_000_000_000_000 ? atSeconds * 1000 : atSeconds
-  return formatShortDuration(Math.max(0, nowMs - targetMs))
+/** `5-hour session` from the window length, `Session` when unknown. */
+function sessionLabel(limitWindowSeconds?: number | null): string {
+  if (!limitWindowSeconds) return 'Session'
+  return `${Math.round(limitWindowSeconds / 3600)}-hour session`
 }
 
 function getQueryErrorMessage(error: unknown, fallback: string) {
@@ -94,25 +106,31 @@ function getQueryErrorMessage(error: unknown, fallback: string) {
   return fallback
 }
 
-/** Single-line meter: label · bar · % · reset */
+/** Usage window: label + % used, bar, then reset countdown. */
 const UsageRow: React.FC<{
   label: string
   usage: UsageWindow | null
-}> = ({ label, usage }) => {
+  nowMs: number
+}> = ({ label, usage, nowMs }) => {
   if (!usage) return null
 
   const usedPercent = clampPercent(usage.usedPercent)
-  const resetLabel = usage.resetsAt ? formatShortRelative(usage.resetsAt) : null
-  const absoluteReset = usage.resetsAt
-    ? new Date(usage.resetsAt * 1000).toLocaleString()
-    : undefined
+  const resetsAt = usage.resetsAt
 
   return (
-    <div
-      className="grid grid-cols-[minmax(4.5rem,7rem)_minmax(0,1fr)_2.75rem_2.25rem] items-center gap-x-2"
-      title={absoluteReset ? `Resets ${absoluteReset}` : undefined}
-    >
-      <span className="truncate text-xs text-foreground">{label}</span>
+    <div className="space-y-1">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="truncate text-xs text-foreground">{label}</span>
+        <span
+          className={cn(
+            'shrink-0 text-xs font-medium tabular-nums',
+            percentClass(usedPercent)
+          )}
+        >
+          {Math.round(usedPercent)}%
+          <span className="ml-1 font-normal text-muted-foreground">used</span>
+        </span>
+      </div>
       <div
         className="h-1.5 w-full overflow-hidden rounded-full bg-secondary"
         role="progressbar"
@@ -129,12 +147,18 @@ const UsageRow: React.FC<{
           style={{ width: `${usedPercent}%` }}
         />
       </div>
-      <span className="text-right text-xs tabular-nums text-muted-foreground">
-        {usedPercent.toFixed(1)}%
-      </span>
-      <span className="text-right text-[10px] tabular-nums text-muted-foreground/80">
-        {resetLabel ?? ''}
-      </span>
+      {resetsAt ? (
+        <p
+          className="text-[11px] tabular-nums text-muted-foreground"
+          title={`Resets ${new Date(toEpochMs(resetsAt)).toLocaleString()}`}
+        >
+          Resets in {formatResetCountdown(resetsAt, nowMs)}
+          <span className="mx-1.5 text-border" aria-hidden>
+            ·
+          </span>
+          {formatResetAt(resetsAt, nowMs)}
+        </p>
+      ) : null}
     </div>
   )
 }
@@ -215,8 +239,7 @@ export const UsagePane: React.FC = () => {
     enabled: !!claudeStatus.data?.installed,
   })
   const claudeUsage = useClaudeUsage({
-    enabled:
-      !!claudeStatus.data?.installed && !!claudeAuth.data?.authenticated,
+    enabled: !!claudeStatus.data?.installed && !!claudeAuth.data?.authenticated,
   })
 
   const codexStatus = useCodexCliStatus()
@@ -302,6 +325,14 @@ export const UsagePane: React.FC = () => {
   const statusLoading =
     claudeStatus.isLoading || codexStatus.isLoading || grokStatus.isLoading
 
+  const nowMs = useNow(hasAnyBackend)
+  const claudePlan = formatPlanName(
+    claudeUsage.data?.planType,
+    claudeUsage.data?.planTier
+  )
+  const codexPlan = formatPlanName(codexUsage.data?.planType)
+  const grokPlan = formatPlanName(grokUsage.data?.planType)
+
   const renderClaude = () => {
     if (claudePendingAuth) {
       return <LoadingLine label="Checking authentication…" />
@@ -309,7 +340,8 @@ export const UsagePane: React.FC = () => {
     if (claudeUsage.isLoading) {
       return <LoadingLine label="Loading usage…" />
     }
-    if (claudeUsage.isError) {
+    // Keep showing last-good data when only a background refetch failed.
+    if (claudeUsage.isError && !claudeUsage.data) {
       return (
         <ErrorLine
           message={claudeErrorMessage}
@@ -324,18 +356,22 @@ export const UsagePane: React.FC = () => {
     const data = claudeUsage.data
     const extra =
       data.extraUsageSpent != null || data.extraUsageLimit != null
-        ? `Extra: ${data.extraUsageSpent ?? 0}${
+        ? `Extra usage: ${data.extraUsageSpent ?? 0}${
             data.extraUsageLimit != null ? ` / ${data.extraUsageLimit}` : ''
           }`
         : null
 
     return (
       <div className="space-y-2">
-        <MetaLine items={[data.planType ?? 'Unknown', extra]} />
-        <div className="space-y-1.5">
-          <UsageRow label="Session" usage={data.session} />
-          <UsageRow label="Weekly" usage={data.weekly} />
-          <UsageRow label="Sonnet" usage={data.sonnetWeekly} />
+        <MetaLine items={[extra]} />
+        <div className="space-y-3">
+          <UsageRow label="5-hour session" usage={data.session} nowMs={nowMs} />
+          <UsageRow label="Weekly" usage={data.weekly} nowMs={nowMs} />
+          <UsageRow
+            label="Weekly · Sonnet"
+            usage={data.sonnetWeekly}
+            nowMs={nowMs}
+          />
         </div>
       </div>
     )
@@ -348,7 +384,8 @@ export const UsagePane: React.FC = () => {
     if (codexUsage.isLoading) {
       return <LoadingLine label="Loading usage…" />
     }
-    if (codexUsage.isError) {
+    // Keep showing last-good data when only a background refetch failed.
+    if (codexUsage.isError && !codexUsage.data) {
       return (
         <ErrorLine
           message={codexErrorMessage}
@@ -378,7 +415,7 @@ export const UsagePane: React.FC = () => {
       if (limit.weekly) {
         rows.push({
           key: `${limit.label}-weekly`,
-          label: `${limit.label} weekly`,
+          label: `${limit.label} · Weekly`,
           usage: limit.weekly,
         })
       }
@@ -387,18 +424,27 @@ export const UsagePane: React.FC = () => {
 
     return (
       <div className="space-y-2">
-        <MetaLine items={[data.planType ?? 'Unknown', credits]} />
+        <MetaLine items={[credits]} />
         {data.rateLimitReachedType ? (
           <InlineStatus tone="error">
             Rate limit reached ({data.rateLimitReachedType.replace(/_/g, ' ')})
           </InlineStatus>
         ) : null}
-        <div className="space-y-1.5">
-          <UsageRow label="Session" usage={data.session} />
-          <UsageRow label="Weekly" usage={data.weekly} />
-          <UsageRow label="Reviews" usage={data.reviews} />
+        <div className="space-y-3">
+          <UsageRow
+            label={sessionLabel(data.session?.limitWindowSeconds)}
+            usage={data.session}
+            nowMs={nowMs}
+          />
+          <UsageRow label="Weekly" usage={data.weekly} nowMs={nowMs} />
+          <UsageRow label="Code reviews" usage={data.reviews} nowMs={nowMs} />
           {extraLimits.map(row => (
-            <UsageRow key={row.key} label={row.label} usage={row.usage} />
+            <UsageRow
+              key={row.key}
+              label={row.label}
+              usage={row.usage}
+              nowMs={nowMs}
+            />
           ))}
         </div>
       </div>
@@ -412,7 +458,8 @@ export const UsagePane: React.FC = () => {
     if (grokUsage.isLoading) {
       return <LoadingLine label="Loading usage…" />
     }
-    if (grokUsage.isError) {
+    // Keep showing last-good data when only a background refetch failed.
+    if (grokUsage.isError && !grokUsage.data) {
       return (
         <ErrorLine
           message={grokErrorMessage}
@@ -461,10 +508,10 @@ export const UsagePane: React.FC = () => {
 
     return (
       <div className="space-y-2">
-        <MetaLine items={[data.planType ?? 'Unknown', codeAccess, period]} />
-        <div className="space-y-1.5">
-          <UsageRow label="Grok Build" usage={data.session} />
-          <UsageRow label="Weekly credits" usage={data.weekly} />
+        <MetaLine items={[codeAccess, period]} />
+        <div className="space-y-3">
+          <UsageRow label="Grok Build" usage={data.session} nowMs={nowMs} />
+          <UsageRow label="Weekly credits" usage={data.weekly} nowMs={nowMs} />
           {products.map(product => (
             <UsageRow
               key={product.product}
@@ -474,6 +521,7 @@ export const UsagePane: React.FC = () => {
                 resetsAt:
                   data.session?.resetsAt ?? data.weekly?.resetsAt ?? null,
               }}
+              nowMs={nowMs}
             />
           ))}
         </div>
@@ -486,20 +534,24 @@ export const UsagePane: React.FC = () => {
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
         <span className="min-w-0 truncate">
-          {isRefreshing ? 'Refreshing…' : 'Up to date'}
+          {isRefreshing ? (
+            'Refreshing…'
+          ) : latestFetchedAt > 0 ? (
+            <span
+              title={new Date(latestFetchedAt * 1000).toLocaleString()}
+              className="tabular-nums"
+            >
+              Updated{' '}
+              {formatCompactDuration(
+                Math.max(0, nowMs - toEpochMs(latestFetchedAt))
+              )}{' '}
+              ago
+            </span>
+          ) : (
+            'Up to date'
+          )}
           <span className="mx-1.5 text-border">·</span>
-          Auto every 5m
-          {latestFetchedAt > 0 ? (
-            <>
-              <span className="mx-1.5 text-border">·</span>
-              <span
-                title={new Date(latestFetchedAt * 1000).toLocaleString()}
-                className="tabular-nums"
-              >
-                {formatShortAge(latestFetchedAt)} ago
-              </span>
-            </>
-          ) : null}
+          Auto-refresh every 5m
         </span>
         <Button
           variant="ghost"
@@ -525,21 +577,36 @@ export const UsagePane: React.FC = () => {
       ) : null}
 
       {showClaude ? (
-        <CompactSection title="Claude" anchorId="pref-usage-section-claude">
+        <UsageCard
+          title="Claude"
+          Icon={ClaudeIcon}
+          plan={claudePlan}
+          anchorId="pref-usage-section-claude"
+        >
           {renderClaude()}
-        </CompactSection>
+        </UsageCard>
       ) : null}
 
       {showCodex ? (
-        <CompactSection title="Codex" anchorId="pref-usage-section-codex">
+        <UsageCard
+          title="Codex"
+          Icon={CodexIcon}
+          plan={codexPlan}
+          anchorId="pref-usage-section-codex"
+        >
           {renderCodex()}
-        </CompactSection>
+        </UsageCard>
       ) : null}
 
       {showGrok ? (
-        <CompactSection title="Grok" anchorId="pref-usage-section-grok">
+        <UsageCard
+          title="Grok"
+          Icon={GrokIcon}
+          plan={grokPlan}
+          anchorId="pref-usage-section-grok"
+        >
           {renderGrok()}
-        </CompactSection>
+        </UsageCard>
       ) : null}
     </div>
   )

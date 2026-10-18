@@ -22,19 +22,11 @@ interface UseChatWindowEventsParams {
   activeWorktreeId: string | null | undefined
   activeWorktreePath: string | null | undefined
   isModal: boolean
-  // Plan dialog
-  latestPlanContent: string | null
-  latestPlanFilePath: string | null
-  setPlanDialogContent: (content: string | null) => void
-  setIsPlanDialogOpen: (open: boolean) => void
   session: Session | null | undefined
   // Git diff
   gitStatus: { base_branch?: string; base_remote?: string } | null | undefined
   setDiffRequest: (
-    req:
-      | DiffRequest
-      | null
-      | ((prev: DiffRequest | null) => DiffRequest | null)
+    req: DiffRequest | null | ((prev: DiffRequest | null) => DiffRequest | null)
   ) => void
   // Auto-scroll
   isAtBottom: boolean
@@ -70,7 +62,7 @@ interface UseChatWindowEventsParams {
 
 /**
  * Manages all window event listeners for ChatWindow.
- * Consolidates focus, plan, git-diff, cancel, create-session,
+ * Consolidates focus, git-diff, cancel, create-session,
  * cycle-mode, set-chat-input, debug-mode, and context command events.
  */
 export function useChatWindowEvents({
@@ -79,10 +71,6 @@ export function useChatWindowEvents({
   activeWorktreeId,
   activeWorktreePath,
   isModal,
-  latestPlanContent,
-  latestPlanFilePath,
-  setPlanDialogContent,
-  setIsPlanDialogOpen,
   session,
   gitStatus,
   setDiffRequest,
@@ -179,27 +167,6 @@ export function useChatWindowEvents({
     return () => window.removeEventListener('focus-chat-input', handler)
   }, [focusChatInput])
 
-  // P key: Open plan dialog
-  useEffect(() => {
-    const handler = () => {
-      if (latestPlanContent) {
-        setPlanDialogContent(latestPlanContent)
-        setIsPlanDialogOpen(true)
-      } else if (latestPlanFilePath) {
-        setIsPlanDialogOpen(true)
-      } else {
-        toast.info('No plan available for this session')
-      }
-    }
-    window.addEventListener('open-plan', handler)
-    return () => window.removeEventListener('open-plan', handler)
-  }, [
-    latestPlanContent,
-    latestPlanFilePath,
-    setPlanDialogContent,
-    setIsPlanDialogOpen,
-  ])
-
   // CMD+T: Open configured default; CMD+SHIFT+T / plus buttons open picker
   useEffect(() => {
     const handler = (event: Event) => {
@@ -239,6 +206,8 @@ export function useChatWindowEvents({
           worktreePath: activeWorktreePath,
           sessionId: activeSessionId,
           selectedExecutionMode: mode,
+          selectedPermissionMode:
+            useChatStore.getState().permissionModes[activeSessionId],
         }).catch(() => undefined)
       }
     }
@@ -355,7 +324,7 @@ export function useChatWindowEvents({
     }
     window.addEventListener('cancel-prompt', handler)
     return () => window.removeEventListener('cancel-prompt', handler)
-  }, []) // isModal is constant for the lifetime of ChatWindow
+  }, [isModal]) // isModal is constant for the lifetime of ChatWindow
 
   // Context commands (save/load/run-script)
   useEffect(() => {

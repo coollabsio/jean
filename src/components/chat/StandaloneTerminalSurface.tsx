@@ -5,7 +5,13 @@
  * emulator and Termius-style extra-keys bar below, with soft-keyboard inset.
  */
 
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ClipboardEvent,
+  type KeyboardEvent,
+} from 'react'
 import { useTerminal } from '@/hooks/useTerminal'
 import { useTerminalBackgroundColor } from '@/hooks/useTerminalThemeSync'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -19,6 +25,8 @@ import {
 } from '@/lib/clipboard'
 import { isModKeyEvent } from '@/types/keybindings'
 import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { TerminalArrowGesture } from './TerminalArrowGesture'
 import { TerminalExtraKeysBar } from './TerminalExtraKeysBar'
 import '@xterm/xterm/css/xterm.css'
@@ -33,6 +41,8 @@ export interface StandaloneTerminalSurfaceProps {
   className?: string
   /** When false, skip arrow pad + extra keys (native desktop default still applies). */
   forceExtraKeys?: boolean
+  /** Show a text field for login codes when browser clipboard access is blocked. */
+  allowPasteInput?: boolean
 }
 
 /**
@@ -47,12 +57,14 @@ export function StandaloneTerminalSurface({
   worktreePath = '/tmp',
   className,
   forceExtraKeys,
+  allowPasteInput = false,
 }: StandaloneTerminalSurfaceProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const surfaceRef = useRef<HTMLDivElement>(null)
   const initialized = useRef(false)
   // Callback-as-state: dialogs/portals often mount at 0×0; observer waits for a real size.
   const [container, setContainer] = useState<HTMLDivElement | null>(null)
+  const [pasteText, setPasteText] = useState('')
   const isMobile = useIsMobile()
   // Soft-keyboard special keys + arrow gesture: web access always, plus narrow viewports.
   const showExtraKeys =
@@ -76,6 +88,26 @@ export function StandaloneTerminalSurface({
     event.stopPropagation()
     const text = normalizeClipboardForTerminal(await readFromClipboard())
     writeTerminalInput(terminalId, text)
+  }
+
+  const handleBrowserPaste = (event: ClipboardEvent<HTMLDivElement>) => {
+    if (isNativeApp()) return
+    // The terminal itself receives paste on its hidden textarea.
+    if (event.target instanceof HTMLInputElement) return
+    const text = normalizeClipboardForTerminal(
+      event.clipboardData.getData('text/plain')
+    )
+    if (!text) return
+    event.preventDefault()
+    event.stopPropagation()
+    writeTerminalInput(terminalId, text)
+  }
+
+  const submitPasteText = () => {
+    const text = normalizeClipboardForTerminal(pasteText).replace(/\n+$/, '')
+    if (!text) return
+    writeTerminalInput(terminalId, `${text}\r`)
+    setPasteText('')
   }
 
   const { initTerminal, fit, focus } = useTerminal({
@@ -145,11 +177,18 @@ export function StandaloneTerminalSurface({
         // Lift the extra-keys bar (and shrink the emulator) above the soft keyboard.
         paddingBottom: keyboardInset > 0 ? keyboardInset : undefined,
       }}
-      onMouseDown={() => {
+      onMouseDown={event => {
+        if (
+          event.target instanceof Element &&
+          event.target.closest('input, button')
+        ) {
+          return
+        }
         focus()
         focusTerminal(terminalId)
       }}
       onKeyDownCapture={event => void handleNativePaste(event)}
+      onPasteCapture={handleBrowserPaste}
     >
       {/* Pad chrome sits above the emulator so long-press arrows never cover text. */}
       {showExtraKeys && (
@@ -171,9 +210,31 @@ export function StandaloneTerminalSurface({
       </div>
       {showExtraKeys && (
         <TerminalExtraKeysBar
+          key={terminalId}
           terminalId={terminalId}
           keyboardOpen={keyboardInset > 0}
         />
+      )}
+      {allowPasteInput && !isNativeApp() && (
+        <form
+          className="flex gap-2 border-t border-border p-2"
+          onSubmit={event => {
+            event.preventDefault()
+            submitPasteText()
+          }}
+        >
+          <Input
+            aria-label="Login code or URL"
+            placeholder="Paste login code or URL here"
+            value={pasteText}
+            onChange={event => setPasteText(event.target.value)}
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <Button type="submit" disabled={!pasteText}>
+            Send
+          </Button>
+        </form>
       )}
     </div>
   )

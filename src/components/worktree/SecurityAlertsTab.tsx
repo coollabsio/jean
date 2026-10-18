@@ -1,5 +1,10 @@
 import { useCallback, useMemo } from 'react'
-import { Loader2, Search, RefreshCw, AlertCircle } from 'lucide-react'
+import {
+  Loader2,
+  Search,
+  RefreshCw,
+  AlertCircle,
+} from '@/components/icons/reicon'
 import { isGhAuthError } from '@/services/github'
 import { GhAuthError } from '@/components/shared/GhAuthError'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -13,6 +18,8 @@ import {
 import { cn } from '@/lib/utils'
 import { SecurityAlertItem, AdvisoryItem } from './NewWorktreeItems'
 import { BulkInvestigateBar } from './BulkInvestigateBar'
+import type { GetContextLinkMatches } from './ContextLinkBadge'
+import type { ContextLinkMatch } from '@/hooks/useContextLinkUsage'
 import { SelectAllControl } from './ItemSelectCheckbox'
 import { useMultiSelect } from './hooks/useMultiSelect'
 import type { DependabotAlert, RepositoryAdvisory } from '@/types/github'
@@ -32,14 +39,14 @@ const ADVISORY_STATE_LABELS: Record<string, string> = {
 }
 
 const STATE_DOT_COLORS: Record<string, string> = {
-  open: 'bg-orange-500',
-  published: 'bg-orange-500',
-  fixed: 'bg-green-500',
+  open: 'bg-warning',
+  published: 'bg-warning',
+  fixed: 'bg-success',
   closed: 'bg-muted-foreground',
   dismissed: 'bg-muted-foreground',
   auto_dismissed: 'bg-muted-foreground',
-  triage: 'bg-yellow-500',
-  draft: 'bg-blue-500',
+  triage: 'bg-warning',
+  draft: 'bg-info',
 }
 
 export type SecuritySelection =
@@ -80,6 +87,7 @@ export interface SecurityAlertsTabProps {
     items: SecuritySelection[]
   ) => void | Promise<void>
   isBulkInvestigating?: boolean
+  getContextMatches?: GetContextLinkMatches
 }
 
 function alertKey(number: number) {
@@ -118,6 +126,7 @@ export function SecurityAlertsTab({
   creatingFromGhsaId,
   onBulkInvestigateSecurity,
   isBulkInvestigating = false,
+  getContextMatches,
 }: SecurityAlertsTabProps) {
   const selectableItems = useMemo(() => {
     const items: SecuritySelection[] = [
@@ -137,6 +146,23 @@ export function SecurityAlertsTab({
   }, [])
 
   const multi = useMultiSelect(selectableItems, getKey)
+  const matchesByKey = useMemo(() => {
+    const map = new Map<string, ContextLinkMatch[]>()
+    if (!getContextMatches) return map
+    for (const alert of alerts) {
+      map.set(
+        alertKey(alert.number),
+        getContextMatches({ type: 'security', id: alert.number })
+      )
+    }
+    for (const advisory of filteredAdvisories) {
+      map.set(
+        advisoryKey(advisory.ghsaId),
+        getContextMatches({ type: 'advisory', id: advisory.ghsaId })
+      )
+    }
+    return map
+  }, [alerts, filteredAdvisories, getContextMatches])
 
   const handleBulkInvestigate = useCallback(async () => {
     if (!onBulkInvestigateSecurity || multi.selectedItems.length < 1) return
@@ -199,18 +225,15 @@ export function SecurityAlertsTab({
           >
             Include resolved alerts
           </label>
-          {!isLoading &&
-            !isLoadingAdvisories &&
-            !error &&
-            hasItems && (
-              <SelectAllControl
-                id="select-all-security"
-                allChecked={multi.allVisibleChecked}
-                someChecked={multi.someVisibleChecked}
-                onToggleAll={multi.toggleAllVisible}
-                ariaLabel="Select all visible security items"
-              />
-            )}
+          {!isLoading && !isLoadingAdvisories && !error && hasItems && (
+            <SelectAllControl
+              id="select-all-security"
+              allChecked={multi.allVisibleChecked}
+              someChecked={multi.someVisibleChecked}
+              onToggleAll={multi.toggleAllVisible}
+              ariaLabel="Select all visible security items"
+            />
+          )}
         </div>
       </div>
 
@@ -279,6 +302,7 @@ export function SecurityAlertsTab({
                     index={index}
                     isSelected={index === selectedIndex}
                     isCreating={creatingFromNumber === alert.number}
+                    contextMatches={matchesByKey.get(key)}
                     isChecked={multi.isChecked(key)}
                     onCheckedChange={checked => multi.toggle(key, checked)}
                     onMouseEnter={() => setSelectedIndex(index)}
@@ -325,6 +349,7 @@ export function SecurityAlertsTab({
                     index={combinedIndex}
                     isSelected={combinedIndex === selectedIndex}
                     isCreating={creatingFromGhsaId === advisory.ghsaId}
+                    contextMatches={matchesByKey.get(key)}
                     isChecked={multi.isChecked(key)}
                     onCheckedChange={checked => multi.toggle(key, checked)}
                     onMouseEnter={() => setSelectedIndex(combinedIndex)}

@@ -7,95 +7,93 @@ import { FeatureTourDialog } from './FeatureTourDialog'
 
 const mocks = vi.hoisted(() => ({
   patchPreferencesMutate: vi.fn(),
+  preferences: undefined as { has_seen_feature_tour: boolean } | undefined,
 }))
 
 vi.mock('@/services/preferences', () => ({
-  usePreferences: () => ({
-    data: {
-      has_seen_feature_tour: false,
-    },
-  }),
+  usePreferences: () => ({ data: mocks.preferences }),
   usePatchPreferences: () => ({ mutate: mocks.patchPreferencesMutate }),
 }))
 
-function renderTour() {
-  act(() => {
-    useUIStore.setState({ featureTourOpen: true })
-  })
+vi.mock('@/lib/environment', () => ({ isNativeApp: () => true }))
 
+function renderTour() {
+  act(() => useUIStore.setState({ featureTourOpen: true }))
   return render(<FeatureTourDialog />)
 }
 
 describe('FeatureTourDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    act(() => {
-      useUIStore.setState({ featureTourOpen: false })
-    })
+    mocks.preferences = { has_seen_feature_tour: false }
+    act(() => useUIStore.setState({ featureTourOpen: false }))
   })
 
   afterEach(() => {
-    act(() => {
-      useUIStore.setState({ featureTourOpen: false })
-    })
+    act(() => useUIStore.setState({ featureTourOpen: false }))
   })
 
-  it('opens with Magic Menu automation instead of shortcut memorization', () => {
+  it('starts with a compact page about the Magic Menu', () => {
     renderTour()
 
     expect(
-      screen.getByRole('dialog', { name: /start with the magic menu/i })
+      screen.getByRole('dialog', { name: /meet the magic menu/i })
     ).toBeInTheDocument()
-    expect(screen.getByText(/automate everyday dev tasks/i)).toBeInTheDocument()
-    expect(screen.getByText(/commit, push, open prs/i)).toBeInTheDocument()
+    expect(screen.getByText(/make it your first stop/i)).toBeInTheDocument()
+    expect(screen.getByText(/use the magic menu often/i)).toBeInTheDocument()
+    expect(document.querySelector('kbd')).toHaveTextContent(/M/i)
+    expect(screen.getByText(/commit, push/i)).toBeInTheDocument()
     expect(screen.getByText(/resolve conflicts/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /next/i })).toBeInTheDocument()
   })
 
-  it('teaches every AI backend before keybindings', async () => {
+  it('shows a brief jean.json page and then marks the tour as seen', async () => {
     const user = userEvent.setup()
     renderTour()
 
     await user.click(screen.getByRole('button', { name: /next/i }))
-    await user.click(screen.getByRole('button', { name: /next/i }))
 
     expect(
-      screen.getByRole('heading', { name: /bring your favorite ai backend/i })
+      screen.getByRole('heading', { name: /automate with jean\.json/i })
     ).toBeInTheDocument()
-    for (const backend of [
-      'Claude',
-      'Codex',
-      'OpenCode',
-      'Cursor',
-      'Pi',
-      'Command Code',
-    ]) {
-      expect(screen.getByText(backend)).toBeInTheDocument()
-    }
-
-    await user.click(screen.getByRole('button', { name: /next/i }))
+    expect(screen.getByText(/prepares each new worktree/i)).toBeInTheDocument()
     expect(
-      screen.getByRole('heading', { name: /mr\. robot/i })
+      screen.getByText(/starts your development environment/i)
     ).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: /next/i }))
-    await user.click(screen.getByRole('button', { name: /next/i }))
-    expect(
-      screen.getByRole('heading', { name: /keyboard shortcuts/i })
-    ).toBeInTheDocument()
-  })
-
-  it('marks the tour as seen when finished', async () => {
-    const user = userEvent.setup()
-    renderTour()
-
-    for (let i = 0; i < 5; i += 1) {
-      await user.click(screen.getByRole('button', { name: /next/i }))
-    }
-    await user.click(screen.getByRole('button', { name: /done/i }))
+    await user.click(screen.getByRole('button', { name: /got it/i }))
 
     expect(mocks.patchPreferencesMutate).toHaveBeenCalledWith({
       has_seen_feature_tour: true,
     })
+    expect(useUIStore.getState().featureTourOpen).toBe(false)
+  })
+
+  it('marks the tour as seen with the close button before preferences load', async () => {
+    const user = userEvent.setup()
+    mocks.preferences = undefined
+    renderTour()
+
+    await user.click(screen.getByRole('button', { name: /close/i }))
+
+    expect(mocks.patchPreferencesMutate).toHaveBeenCalledWith({
+      has_seen_feature_tour: true,
+    })
+    expect(useUIStore.getState().featureTourOpen).toBe(false)
+  })
+
+  it('can be acknowledged with Enter', async () => {
+    const user = userEvent.setup()
+    renderTour()
+
+    await user.keyboard('{Enter}')
+
+    expect(
+      screen.getByRole('heading', { name: /automate with jean\.json/i })
+    ).toBeInTheDocument()
+
+    await user.keyboard('{Enter}')
+
     expect(useUIStore.getState().featureTourOpen).toBe(false)
   })
 })

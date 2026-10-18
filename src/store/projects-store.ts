@@ -1,13 +1,17 @@
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
+import { closeLeftSidebarOnMobile } from '@/store/ui-store'
 import type { LabelData } from '@/types/chat'
-import type { WorktreeSortMode } from '@/types/projects'
+import type { Project, WorktreeSortMode } from '@/types/projects'
 
 export interface ProjectCanvasSettings {
   worktreeSortMode?: WorktreeSortMode
   pinnedLabels?: LabelData[]
   labels?: LabelData[]
 }
+
+/** Panel view inside the Workspace rail section. */
+export type SidebarTab = 'projects' | 'recent'
 
 interface ProjectsUIState {
   // Selection state
@@ -31,13 +35,17 @@ interface ProjectsUIState {
 
   // Project canvas settings per project
   projectCanvasSettings: Record<string, ProjectCanvasSettings>
-
-  // Favorited projects shown first in the GitHub Dashboard filter and sections
-  githubDashboardFavoriteProjectIds: string[]
+  projectCanvasActiveFilters: Record<string, string>
+  sidebarServerFilter: string | null
+  sidebarActiveTab: SidebarTab
+  pinnedRecentSessionIds: string[]
 
   // Add project dialog state
   addProjectDialogOpen: boolean
   addProjectParentFolderId: string | null
+
+  // Add/edit server dialog state (null = closed, no project = add)
+  serverDialog: { project?: Project } | null
 
   // Project settings dialog state
   projectSettingsDialogOpen: boolean
@@ -93,6 +101,8 @@ interface ProjectsUIState {
     open: boolean,
     parentFolderId?: string | null
   ) => void
+  setServerDialog: (serverDialog: { project?: Project } | null) => void
+  setSidebarActiveTab: (tab: SidebarTab) => void
   openProjectSettings: (projectId: string, pane?: string) => void
   closeProjectSettings: () => void
   openGitInitModal: (path: string) => void
@@ -115,8 +125,9 @@ interface ProjectsUIState {
     pinnedLabels: LabelData[]
   ) => void
   setProjectCanvasLabels: (projectId: string, labels: LabelData[]) => void
-  setGitHubDashboardFavoriteProjectIds: (projectIds: string[]) => void
-  toggleGitHubDashboardFavoriteProject: (projectId: string) => void
+  setProjectCanvasActiveFilter: (projectId: string, filter: string) => void
+  setSidebarServerFilter: (serverId: string | null) => void
+  setPinnedRecentSessionIds: (sessionIds: string[]) => void
 }
 
 export const useProjectsStore = create<ProjectsUIState>()(
@@ -131,9 +142,13 @@ export const useProjectsStore = create<ProjectsUIState>()(
       expandedFolderIds: new Set<string>(),
       projectAccessTimestamps: {},
       projectCanvasSettings: {},
-      githubDashboardFavoriteProjectIds: [],
+      projectCanvasActiveFilters: {},
+      sidebarServerFilter: null,
+      sidebarActiveTab: 'projects',
+      pinnedRecentSessionIds: [],
       addProjectDialogOpen: false,
       addProjectParentFolderId: null,
+      serverDialog: null,
       projectSettingsDialogOpen: false,
       projectSettingsProjectId: null,
       projectSettingsInitialPane: null,
@@ -269,10 +284,28 @@ export const useProjectsStore = create<ProjectsUIState>()(
 
       setProjectCanvasSettings: settings =>
         set(
-          state =>
-            state.projectCanvasSettings === settings
-              ? state
-              : { projectCanvasSettings: settings },
+          state => {
+            const mergedSettings: Record<string, ProjectCanvasSettings> =
+              Object.fromEntries(
+                Object.entries(settings).map(([projectId, projectSettings]) => [
+                  projectId,
+                  {
+                    ...projectSettings,
+                    worktreeSortMode:
+                      state.projectCanvasSettings[projectId]
+                        ?.worktreeSortMode ?? projectSettings.worktreeSortMode,
+                  },
+                ])
+              )
+            for (const [projectId, projectSettings] of Object.entries(
+              state.projectCanvasSettings
+            )) {
+              if (!(projectId in mergedSettings)) {
+                mergedSettings[projectId] = projectSettings
+              }
+            }
+            return { projectCanvasSettings: mergedSettings }
+          },
           undefined,
           'setProjectCanvasSettings'
         ),
@@ -347,34 +380,48 @@ export const useProjectsStore = create<ProjectsUIState>()(
           'setProjectCanvasLabels'
         ),
 
-      setGitHubDashboardFavoriteProjectIds: projectIds =>
+      setProjectCanvasActiveFilter: (projectId, filter) =>
         set(
           state =>
-            state.githubDashboardFavoriteProjectIds === projectIds
+            state.projectCanvasActiveFilters[projectId] === filter
               ? state
-              : { githubDashboardFavoriteProjectIds: projectIds },
+              : {
+                  projectCanvasActiveFilters: {
+                    ...state.projectCanvasActiveFilters,
+                    [projectId]: filter,
+                  },
+                },
           undefined,
-          'setGitHubDashboardFavoriteProjectIds'
+          'setProjectCanvasActiveFilter'
         ),
 
-      toggleGitHubDashboardFavoriteProject: projectId =>
+      setSidebarServerFilter: serverId =>
         set(
-          state => {
-            const current = state.githubDashboardFavoriteProjectIds
-            if (current.includes(projectId)) {
-              return {
-                githubDashboardFavoriteProjectIds: current.filter(
-                  id => id !== projectId
-                ),
-              }
-            }
-
-            return {
-              githubDashboardFavoriteProjectIds: [...current, projectId],
-            }
-          },
+          state =>
+            state.sidebarServerFilter === serverId
+              ? state
+              : { sidebarServerFilter: serverId },
           undefined,
-          'toggleGitHubDashboardFavoriteProject'
+          'setSidebarServerFilter'
+        ),
+
+      setSidebarActiveTab: tab =>
+        set(
+          state =>
+            state.sidebarActiveTab === tab ? state : { sidebarActiveTab: tab },
+          undefined,
+          'setSidebarActiveTab'
+        ),
+
+      setPinnedRecentSessionIds: sessionIds =>
+        set(
+          state =>
+            JSON.stringify(state.pinnedRecentSessionIds) ===
+            JSON.stringify(sessionIds)
+              ? state
+              : { pinnedRecentSessionIds: sessionIds },
+          undefined,
+          'setPinnedRecentSessionIds'
         ),
 
       // Folder expansion actions
@@ -453,7 +500,8 @@ export const useProjectsStore = create<ProjectsUIState>()(
         ),
 
       // Dialog actions
-      setAddProjectDialogOpen: (open, parentFolderId) =>
+      setAddProjectDialogOpen: (open, parentFolderId) => {
+        if (open) closeLeftSidebarOnMobile()
         set(
           {
             addProjectDialogOpen: open,
@@ -461,9 +509,16 @@ export const useProjectsStore = create<ProjectsUIState>()(
           },
           undefined,
           'setAddProjectDialogOpen'
-        ),
+        )
+      },
 
-      openProjectSettings: (projectId, pane) =>
+      setServerDialog: serverDialog => {
+        if (serverDialog) closeLeftSidebarOnMobile()
+        set({ serverDialog }, undefined, 'setServerDialog')
+      },
+
+      openProjectSettings: (projectId, pane) => {
+        closeLeftSidebarOnMobile()
         set(
           {
             projectSettingsDialogOpen: true,
@@ -472,7 +527,8 @@ export const useProjectsStore = create<ProjectsUIState>()(
           },
           undefined,
           'openProjectSettings'
-        ),
+        )
+      },
 
       closeProjectSettings: () =>
         set(

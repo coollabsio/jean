@@ -9,6 +9,7 @@ import type {
   LoadedAdvisoryContext,
 } from '@/types/github'
 import type { LoadedLinearIssueContext } from '@/types/linear'
+import type { SentryIssueContext } from '@/types/sentry'
 import {
   getIssueContextContent,
   getPRContextContent,
@@ -48,7 +49,8 @@ export function useContextViewer({
         const content = await getIssueContextContent(
           activeSessionId,
           ctx.number,
-          activeWorktreePath
+          activeWorktreePath,
+          worktreeId
         )
         setViewingContext({
           type: 'issue',
@@ -60,7 +62,7 @@ export function useContextViewer({
         toast.error(`Failed to load context: ${error}`)
       }
     },
-    [activeSessionId, activeWorktreePath]
+    [activeSessionId, activeWorktreePath, worktreeId]
   )
 
   const handleViewPR = useCallback(
@@ -70,7 +72,8 @@ export function useContextViewer({
         const content = await getPRContextContent(
           activeSessionId,
           ctx.number,
-          activeWorktreePath
+          activeWorktreePath,
+          worktreeId
         )
         setViewingContext({
           type: 'pr',
@@ -82,7 +85,7 @@ export function useContextViewer({
         toast.error(`Failed to load context: ${error}`)
       }
     },
-    [activeSessionId, activeWorktreePath]
+    [activeSessionId, activeWorktreePath, worktreeId]
   )
 
   const handleViewSavedContext = useCallback(
@@ -174,6 +177,14 @@ export function useContextViewer({
     [activeSessionId, worktreeId, projectId]
   )
 
+  const handleViewSentry = useCallback((ctx: SentryIssueContext) => {
+    setViewingContext({
+      type: 'sentry',
+      title: `${ctx.shortId}: ${ctx.title}`,
+      content: ctx.content,
+    })
+  }, [])
+
   return {
     viewingContext,
     setViewingContext,
@@ -183,5 +194,6 @@ export function useContextViewer({
     handleViewSecurityAlert,
     handleViewAdvisory,
     handleViewLinear,
+    handleViewSentry,
   }
 }

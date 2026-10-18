@@ -8,9 +8,10 @@ import {
   GitPullRequest,
   Shield,
   ShieldAlert,
-} from 'lucide-react'
+  Sentry,
+} from '@/components/icons/reicon'
 import { LinearIcon } from '@/components/icons/LinearIcon'
-import type { LucideIcon } from 'lucide-react'
+import type { LucideIcon } from '@/components/icons/reicon'
 import {
   Dialog,
   DialogContent,
@@ -21,6 +22,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Markdown } from '@/components/ui/markdown'
 import { cn } from '@/lib/utils'
 import { usePreferences } from '@/services/preferences'
+import { parseServerResourceKey } from '@/lib/server-resource'
 import { useGhLogin } from '@/hooks/useGhLogin'
 import { IssuePreviewModal } from '@/components/worktree/IssuePreviewModal'
 import { githubQueryKeys } from '@/services/github'
@@ -28,12 +30,13 @@ import { linearQueryKeys } from '@/services/linear'
 import { GitHubItemsTab } from './GitHubItemsTab'
 import { SecurityAlertsTab } from './SecurityAlertsTab'
 import { LinearItemsTab } from './LinearItemsTab'
+import { SentryItemsTab } from './SentryItemsTab'
 import { ContextsTab } from './ContextsTab'
 import { useLoadContextData } from './hooks/useLoadContextData'
 import { useLoadContextHandlers } from './hooks/useLoadContextHandlers'
 import { useLoadContextKeyboard } from './hooks/useLoadContextKeyboard'
 
-type TabId = 'issues' | 'prs' | 'security' | 'contexts' | 'linear'
+type TabId = 'issues' | 'prs' | 'security' | 'contexts' | 'linear' | 'sentry'
 
 interface Tab {
   id: TabId
@@ -48,6 +51,7 @@ const TABS: Tab[] = [
   { id: 'prs', label: 'PRs', key: '3', icon: GitPullRequest },
   { id: 'security', label: 'Security', key: '4', icon: Shield },
   { id: 'linear', label: 'Linear', key: '5', icon: LinearIcon },
+  { id: 'sentry', label: 'Sentry', key: '6', icon: Sentry },
 ]
 
 interface LoadContextModalProps {
@@ -71,7 +75,10 @@ export function LoadContextModal({
 }: LoadContextModalProps) {
   const queryClient = useQueryClient()
   const { triggerLogin: triggerGhLogin, isGhInstalled } = useGhLogin()
-  const { data: preferences } = usePreferences()
+  const serverId = worktreeId
+    ? parseServerResourceKey(worktreeId)?.serverId
+    : undefined
+  const { data: preferences } = usePreferences(serverId)
 
   // Navigation state
   const [activeTab, setActiveTab] = useState<TabId>('issues')
@@ -109,6 +116,7 @@ export function LoadContextModal({
     refetchAdvisoryContexts: data.refetchAdvisoryContexts,
     refetchAttachedContexts: data.refetchAttachedContexts,
     refetchLinearContexts: data.refetchLinearContexts,
+    refetchSentryContexts: data.refetchSentryContexts,
     refetchContexts: data.refetchContexts,
     renameMutation: data.renameMutation,
     preferences,
@@ -123,6 +131,7 @@ export function LoadContextModal({
     filteredSecurityAlerts: data.filteredSecurityAlerts,
     filteredAdvisories: data.filteredAdvisories,
     filteredLinearIssues: data.filteredLinearIssues,
+    filteredSentryIssues: data.filteredSentryIssues,
     filteredContexts: data.filteredContexts,
     filteredEntries: data.filteredEntries,
     selectedIndex,
@@ -136,6 +145,7 @@ export function LoadContextModal({
     onSelectAdvisory: handlers.handleSelectAdvisory,
     onPreviewAdvisory: handlers.handlePreviewAdvisory,
     onSelectLinearIssue: handlers.handleSelectLinearIssue,
+    onSelectSentryIssue: handlers.handleSelectSentryIssue,
     onAttachContext: handlers.handleAttachContext,
     onSessionClick: handlers.handleSessionClick,
     onTabChange: setActiveTab,
@@ -159,6 +169,8 @@ export function LoadContextModal({
         setActiveTab('security')
       } else if (data.hasLoadedLinearContexts) {
         setActiveTab('linear')
+      } else if (data.hasLoadedSentryContexts) {
+        setActiveTab('sentry')
       } else {
         setActiveTab('contexts')
       }
@@ -254,6 +266,7 @@ export function LoadContextModal({
     data.hasLoadedSecurityContexts,
     data.hasLoadedAdvisoryContexts,
     data.hasLoadedLinearContexts,
+    data.hasLoadedSentryContexts,
     data.hasAttachedContexts,
     handlers.resetState,
   ])
@@ -477,6 +490,30 @@ export function LoadContextModal({
             />
           )}
 
+          {activeTab === 'sentry' && (
+            <SentryItemsTab
+              projectId={projectId ?? ''}
+              searchQuery={searchQuery}
+              setSearchQuery={setSearchQuery}
+              searchInputRef={searchInputRef}
+              loadedContexts={data.loadedSentryContexts ?? []}
+              isLoadingContexts={data.isLoadingSentryContexts}
+              loadingIds={handlers.loadingSentryIds}
+              removingIds={handlers.removingSentryIds}
+              onView={handlers.handleViewSentryIssue}
+              onRefreshContext={handlers.handleRefreshSentryIssue}
+              onRemove={handlers.handleRemoveSentryIssue}
+              issues={data.filteredSentryIssues}
+              isLoading={data.isLoadingSentryIssues}
+              isRefetching={data.isRefetchingSentryIssues}
+              error={data.sentryIssuesError}
+              onRefresh={() => data.refetchSentryIssues()}
+              selectedIndex={selectedIndex}
+              setSelectedIndex={setSelectedIndex}
+              onSelectIssue={handlers.handleSelectSentryIssue}
+            />
+          )}
+
           {activeTab === 'contexts' && (
             <ContextsTab
               searchQuery={searchQuery}
@@ -539,7 +576,8 @@ export function LoadContextModal({
           (handlers.viewingContext.type === 'saved' ||
             handlers.viewingContext.type === 'security' ||
             handlers.viewingContext.type === 'advisory' ||
-            handlers.viewingContext.type === 'linear') && (
+            handlers.viewingContext.type === 'linear' ||
+            handlers.viewingContext.type === 'sentry') && (
             <Dialog
               open={true}
               onOpenChange={() => handlers.setViewingContext(null)}
@@ -548,13 +586,15 @@ export function LoadContextModal({
                 <DialogHeader>
                   <DialogTitle className="flex items-center gap-2">
                     {handlers.viewingContext.type === 'security' ? (
-                      <Shield className="h-4 w-4 text-orange-500" />
+                      <Shield className="h-4 w-4 text-warning" />
                     ) : handlers.viewingContext.type === 'advisory' ? (
-                      <ShieldAlert className="h-4 w-4 text-orange-500" />
+                      <ShieldAlert className="h-4 w-4 text-warning" />
                     ) : handlers.viewingContext.type === 'linear' ? (
-                      <LinearIcon className="h-4 w-4 text-violet-500" />
+                      <LinearIcon className="h-4 w-4 text-violet-600 dark:text-violet-400" />
+                    ) : handlers.viewingContext.type === 'sentry' ? (
+                      <Sentry className="h-4 w-4 text-warning" />
                     ) : (
-                      <FolderOpen className="h-4 w-4 text-blue-500" />
+                      <FolderOpen className="h-4 w-4 text-muted-foreground" />
                     )}
                     {handlers.viewingContext.title}
                   </DialogTitle>

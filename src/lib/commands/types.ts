@@ -1,4 +1,4 @@
-import type { LucideIcon } from 'lucide-react'
+import type { LucideIcon } from '@/components/icons/reicon'
 import type { QueryClient } from '@tanstack/react-query'
 import type { Theme } from '@/lib/theme-context'
 import type { ClaudeModel } from '@/types/preferences'
@@ -109,6 +109,7 @@ export interface CommandContext {
 
   // State getters for isAvailable checks
   hasActiveSession: () => boolean
+  hasCurrentSessionRunning: () => boolean
   hasActiveWorktree: () => boolean
   hasSelectedProject: () => boolean
   hasInstalledBackend: () => boolean

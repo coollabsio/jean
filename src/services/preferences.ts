@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { invoke } from '@/lib/transport'
+import { invoke, invokeForServer } from '@/lib/transport'
 import { toast } from 'sonner'
 import { logger } from '@/lib/logger'
 import type { AppPreferences } from '@/types/preferences'
@@ -15,6 +15,9 @@ import {
   splitClientPreferencePatch,
   updateClientPreferences,
 } from '@/lib/client-preferences'
+import { useSettingsTargetServerId } from '@/lib/settings-target'
+import { LOCAL_SERVER_ID } from '@/types/server-resource'
+import type { ServerId } from '@/types/server-resource'
 
 // Old default keybindings that have been changed - used for migration
 // When a default changes, add the old value here so stored prefs get updated
@@ -28,6 +31,9 @@ const MIGRATED_KEYBINDINGS: Partial<
   toggle_browser: 'mod+alt+b', // Changed to 'mod+shift+backquote'
   // Changed to free CMD+SHIFT+T, then corrected to the serializer's modifier order.
   restore_last_archived: ['mod+shift+t', 'mod+alt+shift+t'],
+  // Changed so Cmd+1-9 can open Recent sessions and Cmd+Arrow switches tabs.
+  next_session: 'mod+alt+arrowright',
+  previous_session: 'mod+alt+arrowleft',
 }
 
 // Migrate keybindings: if a stored value matches an old default, use the new default
@@ -58,13 +64,64 @@ const isTauri = hasBackend
 // Query keys for preferences
 export const preferencesQueryKeys = {
   all: ['preferences'] as const,
-  preferences: () => [...preferencesQueryKeys.all] as const,
+  preferences: (serverId: string = LOCAL_SERVER_ID) =>
+    serverId === LOCAL_SERVER_ID
+      ? ([...preferencesQueryKeys.all] as const)
+      : ([...preferencesQueryKeys.all, 'server', serverId] as const),
+}
+
+export async function loadPreferencesForServer(
+  serverId: ServerId
+): Promise<AppPreferences> {
+  if (!hasBackendTransport()) {
+    logger.debug('Not in Tauri context, using default preferences')
+    return defaultPreferences
+  }
+
+  const preferences =
+    serverId === LOCAL_SERVER_ID
+      ? await invoke<AppPreferences>('load_preferences')
+      : (
+          await invokeForServer<ServerPreferencesEnvelope>(
+            serverId,
+            'get_server_preferences'
+          )
+        ).preferences
+  const completePreferences = {
+    ...defaultPreferences,
+    ...preferences,
+  } as AppPreferences
+  const migratedBindings = migrateKeybindings(completePreferences.keybindings)
+  const merged = { ...DEFAULT_KEYBINDINGS, ...migratedBindings }
+  const validKeys = new Set(Object.keys(DEFAULT_KEYBINDINGS))
+  const keybindings: KeybindingsMap = {}
+  for (const [key, value] of Object.entries(merged)) {
+    if (validKeys.has(key)) keybindings[key] = value
+  }
+  const normalized = {
+    ...completePreferences,
+    selected_model: normalizeClaudeModel(completePreferences.selected_model, {
+      preserveProviderAliases: Boolean(completePreferences.default_provider),
+    }),
+    selected_codex_model: normalizeCodexModel(
+      completePreferences.selected_codex_model
+    ),
+    keybindings,
+  }
+  return { ...normalized, ...readClientPreferences(normalized) }
 }
 
 export function useServerPreferences() {
+  const serverId = useSettingsTargetServerId()
   return useQuery({
-    queryKey: ['server-preferences'],
-    queryFn: () => invoke<ServerPreferencesEnvelope>('get_server_preferences'),
+    queryKey: ['server-preferences', serverId],
+    queryFn: () =>
+      serverId === LOCAL_SERVER_ID
+        ? invoke<ServerPreferencesEnvelope>('get_server_preferences')
+        : invokeForServer<ServerPreferencesEnvelope>(
+            serverId,
+            'get_server_preferences'
+          ),
     enabled: hasBackendTransport(),
     staleTime: 1000 * 60 * 5,
     retry: false,
@@ -73,58 +130,43 @@ export function useServerPreferences() {
 
 export function useUpdateServerPreferences() {
   const queryClient = useQueryClient()
+  const serverId = useSettingsTargetServerId()
   return useMutation({
-    mutationFn: ({ patch, expectedRevision }: {
-      patch: Partial<AppPreferences>
-      expectedRevision: string
-    }) => invoke<ServerPreferencesEnvelope>('update_server_preferences', {
+    mutationFn: ({
       patch,
       expectedRevision,
-    }),
+    }: {
+      patch: Partial<AppPreferences>
+      expectedRevision: string
+    }) => {
+      const args = { patch, expectedRevision }
+      return serverId === LOCAL_SERVER_ID
+        ? invoke<ServerPreferencesEnvelope>('update_server_preferences', args)
+        : invokeForServer<ServerPreferencesEnvelope>(
+            serverId,
+            'update_server_preferences',
+            args
+          )
+    },
     onSuccess: envelope => {
-      queryClient.setQueryData(['server-preferences'], envelope)
+      queryClient.setQueryData(['server-preferences', serverId], envelope)
       queryClient.invalidateQueries({ queryKey: preferencesQueryKeys.all })
     },
   })
 }
 
 // TanStack Query hooks following the architectural patterns
-export function usePreferences() {
+export function usePreferences(serverIdOverride?: ServerId) {
+  const settingsTargetServerId = useSettingsTargetServerId()
+  const serverId = serverIdOverride ?? settingsTargetServerId
   return useQuery({
-    queryKey: preferencesQueryKeys.preferences(),
+    queryKey: preferencesQueryKeys.preferences(serverId),
     queryFn: async (): Promise<AppPreferences> => {
-      // Return defaults when running outside Tauri (e.g., bun run dev in browser)
-      if (!hasBackendTransport()) {
-        logger.debug('Not in Tauri context, using default preferences')
-        return defaultPreferences
-      }
-
       try {
         logger.debug('Loading preferences from backend')
-        const preferences = await invoke<AppPreferences>('load_preferences')
+        const preferences = await loadPreferencesForServer(serverId)
         logger.info('Preferences loaded successfully', { preferences })
-        // Migrate old defaults and merge with new defaults
-        const migratedBindings = migrateKeybindings(preferences.keybindings)
-        const merged = { ...DEFAULT_KEYBINDINGS, ...migratedBindings }
-        // Drop stale keys (renamed/removed actions) that persist in saved prefs
-        const validKeys = new Set(Object.keys(DEFAULT_KEYBINDINGS))
-        const keybindings: KeybindingsMap = {}
-        for (const [key, value] of Object.entries(merged)) {
-          if (validKeys.has(key)) keybindings[key] = value
-        }
-        const normalized = {
-          ...preferences,
-          selected_model: normalizeClaudeModel(preferences.selected_model, {
-            // Keep opus/sonnet/haiku when a custom CLI provider is the default
-            // so Settings → Claude can show/persist provider-routed models.
-            preserveProviderAliases: Boolean(preferences.default_provider),
-          }),
-          selected_codex_model: normalizeCodexModel(
-            preferences.selected_codex_model
-          ),
-          keybindings,
-        }
-        return { ...normalized, ...readClientPreferences(normalized) }
+        return preferences
       } catch (error) {
         // Return defaults if preferences file doesn't exist yet
         logger.warn('Failed to load preferences, using defaults', { error })
@@ -142,8 +184,19 @@ export function usePreferences() {
  */
 export function usePatchPreferences() {
   const queryClient = useQueryClient()
+  const serverId = useSettingsTargetServerId()
+  const queryKey = preferencesQueryKeys.preferences(serverId)
 
   return useMutation({
+    onMutate: patch => {
+      // Keep every consumer of this server's preferences in sync immediately.
+      // New-session creation can run before the persistence request and its
+      // follow-up refetch finish, especially when this client controls a
+      // remote Jean instance.
+      queryClient.setQueryData<AppPreferences>(queryKey, current =>
+        current ? { ...current, ...patch } : current
+      )
+    },
     mutationFn: async (patch: Partial<AppPreferences>) => {
       const [clientPatch, serverPatch] = splitClientPreferencePatch(patch)
       if (Object.keys(clientPatch).length > 0) {
@@ -160,7 +213,18 @@ export function usePatchPreferences() {
 
       try {
         logger.debug('Patching preferences on backend', { patch: serverPatch })
-        await invoke('patch_preferences', { patch: serverPatch })
+        if (serverId === LOCAL_SERVER_ID) {
+          await invoke('patch_preferences', { patch: serverPatch })
+        } else {
+          const current = await invokeForServer<ServerPreferencesEnvelope>(
+            serverId,
+            'get_server_preferences'
+          )
+          await invokeForServer(serverId, 'update_server_preferences', {
+            patch: serverPatch,
+            expectedRevision: current.revision,
+          })
+        }
         logger.info('Preferences patched successfully')
       } catch (error) {
         const message =
@@ -176,9 +240,14 @@ export function usePatchPreferences() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({
-        queryKey: preferencesQueryKeys.preferences(),
+        queryKey,
       })
       logger.info('Preferences cache invalidated after patch')
+    },
+    onError: () => {
+      // The optimistic values were not saved. Reload the authoritative values
+      // instead of leaving defaults that only appear to be active.
+      queryClient.invalidateQueries({ queryKey })
     },
   })
 }

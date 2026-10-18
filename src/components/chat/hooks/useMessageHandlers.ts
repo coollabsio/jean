@@ -34,7 +34,10 @@ import { formatAnswersAsNaturalLanguage } from '@/services/chat'
 import { parseReviewFindings, getFindingKey } from '../review-finding-utils'
 import { findPlanFilePath, resolvePlanContent } from '../tool-call-utils'
 import { navigateToApprovedWorktree } from '../worktree-approval-navigation'
-import { getCodexPermissionApprovalMode } from '../permission-approval-utils'
+import {
+  getCodexPermissionApprovalMode,
+  isLivePermissionRequest,
+} from '../permission-approval-utils'
 import { isCodexDevUserInputRequest } from '../codex-dev-flows'
 import { generateId } from '@/lib/uuid'
 import { preferencesQueryKeys } from '@/services/preferences'
@@ -46,7 +49,10 @@ import type {
   WorktreeCreatedEvent,
   WorktreeCreateErrorEvent,
 } from '@/types/projects'
-import { clearPlanApprovalTransientState } from './plan-approval-state'
+import {
+  archiveOriginalPlanSession,
+  clearPlanApprovalTransientState,
+} from './plan-approval-state'
 import type { ApprovalModelOverride } from '../ApprovalModelSubmenu'
 
 const respondingCodexUserInputRequests = new Set<string>()
@@ -250,10 +256,10 @@ function getDefaultModelForBackend(
   preferences: AppPreferences | undefined
 ): string {
   if (backend === 'codex') {
-    return preferences?.selected_codex_model ?? 'gpt-5.6-sol'
+    return preferences?.selected_codex_model ?? 'gpt-6.1-sol'
   }
   if (backend === 'opencode') {
-    return preferences?.selected_opencode_model ?? 'opencode/gpt-5.6-sol'
+    return preferences?.selected_opencode_model ?? 'opencode/gpt-6.1-sol'
   }
   if (backend === 'cursor') {
     return preferences?.selected_cursor_model ?? 'cursor/auto'
@@ -273,7 +279,7 @@ function getDefaultModelForBackend(
   if (backend === 'antigravity') {
     return preferences?.selected_antigravity_model ?? 'antigravity/auto'
   }
-  return preferences?.selected_model ?? 'claude-opus-4-8[1m]'
+  return preferences?.selected_model ?? 'claude-opus-5-5'
 }
 
 const SESSION_BACKENDS = new Set<Session['backend']>([
@@ -304,6 +310,37 @@ function asSessionBackend(
  *
  * PERFORMANCE: Uses refs for session/worktree IDs to keep callbacks stable across session switches.
  */
+/**
+ * Answer live Claude permission requests (Supervised): the run waits on Jean
+ * MCP for this answer and continues in place. Returns false when none exist.
+ */
+function respondLiveClaudePermissions(
+  sessionId: string,
+  approved: boolean
+): boolean {
+  const { getPendingDenials, setPendingDenials } = useChatStore.getState()
+  const denials = getPendingDenials(sessionId)
+  const live = denials.filter(isLivePermissionRequest)
+  if (live.length === 0) return false
+
+  setPendingDenials(
+    sessionId,
+    denials.filter(d => !isLivePermissionRequest(d))
+  )
+  for (const denial of live) {
+    // sessionId routes the answer to the Jean server that owns the run
+    invoke('respond_claude_permission', {
+      sessionId,
+      rpcId: denial.rpc_id,
+      approved,
+    }).catch(err => {
+      console.error('[useMessageHandlers] Failed to answer permission:', err)
+      toast.error(`Failed to answer permission request: ${err}`)
+    })
+  }
+  return true
+}
+
 export function useMessageHandlers({
   activeSessionIdRef,
   activeWorktreeIdRef,
@@ -334,6 +371,12 @@ export function useMessageHandlers({
   projectIdRef,
 }: UseMessageHandlersParams): MessageHandlers {
   'use no memo'
+
+  // PERFORMANCE: Depend on the stable mutate/mutateAsync functions rather than
+  // the whole useMutation result, which is a new object every render in
+  // TanStack Query v5. Keeps handlers (and memoized message rows) stable.
+  const { mutate: sendMessageMutate } = sendMessage
+  const { mutateAsync: createSessionMutateAsync } = createSession
 
   // Handle answer submission for AskUserQuestion
   // PERFORMANCE: Uses refs for session/worktree IDs to keep callback stable across session switches
@@ -454,7 +497,7 @@ export function useMessageHandlers({
       setExecutingMode(sessionId, executionModeRef.current)
 
       // Send the formatted answer
-      sendMessage.mutate(
+      sendMessageMutate(
         {
           sessionId,
           worktreeId,
@@ -487,7 +530,7 @@ export function useMessageHandlers({
       useAdaptiveThinkingRef,
       getMcpConfig,
       getCustomProfileName,
-      sendMessage,
+      sendMessageMutate,
       markAtBottom,
       inputRef,
       queryClient,
@@ -576,8 +619,7 @@ export function useMessageHandlers({
       const waitingForInput =
         (state.pendingPermissionDenials[sessionId]?.length ?? 0) > 0 ||
         (state.pendingCodexPermissionRequests[sessionId]?.length ?? 0) > 0 ||
-        (state.pendingOpencodePermissionRequests[sessionId]?.length ?? 0) >
-          0 ||
+        (state.pendingOpencodePermissionRequests[sessionId]?.length ?? 0) > 0 ||
         (state.pendingCodexUserInputRequests[sessionId]?.length ?? 0) > 0 ||
         (state.pendingCodexMcpElicitationRequests[sessionId]?.length ?? 0) >
           0 ||
@@ -739,7 +781,7 @@ export function useMessageHandlers({
             queryKey: chatQueryKeys.sessions(worktreeId),
           })
 
-          sendMessage.mutate(
+          sendMessageMutate(
             {
               sessionId,
               worktreeId,
@@ -778,7 +820,7 @@ export function useMessageHandlers({
       getMcpConfig,
       getCustomProfileName,
       markAtBottom,
-      sendMessage,
+      sendMessageMutate,
       queryClient,
       inputRef,
     ]
@@ -856,7 +898,7 @@ export function useMessageHandlers({
         ? `I've updated the plan. Please review and execute:\n\n<updated-plan>\n${updatedPlan}\n</updated-plan>`
         : isCodexYolo
           ? 'Execute the plan you created. Implement all changes described.'
-          : 'Plan approved (yolo mode). Begin implementing all changes immediately without asking for confirmation. Do not re-explain the plan — start writing code.'
+          : 'Plan approved (Full access mode). Begin implementing all changes immediately without asking for confirmation. Do not re-explain the plan — start writing code.'
       // Resolve yolo overrides (skip if backend override doesn't match session)
       const sessionBackendYolo = selectedBackendRef.current
       const yoloBackendOverride = yoloBackendRef.current
@@ -911,7 +953,7 @@ export function useMessageHandlers({
             queryKey: chatQueryKeys.sessions(worktreeId),
           })
 
-          sendMessage.mutate(
+          sendMessageMutate(
             {
               sessionId,
               worktreeId,
@@ -950,7 +992,7 @@ export function useMessageHandlers({
       getMcpConfig,
       getCustomProfileName,
       markAtBottom,
-      sendMessage,
+      sendMessageMutate,
       queryClient,
       inputRef,
     ]
@@ -1025,7 +1067,7 @@ export function useMessageHandlers({
     addSendingSession(sessionId)
     setExecutingMode(sessionId, 'build')
 
-    sendMessage.mutate(
+    sendMessageMutate(
       {
         sessionId,
         worktreeId,
@@ -1062,7 +1104,7 @@ export function useMessageHandlers({
     getMcpConfig,
     getCustomProfileName,
     markAtBottom,
-    sendMessage,
+    sendMessageMutate,
     inputRef,
   ])
 
@@ -1119,13 +1161,13 @@ export function useMessageHandlers({
     // Send approval message to Claude so it continues with execution
     const yoloApprovalMsg = isCodexYolo
       ? 'Execute the plan you created. Implement all changes described.'
-      : 'Plan approved (yolo mode). Begin implementing all changes immediately without asking for confirmation. Do not re-explain the plan — start writing code.'
+      : 'Plan approved (Full access mode). Begin implementing all changes immediately without asking for confirmation. Do not re-explain the plan — start writing code.'
     setLastSentMessage(sessionId, yoloApprovalMsg)
     setError(sessionId, null)
     addSendingSession(sessionId)
     setExecutingMode(sessionId, 'yolo')
 
-    sendMessage.mutate(
+    sendMessageMutate(
       {
         sessionId,
         worktreeId,
@@ -1162,7 +1204,7 @@ export function useMessageHandlers({
     getMcpConfig,
     getCustomProfileName,
     markAtBottom,
-    sendMessage,
+    sendMessageMutate,
     inputRef,
   ])
 
@@ -1245,7 +1287,7 @@ export function useMessageHandlers({
       // Create new session
       let newSession: Session
       try {
-        newSession = await createSession.mutateAsync({
+        newSession = await createSessionMutateAsync({
           worktreeId,
           worktreePath,
         })
@@ -1265,7 +1307,7 @@ export function useMessageHandlers({
         ? yoloThinkingLevelRef
         : buildThinkingLevelRef
       const modeEffortRef = isYolo ? yoloEffortLevelRef : buildEffortLevelRef
-      const modeLabel = isYolo ? 'Yolo' : 'Build'
+      const modeLabel = isYolo ? 'Full access' : 'Build'
 
       const currentSessionBackend = queryClient.getQueryData<Session>(
         chatQueryKeys.session(sessionId)
@@ -1358,7 +1400,7 @@ export function useMessageHandlers({
           mapCodexReasoningToEffort(modeEffortRef.current) ??
           selectedEffortLevelRef.current
       }
-      sendMessage.mutate({
+      sendMessageMutate({
         sessionId: newSession.id,
         worktreeId,
         worktreePath,
@@ -1372,43 +1414,15 @@ export function useMessageHandlers({
         backend: resolvedBackend,
       })
 
-      // Optionally close the original session immediately.
-      // cancel_process_if_running (used by close/archive) safely skips idle sessions,
-      // and with_sessions_mut uses a per-worktree mutex so there's no file-level race.
+      // Optionally archive the original session (keeps history restorable)
       if (prefs?.close_original_on_clear_context) {
-        const command =
-          prefs.removal_behavior === 'archive'
-            ? 'archive_session'
-            : 'close_session'
-
-        // Optimistically remove from UI immediately
-        queryClient.setQueryData<WorktreeSessions>(
-          chatQueryKeys.sessions(worktreeId),
-          old => {
-            if (!old) return old
-            return {
-              ...old,
-              sessions: old.sessions.filter(s => s.id !== sessionId),
-              active_session_id:
-                old.active_session_id === sessionId
-                  ? newSession.id
-                  : old.active_session_id,
-            }
-          }
-        )
-
-        invoke(command, { worktreeId, worktreePath, sessionId })
-          .then(() =>
-            queryClient.invalidateQueries({
-              queryKey: chatQueryKeys.sessions(worktreeId),
-            })
-          )
-          .catch(err =>
-            console.error(
-              '[useMessageHandlers] Failed to close original session:',
-              err
-            )
-          )
+        archiveOriginalPlanSession({
+          queryClient,
+          worktreeId,
+          worktreePath,
+          sessionId,
+          replacementSessionId: newSession.id,
+        })
       }
     },
     [
@@ -1429,8 +1443,8 @@ export function useMessageHandlers({
       useAdaptiveThinkingRef,
       getMcpConfig,
       getCustomProfileName,
-      createSession,
-      sendMessage,
+      createSessionMutateAsync,
+      sendMessageMutate,
       queryClient,
     ]
   )
@@ -1492,7 +1506,7 @@ export function useMessageHandlers({
       // Create new session
       let newSession: Session
       try {
-        newSession = await createSession.mutateAsync({
+        newSession = await createSessionMutateAsync({
           worktreeId,
           worktreePath,
         })
@@ -1512,7 +1526,7 @@ export function useMessageHandlers({
         ? yoloThinkingLevelRef
         : buildThinkingLevelRef
       const modeEffortRef = isYolo ? yoloEffortLevelRef : buildEffortLevelRef
-      const modeLabel = isYolo ? 'Yolo' : 'Build'
+      const modeLabel = isYolo ? 'Full access' : 'Build'
 
       const currentSessionBackend = queryClient.getQueryData<Session>(
         chatQueryKeys.session(sessionId)
@@ -1601,7 +1615,7 @@ export function useMessageHandlers({
           mapCodexReasoningToEffort(modeEffortRef.current) ??
           selectedEffortLevelRef.current
       }
-      sendMessage.mutate({
+      sendMessageMutate({
         sessionId: newSession.id,
         worktreeId,
         worktreePath,
@@ -1615,43 +1629,15 @@ export function useMessageHandlers({
         backend: resolvedBackend,
       })
 
-      // Optionally close the original session immediately.
-      // cancel_process_if_running (used by close/archive) safely skips idle sessions,
-      // and with_sessions_mut uses a per-worktree mutex so there's no file-level race.
+      // Optionally archive the original session (keeps history restorable)
       if (prefs?.close_original_on_clear_context) {
-        const command =
-          prefs.removal_behavior === 'archive'
-            ? 'archive_session'
-            : 'close_session'
-
-        // Optimistically remove from UI immediately
-        queryClient.setQueryData<WorktreeSessions>(
-          chatQueryKeys.sessions(worktreeId),
-          old => {
-            if (!old) return old
-            return {
-              ...old,
-              sessions: old.sessions.filter(s => s.id !== sessionId),
-              active_session_id:
-                old.active_session_id === sessionId
-                  ? newSession.id
-                  : old.active_session_id,
-            }
-          }
-        )
-
-        invoke(command, { worktreeId, worktreePath, sessionId })
-          .then(() =>
-            queryClient.invalidateQueries({
-              queryKey: chatQueryKeys.sessions(worktreeId),
-            })
-          )
-          .catch(err =>
-            console.error(
-              '[useMessageHandlers] Failed to close original session:',
-              err
-            )
-          )
+        archiveOriginalPlanSession({
+          queryClient,
+          worktreeId,
+          worktreePath,
+          sessionId,
+          replacementSessionId: newSession.id,
+        })
       }
     },
     [
@@ -1672,8 +1658,8 @@ export function useMessageHandlers({
       useAdaptiveThinkingRef,
       getMcpConfig,
       getCustomProfileName,
-      createSession,
-      sendMessage,
+      createSessionMutateAsync,
+      sendMessageMutate,
       queryClient,
     ]
   )
@@ -1864,7 +1850,7 @@ export function useMessageHandlers({
         ? yoloThinkingLevelRef
         : buildThinkingLevelRef
       const modeEffortRef = isYolo ? yoloEffortLevelRef : buildEffortLevelRef
-      const modeLabel = isYolo ? 'Yolo' : 'Build'
+      const modeLabel = isYolo ? 'Full access' : 'Build'
 
       const currentSessionBackend = queryClient.getQueryData<Session>(
         chatQueryKeys.session(sessionId)
@@ -1952,7 +1938,7 @@ export function useMessageHandlers({
           mapCodexReasoningToEffort(modeEffortRef.current) ??
           selectedEffortLevelRef.current
       }
-      sendMessage.mutate({
+      sendMessageMutate({
         sessionId: newSession.id,
         worktreeId: readyWorktree.id,
         worktreePath: readyWorktree.path,
@@ -1966,36 +1952,14 @@ export function useMessageHandlers({
         backend: resolvedBackend,
       })
 
-      // Optionally close the original session
+      // Optionally archive the original session (keeps history restorable)
       if (prefs?.close_original_on_clear_context) {
-        const closeCommand =
-          prefs.removal_behavior === 'archive'
-            ? 'archive_session'
-            : 'close_session'
-
-        queryClient.setQueryData<WorktreeSessions>(
-          chatQueryKeys.sessions(worktreeId),
-          old => {
-            if (!old) return old
-            return {
-              ...old,
-              sessions: old.sessions.filter(s => s.id !== sessionId),
-            }
-          }
-        )
-
-        invoke(closeCommand, { worktreeId, worktreePath, sessionId })
-          .then(() =>
-            queryClient.invalidateQueries({
-              queryKey: chatQueryKeys.sessions(worktreeId),
-            })
-          )
-          .catch(err =>
-            console.error(
-              '[worktreeApproval] Failed to close original session:',
-              err
-            )
-          )
+        archiveOriginalPlanSession({
+          queryClient,
+          worktreeId,
+          worktreePath,
+          sessionId,
+        })
       }
     },
     [
@@ -2017,7 +1981,7 @@ export function useMessageHandlers({
       useAdaptiveThinkingRef,
       getMcpConfig,
       getCustomProfileName,
-      sendMessage,
+      sendMessageMutate,
       queryClient,
     ]
   )
@@ -2177,7 +2141,7 @@ export function useMessageHandlers({
         ? yoloThinkingLevelRef
         : buildThinkingLevelRef
       const modeEffortRef = isYolo ? yoloEffortLevelRef : buildEffortLevelRef
-      const modeLabel = isYolo ? 'Yolo' : 'Build'
+      const modeLabel = isYolo ? 'Full access' : 'Build'
 
       const currentSessionBackend = queryClient.getQueryData<Session>(
         chatQueryKeys.session(sessionId)
@@ -2266,7 +2230,7 @@ export function useMessageHandlers({
           mapCodexReasoningToEffort(modeEffortRef.current) ??
           selectedEffortLevelRef.current
       }
-      sendMessage.mutate({
+      sendMessageMutate({
         sessionId: newSession.id,
         worktreeId: readyWorktree.id,
         worktreePath: readyWorktree.path,
@@ -2280,36 +2244,14 @@ export function useMessageHandlers({
         backend: resolvedBackend,
       })
 
-      // Optionally close the original session
+      // Optionally archive the original session (keeps history restorable)
       if (prefs?.close_original_on_clear_context) {
-        const closeCommand =
-          prefs.removal_behavior === 'archive'
-            ? 'archive_session'
-            : 'close_session'
-
-        queryClient.setQueryData<WorktreeSessions>(
-          chatQueryKeys.sessions(worktreeId),
-          old => {
-            if (!old) return old
-            return {
-              ...old,
-              sessions: old.sessions.filter(s => s.id !== sessionId),
-            }
-          }
-        )
-
-        invoke(closeCommand, { worktreeId, worktreePath, sessionId })
-          .then(() =>
-            queryClient.invalidateQueries({
-              queryKey: chatQueryKeys.sessions(worktreeId),
-            })
-          )
-          .catch(err =>
-            console.error(
-              '[streamingWorktreeApproval] Failed to close original session:',
-              err
-            )
-          )
+        archiveOriginalPlanSession({
+          queryClient,
+          worktreeId,
+          worktreePath,
+          sessionId,
+        })
       }
     },
     [
@@ -2331,7 +2273,7 @@ export function useMessageHandlers({
       useAdaptiveThinkingRef,
       getMcpConfig,
       getCustomProfileName,
-      sendMessage,
+      sendMessageMutate,
       queryClient,
     ]
   )
@@ -2459,6 +2401,9 @@ export function useMessageHandlers({
         addApprovedTool(sessionId, pattern)
       }
 
+      // Live request: the run continues; approved patterns apply to later turns
+      if (respondLiveClaudePermissions(sessionId, true)) return
+
       const allApprovedTools = getApprovedTools(sessionId)
 
       const context = getDeniedMessageContext(sessionId)
@@ -2537,7 +2482,7 @@ export function useMessageHandlers({
       setSelectedModel(sessionId, modelToUse)
       setExecutingMode(sessionId, modeToUse)
 
-      sendMessage.mutate(
+      sendMessageMutate(
         {
           sessionId,
           worktreeId,
@@ -2572,7 +2517,7 @@ export function useMessageHandlers({
       getMcpConfig,
       getCustomProfileName,
       scrollToBottom,
-      sendMessage,
+      sendMessageMutate,
       inputRef,
     ]
   )
@@ -2657,6 +2602,28 @@ export function useMessageHandlers({
         addApprovedTool(sessionId, pattern)
       }
 
+      // Live request: approve it and use YOLO for later turns
+      if (respondLiveClaudePermissions(sessionId, true)) {
+        setMode(sessionId, 'yolo')
+        invoke('broadcast_session_setting', {
+          sessionId,
+          key: 'executionMode',
+          value: 'yolo',
+        }).catch(err => {
+          console.error(
+            '[useMessageHandlers] Claude broadcast executionMode=yolo failed:',
+            err
+          )
+        })
+        invoke('update_session_state', {
+          worktreeId,
+          worktreePath,
+          sessionId,
+          selectedExecutionMode: 'yolo',
+        }).catch(() => undefined)
+        return
+      }
+
       const context = getDeniedMessageContext(sessionId)
       if (!context) {
         console.error(
@@ -2716,7 +2683,7 @@ export function useMessageHandlers({
       setSelectedModel(sessionId, modelToUse)
       setExecutingMode(sessionId, 'yolo')
 
-      sendMessage.mutate(
+      sendMessageMutate(
         {
           sessionId,
           worktreeId,
@@ -2749,7 +2716,7 @@ export function useMessageHandlers({
       getMcpConfig,
       getCustomProfileName,
       scrollToBottom,
-      sendMessage,
+      sendMessageMutate,
       inputRef,
     ]
   )
@@ -2786,6 +2753,9 @@ export function useMessageHandlers({
       setWaitingForInput(sessionId, false)
       return
     }
+
+    // Live request: Claude gets the denial and continues the turn
+    if (respondLiveClaudePermissions(sessionId, false)) return
 
     clearPendingDenials(sessionId)
     clearDeniedMessageContext(sessionId)
@@ -2876,7 +2846,10 @@ export function useMessageHandlers({
   )
 
   const handleOpencodePermissionReply = useCallback(
-    (request: OpenCodePermissionRequest, reply: 'once' | 'always' | 'reject') => {
+    (
+      request: OpenCodePermissionRequest,
+      reply: 'once' | 'always' | 'reject'
+    ) => {
       const sessionId = activeSessionIdRef.current
       const worktreeId = activeWorktreeIdRef.current
       const worktreePath = activeWorktreePathRef.current
@@ -3012,13 +2985,13 @@ export function useMessageHandlers({
 
       const answerMap = buildCodexUserInputAnswerMap(request.questions, answers)
 
+      // Record the answer before replying to Codex. Codex can finish the turn and
+      // emit chat:done before the invoke promise resolves, so delaying this made
+      // the completed plan snapshot contain an unanswered question tool.
+      store.markQuestionAnswered(sessionId, toolCallId, answers)
+      store.updateToolCallOutput(sessionId, toolCallId, JSON.stringify(answers))
+
       const completeResponse = () => {
-        store.markQuestionAnswered(sessionId, toolCallId, answers)
-        store.updateToolCallOutput(
-          sessionId,
-          toolCallId,
-          JSON.stringify(answers)
-        )
         const remainingRequests = store
           .getPendingCodexUserInputRequests(sessionId)
           .filter(item => getCodexUserInputRequestId(item) !== toolCallId)
@@ -3057,6 +3030,8 @@ export function useMessageHandlers({
         })
         .catch(err => {
           respondingCodexUserInputRequests.delete(responseKey)
+          store.clearQuestionAnswer(sessionId, toolCallId)
+          store.updateToolCallOutput(sessionId, toolCallId, '')
           console.error(
             '[useMessageHandlers] Failed to answer Codex user-input request:',
             err
@@ -3292,14 +3267,13 @@ Please apply this fix to the file.`
       const cachedSessionsData = queryClient.getQueryData<WorktreeSessions>(
         chatQueryKeys.sessions(worktreeId)
       )
-      const allContent =
-        (
-          cachedSessionsData?.sessions
-            ?.find((s: Session) => s.id === sessionId)
-            ?.messages?.flatMap((m: { role: string; content: string }) =>
-              m.role === 'assistant' ? [m.content] : []
-            ) ?? []
-        ).join('\n')
+      const allContent = (
+        cachedSessionsData?.sessions
+          ?.find((s: Session) => s.id === sessionId)
+          ?.messages?.flatMap((m: { role: string; content: string }) =>
+            m.role === 'assistant' ? [m.content] : []
+          ) ?? []
+      ).join('\n')
       const findings = parseReviewFindings(allContent)
       const findingIndex = findings.findIndex(
         f =>
@@ -3342,7 +3316,7 @@ Please apply this fix to the file.`
       setSelectedModel(sessionId, selectedModelRef.current)
       setExecutingMode(sessionId, 'build') // Fixes are always in build mode
 
-      sendMessage.mutate(
+      sendMessageMutate(
         {
           sessionId,
           worktreeId,
@@ -3374,7 +3348,7 @@ Please apply this fix to the file.`
       useAdaptiveThinkingRef,
       getMcpConfig,
       getCustomProfileName,
-      sendMessage,
+      sendMessageMutate,
       queryClient,
       inputRef,
     ]
@@ -3431,14 +3405,13 @@ Please apply all these fixes to the respective files.`
       const cachedSessionsData = queryClient.getQueryData<WorktreeSessions>(
         chatQueryKeys.sessions(worktreeId)
       )
-      const allContent =
-        (
-          cachedSessionsData?.sessions
-            ?.find((s: Session) => s.id === sessionId)
-            ?.messages?.flatMap((m: { role: string; content: string }) =>
-              m.role === 'assistant' ? [m.content] : []
-            ) ?? []
-        ).join('\n')
+      const allContent = (
+        cachedSessionsData?.sessions
+          ?.find((s: Session) => s.id === sessionId)
+          ?.messages?.flatMap((m: { role: string; content: string }) =>
+            m.role === 'assistant' ? [m.content] : []
+          ) ?? []
+      ).join('\n')
       const allFindings = parseReviewFindings(allContent)
 
       for (const { finding } of findingsWithSuggestions) {
@@ -3484,7 +3457,7 @@ Please apply all these fixes to the respective files.`
       setSelectedModel(sessionId, selectedModelRef.current)
       setExecutingMode(sessionId, 'build') // Fixes are always in build mode
 
-      sendMessage.mutate(
+      sendMessageMutate(
         {
           sessionId,
           worktreeId,
@@ -3516,7 +3489,7 @@ Please apply all these fixes to the respective files.`
       useAdaptiveThinkingRef,
       getMcpConfig,
       getCustomProfileName,
-      sendMessage,
+      sendMessageMutate,
       queryClient,
       inputRef,
     ]

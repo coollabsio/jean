@@ -38,6 +38,8 @@ pub struct CodexResponse {
     pub cancelled: bool,
     /// Whether a chat:error event was emitted during execution
     pub error_emitted: bool,
+    /// Whether the completed turn must wait for plan approval
+    pub waiting_for_plan: bool,
     /// Token usage for this response
     pub usage: Option<UsageData>,
 }
@@ -625,6 +627,8 @@ fn upsert_codex_plan_tool_call(
         input,
         output: None,
         parent_tool_use_id: None,
+        is_error: None,
+        subagent_usage: None,
     });
     content_blocks.push(ContentBlock::ToolUse {
         tool_call_id: tool_id.to_string(),
@@ -682,6 +686,10 @@ fn emit_codex_plan_tool_call(
 /// to end in `-fast` are left unchanged.
 pub(crate) fn split_fast_model(model: &str) -> (&str, bool) {
     match model {
+        "gpt-6.1-sol-fast" => ("gpt-6.1-sol", true),
+        "gpt-6-astra-fast" => ("gpt-6-astra", true),
+        "gpt-6-sol-fast" => ("gpt-6-sol", true),
+        "gpt-6-luna-fast" => ("gpt-6-luna", true),
         "gpt-5.6" | "gpt-5-6-sol" => ("gpt-5.6-sol", false),
         "gpt-5-6-terra" => ("gpt-5.6-terra", false),
         "gpt-5-6-luna" => ("gpt-5.6-luna", false),
@@ -742,6 +750,9 @@ pub fn apply_codex_provider_to_config(
     );
 }
 
+/// Max concurrent Codex subagent threads.
+const CODEX_MAX_AGENT_THREADS: u32 = 3;
+
 /// Build JSON-RPC params for `thread/start`.
 #[allow(clippy::too_many_arguments)]
 pub fn build_thread_start_params(
@@ -749,9 +760,7 @@ pub fn build_thread_start_params(
     model: Option<&str>,
     execution_mode: Option<&str>,
     search_enabled: bool,
-    base_instructions_content: Option<&str>,
-    multi_agent_enabled: bool,
-    max_agent_threads: Option<u32>,
+    developer_instructions_content: Option<&str>,
     model_verbosity: Option<&str>,
     codex_provider: Option<&crate::CodexProviderProfile>,
 ) -> serde_json::Value {
@@ -775,6 +784,8 @@ pub fn build_thread_start_params(
         }
     }
 
+    params["approvalsReviewer"] = serde_json::json!("user");
+
     // Permission mode mapping.
     //
     // Plan mode must never ask the user for permissions. It is read-only, so
@@ -787,7 +798,7 @@ pub fn build_thread_start_params(
     // whether MCP servers are configured — but setting mcp_elicitations=false
     // is a no-op when no MCP servers exist, so it's safe to use in build mode.
     match execution_mode.unwrap_or("plan") {
-        "build" => {
+        "build" | "auto" => {
             params["approvalPolicy"] = serde_json::json!({
                 "granular": {
                     "mcp_elicitations": false,
@@ -797,6 +808,19 @@ pub fn build_thread_start_params(
                 }
             });
             params["sandbox"] = serde_json::json!("workspace-write");
+            params["approvalsReviewer"] = serde_json::json!(if execution_mode == Some("auto") {
+                "auto_review"
+            } else {
+                "user"
+            });
+            if execution_mode == Some("auto") {
+                params["approvalPolicy"] = serde_json::json!("on-request");
+            }
+        }
+        "supervised" => {
+            params["approvalPolicy"] = serde_json::json!("untrusted");
+            params["approvalsReviewer"] = serde_json::json!("user");
+            params["sandbox"] = serde_json::json!("read-only");
         }
         "yolo" => {
             params["approvalPolicy"] = serde_json::json!("never");
@@ -809,10 +833,11 @@ pub fn build_thread_start_params(
         }
     }
 
-    // Base instructions (system-level context: issues, PRs, custom prompts)
-    if let Some(content) = base_instructions_content {
+    // Jean context (global prompt, issues, PRs, custom prompts) is additive
+    // developer guidance. `baseInstructions` would replace Codex's own prompt.
+    if let Some(content) = developer_instructions_content {
         if !content.is_empty() {
-            params["baseInstructions"] = serde_json::json!(content);
+            params["developerInstructions"] = serde_json::json!(content);
         }
     }
 
@@ -830,17 +855,15 @@ pub fn build_thread_start_params(
         serde_json::json!(if search_enabled { "live" } else { "disabled" }),
     );
 
-    // Multi-agent
-    if multi_agent_enabled {
-        let mut features = serde_json::Map::new();
-        features.insert("multi_agent".to_string(), serde_json::json!(true));
-        config.insert("features".to_string(), serde_json::Value::Object(features));
-        if let Some(threads) = max_agent_threads {
-            let mut agents = serde_json::Map::new();
-            agents.insert("max_threads".to_string(), serde_json::json!(threads));
-            config.insert("agents".to_string(), serde_json::Value::Object(agents));
-        }
-    }
+    // Multi-agent (always on, so Codex can run subagents in parallel)
+    config.insert(
+        "features".to_string(),
+        serde_json::json!({ "multi_agent": true }),
+    );
+    config.insert(
+        "agents".to_string(),
+        serde_json::json!({ "max_threads": CODEX_MAX_AGENT_THREADS }),
+    );
 
     if let Some(provider) = codex_provider {
         apply_codex_provider_to_config(&mut config, provider);
@@ -920,6 +943,11 @@ pub fn build_turn_start_params(
     // accidentally re-sandbox yolo turns and break tools such as Playwright on
     // macOS (issue #328 / PR #362).
     let mode = execution_mode.unwrap_or("plan");
+    params["approvalsReviewer"] = serde_json::json!(if mode == "auto" {
+        "auto_review"
+    } else {
+        "user"
+    });
     match mode {
         "yolo" => {
             params["approvalPolicy"] = serde_json::json!("never");
@@ -927,7 +955,7 @@ pub fn build_turn_start_params(
                 "type": "dangerFullAccess",
             });
         }
-        "build" => {
+        "build" | "auto" => {
             params["approvalPolicy"] = serde_json::json!({
                 "granular": {
                     "mcp_elicitations": false,
@@ -936,6 +964,9 @@ pub fn build_turn_start_params(
                     "request_permissions": true,
                 }
             });
+            if mode == "auto" {
+                params["approvalPolicy"] = serde_json::json!("on-request");
+            }
             let mut writable_roots = vec![serde_json::json!(working_dir.to_string_lossy())];
             for dir in add_dirs {
                 writable_roots.push(serde_json::json!(dir));
@@ -950,6 +981,11 @@ pub fn build_turn_start_params(
                 "excludeTmpdirEnvVar": false,
                 "excludeSlashTmp": false,
             });
+        }
+        "supervised" => {
+            params["approvalPolicy"] = serde_json::json!("untrusted");
+            params["sandboxPolicy"] =
+                serde_json::json!({ "type": "readOnly", "networkAccess": true });
         }
         // "plan" or default: read-only, never ask for approvals
         _ => {
@@ -1009,6 +1045,12 @@ pub fn build_turn_steer_params_with_input(
 // Execution via app-server
 // =============================================================================
 
+fn reload_mcp_servers_before_thread_start(
+    send_request: impl FnOnce(&str, serde_json::Value) -> Result<serde_json::Value, String>,
+) -> Result<(), String> {
+    send_request("config/mcpServer/reload", serde_json::Value::Null).map(|_| ())
+}
+
 /// Execute a Codex chat message via the persistent app-server.
 ///
 /// Handles thread creation/resume, turn execution, event mapping, and approvals.
@@ -1028,9 +1070,7 @@ pub fn execute_codex_via_server(
     search_enabled: bool,
     add_dirs: &[String],
     prompt: &str,
-    base_instructions_content: Option<&str>,
-    multi_agent_enabled: bool,
-    max_agent_threads: Option<u32>,
+    developer_instructions_content: Option<&str>,
     codex_provider: Option<&crate::CodexProviderProfile>,
 ) -> Result<CodexResponse, String> {
     use super::codex_server;
@@ -1052,6 +1092,13 @@ pub fn execute_codex_via_server(
 
     // Ensure the app-server is running
     codex_server::ensure_running(app)?;
+    // The app-server outlives individual Jean sessions, so its MCP registry may
+    // predate changes to ~/.codex/config.toml. Refresh it before starting or
+    // resuming a thread so configured servers match a fresh Codex CLI process.
+    if let Err(error) = reload_mcp_servers_before_thread_start(codex_server::send_request) {
+        codex_server::decrement_usage_count();
+        return Err(format!("Failed to reload Codex MCP servers: {error}"));
+    }
 
     // Start or resume thread
     // Wrapped in a closure so we can decrement USAGE_COUNT on failure
@@ -1059,17 +1106,16 @@ pub fn execute_codex_via_server(
     let thread_id = match (|| -> Result<String, String> {
         if let Some(tid) = existing_thread_id {
             // Resume existing thread
-            let resume_params = build_thread_start_params(
+            let mut resume_params = build_thread_start_params(
                 working_dir,
                 model,
                 execution_mode,
                 search_enabled,
-                base_instructions_content,
-                multi_agent_enabled,
-                max_agent_threads,
+                developer_instructions_content,
                 Some(model_verbosity),
                 codex_provider,
             );
+            apply_agent_browser_session(&mut resume_params, session_id);
             let mut full_params =
                 serde_json::json!({ "threadId": tid, "persistExtendedHistory": true });
             // Copy overridable fields
@@ -1077,10 +1123,11 @@ pub fn execute_codex_via_server(
                 "model",
                 "cwd",
                 "approvalPolicy",
+                "approvalsReviewer",
                 "sandbox",
                 "config",
                 "serviceTier",
-                "baseInstructions",
+                "developerInstructions",
             ] {
                 if let Some(v) = resume_params.get(key) {
                     full_params[key] = v.clone();
@@ -1091,13 +1138,12 @@ pub fn execute_codex_via_server(
                 Err(e) => {
                     log::warn!("Failed to resume thread {tid}: {e}, starting new thread");
                     start_new_thread(
+                        session_id,
                         working_dir,
                         model,
                         execution_mode,
                         search_enabled,
-                        base_instructions_content,
-                        multi_agent_enabled,
-                        max_agent_threads,
+                        developer_instructions_content,
                         Some(model_verbosity),
                         codex_provider,
                     )
@@ -1105,13 +1151,12 @@ pub fn execute_codex_via_server(
             }
         } else {
             start_new_thread(
+                session_id,
                 working_dir,
                 model,
                 execution_mode,
                 search_enabled,
-                base_instructions_content,
-                multi_agent_enabled,
-                max_agent_threads,
+                developer_instructions_content,
                 Some(model_verbosity),
                 codex_provider,
             )
@@ -1433,13 +1478,18 @@ fn append_codex_thread_snapshot_to_history_file(
     Ok(())
 }
 
-fn emit_codex_done(app: &tauri::AppHandle, session_id: &str, worktree_id: &str) {
+fn emit_codex_done(
+    app: &tauri::AppHandle,
+    session_id: &str,
+    worktree_id: &str,
+    waiting_for_plan: bool,
+) {
     let _ = app.emit_all(
         "chat:done",
         &DoneEvent {
             session_id: session_id.to_string(),
             worktree_id: worktree_id.to_string(),
-            waiting_for_plan: false,
+            waiting_for_plan,
         },
     );
 }
@@ -1653,6 +1703,10 @@ pub fn resume_codex_after_crash(
                     }
                 }
 
+                if !response.cancelled && !response.error_emitted {
+                    emit_codex_done(app, session_id, worktree_id, response.waiting_for_plan);
+                }
+
                 return Ok(true);
             }
 
@@ -1715,7 +1769,7 @@ pub fn resume_codex_after_crash(
                         );
                     }
                 }
-                emit_codex_done(app, session_id, worktree_id);
+                emit_codex_done(app, session_id, worktree_id, false);
                 return Ok(true);
             }
 
@@ -1732,7 +1786,7 @@ pub fn resume_codex_after_crash(
                         log::error!("Failed to persist Codex recovered completion state: {e}");
                     }
                 }
-                emit_codex_done(app, session_id, worktree_id);
+                emit_codex_done(app, session_id, worktree_id, false);
                 return Ok(true);
             }
 
@@ -1767,7 +1821,7 @@ pub fn resume_codex_after_crash(
                         );
                     }
                 }
-                emit_codex_done(app, session_id, worktree_id);
+                emit_codex_done(app, session_id, worktree_id, false);
                 return Ok(true);
             }
 
@@ -1782,7 +1836,7 @@ pub fn resume_codex_after_crash(
                     log::error!("Failed to persist Codex recovered completion state: {e}");
                 }
             }
-            emit_codex_done(app, session_id, worktree_id);
+            emit_codex_done(app, session_id, worktree_id, false);
             Ok(true)
         }
     }
@@ -1790,30 +1844,44 @@ pub fn resume_codex_after_crash(
 
 /// Start a new Codex thread via app-server.
 #[allow(clippy::too_many_arguments)]
+/// Give this thread's agent-browser MCP server its own browser session, so
+/// parallel Jean sessions do not share one browser.
+fn apply_agent_browser_session(params: &mut serde_json::Value, session_id: &str) {
+    let overrides = [
+        crate::agent_browser::codex_session_config_override(session_id),
+        // Jean MCP must see the real session (agents, approvals, current context).
+        crate::jean_mcp_config::codex_session_config_override(session_id),
+    ];
+    for (key, value) in overrides.into_iter().flatten() {
+        if !params["config"].is_object() {
+            params["config"] = serde_json::json!({});
+        }
+        params["config"][key] = value;
+    }
+}
+
 fn start_new_thread(
+    session_id: &str,
     working_dir: &std::path::Path,
     model: Option<&str>,
     execution_mode: Option<&str>,
     search_enabled: bool,
-    base_instructions_content: Option<&str>,
-    multi_agent_enabled: bool,
-    max_agent_threads: Option<u32>,
+    developer_instructions_content: Option<&str>,
     model_verbosity: Option<&str>,
     codex_provider: Option<&crate::CodexProviderProfile>,
 ) -> Result<String, String> {
     use super::codex_server;
 
-    let params = build_thread_start_params(
+    let mut params = build_thread_start_params(
         working_dir,
         model,
         execution_mode,
         search_enabled,
-        base_instructions_content,
-        multi_agent_enabled,
-        max_agent_threads,
+        developer_instructions_content,
         model_verbosity,
         codex_provider,
     );
+    apply_agent_browser_session(&mut params, session_id);
 
     let result = codex_server::send_request("thread/start", params)?;
     let thread_id = result
@@ -1911,6 +1979,9 @@ fn process_turn_events(
     let mut error_emitted = false;
     let mut usage: Option<UsageData> = None;
     let mut received_completed_agent_message = false;
+    let mut recovered_connection = false;
+    let mut status_poll_interval = status_poll_interval;
+    let mut recovery_turn_id = recovery_turn_id.map(str::to_owned);
 
     // Coalesce token-rate text/thinking deltas into fewer, larger
     // chat:chunk / chat:thinking events. Flushed before any other event is
@@ -1969,8 +2040,11 @@ fn process_turn_events(
                         );
                         match snapshot {
                             Ok(snapshot) => {
-                                let disposition =
-                                    classify_codex_resume(&snapshot, recovery_turn_id, true);
+                                let disposition = classify_codex_resume(
+                                    &snapshot,
+                                    recovery_turn_id.as_deref(),
+                                    true,
+                                );
                                 if disposition == CodexResumeDisposition::Active {
                                     continue;
                                 }
@@ -1981,7 +2055,7 @@ fn process_turn_events(
                                 if let Err(e) = append_codex_thread_snapshot_to_history_file(
                                     output_file,
                                     &snapshot,
-                                    recovery_turn_id,
+                                    recovery_turn_id.as_deref(),
                                     false,
                                 ) {
                                     log::warn!(
@@ -1991,9 +2065,10 @@ fn process_turn_events(
 
                                 match disposition {
                                     CodexResumeDisposition::Failed => {
-                                        if let Some(turn) =
-                                            select_codex_recovery_turn(&snapshot, recovery_turn_id)
-                                        {
+                                        if let Some(turn) = select_codex_recovery_turn(
+                                            &snapshot,
+                                            recovery_turn_id.as_deref(),
+                                        ) {
                                             let raw_error = codex_turn_error_message(turn)
                                                 .unwrap_or_else(|| {
                                                     "Unknown Codex error".to_string()
@@ -2084,6 +2159,7 @@ fn process_turn_events(
                         .and_then(|t| t.get("id"))
                         .and_then(|v| v.as_str())
                     {
+                        recovery_turn_id = Some(turn_id.to_string());
                         super::registry::register_codex_turn(
                             session_id.to_string(),
                             thread_id.to_string(),
@@ -2098,7 +2174,7 @@ fn process_turn_events(
                             }
                         }
                         // Steer any prompts that were queued before the turn
-                        // became steerable (auto-steer preference, default on).
+                        // became steerable (auto-steer preference, default off).
                         super::commands::trigger_codex_queue_steer(
                             app.clone(),
                             worktree_id.to_string(),
@@ -2144,6 +2220,70 @@ fn process_turn_events(
                     is_yolo_mode,
                 );
             }
+            ServerEvent::Reconnected { snapshot } => {
+                recovered_connection = true;
+                if status_poll_interval.is_none() {
+                    status_poll_interval = Some(std::time::Duration::from_secs(15));
+                }
+                log::info!(
+                    "Codex app-server connection recovered during turn for session {session_id}"
+                );
+                flush_stream_coalescers(
+                    app,
+                    session_id,
+                    worktree_id,
+                    run_id,
+                    &mut chunk_coalescer,
+                    &mut thinking_coalescer,
+                );
+                if let Some(ref mut writer) = output_writer {
+                    let _ = writer.flush();
+                }
+
+                let disposition =
+                    classify_codex_resume(&snapshot, recovery_turn_id.as_deref(), true);
+                if disposition != CodexResumeDisposition::Active {
+                    if let Err(error) = append_codex_thread_snapshot_to_history_file(
+                        output_file,
+                        &snapshot,
+                        recovery_turn_id.as_deref(),
+                        disposition == CodexResumeDisposition::Idle,
+                    ) {
+                        log::warn!("Failed to backfill Codex reconnect snapshot: {error}");
+                    }
+                }
+
+                match disposition {
+                    CodexResumeDisposition::Active => continue,
+                    CodexResumeDisposition::Idle => {
+                        completed = true;
+                        break 'outer;
+                    }
+                    CodexResumeDisposition::Interrupted => {
+                        cancelled = true;
+                        server_interrupted = true;
+                        break 'outer;
+                    }
+                    CodexResumeDisposition::Failed => {
+                        if let Some(turn) =
+                            select_codex_recovery_turn(&snapshot, recovery_turn_id.as_deref())
+                        {
+                            let raw_error = codex_turn_error_message(turn)
+                                .unwrap_or_else(|| "Unknown Codex error".to_string());
+                            let _ = app.emit_all(
+                                "chat:error",
+                                &ErrorEvent {
+                                    session_id: session_id.to_string(),
+                                    worktree_id: worktree_id.to_string(),
+                                    error: format_codex_user_error(&raw_error),
+                                },
+                            );
+                        }
+                        error_emitted = true;
+                        break 'outer;
+                    }
+                }
+            }
             ServerEvent::ServerDied => {
                 log::error!("Codex app-server died during turn for session {session_id}");
                 flush_stream_coalescers(
@@ -2173,6 +2313,31 @@ fn process_turn_events(
 
         if completed {
             break 'outer;
+        }
+    }
+
+    // A reconnect snapshot can contain in-progress items. Do not persist those
+    // as completed. Once the turn finishes, read one authoritative snapshot
+    // and backfill everything emitted during the connection gap.
+    if recovered_connection && completed {
+        if let Some(ref mut writer) = output_writer {
+            let _ = writer.flush();
+        }
+        match super::codex_server::send_request(
+            "thread/read",
+            serde_json::json!({"threadId": thread_id, "includeTurns": true}),
+        ) {
+            Ok(snapshot) => {
+                if let Err(error) = append_codex_thread_snapshot_to_history_file(
+                    output_file,
+                    &snapshot,
+                    recovery_turn_id.as_deref(),
+                    true,
+                ) {
+                    log::warn!("Failed to backfill completed Codex reconnect snapshot: {error}");
+                }
+            }
+            Err(error) => log::warn!("Failed to read completed Codex reconnect snapshot: {error}"),
         }
     }
 
@@ -2223,24 +2388,19 @@ fn process_turn_events(
         enrich_thin_codex_plan(&mut tool_calls, &mut content_blocks, &full_content);
     }
 
-    // Emit chat:done unless error was emitted
-    if !cancelled && !error_emitted {
-        let has_plan_tool = has_codex_plan_tool(&tool_calls);
+    let waiting_for_plan = !cancelled
+        && !error_emitted
+        && is_plan_mode
+        && (has_codex_plan_tool(&tool_calls) || detected_plain_text_plan);
 
+    // The caller emits chat:done after it persists the run and session state.
+    // If this event is early, a client refetch can restore a stale running state.
+    if !cancelled && !error_emitted {
         // Write result marker for crash-recovery compatibility
         // (jsonl_has_result_line() in run_log.rs checks for this)
         if let Some(ref mut writer) = output_writer {
             let _ = writeln!(writer, r#"{{"type":"result"}}"#);
         }
-
-        let _ = app.emit_all(
-            "chat:done",
-            &DoneEvent {
-                session_id: session_id.to_string(),
-                worktree_id: worktree_id.to_string(),
-                waiting_for_plan: is_plan_mode && (has_plan_tool || detected_plain_text_plan),
-            },
-        );
     } else if server_interrupted && !error_emitted {
         // Server-initiated interruption (e.g., Codex ended the turn while an
         // approval request was still pending). User-initiated cancellation is
@@ -2271,6 +2431,7 @@ fn process_turn_events(
         content_blocks,
         cancelled,
         error_emitted,
+        waiting_for_plan,
         usage,
     }
 }
@@ -3517,6 +3678,8 @@ fn upsert_file_change_tool_call(
             input: changes,
             output: None,
             parent_tool_use_id: None,
+            is_error: None,
+            subagent_usage: None,
         });
         content_blocks.push(ContentBlock::ToolUse {
             tool_call_id: tool_id.clone(),
@@ -3575,6 +3738,8 @@ fn process_codex_event(
                         input: serde_json::json!({ "command": command }),
                         output: None,
                         parent_tool_use_id: None,
+                        is_error: None,
+                        subagent_usage: None,
                     });
                     content_blocks.push(ContentBlock::ToolUse {
                         tool_call_id: tool_id.clone(),
@@ -3659,6 +3824,8 @@ fn process_codex_event(
                         input: arguments.clone(),
                         output: None,
                         parent_tool_use_id: None,
+                        is_error: None,
+                        subagent_usage: None,
                     });
                     content_blocks.push(ContentBlock::ToolUse {
                         tool_call_id: tool_id.clone(),
@@ -3704,6 +3871,8 @@ fn process_codex_event(
                         input: input.clone(),
                         output: None,
                         parent_tool_use_id: None,
+                        is_error: None,
+                        subagent_usage: None,
                     });
                     content_blocks.push(ContentBlock::ToolUse {
                         tool_call_id: tool_id.clone(),
@@ -3744,6 +3913,8 @@ fn process_codex_event(
                         input: input.clone(),
                         output: None,
                         parent_tool_use_id: None,
+                        is_error: None,
+                        subagent_usage: None,
                     });
                     content_blocks.push(ContentBlock::ToolUse {
                         tool_call_id: tool_id.clone(),
@@ -3792,6 +3963,8 @@ fn process_codex_event(
                         input: arguments.clone(),
                         output: None,
                         parent_tool_use_id: None,
+                        is_error: None,
+                        subagent_usage: None,
                     });
                     content_blocks.push(ContentBlock::ToolUse {
                         tool_call_id: tool_id.clone(),
@@ -3862,6 +4035,8 @@ fn process_codex_event(
                         input: input.clone(),
                         output: None,
                         parent_tool_use_id: None,
+                        is_error: None,
+                        subagent_usage: None,
                     });
                     content_blocks.push(ContentBlock::ToolUse {
                         tool_call_id: tool_id.clone(),
@@ -4093,6 +4268,8 @@ fn process_codex_event(
                                 input: input.clone(),
                                 output: Some("completed".to_string()),
                                 parent_tool_use_id: None,
+                                is_error: None,
+                                subagent_usage: None,
                             });
                             content_blocks.push(ContentBlock::ToolUse {
                                 tool_call_id: tool_id.clone(),
@@ -4103,10 +4280,29 @@ fn process_codex_event(
                             &ToolUseEvent {
                                 session_id: session_id.to_string(),
                                 worktree_id: worktree_id.to_string(),
-                                id: tool_id,
+                                id: tool_id.clone(),
                                 name: tool_name.to_string(),
                                 input,
                                 parent_tool_use_id: None,
+                            },
+                        );
+                        // Without a tool block the live message has no content
+                        // blocks and falls back to the raw JSON tool list.
+                        let _ = app.emit_all(
+                            "chat:tool_block",
+                            &ToolBlockEvent {
+                                session_id: session_id.to_string(),
+                                worktree_id: worktree_id.to_string(),
+                                tool_call_id: tool_id.clone(),
+                            },
+                        );
+                        let _ = app.emit_all(
+                            "chat:tool_result",
+                            &ToolResultEvent {
+                                session_id: session_id.to_string(),
+                                worktree_id: worktree_id.to_string(),
+                                tool_use_id: tool_id,
+                                output: "completed".to_string(),
                             },
                         );
                     }
@@ -4138,6 +4334,8 @@ fn process_codex_event(
                             input: input.clone(),
                             output: (!output.is_empty()).then_some(output.clone()),
                             parent_tool_use_id: None,
+                            is_error: None,
+                            subagent_usage: None,
                         });
                         content_blocks.push(ContentBlock::ToolUse {
                             tool_call_id: tool_id.clone(),
@@ -4524,6 +4722,8 @@ pub fn parse_codex_run_to_message(
                             input: serde_json::json!({ "command": command }),
                             output: None,
                             parent_tool_use_id: None,
+                            is_error: None,
+                            subagent_usage: None,
                         });
                         content_blocks.push(ContentBlock::ToolUse {
                             tool_call_id: tool_id.clone(),
@@ -4570,6 +4770,8 @@ pub fn parse_codex_run_to_message(
                             input: arguments,
                             output: None,
                             parent_tool_use_id: None,
+                            is_error: None,
+                            subagent_usage: None,
                         });
                         content_blocks.push(ContentBlock::ToolUse {
                             tool_call_id: tool_id.clone(),
@@ -4596,6 +4798,8 @@ pub fn parse_codex_run_to_message(
                             input: item.clone(),
                             output: None,
                             parent_tool_use_id: None,
+                            is_error: None,
+                            subagent_usage: None,
                         });
                         content_blocks.push(ContentBlock::ToolUse {
                             tool_call_id: tool_id.clone(),
@@ -4617,6 +4821,8 @@ pub fn parse_codex_run_to_message(
                             input: item.clone(),
                             output: None,
                             parent_tool_use_id: None,
+                            is_error: None,
+                            subagent_usage: None,
                         });
                         content_blocks.push(ContentBlock::ToolUse {
                             tool_call_id: tool_id.clone(),
@@ -4640,6 +4846,8 @@ pub fn parse_codex_run_to_message(
                             input,
                             output: None,
                             parent_tool_use_id: None,
+                            is_error: None,
+                            subagent_usage: None,
                         });
                         content_blocks.push(ContentBlock::ToolUse {
                             tool_call_id: tool_id.clone(),
@@ -4849,6 +5057,8 @@ pub fn parse_codex_run_to_message(
                                 input,
                                 output: Some("completed".to_string()),
                                 parent_tool_use_id: None,
+                                is_error: None,
+                                subagent_usage: None,
                             });
                             content_blocks.push(ContentBlock::ToolUse {
                                 tool_call_id: tool_id,
@@ -4879,6 +5089,8 @@ pub fn parse_codex_run_to_message(
                                 input,
                                 output: (!output.is_empty()).then_some(output),
                                 parent_tool_use_id: None,
+                                is_error: None,
+                                subagent_usage: None,
                             });
                             content_blocks.push(ContentBlock::ToolUse {
                                 tool_call_id: tool_id,
@@ -4948,6 +5160,7 @@ pub fn parse_codex_run_to_message(
         execution_mode: None,
         thinking_level: None,
         effort_level: None,
+        custom_profile_name: None,
         recovered: run.recovered,
         usage: run.usage.clone(),
     })
@@ -5283,6 +5496,64 @@ fn build_one_shot_codex_args(
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn permission_policies_apply_to_threads_and_every_turn() {
+        for (mode, approval, sandbox, reviewer) in [
+            ("supervised", "untrusted", "readOnly", "user"),
+            ("auto", "on-request", "workspaceWrite", "auto_review"),
+            ("yolo", "never", "dangerFullAccess", "user"),
+            ("plan", "never", "readOnly", "user"),
+        ] {
+            let thread = build_thread_start_params(
+                std::path::Path::new("/tmp/worktree"),
+                Some("gpt-5.4"),
+                Some(mode),
+                false,
+                None,
+                None,
+                None,
+            );
+            let turn = build_turn_start_params(
+                "thread-1",
+                "hello",
+                std::path::Path::new("/tmp/worktree"),
+                Some(mode),
+                None,
+                &[],
+                &[],
+                Some("gpt-5.4"),
+            );
+            assert_eq!(thread["approvalPolicy"], approval);
+            assert_eq!(thread["approvalsReviewer"], reviewer);
+            assert_eq!(turn["approvalPolicy"], approval);
+            assert_eq!(turn["approvalsReviewer"], reviewer);
+            assert_eq!(turn["sandboxPolicy"]["type"], sandbox);
+            assert_eq!(
+                turn["collaborationMode"]["mode"],
+                if mode == "plan" { "plan" } else { "default" }
+            );
+        }
+    }
+
+    #[test]
+    fn reloads_mcp_servers_with_app_server_protocol_before_thread_start() {
+        let result = reload_mcp_servers_before_thread_start(|method, params| {
+            assert_eq!(method, "config/mcpServer/reload");
+            assert_eq!(params, serde_json::Value::Null);
+            Ok(serde_json::json!({}))
+        });
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn fails_thread_start_when_mcp_reload_fails() {
+        let error = reload_mcp_servers_before_thread_start(|_, _| Err("reload failed".into()))
+            .expect_err("reload failure must block thread start");
+
+        assert_eq!(error, "reload failed");
+    }
 
     #[cfg(unix)]
     #[test]
@@ -5643,8 +5914,6 @@ mod tests {
             Some("plan"),
             false,
             None,
-            false,
-            None,
             None,
             None,
         );
@@ -5653,13 +5922,64 @@ mod tests {
     }
 
     #[test]
+    fn jean_context_goes_to_developer_instructions_not_base_instructions() {
+        let params = build_thread_start_params(
+            std::path::Path::new("/tmp"),
+            Some("gpt-5.5"),
+            Some("plan"),
+            false,
+            Some("Jean global system prompt"),
+            None,
+            None,
+        );
+
+        assert_eq!(params["developerInstructions"], "Jean global system prompt");
+        assert!(params.get("baseInstructions").is_none());
+    }
+
+    #[test]
+    fn empty_developer_instructions_are_omitted() {
+        let params = build_thread_start_params(
+            std::path::Path::new("/tmp"),
+            Some("gpt-5.5"),
+            Some("plan"),
+            false,
+            Some(""),
+            None,
+            None,
+        );
+
+        assert!(params.get("developerInstructions").is_none());
+        assert!(params.get("baseInstructions").is_none());
+    }
+
+    #[test]
+    fn thread_params_always_enable_multi_agent() {
+        let params = build_thread_start_params(
+            std::path::Path::new("/tmp"),
+            None,
+            Some("plan"),
+            false,
+            None,
+            None,
+            None,
+        );
+        assert_eq!(
+            params["config"]["features"]["multi_agent"],
+            serde_json::json!(true)
+        );
+        assert_eq!(
+            params["config"]["agents"]["max_threads"],
+            CODEX_MAX_AGENT_THREADS
+        );
+    }
+
+    #[test]
     fn gpt_5_5_fast_enables_fast_service_tier() {
         let params = build_thread_start_params(
             std::path::Path::new("/tmp"),
             Some("gpt-5.5-fast"),
             Some("plan"),
-            false,
-            None,
             false,
             None,
             None,
@@ -5684,6 +6004,15 @@ mod tests {
         assert_eq!(split_fast_model("gpt-5.6"), ("gpt-5.6-sol", false));
         assert_eq!(split_fast_model("gpt-5-6-sol"), ("gpt-5.6-sol", false));
         assert_eq!(split_fast_model("gpt-5-6-sol-fast"), ("gpt-5.6-sol", true));
+    }
+
+    #[test]
+    fn split_fast_model_recognises_gpt_6_fast_models() {
+        assert_eq!(split_fast_model("gpt-6.1-sol-fast"), ("gpt-6.1-sol", true));
+        assert_eq!(split_fast_model("gpt-6-astra-fast"), ("gpt-6-astra", true));
+        assert_eq!(split_fast_model("gpt-6-sol-fast"), ("gpt-6-sol", true));
+        assert_eq!(split_fast_model("gpt-6-luna-fast"), ("gpt-6-luna", true));
+        assert_eq!(split_fast_model("gpt-6.1-sol"), ("gpt-6.1-sol", false));
     }
 
     #[test]
@@ -5754,8 +6083,6 @@ mod tests {
             Some("build"),
             false,
             None,
-            false,
-            None,
             None,
             None,
         );
@@ -5769,8 +6096,6 @@ mod tests {
             std::path::Path::new("/tmp"),
             Some("gpt-5.6-sol"),
             Some("build"),
-            false,
-            None,
             false,
             None,
             Some("high"),
@@ -5817,8 +6142,6 @@ mod tests {
             Some("plan"),
             false,
             None,
-            false,
-            None,
             None,
             None,
         );
@@ -5832,8 +6155,6 @@ mod tests {
             std::path::Path::new("/tmp"),
             Some("gpt-5.4"),
             Some("build"),
-            false,
-            None,
             false,
             None,
             None,
@@ -5852,8 +6173,6 @@ mod tests {
             std::path::Path::new("/tmp"),
             Some("gpt-5.4"),
             Some("plan"),
-            false,
-            None,
             false,
             None,
             None,
@@ -5923,8 +6242,6 @@ mod tests {
             Some("yolo"),
             false,
             None,
-            false,
-            None,
             None,
             None,
         );
@@ -5944,8 +6261,6 @@ mod tests {
             std::path::Path::new("/tmp"),
             Some("gpt-5.4"),
             Some("plan"),
-            false,
-            None,
             false,
             None,
             None,

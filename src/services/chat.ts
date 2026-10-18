@@ -10,12 +10,14 @@ import { toast } from 'sonner'
 import { logger } from '@/lib/logger'
 import { generateId } from '@/lib/uuid'
 import { disposeTerminal } from '@/lib/terminal-instances'
+import { readCloseBypassDetail } from '@/lib/confirm-bypass'
 import {
   beginSessionStateHydration,
   endSessionStateHydration,
 } from '@/lib/session-state-hydration'
 import type {
   AllSessionsResponse,
+  SessionSearchResponse,
   ArchivedSessionEntry,
   ChatMessage,
   ChatHistory,
@@ -26,10 +28,12 @@ import type {
   QuestionAnswer,
   ThinkingLevel,
   ExecutionMode,
+  PermissionMode,
   EffortLevel,
   LabelData,
   QueuedMessage,
   Backend,
+  PinnedTable,
 } from '@/types/chat'
 import { isTauri, projectsQueryKeys } from '@/services/projects'
 import { hasBackendTransport } from '@/lib/environment'
@@ -47,13 +51,52 @@ import {
   preferResolvedCliCommand,
   resolveBackendCliPath,
 } from '@/services/cli-binary'
-import type { StoredReviewResults, Worktree } from '@/types/projects'
+import type {
+  RecentWorktreeItem,
+  StoredReviewResults,
+  Worktree,
+} from '@/types/projects'
 import { preserveQueryCacheOnError } from '@/lib/query-error'
+import { renameTableKeyMessage } from '@/lib/pinned-table-reveal'
+import {
+  useConsolidatedAllSessions,
+  useConsolidatedUnreadSessions,
+} from './multi-server-sessions'
 
 /** Default number of recent runs loaded on initial session fetch. */
 export const INITIAL_RUN_LIMIT = 10
 /** Number of older runs to load per scroll-up batch. */
 export const OLDER_RUN_BATCH = 10
+
+/** Move a continued session to its new position in every cached Recent page. */
+export function touchRecentSessionCaches(
+  queryClient: QueryClient,
+  sessionId: string,
+  timestamp: number
+): void {
+  queryClient.setQueriesData<{ items: RecentWorktreeItem[] }>(
+    { queryKey: ['recent-worktrees'] },
+    old => {
+      if (!old?.items.some(item => item.session.id === sessionId)) return old
+      const items = old.items
+        .map(item =>
+          item.session.id === sessionId
+            ? {
+                ...item,
+                lastActivityAt: timestamp,
+                session: {
+                  ...item.session,
+                  last_message_at: timestamp,
+                  updated_at: timestamp,
+                },
+              }
+            : item
+        )
+        .sort((left, right) => right.lastActivityAt - left.lastActivityAt)
+      return { ...old, items }
+    }
+  )
+}
 
 /** Check if an error is from a WebSocket disconnect (suppress toasts before reload). */
 function isWsDisconnectError(error: unknown): boolean {
@@ -89,7 +132,7 @@ export function removeSessionFromAllSessionsCache(
   queryClient: QueryClient,
   sessionId: string
 ): void {
-  queryClient.setQueryData(['all-sessions'], old => {
+  queryClient.setQueriesData({ queryKey: ['all-sessions'] }, old => {
     const data = old as { entries?: { sessions?: Session[] }[] } | undefined
     if (!data?.entries) return old
     return {
@@ -118,17 +161,20 @@ export async function refreshWorktreeSessionsCaches(
       worktreePath,
     })
     queryClient.setQueryData(chatQueryKeys.sessions(worktreeId), sessions)
-    queryClient.setQueryData<AllSessionsResponse>(['all-sessions'], old => {
-      if (!old?.entries) return old
-      return {
-        ...old,
-        entries: old.entries.map(entry =>
-          entry.worktree_id === worktreeId
-            ? { ...entry, sessions: sessions.sessions }
-            : entry
-        ),
+    queryClient.setQueriesData<AllSessionsResponse>(
+      { queryKey: ['all-sessions'] },
+      old => {
+        if (!old?.entries) return old
+        return {
+          ...old,
+          entries: old.entries.map(entry =>
+            entry.worktree_id === worktreeId
+              ? { ...entry, sessions: sessions.sessions }
+              : entry
+          ),
+        }
       }
-    })
+    )
     return sessions
   } catch (error) {
     logger.warn('Failed to refresh worktree sessions caches', {
@@ -268,6 +314,7 @@ export const chatQueryKeys = {
       searchQuery,
       resultLimit,
     ] as const,
+  unreadSessionCount: () => ['unread-session-count'] as const,
 }
 
 export interface NativeCliHistorySession {
@@ -327,7 +374,7 @@ export function useChatHistory(
 export function useSessions(
   worktreeId: string | null,
   worktreePath: string | null,
-  options?: { includeMessageCounts?: boolean }
+  options?: { includeMessageCounts?: boolean; refetchOnMount?: 'always' }
 ) {
   const includeMessageCounts = options?.includeMessageCounts ?? false
 
@@ -337,12 +384,8 @@ export function useSessions(
       : chatQueryKeys.sessions(worktreeId ?? ''),
     queryFn: async (): Promise<WorktreeSessions> => {
       if (!hasBackendTransport() || !worktreeId || !worktreePath) {
-        return {
-          worktree_id: '',
-          sessions: [],
-          active_session_id: null,
-          version: 2,
-        }
+        // An empty success is cached for the stale time and hides every tab.
+        throw new Error('Session list is not available yet')
       }
 
       try {
@@ -361,8 +404,8 @@ export function useSessions(
     },
     enabled: !!worktreeId && !!worktreePath,
     staleTime: 1000 * 60 * 5, // 5 minutes - enables instant tab bar rendering from cache
-    gcTime: 1000 * 60 * 5,
-    refetchOnMount: true, // Respects staleTime; status changes pushed via streaming/cache:invalidate events
+    gcTime: 1000 * 60 * 2,
+    refetchOnMount: options?.refetchOnMount ?? true, // Modal openings must also refresh cached empty lists
   })
 }
 
@@ -437,6 +480,7 @@ export async function prefetchSessions(
     > = {}
     const waitingUpdates: Record<string, boolean> = {}
     const executionModeUpdates: Record<string, ExecutionMode> = {}
+    const permissionModeUpdates: Record<string, PermissionMode> = {}
     const primarySurfaceUpdates: Record<string, 'chat' | 'terminal'> = {}
     const labelUpdates: Record<string, LabelData> = {}
     const reviewResultsUpdates: Record<string, StoredReviewResults> = {}
@@ -478,6 +522,8 @@ export async function prefetchSessions(
       if (session.selected_execution_mode) {
         executionModeUpdates[session.id] = session.selected_execution_mode
       }
+      if (session.selected_permission_mode)
+        permissionModeUpdates[session.id] = session.selected_permission_mode
       if (session.primary_surface) {
         primarySurfaceUpdates[session.id] = session.primary_surface
       }
@@ -549,6 +595,12 @@ export async function prefetchSessions(
         ...executionModeUpdates,
       }
     }
+    if (Object.keys(permissionModeUpdates).length > 0) {
+      storeUpdates.permissionModes = {
+        ...currentState.permissionModes,
+        ...permissionModeUpdates,
+      }
+    }
     if (Object.keys(primarySurfaceUpdates).length > 0) {
       useUIStore.setState(state => ({
         sessionPrimarySurface: {
@@ -569,16 +621,27 @@ export async function prefetchSessions(
         ...reviewResultsUpdates,
       }
     }
+    // Merge with in-memory answers: disk can lag behind, and replacing would
+    // re-open questions answered since the last save (#779).
     if (Object.keys(answeredQuestionsUpdates).length > 0) {
+      const merged: Record<string, Set<string>> = {}
+      for (const [id, fromDisk] of Object.entries(answeredQuestionsUpdates)) {
+        const inMemory = currentState.answeredQuestions[id]
+        merged[id] = inMemory ? new Set([...fromDisk, ...inMemory]) : fromDisk
+      }
       storeUpdates.answeredQuestions = {
         ...currentState.answeredQuestions,
-        ...answeredQuestionsUpdates,
+        ...merged,
       }
     }
     if (Object.keys(submittedAnswersUpdates).length > 0) {
+      const merged: typeof submittedAnswersUpdates = {}
+      for (const [id, fromDisk] of Object.entries(submittedAnswersUpdates)) {
+        merged[id] = { ...fromDisk, ...currentState.submittedAnswers[id] }
+      }
       storeUpdates.submittedAnswers = {
         ...currentState.submittedAnswers,
-        ...submittedAnswersUpdates,
+        ...merged,
       }
     }
     if (Object.keys(fixedFindingsUpdates).length > 0) {
@@ -610,24 +673,48 @@ export async function prefetchSessions(
  * Used by Load Context modal to show sessions from anywhere
  */
 export function useAllSessions(enabled = true) {
+  return useConsolidatedAllSessions(enabled)
+}
+
+/** Unread sessions only (finished-session popover); much lighter than all. */
+export function useUnreadSessions(enabled = true) {
+  return useConsolidatedUnreadSessions(enabled)
+}
+
+export const MIN_SESSION_SEARCH_LEN = 3
+
+/** Search message bodies, which are stored in backend run logs. */
+export function useSessionMessageSearch(query: string, enabled = true) {
+  const trimmed = query.trim()
+
   return useQuery({
-    queryKey: ['all-sessions'],
-    queryFn: async (): Promise<AllSessionsResponse> => {
-      try {
-        logger.debug('Loading all sessions')
-        const response = await invoke<AllSessionsResponse>('list_all_sessions')
-        logger.info('All sessions loaded', {
-          entryCount: response.entries.length,
-        })
-        return response
-      } catch (error) {
-        logger.error('Failed to load all sessions', { error })
-        return { entries: [] }
-      }
-    },
-    enabled,
-    staleTime: 1000 * 60 * 5, // 5 minutes
-    gcTime: 1000 * 60 * 5,
+    queryKey: ['session-message-search', trimmed],
+    queryFn: () =>
+      invoke<SessionSearchResponse>('search_session_messages', {
+        query: trimmed,
+      }),
+    enabled: enabled && trimmed.length >= MIN_SESSION_SEARCH_LEN,
+    staleTime: 30_000,
+    gcTime: 60_000,
+  })
+}
+
+/**
+ * Load only the unread-session count for the title-bar badge.
+ * Full cross-project session data remains an explicit unread-popover query.
+ */
+export function fetchUnreadSessionCount(): Promise<number> {
+  // Let TanStack Query handle failures. Returning zero here would replace a
+  // valid cached count during a temporary transport or backend failure.
+  return invoke<number>('get_unread_session_count')
+}
+
+export function useUnreadSessionCount() {
+  return useQuery({
+    queryKey: chatQueryKeys.unreadSessionCount(),
+    queryFn: fetchUnreadSessionCount,
+    staleTime: 1000 * 60,
+    gcTime: 1000 * 60 * 2,
   })
 }
 
@@ -957,7 +1044,10 @@ export function useUpdateSessionState() {
       pendingPlanMessageId,
       enabledMcpServers,
       selectedExecutionMode,
+      selectedPermissionMode,
       tableCheckedRows,
+      hiddenTableChecklists,
+      pinnedTables,
     }: {
       worktreeId: string
       worktreePath: string
@@ -1035,7 +1125,10 @@ export function useUpdateSessionState() {
       pendingPlanMessageId?: string | null
       enabledMcpServers?: string[] | null
       selectedExecutionMode?: ExecutionMode | null
+      selectedPermissionMode?: PermissionMode
       tableCheckedRows?: Record<string, number[]>
+      hiddenTableChecklists?: string[]
+      pinnedTables?: PinnedTable[]
     }): Promise<void> => {
       if (!isTauri()) {
         throw new Error('Not in Tauri context')
@@ -1063,7 +1156,10 @@ export function useUpdateSessionState() {
         pendingPlanMessageId,
         enabledMcpServers,
         selectedExecutionMode,
+        selectedPermissionMode,
         tableCheckedRows,
+        hiddenTableChecklists,
+        pinnedTables,
       })
       logger.debug('Session state updated')
     },
@@ -1124,10 +1220,15 @@ export function useCloseSession() {
 
       // Drop from the finished-session bell (reads from ['all-sessions']).
       removeSessionFromAllSessionsCache(queryClient, sessionId)
+      queryClient.invalidateQueries({
+        queryKey: chatQueryKeys.unreadSessionCount(),
+      })
       queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
 
       // Clear all session-scoped state
-      useChatStore.getState().clearSessionState(sessionId)
+      useChatStore
+        .getState()
+        .clearSessionState(sessionId, { removeReferences: true })
       clearSessionScrollState(sessionId)
       cleanupSessionTerminalForRemovedSession(worktreeId, sessionId)
 
@@ -1202,10 +1303,15 @@ export function useArchiveSession() {
 
       // Drop from the finished-session bell (reads from ['all-sessions']).
       removeSessionFromAllSessionsCache(queryClient, sessionId)
+      queryClient.invalidateQueries({
+        queryKey: chatQueryKeys.unreadSessionCount(),
+      })
       queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
 
       // Clear all session-scoped state
-      useChatStore.getState().clearSessionState(sessionId)
+      useChatStore
+        .getState()
+        .clearSessionState(sessionId, { removeReferences: true })
       clearSessionScrollState(sessionId)
       cleanupSessionTerminalForRemovedSession(worktreeId, sessionId)
 
@@ -1521,15 +1627,21 @@ export function useCloseSessionOrWorktreeKeybinding(
   }, [archiveSession, closeSession, queryClient])
 
   useEffect(() => {
-    const handleCloseSessionOrWorktree = () => {
+    const handleCloseSessionOrWorktree = (e: Event) => {
       // Skip when session modal is open — SessionChatModal handles CMD+W in that case
       if (useUIStore.getState().sessionChatModalOpen) return
+
+      const bypassConfirm = readCloseBypassDetail(e)
 
       // Check if confirmation is required
       const preferences = queryClient.getQueryData<AppPreferences>(
         preferencesQueryKeys.preferences()
       )
-      if (preferences?.confirm_session_close !== false && onConfirmRequired) {
+      if (
+        !bypassConfirm &&
+        preferences?.confirm_session_close !== false &&
+        onConfirmRequired
+      ) {
         // Find branch name and session count for the dialog
         const { activeWorktreeId } = useChatStore.getState()
         if (activeWorktreeId) {
@@ -1704,6 +1816,37 @@ export function useSetActiveSession() {
 // ============================================================================
 
 /**
+ * Put an assistant reply into the current turn: replace the assistant message
+ * that follows the last user message, or append one. Never replace a reply
+ * from an earlier turn — chat:done and the invoke response can each arrive
+ * first, and either can be missing.
+ */
+/** Index of the first assistant message after the last user message, or -1 */
+function findTurnReplyIndex(messages: ChatMessage[]): number {
+  let lastUserIdx = -1
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.role === 'user') {
+      lastUserIdx = i
+      break
+    }
+  }
+  return messages.findIndex(
+    (message, index) => index > lastUserIdx && message.role === 'assistant'
+  )
+}
+
+export function upsertTurnAssistantMessage(
+  messages: ChatMessage[],
+  reply: ChatMessage
+): ChatMessage[] {
+  const turnReplyIdx = findTurnReplyIndex(messages)
+  if (turnReplyIdx < 0) return [...messages, reply]
+  const updated = [...messages]
+  updated[turnReplyIdx] = reply
+  return updated
+}
+
+/**
  * Hook to send a message to Claude (session-based)
  */
 export function useSendMessage() {
@@ -1746,14 +1889,36 @@ export function useSendMessage() {
       chromeEnabled?: boolean
       customProfileName?: string
       backend?: string
-      /** Set by the queue processor — its onError requeues the original message */
-      fromQueue?: boolean
       /** When false, skip the end-of-turn recap instruction. */
       includeRecap?: boolean
     }): Promise<ChatMessage> => {
       if (!isTauri()) {
         throw new Error('Not in Tauri context')
       }
+
+      // Snapshot the exact send args so a background auto-continue (after a
+      // usage limit resets) can replay this send without the active-session UI.
+      // Any new send supersedes an armed auto-continue for the session.
+      const { setLastSentArgs, disarmAutoResume } = useChatStore.getState()
+      disarmAutoResume(sessionId)
+      setLastSentArgs(sessionId, {
+        sessionId,
+        worktreeId,
+        worktreePath,
+        message,
+        model,
+        executionMode,
+        thinkingLevel,
+        effortLevel,
+        parallelExecutionPrompt,
+        aiLanguage,
+        allowedTools,
+        mcpConfig,
+        chromeEnabled,
+        customProfileName,
+        backend,
+        includeRecap,
+      })
 
       console.log(
         `[SendMutation] mutationFn CALLED sessionId=${sessionId} worktreeId=${worktreeId}`
@@ -1823,6 +1988,10 @@ export function useSendMessage() {
         timestamp: Math.floor(Date.now() / 1000),
         tool_calls: [],
         model,
+        // Keep the optimistic row on the explicitly selected backend. Model
+        // catalogs can expose new IDs before this client knows how to infer
+        // them, especially when using Jean from another app instance.
+        backend: backend as Backend | undefined,
         execution_mode: executionMode,
         thinking_level:
           backend === 'cursor' || backend === 'grok'
@@ -1836,6 +2005,11 @@ export function useSendMessage() {
       // Batch the optimistic user message AND sending state together so React
       // renders both in a single pass (no two-phase scroll: message then placeholder).
       useChatStore.getState().addSendingSession(sessionId)
+      touchRecentSessionCaches(
+        queryClient,
+        sessionId,
+        optimisticUserMessage.timestamp
+      )
 
       queryClient.setQueryData<Session>(
         chatQueryKeys.session(sessionId),
@@ -1870,9 +2044,13 @@ export function useSendMessage() {
         }
       )
 
-      return { previous, worktreeId }
+      return {
+        previous,
+        worktreeId,
+        sendStartedAt: useChatStore.getState().sendStartedAt[sessionId],
+      }
     },
-    onSuccess: (response, { sessionId, worktreeId }) => {
+    onSuccess: (response, { sessionId, worktreeId }, context) => {
       console.log(
         `[SendMutation] onSuccess sessionId=${sessionId} cancelled=${response.cancelled}`,
         {
@@ -1890,36 +2068,53 @@ export function useSendMessage() {
         return
       }
 
-      const finalResponse = response
+      // A queued prompt can start before this invoke resolves. Then the cache
+      // tail and the running state belong to the new turn — only refetch.
+      const store = useChatStore.getState()
+      const isSameSend =
+        store.sendStartedAt[sessionId] === context?.sendStartedAt
+      if (store.sendingSessionIds[sessionId] && !isSameSend) {
+        queryClient.invalidateQueries({
+          queryKey: chatQueryKeys.session(sessionId),
+        })
+        queryClient.invalidateQueries({
+          queryKey: chatQueryKeys.sessions(worktreeId),
+        })
+        return
+      }
 
-      // Replace the optimistic assistant message with the complete one from backend
-      // This fixes a race condition where chat:done creates an optimistic message
-      // with incomplete content_blocks (missing Edit/Read/Write tool blocks)
+      // Replace this turn's optimistic assistant message (from chat:done) with
+      // the complete one from the backend, which has all content_blocks.
+      // Tables pinned or checked on the optimistic message follow the new id.
+      const cachedMessages = queryClient.getQueryData<Session>(
+        chatQueryKeys.session(sessionId)
+      )?.messages
+      const optimisticId =
+        cachedMessages?.[findTurnReplyIndex(cachedMessages)]?.id
+      if (optimisticId && optimisticId !== response.id) {
+        store.renameTableKeys(sessionId, key =>
+          renameTableKeyMessage(key, optimisticId, response.id)
+        )
+      }
       queryClient.setQueryData<Session>(
         chatQueryKeys.session(sessionId),
-        old => {
-          if (!old) return old
-
-          // Find the last assistant message (the optimistic one from chat:done)
-          // and replace it with the complete message from the backend
-          let lastAssistantIdx = -1
-          for (let i = old.messages.length - 1; i >= 0; i--) {
-            if (old.messages[i]?.role === 'assistant') {
-              lastAssistantIdx = i
-              break
-            }
-          }
-
-          if (lastAssistantIdx >= 0) {
-            const newMessages = [...old.messages]
-            newMessages[lastAssistantIdx] = finalResponse
-            return { ...old, messages: newMessages }
-          }
-
-          // If no assistant message found, add the response
-          return { ...old, messages: [...old.messages, finalResponse] }
-        }
+        old =>
+          old
+            ? {
+                ...old,
+                messages: upsertTurnAssistantMessage(old.messages, response),
+              }
+            : old
       )
+
+      // The invoke response is terminal too. If chat:done was lost (e.g. a
+      // dropped event), finish the turn here so it does not stay running.
+      if (store.sendingSessionIds[sessionId]) {
+        store.completeSession(sessionId)
+        queryClient.invalidateQueries({
+          queryKey: chatQueryKeys.session(sessionId),
+        })
+      }
 
       // Invalidate sessions list to update any metadata
       queryClient.invalidateQueries({
@@ -1956,10 +2151,8 @@ export function useSendMessage() {
         return
       }
 
-      // Benign race: another queue consumer (backend drain / another client)
-      // started a run for this session first. Queued messages are requeued by
-      // the queue processor's per-call onError. Direct submits restore the
-      // draft so typed text isn't lost.
+      // Benign race: the backend queue drain started a run first. Restore a
+      // direct submit to the draft so typed text is not lost.
       //
       // After cancel, a brief residual race can still produce this error while
       // the cancelled worker tears down (#329). Do NOT leave sending sticky —
@@ -1967,21 +2160,18 @@ export function useSendMessage() {
       if (isDuplicateSendError(error)) {
         logger.warn('Duplicate send rejected — another run is active', {
           sessionId,
-          fromQueue: variables.fromQueue ?? false,
         })
-        if (!variables.fromQueue) {
-          const {
-            inputDrafts,
-            setInputDraft,
-            removeSendingSession,
-            clearExecutingMode,
-          } = useChatStore.getState()
-          if (!inputDrafts[sessionId]?.trim()) {
-            setInputDraft(sessionId, variables.message)
-          }
-          removeSendingSession(sessionId)
-          clearExecutingMode(sessionId)
+        const {
+          inputDrafts,
+          setInputDraft,
+          removeSendingSession,
+          clearExecutingMode,
+        } = useChatStore.getState()
+        if (!inputDrafts[sessionId]?.trim()) {
+          setInputDraft(sessionId, variables.message)
         }
+        removeSendingSession(sessionId)
+        clearExecutingMode(sessionId)
         // Drop the optimistic user message by refetching authoritative state
         queryClient.invalidateQueries({
           queryKey: chatQueryKeys.session(sessionId),
@@ -2050,6 +2240,13 @@ export function useSendMessage() {
 
       // Real errors with no streamed content — rollback to previous state
       setError(sessionId, errorMessage || 'Unknown error occurred')
+
+      // The composer is cleared before the async mutation starts. Restore the
+      // submitted text after a rejected send, but never replace newer typing.
+      const { inputDrafts, setInputDraft } = useChatStore.getState()
+      if (!inputDrafts[sessionId]) {
+        setInputDraft(sessionId, variables.message)
+      }
 
       if (context?.previous) {
         queryClient.setQueryData(
@@ -2746,22 +2943,6 @@ export function persistEnqueue(
 }
 
 /**
- * Atomically dequeue a message from the backend.
- * Returns the dequeued message or null if queue was empty (another client won the race).
- */
-export async function persistDequeue(
-  worktreeId: string,
-  worktreePath: string,
-  sessionId: string
-): Promise<QueuedMessage | null> {
-  return invoke<QueuedMessage | null>('dequeue_message', {
-    worktreeId,
-    worktreePath,
-    sessionId,
-  })
-}
-
-/**
  * Persist removal of a specific queued message.
  */
 export function persistRemoveQueued(
@@ -2885,38 +3066,16 @@ export async function steerGrokTurn(
 }
 
 /**
- * Re-insert a message at the FRONT of the persisted queue (sequenced enqueue +
- * move-to-front). Used when a send lost the race against another queue
- * consumer and must be retried once the active run completes.
- */
-export async function persistRequeueFront(
-  worktreeId: string,
-  worktreePath: string,
-  sessionId: string,
-  message: QueuedMessage
-): Promise<void> {
-  await invoke('enqueue_message', {
-    worktreeId,
-    worktreePath,
-    sessionId,
-    message,
-  })
-  await invoke('move_queued_message_front', {
-    worktreeId,
-    worktreePath,
-    sessionId,
-    messageId: message.id,
-  })
-}
-
-/**
  * True when send_chat_message rejected because another consumer (backend
  * queue drain, another client, or a concurrent local send) already started
  * a run for the session. Benign race — the message should be requeued.
  */
 export function isDuplicateSendError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error ?? '')
-  return message.includes('already has an active request')
+  return (
+    message.includes('already has an active request') ||
+    message.includes('already has a Running run')
+  )
 }
 
 /**

@@ -1,8 +1,14 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useQuery, type QueryClient } from '@tanstack/react-query'
-import { invoke } from '@/lib/transport'
 import { toast } from 'sonner'
-import { FileText, Loader2, Check, Link2, Eye, Ellipsis } from 'lucide-react'
+import {
+  FileText,
+  Loader2,
+  Check,
+  Link2,
+  Eye,
+  Ellipsis,
+} from '@/components/icons/reicon'
 import { useUIStore } from '@/store/ui-store'
 import {
   Dialog,
@@ -18,7 +24,12 @@ import {
   useAttachedSavedContexts,
 } from '@/services/github'
 import { useProjects } from '@/services/projects'
-import type { SavedContextsResponse, SavedContext } from '@/types/chat'
+import type { SavedContext } from '@/types/chat'
+import {
+  listSavedContexts,
+  readSavedContextFile,
+  savedContextsQueryKey,
+} from '@/services/saved-contexts'
 
 /** Mirror Rust sanitize_for_filename: lowercase, keep alphanumeric/hyphen, collapse hyphens */
 function sanitizeForFilename(s: string): string {
@@ -48,8 +59,8 @@ export function RecentContexts({
   } | null>(null)
 
   const { data: contextsData } = useQuery({
-    queryKey: ['session-context'],
-    queryFn: () => invoke<SavedContextsResponse>('list_saved_contexts'),
+    queryKey: savedContextsQueryKey(projectId),
+    queryFn: () => listSavedContexts(projectId),
     staleTime: 1000 * 60 * 5, // 5 minutes
   })
 
@@ -145,16 +156,17 @@ export function RecentContexts({
     [sessionId, queryClient, attachedKeys]
   )
 
-  const handlePreview = useCallback(async (ctx: SavedContext) => {
-    try {
-      const content = await invoke<string>('read_context_file', {
-        path: ctx.path,
-      })
-      setPreview({ title: ctx.name || ctx.slug, content })
-    } catch {
-      toast.error('Failed to load context preview')
-    }
-  }, [])
+  const handlePreview = useCallback(
+    async (ctx: SavedContext) => {
+      try {
+        const content = await readSavedContextFile(ctx.path, projectId)
+        setPreview({ title: ctx.name || ctx.slug, content })
+      } catch {
+        toast.error('Failed to load context preview')
+      }
+    },
+    [projectId]
+  )
 
   if (linkedContexts.length === 0 && otherContexts.length === 0) return null
 
@@ -175,7 +187,7 @@ export function RecentContexts({
           {isLoading ? (
             <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
           ) : isAttached ? (
-            <Check className="h-3 w-3 shrink-0 text-green-500" />
+            <Check className="h-3 w-3 shrink-0 text-success" />
           ) : (
             <FileText className="h-3 w-3 shrink-0 text-muted-foreground" />
           )}

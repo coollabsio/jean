@@ -20,6 +20,7 @@
     "opener:allow-open-path",
     "clipboard-manager:default",
     "clipboard-manager:allow-write-text",
+    "clipboard-manager:allow-write-image",
     "dialog:default",
     "fs:default",
     "log:default",

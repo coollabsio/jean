@@ -1,5 +1,12 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
-import { Check, ChevronRight, Clock, Paperclip, Pencil, Play, X } from 'lucide-react'
+import {
+  Check,
+  Clock,
+  Paperclip,
+  Pencil,
+  Play,
+  X,
+} from '@/components/icons/reicon'
 import {
   Collapsible,
   CollapsibleContent,
@@ -12,6 +19,7 @@ import {
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { isImeComposingEvent } from '@/lib/ime-composition'
+import { useChatStore } from '@/store/chat-store'
 import type { QueuedMessage } from '@/types/chat'
 
 interface QueuedPromptsPanelProps {
@@ -50,7 +58,15 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
   onSendNow,
   onEdit,
 }: QueuedPromptsPanelProps) {
-  const [isOpen, setIsOpen] = useState(true)
+  // Collapsed state is remembered per session (expanded by default)
+  const isOpen = useChatStore(
+    state => !state.collapsedQueuedPromptsSessions[sessionId]
+  )
+  const setIsOpen = useCallback(
+    (open: boolean) =>
+      useChatStore.getState().setQueuedPromptsCollapsed(sessionId, !open),
+    [sessionId]
+  )
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingText, setEditingText] = useState('')
@@ -111,7 +127,15 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
         }
       }
     },
-    [messages, selectedIndex, sessionId, onRemove, onSendNow, scrollRowIntoView]
+    [
+      messages,
+      selectedIndex,
+      sessionId,
+      onRemove,
+      onSendNow,
+      scrollRowIntoView,
+      setIsOpen,
+    ]
   )
 
   const startEditing = useCallback((msg: QueuedMessage) => {
@@ -137,15 +161,9 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
       {/* Styled to read as an extension of the chat input card below */}
-      <div className="border-t border-border bg-card sm:rounded-t-lg sm:border sm:border-b-0">
+      <div className="overflow-hidden border-t border-border bg-card sm:rounded-t-lg sm:border sm:border-b-0">
         <div className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground">
-          <CollapsibleTrigger className="flex flex-1 items-center gap-2 hover:bg-muted/50 select-none -ml-3 -my-2 pl-3 py-2 rounded-l-md">
-            <ChevronRight
-              className={cn(
-                'h-3.5 w-3.5 shrink-0 transition-transform duration-200',
-                isOpen && 'rotate-90'
-              )}
-            />
+          <CollapsibleTrigger className="flex flex-1 min-w-0 items-center gap-2 select-none text-left cursor-pointer -mx-3 -my-1.5 px-3 py-1.5 hover:bg-muted/50">
             <Clock className="h-4 w-4 shrink-0" />
             <span className="font-medium">Queued prompts</span>
             <span className="rounded bg-muted/50 px-1.5 py-0.5 text-xs">
@@ -160,7 +178,7 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
             aria-label="Queued prompts"
             tabIndex={0}
             onKeyDown={handleKeyDown}
-            className="max-h-48 overflow-y-auto border-t border-border/50 outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="group/list max-h-48 overflow-y-auto border-t border-border/50 outline-none focus-visible:ring-1 focus-visible:ring-ring"
           >
             {messages.map((msg, index) => {
               const isSelected = index === selectedIndex
@@ -178,7 +196,10 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
                   onClick={() => setSelectedIndex(index)}
                   className={cn(
                     'group flex items-center gap-2 px-3 py-1.5 text-xs cursor-default',
-                    isSelected ? 'bg-muted/60' : 'hover:bg-muted/30'
+                    'hover:bg-muted/30',
+                    // Selection is only visible while the list has focus, so the
+                    // first row doesn't look permanently selected
+                    isSelected && 'group-focus-within/list:bg-muted/60'
                   )}
                 >
                   <span className="shrink-0 text-muted-foreground/60 tabular-nums">
@@ -221,9 +242,12 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
                   <div
                     className={cn(
                       'flex shrink-0 items-center gap-1 transition-opacity',
-                      isSelected
+                      isEditing
                         ? 'opacity-100'
-                        : 'opacity-0 group-hover:opacity-100'
+                        : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100',
+                      isSelected &&
+                        !isEditing &&
+                        'group-focus-within/list:opacity-100'
                     )}
                   >
                     {isEditing ? (
@@ -236,7 +260,7 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
                             e.stopPropagation()
                             saveEditing()
                           }}
-                          className="rounded p-0.5 text-muted-foreground hover:bg-green-600 hover:text-white disabled:opacity-40 transition-colors"
+                          className="rounded p-0.5 text-muted-foreground hover:bg-primary hover:text-primary-foreground disabled:opacity-40 transition-colors"
                         >
                           <Check className="h-3.5 w-3.5" />
                         </button>
@@ -295,7 +319,7 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
                                 e.stopPropagation()
                                 onSendNow(sessionId, msg.id)
                               }}
-                              className="rounded p-0.5 text-muted-foreground hover:bg-green-600 hover:text-white transition-colors"
+                              className="rounded p-0.5 text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
                             >
                               <Play className="h-3.5 w-3.5" />
                             </button>

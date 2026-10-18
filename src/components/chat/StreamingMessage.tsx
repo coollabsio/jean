@@ -1,5 +1,6 @@
 import { memo, useCallback, useMemo } from 'react'
-import { Activity, Loader2 } from 'lucide-react'
+import { Activity } from '@/components/icons/reicon'
+import { WorkingWaveform } from '@/components/ui/status-indicator'
 import { toast } from 'sonner'
 import { Markdown } from '@/components/ui/markdown'
 import type {
@@ -10,8 +11,10 @@ import type {
 } from '@/types/chat'
 import {
   getAskUserQuestions,
+  getCodexUserInputRequestId,
   normalizeQuestionMultipleField,
 } from '@/types/chat'
+import { useChatStore } from '@/store/chat-store'
 import { copyToClipboard } from '@/lib/clipboard'
 import { AskUserQuestion } from './AskUserQuestion'
 import {
@@ -27,11 +30,13 @@ import {
   getPlanTextBlockIndicesToHide,
   isDuplicatePlanTextBlock,
   resolvePlanContent,
+  restoreOmittedStreamingPrefix,
   type TimelineItem,
 } from './tool-call-utils'
 import { ToolCallsDisplay } from './ToolCallsDisplay'
 import { PlanDisplay } from './PlanFileDisplay'
 import { EditedFilesDisplay } from './EditedFilesDisplay'
+import { parseServerResourceKey } from '@/lib/server-resource'
 import { ThinkingBlock } from './ThinkingBlock'
 import { SteeredPromptGroup } from './SteeredPromptGroup'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
@@ -46,7 +51,7 @@ function WorkingVisualRow() {
         <span className="font-medium shrink-0 flex-none whitespace-nowrap">
           Working…
         </span>
-        <Loader2 className="ml-auto h-3 w-3 shrink-0 animate-spin text-muted-foreground/50" />
+        <WorkingWaveform className="ml-auto" />
       </div>
     </div>
   )
@@ -84,6 +89,8 @@ interface StreamingMessageProps {
   areQuestionsSkipped: (sessionId: string) => boolean
   /** Callback to copy a steered user prompt */
   onCopySteeredText?: (text: string) => void
+  /** Hide the edited-files summary when a compact parent renders it outside. */
+  hideEditedFiles?: boolean
 }
 
 /**
@@ -103,19 +110,37 @@ export const StreamingMessage = memo(function StreamingMessage({
   getSubmittedAnswers,
   areQuestionsSkipped,
   onCopySteeredText,
+  hideEditedFiles = false,
 }: StreamingMessageProps) {
+  const ownerServerId = parseServerResourceKey(sessionId)?.serverId
+  const displayBlocks = useMemo(
+    () => restoreOmittedStreamingPrefix(streamingContent, contentBlocks),
+    [streamingContent, contentBlocks]
+  )
   const resolvedPlan = useMemo(
     () =>
       resolvePlanContent({
         toolCalls,
         messageContent: streamingContent,
-        contentBlocks,
+        contentBlocks: displayBlocks,
       }),
-    [toolCalls, streamingContent, contentBlocks]
+    [toolCalls, streamingContent, displayBlocks]
+  )
+  // Codex user-input questions are answered while the turn runs; Claude
+  // AskUserQuestion is answered only after chat:done pauses the session.
+  const pendingCodexUserInputRequests = useChatStore(
+    state => state.pendingCodexUserInputRequests[sessionId]
+  )
+  const codexQuestionIds = useMemo(
+    () =>
+      new Set(
+        (pendingCodexUserInputRequests ?? []).map(getCodexUserInputRequestId)
+      ),
+    [pendingCodexUserInputRequests]
   )
   const hiddenPlanTextBlockIndices = useMemo(
-    () => getPlanTextBlockIndicesToHide(contentBlocks, resolvedPlan.content),
-    [contentBlocks, resolvedPlan.content]
+    () => getPlanTextBlockIndicesToHide(displayBlocks, resolvedPlan.content),
+    [displayBlocks, resolvedPlan.content]
   )
   const fallbackPrePlanText = useMemo(
     () =>
@@ -126,10 +151,10 @@ export const StreamingMessage = memo(function StreamingMessage({
   // Timeline construction is O(blocks + tools) and runs on every streaming
   // frame otherwise — memoize on the immutable store slices it derives from.
   const timelineData = useMemo(() => {
-    if (contentBlocks.length === 0) return null
+    if (displayBlocks.length === 0) return null
     let timeline: TimelineItem[]
     try {
-      timeline = buildTimeline(contentBlocks, toolCalls)
+      timeline = buildTimeline(displayBlocks, toolCalls)
     } catch (e) {
       logger.error('Failed to build streaming timeline', {
         sessionId,
@@ -140,7 +165,7 @@ export const StreamingMessage = memo(function StreamingMessage({
     // First contentBlocks index per text block content — replaces a per-item
     // O(n) findIndex during render.
     const textBlockIndexByText = new Map<string, number>()
-    contentBlocks.forEach((block, index) => {
+    displayBlocks.forEach((block, index) => {
       if (block.type === 'text' && !textBlockIndexByText.has(block.text)) {
         textBlockIndexByText.set(block.text, index)
       }
@@ -165,29 +190,37 @@ export const StreamingMessage = memo(function StreamingMessage({
       textBlockIndexByText,
       incompleteIndices,
     }
-  }, [contentBlocks, toolCalls, sessionId])
+  }, [displayBlocks, toolCalls, sessionId])
 
-  const streamingResponseText = useMemo(() => {
-    const fromBlocks = contentBlocks
+  // Cheap non-whitespace check per flush; the full joined/trimmed response
+  // text is only built lazily when the user actually copies it.
+  const hasStreamingResponseText = useMemo(
+    () =>
+      displayBlocks.some(
+        block => block.type === 'text' && /\S/.test(block.text)
+      ) || /\S/.test(streamingContent),
+    [displayBlocks, streamingContent]
+  )
+
+  const handleCopyStreamingResponse = useCallback(() => {
+    const fromBlocks = displayBlocks
       .flatMap(block => (block.type === 'text' ? [block.text] : []))
       .join('\n')
       .trim()
-    return fromBlocks || streamingContent.trim()
-  }, [contentBlocks, streamingContent])
-
-  const handleCopyStreamingResponse = useCallback(() => {
-    if (!streamingResponseText) return
-    void copyToClipboard(streamingResponseText)
+    const text = fromBlocks || streamingContent.trim()
+    if (!text) return
+    void copyToClipboard(text)
       .then(() => toast.success('Response copied to clipboard'))
       .catch(() => toast.error('Failed to copy response'))
-  }, [streamingResponseText])
+  }, [displayBlocks, streamingContent])
 
   return (
+    // messageText is omitted: when there is response text, onCopyMessage
+    // handles copying (and enables the menu item); otherwise it'd be empty.
     <MessageThreadContextMenu
-      messageText={streamingResponseText}
       copyMessageLabel="Copy response"
       onCopyMessage={
-        streamingResponseText ? handleCopyStreamingResponse : undefined
+        hasStreamingResponseText ? handleCopyStreamingResponse : undefined
       }
     >
       <div className="text-foreground/90">
@@ -287,6 +320,7 @@ export const StreamingMessage = memo(function StreamingMessage({
                                         taskToolCall={item.taskTool}
                                         subToolCalls={item.subTools}
                                         allToolCalls={toolCalls}
+                                        nestedSubTools={item.nestedSubTools}
                                         onFileClick={onFileClick}
                                         isStreaming={true}
                                         isIncomplete={isIncomplete}
@@ -349,6 +383,15 @@ export const StreamingMessage = memo(function StreamingMessage({
                                             : undefined
                                         }
                                         toolOutput={item.tool.output}
+                                        // Claude: the run is being stopped;
+                                        // answering before chat:done races the
+                                        // completion (#779). OpenCode/Codex
+                                        // answer in-flight, so keep them live.
+                                        submitDisabled={
+                                          item.tool.name ===
+                                            'AskUserQuestion' &&
+                                          !codexQuestionIds.has(item.tool.id)
+                                        }
                                       />
                                     )
                                   }
@@ -454,7 +497,13 @@ export const StreamingMessage = memo(function StreamingMessage({
         )}
 
         {/* Show edited files during streaming */}
-        <EditedFilesDisplay toolCalls={toolCalls} />
+        {!hideEditedFiles && (
+          <EditedFilesDisplay
+            toolCalls={toolCalls}
+            worktreePath={worktreePath}
+            serverId={ownerServerId === 'local' ? undefined : ownerServerId}
+          />
+        )}
       </div>
     </MessageThreadContextMenu>
   )

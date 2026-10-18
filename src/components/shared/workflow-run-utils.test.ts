@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Session } from '@/types/chat'
 import type { WorkflowRun } from '@/types/github'
+import type { Worktree } from '@/types/projects'
 import {
   countUnreadFailedWorkflowRuns,
   getLatestFailedWorkflowRuns,
@@ -8,6 +9,7 @@ import {
   isReusableWorkflowInvestigationSession,
   mergeSeenFailedWorkflowRunIds,
   MAX_SEEN_FAILED_WORKFLOW_RUN_IDS,
+  resolveOpenWorkflowWorktree,
 } from './workflow-run-utils'
 
 function session(overrides: Partial<Session> = {}): Session {
@@ -68,6 +70,36 @@ describe('isReusableWorkflowInvestigationSession', () => {
     expect(
       isReusableWorkflowInvestigationSession(session({ archived_at: 1 }))
     ).toBe(false)
+  })
+})
+
+describe('resolveOpenWorkflowWorktree', () => {
+  const baseSession = {
+    id: 'base-1',
+    project_id: 'project-1',
+    name: 'Base Session',
+    path: '/repo/project',
+    branch: 'main',
+    created_at: 1,
+    order: 0,
+    session_type: 'base',
+  } satisfies Worktree
+
+  it('resolves a base session opened in a canvas modal', () => {
+    expect(
+      resolveOpenWorkflowWorktree(null, null, 'base-1', [[baseSession]])
+    ).toEqual({ id: 'base-1', path: '/repo/project' })
+  })
+
+  it('prefers the active worktree path when one is globally active', () => {
+    expect(
+      resolveOpenWorkflowWorktree(
+        'worktree-1',
+        '/repo/worktree',
+        'base-1',
+        [[baseSession]]
+      )
+    ).toEqual({ id: 'worktree-1', path: '/repo/worktree' })
   })
 })
 

@@ -105,6 +105,16 @@ describe('getProviderChangeBeforeMessage', () => {
     })
   })
 
+  it('uses the recorded backend for a model that this client does not know', () => {
+    const messages = [
+      userMessage('u1', 'gpt-5.4', 1, 'codex'),
+      assistantMessage('a1'),
+      userMessage('u2', 'future-model-from-catalog', 3, 'codex'),
+    ]
+
+    expect(getProviderChangeBeforeMessage(messages, 2)).toBeNull()
+  })
+
   it('detects Codex → Grok switches and skips assistant-only rows', () => {
     const messages = [
       userMessage('u1', 'gpt-5.4'),

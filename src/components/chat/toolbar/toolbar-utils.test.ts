@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   formatCommandCodeModelLabel,
+  formatGrokModelOptionLabel,
+  formatGrokPromptModelLabel,
   getProviderDisplayName,
   getSessionProviderDisplayName,
 } from './toolbar-utils'
@@ -39,6 +41,39 @@ describe('getSessionProviderDisplayName', () => {
     expect(getSessionProviderDisplayName('claude', null)).toBe('Anthropic')
     expect(getSessionProviderDisplayName('claude', 'openrouter')).toBe(
       'openrouter'
+    )
+  })
+})
+
+describe('formatGrokPromptModelLabel', () => {
+  it('uses a short name for the fast build model', () => {
+    expect(formatGrokPromptModelLabel('grok/grok-4.7-build-fast')).toBe(
+      '4.7 Fast'
+    )
+    expect(formatGrokPromptModelLabel('grok-4.7')).toBe('4.7')
+    expect(formatGrokPromptModelLabel('grok/grok-4.6')).toBe('4.6')
+  })
+})
+
+describe('formatGrokModelOptionLabel', () => {
+  it('replaces a raw id or generated name with a friendly name', () => {
+    expect(
+      formatGrokModelOptionLabel(
+        'grok/grok-4.7-build-fast',
+        'grok/grok-4.7-build-fast'
+      )
+    ).toBe('Grok 4.7 Fast')
+    expect(
+      formatGrokModelOptionLabel(
+        'grok/grok-4.7-build-fast',
+        'Grok 4.7 Build Fast'
+      )
+    ).toBe('Grok 4.7 Fast')
+  })
+
+  it('keeps a custom catalog name', () => {
+    expect(formatGrokModelOptionLabel('grok/future', 'Super Grok')).toBe(
+      'Super Grok'
     )
   })
 })

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueries } from '@tanstack/react-query'
 import {
   draggable,
@@ -14,6 +14,7 @@ import { isBaseSession, type Worktree } from '@/types/projects'
 import type { WorktreeSessions } from '@/types/chat'
 import { invoke } from '@/lib/transport'
 import { cn } from '@/lib/utils'
+import { useIsTouchDevice } from '@/hooks/use-touch-device'
 import { chatQueryKeys } from '@/services/chat'
 import { isTauri, useReorderWorktrees } from '@/services/projects'
 import { useProjectsStore } from '@/store/projects-store'
@@ -30,6 +31,7 @@ import {
 import { reorderWithClosestEdge } from '@/lib/drag-and-drop/reorder'
 import { announceDrag } from '@/lib/drag-and-drop/live-region'
 import { DropIndicator } from '@/components/drag-and-drop/DropIndicator'
+import { matchesWorktreeSearch } from './project-search'
 import {
   applyWorktreeDropSnapshot,
   emptyWorktreeDropSnapshot,
@@ -52,7 +54,7 @@ interface SortableWorktreeProps {
   closestEdge: Edge | null
 }
 
-function SortableWorktree({
+const SortableWorktree = memo(function SortableWorktree({
   worktree,
   projectId,
   projectPath,
@@ -142,7 +144,7 @@ function SortableWorktree({
       />
     </div>
   )
-}
+})
 
 function cnWorktreeDragClass(disabled: boolean, isDragging: boolean) {
   return cn(
@@ -160,6 +162,9 @@ interface WorktreeListProps {
   projectPath: string
   worktrees: Worktree[]
   defaultBranch: string
+  searchQuery?: string
+  searchActive?: boolean
+  loadSessionCounts?: boolean
 }
 
 export function WorktreeList({
@@ -167,23 +172,39 @@ export function WorktreeList({
   projectPath,
   worktrees,
   defaultBranch,
+  searchQuery = '',
+  searchActive = false,
+  loadSessionCounts = true,
 }: WorktreeListProps) {
   const reorderWorktrees = useReorderWorktrees()
+  // draggable="true" makes mobile browsers lift the row on long-press, which
+  // fights the context menu; touch has no reorder gesture anyway.
+  const isTouchDevice = useIsTouchDevice()
   const worktreeSortMode = useProjectsStore(
     state =>
       state.projectCanvasSettings[projectId]?.worktreeSortMode ?? 'created'
   )
 
+  const visibleWorktrees = useMemo(
+    () =>
+      searchQuery
+        ? worktrees.filter(worktree =>
+            matchesWorktreeSearch(worktree, searchQuery)
+          )
+        : worktrees,
+    [searchQuery, worktrees]
+  )
+
   const pendingWorktrees = useMemo(
-    () => worktrees.filter(w => w.status === 'pending'),
-    [worktrees]
+    () => visibleWorktrees.filter(w => w.status === 'pending'),
+    [visibleWorktrees]
   )
   const readyWorktrees = useMemo(
     () =>
-      worktrees.filter(
+      visibleWorktrees.filter(
         w => !w.status || w.status === 'ready' || w.status === 'error'
       ),
-    [worktrees]
+    [visibleWorktrees]
   )
 
   const sessionQueries = useQueries({
@@ -191,12 +212,7 @@ export function WorktreeList({
       queryKey: [...chatQueryKeys.sessions(wt.id), 'with-counts'],
       queryFn: async (): Promise<WorktreeSessions> => {
         if (!isTauri() || !wt.id || !wt.path) {
-          return {
-            worktree_id: wt.id,
-            sessions: [],
-            active_session_id: null,
-            version: 2,
-          }
+          throw new Error('Session list is not available yet')
         }
         return invoke<WorktreeSessions>('get_sessions', {
           worktreeId: wt.id,
@@ -204,7 +220,7 @@ export function WorktreeList({
           includeMessageCounts: true,
         })
       },
-      enabled: !!wt.id && !!wt.path,
+      enabled: loadSessionCounts && !!wt.id && !!wt.path,
       // Prefer bootstrap/init-seeded cache; avoid N-way WS refetch on open
       staleTime: 1000 * 60 * 5,
       gcTime: 1000 * 60 * 5,
@@ -517,7 +533,10 @@ export function WorktreeList({
             projectPath={projectPath}
             defaultBranch={defaultBranch}
             disabled={
-              reorderWorktrees.isPending || !canReorderWorktree(worktree)
+              isTouchDevice ||
+              searchActive ||
+              reorderWorktrees.isPending ||
+              !canReorderWorktree(worktree)
             }
             isDragging={dragState.draggingId === worktree.id}
             closestEdge={isTarget ? dragState.closestEdge : null}

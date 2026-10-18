@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, type CSSProperties } from 'react'
+import { Suspense, lazy, useCallback } from 'react'
 import {
   Sheet,
   SheetContent,
@@ -17,16 +17,14 @@ const FileBrowserSidebar = lazy(() =>
 interface MobileFileBrowserProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  width: number
 }
 
 /**
- * Mobile file browser as a left overlay drawer (same pattern as projects sidebar).
+ * Mobile file browser as a right overlay drawer.
  */
 export function MobileFileBrowser({
   open,
   onOpenChange,
-  width,
 }: MobileFileBrowserProps) {
   // While a file is open, ignore sheet dismiss (outside tap / focus steal).
   // The file viewer is closed only via its own X; reopening the browser is fine.
@@ -43,7 +41,7 @@ export function MobileFileBrowser({
   return (
     <Sheet open={open} onOpenChange={handleOpenChange}>
       <SheetContent
-        side="left"
+        side="right"
         showCloseButton={false}
         onOpenAutoFocus={e => e.preventDefault()}
         onInteractOutside={e => {
@@ -58,12 +56,8 @@ export function MobileFileBrowser({
             e.preventDefault()
           }
         }}
-        className="bg-sidebar text-sidebar-foreground w-[min(90vw,var(--mobile-file-browser-width))] gap-0 border-r p-0 sm:max-w-[min(90vw,var(--mobile-file-browser-width))]"
-        style={
-          {
-            '--mobile-file-browser-width': `${width}px`,
-          } as CSSProperties
-        }
+        // Almost full width; the thin dimmed strip on the left still dismisses.
+        className="bg-sidebar text-sidebar-foreground w-[calc(100vw-3rem)] gap-0 border-l p-0 sm:max-w-[calc(100vw-3rem)]"
         data-testid="mobile-file-browser"
       >
         <SheetHeader className="sr-only">
@@ -73,7 +67,7 @@ export function MobileFileBrowser({
           </SheetDescription>
         </SheetHeader>
         <Suspense fallback={null}>
-          <FileBrowserSidebar hideCloseButton={false} />
+          <FileBrowserSidebar />
         </Suspense>
       </SheetContent>
     </Sheet>

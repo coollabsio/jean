@@ -3,7 +3,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { invoke } from '@/lib/transport'
+import { invokeForOptionalServer } from '@/lib/transport'
 import { listen } from '@/lib/transport'
 import { toast } from 'sonner'
 import { useCallback, useEffect, useState } from 'react'
@@ -15,6 +15,7 @@ import type {
   OpencodeReleaseInfo,
 } from '@/types/opencode-cli'
 import { hasBackendTransport } from '@/lib/environment'
+import { useOptionalSettingsTargetServerId } from '@/lib/settings-target'
 
 const isTauri = hasBackendTransport
 
@@ -33,8 +34,13 @@ export const openCodeCliQueryKeys = opencodeCliQueryKeys
  * Hook to detect OpenCode CLI in system PATH
  */
 export function useOpencodePathDetection(options?: { enabled?: boolean }) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: [...opencodeCliQueryKeys.all, 'path-detection'],
+    queryKey: [
+      ...opencodeCliQueryKeys.all,
+      'path-detection',
+      serverId ?? 'local',
+    ],
     queryFn: async (): Promise<{
       found: boolean
       path: string | null
@@ -50,12 +56,12 @@ export function useOpencodePathDetection(options?: { enabled?: boolean }) {
         }
       }
       try {
-        const result = await invoke<{
+        const result = await invokeForOptionalServer<{
           found: boolean
           path: string | null
           version: string | null
           package_manager: string | null
-        }>('detect_opencode_in_path')
+        }>(serverId, 'detect_opencode_in_path')
         console.debug('[ONBOARDING:SVC] opencode path detection:', result)
         return result
       } catch (err) {
@@ -75,14 +81,20 @@ export function useOpencodePathDetection(options?: { enabled?: boolean }) {
 }
 export const useOpenCodePathDetection = useOpencodePathDetection
 
-export function useOpencodeCliStatus(options?: { enabled?: boolean }) {
+export function useOpencodeCliStatus(options?: {
+  enabled?: boolean
+  serverId?: string
+}) {
+  const settingsServerId = useOptionalSettingsTargetServerId()
+  const serverId = options?.serverId ?? settingsServerId
   return useQuery({
-    queryKey: opencodeCliQueryKeys.status(),
+    queryKey: [...opencodeCliQueryKeys.status(), serverId ?? 'local'],
     queryFn: async (): Promise<OpencodeCliStatus> => {
       if (!isTauri()) return { installed: false, version: null, path: null }
       try {
         console.debug('[ONBOARDING:SVC] opencode: checking installed status...')
-        const status = await invoke<OpencodeCliStatus>(
+        const status = await invokeForOptionalServer<OpencodeCliStatus>(
+          serverId,
           'check_opencode_cli_installed'
         )
         console.debug('[ONBOARDING:SVC] opencode: status =', status)
@@ -102,15 +114,17 @@ export function useOpencodeCliStatus(options?: { enabled?: boolean }) {
 export const useOpenCodeCliStatus = useOpencodeCliStatus
 
 export function useOpencodeCliAuth(options?: { enabled?: boolean }) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: opencodeCliQueryKeys.auth(),
+    queryKey: [...opencodeCliQueryKeys.auth(), serverId ?? 'local'],
     queryFn: async (): Promise<OpencodeAuthStatus> => {
       if (!isTauri()) {
         return { authenticated: false, error: 'Not in Tauri context' }
       }
       try {
         console.debug('[ONBOARDING:SVC] opencode: checking auth status...')
-        const status = await invoke<OpencodeAuthStatus>(
+        const status = await invokeForOptionalServer<OpencodeAuthStatus>(
+          serverId,
           'check_opencode_cli_auth'
         )
         console.debug('[ONBOARDING:SVC] opencode: auth =', status)
@@ -132,11 +146,13 @@ export function useOpencodeCliAuth(options?: { enabled?: boolean }) {
 export const useOpenCodeCliAuth = useOpencodeCliAuth
 
 export function useAvailableOpencodeVersions(options?: { enabled?: boolean }) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: opencodeCliQueryKeys.versions(),
+    queryKey: [...opencodeCliQueryKeys.versions(), serverId ?? 'local'],
     queryFn: async (): Promise<OpencodeReleaseInfo[]> => {
       if (!isTauri()) return []
-      return await invoke<OpencodeReleaseInfo[]>(
+      return await invokeForOptionalServer<OpencodeReleaseInfo[]>(
+        serverId,
         'get_available_opencode_versions'
       )
     },
@@ -148,13 +164,21 @@ export function useAvailableOpencodeVersions(options?: { enabled?: boolean }) {
 }
 export const useAvailableOpenCodeVersions = useAvailableOpencodeVersions
 
-export function useAvailableOpencodeModels(options?: { enabled?: boolean }) {
+export function useAvailableOpencodeModels(options?: {
+  enabled?: boolean
+  serverId?: string
+}) {
+  const settingsServerId = useOptionalSettingsTargetServerId()
+  const serverId = options?.serverId ?? settingsServerId
   return useQuery({
-    queryKey: opencodeCliQueryKeys.models(),
+    queryKey: [...opencodeCliQueryKeys.models(), serverId ?? 'local'],
     queryFn: async (): Promise<string[]> => {
       if (!isTauri()) return []
       try {
-        return await invoke<string[]>('list_opencode_models')
+        return await invokeForOptionalServer<string[]>(
+          serverId,
+          'list_opencode_models'
+        )
       } catch (error) {
         logger.error('Failed to list OpenCode models', { error })
         throw error
@@ -172,28 +196,36 @@ export function useAvailableOpencodeModels(options?: { enabled?: boolean }) {
  */
 export function useRefreshOpencodeModels() {
   const queryClient = useQueryClient()
+  const serverId = useOptionalSettingsTargetServerId()
+  const queryKey = [...opencodeCliQueryKeys.models(), serverId ?? 'local']
 
   return useMutation({
     mutationFn: async (): Promise<string[]> => {
       if (!isTauri()) return []
       try {
-        return await invoke<string[]>('refresh_opencode_models')
+        return await invokeForOptionalServer<string[]>(
+          serverId,
+          'refresh_opencode_models'
+        )
       } catch (error) {
         logger.error('Failed to refresh OpenCode models', { error })
         throw error
       }
     },
     onSuccess: models => {
-      queryClient.setQueryData(opencodeCliQueryKeys.models(), models)
+      queryClient.setQueryData(queryKey, models)
     },
   })
 }
 
 export function useInstallOpencodeCli() {
   const queryClient = useQueryClient()
+  const serverId = useOptionalSettingsTargetServerId()
   return useMutation({
     mutationFn: async (version?: string) => {
-      await invoke('install_opencode_cli', { version: version ?? null })
+      await invokeForOptionalServer(serverId, 'install_opencode_cli', {
+        version: version ?? null,
+      })
     },
     retry: false,
     onSuccess: () => {
@@ -236,11 +268,16 @@ export function useOpencodeInstallProgress(): [
 }
 export const useOpenCodeInstallProgress = useOpencodeInstallProgress
 
-function checkManualVersion(version: string) {
-  return invoke<boolean>('check_opencode_cli_version_exists', { version })
+function checkManualVersion(version: string, serverId?: string) {
+  return invokeForOptionalServer<boolean>(
+    serverId,
+    'check_opencode_cli_version_exists',
+    { version }
+  )
 }
 
 export function useOpencodeCliSetup() {
+  const serverId = useOptionalSettingsTargetServerId()
   const status = useOpencodeCliStatus()
   const versions = useAvailableOpencodeVersions()
   const installMutation = useInstallOpencodeCli()
@@ -257,7 +294,6 @@ export function useOpencodeCliSetup() {
     })
   }
 
-
   return {
     status: status.data,
     isStatusLoading: status.isLoading,
@@ -270,7 +306,8 @@ export function useOpencodeCliSetup() {
     installError: installMutation.error,
     progress,
     install,
-    checkManualVersion,
+    checkManualVersion: (version: string) =>
+      checkManualVersion(version, serverId),
     refetchStatus: status.refetch,
   }
 }

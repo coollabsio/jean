@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from 'react'
+import { parseServerResourceKey } from '@/lib/server-resource'
 import { useChatStore } from '@/store/chat-store'
 import {
   useMcpServers,
@@ -34,7 +35,9 @@ export function useMcpServerResolution({
 }: UseMcpServerResolutionParams) {
   const { data: mcpServersData } = useMcpServers(
     activeWorktreePath,
-    selectedBackend
+    selectedBackend,
+    parseServerResourceKey(project?.id ?? deferredSessionId ?? '')?.serverId ??
+      'local'
   )
   const availableMcpServers = useMemo(
     () => mcpServersData ?? [],

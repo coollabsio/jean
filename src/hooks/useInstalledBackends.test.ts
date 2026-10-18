@@ -24,8 +24,11 @@ const status = Object.fromEntries(
 ) as Record<CliBackend, { installed: boolean }>
 
 const auth = Object.fromEntries(
-  BACKENDS.map(backend => [backend, { authenticated: false }])
-) as Record<CliBackend, { authenticated: boolean }>
+  BACKENDS.map(backend => [backend, { authenticated: false, timedOut: false }])
+) as Record<
+  CliBackend,
+  { authenticated: boolean; timedOut?: boolean; timed_out?: boolean }
+>
 
 function statusQuery(backend: CliBackend) {
   return {
@@ -94,6 +97,8 @@ describe('useInstalledBackends', () => {
     for (const backend of BACKENDS) {
       status[backend].installed = false
       auth[backend].authenticated = false
+      auth[backend].timedOut = false
+      auth[backend].timed_out = false
     }
   })
 
@@ -149,6 +154,8 @@ describe('useBackendAuthStatuses', () => {
     for (const backend of BACKENDS) {
       status[backend].installed = false
       auth[backend].authenticated = false
+      auth[backend].timedOut = false
+      auth[backend].timed_out = false
     }
   })
 
@@ -177,5 +184,15 @@ describe('useBackendAuthStatuses', () => {
     status.antigravity.installed = false
     const { result: uninstalled } = renderHook(() => useBackendAuthStatuses())
     expect(uninstalled.current.authByBackend.antigravity).toBeUndefined()
+  })
+
+  it('does not treat a timed-out Antigravity auth check as signed out', () => {
+    status.antigravity.installed = true
+    auth.antigravity.authenticated = false
+    auth.antigravity.timedOut = true
+
+    const { result } = renderHook(() => useBackendAuthStatuses())
+
+    expect(result.current.authByBackend.antigravity).toBeUndefined()
   })
 })

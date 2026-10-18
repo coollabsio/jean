@@ -8,6 +8,7 @@ import {
   selectConnection,
   LOCAL_CONNECTION_ID,
 } from '@/lib/remote-connections'
+import { rememberProjectDestination } from '@/lib/project-destination'
 
 const saveMock = vi.fn()
 const browseDirectoryMock = vi.fn()
@@ -28,15 +29,35 @@ vi.mock('@/lib/transport', async () => {
       }
       return actual.invoke(cmd, args)
     },
+    invokeForServer: (
+      _serverId: string,
+      cmd: string,
+      args?: Record<string, unknown>
+    ) => {
+      if (cmd === 'browse_directory') return browseDirectoryMock(args)
+      return actual.invoke(cmd, args)
+    },
   }
 })
 
 describe('CloneProjectModal', () => {
   const longDestination =
     '/Users/stacylia/Developer/coolify/this is a long name for a folder'
+  const storage = new Map<string, string>()
 
   beforeEach(() => {
     vi.clearAllMocks()
+    HTMLElement.prototype.hasPointerCapture = vi.fn(() => false)
+    HTMLElement.prototype.setPointerCapture = vi.fn()
+    HTMLElement.prototype.releasePointerCapture = vi.fn()
+    HTMLElement.prototype.scrollIntoView = vi.fn()
+    storage.clear()
+    vi.mocked(localStorage.getItem).mockImplementation(
+      key => storage.get(key) ?? null
+    )
+    vi.mocked(localStorage.setItem).mockImplementation((key, value) => {
+      storage.set(key, value)
+    })
     saveMock.mockResolvedValue(longDestination)
     browseDirectoryMock.mockResolvedValue({
       current_path: '/remote/home',
@@ -59,6 +80,7 @@ describe('CloneProjectModal', () => {
       cloneModalOpen: true,
       addProjectDialogOpen: true,
       addProjectParentFolderId: null,
+      selectedProjectId: null,
     })
   })
 
@@ -98,13 +120,15 @@ describe('CloneProjectModal', () => {
     expect(saveMock).toHaveBeenCalled()
   })
 
-  it('opens the remote directory browser when connected to a remote backend', async () => {
+  it('opens the remote directory browser for the selected remote project', async () => {
     const remote = addRemoteConnection({
       name: 'Remote host',
       url: 'https://remote.example.com',
       token: 'test-token',
     })
-    selectConnection(remote.id)
+    useProjectsStore.setState({
+      selectedProjectId: `${remote.id}:project-1`,
+    })
 
     render(<CloneProjectModal />)
 
@@ -119,5 +143,52 @@ describe('CloneProjectModal', () => {
     ).toBeInTheDocument()
     expect(saveMock).not.toHaveBeenCalled()
     expect(browseDirectoryMock).toHaveBeenCalled()
+  })
+
+  it('prefills the destination saved for the selected Jean instance', async () => {
+    const remote = addRemoteConnection({
+      name: 'Remote host',
+      url: 'https://remote.example.com',
+      token: 'test-token',
+    })
+    rememberProjectDestination('local', '/Users/me/code/local-project')
+    rememberProjectDestination(remote.id, '/home/me/apps/previous-project')
+    useProjectsStore.setState({
+      selectedProjectId: `${remote.id}:project-1`,
+    })
+
+    render(<CloneProjectModal />)
+    await userEvent.type(
+      screen.getByLabelText(/^repository$/i),
+      'example/new-project.git'
+    )
+
+    expect(
+      await screen.findByRole('button', {
+        name: '/home/me/apps/new-project',
+      })
+    ).toBeInTheDocument()
+  })
+
+  it('offers GitHub, GitLab, and unrestricted custom URL modes', async () => {
+    render(<CloneProjectModal />)
+
+    const provider = screen.getByRole('combobox', { name: /git provider/i })
+    expect(provider).toHaveTextContent('GitHub')
+    expect(screen.getByLabelText(/^repository$/i)).toHaveAttribute(
+      'placeholder',
+      'user/repository'
+    )
+
+    await userEvent.click(provider)
+    await userEvent.click(screen.getByRole('option', { name: 'GitLab' }))
+    expect(provider).toHaveTextContent('GitLab')
+
+    await userEvent.click(provider)
+    await userEvent.click(screen.getByRole('option', { name: 'Custom' }))
+    expect(screen.getByLabelText(/repository url/i)).toHaveAttribute(
+      'placeholder',
+      'https://example.com/user/repo.git'
+    )
   })
 })

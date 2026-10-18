@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { AlertCircle, Activity } from 'lucide-react'
+import { AlertCircle, Activity } from '@/components/icons/reicon'
 import { cn } from '@/lib/utils'
 import {
   Tooltip,
@@ -27,7 +27,10 @@ export function FailedRunsBadge({
   className,
 }: FailedRunsBadgeProps) {
   const queryClient = useQueryClient()
-  const authData = queryClient.getQueryData<GhAuthStatus>(ghCliQueryKeys.auth())
+  const authData = queryClient.getQueryData<GhAuthStatus>([
+    ...ghCliQueryKeys.auth(),
+    'local',
+  ])
   const isAuthenticated = authData?.authenticated ?? false
   const seenFailedWorkflowRunIds = useUIStore(
     state => state.seenFailedWorkflowRunIds
@@ -68,7 +71,7 @@ export function FailedRunsBadge({
             type="button"
             onClick={handleClick}
             className={cn(
-              'shrink-0 rounded bg-red-500/10 px-1.5 py-0.5 text-[11px] font-medium text-red-600 transition-colors hover:bg-red-500/20',
+              'shrink-0 rounded bg-destructive/10 px-1.5 py-0.5 text-[11px] font-medium text-destructive transition-colors hover:bg-destructive/20',
               className
             )}
           >

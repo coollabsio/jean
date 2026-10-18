@@ -1,4 +1,5 @@
 import { createRef } from 'react'
+import { QueryClient } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@/test/test-utils'
 import { ChatInput } from './ChatInput'
@@ -27,6 +28,8 @@ const storeState = {
   addPendingFile: vi.fn(),
   addPendingSkill: vi.fn(),
   addPendingImage: vi.fn(),
+  updatePendingImage: vi.fn(),
+  removePendingImage: vi.fn(),
   addPendingTextFile: vi.fn(),
 }
 
@@ -47,6 +50,88 @@ vi.mock('./FileMentionPopover', () => ({
   FileMentionPopover: () => null,
 }))
 
+vi.mock('./ContextMentionPopover', () => ({
+  ContextMentionPopover: ({
+    open,
+    onSelectContext,
+  }: {
+    open: boolean
+    onSelectContext: (item: unknown, investigate: boolean) => void
+  }) =>
+    open ? (
+      <>
+        <button
+          type="button"
+          onClick={() =>
+            onSelectContext(
+              {
+                id: 'issue:123',
+                type: 'issue',
+                label: '#123',
+                title: 'Login fails',
+                issue: { number: 123, title: 'Login fails' },
+              },
+              false
+            )
+          }
+        >
+          Add selected issue
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            onSelectContext(
+              {
+                id: 'issue:123',
+                type: 'issue',
+                label: '#123',
+                title: 'Login fails',
+                issue: { number: 123, title: 'Login fails' },
+              },
+              true
+            )
+          }
+        >
+          Investigate selected issue
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            onSelectContext(
+              {
+                id: 'pr:45',
+                type: 'pr',
+                label: 'PR #45',
+                title: 'Fix login',
+                pr: { number: 45, title: 'Fix login' },
+              },
+              true
+            )
+          }
+        >
+          Investigate selected PR
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            onSelectContext(
+              {
+                id: 'pr:45',
+                type: 'pr',
+                label: 'PR #45',
+                title: 'Fix login',
+                pr: { number: 45, title: 'Fix login' },
+              },
+              false
+            )
+          }
+        >
+          Add selected PR
+        </button>
+      </>
+    ) : null,
+}))
+
 vi.mock('./SlashPopover', () => ({
   SlashPopover: slashPopoverMock,
 }))
@@ -63,21 +148,29 @@ vi.mock('@/store/chat-store', () => ({
 }))
 
 describe('ChatInput attachments', () => {
-  const renderInput = () => {
+  const renderInput = (
+    activeSessionId = 'session-1',
+    investigateIssuePrompt?: string,
+    investigatePRPrompt?: string,
+    onSubmit = vi.fn(),
+    executionMode: 'plan' | 'build' | 'yolo' = 'build'
+  ) => {
     const formRef = createRef<HTMLFormElement>()
     const inputRef = createRef<HTMLTextAreaElement>()
 
     render(
       <ChatInput
-        activeSessionId="session-1"
+        activeSessionId={activeSessionId}
         activeWorktreePath="/tmp/worktree"
         isSending={false}
-        executionMode="build"
+        executionMode={executionMode}
         focusChatShortcut="⌘K"
-        onSubmit={vi.fn()}
+        onSubmit={onSubmit}
         onCancel={vi.fn()}
         formRef={formRef}
         inputRef={inputRef}
+        investigateIssuePrompt={investigateIssuePrompt}
+        investigatePRPrompt={investigatePRPrompt}
       />
     )
 
@@ -97,9 +190,184 @@ describe('ChatInput attachments', () => {
     storeState.addPendingFile.mockReset()
     storeState.addPendingSkill.mockReset()
     storeState.addPendingImage.mockReset()
+    storeState.updatePendingImage.mockReset()
+    storeState.removePendingImage.mockReset()
     storeState.addPendingTextFile.mockReset()
     storeState.inputDrafts = {}
     slashPopoverMock.mockClear()
+  })
+
+  it('sends the issue investigation prompt after the context loads', async () => {
+    invokeMock.mockResolvedValue(undefined)
+    const onSubmit = vi.fn()
+    const textarea = renderInput(
+      'session-1',
+      'Investigate the loaded GitHub {issueWord} ({issueRefs})',
+      undefined,
+      onSubmit
+    )
+
+    fireEvent.change(textarea, { target: { value: '#42' } })
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Investigate selected issue' })
+    )
+
+    // Prompt is in the input and submitted right away; the context load is
+    // deferred to beforeSend so the send stays bound to this session.
+    expect(textarea.value).toBe('Investigate the loaded GitHub issue (#123)')
+    expect(storeState.setInputDraft).toHaveBeenCalledWith(
+      'session-1',
+      'Investigate the loaded GitHub issue (#123)'
+    )
+    expect(onSubmit).toHaveBeenCalledWith(undefined, {
+      beforeSend: expect.any(Function),
+    })
+    expect(invokeMock).not.toHaveBeenCalled()
+
+    await onSubmit.mock.calls[0]?.[1].beforeSend()
+    expect(invokeMock).toHaveBeenCalledWith('load_issue_context', {
+      sessionId: 'session-1',
+      issueNumber: 123,
+      projectPath: '/tmp/worktree',
+    })
+  })
+
+  it('tells the agent to fix the issue when investigating in yolo mode', () => {
+    invokeMock.mockResolvedValue(undefined)
+    const textarea = renderInput(
+      'session-1',
+      'Investigate the loaded GitHub {issueWord} ({issueRefs})',
+      undefined,
+      vi.fn(),
+      'yolo'
+    )
+
+    fireEvent.change(textarea, { target: { value: '#42' } })
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Investigate selected issue' })
+    )
+
+    expect(textarea.value).toContain(
+      'Investigate the loaded GitHub issue (#123)'
+    )
+    expect(textarea.value).toContain('<yolo_investigation_fix>')
+  })
+
+  it('does not wait for the query refetch before sending the investigation', async () => {
+    invokeMock.mockResolvedValue(undefined)
+    const invalidate = vi
+      .spyOn(QueryClient.prototype, 'invalidateQueries')
+      .mockReturnValue(new Promise<void>(() => undefined))
+    const onSubmit = vi.fn()
+    const textarea = renderInput('session-1', undefined, undefined, onSubmit)
+
+    fireEvent.change(textarea, { target: { value: '#42' } })
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Investigate selected issue' })
+    )
+
+    // A slow refetch of all GitHub/Linear queries must not delay the send.
+    await expect(
+      onSubmit.mock.calls[0]?.[1].beforeSend()
+    ).resolves.toBeUndefined()
+    expect(invalidate).toHaveBeenCalled()
+    invalidate.mockRestore()
+  })
+
+  it('fails beforeSend when the investigation context cannot load', async () => {
+    invokeMock.mockRejectedValue(new Error('boom'))
+    const onSubmit = vi.fn()
+    const textarea = renderInput('session-1', undefined, undefined, onSubmit)
+
+    fireEvent.change(textarea, { target: { value: '#42' } })
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Investigate selected issue' })
+    )
+
+    await expect(onSubmit.mock.calls[0]?.[1].beforeSend()).rejects.toThrow(
+      'boom'
+    )
+  })
+
+  it('removes the typed hash and number after attaching an issue', async () => {
+    invokeMock.mockResolvedValue(undefined)
+    const textarea = renderInput()
+
+    fireEvent.change(textarea, { target: { value: '#42' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add selected issue' }))
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('load_issue_context', {
+        sessionId: 'session-1',
+        issueNumber: 123,
+        projectPath: '/tmp/worktree',
+      })
+      expect(storeState.setInputDraft).toHaveBeenCalledWith('session-1', '')
+    })
+    expect(textarea.value).toBe('')
+  })
+
+  it('removes only the typed hash query when other draft text exists', async () => {
+    invokeMock.mockResolvedValue(undefined)
+    const textarea = renderInput()
+
+    fireEvent.change(textarea, { target: { value: 'Check this #42' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add selected issue' }))
+
+    await waitFor(() => {
+      expect(storeState.setInputDraft).toHaveBeenCalledWith(
+        'session-1',
+        'Check this '
+      )
+    })
+    expect(textarea.value).toBe('Check this ')
+  })
+
+  it('sends the PR investigation prompt after the context loads', async () => {
+    invokeMock.mockResolvedValue(undefined)
+    const onSubmit = vi.fn()
+    const textarea = renderInput(
+      'session-1',
+      undefined,
+      'Investigate the loaded GitHub {prWord} ({prRefs})',
+      onSubmit
+    )
+
+    fireEvent.change(textarea, { target: { value: '#' } })
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Investigate selected PR' })
+    )
+
+    expect(textarea.value).toBe('Investigate the loaded GitHub PR (#45)')
+    expect(onSubmit).toHaveBeenCalledWith(undefined, {
+      beforeSend: expect.any(Function),
+    })
+    expect(invokeMock).not.toHaveBeenCalled()
+
+    await onSubmit.mock.calls[0]?.[1].beforeSend()
+    expect(invokeMock).toHaveBeenCalledWith('load_pr_context', {
+      sessionId: 'session-1',
+      prNumber: 45,
+      projectPath: '/tmp/worktree',
+    })
+  })
+
+  it('removes the typed hash and number after attaching a PR', async () => {
+    invokeMock.mockResolvedValue(undefined)
+    const textarea = renderInput()
+
+    fireEvent.change(textarea, { target: { value: '#42' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add selected PR' }))
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('load_pr_context', {
+        sessionId: 'session-1',
+        prNumber: 45,
+        projectPath: '/tmp/worktree',
+      })
+      expect(storeState.setInputDraft).toHaveBeenCalledWith('session-1', '')
+    })
+    expect(textarea.value).toBe('')
   })
 
   it('opens the skill picker when typing $ for a Codex session', () => {
@@ -245,6 +513,13 @@ describe('ChatInput attachments', () => {
     expect(textarea.parentElement).toHaveClass('min-w-0')
   })
 
+  it('limits the normal textarea height to keep chat messages visible', () => {
+    const textarea = renderInput()
+
+    expect(textarea).toHaveClass('max-h-[30vh]')
+    expect(textarea).not.toHaveClass('max-h-[50vh]')
+  })
+
   it('caps the textarea height in mobile zen mode', () => {
     mobileState.value = true
     useUIStore.setState({ zenMode: true })
@@ -252,7 +527,7 @@ describe('ChatInput attachments', () => {
     const textarea = renderInput()
 
     expect(textarea).toHaveClass('h-12', 'max-h-12')
-    expect(textarea).not.toHaveClass('max-h-[50vh]')
+    expect(textarea).not.toHaveClass('max-h-[30vh]')
   })
 
   it('uses a compact textarea height in desktop zen mode', () => {
@@ -261,7 +536,7 @@ describe('ChatInput attachments', () => {
     const textarea = renderInput()
 
     expect(textarea).toHaveClass('h-12', 'max-h-12')
-    expect(textarea).not.toHaveClass('max-h-[50vh]')
+    expect(textarea).not.toHaveClass('max-h-[30vh]')
     expect(screen.queryByText('to focus')).not.toBeInTheDocument()
   })
 
@@ -432,6 +707,37 @@ describe('ChatInput attachments', () => {
     expect(invokeMock).not.toHaveBeenCalledWith('read_clipboard_image')
   })
 
+  it('processes an image once when web clipboard items and files both expose it', async () => {
+    const textarea = renderInput()
+    const itemImage = new File(['png'], 'image.png', {
+      type: 'image/png',
+      lastModified: 123,
+    })
+    const filesImage = new File(['png'], 'image.png', {
+      type: 'image/png',
+      lastModified: 123,
+    })
+    processAttachmentFile.mockResolvedValue(undefined)
+
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        getData: () => '',
+        items: [
+          {
+            type: 'image/png',
+            getAsFile: () => itemImage,
+          },
+        ],
+        files: [filesImage],
+      },
+    })
+
+    await waitFor(() => {
+      expect(processAttachmentFile).toHaveBeenCalledTimes(1)
+    })
+    expect(processAttachmentFile).toHaveBeenCalledWith(itemImage, 'session-1')
+  })
+
   it('does not request the desktop clipboard for an empty web paste', async () => {
     const textarea = renderInput()
 
@@ -446,6 +752,45 @@ describe('ChatInput attachments', () => {
     await waitFor(() => {
       expect(invokeMock).not.toHaveBeenCalledWith('read_clipboard_image')
     })
+  })
+
+  it('uploads a native clipboard image to the active remote backend', async () => {
+    nativeState.value = true
+    invokeMock
+      .mockResolvedValueOnce({ data: 'clipboard-png', mimeType: 'image/png' })
+      .mockResolvedValueOnce({
+        id: 'remote-image',
+        path: '/remote/pasted-images/image.png',
+        filename: 'image.png',
+      })
+    const textarea = renderInput('remote-a:session-1')
+
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        getData: () => '',
+        items: [],
+        files: [],
+      },
+    })
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenNthCalledWith(1, 'read_clipboard_image')
+      expect(invokeMock).toHaveBeenNthCalledWith(2, 'save_pasted_image', {
+        data: 'clipboard-png',
+        mimeType: 'image/png',
+        sessionId: 'remote-a:session-1',
+      })
+    })
+    expect(storeState.updatePendingImage).toHaveBeenCalledWith(
+      'remote-a:session-1',
+      expect.any(String),
+      {
+        id: 'remote-image',
+        path: '/remote/pasted-images/image.png',
+        filename: 'image.png',
+        loading: false,
+      }
+    )
   })
 
   it('saves large text as an attachment when pasted with an image', async () => {
@@ -476,6 +821,7 @@ describe('ChatInput attachments', () => {
       expect(processAttachmentFile).toHaveBeenCalledWith(image, 'session-1')
       expect(invokeMock).toHaveBeenCalledWith('save_pasted_text', {
         content: largeText,
+        sessionId: 'session-1',
       })
       expect(storeState.addPendingTextFile).toHaveBeenCalledWith(
         'session-1',
@@ -512,6 +858,7 @@ describe('ChatInput IME composition (issue #584)', () => {
   }) => {
     const formRef = createRef<HTMLFormElement>()
     const inputRef = createRef<HTMLTextAreaElement>()
+    let clearInput: (() => void) | null = null
     const onSubmit = vi.fn()
 
     render(
@@ -522,6 +869,9 @@ describe('ChatInput IME composition (issue #584)', () => {
         executionMode="build"
         focusChatShortcut="⌘K"
         onSubmit={onSubmit}
+        onRegisterClearHandler={handler => {
+          clearInput = handler
+        }}
         onCancel={vi.fn()}
         formRef={formRef}
         inputRef={inputRef}
@@ -531,7 +881,7 @@ describe('ChatInput IME composition (issue #584)', () => {
     )
 
     const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
-    return { textarea, onSubmit }
+    return { textarea, onSubmit, acceptSubmit: () => clearInput?.() }
   }
 
   it('submits on normal Enter when not composing', () => {
@@ -542,6 +892,27 @@ describe('ChatInput IME composition (issue #584)', () => {
     fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', keyCode: 13 })
 
     expect(onSubmit).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps text visible when the submit handler does not accept the message', () => {
+    const { textarea, onSubmit } = renderWithSubmit()
+    fireEvent.change(textarea, { target: { value: 'keep this draft' } })
+
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', keyCode: 13 })
+
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+    expect(textarea.value).toBe('keep this draft')
+  })
+
+  it('clears accepted messages through the registered submit handler', () => {
+    const { textarea, onSubmit, acceptSubmit } = renderWithSubmit()
+    onSubmit.mockImplementation(acceptSubmit)
+    fireEvent.change(textarea, { target: { value: 'send this message' } })
+
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', keyCode: 13 })
+
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+    expect(textarea.value).toBe('')
   })
 
   it('submits as a steer when the primary modifier is held', () => {

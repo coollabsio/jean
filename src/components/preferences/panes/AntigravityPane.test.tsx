@@ -1,5 +1,6 @@
+import userEvent from '@testing-library/user-event'
 import { fireEvent, render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ReactQuery from '@tanstack/react-query'
 import { AntigravityPane } from './AntigravityPane'
 
@@ -7,6 +8,14 @@ const patchMutate = vi.fn()
 const installMutate = vi.fn()
 const uninstallMutate = vi.fn()
 const openLogin = vi.fn()
+const authRefetch = vi.fn()
+
+interface AuthData {
+  authenticated: boolean
+  error?: string | null
+  timedOut?: boolean
+}
+let authData: AuthData = { authenticated: true }
 
 vi.mock('@/store/ui-store', () => ({
   useUIStore: (
@@ -34,8 +43,14 @@ vi.mock('@/services/antigravity-cli', () => ({
   useAntigravityCliStatus: () => ({
     data: { installed: true, version: '0.54.4', path: '/managed/antigravity' },
   }),
-  useAntigravityCliAuth: () => ({ data: { authenticated: true } }),
-  useAvailableAntigravityModels: () => ({ data: [{ id: 'auto', label: 'Auto' }] }),
+  useAntigravityCliAuth: () => ({
+    data: authData,
+    isFetching: false,
+    refetch: authRefetch,
+  }),
+  useAvailableAntigravityModels: () => ({
+    data: [{ id: 'auto', label: 'Auto' }],
+  }),
   useAvailableAntigravityVersions: () => ({
     data: [
       { version: '0.54.4', prerelease: false },
@@ -44,7 +59,11 @@ vi.mock('@/services/antigravity-cli', () => ({
     isFetching: false,
   }),
   useAntigravityPathDetection: () => ({
-    data: { found: true, path: '/usr/local/bin/antigravity', version: '0.53.0' },
+    data: {
+      found: true,
+      path: '/usr/local/bin/antigravity',
+      version: '0.53.0',
+    },
     isLoading: false,
     refetch: vi.fn(),
   }),
@@ -55,15 +74,33 @@ vi.mock('@/services/antigravity-cli', () => ({
   }),
 }))
 
-describe('AntigravityPane', () => {
-  beforeEach(() => vi.clearAllMocks())
+beforeAll(() => {
+  HTMLElement.prototype.hasPointerCapture = vi.fn(() => false)
+  HTMLElement.prototype.setPointerCapture = vi.fn()
+  HTMLElement.prototype.releasePointerCapture = vi.fn()
+  HTMLElement.prototype.scrollIntoView = vi.fn()
+})
 
-  it('shows Jean-managed and system PATH sources', () => {
+describe('AntigravityPane', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    authData = { authenticated: true }
+  })
+
+  it('shows Jean-managed and system PATH sources', async () => {
+    const user = userEvent.setup()
     render(<AntigravityPane />)
 
-    expect(screen.getByText('Jean managed')).toBeInTheDocument()
-    expect(screen.getByText('System PATH')).toBeInTheDocument()
-    expect(screen.getByText(/\/usr\/local\/bin\/antigravity/)).toBeInTheDocument()
+    expect(
+      screen.getByRole('combobox', { name: 'Antigravity CLI source' })
+    ).toHaveTextContent('Jean managed')
+    await user.click(
+      screen.getByRole('combobox', { name: 'Antigravity CLI source' })
+    )
+    expect(screen.getByRole('option', { name: /System PATH/ })).toHaveAttribute(
+      'title',
+      expect.stringContaining('/usr/local/bin/antigravity')
+    )
   })
 
   it('installs the selected stable managed version', () => {
@@ -75,13 +112,14 @@ describe('AntigravityPane', () => {
     expect(screen.queryByText('0.55.0-preview')).not.toBeInTheDocument()
   })
 
-  it('persists PATH source selection', () => {
+  it('persists PATH source selection', async () => {
+    const user = userEvent.setup()
     render(<AntigravityPane />)
 
-    const pathLabel = screen.getByText('System PATH').closest('label')
-    expect(pathLabel).not.toBeNull()
-    if (!pathLabel) return
-    fireEvent.click(pathLabel)
+    await user.click(
+      screen.getByRole('combobox', { name: 'Antigravity CLI source' })
+    )
+    await user.click(screen.getByRole('option', { name: /System PATH/ }))
 
     expect(patchMutate).toHaveBeenCalledWith(
       { antigravity_cli_source: 'path' },
@@ -100,5 +138,52 @@ describe('AntigravityPane', () => {
       [],
       'login'
     )
+  })
+
+  it('reports a timed-out auth check separately from being signed out', () => {
+    authData = {
+      authenticated: false,
+      error: 'Antigravity CLI status check timed out',
+      timedOut: true,
+    }
+
+    render(<AntigravityPane />)
+
+    expect(screen.getByText(/Auth check timed out/)).toBeInTheDocument()
+    expect(screen.queryByText(/Not authenticated/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Login' })).toBeInTheDocument()
+  })
+
+  it('retries a timed-out auth check without opening login', () => {
+    authData = {
+      authenticated: false,
+      error: 'Antigravity CLI status check timed out',
+      timedOut: true,
+    }
+
+    render(<AntigravityPane />)
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+
+    expect(authRefetch).toHaveBeenCalled()
+    expect(openLogin).not.toHaveBeenCalled()
+  })
+
+  it('still reports a genuine signed-out state', () => {
+    authData = {
+      authenticated: false,
+      error: 'Please sign in',
+      timedOut: false,
+    }
+
+    render(<AntigravityPane />)
+
+    expect(
+      screen.getByText(/Not authenticated · Please sign in/)
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Retry' })
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Login' })).toBeInTheDocument()
   })
 })

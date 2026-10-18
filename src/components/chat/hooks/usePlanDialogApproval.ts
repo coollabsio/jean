@@ -171,6 +171,11 @@ export function usePlanDialogApproval({
       // refetch triggered by the self-received session:setting-changed event
       // returns the already-updated backend data (prevents stale overwrites
       // of optimistic TanStack cache on web access).
+      const executionMode =
+        mode === 'yolo'
+          ? 'yolo'
+          : (useChatStore.getState().permissionModes[activeSessionId] ??
+            'build')
       const markPromise = pendingPlanMessage
         ? markPlanApprovedService(
             activeWorktreeId,
@@ -193,14 +198,14 @@ export function usePlanDialogApproval({
             sessionId: activeSessionId,
             waitingForInput: false,
             waitingForInputType: null,
-            selectedExecutionMode: mode,
+            selectedExecutionMode: executionMode,
           })
         )
         .then(() => {
           invoke('broadcast_session_setting', {
             sessionId: activeSessionId,
             key: 'executionMode',
-            value: mode,
+            value: executionMode,
           }).catch(err => {
             console.error(
               '[usePlanDialogApproval] Broadcast executionMode=' +
@@ -230,13 +235,13 @@ export function usePlanDialogApproval({
       // Build approval message
       const defaultText =
         mode === 'yolo'
-          ? 'Plan approved (yolo mode). Begin implementing all changes immediately without asking for confirmation. Do not re-explain the plan — start writing code.'
+          ? 'Plan approved (Full access mode). Begin implementing all changes immediately without asking for confirmation. Do not re-explain the plan — start writing code.'
           : 'Plan approved. Begin implementing the changes now. Do not re-explain the plan — start writing code.'
       const message = updatedPlan
         ? `I've updated the plan. Please review and execute:\n\n<updated-plan>\n${updatedPlan}\n</updated-plan>`
         : defaultText
 
-      setExecutionMode(activeSessionId, mode)
+      setExecutionMode(activeSessionId, executionMode)
 
       const backendOverride =
         mode === 'yolo' ? yoloBackendRef.current : buildBackendRef.current
@@ -284,7 +289,7 @@ export function usePlanDialogApproval({
           : undefined
 
       const model = modelOverride ?? selectedModelRef.current
-      const modeLabel = mode === 'yolo' ? 'Yolo' : 'Build'
+      const modeLabel = mode === 'yolo' ? 'Full access' : 'Build'
       const overrideStr =
         modelOverride || backendOverride
           ? [backendOverride, model].filter(Boolean).join(' / ')
@@ -303,7 +308,7 @@ export function usePlanDialogApproval({
         pendingTextFiles: [],
         model,
         provider: selectedProviderRef.current,
-        executionMode: mode,
+        executionMode,
         thinkingLevel: resolvedThinkingLevel,
         effortLevel: resolvedEffortLevel,
         mcpConfig: buildMcpConfigJson(

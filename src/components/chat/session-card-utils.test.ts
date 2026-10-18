@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildNativeClientSessionInput,
   computeSessionCardData,
+  createSessionCardDataCache,
   getEffectiveSessionWaiting,
   getResumeArgs,
   isDedicatedEmptyCodeReviewSession,
@@ -90,9 +91,7 @@ describe('native client resume sessions', () => {
     const managed =
       '/home/user/.local/share/com.jean.desktop/grok-cli/node_modules/.bin/grok'
 
-    expect(
-      getResumeArgs(grokSession, { resolvedCommand: managed })
-    ).toEqual({
+    expect(getResumeArgs(grokSession, { resolvedCommand: managed })).toEqual({
       command: managed,
       args: ['--resume', 'grok-acp-2'],
     })
@@ -248,6 +247,54 @@ describe('computeSessionCardData', () => {
     }
   }
 
+  it.each(['supervised', 'auto'] as const)(
+    'shows %s turns as running Build work',
+    mode => {
+      const session = createBaseSession({ selected_execution_mode: mode })
+      const state = createBaseStoreState({
+        sendingSessionIds: { 'session-1': true },
+        executionModes: { 'session-1': mode },
+      })
+      expect(computeSessionCardData(session, state).status).toBe('vibing')
+      const restored = createBaseSession({
+        last_run_status: 'running',
+        last_run_execution_mode: mode,
+      })
+      expect(
+        computeSessionCardData(restored, createBaseStoreState()).status
+      ).toBe('vibing')
+    }
+  )
+
+  it('reuses a card when unrelated session state changes', () => {
+    const session = createBaseSession()
+    const cache = createSessionCardDataCache()
+    const storeState = createBaseStoreState()
+
+    const first = cache(session, storeState)
+    const unchanged = cache(session, {
+      ...storeState,
+      sendingSessionIds: { 'other-session': true },
+    })
+
+    expect(unchanged).toBe(first)
+  })
+
+  it('recomputes a card when its session state changes', () => {
+    const session = createBaseSession()
+    const cache = createSessionCardDataCache()
+    const storeState = createBaseStoreState()
+
+    const first = cache(session, storeState)
+    const changed = cache(session, {
+      ...storeState,
+      sendingSessionIds: { [session.id]: true },
+    })
+
+    expect(changed).not.toBe(first)
+    expect(changed.isSending).toBe(true)
+  })
+
   it('keeps streaming codex plans in planning status until the run actually pauses', () => {
     const session = createBaseSession()
 
@@ -376,7 +423,47 @@ describe('computeSessionCardData', () => {
     expect(card.status).toBe('cancelled')
   })
 
-  it('does not let a manual override hide live waiting status', () => {
+  it('does not let a manual override hide waiting status during an active run', () => {
+    const session = createBaseSession({
+      backend: 'codex',
+      last_run_status: 'running',
+      last_run_execution_mode: 'build',
+    })
+    const storeState = createBaseStoreState({
+      sendingSessionIds: { 'session-1': true },
+      sessionStatusOverrides: { 'session-1': 'review' },
+      pendingCodexCommandApprovalRequests: {
+        'session-1': [{ rpc_id: 1 } as never],
+      },
+    })
+
+    const card = computeSessionCardData(session, storeState)
+
+    expect(card.automaticStatus).toBe('command_approval')
+    expect(card.statusOverride).toBe('review')
+    expect(card.status).toBe('command_approval')
+  })
+
+  it('lets an explicit override replace persisted waiting status when idle', () => {
+    const session = createBaseSession({
+      waiting_for_input: true,
+      waiting_for_input_type: 'question',
+      last_run_status: 'completed',
+      last_run_execution_mode: 'plan',
+    })
+    const storeState = createBaseStoreState({
+      sessionStatusOverrides: { 'session-1': 'completed' },
+      waitingForInputSessionIds: { 'session-1': true },
+    })
+
+    const card = computeSessionCardData(session, storeState)
+
+    expect(card.automaticStatus).toBe('input_required')
+    expect(card.statusOverride).toBe('completed')
+    expect(card.status).toBe('completed')
+  })
+
+  it('keeps persisted waiting status over a review override', () => {
     const session = createBaseSession({
       waiting_for_input: true,
       waiting_for_input_type: 'question',
@@ -391,8 +478,29 @@ describe('computeSessionCardData', () => {
     const card = computeSessionCardData(session, storeState)
 
     expect(card.automaticStatus).toBe('input_required')
-    expect(card.statusOverride).toBe('review')
     expect(card.status).toBe('input_required')
+  })
+
+  it('lets a manual override replace stale permission denials after a run', () => {
+    const session = createBaseSession({
+      backend: 'claude',
+      last_run_status: 'completed',
+      last_run_execution_mode: 'yolo',
+      selected_execution_mode: 'yolo',
+      status_override: 'completed',
+      pending_permission_denials: [
+        { tool_name: 'WebSearch', tool_use_id: 'toolu_1', tool_input: {} },
+      ],
+    })
+    const storeState = createBaseStoreState({
+      executionModes: { 'session-1': 'build' },
+    })
+
+    const card = computeSessionCardData(session, storeState)
+
+    expect(card.automaticStatus).toBe('permission')
+    expect(card.statusOverride).toBe('completed')
+    expect(card.status).toBe('completed')
   })
 
   it('can force idle even when automatic status is completed', () => {
@@ -420,8 +528,42 @@ describe('computeSessionCardData', () => {
     expect(card.status).toBe('reviewing')
     expect(statusConfig[card.status]).toMatchObject({
       indicatorStatus: 'running',
-      indicatorVariant: 'loading',
     })
+  })
+
+  it('shows a code review tab as loading while its review job is running', () => {
+    const session = createBaseSession({
+      name: 'Code Review · Codex · gpt-5.6-sol',
+      is_reviewing: true,
+      review_results: {
+        reviews: [
+          { backend: 'codex', model: 'gpt-5.6-sol', status: 'running' },
+        ],
+      },
+    })
+
+    const card = computeSessionCardData(
+      session,
+      createBaseStoreState({ reviewingSessions: { [session.id]: true } })
+    )
+
+    expect(card.status).toBe('reviewing')
+  })
+
+  it('shows a code review tab as review ready when its review job completed', () => {
+    const session = createBaseSession({
+      name: 'Code Review · Codex · gpt-5.6-sol',
+      is_reviewing: false,
+      review_results: {
+        reviews: [
+          { backend: 'codex', model: 'gpt-5.6-sol', status: 'completed' },
+        ],
+      },
+    })
+
+    const card = computeSessionCardData(session, createBaseStoreState())
+
+    expect(card.status).toBe('review')
   })
 
   it('ignores stale Zustand waiting flag when remote run completed normally', () => {
@@ -650,6 +792,157 @@ describe('computeSessionCardData', () => {
 
     expect(card.isWaiting).toBe(true)
     expect(card.status).toBe('input_required')
+  })
+
+  it('ignores stale persisted waiting state after a Claude turn starts sending', () => {
+    const session: Session = {
+      ...createBaseSession(),
+      backend: 'claude',
+      waiting_for_input: true,
+      waiting_for_input_type: 'question',
+      last_run_status: 'running',
+      last_run_execution_mode: 'yolo',
+    }
+    const storeState = createBaseStoreState({
+      sendingSessionIds: { 'session-1': true },
+      executingModes: { 'session-1': 'yolo' },
+    })
+
+    const card = computeSessionCardData(session, storeState)
+
+    expect(card.isWaiting).toBe(false)
+    expect(card.status).toBe('yoloing')
+  })
+
+  it('does not show a stale Claude question while a later turn is running', () => {
+    const session: Session = {
+      ...createBaseSession(),
+      backend: 'claude',
+      last_run_status: 'running',
+      last_run_execution_mode: 'yolo',
+    }
+    const storeState = createBaseStoreState({
+      sendingSessionIds: { 'session-1': true },
+      executingModes: { 'session-1': 'yolo' },
+      activeToolCalls: {
+        'session-1': [
+          { id: 'old-question', name: 'AskUserQuestion', input: {} },
+        ],
+      },
+    })
+
+    const card = computeSessionCardData(session, storeState)
+
+    expect(card.isWaiting).toBe(false)
+    expect(card.status).toBe('yoloing')
+  })
+
+  describe('pending question from persisted messages', () => {
+    const questionMessage = {
+      id: 'assistant-1',
+      session_id: 'session-1',
+      role: 'assistant' as const,
+      content: 'Which option?',
+      timestamp: 1,
+      tool_calls: [
+        {
+          id: 'question-1',
+          name: 'AskUserQuestion',
+          input: { questions: [] },
+        },
+      ],
+    }
+
+    it('treats an unanswered AskUserQuestion in the last assistant message as pending', () => {
+      const session = createBaseSession({ messages: [questionMessage] })
+
+      const card = computeSessionCardData(session, createBaseStoreState())
+
+      expect(card.hasQuestion).toBe(true)
+      expect(card.isWaiting).toBe(true)
+    })
+
+    it('does not treat a question as pending when a user message follows it (#779)', () => {
+      const session = createBaseSession({
+        messages: [
+          questionMessage,
+          {
+            id: 'user-1',
+            session_id: 'session-1',
+            role: 'user',
+            content: 'My answer',
+            timestamp: 2,
+            tool_calls: [],
+          },
+        ],
+      })
+
+      const card = computeSessionCardData(session, createBaseStoreState())
+
+      expect(card.hasQuestion).toBe(false)
+      expect(card.isWaiting).toBe(false)
+    })
+
+    it('still treats it as pending when the user message came before the question', () => {
+      const session = createBaseSession({
+        messages: [
+          {
+            id: 'user-1',
+            session_id: 'session-1',
+            role: 'user',
+            content: 'Do the thing',
+            timestamp: 0,
+            tool_calls: [],
+          },
+          questionMessage,
+        ],
+      })
+
+      const card = computeSessionCardData(session, createBaseStoreState())
+
+      expect(card.hasQuestion).toBe(true)
+    })
+  })
+
+  it('shows a running Claude turn instead of a hidden old permission denial', () => {
+    const denial = {
+      tool_name: 'Bash',
+      tool_use_id: 'old-denial',
+      tool_input: {},
+    }
+    const session = createBaseSession({
+      backend: 'claude',
+      last_run_status: 'running',
+      last_run_execution_mode: 'yolo',
+      pending_permission_denials: [denial],
+    })
+    const storeState = createBaseStoreState({
+      sendingSessionIds: { 'session-1': true },
+      executingModes: { 'session-1': 'yolo' },
+      pendingPermissionDenials: { 'session-1': [denial] },
+    })
+
+    const card = computeSessionCardData(session, storeState)
+
+    expect(card.hasPermissionDenials).toBe(false)
+    expect(card.isWaiting).toBe(false)
+    expect(card.status).toBe('yoloing')
+  })
+
+  it('does not show a hidden permission denial after a yolo turn completes', () => {
+    const session = createBaseSession({
+      backend: 'claude',
+      last_run_status: 'completed',
+      selected_execution_mode: 'yolo',
+      pending_permission_denials: [
+        { tool_name: 'Bash', tool_use_id: 'old-denial', tool_input: {} },
+      ],
+    })
+
+    const card = computeSessionCardData(session, createBaseStoreState())
+
+    expect(card.hasPermissionDenials).toBe(false)
+    expect(card.status).toBe('completed')
   })
 
   it('maps cancelled last_run_status to cancelled (not idle)', () => {

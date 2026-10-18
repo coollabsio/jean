@@ -10,7 +10,16 @@
 // is stored in UI state.
 // Review results are also stored in Session files (review_results field).
 
-import type { LabelData } from '@/types/chat'
+import type { LabelData, SendMessageArgs } from '@/types/chat'
+
+/** A session armed for auto-continue after a usage limit resets. */
+export interface AutoResumeEntry {
+  session_id: string
+  /** Reset epoch (ms) to wait for. */
+  resume_at_ms: number
+  /** Exact send args to replay. */
+  send_args: SendMessageArgs
+}
 
 export interface ProjectCanvasSettingsState {
   worktree_sort_mode?: 'created' | 'last_activity' | 'manual'
@@ -57,13 +66,29 @@ export interface PendingTextFileDraft {
   content?: string
 }
 
+export interface PendingFileDraft {
+  id: string
+  relative_path: string
+  source_root_path?: string
+  source_project_id?: string
+  source_project_name?: string
+  extension: string
+  is_directory: boolean
+}
+
+export interface PendingSkillDraft {
+  id: string
+  name: string
+  path: string
+}
+
 export interface UIState {
   active_worktree_id: string | null
   active_worktree_path: string | null
   last_active_worktree_id: string | null
   active_project_id: string | null
-  expanded_project_ids: string[]
-  expanded_folder_ids: string[]
+  expanded_project_ids?: string[]
+  expanded_folder_ids?: string[]
   /** Left sidebar width in pixels, defaults to 250 */
   left_sidebar_size?: number
   /** Left sidebar visibility, defaults to false */
@@ -88,6 +113,12 @@ export interface UIState {
    * Content is optional in persistence; restore re-reads from disk when missing.
    */
   pending_text_files?: Record<string, PendingTextFileDraft[]>
+  /** Unsent regular file and directory attachments per session */
+  pending_files?: Record<string, PendingFileDraft[]>
+  /** Unsent skill attachments per session */
+  pending_skills?: Record<string, PendingSkillDraft[]>
+  /** Worktrees whose setup-script status card was dismissed */
+  dismissed_setup_scripts?: string[]
   /** Whether the review sidebar is visible */
   review_sidebar_visible?: boolean
   /** Modal terminal drawer open state per worktree */
@@ -140,8 +171,8 @@ export interface UIState {
   dashboard_worktree_collapse_overrides?: Record<string, boolean>
   /** Project canvas settings per project */
   project_canvas_settings?: Record<string, ProjectCanvasSettingsState>
-  /** Favorited projects shown first in the GitHub Dashboard */
-  github_dashboard_favorite_project_ids?: string[]
+  /** Session IDs pinned in the recent sessions list */
+  pinned_recent_session_ids?: string[]
   /** Last opened worktree+session per project: projectId → { worktree_id, session_id } */
   last_opened_per_project?: Record<
     string,
@@ -152,6 +183,8 @@ export interface UIState {
    * (failed-run badges only count runs not in this list).
    */
   seen_failed_workflow_run_ids?: number[]
+  /** Sessions armed for auto-continue after a usage limit resets */
+  auto_resume?: AutoResumeEntry[]
   version: number
 }
 
@@ -171,6 +204,9 @@ export const defaultUIState: UIState = {
   input_drafts: {},
   pending_images: {},
   pending_text_files: {},
+  pending_files: {},
+  pending_skills: {},
+  dismissed_setup_scripts: [],
   modal_terminal_open: {},
   modal_terminal_dock_mode: 'floating',
   modal_terminal_width: 400,
@@ -193,7 +229,8 @@ export const defaultUIState: UIState = {
   browser_modal_height: 400,
   browser_bottom_panel_open: {},
   browser_bottom_panel_height: 360,
-  github_dashboard_favorite_project_ids: [],
+  pinned_recent_session_ids: [],
   seen_failed_workflow_run_ids: [],
+  auto_resume: [],
   version: 1,
 }

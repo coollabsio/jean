@@ -7,34 +7,40 @@ import {
 
 describe('getExtensionColor', () => {
   it('returns correct color for TypeScript files', () => {
-    expect(getExtensionColor('ts')).toBe('text-blue-500')
-    expect(getExtensionColor('tsx')).toBe('text-blue-500')
+    expect(getExtensionColor('ts')).toBe('text-blue-600 dark:text-blue-500')
+    expect(getExtensionColor('tsx')).toBe('text-blue-600 dark:text-blue-500')
   })
 
   it('returns correct color for JavaScript files', () => {
-    expect(getExtensionColor('js')).toBe('text-yellow-500')
-    expect(getExtensionColor('jsx')).toBe('text-yellow-500')
+    expect(getExtensionColor('js')).toBe('text-yellow-600 dark:text-yellow-500')
+    expect(getExtensionColor('jsx')).toBe(
+      'text-yellow-600 dark:text-yellow-500'
+    )
   })
 
   it('returns correct color for Rust files', () => {
-    expect(getExtensionColor('rs')).toBe('text-orange-500')
+    expect(getExtensionColor('rs')).toBe('text-orange-600 dark:text-orange-500')
   })
 
   it('returns correct color for Python files', () => {
-    expect(getExtensionColor('py')).toBe('text-green-500')
+    expect(getExtensionColor('py')).toBe('text-green-600 dark:text-green-500')
   })
 
   it('returns correct color for config files', () => {
-    expect(getExtensionColor('json')).toBe('text-yellow-600')
+    expect(getExtensionColor('json')).toBe(
+      'text-amber-500 dark:text-yellow-600'
+    )
     expect(getExtensionColor('toml')).toBe('text-gray-400')
-    expect(getExtensionColor('yaml')).toBe('text-red-400')
-    expect(getExtensionColor('yml')).toBe('text-red-400')
+    expect(getExtensionColor('yaml')).toBe('text-red-600 dark:text-red-400')
+    expect(getExtensionColor('yml')).toBe('text-red-600 dark:text-red-400')
   })
 
   it('returns correct color for markup files', () => {
     expect(getExtensionColor('md')).toBe('text-gray-500')
-    expect(getExtensionColor('html')).toBe('text-orange-400')
-    expect(getExtensionColor('css')).toBe('text-pink-500')
+    expect(getExtensionColor('html')).toBe(
+      'text-orange-600 dark:text-orange-400'
+    )
+    expect(getExtensionColor('css')).toBe('text-pink-600 dark:text-pink-500')
   })
 
   it('returns fallback color for unknown extensions', () => {

@@ -152,6 +152,51 @@ describe('StandaloneTerminalSurface', () => {
     )
   })
 
+  it('sends browser paste data to the login terminal without clipboard access', () => {
+    render(
+      <StandaloneTerminalSurface
+        terminalId="http-login"
+        command="claude"
+        commandArgs={['auth', 'login']}
+        allowPasteInput
+      />
+    )
+
+    const event = new Event('paste', { bubbles: true, cancelable: true })
+    Object.defineProperty(event, 'clipboardData', {
+      value: { getData: () => 'login-code\r\n' },
+    })
+    const terminalInput = document.createElement('textarea')
+    screen.getByTestId('standalone-terminal-surface').append(terminalInput)
+    fireEvent(terminalInput, event)
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(writeTerminalInput).toHaveBeenCalledWith('http-login', 'login-code\n')
+    expect(readFromClipboard).not.toHaveBeenCalled()
+  })
+
+  it('sends text from the HTTP login field and does not intercept its paste', () => {
+    render(
+      <StandaloneTerminalSurface
+        terminalId="http-login-field"
+        command="claude"
+        commandArgs={['auth', 'login']}
+        allowPasteInput
+      />
+    )
+
+    const field = screen.getByRole('textbox', { name: 'Login code or URL' })
+    fireEvent.paste(field, {
+      clipboardData: { getData: () => 'code-123' },
+    })
+    expect(writeTerminalInput).not.toHaveBeenCalled()
+
+    fireEvent.change(field, { target: { value: 'code-123' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    expect(writeTerminalInput).toHaveBeenCalledWith('http-login-field', 'code-123\r')
+    expect(field).toHaveValue('')
+  })
+
   it('does not start the login PTY while the container is still tiny (issue #624)', async () => {
     mockContentRect = { width: 40, height: 20 }
 

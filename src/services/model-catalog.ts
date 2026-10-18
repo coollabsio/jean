@@ -5,6 +5,7 @@ import {
   modelOptions,
   type CliBackend,
 } from '@/types/preferences'
+import { sortModelOptionsByRawModel } from '@/lib/model-utils'
 
 export const MODEL_CATALOG_URL =
   'https://raw.githubusercontent.com/coollabsio/coollabs-cdn/main/json/jean/models.json'
@@ -116,15 +117,20 @@ function getBundledReasoning(
   model: string
 ): ModelReasoningCapability | undefined {
   if (backend === 'codex') {
+    const isGpt6 = /^gpt-6[.-]/.test(model)
     const isGpt56 = model.startsWith('gpt-5.6')
-    const levels = isGpt56
+    const levels = isGpt6
       ? model.includes('luna')
         ? GPT_5_6_LUNA_EFFORT_LEVELS
         : GPT_5_6_EFFORT_LEVELS
-      : STANDARD_EFFORT_LEVELS
+      : isGpt56
+        ? model.includes('luna')
+          ? GPT_5_6_LUNA_EFFORT_LEVELS
+          : GPT_5_6_EFFORT_LEVELS
+        : STANDARD_EFFORT_LEVELS
     return {
       type: 'effort',
-      default: isGpt56 ? 'medium' : 'high',
+      default: isGpt6 || isGpt56 ? 'medium' : 'high',
       levels,
     }
   }
@@ -134,6 +140,7 @@ function getBundledReasoning(
     model.includes('fable-5') ||
     model.includes('opus-5') ||
     model.includes('sonnet-5') ||
+    model.includes('haiku-5') ||
     model.includes('opus-4-8') ||
     model.includes('opus-4-7') ||
     model.includes('opus-4-6') ||
@@ -164,9 +171,9 @@ const fallbackModelCatalog: ModelCatalog = {
   version: 1,
   updated_at: 'bundled',
   defaults: {
-    claude: 'claude-opus-4-8[1m]',
-    codex: 'gpt-5.6-sol',
-    opencode: 'opencode/gpt-5.6-sol',
+    claude: 'claude-opus-5-5',
+    codex: 'gpt-6.1-sol',
+    opencode: 'opencode/gpt-6.1-sol',
     grok: 'grok/grok-4.6',
   },
   backends: {
@@ -421,9 +428,10 @@ export function getCatalogModelOptions(
       ? []
       : getCatalogModelOptions(fallbackModelCatalog, backend)
   }
-  return models.flatMap(model =>
+  const options = models.flatMap(model =>
     model.hidden ? [] : [{ value: model.id, label: model.label }]
   )
+  return backend === 'claude' ? sortModelOptionsByRawModel(options) : options
 }
 
 export function getCatalogDefaultModelOptions(

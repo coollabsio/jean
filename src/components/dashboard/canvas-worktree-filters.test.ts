@@ -3,6 +3,8 @@ import type { Worktree } from '@/types/projects'
 import {
   CANVAS_FILTER_TABS,
   getCanvasFilterTabCount,
+  getCanvasWorktreeSearchTerms,
+  matchesCanvasWorktreeSearch,
   matchesCanvasFilterTab,
   shouldShowCanvasWorktreeSection,
 } from './canvas-worktree-filters'
@@ -42,6 +44,31 @@ describe('canvas worktree filters', () => {
     expect(matchesCanvasFilterTab(autoFixIssue, 'auto_fix')).toBe(true)
   })
 
+  it('keeps pending, failed, and ready automation worktrees out of every normal filter, including labels', () => {
+    for (const status of ['pending', 'error', 'ready'] as const) {
+      const robot = worktree({
+        origin: 'auto_fix',
+        status,
+        issue_number: 1,
+        pr_number: 2,
+        security_alert_number: 3,
+        labels: [{ name: 'Bug', color: '#fff', pinned: true }],
+      })
+      for (const filter of [
+        'all',
+        'manual',
+        'issues',
+        'prs',
+        'security',
+        'label:bug',
+      ] as const) {
+        expect(matchesCanvasFilterTab(robot, filter)).toBe(false)
+      }
+      expect(matchesCanvasFilterTab(robot, 'auto_fix')).toBe(true)
+    }
+    expect(matchesCanvasFilterTab(worktree({}), 'auto_fix')).toBe(false)
+  })
+
   it('counts auto-fix worktrees separately from All', () => {
     const worktrees = [
       worktree({ id: 'manual' }),
@@ -70,5 +97,47 @@ describe('canvas worktree filters', () => {
         worktree({ id: 'deleting', status: 'deleting' })
       )
     ).toBe(false)
+  })
+
+  it('matches worktree search only against relevant worktree metadata', () => {
+    const matching = worktree({
+      name: 'pr-10960-memory-crash',
+      branch: 'fix/memory-crash',
+      pr_number: 10960,
+    })
+    const unrelated = worktree({
+      name: 'smtp-server-setup',
+      branch: 'fix/smtp',
+      pr_number: 5877,
+    })
+
+    expect(matchesCanvasWorktreeSearch(matching, '10960')).toBe(true)
+    expect(matchesCanvasWorktreeSearch(unrelated, '10960')).toBe(false)
+  })
+
+  it('normalizes searchable worktree metadata once per worktree', () => {
+    const terms = getCanvasWorktreeSearchTerms(
+      worktree({
+        name: 'Feature/Search',
+        branch: 'Feature/Search',
+        labels: [{ name: 'Needs Review', color: '#fff' }],
+        pr_number: 42,
+        issue_number: 7,
+        linear_issue_identifier: 'ENG-123',
+        security_alert_number: 9,
+        advisory_ghsa_id: 'GHSA-AbCd',
+      })
+    )
+
+    expect(terms).toEqual([
+      'feature/search',
+      'feature/search',
+      'needs review',
+      '42',
+      '7',
+      'eng-123',
+      '9',
+      'ghsa-abcd',
+    ])
   })
 })

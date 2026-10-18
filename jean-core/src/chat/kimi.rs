@@ -4,6 +4,7 @@
 //! running while Jean is closed; Jean tails the host's run JSONL and reattaches
 //! after restart. Windows uses the attached ACP fallback.
 
+use super::coalesce::ChunkCoalescer;
 use super::types::{ChatMessage, ContentBlock, MessageRole, RunEntry, ToolCall, UsageData};
 use crate::http_server::EmitExt;
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -67,7 +68,8 @@ pub struct KimiExecutionOptions<'a> {
 
 fn kimi_mode(mode: Option<&str>) -> &'static str {
     match mode.unwrap_or("plan") {
-        "build" => "auto",
+        "auto" => "auto",
+        "build" | "supervised" => "default",
         "yolo" => "yolo",
         _ => "plan",
     }
@@ -197,31 +199,8 @@ fn handle_reverse_request(
         return Ok(false);
     }
 
-    let allow = !matches!(execution_mode, None | Some("plan"));
-    let options = value
-        .get("params")
-        .and_then(|params| params.get("options"))
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let preferred = if allow {
-        ["allow_once", "allow_always"]
-    } else {
-        ["reject_once", "reject_always"]
-    };
-    let selected = preferred.iter().find_map(|kind| {
-        options.iter().find_map(|option| {
-            (option.get("kind").and_then(Value::as_str) == Some(*kind))
-                .then(|| option.get("optionId").and_then(Value::as_str))
-                .flatten()
-        })
-    });
-    let result = match selected {
-        Some(option_id) => serde_json::json!({
-            "outcome": {"outcome": "selected", "optionId": option_id}
-        }),
-        None => serde_json::json!({"outcome": {"outcome": "cancelled"}}),
-    };
+    let params = value.get("params").unwrap_or(&Value::Null);
+    let result = super::acp_permissions::decide(execution_mode, params)?;
     send_response(stdin, id, result)?;
     Ok(true)
 }
@@ -419,6 +398,44 @@ fn emit(app: &AppHandle, event: &str, value: Value) {
     let _ = app.emit_all(event, &value);
 }
 
+fn emit_kimi_chunk(app: &AppHandle, session_id: &str, worktree_id: &str, content: &str) {
+    emit(
+        app,
+        "chat:chunk",
+        serde_json::json!({
+            "session_id": session_id,
+            "worktree_id": worktree_id,
+            "content": content,
+        }),
+    );
+}
+
+/// Buffer a text delta; emits one coalesced `chat:chunk` once the window elapses.
+fn push_kimi_chunk(
+    app: &AppHandle,
+    session_id: &str,
+    worktree_id: &str,
+    coalescer: &mut ChunkCoalescer,
+    content: &str,
+) {
+    if let Some(batch) = coalescer.push(content) {
+        emit_kimi_chunk(app, session_id, worktree_id, &batch);
+    }
+}
+
+/// Emit buffered text. Must run before any other event for the session
+/// (thinking/tool/done/error) so event ordering is preserved.
+fn flush_kimi_chunks(
+    app: &AppHandle,
+    session_id: &str,
+    worktree_id: &str,
+    coalescer: &mut ChunkCoalescer,
+) {
+    if let Some(batch) = coalescer.flush() {
+        emit_kimi_chunk(app, session_id, worktree_id, &batch);
+    }
+}
+
 fn inject_synthetic_plan(response: &mut KimiResponse) -> Option<ToolCall> {
     if response.content.trim().is_empty()
         || response
@@ -437,6 +454,8 @@ fn inject_synthetic_plan(response: &mut KimiResponse) -> Option<ToolCall> {
         }),
         output: None,
         parent_tool_use_id: None,
+        is_error: None,
+        subagent_usage: None,
     };
     response.content_blocks.push(ContentBlock::ToolUse {
         tool_call_id: tool.id.clone(),
@@ -647,6 +666,10 @@ pub fn run_kimi_acp_host_from_args() -> Result<(), String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     if let Some(session_id) = jean_session_id {
+        command.env(
+            crate::agent_browser::SESSION_ENV,
+            crate::agent_browser::session_name(&session_id),
+        );
         command.env("JEAN_SESSION_ID", session_id);
     }
     if let Some(worktree_id) = worktree_id {
@@ -741,6 +764,12 @@ pub fn run_kimi_acp_host_from_args() -> Result<(), String> {
     let stop = Arc::new(AtomicBool::new(false));
     let abort = Arc::new(AtomicBool::new(false));
     let (prompt_tx, prompt_rx) = mpsc::channel();
+    let approval_output = output.clone();
+    let _approval_scope = super::acp_permissions::scope(
+        super::types::Backend::Kimi,
+        Arc::new(move |value| write_host_line(&approval_output, value)),
+        abort.clone(),
+    );
     let listener_stop = stop.clone();
     let listener_abort = abort.clone();
     std::thread::spawn(move || {
@@ -757,6 +786,15 @@ pub fn run_kimi_acp_host_from_args() -> Result<(), String> {
                 continue;
             };
             match value.get("type").and_then(Value::as_str) {
+                Some("permission_reply") => {
+                    if let (Some(id), Some(option)) =
+                        (value["request_id"].as_str(), value["option_id"].as_str())
+                    {
+                        if let Err(error) = super::acp_permissions::reply(id, option) {
+                            eprintln!("[kimi-acp] approval reply failed: {error}");
+                        }
+                    }
+                }
                 Some("prompt") => {
                     if let Some(message) = value.get("message").and_then(Value::as_str) {
                         let _ = prompt_tx.send(message.to_string());
@@ -871,6 +909,8 @@ fn apply_kimi_stream_item(response: &mut KimiResponse, item: &KimiStreamItem) {
                     input: input.clone(),
                     output: None,
                     parent_tool_use_id: None,
+                    is_error: None,
+                    subagent_usage: None,
                 });
             }
         }
@@ -907,6 +947,8 @@ pub fn tail_kimi_output(
     let mut last_output_at = Instant::now();
     let mut received_output = false;
     let mut completed = false;
+    // Batch token deltas (~30ms) into fewer chat:chunk events.
+    let mut chunk_coalescer = ChunkCoalescer::new();
 
     loop {
         let lines = tailer.poll()?;
@@ -915,19 +957,30 @@ pub fn tail_kimi_output(
             let Ok(value) = serde_json::from_str::<Value>(line.trim()) else {
                 continue;
             };
-            completed |= merge_kimi_host_line(&mut response, &value)?;
+            if super::acp_permissions::handle_log_event(
+                app,
+                session_id,
+                worktree_id,
+                &super::pi::run_id_from_output_file(output_file),
+                &value,
+            )? {
+                continue;
+            }
+            let merged = merge_kimi_host_line(&mut response, &value);
+            if merged.is_err() {
+                flush_kimi_chunks(app, session_id, worktree_id, &mut chunk_coalescer);
+            }
+            completed |= merged?;
             if let Some(item) = parse_stream_item(&value) {
                 apply_kimi_stream_item(&mut response, &item);
+                if let KimiStreamItem::Text(content) = &item {
+                    push_kimi_chunk(app, session_id, worktree_id, &mut chunk_coalescer, content);
+                } else {
+                    // Flush text before any other event so UI order is stable.
+                    flush_kimi_chunks(app, session_id, worktree_id, &mut chunk_coalescer);
+                }
                 match item {
-                    KimiStreamItem::Text(content) => emit(
-                        app,
-                        "chat:chunk",
-                        serde_json::json!({
-                            "session_id": session_id,
-                            "worktree_id": worktree_id,
-                            "content": content,
-                        }),
-                    ),
+                    KimiStreamItem::Text(_) => {}
                     KimiStreamItem::Thinking(content) => emit(
                         app,
                         "chat:thinking",
@@ -975,6 +1028,14 @@ pub fn tail_kimi_output(
             last_output_at = Instant::now();
         }
 
+        // Release buffered text when the coalesce window elapses, even if no
+        // new lines arrived (idle mid-sentence).
+        if let Some(deadline) = chunk_coalescer.deadline() {
+            if Instant::now() >= deadline {
+                flush_kimi_chunks(app, session_id, worktree_id, &mut chunk_coalescer);
+            }
+        }
+
         if completed {
             break;
         }
@@ -988,9 +1049,14 @@ pub fn tail_kimi_output(
                 break;
             }
         }
-        std::thread::sleep(next_poll_interval(got_lines, last_output_at.elapsed()));
+        let mut sleep_for = next_poll_interval(got_lines, last_output_at.elapsed());
+        if let Some(deadline) = chunk_coalescer.deadline() {
+            sleep_for = sleep_for.min(deadline.saturating_duration_since(Instant::now()));
+        }
+        std::thread::sleep(sleep_for);
     }
 
+    flush_kimi_chunks(app, session_id, worktree_id, &mut chunk_coalescer);
     response.content = response.content.trim().to_string();
     Ok(response)
 }
@@ -1035,6 +1101,7 @@ pub(crate) fn parse_kimi_run_to_message(
         execution_mode: run.execution_mode.clone(),
         thinking_level: run.thinking_level.clone(),
         effort_level: run.effort_level.clone(),
+        custom_profile_name: None,
         recovered: run.recovered,
         usage: response.usage.or_else(|| run.usage.clone()),
     })
@@ -1176,6 +1243,10 @@ fn execute_kimi_attached(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .env("JEAN_SESSION_ID", options.jean_session_id)
+        .env(
+            crate::agent_browser::SESSION_ENV,
+            crate::agent_browser::session_name(options.jean_session_id),
+        )
         .env("JEAN_WORKTREE_ID", options.worktree_id);
     let (depth_key, depth_value) = super::jean_mcp::child_depth_env();
     command.env(depth_key, depth_value);
@@ -1187,7 +1258,7 @@ fn execute_kimi_attached(
         callback(pid);
     }
     if !super::registry::register_process(options.jean_session_id.to_string(), pid) {
-        let _ = child.kill();
+        crate::platform::kill_and_reap(&mut child);
         return Ok(KimiResponse {
             content: String::new(),
             session_id: options
@@ -1201,11 +1272,17 @@ fn execute_kimi_attached(
         });
     }
 
+    let _approval_scope = super::acp_permissions::attached_scope(
+        options.app,
+        options.jean_session_id,
+        options.worktree_id,
+        options.output_file,
+        super::types::Backend::Kimi,
+    );
     let result = execute_kimi_child(&mut child, options);
     let cancelled = !super::registry::is_process_running(options.jean_session_id);
     super::registry::unregister_process(options.jean_session_id);
-    let _ = child.kill();
-    let _ = child.wait();
+    crate::platform::kill_and_reap(&mut child);
 
     match result {
         Ok(mut response) => {
@@ -1329,7 +1406,19 @@ fn execute_kimi_child(
         usage: None,
     };
     let mut line = String::new();
+    // Batch token deltas (~30ms) into fewer chat:chunk events.
+    let mut chunk_coalescer = ChunkCoalescer::new();
     loop {
+        // No complete line buffered — flush before blocking on more output so
+        // text is not held back while Kimi idles mid-stream.
+        if !reader.buffer().contains(&b'\n') {
+            flush_kimi_chunks(
+                options.app,
+                options.jean_session_id,
+                options.worktree_id,
+                &mut chunk_coalescer,
+            );
+        }
         line.clear();
         if reader
             .read_line(&mut line)
@@ -1341,22 +1430,38 @@ fn execute_kimi_child(
         let Ok(value) = serde_json::from_str::<Value>(line.trim()) else {
             continue;
         };
-        if handle_reverse_request(&mut stdin, &value, options.execution_mode)? {
+        let handled = handle_reverse_request(&mut stdin, &value, options.execution_mode);
+        if handled.is_err() {
+            flush_kimi_chunks(
+                options.app,
+                options.jean_session_id,
+                options.worktree_id,
+                &mut chunk_coalescer,
+            );
+        }
+        if handled? {
             continue;
         }
         if let Some(item) = parse_stream_item(&value) {
+            if !matches!(item, KimiStreamItem::Text(_)) {
+                // Flush text before any other event so UI order is stable.
+                flush_kimi_chunks(
+                    options.app,
+                    options.jean_session_id,
+                    options.worktree_id,
+                    &mut chunk_coalescer,
+                );
+            }
             match item {
                 KimiStreamItem::Text(text) => {
                     response.content.push_str(&text);
                     push_text_block(&mut response.content_blocks, &text);
-                    emit(
+                    push_kimi_chunk(
                         options.app,
-                        "chat:chunk",
-                        serde_json::json!({
-                            "session_id": options.jean_session_id,
-                            "worktree_id": options.worktree_id,
-                            "content": text,
-                        }),
+                        options.jean_session_id,
+                        options.worktree_id,
+                        &mut chunk_coalescer,
+                        &text,
                     );
                 }
                 KimiStreamItem::Thinking(thinking) => {
@@ -1384,6 +1489,8 @@ fn execute_kimi_child(
                             input: input.clone(),
                             output: None,
                             parent_tool_use_id: None,
+                            is_error: None,
+                            subagent_usage: None,
                         });
                     }
                     emit(
@@ -1425,6 +1532,12 @@ fn execute_kimi_child(
             }
         }
         if value.get("id").and_then(Value::as_i64) == Some(prompt_id) {
+            flush_kimi_chunks(
+                options.app,
+                options.jean_session_id,
+                options.worktree_id,
+                &mut chunk_coalescer,
+            );
             if let Some(error) = value.get("error") {
                 return Err(format!("Kimi ACP prompt failed: {error}"));
             }
@@ -1498,7 +1611,9 @@ mod tests {
     #[test]
     fn maps_jean_execution_modes_to_kimi_acp_modes() {
         assert_eq!(kimi_mode(Some("plan")), "plan");
-        assert_eq!(kimi_mode(Some("build")), "auto");
+        assert_eq!(kimi_mode(Some("build")), "default");
+        assert_eq!(kimi_mode(Some("supervised")), "default");
+        assert_eq!(kimi_mode(Some("auto")), "auto");
         assert_eq!(kimi_mode(Some("yolo")), "yolo");
         assert_eq!(kimi_mode(None), "plan");
     }

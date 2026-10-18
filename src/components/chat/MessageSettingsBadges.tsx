@@ -19,6 +19,7 @@ interface MessageSettingsBadgesProps {
   executionMode: ExecutionMode | undefined
   thinkingLevel: ThinkingLevel | undefined
   effortLevel: EffortLevel | undefined
+  provider?: string
   isCursor: boolean
 }
 
@@ -27,6 +28,7 @@ export const MessageSettingsBadges = memo(function MessageSettingsBadges({
   executionMode,
   thinkingLevel,
   effortLevel,
+  provider,
   isCursor,
 }: MessageSettingsBadgesProps) {
   if (!model) return null
@@ -43,7 +45,13 @@ export const MessageSettingsBadges = memo(function MessageSettingsBadges({
     isPiModel(model) ||
     model.startsWith('pi/')
   const executionModeLabel = executionMode
-    ? executionMode.charAt(0).toUpperCase() + executionMode.slice(1)
+    ? {
+        plan: 'Plan',
+        build: 'Auto-accept edits',
+        yolo: 'Full access',
+        supervised: 'Supervised',
+        auto: 'Auto',
+      }[executionMode]
     : null
 
   const effortOptions = model.startsWith('pi/')
@@ -69,6 +77,7 @@ export const MessageSettingsBadges = memo(function MessageSettingsBadges({
   return (
     <div className="flex items-center text-[10px] text-muted-foreground/50">
       <span>{modelLabel}</span>
+      {provider && <span>&nbsp;· {provider}</span>}
       {executionModeLabel && <span>&nbsp;· {executionModeLabel}</span>}
       {!isCursor && effortLabel && <span>&nbsp;· {effortLabel}</span>}
       {!isCursor && !effortLabel && thinkingLabel && (

@@ -9,13 +9,19 @@ import {
 } from './codex-cli'
 import type { CodexUsageSnapshot } from '@/types/codex-cli'
 
-const { invokeMock, listenMock } = vi.hoisted(() => ({
+const { invokeMock, invokeForServerMock, listenMock } = vi.hoisted(() => ({
   invokeMock: vi.fn(),
+  invokeForServerMock: vi.fn(),
   listenMock: vi.fn(),
 }))
 
 vi.mock('@/lib/transport', () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
+  invokeForOptionalServer: (
+    serverId: string | undefined,
+    ...args: unknown[]
+  ) =>
+    serverId ? invokeForServerMock(serverId, ...args) : invokeMock(...args),
   listen: (...args: unknown[]) => listenMock(...args),
   useWsConnectionStatus: vi.fn(() => true),
 }))
@@ -91,6 +97,7 @@ describe('Codex usage update listener', () => {
 describe('Codex CLI status', () => {
   beforeEach(() => {
     invokeMock.mockReset()
+    invokeForServerMock.mockReset()
   })
 
   it('checks the configured remote backend before its WebSocket connects', async () => {
@@ -109,5 +116,29 @@ describe('Codex CLI status', () => {
 
     await waitFor(() => expect(result.current.data?.installed).toBe(true))
     expect(invokeMock).toHaveBeenCalledWith('check_codex_cli_installed')
+  })
+
+  it('checks an explicitly selected server', async () => {
+    invokeForServerMock.mockResolvedValue({
+      installed: true,
+      version: '1.2.3',
+      path: '/remote/bin/codex',
+    })
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client: queryClient }, children)
+
+    const { result } = renderHook(
+      () => useCodexCliStatus({ serverId: 'remote-1' }),
+      { wrapper }
+    )
+
+    await waitFor(() => expect(result.current.data?.installed).toBe(true))
+    expect(invokeForServerMock).toHaveBeenCalledWith(
+      'remote-1',
+      'check_codex_cli_installed'
+    )
   })
 })

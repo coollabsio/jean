@@ -6,7 +6,6 @@ import { MainWindowContent } from './MainWindowContent'
 import { useUIStore } from '@/store/ui-store'
 import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
-import { useTerminalStore } from '@/store/terminal-store'
 
 vi.mock('@/hooks/use-mobile', () => ({
   useIsMobile: () => true,
@@ -16,6 +15,14 @@ vi.mock('@/services/projects', () => ({
   useProjects: () => ({ data: [] }),
 }))
 
+vi.mock('@/components/agents/agents-feature', () => ({
+  useShowAgents: () => false,
+  useAgentsEnabled: () => false,
+  useAgentsEnabledServers: () => [],
+}))
+vi.mock('@/services/preferences', () => ({
+  usePreferences: () => ({ data: undefined }),
+}))
 vi.mock('@/hooks/useInstalledBackends', () => ({
   useInstalledBackends: () => ({
     installedBackends: ['claude'],
@@ -102,25 +109,51 @@ describe('MainWindowContent mobile swipe open sidebar', () => {
     expect(useUIStore.getState().leftSidebarVisible).toBe(false)
   })
 
-  it('uses swipe-back on chat instead of open-sidebar target', async () => {
+  it('shows the circular indicator at the current swipe position', () => {
+    render(
+      <MainWindowContent
+        sidebarSwipeIndicator={{
+          isSwiping: true,
+          translateX: 68,
+          progress: 0.5,
+        }}
+      />
+    )
+
+    const indicator = screen.getByTestId('mobile-sidebar-swipe-indicator')
+    expect(indicator).toHaveStyle({ left: '60px' })
+    expect(indicator.firstElementChild).toHaveStyle({
+      width: '20px',
+      height: '20px',
+    })
+    expect(
+      Number((indicator.firstElementChild as HTMLElement).style.opacity)
+    ).toBeCloseTo(0.65)
+  })
+
+  it('attaches the sidebar swipe target inside chat without leaving it', async () => {
     useChatStore.setState({
       activeWorktreePath: '/tmp/wt',
       activeWorktreeId: 'wt-1',
     })
 
-    render(<MainWindowContent />)
+    const swipeContainerRef = createRef<HTMLDivElement>()
+    render(<MainWindowContent sidebarSwipeContainerRef={swipeContainerRef} />)
 
     await waitFor(() => {
       expect(screen.getByTestId('chat-window')).toBeInTheDocument()
     })
+    const target = screen.getByTestId('mobile-swipe-chat')
+    expect(swipeContainerRef.current).toBe(target)
     expect(screen.queryByTestId('mobile-swipe-open-sidebar')).toBeNull()
   })
 })
 
-describe('MainWindowContent mobile swipe terminal', () => {
+describe('MainWindowContent mobile chat gestures', () => {
   beforeEach(() => {
     useUIStore.setState({
       leftSidebarVisible: false,
+      fileBrowserVisible: false,
       sessionChatModalOpen: false,
       sessionChatModalWorktreeId: null,
     })
@@ -129,129 +162,17 @@ describe('MainWindowContent mobile swipe terminal', () => {
       activeWorktreeId: 'wt-1',
     })
     useProjectsStore.setState({ selectedProjectId: 'proj-1' })
-    useTerminalStore.setState({
-      terminals: {},
-      activeTerminalIds: {},
-      runningTerminals: new Set(),
-      failedTerminals: new Set(),
-      terminalVisible: false,
-      terminalPanelOpen: {},
-      modalTerminalOpen: {},
-    })
   })
 
-  it('opens the terminal panel on right-edge swipe left', async () => {
+  it('does not expose a right-edge file-browser swipe target', async () => {
     render(<MainWindowContent />)
 
-    const target = await screen.findByTestId('mobile-swipe-open-terminal')
-    Object.defineProperty(target, 'offsetWidth', {
-      value: 400,
-      configurable: true,
+    await waitFor(() => {
+      expect(screen.getByTestId('chat-window')).toBeInTheDocument()
     })
-
-    expect(useTerminalStore.getState().terminalVisible).toBe(false)
-
-    act(() => {
-      fireTouch(target, 'touchstart', 392)
-      fireTouch(target, 'touchmove', 180)
-      fireTouch(target, 'touchend', 180)
-    })
-
-    expect(useTerminalStore.getState().terminalPanelOpen['wt-1']).toBe(true)
-    expect(useTerminalStore.getState().terminalVisible).toBe(true)
-  })
-
-  it('tracks the finger while swiping the terminal open', async () => {
-    render(<MainWindowContent />)
-
-    const target = await screen.findByTestId('mobile-swipe-open-terminal')
-    Object.defineProperty(target, 'offsetWidth', {
-      value: 400,
-      configurable: true,
-    })
-
-    act(() => {
-      fireTouch(target, 'touchstart', 392)
-      fireTouch(target, 'touchmove', 280)
-    })
-
-    expect(target).toHaveStyle({ transform: 'translateX(-112px)' })
-    expect(useTerminalStore.getState().terminalVisible).toBe(false)
-  })
-
-  it('closes the terminal on left-edge swipe right when open', async () => {
-    useTerminalStore.setState({
-      terminalVisible: true,
-      terminalPanelOpen: { 'wt-1': true },
-      terminals: {
-        'wt-1': [
-          {
-            id: 't1',
-            worktreeId: 'wt-1',
-            command: null,
-            label: 'Terminal',
-            kind: 'panel',
-          },
-        ],
-      },
-    })
-
-    render(<MainWindowContent />)
-
-    const target = await screen.findByTestId('mobile-swipe-chat')
-    Object.defineProperty(target, 'offsetWidth', {
-      value: 400,
-      configurable: true,
-    })
-
-    act(() => {
-      fireTouch(target, 'touchstart', 8)
-      fireTouch(target, 'touchmove', 200)
-      fireTouch(target, 'touchend', 200)
-    })
-
-    // animateToEnd is false while terminal is open → closes immediately
-    expect(useTerminalStore.getState().terminalVisible).toBe(false)
-    expect(useTerminalStore.getState().terminalPanelOpen['wt-1']).toBe(false)
-    // Should not leave chat
-    expect(useChatStore.getState().activeWorktreePath).toBe('/tmp/wt')
-  })
-
-  it('does not open terminal when already visible', async () => {
-    useTerminalStore.setState({
-      terminalVisible: true,
-      terminalPanelOpen: { 'wt-1': true },
-      terminals: {
-        'wt-1': [
-          {
-            id: 't1',
-            worktreeId: 'wt-1',
-            command: null,
-            label: 'Terminal',
-            kind: 'panel',
-          },
-        ],
-      },
-    })
-
-    render(<MainWindowContent />)
-
-    const target = await screen.findByTestId('mobile-swipe-open-terminal')
-    Object.defineProperty(target, 'offsetWidth', {
-      value: 400,
-      configurable: true,
-    })
-
-    const before = useTerminalStore.getState().terminals['wt-1']?.length
-
-    act(() => {
-      fireTouch(target, 'touchstart', 392)
-      fireTouch(target, 'touchmove', 180)
-      fireTouch(target, 'touchend', 180)
-    })
-
-    // Gesture disabled while open — no extra terminal
-    expect(useTerminalStore.getState().terminals['wt-1']?.length).toBe(before)
-    expect(useTerminalStore.getState().terminalVisible).toBe(true)
+    expect(
+      screen.queryByTestId('mobile-swipe-open-file-browser')
+    ).not.toBeInTheDocument()
+    expect(useUIStore.getState().fileBrowserVisible).toBe(false)
   })
 })

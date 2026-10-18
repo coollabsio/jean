@@ -1,7 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
 import { invoke } from '@/lib/transport'
 import { logger } from '@/lib/logger'
-import type { SentryIssue, SentryProjectMapping } from '@/types/sentry'
+import type {
+  SentryIssue,
+  SentryIssueContext,
+  SentryProjectMapping,
+} from '@/types/sentry'
 
 export const sentryQueryKeys = {
   all: ['sentry'] as const,
@@ -9,6 +13,8 @@ export const sentryQueryKeys = {
     [...sentryQueryKeys.all, 'projects', projectId] as const,
   issues: (projectId: string, query: string) =>
     [...sentryQueryKeys.all, 'issues', projectId, query] as const,
+  loadedContexts: (sessionId: string) =>
+    [...sentryQueryKeys.all, 'loaded-contexts', sessionId] as const,
 }
 
 export async function testSentryAuthToken(
@@ -81,5 +87,22 @@ export function useSentryIssues(projectId: string | null, query = '') {
     staleTime: 1000 * 60 * 2,
     gcTime: 1000 * 60 * 10,
     retry: 1,
+  })
+}
+
+export function useLoadedSentryContexts(
+  sessionId: string | null,
+  worktreeId: string | null,
+  projectId: string | null
+) {
+  return useQuery({
+    queryKey: sentryQueryKeys.loadedContexts(sessionId ?? ''),
+    queryFn: async () =>
+      (await invoke<SentryIssueContext[]>('get_sentry_issue_context_contents', {
+        sessionId,
+        worktreeId,
+        projectId,
+      })) ?? [],
+    enabled: !!sessionId && !!projectId,
   })
 }

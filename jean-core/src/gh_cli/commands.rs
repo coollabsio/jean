@@ -509,6 +509,8 @@ pub async fn install_gh_cli(app: AppHandle, version: Option<String>) -> Result<(
         crate::platform::wsl_write_bytes(&wsl.distro, &unix_path, &binary_bytes)
             .map_err(|e| format!("Failed to write binary into WSL: {e}"))?;
         crate::platform::wsl_chmod_exec(&wsl.distro, &unix_path)?;
+        #[cfg(windows)]
+        crate::expose_managed_cli_in_wsl(&wsl.distro, "gh", &unix_path);
         emit_progress(&app, "complete", "Installation complete!", 100);
         log::trace!("GitHub CLI installed successfully at WSL:{unix_path}");
         return Ok(());
@@ -573,6 +575,7 @@ pub async fn install_gh_cli(app: AppHandle, version: Option<String>) -> Result<(
     emit_progress(&app, "complete", "Installation complete!", 100);
 
     log::trace!("GitHub CLI installed successfully at {:?}", binary_path);
+    crate::expose_managed_cli("gh", &binary_path);
     Ok(())
 }
 

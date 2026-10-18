@@ -25,13 +25,22 @@ function findNearestTickIndex(zoom: number): number {
 
 /** Apply UI zoom when the saved preference changes. */
 async function applyZoom(scaleFactor: number) {
+  const root = document.documentElement
+  root.style.setProperty('--app-zoom', String(scaleFactor))
+  root.style.setProperty(
+    '--mac-titlebar-action-left-inset',
+    `${68 / scaleFactor}px`
+  )
+  root.style.setProperty(
+    '--mac-titlebar-action-top-inset',
+    `${4 + Math.max(0, scaleFactor - 1) * 4}px`
+  )
+
   if (!isNativeApp()) {
-    const root = document.documentElement
     const style = root.style as CSSStyleDeclaration & {
       zoom: string
     }
     style.zoom = ''
-    root.style.setProperty('--app-zoom', String(scaleFactor))
     root.style.fontSize = `${16 * scaleFactor}px`
     return
   }
@@ -90,8 +99,7 @@ export function useZoom() {
     updateZoom,
   } = useClientZoom(zoomSeed)
 
-  const zoomLevel =
-    isMobile && !syncZoomLevels ? mobileZoom : desktopZoom
+  const zoomLevel = isMobile && !syncZoomLevels ? mobileZoom : desktopZoom
 
   // Apply zoom when client-local zoom changes
   useEffect(() => {
@@ -145,9 +153,8 @@ export function useZoom() {
 
           void (async () => {
             try {
-              const { getCurrentWebview } = await import(
-                '@tauri-apps/api/webview'
-              )
+              const { getCurrentWebview } =
+                await import('@tauri-apps/api/webview')
               if (cancelled) return
               const webview = getCurrentWebview()
               // Bounce through 1 so WKWebView rebuilds its layer at the new DPR.

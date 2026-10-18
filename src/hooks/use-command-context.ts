@@ -191,6 +191,16 @@ export function useCommandContext(
 
     const sessionId = getActiveSession(activeWorktreeId)
     if (!sessionId) return
+    if (useChatStore.getState().isSending(sessionId)) {
+      notify(
+        'Wait for the current session to finish before clearing context.',
+        undefined,
+        {
+          type: 'info',
+        }
+      )
+      return
+    }
     const worktreePath =
       useChatStore.getState().getWorktreePath(activeWorktreeId) ??
       useChatStore.getState().activeWorktreePath
@@ -521,7 +531,7 @@ export function useCommandContext(
 
   const getCurrentModel = useCallback((): ClaudeModel => {
     // Default - actual model comes from preferences
-    return 'claude-opus-4-8[1m]'
+    return 'claude-opus-5-5'
   }, [])
 
   const getCurrentThinkingLevel = useCallback((): ThinkingLevel => {
@@ -678,7 +688,7 @@ export function useCommandContext(
       return
     }
 
-    const { addTerminal, setTerminalPanelOpen, setTerminalVisible } =
+    const { addTerminal, setTerminalPanelOpen, setTerminalVisibleForWorktree } =
       useTerminalStore.getState()
     const terminals = useTerminalStore
       .getState()
@@ -691,7 +701,7 @@ export function useCommandContext(
     } else {
       // Just show the panel
       setTerminalPanelOpen(selectedWorktreeId, true)
-      setTerminalVisible(true)
+      setTerminalVisibleForWorktree(selectedWorktreeId, true)
     }
   }, [])
 
@@ -802,7 +812,7 @@ export function useCommandContext(
         type: 'error',
       })
     }
-  }, [])
+  }, [queryClient, preferences, installedBackends])
 
   // Session - Resume session (reconnect to Claude CLI)
   const resumeSession = useCallback(async () => {
@@ -889,6 +899,18 @@ export function useCommandContext(
     // This needs to check if jean.json has a run script
     // For now return true - actual check happens in the run script handler
     return true
+  }, [])
+
+  const hasCurrentSessionRunning = useCallback(() => {
+    const chatState = useChatStore.getState()
+    const uiState = useUIStore.getState()
+    const worktreeId = uiState.sessionChatModalOpen
+      ? uiState.sessionChatModalWorktreeId
+      : chatState.activeWorktreeId
+    if (!worktreeId) return false
+
+    const sessionId = chatState.getActiveSession(worktreeId)
+    return sessionId ? chatState.isSending(sessionId) : false
   }, [])
 
   return useMemo(
@@ -979,6 +1001,7 @@ export function useCommandContext(
 
       // State getters
       hasActiveSession,
+      hasCurrentSessionRunning,
       hasActiveWorktree,
       hasSelectedProject,
       hasInstalledBackend,
@@ -1044,6 +1067,7 @@ export function useCommandContext(
       hasMultipleSessions,
       hasMultipleWorktrees,
       hasRunScript,
+      hasCurrentSessionRunning,
       getCurrentTheme,
       getCurrentModel,
       getCurrentThinkingLevel,

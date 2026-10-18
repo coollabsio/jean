@@ -13,12 +13,10 @@ export type IndicatorStatus =
   | 'crashed'
   | 'scheduled'
 
-export type IndicatorVariant = 'default' | 'destructive' | 'loading'
 export type IndicatorShape = 'circle' | 'square' | 'diamond' | 'ring'
 
 interface StatusIndicatorProps {
   status: IndicatorStatus
-  variant?: IndicatorVariant
   shape?: IndicatorShape
   /** Accessible name describing the status (also used as title fallback). */
   label?: string
@@ -64,9 +62,33 @@ function shapeClasses(shape: IndicatorShape): string {
   }
 }
 
+/** Small 3-bar activity waveform shown for running sessions/agents. */
+export function WorkingWaveform({
+  label,
+  className,
+}: {
+  label?: string
+  className?: string
+}) {
+  return (
+    <span
+      {...(label
+        ? { role: 'img', 'aria-label': label, title: label }
+        : { 'aria-hidden': true })}
+      className={cn(
+        'working-waveform shrink-0 text-primary forced-colors:text-[Highlight]',
+        className
+      )}
+    >
+      <span />
+      <span />
+      <span />
+    </span>
+  )
+}
+
 export function StatusIndicator({
   status,
-  variant = 'default',
   shape,
   label,
   className,
@@ -75,35 +97,11 @@ export function StatusIndicator({
   const shapeClass = shapeClasses(resolvedShape)
   const title = label
 
-  // Running state: CSS border spinner (shape still communicates meaning without color)
+  // Running state: shared 3-bar waveform. It has a fixed size, so the
+  // dot size classes from `className` do not apply here. Static dots sit in
+  // a slot of the same size so layouts do not shift between states.
   if (status === 'running') {
-    const colorClass =
-      variant === 'destructive'
-        ? 'border-t-destructive bg-destructive/10 forced-colors:border-t-[Highlight]'
-        : variant === 'loading'
-          ? 'border-t-cyan-500 bg-cyan-500/10 forced-colors:border-t-[Highlight]'
-          : 'border-t-yellow-500 bg-yellow-500/10 forced-colors:border-t-[Highlight]'
-
-    return (
-      <span
-        role="img"
-        aria-label={label}
-        title={title}
-        className={cn(
-          'shrink-0 block animate-spin border-2 border-transparent motion-reduce:animate-none',
-          // Reduced motion: solid fill instead of spinner so status remains visible
-          'motion-reduce:border-0 motion-reduce:bg-current',
-          variant === 'destructive'
-            ? 'motion-reduce:text-destructive'
-            : variant === 'loading'
-              ? 'motion-reduce:text-cyan-500'
-              : 'motion-reduce:text-yellow-500',
-          shapeClass,
-          colorClass,
-          className
-        )}
-      />
-    )
+    return <WorkingWaveform label={label} />
   }
 
   // Static states: filled/outline shapes with distinct colors + shapes
@@ -112,13 +110,13 @@ export function StatusIndicator({
     status === 'plan_approval' ||
     status === 'input_required' ||
     status === 'permission'
-      ? 'text-yellow-500 animate-blink motion-reduce:animate-none forced-colors:text-[Highlight]'
+      ? 'text-warning animate-blink motion-reduce:animate-none forced-colors:text-[Highlight]'
       : status === 'review' || status === 'completed'
-        ? 'text-green-500 forced-colors:text-[Highlight]'
+        ? 'text-success forced-colors:text-[Highlight]'
         : status === 'crashed'
           ? 'text-destructive forced-colors:text-[Mark]'
           : status === 'scheduled'
-            ? 'text-cyan-500 forced-colors:text-[Highlight]'
+            ? 'text-info forced-colors:text-[Highlight]'
             : status === 'cancelled'
               ? 'text-muted-foreground forced-colors:text-[GrayText]'
               : 'text-muted-foreground/50 forced-colors:text-[GrayText]'
@@ -131,13 +129,17 @@ export function StatusIndicator({
       role="img"
       aria-label={label}
       title={title}
-      className={cn(
-        'shrink-0 block',
-        fillClass,
-        shapeClass,
-        colorClass,
-        className
-      )}
-    />
+      className="inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center"
+    >
+      <span
+        className={cn(
+          'shrink-0 block',
+          fillClass,
+          shapeClass,
+          colorClass,
+          className
+        )}
+      />
+    </span>
   )
 }

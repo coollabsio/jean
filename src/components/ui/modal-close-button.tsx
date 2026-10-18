@@ -1,4 +1,4 @@
-import { X } from 'lucide-react'
+import { X } from '@/components/icons/reicon'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 

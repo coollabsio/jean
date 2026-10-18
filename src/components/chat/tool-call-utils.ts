@@ -33,7 +33,8 @@ function isAgentTool(name: string): boolean {
 export function normalizeTodosForDisplay(
   todos: Todo[],
   isStreaming: boolean,
-  wasCancelled = false
+  wasCancelled = false,
+  completePending = false
 ): Todo[] {
   if (isStreaming) return todos
 
@@ -42,8 +43,13 @@ export function normalizeTodosForDisplay(
     if (wasCancelled && todo.status !== 'completed') {
       return { ...todo, status: 'cancelled' as const }
     }
-    // Normal completion: convert in_progress to completed
-    if (todo.status === 'in_progress') {
+    // Grok can finish a turn without sending the final TodoWrite status patch.
+    // A normally completed turn is authoritative, so clear its stale pending
+    // and in-progress states in the display.
+    if (
+      todo.status === 'in_progress' ||
+      (completePending && todo.status === 'pending')
+    ) {
       return { ...todo, status: 'completed' as const }
     }
     return todo
@@ -131,7 +137,17 @@ export type StackableItem =
 export type TimelineItem =
   | { type: 'text'; text: string; key: string }
   | { type: 'thinking'; thinking: string; key: string }
-  | { type: 'task'; taskTool: ToolCall; subTools: ToolCall[]; key: string }
+  | {
+      type: 'task'
+      taskTool: ToolCall
+      subTools: ToolCall[]
+      key: string
+      /**
+       * Sub-tools of every Task/Agent in the message keyed by tool id (same
+       * grouping as subTools). Lets nested agents render their own children.
+       */
+      nestedSubTools?: Record<string, ToolCall[]>
+    }
   | { type: 'standalone'; tool: ToolCall; key: string }
   | { type: 'stackedGroup'; items: StackableItem[]; key: string }
   | { type: 'askUserQuestion'; tool: ToolCall; introText?: string; key: string }
@@ -253,6 +269,51 @@ export function coalesceContentBlocks(blocks: ContentBlock[]): ContentBlock[] {
   return out
 }
 
+/**
+ * Live tool blocks can start after the accumulated answer text.
+ * Put that missing start back on the first text block while the turn streams.
+ * The finished message already has the full text.
+ */
+export function restoreOmittedStreamingPrefix(
+  streamingContent: string,
+  blocks: ContentBlock[]
+): ContentBlock[] {
+  if (!streamingContent) return blocks
+
+  const joined = blocks
+    .flatMap(block => (block.type === 'text' ? [block.text] : []))
+    .join('')
+
+  if (!joined) {
+    if (blocks.length === 0) return blocks
+    return [{ type: 'text', text: streamingContent }, ...blocks]
+  }
+
+  if (
+    streamingContent.length === joined.length ||
+    !streamingContent.endsWith(joined)
+  ) {
+    return blocks
+  }
+
+  const prefix = streamingContent.slice(
+    0,
+    streamingContent.length - joined.length
+  )
+  if (!prefix) return blocks
+
+  const index = blocks.findIndex(block => block.type === 'text')
+  const block = index >= 0 ? blocks[index] : undefined
+  if (!block || block.type !== 'text') return blocks
+
+  const text = prefix.endsWith(block.text) ? prefix : prefix + block.text
+  if (text === block.text) return blocks
+
+  const next = blocks.slice()
+  next[index] = { type: 'text', text }
+  return next
+}
+
 export function buildTimeline(
   contentBlocks: ContentBlock[],
   toolCalls: ToolCall[]
@@ -305,6 +366,14 @@ export function buildTimeline(
       }
       // else: standalone tool (no current Task context)
     }
+  }
+
+  // Resolved sub-tools per Task/Agent id, in first-seen order
+  const subToolsByParent: Record<string, ToolCall[]> = {}
+  for (const [subId, parentId] of subToolParent.entries()) {
+    const subTool = toolCallMap.get(subId)
+    if (!subTool) continue
+    ;(subToolsByParent[parentId] ??= []).push(subTool)
   }
 
   // Track which Tasks we've already rendered (to collect their sub-tools)
@@ -442,20 +511,12 @@ export function buildTimeline(
         if (renderedTasks.has(toolCall.id)) continue
         renderedTasks.add(toolCall.id)
 
-        // Find all sub-tools for this task
-        const subTools: ToolCall[] = []
-        for (const [subId, parentId] of subToolParent.entries()) {
-          if (parentId === toolCall.id) {
-            const subTool = toolCallMap.get(subId)
-            if (subTool) subTools.push(subTool)
-          }
-        }
-
         result.push({
           type: 'task',
           taskTool: toolCall,
-          subTools,
+          subTools: subToolsByParent[toolCall.id] ?? [],
           key: `task-${toolCall.id}`,
+          nestedSubTools: subToolsByParent,
         })
       } else {
         // Standalone tool (not a sub-tool, not a Task)
@@ -512,7 +573,10 @@ function getPlanPreviewField(input: PlanToolInput | undefined): string | null {
 
 /** Status-only explanations are not handoff-quality plan bodies. */
 function isStatusOnlyPlanExplanation(text: string): boolean {
-  const normalized = text.trim().toLowerCase().replace(/[.!]+$/g, '')
+  const normalized = text
+    .trim()
+    .toLowerCase()
+    .replace(/[.!]+$/g, '')
   if (!normalized) return true
   if (normalized.length > 80) return false
   return (
@@ -876,25 +940,44 @@ export function getPlanTextBlockIndicesToHide(
   return hidden
 }
 
+const PLAN_FILE_EDIT_TOOLS = new Set(['Write', 'Edit', 'MultiEdit'])
+
+/** `.../.claude/plans/<name>.md` with either path separator (Windows too). */
+function isPlanFilePath(filePath: unknown): filePath is string {
+  return (
+    typeof filePath === 'string' &&
+    /[/\\]\.claude[/\\]plans[/\\]/.test(filePath) &&
+    filePath.toLowerCase().endsWith('.md')
+  )
+}
+
 /**
  * Find the plan file path from tool calls
- * Looks for Write tool calls that target ~/.claude/plans/*.md files
+ * Prefers the `planFilePath` Claude CLI adds to ExitPlanMode input, then the
+ * latest Write/Edit/MultiEdit targeting ~/.claude/plans/*.md
  * (Fallback for old-style file-based plans)
  *
  * @param toolCalls - All tool calls from the message
  * @returns The plan file path if found, null otherwise
  */
 export function findPlanFilePath(toolCalls: ToolCall[]): string | null {
-  // Look for Write tool calls to ~/.claude/plans/*.md
-  const planWrite = toolCalls.find(t => {
-    if (t.name !== 'Write') return false
-    const input = t.input as { file_path?: string } | undefined
-    const filePath = input?.file_path
-    return filePath?.includes('/.claude/plans/') && filePath.endsWith('.md')
-  })
-
-  if (!planWrite) return null
-
-  const input = planWrite.input as { file_path: string }
-  return input.file_path
+  let editedPlanPath: string | null = null
+  for (let i = toolCalls.length - 1; i >= 0; i--) {
+    const toolCall = toolCalls[i]
+    if (!toolCall) continue
+    const input = (toolCall.input ?? {}) as Record<string, unknown>
+    if (toolCall.name === 'ExitPlanMode') {
+      const planFilePath = input.planFilePath ?? input.plan_file_path
+      if (typeof planFilePath === 'string' && planFilePath.trim()) {
+        return planFilePath
+      }
+    } else if (
+      !editedPlanPath &&
+      PLAN_FILE_EDIT_TOOLS.has(toolCall.name) &&
+      isPlanFilePath(input.file_path)
+    ) {
+      editedPlanPath = input.file_path
+    }
+  }
+  return editedPlanPath
 }

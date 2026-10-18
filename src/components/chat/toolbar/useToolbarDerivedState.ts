@@ -13,7 +13,11 @@ import {
   OPENCODE_MODEL_OPTIONS,
   PI_MODEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
-import { sortModelOptionsByRawModel } from '@/components/chat/toolbar/toolbar-utils'
+import {
+  formatGrokModelOptionLabel,
+  formatGrokPromptModelLabel,
+} from '@/components/chat/toolbar/toolbar-utils'
+import { sortModelOptionsByRawModel } from '@/lib/model-utils'
 import {
   getCatalogModelFastInfo,
   getCatalogModelOptions,
@@ -246,7 +250,10 @@ export function useToolbarDerivedState({
     modelCatalog,
     'grok',
     grokModelOptions ?? GROK_MODEL_OPTIONS
-  )
+  ).map(option => ({
+    ...option,
+    label: formatGrokModelOptionLabel(option.value, option.label),
+  }))
   const resolvedKimiModelOptions = mergeCatalogOptions(
     modelCatalog,
     'kimi',
@@ -321,9 +328,17 @@ export function useToolbarDerivedState({
     ? fastInfo.baseModel
     : effectiveSelectedModel
 
-  const selectedModelLabel =
-    filteredModelOptions.find(o => o.value === labelLookupKey)?.label ??
-    labelLookupKey
+  const matchedModelLabel = filteredModelOptions.find(
+    option => option.value === labelLookupKey
+  )?.label
+  const grokShortLabel = formatGrokPromptModelLabel(labelLookupKey)
+  const selectedModelLabel = !isGrok
+    ? (matchedModelLabel ?? labelLookupKey)
+    : !matchedModelLabel ||
+        matchedModelLabel === grokShortLabel ||
+        matchedModelLabel === `Grok ${grokShortLabel}`
+      ? grokShortLabel
+      : matchedModelLabel
   const selectedModelReasoning = getCatalogModelReasoning(
     modelCatalog,
     selectedBackend,

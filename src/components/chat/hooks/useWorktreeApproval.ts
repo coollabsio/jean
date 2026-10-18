@@ -5,6 +5,7 @@ import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
 import { usePreferences } from '@/services/preferences'
+import { parseServerResourceKey } from '@/lib/server-resource'
 import {
   useSendMessage,
   markPlanApproved,
@@ -12,6 +13,7 @@ import {
   chatQueryKeys,
 } from '@/services/chat'
 import { invoke, listen } from '@/lib/transport'
+import { archiveOriginalPlanSession } from './plan-approval-state'
 import type {
   EffortLevel,
   Session,
@@ -87,10 +89,10 @@ function getDefaultModelForBackend(
     | undefined
 ): string {
   if (backend === 'codex') {
-    return preferences?.selected_codex_model ?? 'gpt-5.6-sol'
+    return preferences?.selected_codex_model ?? 'gpt-6.1-sol'
   }
   if (backend === 'opencode') {
-    return preferences?.selected_opencode_model ?? 'opencode/gpt-5.6-sol'
+    return preferences?.selected_opencode_model ?? 'opencode/gpt-6.1-sol'
   }
   if (backend === 'cursor') {
     return preferences?.selected_cursor_model ?? 'cursor/auto'
@@ -110,7 +112,7 @@ function getDefaultModelForBackend(
   if (backend === 'antigravity') {
     return preferences?.selected_antigravity_model ?? 'antigravity/auto'
   }
-  return preferences?.selected_model ?? 'claude-opus-4-8[1m]'
+  return preferences?.selected_model ?? 'claude-opus-5-5'
 }
 
 function clearWorktreeApprovalUiState(
@@ -144,7 +146,8 @@ export function useWorktreeApproval({
   projectId,
 }: UseWorktreeApprovalParams) {
   const queryClient = useQueryClient()
-  const { data: preferences } = usePreferences()
+  const serverId = parseServerResourceKey(worktreeId)?.serverId
+  const { data: preferences } = usePreferences(serverId)
   const sendMessage = useSendMessage()
 
   const handleWorktreeApproval = useCallback(
@@ -358,7 +361,7 @@ export function useWorktreeApproval({
 
       // Step 8: Send plan as first message with mode-specific overrides
       const isYolo = mode === 'yolo'
-      const modeLabel = isYolo ? 'Yolo' : 'Build'
+      const modeLabel = isYolo ? 'Full access' : 'Build'
       const originalBackend = card.session.backend as CliBackend | undefined
       const modeBackendPref = isYolo
         ? preferences?.yolo_backend
@@ -373,9 +376,9 @@ export function useWorktreeApproval({
         ? preferences?.yolo_effort_level
         : preferences?.build_effort_level
       const modeBackendOverride = modeBackendPref as CliBackend | null
-      const backend = (modeBackendOverride ??
-        originalBackend ??
-        undefined) as CliBackend | undefined
+      const backend = (modeBackendOverride ?? originalBackend ?? undefined) as
+        | CliBackend
+        | undefined
       const model =
         modeModelPref ??
         (modeBackendOverride
@@ -513,36 +516,14 @@ export function useWorktreeApproval({
         backend,
       })
 
-      // Optionally close the original session
+      // Optionally archive the original session (keeps history restorable)
       if (preferences?.close_original_on_clear_context) {
-        const command =
-          preferences.removal_behavior === 'archive'
-            ? 'archive_session'
-            : 'close_session'
-
-        queryClient.setQueryData<WorktreeSessions>(
-          chatQueryKeys.sessions(worktreeId),
-          old => {
-            if (!old) return old
-            return {
-              ...old,
-              sessions: old.sessions.filter(s => s.id !== sessionId),
-            }
-          }
-        )
-
-        invoke(command, { worktreeId, worktreePath, sessionId })
-          .then(() =>
-            queryClient.invalidateQueries({
-              queryKey: chatQueryKeys.sessions(worktreeId),
-            })
-          )
-          .catch(err =>
-            console.error(
-              '[useWorktreeApproval] Failed to close original session:',
-              err
-            )
-          )
+        archiveOriginalPlanSession({
+          queryClient,
+          worktreeId,
+          worktreePath,
+          sessionId,
+        })
       }
     },
     [worktreeId, worktreePath, projectId, queryClient, preferences, sendMessage]

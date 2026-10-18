@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertCircle, FileText, Loader2, RefreshCw, Tag, XIcon } from 'lucide-react'
+import {
+  AlertCircle,
+  FileText,
+  Loader2,
+  RefreshCw,
+  Tag,
+  XIcon,
+} from '@/components/icons/reicon'
 import { toast } from 'sonner'
 import { invoke } from '@/lib/transport'
 import { isGhAuthError } from '@/services/github'
@@ -44,7 +51,6 @@ export function ReleaseNotesDialog() {
   const selectedProjectId = useProjectsStore(state => state.selectedProjectId)
   const { data: projects } = useProjects()
   const { data: worktrees } = useWorktrees(selectedProjectId)
-  const { data: preferences } = usePreferences()
   const createBaseSession = useCreateBaseSession()
   const createSession = useCreateSession()
   const sendMessage = useSendMessage()
@@ -53,6 +59,7 @@ export function ReleaseNotesDialog() {
     () => projects?.find(item => item.id === selectedProjectId),
     [projects, selectedProjectId]
   )
+  const { data: preferences } = usePreferences(project?.serverId)
   const [releases, setReleases] = useState<GitHubRelease[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [isLaunching, setIsLaunching] = useState(false)
@@ -166,7 +173,8 @@ export function ReleaseNotesDialog() {
           model,
           customProfileName: provider ?? undefined,
           effortLevel:
-            preferences?.magic_prompt_efforts?.release_notes_effort ?? undefined,
+            preferences?.magic_prompt_efforts?.release_notes_effort ??
+            undefined,
           mcpConfig,
           includeRecap: false,
         })
@@ -226,7 +234,9 @@ export function ReleaseNotesDialog() {
                   aria-label="Refresh releases"
                   className="inline-flex h-7 w-7 items-center justify-center rounded-md opacity-70 hover:bg-accent hover:opacity-100"
                 >
-                  <RefreshCw className={cn('size-4', isLoading && 'animate-spin')} />
+                  <RefreshCw
+                    className={cn('size-4', isLoading && 'animate-spin')}
+                  />
                 </button>
               </TooltipTrigger>
               <TooltipContent>Refresh releases</TooltipContent>
@@ -243,13 +253,18 @@ export function ReleaseNotesDialog() {
             <div className="flex items-center justify-center py-8">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
               <span className="ml-2 text-sm text-muted-foreground">
-                {isLaunching ? 'Opening release notes session...' : 'Loading releases...'}
+                {isLaunching
+                  ? 'Opening release notes session...'
+                  : 'Loading releases...'}
               </span>
             </div>
           )}
           {error &&
             (isGhAuthError(error) ? (
-              <GhAuthError onLogin={triggerLogin} isGhInstalled={isGhInstalled} />
+              <GhAuthError
+                onLogin={triggerLogin}
+                isGhInstalled={isGhInstalled}
+              />
             ) : (
               <div className="flex items-center justify-center gap-2 px-4 py-8 text-sm text-muted-foreground">
                 <AlertCircle className="h-5 w-5 text-destructive" />
@@ -265,7 +280,8 @@ export function ReleaseNotesDialog() {
           {!isLoading && !isLaunching && !error && releases.length > 0 && (
             <div className="py-1">
               <div className="px-4 py-1 text-xs text-muted-foreground">
-                Select a release. Jean will open a session and generate copyable Markdown notes for changes since that version.
+                Select a release. Jean will open a session and generate copyable
+                Markdown notes for changes since that version.
               </div>
               {releases.map((release, index) => (
                 <ReleaseItem
@@ -312,7 +328,7 @@ function ReleaseItem({
             {release.name || release.tagName}
           </span>
           {release.isLatest && (
-            <span className="rounded bg-green-500/10 px-1.5 py-0.5 text-xs text-green-600">
+            <span className="rounded bg-success/10 px-1.5 py-0.5 text-xs text-success">
               Latest
             </span>
           )}

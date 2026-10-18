@@ -42,47 +42,6 @@ fn wsl_shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-/// Claude flags whose following argument is a filesystem path that Claude will
-/// open. When Claude runs inside WSL these must be WSL paths — a Windows-form
-/// value (e.g. `C:\Users\..`) is resolved relative to the Linux cwd and fails
-/// (notably `--append-system-prompt-file`, which aborts the whole run).
-#[cfg(any(windows, test))]
-const WSL_PATH_VALUE_FLAGS: &[&str] = &["--add-dir", "--append-system-prompt-file", "--settings"];
-
-#[cfg(any(windows, test))]
-fn looks_like_windows_path(value: &str) -> bool {
-    // UNC (`\\..`) or drive path (`C:\..` / `C:/..`). Anything else is left
-    // untouched so non-path values (models, inline `--settings` JSON) are never
-    // mangled.
-    value.starts_with("\\\\")
-        || (value.len() >= 3
-            && value.as_bytes()[0].is_ascii_alphabetic()
-            && value.as_bytes()[1] == b':'
-            && matches!(value.as_bytes()[2], b'\\' | b'/'))
-}
-
-/// Translate Windows-form path values that follow known path flags into WSL
-/// paths, leaving every other argument untouched.
-#[cfg(any(windows, test))]
-fn wslify_path_args(args: &[String]) -> Vec<String> {
-    let mut out = Vec::with_capacity(args.len());
-    let mut translate_next = false;
-    for arg in args {
-        if translate_next {
-            translate_next = false;
-            if looks_like_windows_path(arg) {
-                out.push(crate::platform::win_to_wsl_path(arg));
-                continue;
-            }
-        }
-        if WSL_PATH_VALUE_FLAGS.contains(&arg.as_str()) {
-            translate_next = true;
-        }
-        out.push(arg.clone());
-    }
-    out
-}
-
 /// Build the shell program fed to `wsl.exe -- sh -s` (via stdin, so wsl.exe
 /// never re-parses it) that launches Claude so it OUTLIVES the `wsl.exe`
 /// invocation.
@@ -485,7 +444,7 @@ pub fn spawn_detached_claude(
         let unix_output = crate::platform::win_to_wsl_path(&output_file.to_string_lossy());
         // Windows path args (e.g. --add-dir, --append-system-prompt-file) must be
         // WSL paths so Claude, running inside the distro, can open them.
-        let wsl_args = wslify_path_args(args);
+        let wsl_args = crate::platform::wslify_path_args(args);
         // The detached session writes its pid to a sibling file that both WSL
         // (via a /mnt/c path) and Jean can see. Clear any stale file first so a
         // failed spawn can't hand back a previous run's pid.
@@ -541,7 +500,7 @@ pub fn spawn_detached_claude(
                     .map_err(|e| format!("Failed to write WSL launch command: {e}"))
             });
         if let Err(error) = write_result {
-            let _ = child.kill();
+            crate::platform::kill_and_reap(&mut child);
             return Err(error);
         }
 
@@ -551,7 +510,7 @@ pub fn spawn_detached_claude(
         if let Some(stdout) = child.stdout.take() {
             let mut reader = BufReader::new(stdout);
             if let Err(e) = reader.read_line(&mut pid_str) {
-                let _ = child.kill();
+                crate::platform::kill_and_reap(&mut child);
                 let _ = std::fs::remove_file(&pid_file);
                 return Err(format!("Failed to read WSL PID: {e}"));
             }
@@ -563,7 +522,7 @@ pub fn spawn_detached_claude(
             Err(e) => {
                 // No pid printed: the session never came up (e.g. the working
                 // directory could not be entered). Fail loudly.
-                let _ = child.kill();
+                crate::platform::kill_and_reap(&mut child);
                 let _ = std::fs::remove_file(&pid_file);
                 return Err(format!("Failed to parse WSL PID '{pid_str}': {e}"));
             }
@@ -572,7 +531,7 @@ pub fn spawn_detached_claude(
         // `kill -0 0` targets the current process group and can falsely report
         // success, so never allow an invalid PID into recovery state.
         if pid == 0 {
-            let _ = child.kill();
+            crate::platform::kill_and_reap(&mut child);
             let _ = std::fs::remove_file(&pid_file);
             return Err(
                 "WSL spawn produced no process (pid 0) — the working directory \
@@ -723,57 +682,6 @@ mod tests {
     }
 
     #[test]
-    fn test_wslify_path_args_translates_path_flag_values() {
-        let args = vec![
-            "--print".to_string(),
-            "--add-dir".to_string(),
-            r"C:\Users\foo\proj".to_string(),
-            "--append-system-prompt-file".to_string(),
-            r"\\wsl.localhost\Ubuntu-22.04\home\u\ctx.md".to_string(),
-            "--model".to_string(),
-            "claude-opus-4-8[1m]".to_string(),
-            "--settings".to_string(),
-            r"C:\Users\foo\.claude\settings.json".to_string(),
-        ];
-        let out = wslify_path_args(&args);
-        assert_eq!(out[2], "/mnt/c/Users/foo/proj");
-        assert_eq!(out[4], "/home/u/ctx.md");
-        // A non-path flag's value must be left untouched.
-        assert_eq!(out[6], "claude-opus-4-8[1m]");
-        assert_eq!(out[8], "/mnt/c/Users/foo/.claude/settings.json");
-    }
-
-    #[test]
-    fn test_wslify_path_args_leaves_non_windows_values() {
-        // Path flag whose value is already a unix path (or not a Windows path).
-        let args = vec!["--add-dir".to_string(), "/home/u/x".to_string()];
-        assert_eq!(wslify_path_args(&args), args);
-    }
-
-    #[test]
-    fn test_wslify_path_args_translates_forward_slash_drive_paths() {
-        let args = vec![
-            "--add-dir".to_string(),
-            "C:/Users/foo/proj".to_string(),
-            "--settings".to_string(),
-            r"C:\Users\foo\.claude\settings.json".to_string(),
-        ];
-        let out = wslify_path_args(&args);
-        assert_eq!(out[1], "/mnt/c/Users/foo/proj");
-        assert_eq!(out[3], "/mnt/c/Users/foo/.claude/settings.json");
-    }
-
-    #[test]
-    fn test_wslify_path_args_leaves_inline_settings_json_unchanged() {
-        let args = vec![
-            "--settings".to_string(),
-            r#"{"permissions":{"allow":["Read"]}}"#.to_string(),
-        ];
-
-        assert_eq!(wslify_path_args(&args), args);
-    }
-
-    #[test]
     fn test_wsl_claude_script_detaches_with_setsid() {
         let script = build_wsl_claude_script(
             "/usr/bin/claude",
@@ -811,15 +719,5 @@ mod tests {
         // Do not exec-over the session shell: the shell must stay as leader so
         // the cat|claude pipeline remains killable as one process group.
         assert!(!script.contains("exec "));
-    }
-
-    #[test]
-    fn test_looks_like_windows_path_accepts_slash_and_backslash() {
-        assert!(looks_like_windows_path(r"C:\Users\foo"));
-        assert!(looks_like_windows_path("C:/Users/foo"));
-        assert!(looks_like_windows_path(r"\\wsl.localhost\Ubuntu\home\u"));
-        assert!(!looks_like_windows_path("/home/u"));
-        assert!(!looks_like_windows_path(r#"{"permissions":{}}"#));
-        assert!(!looks_like_windows_path("claude-opus-4-8[1m]"));
     }
 }

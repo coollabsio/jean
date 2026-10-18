@@ -59,6 +59,8 @@ export interface ClaudeUsageWindowSnapshot {
 
 export interface ClaudeUsageSnapshot {
   planType: string | null
+  /** Raw OAuth rate limit tier (e.g. `default_claude_max_20x`) */
+  planTier?: string | null
   session: ClaudeUsageWindowSnapshot | null
   weekly: ClaudeUsageWindowSnapshot | null
   sonnetWeekly: ClaudeUsageWindowSnapshot | null

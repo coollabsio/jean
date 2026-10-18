@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { MessageSquare, Terminal } from 'lucide-react'
+import { MessageSquare, Terminal } from '@/components/icons/reicon'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { invoke, listen } from '@/lib/transport'

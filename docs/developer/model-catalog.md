@@ -9,6 +9,21 @@ bundled model list for Claude and Codex; other backends merge CDN entries ahead
 of models discovered from their CLI. Fast variants inherit their base model's
 reasoning capability.
 
+## Applying a model to all Magic Prompts
+
+Settings → Magic Prompts has an **All prompts** row: a searchable model
+picker grouped by installed backend, a **Fast** switch, a **Mode** select
+(Plan/Yolo), and an **Apply to all prompts** button. The picker uses the same
+catalog/discovered model options as the individual prompt controls, but lists
+only base models; the Fast switch picks the fast variant when the selected
+model has one. Do not add model-specific presets to this menu.
+
+Apply updates every configurable prompt's backend, model, execution mode, and
+supported default reasoning level, and replaces the Code Review runners with
+one matching runner (its fix mode uses the selected mode). It clears provider
+overrides so a custom Claude profile cannot redirect the selected first-party
+model. Prompt text is not changed.
+
 ## Reasoning capability
 
 Each model can declare at most one reasoning control:

@@ -9,12 +9,28 @@
 use std::io::BufReader;
 use std::io::{BufRead, Write};
 
+use std::time::Duration;
+
 use serde_json::{json, Value};
 
 use crate::jean_mcp_core::{
-    handle_protocol_message, jsonrpc_error, ToolCallRequest, JEAN_MCP_DEPTH_ENV,
-    JEAN_MCP_SESSION_ENV, JEAN_MCP_SOCKET_ENV, JEAN_MCP_TOKEN_ENV,
+    handle_protocol_message, jsonrpc_error, ToolCallRequest, CLAUDE_PERMISSION_PROMPT_TOOL,
+    JEAN_MCP_DEPTH_ENV, JEAN_MCP_SESSION_ENV, JEAN_MCP_SOCKET_ENV, JEAN_MCP_TOKEN_ENV,
 };
+
+/// Default wait for a parent response.
+const RESPONSE_TIMEOUT: Duration = Duration::from_secs(120);
+/// Live permission prompts wait for the user; the parent denies them when the
+/// run stops, so this only guards against a lost parent.
+const PERMISSION_PROMPT_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
+
+fn response_timeout(tool_name: &str) -> Duration {
+    if tool_name == CLAUDE_PERMISSION_PROMPT_TOOL {
+        PERMISSION_PROMPT_TIMEOUT
+    } else {
+        RESPONSE_TIMEOUT
+    }
+}
 
 pub fn run_stdio_server() -> Result<(), String> {
     let stdin = std::io::stdin();
@@ -61,6 +77,7 @@ fn proxy_tool_call(tool_call: ToolCallRequest) -> Result<Value, String> {
 
     proxy_to_parent(
         &socket,
+        response_timeout(&tool_call.name),
         json!({
             "token": token,
             "source": source,
@@ -71,14 +88,17 @@ fn proxy_tool_call(tool_call: ToolCallRequest) -> Result<Value, String> {
     )
 }
 #[cfg(unix)]
-fn proxy_to_parent(socket: &str, request: Value) -> Result<Value, String> {
+fn proxy_to_parent(
+    socket: &str,
+    response_timeout: Duration,
+    request: Value,
+) -> Result<Value, String> {
     use std::os::unix::net::UnixStream;
-    use std::time::Duration;
 
     let mut stream = UnixStream::connect(socket)
         .map_err(|e| format!("Failed to connect Jean MCP socket {socket}: {e}"))?;
     stream
-        .set_read_timeout(Some(Duration::from_secs(120)))
+        .set_read_timeout(Some(response_timeout))
         .map_err(|e| format!("Failed to set Jean MCP socket read timeout: {e}"))?;
     stream
         .set_write_timeout(Some(Duration::from_secs(30)))
@@ -104,11 +124,15 @@ fn proxy_to_parent(socket: &str, request: Value) -> Result<Value, String> {
 }
 
 #[cfg(windows)]
-fn proxy_to_parent(socket: &str, request: Value) -> Result<Value, String> {
+fn proxy_to_parent(
+    socket: &str,
+    response_timeout: Duration,
+    request: Value,
+) -> Result<Value, String> {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::windows::named_pipe::ClientOptions;
     use tokio::runtime::Builder;
-    use tokio::time::{timeout, Duration};
+    use tokio::time::timeout;
 
     let encoded = serde_json::to_string(&request)
         .map_err(|e| format!("Failed to encode Jean MCP pipe request: {e}"))?;
@@ -133,7 +157,7 @@ fn proxy_to_parent(socket: &str, request: Value) -> Result<Value, String> {
 
         let mut reader = BufReader::new(pipe);
         let mut line = String::new();
-        timeout(Duration::from_secs(120), reader.read_line(&mut line))
+        timeout(response_timeout, reader.read_line(&mut line))
             .await
             .map_err(|_| "Timed out reading Jean MCP pipe response".to_string())?
             .map_err(|e| format!("Failed to read Jean MCP pipe response: {e}"))?;
@@ -149,7 +173,11 @@ fn proxy_to_parent(socket: &str, request: Value) -> Result<Value, String> {
 }
 
 #[cfg(not(any(unix, windows)))]
-fn proxy_to_parent(_socket: &str, _request: Value) -> Result<Value, String> {
+fn proxy_to_parent(
+    _socket: &str,
+    _response_timeout: Duration,
+    _request: Value,
+) -> Result<Value, String> {
     Err("Jean MCP local IPC is not supported on this platform".to_string())
 }
 

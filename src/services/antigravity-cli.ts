@@ -1,10 +1,11 @@
 /** Antigravity CLI management service. */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { invoke } from '@/lib/transport'
+import { invoke, invokeForOptionalServer } from '@/lib/transport'
 import { logger } from '@/lib/logger'
 import { toast } from 'sonner'
 import { hasBackendTransport } from '@/lib/environment'
+import { useOptionalSettingsTargetServerId } from '@/lib/settings-target'
 import type {
   AntigravityAuthStatus,
   AntigravityCliStatus,
@@ -21,7 +22,8 @@ export const antigravityCliQueryKeys = {
   auth: () => [...antigravityCliQueryKeys.all, 'auth'] as const,
   models: () => [...antigravityCliQueryKeys.all, 'models'] as const,
   versions: () => [...antigravityCliQueryKeys.all, 'versions'] as const,
-  installCommand: () => [...antigravityCliQueryKeys.all, 'install-command'] as const,
+  installCommand: () =>
+    [...antigravityCliQueryKeys.all, 'install-command'] as const,
 }
 
 const fallbackAntigravityVersions: AntigravityReleaseInfo[] = [
@@ -29,8 +31,13 @@ const fallbackAntigravityVersions: AntigravityReleaseInfo[] = [
 ]
 
 export function useAntigravityPathDetection(options?: { enabled?: boolean }) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: [...antigravityCliQueryKeys.all, 'path-detection'],
+    queryKey: [
+      ...antigravityCliQueryKeys.all,
+      'path-detection',
+      serverId ?? 'local',
+    ],
     queryFn: async (): Promise<{
       found: boolean
       path: string | null
@@ -46,7 +53,10 @@ export function useAntigravityPathDetection(options?: { enabled?: boolean }) {
         }
       }
       try {
-        return await invoke('detect_antigravity_in_path')
+        return await invokeForOptionalServer(
+          serverId,
+          'detect_antigravity_in_path'
+        )
       } catch (error) {
         logger.debug('Antigravity path detection failed', { error })
         return {
@@ -63,13 +73,21 @@ export function useAntigravityPathDetection(options?: { enabled?: boolean }) {
   })
 }
 
-export function useAntigravityCliStatus(options?: { enabled?: boolean }) {
+export function useAntigravityCliStatus(options?: {
+  enabled?: boolean
+  serverId?: string
+}) {
+  const settingsServerId = useOptionalSettingsTargetServerId()
+  const serverId = options?.serverId ?? settingsServerId
   return useQuery({
-    queryKey: antigravityCliQueryKeys.status(),
+    queryKey: [...antigravityCliQueryKeys.status(), serverId ?? 'local'],
     queryFn: async (): Promise<AntigravityCliStatus> => {
       if (!isTauri()) return { installed: false, version: null, path: null }
       try {
-        return await invoke<AntigravityCliStatus>('check_antigravity_cli_installed')
+        return await invokeForOptionalServer<AntigravityCliStatus>(
+          serverId,
+          'check_antigravity_cli_installed'
+        )
       } catch (error) {
         logger.error('Failed to check Antigravity CLI status', { error })
         return { installed: false, version: null, path: null }
@@ -83,8 +101,9 @@ export function useAntigravityCliStatus(options?: { enabled?: boolean }) {
 }
 
 export function useAntigravityCliAuth(options?: { enabled?: boolean }) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: antigravityCliQueryKeys.auth(),
+    queryKey: [...antigravityCliQueryKeys.auth(), serverId ?? 'local'],
     queryFn: async (): Promise<AntigravityAuthStatus> => {
       if (!isTauri()) {
         return {
@@ -94,7 +113,10 @@ export function useAntigravityCliAuth(options?: { enabled?: boolean }) {
         }
       }
       try {
-        return await invoke<AntigravityAuthStatus>('check_antigravity_cli_auth')
+        return await invokeForOptionalServer<AntigravityAuthStatus>(
+          serverId,
+          'check_antigravity_cli_auth'
+        )
       } catch (error) {
         logger.error('Failed to check Antigravity CLI auth', { error })
         return {
@@ -110,15 +132,23 @@ export function useAntigravityCliAuth(options?: { enabled?: boolean }) {
   })
 }
 
-export function useAvailableAntigravityModels(options?: { enabled?: boolean }) {
+export function useAvailableAntigravityModels(options?: {
+  enabled?: boolean
+  serverId?: string
+}) {
+  const settingsServerId = useOptionalSettingsTargetServerId()
+  const serverId = options?.serverId ?? settingsServerId
   return useQuery({
-    queryKey: antigravityCliQueryKeys.models(),
+    queryKey: [...antigravityCliQueryKeys.models(), serverId ?? 'local'],
     queryFn: async (): Promise<AntigravityModelInfo[]> => {
       if (!isTauri()) {
         return [{ id: 'default', label: 'Configured default', isDefault: true }]
       }
       try {
-        const models = await invoke<AntigravityModelInfo[]>('list_antigravity_models')
+        const models = await invokeForOptionalServer<AntigravityModelInfo[]>(
+          serverId,
+          'list_antigravity_models'
+        )
         return models.length
           ? models
           : [{ id: 'default', label: 'Configured default', isDefault: true }]
@@ -133,20 +163,23 @@ export function useAvailableAntigravityModels(options?: { enabled?: boolean }) {
   })
 }
 
-export function useAvailableAntigravityVersions(options?: { enabled?: boolean }) {
+export function useAvailableAntigravityVersions(options?: {
+  enabled?: boolean
+}) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: antigravityCliQueryKeys.versions(),
+    queryKey: [...antigravityCliQueryKeys.versions(), serverId ?? 'local'],
     queryFn: async (): Promise<AntigravityReleaseInfo[]> => {
       if (!isTauri()) return fallbackAntigravityVersions
       try {
-        const versions = await invoke<
+        const versions = await invokeForOptionalServer<
           {
             version: string
             tag_name: string
             published_at: string
             prerelease: boolean
           }[]
-        >('get_available_antigravity_versions')
+        >(serverId, 'get_available_antigravity_versions')
         return versions.map(v => ({
           version: v.version,
           tagName: v.tag_name,
@@ -167,9 +200,12 @@ export function useAvailableAntigravityVersions(options?: { enabled?: boolean })
 
 export function useInstallAntigravityCli() {
   const queryClient = useQueryClient()
+  const serverId = useOptionalSettingsTargetServerId()
   return useMutation({
     mutationFn: async (version?: string) => {
-      await invoke('install_antigravity_cli', { version: version ?? null })
+      await invokeForOptionalServer(serverId, 'install_antigravity_cli', {
+        version: version ?? null,
+      })
     },
     retry: false,
     onSuccess: () => {
@@ -201,11 +237,16 @@ export function useUninstallAntigravityCli() {
   })
 }
 
-function checkManualVersion(version: string) {
-  return invoke<boolean>('check_antigravity_cli_version_exists', { version })
+function checkManualVersion(version: string, serverId?: string) {
+  return invokeForOptionalServer<boolean>(
+    serverId,
+    'check_antigravity_cli_version_exists',
+    { version }
+  )
 }
 
 export function useAntigravityCliSetup() {
+  const serverId = useOptionalSettingsTargetServerId()
   const status = useAntigravityCliStatus()
   const versions = useAvailableAntigravityVersions()
   const installMutation = useInstallAntigravityCli()
@@ -222,7 +263,9 @@ export function useAntigravityCliSetup() {
   return {
     status: status.data,
     isStatusLoading: status.isLoading,
-    versions: versions.data?.length ? versions.data : fallbackAntigravityVersions,
+    versions: versions.data?.length
+      ? versions.data
+      : fallbackAntigravityVersions,
     isVersionsLoading: versions.isFetching,
     isVersionsError: versions.isError,
     refetchVersions: versions.refetch,
@@ -231,11 +274,17 @@ export function useAntigravityCliSetup() {
     installError: installMutation.error,
     progress: null,
     install,
-    checkManualVersion,
+    checkManualVersion: (version: string) =>
+      checkManualVersion(version, serverId),
     refetchStatus: status.refetch,
   }
 }
 
-export async function getAntigravityInstallCommand(): Promise<AntigravityInstallCommand> {
-  return invoke<AntigravityInstallCommand>('get_antigravity_install_command')
+export async function getAntigravityInstallCommand(
+  serverId?: string
+): Promise<AntigravityInstallCommand> {
+  return invokeForOptionalServer<AntigravityInstallCommand>(
+    serverId,
+    'get_antigravity_install_command'
+  )
 }

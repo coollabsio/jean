@@ -10,6 +10,7 @@ import {
   isPlanToolCall,
 } from '@/types/chat'
 import { AskUserQuestion } from './AskUserQuestion'
+import { isToolCallError } from './ToolCallInline'
 
 /** Placeholder outputs that add no value next to already-rendered tool details. */
 function isPlaceholderToolOutput(output: string): boolean {
@@ -145,6 +146,9 @@ export const ToolCallsDisplay = memo(function ToolCallsDisplay({
               {otherTools.map(tool => (
                 <div key={tool.id}>
                   <span className="font-medium">{tool.name}</span>
+                  {isToolCallError(tool) && (
+                    <span className="ml-1.5 text-destructive/80">failed</span>
+                  )}
                   {tool.input != null && (
                     <div className="overflow-x-auto">
                       <pre className="mt-0.5 max-w-full text-[0.625rem] leading-tight whitespace-pre-wrap break-words">
@@ -155,7 +159,9 @@ export const ToolCallsDisplay = memo(function ToolCallsDisplay({
                     </div>
                   )}
                   {/* Show tool stdout/result (bash and others) — was missing before #572 */}
+                  {/* Read contents are dropped live; keep history consistent */}
                   {typeof tool.output === 'string' &&
+                    tool.name !== 'Read' &&
                     !isPlaceholderToolOutput(tool.output) && (
                       <div className="mt-1 overflow-x-auto">
                         <div className="text-[0.625rem] text-muted-foreground/50 mb-0.5">

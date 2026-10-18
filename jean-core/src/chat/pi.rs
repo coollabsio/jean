@@ -245,6 +245,8 @@ fn merge_assistant_message(response: &mut PiResponse, message: &Value) {
                     input,
                     output: None,
                     parent_tool_use_id: None,
+                    is_error: None,
+                    subagent_usage: None,
                 });
                 response
                     .content_blocks
@@ -413,6 +415,8 @@ fn merge_pi_line(response: &mut PiResponse, value: &Value) {
                 input,
                 output: None,
                 parent_tool_use_id: None,
+                is_error: None,
+                subagent_usage: None,
             });
             response
                 .content_blocks
@@ -485,6 +489,7 @@ pub(crate) fn parse_pi_run_to_message(
         execution_mode: run.execution_mode.clone(),
         thinking_level: run.thinking_level.clone(),
         effort_level: run.effort_level.clone(),
+        custom_profile_name: None,
         recovered: run.recovered,
         usage: response.usage.or_else(|| run.usage.clone()),
     })
@@ -1281,7 +1286,7 @@ pub fn execute_pi(
     pid_callback: Option<Box<dyn FnOnce(u32) + Send>>,
 ) -> Result<PiResponse, String> {
     let cli_path = crate::pi_cli::resolve_cli_binary(app);
-    if !cli_path.exists() {
+    if !crate::platform::resolved_cli_exists(&cli_path) {
         return Err("PI CLI not installed".to_string());
     }
 
@@ -1388,15 +1393,17 @@ pub fn execute_pi(
         pi_tools_for_mode(execution_mode.unwrap_or("plan"))
     );
 
-        let mut child =
-            crate::platform::cli_command(&cli_path.to_string_lossy(), Some(working_dir))
-                .args(args)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .env("JEAN_SESSION_ID", session_id)
-                .env("JEAN_WORKTREE_ID", worktree_id)
-                .spawn()
-                .map_err(|e| format!("Failed to spawn PI CLI: {e}"))?;
+        let mut child = crate::platform::wsl_resolved_cli_command(
+            &cli_path.to_string_lossy(),
+            Some(working_dir),
+        )
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .env("JEAN_SESSION_ID", session_id)
+        .env("JEAN_WORKTREE_ID", worktree_id)
+        .spawn()
+        .map_err(|e| format!("Failed to spawn PI CLI: {e}"))?;
         let pid = child.id();
         if let Some(callback) = pid_callback {
             callback(pid);
@@ -1491,11 +1498,11 @@ pub fn execute_one_shot_pi(
     effort_level: Option<&str>,
 ) -> Result<String, String> {
     let cli_path = crate::pi_cli::resolve_cli_binary(app);
-    if !cli_path.exists() {
+    if !crate::platform::resolved_cli_exists(&cli_path) {
         return Err("PI CLI not installed".to_string());
     }
     let dir = working_dir.unwrap_or_else(|| Path::new("."));
-    let mut cmd = crate::platform::cli_command(&cli_path.to_string_lossy(), Some(dir));
+    let mut cmd = crate::platform::wsl_resolved_cli_command(&cli_path.to_string_lossy(), Some(dir));
     cmd.args(["--mode", "json", "--no-session"]);
     cmd.args(["--model", raw_pi_model(Some(model)).unwrap_or(model)]);
     if let Some(effort) = effort_level {

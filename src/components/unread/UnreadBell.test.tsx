@@ -13,15 +13,27 @@ import type { AllSessionsResponse, Session } from '@/types/chat'
 import { UnreadBell } from './UnreadBell'
 
 const invokeMock = vi.fn()
-let allSessions: AllSessionsResponse
+const invokeForServerMock = vi.fn()
+let allSessions: AllSessionsResponse | undefined
+let allSessionsLoading = false
+let allSessionsFetching = false
 let unreadCount = 2
+let sendingSessionIds: Record<string, boolean> = {}
 
 vi.mock('@/lib/transport', () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
+  invokeForServer: (...args: unknown[]) => invokeForServerMock(...args),
 }))
 
 vi.mock('@/services/chat', () => ({
-  useAllSessions: () => ({ data: allSessions, isLoading: false }),
+  chatQueryKeys: {
+    unreadSessionCount: () => ['unread-session-count'],
+  },
+  useUnreadSessions: () => ({
+    data: allSessions,
+    isLoading: allSessionsLoading,
+    isFetching: allSessionsFetching,
+  }),
 }))
 
 let finishedSessionAnimationEnabled = true
@@ -64,20 +76,29 @@ const setActiveSessionMock = vi.fn()
 const clearActiveWorktreeMock = vi.fn()
 const setLastOpenedForProjectMock = vi.fn()
 vi.mock('@/store/chat-store', () => ({
-  useChatStore: {
-    getState: () => ({
-      setActiveSession: setActiveSessionMock,
-      clearActiveWorktree: clearActiveWorktreeMock,
-      setLastOpenedForProject: setLastOpenedForProjectMock,
-    }),
-  },
+  useChatStore: Object.assign(
+    (
+      selector: (state: {
+        sendingSessionIds: Record<string, boolean>
+      }) => unknown
+    ) => selector({ sendingSessionIds }),
+    {
+      getState: () => ({
+        setActiveSession: setActiveSessionMock,
+        clearActiveWorktree: clearActiveWorktreeMock,
+        setLastOpenedForProject: setLastOpenedForProjectMock,
+      }),
+    }
+  ),
 }))
 
 const markWorktreeForAutoOpenSessionMock = vi.fn()
+const setRailSectionMock = vi.fn()
 vi.mock('@/store/ui-store', () => ({
   useUIStore: {
     getState: () => ({
       markWorktreeForAutoOpenSession: markWorktreeForAutoOpenSessionMock,
+      setRailSection: setRailSectionMock,
     }),
   },
 }))
@@ -114,9 +135,13 @@ function renderWithQueryClient(children: ReactNode) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  return render(
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  )
+  return render(children, {
+    wrapper: ({ children: wrappedChildren }) => (
+      <QueryClientProvider client={queryClient}>
+        {wrappedChildren}
+      </QueryClientProvider>
+    ),
+  })
 }
 
 async function openDropdown() {
@@ -137,6 +162,9 @@ describe('UnreadBell', () => {
       globalThis as typeof globalThis & { __JEAN_TEST_IS_NATIVE__?: boolean }
     ).__JEAN_TEST_IS_NATIVE__ = true
     unreadCount = 2
+    allSessionsLoading = false
+    allSessionsFetching = false
+    sendingSessionIds = {}
     finishedSessionAnimationEnabled = true
     allSessions = {
       entries: [
@@ -162,6 +190,179 @@ describe('UnreadBell', () => {
       ],
     }
     invokeMock.mockResolvedValue(undefined)
+    invokeForServerMock.mockResolvedValue(undefined)
+  })
+
+  it('shows sessions that finish loading after the shortcut opens the popover', async () => {
+    const loadedSessions = allSessions
+    allSessions = undefined
+    allSessionsLoading = true
+    const view = renderWithQueryClient(<UnreadBell title="Jean" />)
+
+    fireEvent(window, new CustomEvent('command:open-unread-sessions'))
+
+    expect(
+      screen.getByRole('button', { name: /2 finished sessions/i })
+    ).toBeInTheDocument()
+    allSessions = loadedSessions
+    allSessionsLoading = false
+    view.rerender(<UnreadBell title="Jean" />)
+
+    expect(await screen.findByText('Session one')).toBeInTheDocument()
+  })
+
+  it('does not snapshot a stale empty list while the first open refetches', async () => {
+    unreadCount = 1
+    allSessions = { entries: [] }
+    allSessionsFetching = true
+    const view = renderWithQueryClient(<UnreadBell title="Jean" />)
+
+    await userEvent.click(
+      screen.getByRole('button', { name: /1 finished session/i })
+    )
+
+    expect(
+      screen.getByRole('button', { name: /1 finished session/i })
+    ).toBeInTheDocument()
+
+    allSessions = {
+      entries: [
+        {
+          project_id: 'project-1',
+          project_name: 'Jean',
+          worktree_id: 'worktree-1',
+          worktree_name: 'main',
+          worktree_path: '/repo',
+          sessions: [session({ id: 'session-1', name: 'Session one' })],
+        },
+      ],
+    }
+    allSessionsFetching = false
+    view.rerender(<UnreadBell title="Jean" />)
+
+    expect(await screen.findByText('Session one')).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /1 finished session/i })
+    ).toBeInTheDocument()
+  })
+
+  it('shows a new finished session on the first open after the last one was read', async () => {
+    ;(
+      globalThis as typeof globalThis & { __JEAN_TEST_IS_NATIVE__?: boolean }
+    ).__JEAN_TEST_IS_NATIVE__ = false
+    unreadCount = 1
+    allSessions = {
+      entries: [
+        {
+          project_id: 'project-1',
+          project_name: 'Jean',
+          worktree_id: 'worktree-1',
+          worktree_name: 'main',
+          worktree_path: '/repo',
+          sessions: [session({ id: 'session-1', name: 'Session one' })],
+        },
+      ],
+    }
+    const user = userEvent.setup()
+    const view = renderWithQueryClient(<UnreadBell title="Jean" />)
+
+    await user.click(
+      screen.getByRole('button', { name: /1 finished session/i })
+    )
+    await user.click(screen.getByText('Session one'))
+    await waitFor(() =>
+      expect(screen.queryByText('Session one')).not.toBeInTheDocument()
+    )
+
+    unreadCount = 0
+    allSessions = { entries: [] }
+    view.rerender(<UnreadBell title="Jean" />)
+    unreadCount = 1
+    view.rerender(<UnreadBell title="Jean" />)
+
+    await user.click(
+      screen.getByRole('button', { name: /1 finished session/i })
+    )
+    expect(screen.queryByText('Session one')).not.toBeInTheDocument()
+
+    allSessions = {
+      entries: [
+        {
+          project_id: 'project-1',
+          project_name: 'Jean',
+          worktree_id: 'worktree-1',
+          worktree_name: 'main',
+          worktree_path: '/repo',
+          sessions: [session({ id: 'session-2', name: 'Session two' })],
+        },
+      ],
+    }
+    view.rerender(<UnreadBell title="Jean" />)
+
+    expect(await screen.findByText('Session two')).toBeInTheDocument()
+  })
+
+  it('shows cached unread sessions on the first click while refetching', async () => {
+    allSessionsFetching = true
+    renderWithQueryClient(<UnreadBell title="Jean" />)
+
+    await userEvent.click(
+      screen.getByRole('button', { name: /2 finished sessions/i })
+    )
+
+    expect(screen.getByText('Session one')).toBeInTheDocument()
+    expect(screen.getByText('Session two')).toBeInTheDocument()
+  })
+
+  it('opens the list instead of selecting the only unread session from the bell', async () => {
+    unreadCount = 1
+    allSessions = {
+      entries: [
+        {
+          project_id: 'project-1',
+          project_name: 'Jean',
+          worktree_id: 'worktree-1',
+          worktree_name: 'main',
+          worktree_path: '/repo',
+          sessions: [session({ id: 'session-1', name: 'Session one' })],
+        },
+      ],
+    }
+    renderWithQueryClient(<UnreadBell title="Jean" />)
+
+    await userEvent.click(
+      screen.getByRole('button', { name: /1 finished session/i })
+    )
+
+    expect(screen.getByText('Session one')).toBeInTheDocument()
+    expect(markWorktreeForAutoOpenSessionMock).not.toHaveBeenCalled()
+
+    await userEvent.click(screen.getByText('Session one'))
+
+    expect(markWorktreeForAutoOpenSessionMock).toHaveBeenCalledWith(
+      'worktree-1',
+      'session-1'
+    )
+    // Leaves the Agents page so the session opens in the Code view
+    expect(setRailSectionMock).toHaveBeenCalledWith('workspace')
+  })
+
+  it('shows a running Claude session instead of stale waiting state', async () => {
+    sendingSessionIds = { 'session-1': true }
+    const firstEntry = allSessions?.entries[0]
+    if (!firstEntry) throw new Error('Expected an unread session entry')
+    firstEntry.sessions[0] = session({
+      waiting_for_input: true,
+      waiting_for_input_type: 'question',
+      last_run_status: 'running',
+    })
+
+    await openDropdown()
+
+    const row = screen.getByText('Session one').closest('button')
+    expect(row?.querySelector('svg')?.getAttribute('class') ?? '').toContain(
+      'animate-spin'
+    )
   })
 
   it('marks the focused unread session read when R is pressed', async () => {
@@ -177,6 +378,51 @@ describe('UnreadBell', () => {
     })
     expect(screen.queryByText('Session two')).not.toBeInTheDocument()
     expect(screen.getByText('Session one')).toBeInTheDocument()
+  })
+
+  it('marks all sessions read on their owning instances', async () => {
+    allSessions = {
+      entries: [
+        {
+          project_id: 'project-1',
+          project_name: 'Jean',
+          worktree_id: 'worktree-1',
+          worktree_name: 'main',
+          worktree_path: '/repo',
+          serverId: 'local',
+          serverName: 'Local',
+          sessions: [session({ id: 'session-1' })],
+        },
+        {
+          project_id: 'remote-1:project-2',
+          project_name: 'API',
+          worktree_id: 'remote-1:worktree-2',
+          worktree_name: 'feature',
+          worktree_path: '/api',
+          serverId: 'remote-1',
+          serverName: 'Build box',
+          sessions: [
+            session({ id: 'remote-1:session-2', name: 'Remote session' }),
+          ],
+        },
+      ],
+    }
+
+    const user = await openDropdown()
+    await user.click(screen.getByRole('button', { name: 'Mark all read' }))
+
+    await waitFor(() => {
+      expect(invokeForServerMock).toHaveBeenCalledWith(
+        'local',
+        'set_session_last_opened',
+        { sessionId: 'session-1' }
+      )
+      expect(invokeForServerMock).toHaveBeenCalledWith(
+        'remote-1',
+        'set_session_last_opened',
+        { sessionId: 'session-2' }
+      )
+    })
   })
 
   it('shows an R keyboard affordance on the focused unread row', async () => {

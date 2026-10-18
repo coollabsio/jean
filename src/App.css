@@ -26,7 +26,11 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
   --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -74,7 +78,7 @@
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
+  --primary: oklch(0.205 0 0); /* near-black: monochrome light theme */
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
@@ -83,11 +87,16 @@
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
-  --warning: #fcd452;
-  --success: #22c55e;
+  /* Status colors use -700 shades so text stays readable on white (>= 4.5:1) */
+  --warning: #c2410c; /* orange-700: vivid, not brown */
+  --warning-foreground: #ffffff;
+  --success: #15803d; /* green-700 */
+  --success-foreground: #ffffff;
+  --info: #1d4ed8; /* blue-700 */
+  --info-foreground: #ffffff;
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --ring: oklch(0.556 0 0);
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
@@ -129,7 +138,11 @@
   --accent-foreground: #fafafa;
   --destructive: #dc2626; /* error red */
   --warning: #fcd452; /* yellow */
+  --warning-foreground: #101010;
   --success: #22c55e; /* green */
+  --success-foreground: #101010;
+  --info: #60a5fa; /* blue-400 */
+  --info-foreground: #101010;
   --border: #323232; /* coolgray-500 */
   --input: #323232; /* coolgray-500 */
   --ring: #fcd452; /* yellow focus ring */
@@ -167,6 +180,40 @@
 .animate-wave {
   animation: wave 0.5s ease-in-out infinite;
   display: inline-block;
+}
+
+/* Small activity waveform used by working sessions and agents. */
+@keyframes working-waveform {
+  0%,
+  100% {
+    transform: scaleY(0.45);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.working-waveform {
+  display: inline-flex;
+  height: 10px;
+  align-items: center;
+  gap: 2px;
+}
+
+.working-waveform > span {
+  width: 2px;
+  height: 8px;
+  border-radius: 9999px;
+  background: currentColor;
+  animation: working-waveform 0.9s ease-in-out infinite;
+}
+
+.working-waveform > span:nth-child(2) {
+  animation-delay: -0.6s;
+}
+
+.working-waveform > span:nth-child(3) {
+  animation-delay: -0.3s;
 }
 
 /* Blink animation for waiting indicator */
@@ -473,10 +520,21 @@
     -ms-user-select: none !important;
   }
 
+  /* Inline file paths open the message menu on long press. On touch screens,
+     iOS text selection/callout would cancel that long press. */
+  @media (pointer: coarse) {
+    .select-text code[data-file-path] {
+      user-select: none !important;
+      -webkit-user-select: none !important;
+      -webkit-touch-callout: none;
+    }
+  }
+
   /* Links should always have pointer cursor */
   a,
   .select-text a,
-  .select-text a * {
+  .select-text a *,
+  .select-text code[data-file-path] {
     cursor: pointer !important;
   }
 
@@ -515,6 +573,14 @@
   pointer-events: auto !important;
 }
 
+/* Native macOS traffic lights do not scale with the webview. The padding keeps
+   their clearance fixed; the margin scales with the neighboring app icons. */
+.mac-titlebar-actions {
+  margin-left: 8px;
+  padding-left: var(--mac-titlebar-action-left-inset, 68px);
+  padding-top: var(--mac-titlebar-action-top-inset, 4px);
+}
+
 /* Font overrides - outside @layer to ensure higher specificity */
 body {
   font-family: var(--font-family-sans) !important;
@@ -550,8 +616,9 @@ kbd {
   font-family: var(--font-family-mono) !important;
 }
 
-/* Keyboard shortcut indicators only make sense in the native desktop app. */
-body:not(.native-app) kbd {
+/* Keyboard shortcut indicators only make sense in the native desktop app,
+   unless marked data-web-visible (shortcuts that also work in web access). */
+body:not(.native-app) kbd:not([data-web-visible]) {
   display: none !important;
 }
 
@@ -619,6 +686,10 @@ body:not(.native-app) kbd {
   animation: settings-highlight-flash 1.8s ease-out;
   border-radius: calc(var(--radius) - 2px);
 }
+/* Pinned table "Show in chat" flash */
+.pinned-table-highlight {
+  animation: settings-highlight-flash 1.8s ease-out;
+}
 
 /* Number input spinners inherit color-scheme from .dark (light arrows).
    Keep an explicit rule so nested light color-scheme overrides can't darken them. */
@@ -670,6 +741,7 @@ body:not(.native-app) kbd {
 
 @media (prefers-reduced-motion: reduce) {
   .animate-wave,
+  .working-waveform > span,
   .animate-blink,
   .animate-border-spin,
   .animate-icon-glow,
@@ -684,6 +756,7 @@ body:not(.native-app) kbd {
 }
 
 .window-blurred .animate-wave,
+.window-blurred .working-waveform > span,
 .window-blurred .animate-blink,
 .window-blurred .animate-border-spin,
 .window-blurred .animate-icon-glow,

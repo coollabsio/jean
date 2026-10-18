@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { ApprovalCard } from './ApprovalCard'
 import { Markdown } from '@/components/ui/markdown'
 import { Textarea } from '@/components/ui/textarea'
 import type { CodexMcpElicitationRequest } from '@/types/chat'
@@ -55,14 +56,31 @@ export function CodexMcpElicitationRequest({
   }, [rawContent, request.mode])
 
   return (
-    <div className="my-3 rounded border border-muted bg-muted/30 p-4 font-mono text-sm">
-      <div className="mb-2 font-semibold">
-        MCP server “{request.server_name}” needs input
-      </div>
-      <div className="mb-3 text-muted-foreground">
-        <Markdown>{request.message}</Markdown>
-      </div>
-
+    <ApprovalCard
+      title={`MCP server “${request.server_name}” needs input`}
+      description={<Markdown>{request.message}</Markdown>}
+      actions={
+        <>
+          <Button
+            size="sm"
+            onClick={() =>
+              onAccept(
+                request.mode === 'form' ? parsedContent.value : undefined
+              )
+            }
+            disabled={request.mode === 'form' && !!parsedContent.error}
+          >
+            Accept
+          </Button>
+          <Button size="sm" variant="secondary" onClick={onDecline}>
+            Decline
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onCancel}>
+            Cancel
+          </Button>
+        </>
+      }
+    >
       {request.mode === 'url' ? (
         <a
           href={request.url}
@@ -89,24 +107,6 @@ export function CodexMcpElicitationRequest({
           )}
         </div>
       )}
-
-      <div className="mt-4 flex flex-wrap gap-2">
-        <Button
-          size="sm"
-          onClick={() =>
-            onAccept(request.mode === 'form' ? parsedContent.value : undefined)
-          }
-          disabled={request.mode === 'form' && !!parsedContent.error}
-        >
-          Accept
-        </Button>
-        <Button size="sm" variant="secondary" onClick={onDecline}>
-          Decline
-        </Button>
-        <Button size="sm" variant="ghost" onClick={onCancel}>
-          Cancel
-        </Button>
-      </div>
-    </div>
+    </ApprovalCard>
   )
 }

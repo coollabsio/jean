@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { useUIStore } from './ui-store'
 
 describe('Command Code CLI update modal', () => {
@@ -14,6 +14,42 @@ describe('Command Code CLI update modal', () => {
 
     expect(useUIStore.getState().cliUpdateModalOpen).toBe(true)
     expect(useUIStore.getState().cliUpdateModalType).toBe('commandcode')
+  })
+})
+
+describe('minimized CLI updates', () => {
+  beforeEach(() => {
+    useUIStore.setState({ minimizedCliUpdate: null })
+  })
+
+  it('stores progress and restores the active modal', () => {
+    const store = useUIStore.getState()
+    store.openCliUpdateModal('codex')
+    store.setMinimizedCliUpdate({
+      type: 'codex',
+      name: 'Codex CLI',
+      kind: 'reinstall',
+      progress: 25,
+    })
+
+    store.updateMinimizedCliUpdateProgress(60)
+    expect(useUIStore.getState().minimizedCliUpdate?.progress).toBe(60)
+
+    store.restoreMinimizedCliUpdate()
+    expect(useUIStore.getState().minimizedCliUpdate).toBeNull()
+    expect(useUIStore.getState().cliUpdateModalOpen).toBe(true)
+  })
+
+  it('clears minimized state when the active update closes', () => {
+    useUIStore.getState().setMinimizedCliUpdate({
+      type: 'gh',
+      name: 'GitHub CLI',
+      kind: 'terminal',
+      progress: null,
+    })
+
+    useUIStore.getState().closeCliLoginModal()
+    expect(useUIStore.getState().minimizedCliUpdate).toBeNull()
   })
 })
 
@@ -163,6 +199,73 @@ describe('UIStore', () => {
     ).toBeUndefined()
   })
 
+  it('evicts worktree and session keyed UI state when a worktree is removed', () => {
+    useUIStore.setState({
+      autoInvestigateWorktreeIds: new Set(['worktree-1', 'worktree-2']),
+      autoInvestigatePRWorktreeIds: new Set(['worktree-1', 'worktree-2']),
+      autoInvestigateSecurityAlertWorktreeIds: new Set([
+        'worktree-1',
+        'worktree-2',
+      ]),
+      autoInvestigateAdvisoryWorktreeIds: new Set(['worktree-1', 'worktree-2']),
+      autoInvestigateLinearIssueWorktreeIds: new Set([
+        'worktree-1',
+        'worktree-2',
+      ]),
+      autoInvestigateSentryIssueWorktreeIds: new Set([
+        'worktree-1',
+        'worktree-2',
+      ]),
+      autoOpenSessionWorktreeIds: new Set(['worktree-1', 'worktree-2']),
+      pendingAutoOpenSessionIds: {
+        'worktree-1': 'session-1',
+        'worktree-2': 'session-2',
+      },
+      sessionPrimarySurface: {
+        'session-1': 'terminal',
+        'session-2': 'chat',
+      },
+      sessionTerminalIds: {
+        'session-1': 'terminal-1',
+        'session-2': 'terminal-2',
+      },
+      sessionChatModalOpen: true,
+      sessionChatModalWorktreeId: 'worktree-1',
+      newSessionModeTarget: {
+        worktreeId: 'worktree-1',
+        worktreePath: '/tmp/worktree-1',
+        origin: 'canvas',
+      },
+    })
+
+    useUIStore.getState().clearWorktreeState('worktree-1', ['session-1'])
+
+    const state = useUIStore.getState()
+    expect(state.autoInvestigateWorktreeIds).toEqual(new Set(['worktree-2']))
+    expect(state.autoInvestigatePRWorktreeIds).toEqual(new Set(['worktree-2']))
+    expect(state.autoInvestigateSecurityAlertWorktreeIds).toEqual(
+      new Set(['worktree-2'])
+    )
+    expect(state.autoInvestigateAdvisoryWorktreeIds).toEqual(
+      new Set(['worktree-2'])
+    )
+    expect(state.autoInvestigateLinearIssueWorktreeIds).toEqual(
+      new Set(['worktree-2'])
+    )
+    expect(state.autoInvestigateSentryIssueWorktreeIds).toEqual(
+      new Set(['worktree-2'])
+    )
+    expect(state.autoOpenSessionWorktreeIds).toEqual(new Set(['worktree-2']))
+    expect(state.pendingAutoOpenSessionIds).toEqual({
+      'worktree-2': 'session-2',
+    })
+    expect(state.sessionPrimarySurface).toEqual({ 'session-2': 'chat' })
+    expect(state.sessionTerminalIds).toEqual({ 'session-2': 'terminal-2' })
+    expect(state.sessionChatModalOpen).toBe(false)
+    expect(state.sessionChatModalWorktreeId).toBeNull()
+    expect(state.newSessionModeTarget).toBeNull()
+  })
+
   it('does not notify subscribers for duplicate auto-open session requests', () => {
     const store = useUIStore.getState()
     let notifications = 0
@@ -200,5 +303,119 @@ describe('UIStore', () => {
 
     setUpdateReadyVersion('1.2.3') // no-op guard
     expect(useUIStore.getState().updateReadyVersion).toBe('1.2.3')
+  })
+})
+
+describe('MCP login context', () => {
+  beforeEach(() => useUIStore.getState().closeCliLoginModal())
+
+  it('clears the MCP target when the modal closes', () => {
+    useUIStore
+      .getState()
+      .openCliLoginModal('claude', '/cli', ['mcp', 'login'], 'login', {
+        serverName: 'orbit-dev',
+        worktreePath: '/repo',
+        serverId: 'remote',
+      })
+    expect(useUIStore.getState().cliLoginModalMcpContext?.serverId).toBe(
+      'remote'
+    )
+    useUIStore.getState().closeCliLoginModal()
+    expect(useUIStore.getState().cliLoginModalMcpContext).toBeNull()
+  })
+
+  it('never carries an MCP directory or owner into a normal CLI login', () => {
+    useUIStore
+      .getState()
+      .openCliLoginModal('claude', '/cli', ['mcp', 'login'], 'login', {
+        serverName: 'orbit-dev',
+        worktreePath: '/repo',
+        serverId: 'remote',
+      })
+    useUIStore.getState().openCliLoginModal('codex', '/cli', ['login'])
+    expect(useUIStore.getState().cliLoginModalMcpContext).toBeNull()
+  })
+})
+
+describe('mobile left sidebar closes when a surface opens over it', () => {
+  const desktopWidth = window.innerWidth
+
+  function setViewportWidth(width: number) {
+    Object.defineProperty(window, 'innerWidth', {
+      value: width,
+      configurable: true,
+      writable: true,
+    })
+  }
+
+  beforeEach(() => {
+    useUIStore.setState({
+      leftSidebarVisible: true,
+      sessionChatModalOpen: false,
+      sessionChatModalWorktreeId: null,
+      newWorktreeModalOpen: false,
+      preferencesOpen: false,
+      preferencesPane: null,
+    })
+  })
+
+  afterEach(() => {
+    setViewportWidth(desktopWidth)
+  })
+
+  it.each([
+    [
+      'session chat modal',
+      () => useUIStore.getState().setSessionChatModalOpen(true, 'wt-1'),
+    ],
+    [
+      'new worktree modal',
+      () => useUIStore.getState().setNewWorktreeModalOpen(true),
+    ],
+    ['preferences', () => useUIStore.getState().setPreferencesOpen(true)],
+    [
+      'preferences pane',
+      () => useUIStore.getState().openPreferencesPane('general'),
+    ],
+    ['preferences toggle', () => useUIStore.getState().togglePreferences()],
+  ])('closes it on mobile when opening the %s', (_, open) => {
+    setViewportWidth(390)
+
+    open()
+
+    expect(useUIStore.getState().leftSidebarVisible).toBe(false)
+  })
+
+  it('keeps it open on desktop', () => {
+    setViewportWidth(1280)
+
+    useUIStore.getState().setSessionChatModalOpen(true, 'wt-1')
+    useUIStore.getState().setNewWorktreeModalOpen(true)
+    useUIStore.getState().openPreferencesPane('general')
+
+    expect(useUIStore.getState().leftSidebarVisible).toBe(true)
+    expect(useUIStore.getState().sessionChatModalOpen).toBe(true)
+    expect(useUIStore.getState().sessionChatModalWorktreeId).toBe('wt-1')
+  })
+
+  it('keeps it open on mobile when a surface closes', () => {
+    setViewportWidth(390)
+    useUIStore.setState({ sessionChatModalOpen: true })
+
+    useUIStore.getState().setSessionChatModalOpen(false)
+    useUIStore.getState().setNewWorktreeModalOpen(false)
+    useUIStore.getState().setPreferencesOpen(false)
+
+    expect(useUIStore.getState().leftSidebarVisible).toBe(true)
+  })
+
+  it('does not notify subscribers when reopening an already-open modal', () => {
+    setViewportWidth(1280)
+    useUIStore.getState().setSessionChatModalOpen(true, 'wt-1')
+    const before = useUIStore.getState()
+
+    useUIStore.getState().setSessionChatModalOpen(true, 'wt-1')
+
+    expect(useUIStore.getState()).toBe(before)
   })
 })

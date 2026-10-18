@@ -20,7 +20,7 @@ function TouchProbe({
   edge?: 'left' | 'right'
   visualFeedback?: boolean
 }) {
-  const { containerRef, translateX, isSwiping } = useSwipeBack({
+  const { containerRef, translateX, isSwiping, progress } = useSwipeBack({
     onSwipeBack,
     enabled,
     animateToEnd,
@@ -34,6 +34,7 @@ function TouchProbe({
       ref={containerRef}
       data-testid="swipe-target"
       data-translate={translateX}
+      data-progress={progress}
       data-swiping={isSwiping ? 'true' : 'false'}
       style={{ width: 400, height: 600 }}
     />
@@ -42,7 +43,7 @@ function TouchProbe({
 
 function fireTouch(
   el: Element,
-  type: 'touchstart' | 'touchmove' | 'touchend',
+  type: 'touchstart' | 'touchmove' | 'touchend' | 'touchcancel',
   clientX: number,
   clientY = 100
 ) {
@@ -64,8 +65,8 @@ function fireTouch(
   const event = new TouchEvent(type, {
     bubbles: true,
     cancelable: true,
-    touches: type === 'touchend' ? [] : [touch],
-    targetTouches: type === 'touchend' ? [] : [touch],
+    touches: type === 'touchend' || type === 'touchcancel' ? [] : [touch],
+    targetTouches: type === 'touchend' || type === 'touchcancel' ? [] : [touch],
     changedTouches: [touch],
   })
   el.dispatchEvent(event)
@@ -120,6 +121,19 @@ describe('useSwipeBack', () => {
     expect(onSwipeBack).toHaveBeenCalledTimes(1)
   })
 
+  it('reserves horizontal touch movement while the gesture is enabled', () => {
+    const { getByTestId, rerender } = render(
+      <TouchProbe onSwipeBack={vi.fn()} />
+    )
+    const el = getByTestId('swipe-target')
+
+    expect(el.style.touchAction).toBe('pan-y')
+
+    rerender(<TouchProbe onSwipeBack={vi.fn()} enabled={false} />)
+
+    expect(el.style.touchAction).toBeFalsy()
+  })
+
   it('resets finger-tracked feedback after opening an overlay', () => {
     const onSwipeBack = vi.fn()
     const { getByTestId } = render(
@@ -136,7 +150,8 @@ describe('useSwipeBack', () => {
       fireTouch(el, 'touchstart', 8)
       fireTouch(el, 'touchmove', 180)
     })
-    expect(el).toHaveAttribute('data-translate', '172')
+    expect(el).toHaveAttribute('data-translate', '180')
+    expect(el).toHaveAttribute('data-progress', '1')
 
     act(() => {
       fireTouch(el, 'touchend', 180)
@@ -205,6 +220,55 @@ describe('useSwipeBack', () => {
       vi.advanceTimersByTime(250)
     })
 
+    expect(onSwipeBack).not.toHaveBeenCalled()
+  })
+
+  it('resets swiping when the browser cancels the touch', () => {
+    const onSwipeBack = vi.fn()
+    const { getByTestId } = render(
+      <TouchProbe onSwipeBack={onSwipeBack} animateToEnd={false} />
+    )
+    const el = getByTestId('swipe-target')
+    Object.defineProperty(el, 'offsetWidth', { value: 400, configurable: true })
+
+    act(() => {
+      fireTouch(el, 'touchstart', 8)
+      fireTouch(el, 'touchmove', 300)
+    })
+    expect(el.getAttribute('data-swiping')).toBe('true')
+
+    act(() => {
+      fireTouch(el, 'touchcancel', 300)
+    })
+
+    expect(el.getAttribute('data-swiping')).toBe('false')
+    expect(el.getAttribute('data-progress')).toBe('0')
+    expect(onSwipeBack).not.toHaveBeenCalled()
+  })
+
+  it('resets swiping when disabled mid-gesture', () => {
+    const onSwipeBack = vi.fn()
+    const { getByTestId, rerender } = render(
+      <TouchProbe onSwipeBack={onSwipeBack} animateToEnd={false} />
+    )
+    const el = getByTestId('swipe-target')
+    Object.defineProperty(el, 'offsetWidth', { value: 400, configurable: true })
+
+    act(() => {
+      fireTouch(el, 'touchstart', 8)
+      fireTouch(el, 'touchmove', 100)
+    })
+    expect(el.getAttribute('data-swiping')).toBe('true')
+
+    rerender(
+      <TouchProbe
+        onSwipeBack={onSwipeBack}
+        animateToEnd={false}
+        enabled={false}
+      />
+    )
+
+    expect(el.getAttribute('data-swiping')).toBe('false')
     expect(onSwipeBack).not.toHaveBeenCalled()
   })
 

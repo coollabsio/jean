@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -52,6 +52,66 @@ static CODEX_YOLO_AUTO_APPROVE: Lazy<Mutex<HashSet<String>>> =
 /// quitting). Claude CLI and host-backed Pi/Grok/Kimi/Antigravity runs are detached.
 static DETACHED_SESSIONS: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
 
+/// Sessions with a `send_chat_message` call currently in flight.
+///
+/// The registry-based "actively managed" guard only catches duplicates after a
+/// process/turn is registered, leaving a window where two concurrent sends
+/// (backend queue drain vs a direct client send, or two clients) both
+/// pass the check and spawn duplicate runs. This claim is taken atomically at
+/// `send_chat_message` entry and held for the whole call — unless cancel
+/// releases it early so a follow-up send is not stuck (#329).
+///
+/// Values are generation tokens so an early cancel release cannot be clobbered
+/// by a later `Drop` from the cancelled claim after a new claim was acquired.
+static ACTIVE_SENDS: Lazy<Mutex<HashMap<String, u64>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+static SEND_CLAIM_GENERATION: AtomicU64 = AtomicU64::new(1);
+
+/// RAII claim on a session's send slot — released on drop (any return path).
+pub struct SendClaim {
+    session_id: String,
+    generation: u64,
+}
+
+impl SendClaim {
+    pub fn try_acquire(session_id: &str) -> Option<Self> {
+        let mut active = lock_recover(&ACTIVE_SENDS, "ACTIVE_SENDS");
+        if active.contains_key(session_id) {
+            return None;
+        }
+        let generation = SEND_CLAIM_GENERATION.fetch_add(1, Ordering::Relaxed);
+        active.insert(session_id.to_string(), generation);
+        Some(Self {
+            session_id: session_id.to_string(),
+            generation,
+        })
+    }
+}
+
+impl Drop for SendClaim {
+    fn drop(&mut self) {
+        let mut active = lock_recover(&ACTIVE_SENDS, "ACTIVE_SENDS");
+        if active.get(&self.session_id) == Some(&self.generation) {
+            active.remove(&self.session_id);
+        }
+    }
+}
+
+/// Release the in-flight send claim for a session after cancel so a follow-up
+/// prompt is not rejected with "Session already has an active request" while
+/// the cancelled worker finishes teardown (#329).
+pub fn release_active_send(session_id: &str) {
+    if lock_recover(&ACTIVE_SENDS, "ACTIVE_SENDS")
+        .remove(session_id)
+        .is_some()
+    {
+        log::info!("[SendChat] released active send claim after cancel session={session_id}");
+    }
+}
+
+pub fn has_active_send(session_id: &str) -> bool {
+    lock_recover(&ACTIVE_SENDS, "ACTIVE_SENDS").contains_key(session_id)
+}
+
 fn lock_recover<'a, T>(mutex: &'a Mutex<T>, name: &str) -> std::sync::MutexGuard<'a, T> {
     match mutex.lock() {
         Ok(guard) => guard,
@@ -62,7 +122,12 @@ fn lock_recover<'a, T>(mutex: &'a Mutex<T>, name: &str) -> std::sync::MutexGuard
     }
 }
 
-fn emit_cancelled_event(app: &AppHandle, session_id: &str, worktree_id: &str, undo_send: bool) {
+pub(crate) fn emit_cancelled_event(
+    app: &AppHandle,
+    session_id: &str,
+    worktree_id: &str,
+    undo_send: bool,
+) {
     let emitted_at_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
@@ -115,8 +180,11 @@ fn try_abort_pi_rpc_host(app: &AppHandle, session_id: &str) {
 #[cfg(not(unix))]
 fn try_abort_pi_rpc_host(_app: &AppHandle, _session_id: &str) {}
 
+/// Ask the warm Grok host to cancel the in-flight turn without exiting.
+/// Returns true when the host accepted the abort, so the caller must not
+/// kill that process — the next prompt reuses it.
 #[cfg(unix)]
-fn try_abort_grok_acp_host(app: &AppHandle, session_id: &str) {
+fn try_abort_grok_acp_host(app: &AppHandle, session_id: &str) -> bool {
     let run_id = super::storage::load_metadata(app, session_id)
         .ok()
         .flatten()
@@ -131,21 +199,27 @@ fn try_abort_grok_acp_host(app: &AppHandle, session_id: &str) {
                 })
                 .map(|run| run.run_id.clone())
         });
-    let Some(run_id) = run_id else { return };
+    let Some(run_id) = run_id else { return false };
     let Ok(app_data) = app.path().app_data_dir() else {
         log::warn!("Failed to resolve app data dir for Grok ACP abort");
-        return;
+        return false;
     };
     let socket_path = super::grok::grok_acp_socket_path(&app_data, session_id, &run_id);
     let line =
         super::grok::serialize_grok_host_command("abort", None, Some(&format!("abort-{run_id}")));
-    if let Err(e) = super::grok::send_grok_acp_host_command(&socket_path, &line) {
-        log::warn!("Failed to send Grok ACP abort before kill for session {session_id}: {e}");
+    match super::grok::send_grok_acp_host_command(&socket_path, &line) {
+        Ok(()) => true,
+        Err(e) => {
+            log::warn!("Failed to send Grok ACP abort before kill for session {session_id}: {e}");
+            false
+        }
     }
 }
 
 #[cfg(not(unix))]
-fn try_abort_grok_acp_host(_app: &AppHandle, _session_id: &str) {}
+fn try_abort_grok_acp_host(_app: &AppHandle, _session_id: &str) -> bool {
+    false
+}
 
 #[cfg(unix)]
 fn try_abort_kimi_acp_host(app: &AppHandle, session_id: &str) {
@@ -233,6 +307,27 @@ pub fn unregister_process(session_id: &str) {
     }
     drop(registry);
     lock_recover(&DETACHED_SESSIONS, "DETACHED_SESSIONS").remove(session_id);
+}
+
+/// Remove a session's process entry only while it still belongs to `pid`.
+///
+/// A tailer of a cancelled run must not unregister a newer run that already
+/// registered a different PID for the same session.
+pub fn unregister_process_if_owned(session_id: &str, pid: u32) {
+    let mut registry = lock_recover(&PROCESS_REGISTRY, "PROCESS_REGISTRY");
+    if registry.get(session_id) != Some(&pid) {
+        return;
+    }
+    registry.remove(session_id);
+    drop(registry);
+    lock_recover(&DETACHED_SESSIONS, "DETACHED_SESSIONS").remove(session_id);
+    log::trace!("Unregistered process {pid} for session: {session_id}");
+}
+
+/// Whether `pid` is still the registered process for this session.
+/// False after cancel removed it, or once a newer run replaced it.
+pub fn is_process_registered(session_id: &str, pid: u32) -> bool {
+    lock_recover(&PROCESS_REGISTRY, "PROCESS_REGISTRY").get(session_id) == Some(&pid)
 }
 
 /// Register a cancellation flag for an OpenCode session.
@@ -466,7 +561,7 @@ pub fn get_running_sessions() -> Vec<String> {
     sessions
 }
 
-/// Get all session IDs that are actively managed (running process, cancel flag, or codex turn).
+/// Get all session IDs that are actively managed (running process, cancel flag, codex turn, or active send).
 /// Used by recover_incomplete_runs to skip sessions that don't need recovery.
 pub fn get_actively_managed_sessions() -> HashSet<String> {
     let mut sessions: HashSet<String> = lock_recover(&PROCESS_REGISTRY, "PROCESS_REGISTRY")
@@ -479,6 +574,7 @@ pub fn get_actively_managed_sessions() -> HashSet<String> {
             .keys()
             .cloned(),
     );
+    sessions.extend(lock_recover(&ACTIVE_SENDS, "ACTIVE_SENDS").keys().cloned());
     sessions
 }
 
@@ -503,12 +599,13 @@ pub fn has_nonsurvivable_running_sessions() -> bool {
         .any(|session_id| !detached.contains(session_id))
 }
 
-/// Check if a specific session is actively managed (has a running process, cancel flag, or codex turn).
+/// Check if a specific session is actively managed (has a running process, cancel flag, codex turn, or active send).
 /// Used by resume_session to avoid starting a duplicate tail.
 pub fn is_session_actively_managed(session_id: &str) -> bool {
     lock_recover(&PROCESS_REGISTRY, "PROCESS_REGISTRY").contains_key(session_id)
         || lock_recover(&CANCEL_FLAGS, "CANCEL_FLAGS").contains_key(session_id)
         || lock_recover(&CODEX_TURN_REGISTRY, "CODEX_TURN_REGISTRY").contains_key(session_id)
+        || lock_recover(&ACTIVE_SENDS, "ACTIVE_SENDS").contains_key(session_id)
 }
 
 #[cfg(test)]
@@ -523,6 +620,7 @@ mod tests {
         lock_recover(&PENDING_CANCELS, "PENDING_CANCELS").clear();
         lock_recover(&CANCEL_FLAGS, "CANCEL_FLAGS").clear();
         lock_recover(&CODEX_TURN_REGISTRY, "CODEX_TURN_REGISTRY").clear();
+        lock_recover(&ACTIVE_SENDS, "ACTIVE_SENDS").clear();
     }
 
     #[test]
@@ -550,6 +648,26 @@ mod tests {
                 "opencode-session".to_string()
             ]
         );
+
+        clear_registries();
+    }
+
+    #[test]
+    fn send_claim_marks_session_as_actively_managed() {
+        let _guard = lock_recover(&TEST_LOCK, "TEST_LOCK");
+        clear_registries();
+
+        let session_id = "send-claim-session";
+        assert!(!is_session_actively_managed(session_id));
+        assert!(!get_actively_managed_sessions().contains(session_id));
+
+        let claim = SendClaim::try_acquire(session_id).expect("acquire claim");
+        assert!(is_session_actively_managed(session_id));
+        assert!(get_actively_managed_sessions().contains(session_id));
+
+        drop(claim);
+        assert!(!is_session_actively_managed(session_id));
+        assert!(!get_actively_managed_sessions().contains(session_id));
 
         clear_registries();
     }
@@ -686,6 +804,31 @@ mod tests {
     }
 
     #[test]
+    fn owned_unregister_keeps_newer_run_registration() {
+        let _guard = lock_recover(&TEST_LOCK, "TEST_LOCK");
+        clear_registries();
+
+        assert!(register_detached_process("session".to_string(), 111));
+        assert!(is_process_registered("session", 111));
+
+        // Cancel removed the old run, then a new run registered pid 222.
+        lock_recover(&PROCESS_REGISTRY, "PROCESS_REGISTRY").remove("session");
+        assert!(register_detached_process("session".to_string(), 222));
+
+        // Old tailer sees its run is gone, and must not remove the new entry.
+        assert!(!is_process_registered("session", 111));
+        unregister_process_if_owned("session", 111);
+        assert!(is_process_registered("session", 222));
+        assert!(lock_recover(&DETACHED_SESSIONS, "DETACHED_SESSIONS").contains("session"));
+
+        unregister_process_if_owned("session", 222);
+        assert!(!is_session_actively_managed("session"));
+        assert!(!lock_recover(&DETACHED_SESSIONS, "DETACHED_SESSIONS").contains("session"));
+
+        clear_registries();
+    }
+
+    #[test]
     fn clear_pending_cancel_leaves_active_registrations_intact() {
         let _guard = lock_recover(&TEST_LOCK, "TEST_LOCK");
         clear_registries();
@@ -731,9 +874,17 @@ pub fn cancel_process(
         }
 
         try_abort_pi_rpc_host(app, session_id);
-        try_abort_grok_acp_host(app, session_id);
+        let grok_host_kept = try_abort_grok_acp_host(app, session_id);
         try_abort_kimi_acp_host(app, session_id);
         try_abort_antigravity_acp_host(app, session_id);
+        if grok_host_kept {
+            log::info!("Grok ACP host left running after cancel for session {session_id}");
+            if let Err(e) = run_log::mark_running_run_cancelled(app, session_id) {
+                log::warn!("Failed to mark run as cancelled in manifest: {e}");
+            }
+            emit_cancelled_event(app, session_id, worktree_id, false);
+            return Ok(true);
+        }
         log::trace!("Cancelling Claude process group {pid} for session: {session_id}");
 
         // Kill the entire process tree to ensure child processes are also terminated
@@ -878,9 +1029,17 @@ pub fn cancel_process_if_running(
         }
 
         try_abort_pi_rpc_host(app, session_id);
-        try_abort_grok_acp_host(app, session_id);
+        let grok_host_kept = try_abort_grok_acp_host(app, session_id);
         try_abort_kimi_acp_host(app, session_id);
         try_abort_antigravity_acp_host(app, session_id);
+        if grok_host_kept {
+            log::info!("Grok ACP host left running after cancel for session {session_id}");
+            if let Err(e) = run_log::mark_running_run_cancelled(app, session_id) {
+                log::warn!("Failed to mark run as cancelled in manifest: {e}");
+            }
+            emit_cancelled_event(app, session_id, worktree_id, false);
+            return Ok(true);
+        }
         log::trace!("Cancelling Claude process group {pid} for session: {session_id}");
 
         use crate::platform::{is_process_alive, kill_process, kill_process_tree};

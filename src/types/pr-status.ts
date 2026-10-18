@@ -33,6 +33,8 @@ export interface PrStatusEvent {
   worktree_id: string
   pr_number: number
   pr_url: string
+  /** Current GitHub target branch (omitted by older Jean servers). */
+  base_branch?: string
   state: PrState
   is_draft: boolean
   review_decision: ReviewDecision | null

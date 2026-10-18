@@ -185,6 +185,67 @@ describe('restore-keyboard-focus', () => {
   })
 
   describe('installWindowKeyboardFocusRestore', () => {
+    it('restores focus from the native window focus event', async () => {
+      vi.useFakeTimers()
+      let nativeFocusHandler: ((focused: boolean) => void) | undefined
+      const nativeUnlisten = vi.fn()
+      const subscribeToNativeFocus = vi.fn(
+        async (handler: (focused: boolean) => void) => {
+          nativeFocusHandler = handler
+          return nativeUnlisten
+        }
+      )
+
+      const input = document.createElement('textarea')
+      document.body.appendChild(input)
+      input.focus()
+
+      const cleanup = installWindowKeyboardFocusRestore({
+        subscribeToNativeFocus,
+      })
+      await vi.waitFor(() => expect(subscribeToNativeFocus).toHaveBeenCalled())
+
+      document.body.tabIndex = -1
+      document.body.focus()
+      nativeFocusHandler?.(false)
+      vi.runAllTimers()
+      expect(document.activeElement).toBe(document.body)
+
+      nativeFocusHandler?.(true)
+      vi.runAllTimers()
+      expect(document.activeElement).toBe(input)
+
+      cleanup()
+      expect(nativeUnlisten).toHaveBeenCalledOnce()
+      vi.useRealTimers()
+    })
+
+    it('ignores a queued native focus event after cleanup', async () => {
+      vi.useFakeTimers()
+      let nativeFocusHandler: ((focused: boolean) => void) | undefined
+
+      const input = document.createElement('textarea')
+      document.body.appendChild(input)
+      input.focus()
+
+      const cleanup = installWindowKeyboardFocusRestore({
+        subscribeToNativeFocus: async handler => {
+          nativeFocusHandler = handler
+          return vi.fn<() => void>()
+        },
+      })
+      await vi.waitFor(() => expect(nativeFocusHandler).toBeDefined())
+
+      document.body.tabIndex = -1
+      document.body.focus()
+      cleanup()
+      nativeFocusHandler?.(true)
+      vi.runAllTimers()
+
+      expect(document.activeElement).toBe(document.body)
+      vi.useRealTimers()
+    })
+
     it('restores last focused element on window focus', () => {
       vi.useFakeTimers()
 

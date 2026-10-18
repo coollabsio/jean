@@ -20,8 +20,10 @@ vi.mock('sonner', () => ({
 
 import {
   canReconnectSession,
+  isDuplicateSendError,
   prefetchSessions,
   reconnectNativeCliSession,
+  touchRecentSessionCaches,
 } from './chat'
 import { preserveQueryCacheOnError } from '@/lib/query-error'
 import { useChatStore } from '@/store/chat-store'
@@ -35,6 +37,59 @@ const toastMock = toast as unknown as {
   success: ReturnType<typeof vi.fn>
   error: ReturnType<typeof vi.fn>
 }
+
+describe('touchRecentSessionCaches', () => {
+  it('updates and reorders a continued session immediately', () => {
+    const queryClient = new QueryClient()
+    const session = (id: string, timestamp: number) => ({
+      session: {
+        id,
+        name: id,
+        order: 0,
+        created_at: timestamp,
+        updated_at: timestamp,
+        messages: [],
+      },
+      lastActivityAt: timestamp,
+    })
+    const key = ['recent-worktrees', 'projects', 10, 'old']
+    queryClient.setQueryData(key, {
+      items: [session('new', 200), session('old', 100)],
+    })
+
+    touchRecentSessionCaches(queryClient, 'old', 300)
+
+    const result = queryClient.getQueryData<{
+      items: {
+        lastActivityAt: number
+        session: Session
+      }[]
+    }>(key)
+    expect(result?.items.map(item => item.session.id)).toEqual(['old', 'new'])
+    expect(result?.items[0]?.lastActivityAt).toBe(300)
+    expect(result?.items[0]?.session.last_message_at).toBe(300)
+  })
+})
+
+describe('isDuplicateSendError', () => {
+  it('recognizes the run-log duplicate guard error', () => {
+    expect(
+      isDuplicateSendError(
+        'Session session-1 already has a Running run — refusing to create duplicate'
+      )
+    ).toBe(true)
+  })
+
+  it('recognizes the active-request duplicate guard error', () => {
+    expect(
+      isDuplicateSendError(new Error('Session already has an active request'))
+    ).toBe(true)
+  })
+
+  it('does not classify unrelated send errors as duplicates', () => {
+    expect(isDuplicateSendError('CLI process failed')).toBe(false)
+  })
+})
 
 describe('transient WebSocket query failures', () => {
   it('rethrows disconnects so TanStack Query preserves cached session data', () => {
@@ -106,6 +161,68 @@ describe('prefetchSessions', () => {
     expect(state.answeredQuestions['session-1']?.has('tool-1')).toBe(true)
     expect(state.submittedAnswers['session-1']).toEqual({
       'tool-1': [{ questionIndex: 0, selectedOptions: [1] }],
+    })
+  })
+
+  it('merges prefetched answers with in-memory answers instead of replacing them (#779)', async () => {
+    useChatStore.setState({
+      answeredQuestions: {
+        'session-1': new Set(['memory-tool']),
+        'session-other': new Set(['other-tool']),
+      },
+      submittedAnswers: {
+        'session-1': {
+          'memory-tool': [{ questionIndex: 0, selectedOptions: [2] }],
+          'shared-tool': [{ questionIndex: 0, selectedOptions: [2] }],
+        },
+      },
+    })
+    const { invoke } = await import('@/lib/transport')
+    ;(invoke as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      worktree_id: 'wt-1',
+      sessions: [
+        {
+          id: 'session-1',
+          name: 'Session 1',
+          order: 0,
+          created_at: 1,
+          updated_at: 1,
+          messages: [],
+          version: 2,
+          answered_questions: ['disk-tool'],
+          submitted_answers: {
+            'disk-tool': [{ questionIndex: 0, selectedOptions: [0] }],
+            'shared-tool': [{ questionIndex: 0, selectedOptions: [0] }],
+          },
+          fixed_findings: [],
+          waiting_for_input: false,
+        },
+      ],
+      active_session_id: 'session-1',
+      version: 2,
+    })
+
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    })
+
+    await prefetchSessions(queryClient, 'wt-1', '/tmp/wt-1')
+
+    const state = useChatStore.getState()
+    expect(state.answeredQuestions['session-1']).toEqual(
+      new Set(['disk-tool', 'memory-tool'])
+    )
+    expect(state.answeredQuestions['session-other']).toEqual(
+      new Set(['other-tool'])
+    )
+    expect(state.submittedAnswers['session-1']).toEqual({
+      'disk-tool': [{ questionIndex: 0, selectedOptions: [0] }],
+      'memory-tool': [{ questionIndex: 0, selectedOptions: [2] }],
+      // In-memory answer wins over the on-disk one
+      'shared-tool': [{ questionIndex: 0, selectedOptions: [2] }],
     })
   })
 })

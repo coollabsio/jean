@@ -3,7 +3,11 @@
 //! Reads:
 //! - Project scope: <worktree_path>/.cursor/mcp.json → `mcpServers`
 //! - User scope:    ~/.cursor/mcp.json              → `mcpServers`
+//!
+//! Servers from other sources (plugins, team settings) come from
+//! `cursor-agent mcp list` (see [`crate::chat::mcp_external`]).
 
+use crate::chat::mcp_external::{self, ExternalServer};
 use crate::chat::{McpHealthStatus, McpServerInfo};
 use once_cell::sync::Lazy;
 use std::collections::{HashMap, HashSet};
@@ -31,6 +35,21 @@ pub fn get_mcp_servers(worktree_path: Option<&str>) -> Vec<McpServerInfo> {
         collect_from_json(&user_config, "user", &mut servers, &mut seen_names);
     }
 
+    mcp_external::append("cursor", worktree_path, &mut servers);
+    servers
+}
+
+/// Servers named in `cursor-agent mcp list` output (it shows no target).
+pub fn servers_from_list_output(output: &str) -> Vec<ExternalServer> {
+    let mut servers: Vec<ExternalServer> = parse_cursor_mcp_list_output(output)
+        .into_iter()
+        .map(|(name, status)| {
+            let mut server = ExternalServer::new(name, "", "cli");
+            server.status = Some(status);
+            server
+        })
+        .collect();
+    servers.sort_by(|a, b| a.name.cmp(&b.name));
     servers
 }
 
@@ -79,6 +98,18 @@ pub fn check_mcp_health(
     app: &AppHandle,
     worktree_path: Option<&Path>,
 ) -> Result<HashMap<String, McpHealthStatus>, String> {
+    let output = run_mcp_list(app, worktree_path)?;
+    mcp_external::store(
+        app,
+        "cursor",
+        worktree_path.and_then(Path::to_str),
+        servers_from_list_output(&output),
+    );
+    Ok(parse_cursor_mcp_list_output(&output))
+}
+
+/// Run `cursor-agent mcp list` and return stdout + stderr.
+pub fn run_mcp_list(app: &AppHandle, worktree_path: Option<&Path>) -> Result<String, String> {
     let cli_path = super::resolve_cli_binary(app);
     if !cli_path.exists() {
         return Err("Cursor CLI not installed".to_string());
@@ -101,12 +132,11 @@ pub fn check_mcp_health(
         return Err(format!("Cursor MCP list failed: {}", stderr.trim()));
     }
 
-    let combined = format!(
+    Ok(format!(
         "{}\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
-    );
-    Ok(parse_cursor_mcp_list_output(&combined))
+    ))
 }
 
 pub fn sync_cursor_mcp_approvals(
@@ -229,7 +259,7 @@ fn workspace_lock(worktree_path: &Path) -> Result<Arc<Mutex<()>>, String> {
     Ok(lock)
 }
 
-fn strip_ansi(input: &str) -> String {
+pub(crate) fn strip_ansi(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
     while let Some(ch) = chars.next() {

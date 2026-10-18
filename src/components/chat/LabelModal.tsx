@@ -7,7 +7,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { Tag, Check, Pencil, Pin, Trash2 } from 'lucide-react'
+import { Tag, Check, Pencil, Pin, Trash2 } from '@/components/icons/reicon'
 import { useChatStore } from '@/store/chat-store'
 import type { LabelData } from '@/types/chat'
 import { getLabelTextColor } from '@/lib/label-colors'
@@ -279,7 +279,6 @@ export function LabelModal({
       getLabelData,
       applyLabel,
       saveEditedColor,
-      mode,
     ]
   )
 

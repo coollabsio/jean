@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DEFAULT_RELEASE_NOTES_PROMPT,
   ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_BACKENDS,
   ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_MODELS,
   COMMANDCODE_DEFAULT_MAGIC_PROMPT_BACKENDS,
   COMMANDCODE_DEFAULT_MAGIC_PROMPT_MODELS,
-  DEFAULT_FINAL_REVIEW_PROMPT,
   DEFAULT_INVESTIGATE_ADVISORY_PROMPT,
   DEFAULT_INVESTIGATE_ISSUE_PROMPT,
   DEFAULT_INVESTIGATE_LINEAR_ISSUE_PROMPT,
@@ -23,14 +23,20 @@ import {
   resolveMagicPromptProvider,
 } from './preferences'
 
+describe('default release notes prompt', () => {
+  it('requires a v-prefixed version title without an app/version body heading', () => {
+    expect(DEFAULT_RELEASE_NOTES_PROMPT).toContain(
+      'prefix the release version with `v`'
+    )
+    expect(DEFAULT_RELEASE_NOTES_PROMPT).toContain('`v0.1.74`')
+    expect(DEFAULT_RELEASE_NOTES_PROMPT).toContain(
+      'Do not repeat the app name or release version at the top'
+    )
+  })
+})
+
 describe('magic prompt preference resolvers', () => {
   it('defines an audit-only final review prompt with tabular output', () => {
-    expect(DEFAULT_FINAL_REVIEW_PROMPT).toContain('Do not modify')
-    expect(DEFAULT_FINAL_REVIEW_PROMPT).toContain('regressions')
-    expect(DEFAULT_FINAL_REVIEW_PROMPT).toContain('consolidat')
-    expect(DEFAULT_FINAL_REVIEW_PROMPT).toContain('Fixes #')
-    expect(DEFAULT_FINAL_REVIEW_PROMPT).toContain('Markdown table')
-    expect(defaultPreferences.magic_prompt_modes.final_review_mode).toBe('yolo')
     expect(defaultPreferences.magic_prompt_modes.code_review_fix_mode).toBe(
       'plan'
     )
@@ -108,16 +114,15 @@ describe('magic prompt preference resolvers', () => {
     )
     // Non-investigation chat modes keep shared defaults
     expect(GROK_DEFAULT_MAGIC_PROMPT_MODES.review_comments_mode).toBe('plan')
-    expect(GROK_DEFAULT_MAGIC_PROMPT_MODES.final_review_mode).toBe('yolo')
     expect(defaultPreferences.selected_grok_model).toBe('grok/grok-4.6')
     expect(defaultPreferences.default_grok_reasoning_effort).toBe('high')
   })
 
-  it('defaults Claude to Opus 4.8 and Codex/OpenCode to GPT 5.6 Sol', () => {
-    expect(defaultPreferences.selected_model).toBe('claude-opus-4-8[1m]')
-    expect(defaultPreferences.selected_codex_model).toBe('gpt-5.6-sol')
+  it('defaults Claude to Opus 5.5 and Codex/OpenCode to GPT 6.1 Sol', () => {
+    expect(defaultPreferences.selected_model).toBe('claude-opus-5-5')
+    expect(defaultPreferences.selected_codex_model).toBe('gpt-6.1-sol')
     expect(defaultPreferences.selected_opencode_model).toBe(
-      'opencode/gpt-5.6-sol'
+      'opencode/gpt-6.1-sol'
     )
     expect(defaultPreferences.default_codex_model_verbosity).toBe('medium')
   })
@@ -143,7 +148,7 @@ describe('magic prompt preference resolvers', () => {
   it('provides dedicated defaults for Sentry investigations', () => {
     expect(
       defaultPreferences.magic_prompt_models.investigate_sentry_issue_model
-    ).toBe('claude-opus-4-8[1m]')
+    ).toBe('claude-opus-5-5')
     expect(
       defaultPreferences.magic_prompt_modes.investigate_sentry_issue_mode
     ).toBe('plan')
@@ -173,6 +178,19 @@ describe('magic prompt preference resolvers', () => {
     )
   })
 
+  it.each([
+    ['issue', DEFAULT_INVESTIGATE_ISSUE_PROMPT],
+    ['pull request', DEFAULT_INVESTIGATE_PR_PROMPT],
+    ['security advisory', DEFAULT_INVESTIGATE_ADVISORY_PROMPT],
+  ])('validates the %s before deeper investigation', (_name, prompt) => {
+    const normalized = prompt.toLowerCase()
+
+    expect(normalized).toContain('1. validate')
+    expect(normalized).toContain('still valid')
+    expect(normalized).toContain('whether it makes sense to work on it now')
+    expect(normalized).toContain('if not, stop and explain why')
+  })
+
   it('keeps fixing and pushing workflow failures until the pushed commit is green', () => {
     const prompt = DEFAULT_INVESTIGATE_WORKFLOW_RUN_PROMPT.toLowerCase()
 
@@ -186,9 +204,13 @@ describe('magic prompt preference resolvers', () => {
     expect(defaultPreferences.auto_recaps_enabled).toBe(true)
   })
 
-  it('enables Codex multi-agent by default with parallel prompting', () => {
-    expect(defaultPreferences.parallel_execution_prompt_enabled).toBe(true)
-    expect(defaultPreferences.codex_multi_agent_enabled).toBe(true)
+  it('always-on parallel prompting falls back to the default prompt', () => {
+    expect(defaultPreferences).not.toHaveProperty(
+      'parallel_execution_prompt_enabled'
+    )
+    expect(defaultPreferences).not.toHaveProperty('codex_multi_agent_enabled')
+    expect(defaultPreferences).not.toHaveProperty('codex_max_agent_threads')
+    expect(defaultPreferences.magic_prompts.parallel_execution).toBeNull()
   })
 
   it('prefers explicit backend overrides', () => {

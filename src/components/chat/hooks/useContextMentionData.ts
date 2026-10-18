@@ -1,6 +1,4 @@
 import { useMemo } from 'react'
-import { Bug, GitPullRequest, ShieldAlert, Siren } from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
 import {
   filterAdvisories,
   filterIssues,
@@ -34,7 +32,6 @@ import type {
   RepositoryAdvisory,
 } from '@/types/github'
 import type { LinearIssue } from '@/types/linear'
-import { LinearIcon } from '@/components/icons/LinearIcon'
 
 export type ContextMentionType =
   | 'issue'
@@ -48,9 +45,7 @@ export interface ContextMentionItem {
   type: ContextMentionType
   label: string
   title: string
-  subtitle?: string
   badge?: string
-  icon: LucideIcon
   issue?: GitHubIssue
   pr?: GitHubPullRequest
   securityAlert?: DependabotAlert
@@ -62,6 +57,7 @@ export interface ContextMentionGroup {
   id: ContextMentionType
   heading: string
   items: ContextMentionItem[]
+  hasMore?: boolean
 }
 
 function lowerTrim(query: string) {
@@ -81,9 +77,6 @@ function issueToItem(issue: GitHubIssue): ContextMentionItem {
     type: 'issue',
     label: `#${issue.number}`,
     title: issue.title,
-    subtitle: `${issue.state} issue by ${issue.author.login}`,
-    badge: issue.state,
-    icon: Bug,
     issue,
   }
 }
@@ -94,9 +87,7 @@ function prToItem(pr: GitHubPullRequest): ContextMentionItem {
     type: 'pr',
     label: `PR #${pr.number}`,
     title: pr.title,
-    subtitle: `${pr.state} ${pr.baseRefName} ← ${pr.headRefName}`,
-    badge: pr.isDraft ? 'draft' : pr.state,
-    icon: GitPullRequest,
+    badge: pr.isDraft ? 'draft' : undefined,
     pr,
   }
 }
@@ -107,9 +98,7 @@ function securityToItem(alert: DependabotAlert): ContextMentionItem {
     type: 'security',
     label: `Security #${alert.number}`,
     title: alert.summary,
-    subtitle: `${alert.packageName} in ${alert.manifestPath}`,
     badge: alert.severity,
-    icon: ShieldAlert,
     securityAlert: alert,
   }
 }
@@ -120,10 +109,7 @@ function advisoryToItem(advisory: RepositoryAdvisory): ContextMentionItem {
     type: 'advisory',
     label: advisory.ghsaId,
     title: advisory.summary,
-    subtitle:
-      advisory.cveId ?? `${advisory.vulnerabilities.length} vulnerabilities`,
     badge: advisory.severity,
-    icon: Siren,
     advisory,
   }
 }
@@ -134,9 +120,7 @@ function linearToItem(issue: LinearIssue): ContextMentionItem {
     type: 'linear',
     label: issue.identifier,
     title: issue.title,
-    subtitle: `${issue.state.name}${issue.assignee ? ` • ${issue.assignee.displayName}` : ''}`,
     badge: issue.priorityLabel,
-    icon: LinearIcon,
     linearIssue: issue,
   }
 }
@@ -168,12 +152,16 @@ export function useContextMentionData({
   projectId,
   query,
   includeClosed,
+  issueLimit = 8,
+  prLimit = 8,
 }: {
   open: boolean
   projectPath: string | null
   projectId: string | null
   query: string
   includeClosed: boolean
+  issueLimit?: number
+  prLimit?: number
 }): { groups: ContextMentionGroup[]; isFetching: boolean } {
   const enabledProjectPath = open ? projectPath : null
   const enabledProjectId = open ? projectId : null
@@ -190,12 +178,12 @@ export function useContextMentionData({
   const { data: issueResult, isFetching: isFetchingIssues } = useGitHubIssues(
     enabledProjectPath,
     issueState,
-    { enabled: open }
+    { enabled: open, ownerId: enabledProjectId ?? undefined }
   )
   const { data: prs = [], isFetching: isFetchingPRs } = useGitHubPRs(
     enabledProjectPath,
     prState,
-    { enabled: open }
+    { enabled: open, ownerId: enabledProjectId ?? undefined }
   )
   const { data: alerts = [], isFetching: isFetchingAlerts } =
     useDependabotAlerts(enabledProjectPath, securityState, { enabled: open })
@@ -304,12 +292,14 @@ export function useContextMentionData({
       {
         id: 'issue',
         heading: 'GitHub Issues',
-        items: filteredIssues.slice(0, 8).map(issueToItem),
+        items: filteredIssues.slice(0, issueLimit).map(issueToItem),
+        hasMore: filteredIssues.length > issueLimit,
       },
       {
         id: 'pr',
         heading: 'GitHub Pull Requests',
-        items: filteredPRs.slice(0, 8).map(prToItem),
+        items: filteredPRs.slice(0, prLimit).map(prToItem),
+        hasMore: filteredPRs.length > prLimit,
       },
       {
         id: 'security',
@@ -344,12 +334,14 @@ export function useContextMentionData({
     exactSecurity,
     ghsaId,
     includeClosed,
+    issueLimit,
     issueResult,
     itemNumber,
     linearNumber,
     linearResult,
     open,
     prs,
+    prLimit,
     searchedIssues,
     searchedLinear,
     searchedPRs,

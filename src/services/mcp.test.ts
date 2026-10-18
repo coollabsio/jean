@@ -42,6 +42,12 @@ const otherServer: McpServerInfo = {
   config: { type: 'stdio', command: 'github-mcp' },
 }
 
+const agentBrowserServer: McpServerInfo = {
+  ...otherServer,
+  name: 'agent-browser',
+  config: { type: 'stdio', command: 'agent-browser', args: ['mcp'] },
+}
+
 describe('resolveEnabledMcpServers', () => {
   it('cascades session → project → global and auto-enables new servers', () => {
     const enabled = resolveEnabledMcpServers({
@@ -50,7 +56,10 @@ describe('resolveEnabledMcpServers', () => {
       knownServers: [],
     })
     expect(enabled).toEqual(
-      expect.arrayContaining([mcpKey('claude', 'jean'), mcpKey('claude', 'github')])
+      expect.arrayContaining([
+        mcpKey('claude', 'jean'),
+        mcpKey('claude', 'github'),
+      ])
     )
   })
 
@@ -63,6 +72,17 @@ describe('resolveEnabledMcpServers', () => {
     })
     expect(enabled).toEqual([mcpKey('claude', 'github')])
     expect(enabled).not.toContain(mcpKey('claude', 'jean'))
+  })
+
+  it('respects an empty session override for agent-browser', () => {
+    const enabled = resolveEnabledMcpServers({
+      availableServers: [agentBrowserServer, otherServer],
+      sessionEnabled: [],
+      globalEnabled: [],
+      knownServers: [mcpKey('claude', 'agent-browser')],
+    })
+
+    expect(enabled).toEqual([])
   })
 
   it('does not re-enable known-but-disabled servers', () => {
@@ -93,9 +113,7 @@ describe('resolveEnabledMcpServers', () => {
 describe('getNewServersToAutoEnable', () => {
   it('skips disabled servers', () => {
     const disabled: McpServerInfo = { ...jeanServer, disabled: true }
-    expect(
-      getNewServersToAutoEnable([disabled], [], [])
-    ).toEqual([])
+    expect(getNewServersToAutoEnable([disabled], [], [])).toEqual([])
   })
 })
 

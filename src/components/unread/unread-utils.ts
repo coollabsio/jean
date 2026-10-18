@@ -7,10 +7,20 @@ export function hasPendingSessionApproval(session: Session): boolean {
   return (
     (session.pending_codex_command_approval_requests?.length ?? 0) > 0 ||
     (session.pending_codex_permission_requests?.length ?? 0) > 0 ||
+    (session.pending_opencode_permission_requests?.length ?? 0) > 0 ||
     (session.pending_codex_user_input_requests?.length ?? 0) > 0 ||
     (session.pending_codex_mcp_elicitation_requests?.length ?? 0) > 0 ||
     (session.pending_codex_dynamic_tool_call_requests?.length ?? 0) > 0 ||
     (session.pending_permission_denials?.length ?? 0) > 0
+  )
+}
+
+function hasRunningReview(session: Session): boolean {
+  const results = session.review_results
+  return (
+    !!results &&
+    'reviews' in results &&
+    results.reviews.some(entry => entry.status === 'running')
   )
 }
 
@@ -25,11 +35,12 @@ export function isUnreadSession(session: Session): boolean {
   // queues so reconnect/remote clients still surface them (issue #626).
   const isWaiting =
     session.waiting_for_input || hasPendingSessionApproval(session)
-  const isReviewing = session.is_reviewing
-  const hasReviewResults = !!session.review_results
+  // A running review job is not finished yet; surface it when it ends.
+  const hasReviewActivity =
+    !hasRunningReview(session) &&
+    (session.is_reviewing || !!session.review_results)
 
-  if (!hasFinishedRun && !isWaiting && !isReviewing && !hasReviewResults)
-    return false
+  if (!hasFinishedRun && !isWaiting && !hasReviewActivity) return false
 
   if (!session.last_opened_at) return true
   return session.last_opened_at < session.updated_at

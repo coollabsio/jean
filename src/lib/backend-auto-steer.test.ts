@@ -22,11 +22,28 @@ describe('isSteerCapableBackend', () => {
 })
 
 describe('isBackendAutoSteerEnabled', () => {
-  it('defaults to true for steer-capable backends', () => {
-    expect(isBackendAutoSteerEnabled('codex')).toBe(true)
-    expect(isBackendAutoSteerEnabled('opencode')).toBe(true)
-    expect(isBackendAutoSteerEnabled('pi')).toBe(true)
-    expect(isBackendAutoSteerEnabled('grok')).toBe(true)
+  it('defaults to false for steer-capable backends', () => {
+    expect(isBackendAutoSteerEnabled('codex')).toBe(false)
+    expect(isBackendAutoSteerEnabled('opencode')).toBe(false)
+    expect(isBackendAutoSteerEnabled('pi')).toBe(false)
+    expect(isBackendAutoSteerEnabled('grok')).toBe(false)
+  })
+
+  it('returns true when the backend preference is enabled', () => {
+    expect(
+      isBackendAutoSteerEnabled('codex', { codex_auto_steer_enabled: true })
+    ).toBe(true)
+    expect(
+      isBackendAutoSteerEnabled('opencode', {
+        opencode_auto_steer_enabled: true,
+      })
+    ).toBe(true)
+    expect(
+      isBackendAutoSteerEnabled('pi', { pi_auto_steer_enabled: true })
+    ).toBe(true)
+    expect(
+      isBackendAutoSteerEnabled('grok', { grok_auto_steer_enabled: true })
+    ).toBe(true)
   })
 
   it('returns false when the backend preference is disabled', () => {

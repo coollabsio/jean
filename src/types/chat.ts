@@ -62,22 +62,59 @@ export type Backend =
   | 'kimi'
   | 'antigravity'
 
-/**
- * Execution mode for Claude CLI permission handling
- * - plan: Read-only mode, Claude can't make changes (--permission-mode plan)
- * - build: Auto-approve file edits only (--permission-mode acceptEdits)
- * - yolo: Auto-approve ALL tools without prompting (--permission-mode bypassPermissions)
- */
-export type ExecutionMode = 'plan' | 'build' | 'yolo'
+/** Wire-compatible execution policies. Plan remains a read-only workflow. */
+export type ExecutionMode = 'plan' | 'build' | 'yolo' | 'supervised' | 'auto'
+export type PermissionMode = Exclude<ExecutionMode, 'plan'>
 
-/** Cycle order for execution modes (used by Shift+Tab cycling) */
-export const EXECUTION_MODE_CYCLE: ExecutionMode[] = ['plan', 'build', 'yolo']
+/**
+ * Full argument bundle passed to the `send_chat_message` mutation. Captured per
+ * session so a background re-send (e.g. auto-continue after a usage limit
+ * resets) can replay the exact send without the active-session UI.
+ */
+export interface SendMessageArgs {
+  sessionId: string
+  worktreeId: string
+  worktreePath: string
+  message: string
+  model?: string
+  executionMode?: ExecutionMode
+  thinkingLevel?: ThinkingLevel
+  effortLevel?: EffortLevel
+  parallelExecutionPrompt?: string
+  aiLanguage?: string
+  allowedTools?: string[]
+  mcpConfig?: string
+  chromeEnabled?: boolean
+  customProfileName?: string
+  backend?: string
+  /** When false, skip the end-of-turn recap instruction. */
+  includeRecap?: boolean
+}
+
+export function getSupportedPermissionModes(
+  backend: Backend | undefined
+): PermissionMode[] {
+  if (backend === 'codex' || backend === 'kimi' || backend === 'grok')
+    return ['supervised', 'build', 'auto', 'yolo']
+  if (backend === 'claude' || backend === undefined)
+    return ['supervised', 'build', 'auto', 'yolo']
+  if (backend === 'opencode') return ['supervised', 'build', 'yolo']
+  return ['yolo']
+}
 
 export function getSupportedExecutionModes(
   backend: Backend | undefined
 ): ExecutionMode[] {
-  if (backend === 'cursor') return ['plan', 'yolo']
-  return EXECUTION_MODE_CYCLE
+  // Retain legacy Build for existing sessions, except Cursor, which never supported it.
+  return backend === 'cursor'
+    ? ['plan', 'yolo']
+    : [
+        ...new Set<ExecutionMode>([
+          'plan',
+          'build',
+          ...getSupportedPermissionModes(backend),
+        ]),
+      ]
 }
 
 export function isExecutionModeSupported(
@@ -92,7 +129,14 @@ export function normalizeExecutionModeForBackend(
   mode: ExecutionMode
 ): ExecutionMode {
   if (isExecutionModeSupported(backend, mode)) return mode
-  return backend === 'cursor' ? 'yolo' : 'plan'
+  // Never turn an unsupported restricted policy into unrestricted execution.
+  return 'plan'
+}
+
+export function permissionModeForExecution(
+  mode: ExecutionMode
+): PermissionMode {
+  return mode === 'plan' ? 'yolo' : mode
 }
 
 /**
@@ -120,12 +164,26 @@ export interface ToolCall {
   input: unknown
   /** Output/result from tool execution (from tool_result messages) */
   output?: string
+  /** True when the tool result was an error (failed/denied). Only set on error. */
+  is_error?: boolean
   /** Parent tool use ID for sub-agent tool calls (for parallel task attribution) */
   parent_tool_use_id?: string
   /** Live events streamed during long-running tools (e.g. Monitor). */
   events?: ToolLiveEvent[]
   /** Current lifecycle status for long-running tools. */
   status?: 'armed' | 'running' | 'done' | 'timeout' | 'error'
+  /** Token/tool/time totals of a Claude Task/Agent subagent run */
+  subagent_usage?: SubagentUsage
+}
+
+/** Claude subagent totals (from task_progress events and the final result) */
+export interface SubagentUsage {
+  /** Context tokens of the subagent's latest API call */
+  total_tokens: number
+  tool_uses: number
+  duration_ms: number
+  /** Model the subagent runs on (e.g. `claude-opus-5-5`) */
+  model?: string
 }
 
 export interface PlanStep {
@@ -180,6 +238,8 @@ export interface ChatMessage {
   thinking_level?: ThinkingLevel
   /** Effort level when this message was sent (user messages only, Opus 4.6) */
   effort_level?: EffortLevel
+  /** Provider/custom profile used when this message was sent (user messages only) */
+  custom_profile_name?: string
   /** True if this message was recovered from a crash */
   recovered?: boolean
   /** Token usage for this message (assistant messages only) */
@@ -203,11 +263,26 @@ export interface DeniedMessageContext {
 }
 
 /**
+ * A chat table pinned for quick access. `key` is the checklist table key
+ * ("{messageId}:{markdownOffset}"); `markdown` is the table source;
+ * `title` is the heading above the table in the message, when there is one.
+ */
+export interface PinnedTable {
+  key: string
+  markdown: string
+  title?: string
+}
+
+/**
  * A chat session within a worktree (supports multiple sessions per worktree)
  */
 export interface Session {
   /** Unique session identifier (UUID v4) */
   id: string
+  /** Client-only owner for a resource loaded from a remote Jean server. */
+  serverId?: string
+  /** Original server-local id when `id` is a composite client key. */
+  resourceId?: string
   /** Display name ("Session 1", or user-customized name) */
   name: string
   /** Order index for tab ordering (0-indexed) */
@@ -252,8 +327,10 @@ export interface Session {
   selected_effort_level?: EffortLevel
   /** Selected provider (custom CLI profile name) for this session */
   selected_provider?: string
-  /** Selected execution mode for this session (plan/build/yolo) */
+  /** Selected workflow/permission policy for this session */
   selected_execution_mode?: ExecutionMode
+  /** Build permission choice, retained while planning. */
+  selected_permission_mode?: PermissionMode
   /** Whether session naming has been attempted for this session */
   session_naming_completed?: boolean
   /** Unix timestamp when session was archived (undefined = not archived) */
@@ -311,6 +388,10 @@ export interface Session {
   enabled_mcp_servers?: string[]
   /** Per-table checklist state: tableKey -> checked row indices */
   table_checked_rows?: Record<string, number[]>
+  /** Table keys with checked rows tracked while checklist mode is off */
+  hidden_table_checklists?: string[]
+  /** Tables pinned for quick access, in pin order */
+  pinned_tables?: PinnedTable[]
   /** Unix timestamp when session was last opened/viewed by the user */
   last_opened_at?: number
   /** Primary surface for this session. Terminal sessions render as full-screen CLI sessions. */
@@ -539,12 +620,14 @@ export interface ErrorEvent {
 }
 
 /**
- * Event payload for cancellation from Rust (user pressed Escape)
+ * Event payload for cancellation from Rust (user pressed Escape).
+ * undo_send only indicates whether the user turn should be removed from
+ * history; a prompt with no streamed output may still be restored when false.
  */
 export interface CancelledEvent {
   session_id: string
   worktree_id: string // Kept for backward compatibility
-  undo_send: boolean // True only when the prompt never started (restore to input)
+  undo_send: boolean
   emitted_at_ms: number
   run_id?: string
 }
@@ -577,6 +660,8 @@ export interface ToolResultEvent {
   worktree_id: string // Kept for backward compatibility
   tool_use_id: string
   output: string
+  /** True when the tool result was an error (omitted otherwise) */
+  is_error?: boolean
 }
 
 /**
@@ -584,6 +669,14 @@ export interface ToolResultEvent {
  * Unlike tool_result (atomic), tool_event arrives incrementally while a
  * long-running tool is armed.
  */
+/** Event payload for chat:subagent_usage (Claude Task/Agent totals) */
+export interface SubagentUsageEvent {
+  session_id: string
+  worktree_id: string
+  tool_use_id: string
+  usage: SubagentUsage
+}
+
 export interface ToolEventEvent {
   session_id: string
   worktree_id: string
@@ -988,7 +1081,13 @@ export function hasQuestionAnswerOutput(
   const trimmed = output.trim()
   if (!trimmed) return false
 
-  if (trimmed === 'Answer questions?' || trimmed.startsWith('Error:')) {
+  if (
+    trimmed === 'Answer questions?' ||
+    trimmed.startsWith('Error:') ||
+    trimmed.startsWith('<tool_use_error>') ||
+    // Newer Claude CLI denies the blocking tool in headless runs
+    /^Permission to use \S+ was not granted\.?$/.test(trimmed)
+  ) {
     return false
   }
 
@@ -1247,17 +1346,34 @@ export function getTodoWriteTodos(toolCall: ToolCall): Todo[] {
 }
 
 /**
- * A Codex multi-agent entry extracted from collab_tool_call events
+ * A subagent entry shown in the Subagents panel above the chat input.
+ * Extracted from Codex collab_tool_call events or Claude Task/Agent tool calls.
  */
-export interface CodexAgent {
-  /** Tool call ID of the SpawnAgent collab_tool_call */
+export interface SubAgent {
+  /** Codex thread ID or Claude Task/Agent tool call ID */
   id: string
-  /** The prompt given to the agent (truncated for display) */
+  /** The prompt or description given to the agent (truncated for display) */
   prompt: string
   /** Agent lifecycle status */
   status: 'in_progress' | 'completed' | 'errored' | 'interrupted'
   /** Completion message from agents_states */
   message?: string
+  /** Bold label before the prompt (e.g. Claude subagent model or type) */
+  label?: string
+  /** Number of tool calls the agent made (Claude only) */
+  toolCount?: number
+  /** Context tokens of the agent's latest API call (Claude only) */
+  tokens?: number
+  /** Run time reported by the CLI (Claude only) */
+  durationMs?: number
+  /** Full prompt, for the expanded detail view */
+  fullPrompt?: string
+  /** Final report the agent returned (Claude Task/Agent output) */
+  report?: string
+  /** Tool calls shown in the expanded detail view */
+  toolCalls?: ToolCall[]
+  /** All turn tool calls, to resolve nested Claude Task/Agent sub-tools */
+  allToolCalls?: ToolCall[]
 }
 
 /** Names of collab tool calls that should be shown in the AgentWidget, not the timeline */
@@ -1316,6 +1432,14 @@ export interface SaveImageResponse {
   path: string
 }
 
+/** Raw image data read from the local native clipboard. */
+export interface ClipboardImageData {
+  /** Base64-encoded image bytes without a data URL prefix. */
+  data: string
+  /** MIME type for the encoded image. */
+  mimeType: string
+}
+
 // ============================================================================
 // Text Paste Types (for large text pastes in chat)
 // ============================================================================
@@ -1335,6 +1459,16 @@ export interface PendingTextFile {
   size: number
   /** Full content for preview */
   content: string
+  /**
+   * Set when this chip holds rows picked from a chat table. `rows` are body
+   * row indices in table order; `notes` maps a row index to the user's note
+   * for that row. In-memory only (not restored on restart).
+   */
+  tableRows?: {
+    tableKey: string
+    rows: number[]
+    notes?: Record<number, string>
+  }
 }
 
 /**
@@ -1348,6 +1482,14 @@ export interface SaveTextResponse {
   /** Full path to the saved text file */
   path: string
   /** Size in bytes */
+  size: number
+}
+
+/** Response from saving an arbitrary uploaded file. */
+export interface SaveFileResponse {
+  id: string
+  filename: string
+  path: string
   size: number
 }
 
@@ -1584,6 +1726,7 @@ export interface McpServerInfo {
 /** Health status of an MCP server as reported by `claude mcp list` */
 export type McpHealthStatus =
   | 'connected'
+  | 'authenticated'
   | 'needsAuthentication'
   | 'couldNotConnect'
   | 'disabled'
@@ -1661,6 +1804,10 @@ export interface AllSessionsEntry {
   worktree_name: string
   worktree_path: string
   sessions: Session[]
+  /** Owning Jean instance. Present on native multi-server results. */
+  serverId?: string
+  /** Display name of the owning Jean instance. */
+  serverName?: string
 }
 
 /**
@@ -1668,6 +1815,25 @@ export interface AllSessionsEntry {
  */
 export interface AllSessionsResponse {
   entries: AllSessionsEntry[]
+}
+
+export interface SessionSearchHit {
+  session_id: string
+  session_name: string
+  project_id: string
+  project_name: string
+  worktree_id: string
+  worktree_name: string
+  worktree_path: string
+  snippet: string
+  message_id?: string
+  match_count: number
+  updated_at: number
+}
+
+export interface SessionSearchResponse {
+  hits: SessionSearchHit[]
+  truncated: boolean
 }
 
 // ============================================================================

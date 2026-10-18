@@ -2,6 +2,7 @@ import React from 'react'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { usePreferences, usePatchPreferences } from '@/services/preferences'
+import { useUIStore } from '@/store/ui-store'
 import { SettingsSection } from '../SettingsSection'
 
 const InlineField: React.FC<{
@@ -25,31 +26,12 @@ export const ExperimentalPane: React.FC = () => {
   const patchPreferences = usePatchPreferences()
   return (
     <div className="space-y-6">
-      <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/5 p-4">
+      <div className="rounded-lg border border-warning/20 bg-warning/5 p-4">
         <p className="text-sm text-muted-foreground">
           These features are experimental and may change or be removed in future
           versions. Use at your own risk.
         </p>
       </div>
-
-      <SettingsSection
-        title="Features"
-        anchorId="pref-experimental-section-features"
-      >
-        <div className="space-y-4">
-          <InlineField
-            label="Combined git sync button"
-            description="Replace separate Pull and Push badges with one Sync button that does both"
-          >
-            <Switch
-              checked={preferences?.git_sync_button ?? false}
-              onCheckedChange={checked => {
-                patchPreferences.mutate({ git_sync_button: checked })
-              }}
-            />
-          </InlineField>
-        </div>
-      </SettingsSection>
 
       <SettingsSection
         title="Developer Tools"
@@ -63,6 +45,25 @@ export const ExperimentalPane: React.FC = () => {
             checked={preferences?.debug_mode_enabled ?? false}
             onCheckedChange={checked => {
               patchPreferences.mutate({ debug_mode_enabled: checked })
+            }}
+          />
+        </InlineField>
+      </SettingsSection>
+
+      <SettingsSection
+        title="Agents"
+        anchorId="pref-experimental-section-agents"
+      >
+        <InlineField
+          label="Enable agents"
+          description="Show the Agents tab with Jean, the coordinator agent that manages all your projects"
+        >
+          <Switch
+            checked={preferences?.agents_enabled ?? false}
+            onCheckedChange={checked => {
+              patchPreferences.mutate({ agents_enabled: checked })
+              // Leave the Agents page when the feature is turned off
+              if (!checked) useUIStore.getState().setRailSection('workspace')
             }}
           />
         </InlineField>

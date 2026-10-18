@@ -1,15 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ArrowDownUp, ChevronDown } from '@/components/icons/reicon'
 import {
-  ArrowDown,
-  ArrowDownUp,
-  ArrowUp,
-  ChevronDown,
-  MoreHorizontal,
-  Plus,
-} from 'lucide-react'
-import { convertFileSrc, convertProjectFileSrc } from '@/lib/transport'
+  convertFileSrc,
+  convertProjectFileSrc,
+  convertServerFileSrc,
+  convertServerProjectFileSrc,
+} from '@/lib/transport'
 import { cn } from '@/lib/utils'
-import { dismissibleToast } from '@/lib/dismissible-toast'
 import type { Project } from '@/types/projects'
 import { isBaseSession } from '@/types/projects'
 import { useProjectsStore } from '@/store/projects-store'
@@ -25,16 +22,8 @@ import {
 import {
   useFetchWorktreesStatus,
   useGitStatus,
-  gitPush,
-  fetchWorktreesStatus,
-  performGitPull,
   performGitSync,
 } from '@/services/git-status'
-import { usePreferences } from '@/services/preferences'
-import { NewIssuesBadge } from '@/components/shared/NewIssuesBadge'
-import { OpenPRsBadge } from '@/components/shared/OpenPRsBadge'
-import { FailedRunsBadge } from '@/components/shared/FailedRunsBadge'
-import { SecurityAlertsBadge } from '@/components/shared/SecurityAlertsBadge'
 import {
   Tooltip,
   TooltipTrigger,
@@ -42,40 +31,57 @@ import {
 } from '@/components/ui/tooltip'
 import { WorktreeList } from './WorktreeList'
 import { ProjectContextMenu } from './ProjectContextMenu'
+import { matchesProjectSearch, matchesWorktreeSearch } from './project-search'
+import { CollapsedCountBadge } from './CollapsedCountBadge'
 
 interface ProjectTreeItemProps {
   project: Project
+  searchQuery?: string
 }
 
-/**
- * Resolve the primary action for a project-row click.
- * Projects with worktrees expand/collapse only — never clear session selection.
- * Empty projects still open the project canvas.
- */
-export function resolveProjectRowClickAction(
-  hasWorktrees: boolean
-): 'toggle-expand' | 'open-canvas' {
-  return hasWorktrees ? 'toggle-expand' : 'open-canvas'
-}
-
-export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
+export function ProjectTreeItem({
+  project,
+  searchQuery = '',
+}: ProjectTreeItemProps) {
   const isMobile = useIsMobile()
-  const { data: preferences } = usePreferences()
-  const gitSyncButton = preferences?.git_sync_button ?? false
-  const {
-    expandedProjectIds,
-    selectedProjectId,
-    selectProject,
-    toggleProjectExpanded,
-    openProjectSettings,
-  } = useProjectsStore()
-  const { data: worktrees = [] } = useWorktrees(project.id)
-  const { data: appDataDir = '' } = useAppDataDir()
-  const hasWorktrees = worktrees.length > 0
-  const isExpanded = hasWorktrees && expandedProjectIds.has(project.id)
-  const setNewWorktreeModalOpen = useUIStore(
-    state => state.setNewWorktreeModalOpen
+  const isOffline = project.offline === true
+  const isProjectExpanded = useProjectsStore(state =>
+    state.expandedProjectIds.has(project.id)
   )
+  const selectedProjectId = useProjectsStore(state => state.selectedProjectId)
+  const selectProject = useProjectsStore(state => state.selectProject)
+  const toggleProjectExpanded = useProjectsStore(
+    state => state.toggleProjectExpanded
+  )
+  const shouldLoadWorktrees =
+    !isOffline &&
+    (Boolean(searchQuery) ||
+      isProjectExpanded ||
+      selectedProjectId === project.id)
+  const { data: loadedWorktrees, isLoading: worktreesLoading } = useWorktrees(
+    project.id,
+    {
+      enabled: shouldLoadWorktrees,
+    }
+  )
+  const worktrees = useMemo(
+    () =>
+      (loadedWorktrees ?? []).filter(
+        worktree => worktree.origin !== 'auto_fix'
+      ),
+    [loadedWorktrees]
+  )
+  const { data: appDataDir = '' } = useAppDataDir()
+  // Prefer loaded worktrees: project.worktree_count can be stale
+  const worktreeCount = loadedWorktrees
+    ? worktrees.length
+    : (project.worktree_count ?? 0)
+  const hasWorktrees = !isOffline && worktreeCount > 0
+  const projectMatchesSearch = matchesProjectSearch(project, searchQuery)
+  const hasMatchingWorktree = worktrees.some(worktree =>
+    matchesWorktreeSearch(worktree, searchQuery)
+  )
+  const isExpanded = hasWorktrees && (Boolean(searchQuery) || isProjectExpanded)
 
   const avatarKey = project.avatar_path ?? project.default_avatar_path ?? null
 
@@ -86,21 +92,32 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
 
   // Build avatar URL from relative path
   const avatarUrl =
-    project.avatar_path && appDataDir && !imgError
-      ? convertFileSrc(`${appDataDir}/${project.avatar_path}`)
+    project.avatar_path && !imgError
+      ? project.serverId
+        ? convertServerFileSrc(project.serverId, project.avatar_path)
+        : appDataDir
+          ? convertFileSrc(`${appDataDir}/${project.avatar_path}`)
+          : null
       : project.default_avatar_path && !imgError
-        ? convertProjectFileSrc(project.default_avatar_path)
+        ? project.serverId
+          ? convertServerProjectFileSrc(
+              project.serverId,
+              project.default_avatar_path
+            )
+          : convertProjectFileSrc(project.default_avatar_path)
         : null
 
   // Fetch git status for all worktrees when project is expanded
-  useFetchWorktreesStatus(project.id, isExpanded)
+  useFetchWorktreesStatus(project.id, isExpanded && !searchQuery)
 
   // Check if base session exists
   const hasBaseSession = worktrees.some(w => isBaseSession(w))
 
   // Get base branch status from any worktree (all have it)
   const firstWorktree = worktrees[0]
-  const { data: gitStatus } = useGitStatus(firstWorktree?.id ?? null)
+  const { data: gitStatus } = useGitStatus(
+    searchQuery ? null : (firstWorktree?.id ?? null)
+  )
 
   // Only show on project line when no base session
   const baseBranchBehindCount = !hasBaseSession
@@ -120,7 +137,6 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
 
   // Project is only selected if it's the selected project AND no worktree is active
   const isSelected = selectedProjectId === project.id && !activeWorktreeId
-  const showStatusBadges = !isMobile && (isExpanded || isSelected)
 
   // Inline rename (double-click), matching folder/worktree patterns
   const [isEditing, setIsEditing] = useState(false)
@@ -145,16 +161,8 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
   }, [isEditing])
 
   const handleClick = useCallback(() => {
-    if (isEditing) return
+    if (isEditing || isOffline) return
 
-    const action = resolveProjectRowClickAction(hasWorktrees)
-    if (action === 'toggle-expand') {
-      // Expand/collapse only — preserve selected worktree/session highlight
-      toggleProjectExpanded(project.id)
-      return
-    }
-
-    // Empty project: open project canvas
     selectProject(project.id)
     clearActiveWorktree()
     if (isMobile) {
@@ -162,8 +170,7 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
     }
   }, [
     isEditing,
-    hasWorktrees,
-    toggleProjectExpanded,
+    isOffline,
     project.id,
     selectProject,
     clearActiveWorktree,
@@ -173,11 +180,11 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
   const handleDoubleClick = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation()
-      if (isEditing) return
+      if (isEditing || isOffline) return
       setEditName(project.name)
       setIsEditing(true)
     },
-    [isEditing, project.name]
+    [isEditing, isOffline, project.name]
   )
 
   const handleSubmitRename = useCallback(
@@ -218,56 +225,7 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
     [project.id, toggleProjectExpanded]
   )
 
-  const handleAddWorktree = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation()
-      // Select this project first so the modal knows which project to use
-      selectProject(project.id)
-      // Open the New Session modal
-      setNewWorktreeModalOpen(true)
-    },
-    [project.id, selectProject, setNewWorktreeModalOpen]
-  )
-
-  const handleBasePull = useCallback(
-    async (e: React.MouseEvent) => {
-      e.stopPropagation()
-      await performGitPull({
-        worktreeId: '',
-        worktreePath: project.path,
-        baseBranch: project.default_branch,
-        projectId: project.id,
-      })
-    },
-    [project.id, project.path, project.default_branch]
-  )
-
   const pickRemoteOrRun = useRemotePicker(project.path)
-
-  const handleBasePush = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation()
-      pickRemoteOrRun(async remote => {
-        const opToast = dismissibleToast.loading('Pushing changes...')
-        try {
-          const result = await gitPush(project.path, undefined, remote)
-          fetchWorktreesStatus(project.id)
-          if (result.permissionDenied) {
-            opToast.error('Push failed', {
-              duration: Infinity,
-              description:
-                result.output.trim() || 'The remote rejected the push.',
-            })
-          } else {
-            opToast.success('Changes pushed')
-          }
-        } catch (error) {
-          opToast.error(`Push failed: ${error}`)
-        }
-      })
-    },
-    [pickRemoteOrRun, project.id, project.path]
-  )
 
   const handleBaseSync = useCallback(
     (e: React.MouseEvent) => {
@@ -296,13 +254,24 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
     ]
   )
 
+  if (
+    searchQuery &&
+    !projectMatchesSearch &&
+    !worktreesLoading &&
+    !hasMatchingWorktree
+  ) {
+    return null
+  }
+
   return (
-    <ProjectContextMenu project={project}>
-      <div>
-        {/* Project Row */}
+    <div>
+      {/* Project Row — only the row is the context-menu trigger, so worktree
+          rows' long-press does not also open this menu on touch. */}
+      <ProjectContextMenu project={project}>
         <div
           className={cn(
-            'group relative flex cursor-pointer items-center gap-1.5 px-2 py-1.5 overflow-hidden transition-colors duration-150',
+            'group relative flex items-center gap-1.5 px-2 py-1.5 overflow-hidden transition-colors duration-150',
+            isOffline ? 'cursor-default opacity-70' : 'cursor-pointer',
             isSelected
               ? 'bg-primary/10 text-foreground before:absolute before:left-0 before:top-0 before:h-full before:w-[3px] before:bg-primary'
               : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
@@ -344,6 +313,11 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
           ) : (
             <span className="flex flex-1 items-center gap-0.5 truncate text-sm">
               <span className="truncate">{project.name}</span>
+              {isOffline && (
+                <span className="shrink-0 rounded bg-warning/10 px-1 py-0.5 text-[10px] text-warning">
+                  Offline
+                </span>
+              )}
               {hasWorktrees && (
                 <button
                   type="button"
@@ -370,140 +344,64 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
           )}
 
           {/* Base branch pull/push indicators (when no base session) */}
-          {gitSyncButton &&
-          (baseBranchBehindCount > 0 || baseBranchAheadCount > 0) ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={handleBaseSync}
-                  className="shrink-0 rounded bg-violet-500/10 px-1.5 py-0.5 text-[11px] font-medium text-violet-500 transition-colors hover:bg-violet-500/20"
-                >
-                  <span className="flex items-center gap-0.5">
-                    <ArrowDownUp className="h-3 w-3" />
-                    {baseBranchBehindCount > 0 && baseBranchAheadCount > 0
-                      ? `${baseBranchBehindCount}/${baseBranchAheadCount}`
-                      : baseBranchBehindCount > 0
-                        ? baseBranchBehindCount
-                        : baseBranchAheadCount}
-                  </span>
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {(() => {
-                  const parts: string[] = []
-                  if (baseBranchBehindCount > 0) {
-                    parts.push(
-                      `pull ${baseBranchBehindCount} commit${baseBranchBehindCount > 1 ? 's' : ''}`
-                    )
-                  }
-                  if (baseBranchAheadCount > 0) {
-                    parts.push(
-                      `push ${baseBranchAheadCount} commit${baseBranchAheadCount > 1 ? 's' : ''}`
-                    )
-                  }
-                  return `Sync ${project.default_branch}: ${parts.join(', ')}`
-                })()}
-              </TooltipContent>
-            </Tooltip>
-          ) : (
-            <>
-              {baseBranchBehindCount > 0 && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={handleBasePull}
-                      className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/20"
-                    >
-                      <span className="flex items-center gap-0.5">
-                        <ArrowDown className="h-3 w-3" />
-                        {baseBranchBehindCount}
-                      </span>
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>{`Pull ${baseBranchBehindCount} commit${baseBranchBehindCount > 1 ? 's' : ''} on ${project.default_branch}`}</TooltipContent>
-                </Tooltip>
-              )}
-              {baseBranchAheadCount > 0 && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={handleBasePush}
-                      className="shrink-0 rounded bg-orange-500/10 px-1.5 py-0.5 text-[11px] font-medium text-orange-500 transition-colors hover:bg-orange-500/20"
-                    >
-                      <span className="flex items-center gap-0.5">
-                        <ArrowUp className="h-3 w-3" />
-                        {baseBranchAheadCount}
-                      </span>
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>{`Push ${baseBranchAheadCount} commit${baseBranchAheadCount > 1 ? 's' : ''} on ${project.default_branch}`}</TooltipContent>
-                </Tooltip>
-              )}
-            </>
-          )}
+          {!isOffline &&
+            (baseBranchBehindCount > 0 || baseBranchAheadCount > 0) && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={handleBaseSync}
+                    className="shrink-0 rounded bg-violet-500/10 px-1.5 py-0.5 text-[11px] font-medium text-violet-600 dark:text-violet-400 transition-colors hover:bg-violet-500/20"
+                  >
+                    <span className="flex items-center gap-0.5">
+                      <ArrowDownUp className="h-3 w-3" />
+                      {baseBranchBehindCount > 0 && baseBranchAheadCount > 0
+                        ? `${baseBranchBehindCount}/${baseBranchAheadCount}`
+                        : baseBranchBehindCount > 0
+                          ? baseBranchBehindCount
+                          : baseBranchAheadCount}
+                    </span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {(() => {
+                    const parts: string[] = []
+                    if (baseBranchBehindCount > 0) {
+                      parts.push(
+                        `pull ${baseBranchBehindCount} commit${baseBranchBehindCount > 1 ? 's' : ''}`
+                      )
+                    }
+                    if (baseBranchAheadCount > 0) {
+                      parts.push(
+                        `push ${baseBranchAheadCount} commit${baseBranchAheadCount > 1 ? 's' : ''}`
+                      )
+                    }
+                    return `Sync ${project.default_branch}: ${parts.join(', ')}`
+                  })()}
+                </TooltipContent>
+              </Tooltip>
+            )}
 
-          {showStatusBadges && (
-            <div className="hidden items-center gap-1 sm:flex">
-              <NewIssuesBadge
-                projectPath={project.path}
-                projectId={project.id}
-              />
-              <OpenPRsBadge projectPath={project.path} projectId={project.id} />
-              <SecurityAlertsBadge
-                projectPath={project.path}
-                projectId={project.id}
-              />
-              <FailedRunsBadge projectPath={project.path} />
-            </div>
-          )}
-
-          {/* Settings */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={e => {
-                  e.stopPropagation()
-                  openProjectSettings(project.id)
-                }}
-                aria-label="Project settings"
-                className="flex size-4 shrink-0 items-center justify-center rounded opacity-50 hover:bg-accent-foreground/10 hover:opacity-100"
-              >
-                <MoreHorizontal className="size-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Project settings</TooltipContent>
-          </Tooltip>
-
-          {/* Add Worktree */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={handleAddWorktree}
-                aria-label="New worktree"
-                className="flex size-4 shrink-0 items-center justify-center rounded opacity-50 hover:bg-accent-foreground/10 hover:opacity-100"
-              >
-                <Plus className="size-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>New worktree</TooltipContent>
-          </Tooltip>
-        </div>
-
-        {/* Worktrees */}
-        {isExpanded && (
-          <WorktreeList
-            projectId={project.id}
-            projectPath={project.path}
-            worktrees={worktrees}
-            defaultBranch={project.default_branch}
+          <CollapsedCountBadge
+            count={worktreeCount}
+            label="workspaces"
+            isExpanded={isExpanded}
           />
-        )}
-      </div>
-    </ProjectContextMenu>
+        </div>
+      </ProjectContextMenu>
+
+      {/* Worktrees */}
+      {isExpanded && (
+        <WorktreeList
+          projectId={project.id}
+          projectPath={project.path}
+          worktrees={worktrees}
+          defaultBranch={project.default_branch}
+          searchQuery={projectMatchesSearch ? '' : searchQuery}
+          searchActive={Boolean(searchQuery)}
+          loadSessionCounts={!searchQuery}
+        />
+      )}
+    </div>
   )
 }

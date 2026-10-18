@@ -137,9 +137,7 @@ export function prepareRemoteEditorOpenArgs(
   }
 
   const rawPath =
-    command === 'open_worktree_in_editor'
-      ? args?.worktreePath
-      : args?.path
+    command === 'open_worktree_in_editor' ? args?.worktreePath : args?.path
   const path = typeof rawPath === 'string' ? rawPath : ''
   if (!path.trim()) {
     throw new Error('No path to open.')
@@ -170,5 +168,32 @@ export function prepareRemoteEditorOpenArgs(
     editor: 'zed',
     line: args?.line,
     column: args?.column,
+  }
+}
+
+/** Add SSH connection details when a native desktop opens a remote worktree
+ * in its local terminal application. */
+export function prepareRemoteTerminalOpenArgs(
+  command: string,
+  args: Record<string, unknown> | undefined,
+  connection: RemoteConnection
+): Record<string, unknown> | null {
+  if (command !== 'open_worktree_in_terminal') return null
+
+  const path = typeof args?.worktreePath === 'string' ? args.worktreePath : ''
+  if (!path.trim()) throw new Error('No path to open.')
+
+  const endpoint = resolveRemoteSshEndpoint(connection)
+  if (!endpoint) {
+    throw new Error(
+      'Configure SSH user and host on this remote connection to open its terminal.'
+    )
+  }
+
+  return {
+    ...args,
+    sshUser: endpoint.user,
+    sshHost: endpoint.host,
+    sshPort: endpoint.port,
   }
 }

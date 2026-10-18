@@ -23,6 +23,11 @@ interface StartupOnboardingState {
    * connections — WSL only applies to the local desktop shell.
    */
   requiresWslChoice: boolean
+  /**
+   * A remote Jean server is configured. Its backends live on that server, so
+   * missing local tools must not reopen onboarding at every start.
+   */
+  hasRemoteServer?: boolean
 }
 
 export type StartupOnboardingAction =
@@ -48,6 +53,7 @@ export function getStartupOnboardingAction({
   onboardingDismissed,
   onboardingManuallyTriggered,
   requiresWslChoice,
+  hasRemoteServer = false,
 }: StartupOnboardingState): StartupOnboardingAction {
   if (onboardingDismissed || onboardingManuallyTriggered) return 'none'
 
@@ -74,6 +80,8 @@ export function getStartupOnboardingAction({
   if (ghReady && hasAiBackendReady) {
     return onboardingOpen ? 'close' : 'ready'
   }
+
+  if (hasRemoteServer) return 'none'
 
   if (requiresWslChoice) return 'open'
 

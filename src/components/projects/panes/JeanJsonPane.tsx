@@ -1,27 +1,15 @@
-import React, { useState, useCallback, useEffect } from 'react'
-import { Loader2, Plus, X } from 'lucide-react'
+import { SettingsSection } from '@/components/preferences/SettingsSection'
+import { useState, useCallback, useEffect } from 'react'
+import { Loader2, Plus, X } from '@/components/icons/reicon'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Separator } from '@/components/ui/separator'
+import { generateId } from '@/lib/uuid'
 import {
   useJeanConfig,
   useSaveJeanConfig,
   normalizeRunScripts,
 } from '@/services/projects'
-
-const SettingsSection: React.FC<{
-  title: string
-  children: React.ReactNode
-}> = ({ title, children }) => (
-  <div className="space-y-4">
-    <div>
-      <h3 className="text-lg font-medium text-foreground">{title}</h3>
-      <Separator className="mt-2" />
-    </div>
-    {children}
-  </div>
-)
 
 export function JeanJsonPane({
   projectPath,
@@ -35,7 +23,7 @@ export function JeanJsonPane({
   const [localSetup, setLocalSetup] = useState('')
   const [localTeardown, setLocalTeardown] = useState('')
   const [localRun, setLocalRun] = useState<{ id: string; value: string }[]>(
-    () => [{ id: crypto.randomUUID(), value: '' }]
+    () => [{ id: generateId(), value: '' }]
   )
   const [localPorts, setLocalPorts] = useState<
     { id: string; port: string; label: string; host: string }[]
@@ -51,7 +39,7 @@ export function JeanJsonPane({
       const scripts = normalizeRunScripts(jeanConfig.scripts.run)
       setLocalRun(
         (scripts.length > 0 ? scripts : ['']).map(value => ({
-          id: crypto.randomUUID(),
+          id: generateId(),
           value,
         }))
       )
@@ -59,7 +47,7 @@ export function JeanJsonPane({
       const ports = jeanConfig.ports ?? []
       setLocalPorts(
         ports.map(p => ({
-          id: crypto.randomUUID(),
+          id: generateId(),
           port: String(p.port),
           label: p.label,
           host: p.host ?? '',
@@ -201,10 +189,7 @@ export function JeanJsonPane({
               size="sm"
               className="h-7 text-xs"
               onClick={() =>
-                setLocalRun([
-                  ...localRun,
-                  { id: crypto.randomUUID(), value: '' },
-                ])
+                setLocalRun([...localRun, { id: generateId(), value: '' }])
               }
             >
               <Plus className="mr-1 h-3 w-3" />
@@ -269,7 +254,7 @@ export function JeanJsonPane({
                 setLocalPorts([
                   ...localPorts,
                   {
-                    id: crypto.randomUUID(),
+                    id: generateId(),
                     port: '',
                     label: '',
                     host: '',

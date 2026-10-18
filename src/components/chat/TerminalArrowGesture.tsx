@@ -13,7 +13,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronUp,
-} from 'lucide-react'
+} from '@/components/icons/reicon'
 import { cn } from '@/lib/utils'
 import {
   focusTerminal,

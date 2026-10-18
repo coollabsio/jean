@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildCodexUserInputAnswerMap,
+  getSupportedPermissionModes,
+  normalizeExecutionModeForBackend,
   findCodexUserInputRequest,
   foldTodoWriteToolCalls,
   getAskUserQuestions,
@@ -18,6 +20,16 @@ describe('hasQuestionAnswerOutput', () => {
   it('returns false for Claude blocking-tool error output', () => {
     expect(hasQuestionAnswerOutput('Answer questions?')).toBe(false)
     expect(hasQuestionAnswerOutput('Error: Answer questions?')).toBe(false)
+    expect(
+      hasQuestionAnswerOutput(
+        'Permission to use AskUserQuestion was not granted.'
+      )
+    ).toBe(false)
+    expect(
+      hasQuestionAnswerOutput(
+        '<tool_use_error>Answer questions?</tool_use_error>'
+      )
+    ).toBe(false)
   })
 
   it('returns true for persisted JSON answers', () => {
@@ -225,7 +237,10 @@ describe('TodoWrite (Grok + Claude)', () => {
         name: 'todo_write',
         input: {
           merge: true,
-          todos: [{ id: '2', status: 'completed' }, { id: '3', status: 'completed' }],
+          todos: [
+            { id: '2', status: 'completed' },
+            { id: '3', status: 'completed' },
+          ],
         },
       },
     ]
@@ -252,27 +267,26 @@ describe('TodoWrite (Grok + Claude)', () => {
   })
 })
 
+it('recognizes and parses Claude AskUserQuestion with questions encoded as JSON string', () => {
+  const toolCall = {
+    id: 'claude-question-1',
+    name: 'AskUserQuestion',
+    input: {
+      questions:
+        '[{"question":"Pick one","header":"Choice","multiSelect":false,"options":[{"label":"A"}]}]',
+    },
+  }
 
-  it('recognizes and parses Claude AskUserQuestion with questions encoded as JSON string', () => {
-    const toolCall = {
-      id: 'claude-question-1',
-      name: 'AskUserQuestion',
-      input: {
-        questions:
-          '[{"question":"Pick one","header":"Choice","multiSelect":false,"options":[{"label":"A"}]}]',
-      },
-    }
-
-    expect(isAskUserQuestion(toolCall)).toBe(true)
-    expect(getAskUserQuestions(toolCall.input)).toEqual([
-      {
-        question: 'Pick one',
-        header: 'Choice',
-        multiSelect: false,
-        options: [{ label: 'A' }],
-      },
-    ])
-  })
+  expect(isAskUserQuestion(toolCall)).toBe(true)
+  expect(getAskUserQuestions(toolCall.input)).toEqual([
+    {
+      question: 'Pick one',
+      header: 'Choice',
+      multiSelect: false,
+      options: [{ label: 'A' }],
+    },
+  ])
+})
 
 describe('buildCodexUserInputAnswerMap', () => {
   it('maps selected option labels and custom text by Codex question id', () => {
@@ -319,5 +333,42 @@ describe('buildCodexUserInputAnswerMap', () => {
     ).toEqual({
       '0': { answers: ['Backend'] },
     })
+  })
+})
+
+describe('permission capabilities', () => {
+  it.each(['claude', 'codex', 'kimi', 'grok'] as const)(
+    'offers all policies for %s',
+    backend => {
+      expect(getSupportedPermissionModes(backend)).toEqual([
+        'supervised',
+        'build',
+        'auto',
+        'yolo',
+      ])
+    }
+  )
+  it.each(['opencode'] as const)(
+    'does not offer automatic review for %s',
+    backend => {
+      expect(getSupportedPermissionModes(backend)).toEqual([
+        'supervised',
+        'build',
+        'yolo',
+      ])
+    }
+  )
+  it.each(['cursor', 'pi', 'commandcode', 'antigravity'] as const)(
+    'does not advertise unsupported policies for %s',
+    backend => {
+      expect(getSupportedPermissionModes(backend)).toEqual(['yolo'])
+      expect(normalizeExecutionModeForBackend(backend, 'supervised')).toBe(
+        'plan'
+      )
+      expect(normalizeExecutionModeForBackend(backend, 'auto')).toBe('plan')
+    }
+  )
+  it('never escalates unsupported Cursor Build to Full access', () => {
+    expect(normalizeExecutionModeForBackend('cursor', 'build')).toBe('plan')
   })
 })

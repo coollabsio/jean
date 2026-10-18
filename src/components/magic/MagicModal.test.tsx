@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import userEvent from '@testing-library/user-event'
-import { fireEvent, render, screen, waitFor } from '@/test/test-utils'
+import { act, render, screen, waitFor, within } from '@/test/test-utils'
 import { MagicModal } from './MagicModal'
+import type { CliBackend } from '@/types/preferences'
 
 const mocks = vi.hoisted(() => {
   const worktree = {
@@ -16,6 +17,8 @@ const mocks = vi.hoisted(() => {
   return {
     setMagicModalOpen: vi.fn(),
     selectWorktree: vi.fn(),
+    setActiveWorktree: vi.fn(),
+    setPendingMagicCommand: vi.fn(),
     invokeMock: vi.fn(),
     invalidateQueries: vi.fn(),
     triggerImmediateGitPoll: vi.fn(),
@@ -38,6 +41,17 @@ const mocks = vi.hoisted(() => {
     gitPush: vi.fn(),
     openExternal: vi.fn(),
     activeWorktreePath: null as string | null,
+    hasIssueContexts: false,
+    activeSessionIds: {} as Record<string, string>,
+    selectedBackends: {} as Record<string, CliBackend>,
+    selectedModels: {} as Record<string, string>,
+    investigationSession: null as {
+      backend: CliBackend
+      selected_model: string
+    } | null,
+    selectedWorktreeId: 'wt-1',
+    installedBackendsOptions: vi.fn(),
+    preferencesServerId: vi.fn(),
     worktreePaths: {} as Record<string, string>,
     worktree,
   }
@@ -63,6 +77,8 @@ interface ChatState {
   activeWorktreeId: string | null
   activeWorktreePath: string | null
   activeSessionIds: Record<string, string>
+  selectedBackends: Record<string, CliBackend>
+  selectedModels: Record<string, string>
 }
 
 vi.mock('@/store/ui-store', () => ({
@@ -97,7 +113,7 @@ vi.mock('@/store/projects-store', () => ({
   useProjectsStore: Object.assign(
     (selector?: (state: ProjectsState) => unknown) => {
       const state: ProjectsState = {
-        selectedWorktreeId: 'wt-1',
+        selectedWorktreeId: mocks.selectedWorktreeId,
         selectedProjectId: 'project-1',
       }
       return selector ? selector(state) : state
@@ -113,19 +129,23 @@ vi.mock('@/store/chat-store', () => ({
       const state: ChatState = {
         activeWorktreeId: null,
         activeWorktreePath: mocks.activeWorktreePath,
-        activeSessionIds: {},
+        activeSessionIds: mocks.activeSessionIds,
+        selectedBackends: mocks.selectedBackends,
+        selectedModels: mocks.selectedModels,
       }
       return selector ? selector(state) : state
     },
     {
       getState: () => ({
         activeWorktreePath: mocks.activeWorktreePath,
-        activeSessionIds: {},
+        activeSessionIds: mocks.activeSessionIds,
+        selectedBackends: mocks.selectedBackends,
+        selectedModels: mocks.selectedModels,
         worktreePaths: mocks.worktreePaths as Record<string, string>,
         setWorktreeLoading: vi.fn(),
         clearWorktreeLoading: vi.fn(),
-        setActiveWorktree: vi.fn(),
-        setPendingMagicCommand: vi.fn(),
+        setActiveWorktree: mocks.setActiveWorktree,
+        setPendingMagicCommand: mocks.setPendingMagicCommand,
         registerWorktreePath: mocks.registerWorktreePath,
         getWorktreePath: (worktreeId: string) =>
           mocks.worktreePaths[worktreeId],
@@ -177,36 +197,38 @@ vi.mock('@/services/projects', () => ({
 }))
 
 vi.mock('@/services/github', () => ({
-  useLoadedIssueContexts: () => ({ data: [] }),
+  useLoadedIssueContexts: () => ({
+    data: mocks.hasIssueContexts ? [{ number: 123 }] : [],
+  }),
   useLoadedPRContexts: () => ({ data: [] }),
   useLoadedAdvisoryContexts: () => ({ data: [] }),
 }))
 
 vi.mock('@/services/preferences', () => ({
-  usePreferences: () => ({
-    data: {
-      default_backend: 'claude',
-      selected_model: 'claude-opus-4-8[1m]',
-      selected_codex_model: 'gpt-5.5',
-      magic_prompt_models: {
-        final_review_model: 'gpt-5.5',
+  usePreferences: (serverId?: string) => {
+    mocks.preferencesServerId(serverId)
+    return {
+      data: {
+        default_backend: 'claude',
+        selected_model: 'claude-opus-4-8[1m]',
+        selected_codex_model: 'gpt-5.5',
+        magic_prompt_models: {},
+        magic_prompt_efforts: {},
+        magic_prompt_modes: {},
+        magic_prompts: {
+          resolve_conflicts: 'Resolve and finish.',
+        },
+        magic_prompt_backends: {
+          resolve_conflicts_backend: 'codex',
+        },
       },
-      magic_prompt_efforts: {
-        final_review_effort: 'high',
-      },
-      magic_prompt_modes: {
-        final_review_mode: 'plan',
-      },
-      magic_prompts: {
-        resolve_conflicts: 'Resolve and finish.',
-        final_review: 'Run the custom final audit and return tables.',
-      },
-      magic_prompt_backends: {
-        resolve_conflicts_backend: 'codex',
-        final_review_backend: 'codex',
-      },
-    },
-  }),
+    }
+  },
+}))
+
+vi.mock('@/services/chat', async importOriginal => ({
+  ...(await importOriginal()),
+  useSession: () => ({ data: mocks.investigationSession }),
 }))
 
 vi.mock('@/services/opencode-cli', () => ({
@@ -214,7 +236,10 @@ vi.mock('@/services/opencode-cli', () => ({
 }))
 
 vi.mock('@/hooks/useInstalledBackends', () => ({
-  useInstalledBackends: () => ({ installedBackends: ['claude'] }),
+  useInstalledBackends: (options?: { serverId?: string }) => {
+    mocks.installedBackendsOptions(options)
+    return { installedBackends: ['claude', 'codex'] }
+  },
 }))
 
 vi.mock('@/hooks/useRemotePicker', () => ({
@@ -261,26 +286,44 @@ vi.mock('sonner', () => ({
 }))
 
 vi.mock('@/components/chat/ReviewMethodModal', () => ({
-  ReviewMethodModal: ({
-    open,
-    onFinalReview,
+  ReviewMethodModal: () => null,
+}))
+
+vi.mock('@/components/chat/toolbar/DesktopBackendModelPicker', () => ({
+  DesktopBackendModelPicker: ({
+    onModelChange,
+    onBackendModelChange,
   }: {
-    open: boolean
-    onFinalReview: () => void
-  }) =>
-    open ? (
-      <button data-testid="final-review-choice" onClick={onFinalReview}>
-        Final review
+    onModelChange: (model: string) => void
+    onBackendModelChange: (backend: string, model: string) => void
+  }) => (
+    <>
+      <button onClick={() => onModelChange('claude-opus-4-8[1m]-fast')}>
+        Select Claude Fast
       </button>
-    ) : null,
+      <button onClick={() => onBackendModelChange('codex', 'gpt-5.5-fast')}>
+        Select Codex Fast
+      </button>
+    </>
+  ),
 }))
 
 describe('MagicModal manual PR link', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      value: 1024,
+    })
     mocks.worktree.pr_number = null
     mocks.worktree.pr_url = null
     mocks.activeWorktreePath = null
+    mocks.hasIssueContexts = false
+    mocks.activeSessionIds = {}
+    mocks.selectedBackends = {}
+    mocks.selectedModels = {}
+    mocks.investigationSession = null
+    mocks.selectedWorktreeId = 'wt-1'
     mocks.invokeMock.mockImplementation((command: string) => {
       if (command === 'detect_and_link_pr') return Promise.resolve(null)
       if (command === 'link_worktree_pr') {
@@ -292,6 +335,153 @@ describe('MagicModal manual PR link', () => {
       }
       return Promise.resolve(null)
     })
+  })
+
+  it.each([
+    ['Claude', 'claude', 'claude-opus-4-8[1m]-fast'],
+    ['Codex', 'codex', 'gpt-5.5-fast'],
+  ])(
+    'preserves the %s Fast model in investigation overrides',
+    async (label, backend, model) => {
+      const user = userEvent.setup()
+      mocks.activeWorktreePath = '/repo/worktree'
+      mocks.hasIssueContexts = true
+      const events: unknown[] = []
+      const onCommand = (event: Event) =>
+        events.push((event as CustomEvent).detail)
+      window.addEventListener('magic-command', onCommand)
+      try {
+        render(<MagicModal />)
+        act(() => {
+          window.dispatchEvent(
+            new CustomEvent('magic-option', { detail: 'investigate-issue' })
+          )
+        })
+        const dialog = await screen.findByRole('dialog', {
+          name: 'Investigate Issue',
+        })
+        const modelButton = within(dialog).getByRole('button', {
+          name: `Select ${label} Fast`,
+        })
+        modelButton.focus()
+        await user.keyboard('{Enter}')
+        expect(events).toEqual([])
+        await user.click(
+          within(dialog).getByRole('button', { name: 'Investigate' })
+        )
+        expect(events).toEqual([
+          {
+            command: 'investigate',
+            type: 'issue',
+            override: { backend, model },
+          },
+        ])
+      } finally {
+        window.removeEventListener('magic-command', onCommand)
+      }
+    }
+  )
+
+  it.each(['toolbar', 'persisted', 'no-session', 'magic-settings'])(
+    'uses the correct investigation defaults for %s',
+    async source => {
+      const user = userEvent.setup()
+      mocks.activeWorktreePath = '/repo/worktree'
+      mocks.hasIssueContexts = true
+      if (source !== 'no-session') {
+        mocks.activeSessionIds = { 'wt-1': 'session-1' }
+        mocks.investigationSession = {
+          backend: 'codex',
+          selected_model: 'gpt-5.5-fast',
+        }
+      }
+      if (source === 'toolbar') {
+        mocks.selectedBackends = { 'session-1': 'claude' }
+        mocks.selectedModels = { 'session-1': 'claude-opus-4-8[1m]-fast' }
+      }
+      const events: unknown[] = []
+      const onCommand = (event: Event) =>
+        events.push((event as CustomEvent).detail)
+      window.addEventListener('magic-command', onCommand)
+      try {
+        render(<MagicModal />)
+        act(() => {
+          window.dispatchEvent(
+            new CustomEvent('magic-option', { detail: 'investigate-issue' })
+          )
+        })
+        const dialog = await screen.findByRole('dialog', {
+          name: 'Investigate Issue',
+        })
+        if (source !== 'magic-settings') {
+          await user.click(
+            within(dialog).getByRole('radio', { name: /Choose backend/ })
+          )
+        }
+        await user.click(
+          within(dialog).getByRole('button', { name: 'Investigate' })
+        )
+        expect(events).toEqual([
+          {
+            command: 'investigate',
+            type: 'issue',
+            ...(source === 'magic-settings'
+              ? {}
+              : {
+                  override:
+                    source === 'persisted'
+                      ? { backend: 'codex', model: 'gpt-5.5-fast' }
+                      : {
+                          backend: 'claude',
+                          model:
+                            source === 'toolbar'
+                              ? 'claude-opus-4-8[1m]-fast'
+                              : 'claude-opus-4-8[1m]',
+                        },
+                }),
+          },
+        ])
+      } finally {
+        window.removeEventListener('magic-command', onCommand)
+      }
+    }
+  )
+
+  it('checks installed backends on the selected worktree server', () => {
+    mocks.selectedWorktreeId = 'remote-1:wt-1'
+
+    render(<MagicModal />)
+
+    expect(mocks.installedBackendsOptions).toHaveBeenCalledWith({
+      serverId: 'remote-1',
+    })
+    expect(mocks.preferencesServerId).toHaveBeenCalledWith('remote-1')
+  })
+
+  it('renders touch-friendly grouped actions for the mobile menu', () => {
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      value: 390,
+    })
+    render(<MagicModal />)
+
+    const mobileMenu = screen.getByTestId('magic-mobile-menu')
+    expect(within(mobileMenu).getByText('Context')).toBeInTheDocument()
+    expect(within(mobileMenu).getByText('Pull Request')).toBeInTheDocument()
+    expect(
+      within(mobileMenu).getByRole('button', { name: 'Save Context' })
+    ).toHaveClass('min-h-12')
+    expect(mobileMenu.querySelector('kbd')).not.toBeInTheDocument()
+  })
+
+  it('uses the issue icon for the Issue investigation action', () => {
+    render(<MagicModal />)
+
+    const issueAction = within(
+      screen.getByTestId('magic-column-right')
+    ).getByRole('button', { name: 'Issue I' })
+    expect(issueAction.querySelector('svg circle')).toBeInTheDocument()
+    expect(issueAction.querySelector('svg path')).not.toBeInTheDocument()
   })
 
   it('opens a Link PR dialog and shows checking state while searching current branch', async () => {
@@ -343,6 +533,20 @@ describe('MagicModal manual PR link', () => {
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({
       queryKey: ['projects', 'project-1', 'worktrees'],
     })
+  })
+
+  it('opens Link PR from the mobile Magic option event', async () => {
+    render(<MagicModal />)
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('magic-option', { detail: 'link-pr' })
+      )
+    })
+
+    expect(
+      await screen.findByRole('dialog', { name: /link pull request/i })
+    ).toBeInTheDocument()
   })
 
   it('opens a Link PR dialog and links the selected PR number', async () => {
@@ -447,56 +651,6 @@ describe('MagicModal manual PR link', () => {
     expect(mocks.setExecutionMode).toHaveBeenCalledWith(
       'conflict-session',
       'yolo'
-    )
-  })
-
-  it('starts Final review as a normal plan-mode session with dedicated settings', async () => {
-    const user = userEvent.setup()
-    mocks.invokeMock.mockImplementation((command: string) => {
-      if (command === 'create_session') {
-        return Promise.resolve({
-          id: 'final-review-session',
-          name: 'Final review',
-          order: 1,
-          created_at: 1,
-          updated_at: 1,
-          messages: [],
-          backend: 'codex',
-        })
-      }
-      if (command === 'send_chat_message') {
-        return Promise.resolve({ id: 'message-1' })
-      }
-      return Promise.resolve(undefined)
-    })
-
-    render(<MagicModal />)
-
-    await user.click(screen.getByRole('button', { name: /^review/i }))
-    fireEvent.click(screen.getByTestId('final-review-choice'))
-
-    await waitFor(() => {
-      expect(mocks.invokeMock).toHaveBeenCalledWith(
-        'send_chat_message',
-        expect.objectContaining({
-          sessionId: 'final-review-session',
-          worktreeId: 'wt-1',
-          worktreePath: '/repo/worktree',
-          message: 'Run the custom final audit and return tables.',
-          model: 'gpt-5.5',
-          effortLevel: 'high',
-          executionMode: 'plan',
-          backend: 'codex',
-        })
-      )
-    })
-    expect(mocks.setActiveSession).toHaveBeenCalledWith(
-      'wt-1',
-      'final-review-session'
-    )
-    expect(mocks.setExecutionMode).toHaveBeenCalledWith(
-      'final-review-session',
-      'plan'
     )
   })
 
@@ -660,12 +814,73 @@ describe('MagicModal manual PR link', () => {
     ).toBeInTheDocument()
   })
 
-  it('shows the inject session magic command', () => {
+  it('shows one inject context command instead of load context', () => {
     render(<MagicModal />)
 
     expect(
-      screen.getByRole('button', { name: /inject session/i })
+      screen.getByRole('button', { name: /inject context/i })
     ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: /load context/i })
+    ).not.toBeInTheDocument()
+  })
+
+  it('shows the check GitHub issues magic command', () => {
+    render(<MagicModal />)
+
+    expect(
+      screen.getByRole('button', { name: /check github issues/i })
+    ).toBeInTheDocument()
+  })
+
+  it('only sends the comment and close issue action when issue context is loaded', async () => {
+    const user = userEvent.setup()
+    mocks.activeWorktreePath = '/repo/worktree'
+    const dispatchSpy = vi.spyOn(window, 'dispatchEvent')
+    const { rerender } = render(<MagicModal />)
+    const action = screen.getByRole('button', {
+      name: /comment & close issue/i,
+    })
+    expect(action).toBeDisabled()
+
+    mocks.hasIssueContexts = true
+    rerender(<MagicModal />)
+    await user.click(
+      screen.getByRole('button', { name: /comment & close issue/i })
+    )
+
+    expect(dispatchSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'magic-command',
+        detail: { command: 'comment-and-close-issue' },
+      })
+    )
+    dispatchSpy.mockRestore()
+  })
+
+  it('dispatches the commit in session command to the current chat', async () => {
+    const user = userEvent.setup()
+    mocks.activeWorktreePath = '/repo/worktree'
+    const dispatchSpy = vi.spyOn(window, 'dispatchEvent')
+    render(<MagicModal />)
+
+    await user.click(screen.getByRole('button', { name: /commit this session/i }))
+
+    expect(dispatchSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'magic-command',
+        detail: { command: 'commit-in-session' },
+      })
+    )
+    dispatchSpy.mockRestore()
+  })
+
+  it('does not show the removed smoke test magic command', () => {
+    render(<MagicModal />)
+
+    expect(
+      screen.queryByRole('button', { name: /smoke test/i })
+    ).not.toBeInTheDocument()
   })
 
   it('starts commit and push actions directly with loading notifications when chat is active', async () => {
@@ -697,7 +912,12 @@ describe('MagicModal manual PR link', () => {
       'Pushing feature-branch...',
       expect.any(Object)
     )
-    expect(mocks.gitPush).toHaveBeenCalledWith('/repo/worktree', null, 'origin')
+    expect(mocks.gitPush).toHaveBeenCalledWith(
+      '/repo/worktree',
+      null,
+      'origin',
+      'wt-1'
+    )
 
     rerender(<MagicModal />)
     await user.click(screen.getByRole('button', { name: /^commit & push p$/i }))

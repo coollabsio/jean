@@ -16,6 +16,7 @@ const WHEEL_DISMISS_THRESHOLD = 32
 const WHEEL_DISMISS_RESET_MS = 180
 const TOASTER_Z_INDEX = 2147483647
 const MOBILE_BREAKPOINT = 768
+export const TOASTER_EXPAND_BY_DEFAULT = false
 
 function isInteractiveTarget(target: EventTarget | null): boolean {
   return target instanceof Element && Boolean(target.closest('button, a'))
@@ -243,7 +244,12 @@ function ToastActionHotkey() {
   return null
 }
 
-const Toaster = ({ position, style, ...props }: ToasterProps) => {
+const Toaster = ({
+  position,
+  style,
+  expand = TOASTER_EXPAND_BY_DEFAULT,
+  ...props
+}: ToasterProps) => {
   const { theme = 'system' } = useTheme()
   const resolvedPosition = position ?? 'bottom-right'
 
@@ -252,6 +258,7 @@ const Toaster = ({ position, style, ...props }: ToasterProps) => {
       <Sonner
         theme={theme as ToasterProps['theme']}
         position={resolvedPosition}
+        expand={expand}
         className="toaster group"
         style={
           {

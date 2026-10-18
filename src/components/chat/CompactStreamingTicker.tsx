@@ -1,5 +1,6 @@
 import { memo, useMemo, useState } from 'react'
-import { Loader2, Activity, Brain, ChevronRight } from 'lucide-react'
+import { Activity, Brain, ChevronRight } from '@/components/icons/reicon'
+import { WorkingWaveform } from '@/components/ui/status-indicator'
 import type { ContentBlock, ToolCall } from '@/types/chat'
 import { isAskUserQuestion, isPlanToolCall } from '@/types/chat'
 import {
@@ -10,12 +11,10 @@ import {
 import {
   TOOL_CALL_ROW_CLASS,
   TOOL_CALL_DETAIL_PILL_CLASS,
-  formatJeanMcpToolDetail,
-  formatJeanMcpToolLabel,
-  isJeanMcpToolName,
-  normalizeToolCallForDisplay,
+  summarizeToolCall,
 } from './ToolCallInline'
 import { EditedFilesDisplay } from './EditedFilesDisplay'
+import { parseServerResourceKey } from '@/lib/server-resource'
 import { StreamingMessage } from './StreamingMessage'
 import { SteeredPromptGroup } from './SteeredPromptGroup'
 import {
@@ -65,72 +64,6 @@ function summarizeLatest(
     return { label: truncate(streamingContent.trim(), 120) }
   }
   return { label: 'Working…' }
-}
-
-function summarizeToolCall(tc: ToolCall): { label: string; detail?: string } {
-  const normalized = normalizeToolCallForDisplay(
-    tc.name,
-    (tc.input ?? {}) as Record<string, unknown>
-  )
-  const input = normalized.input
-  const filePath =
-    typeof input.file_path === 'string' ? input.file_path : undefined
-  const path = typeof input.path === 'string' ? input.path : undefined
-  const command = typeof input.command === 'string' ? input.command : undefined
-  const url = typeof input.url === 'string' ? input.url : undefined
-  const pattern = typeof input.pattern === 'string' ? input.pattern : undefined
-  const description =
-    typeof input.description === 'string' ? input.description : undefined
-  const query = typeof input.query === 'string' ? input.query : undefined
-  const backend = typeof input.backend === 'string' ? input.backend : undefined
-  const toolName =
-    typeof input.tool_name === 'string'
-      ? input.tool_name
-      : typeof input.toolName === 'string'
-        ? input.toolName
-        : undefined
-  // Codex web search may nest the query under action
-  const action =
-    input.action && typeof input.action === 'object'
-      ? (input.action as Record<string, unknown>)
-      : undefined
-  const actionQuery =
-    typeof action?.query === 'string'
-      ? action.query
-      : typeof action?.url === 'string'
-        ? action.url
-        : undefined
-
-  const friendlyLabel =
-    normalized.name === 'CodexWebSearch'
-      ? 'Web Search'
-      : normalized.name === 'CodexImageView'
-        ? 'Image View'
-        : normalized.name === 'CodexImageGeneration'
-          ? 'Image Generation'
-          : normalized.name === 'CodexContextCompaction'
-            ? 'Context Compaction'
-            : isJeanMcpToolName(normalized.name)
-              ? formatJeanMcpToolLabel(normalized.name)
-              : normalized.name
-
-  const detail = isJeanMcpToolName(normalized.name)
-    ? formatJeanMcpToolDetail(input)
-    : (query ??
-      actionQuery ??
-      filePath ??
-      path ??
-      command ??
-      url ??
-      pattern ??
-      description ??
-      backend ??
-      toolName ??
-      undefined)
-  return {
-    label: friendlyLabel,
-    detail: detail ? truncate(detail, 80) : undefined,
-  }
 }
 
 function truncate(text: string, max: number): string {
@@ -185,9 +118,9 @@ function compactStreamSegmentKey(segment: CompactStreamSegment): string {
   if (toolId) return `activity:tool:${toolId}`
   const first = segment.blocks[0]
   if (first) {
-    if (first.type === 'tool_use') return `activity:tooluse:${first.tool_call_id}`
-    if (first.type === 'text')
-      return `activity:text:${first.text.slice(0, 64)}`
+    if (first.type === 'tool_use')
+      return `activity:tooluse:${first.tool_call_id}`
+    if (first.type === 'text') return `activity:text:${first.text.slice(0, 64)}`
     if (first.type === 'thinking')
       return `activity:thinking:${first.thinking.slice(0, 64)}`
     if (first.type === 'user_input')
@@ -281,15 +214,25 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
     streamingContent,
     onCopySteeredText,
     worktreePath,
+    sessionId,
     showLoadingIndicator = true,
   } = props
+  const ownerServerId = parseServerResourceKey(sessionId)?.serverId
   const [isOpen, setIsOpen] = useState(false)
+
+  // Keyed on toolCalls only so these keep a stable identity across
+  // streaming-content flushes (they feed memoized children/memos below).
+  const { activityToolCalls, planToolCalls } = useMemo(
+    () => ({
+      activityToolCalls: toolCalls.filter(tc => !isPlanToolCall(tc)),
+      planToolCalls: toolCalls.filter(isPlanToolCall),
+    }),
+    [toolCalls]
+  )
 
   const {
     activityBlocks,
-    activityToolCalls,
     planBlocks,
-    planToolCalls,
     planStreamingContent,
     steeredTexts,
     orderedActivityBlocks,
@@ -299,7 +242,6 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
       messageContent: streamingContent,
       contentBlocks,
     }).content
-    const plans = toolCalls.filter(isPlanToolCall)
     const ordered = contentBlocks.filter(block => {
       if (isPlanToolBlock(block, toolCalls)) return false
       if (
@@ -313,9 +255,7 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
     })
     return {
       activityBlocks: filterActivityBlocks(ordered, toolCalls, plan),
-      activityToolCalls: toolCalls.filter(tc => !isPlanToolCall(tc)),
       planBlocks: filterPlanToolBlocks(contentBlocks, toolCalls),
-      planToolCalls: plans,
       planStreamingContent: plan ?? '',
       orderedActivityBlocks: ordered,
       // User prompts injected mid-turn (Codex turn/steer) — surfaced as
@@ -504,9 +444,7 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
                   {stepCount} step{stepCount === 1 ? '' : 's'}
                 </span>
               )}
-              {showLoadingIndicator && (
-                <Loader2 className="h-3 w-3 animate-spin opacity-50" />
-              )}
+              {showLoadingIndicator && <WorkingWaveform label="Working" />}
               <ChevronRight
                 className={
                   'h-3.5 w-3.5 transition-transform duration-200' +
@@ -522,6 +460,7 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
                 contentBlocks={activityBlocks}
                 toolCalls={activityToolCalls}
                 streamingContent={hasPlan ? '' : streamingContent}
+                hideEditedFiles
               />
             </div>
           </CollapsibleContent>
@@ -530,6 +469,7 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
       <EditedFilesDisplay
         toolCalls={activityToolCalls}
         worktreePath={worktreePath}
+        serverId={ownerServerId === 'local' ? undefined : ownerServerId}
       />
       {hasPlan && (
         <StreamingMessage

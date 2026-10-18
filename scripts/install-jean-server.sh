@@ -28,6 +28,7 @@ SERVICE_NAME="${JEAN_SERVER_SERVICE:-jean-server}"
 SERVICE_USER="${JEAN_SERVER_USER:-}"
 ENV_FILE="${JEAN_SERVER_ENV_FILE:-}"
 DATA_DIR="${JEAN_SERVER_DATA_DIR:-}"
+SERVER_NAME="${JEAN_SERVER_NAME:-}"
 GITHUB_API="${GITHUB_API:-https://api.github.com}"
 GITHUB_DOWNLOAD="${GITHUB_DOWNLOAD:-https://github.com}"
 
@@ -79,6 +80,7 @@ Options:
   --service-name <name>    Unit name without .service (default: jean-server)
   --env-file <path>        Environment file path
   --data-dir <path>        JEAN_DATA_DIR for projects/prefs
+  --name <name>            Display name shown by Web Access clients
   --repo <owner/name>      GitHub repo (default: coollabsio/jean)
   --tarball <path>         Install from a local release .tar.gz instead of GitHub
   --no-service             Install binary + env only (skip service registration)
@@ -217,6 +219,7 @@ write_env_file() {
   local token="$4"
   local no_token="$5"
   local data_dir="$6"
+  local server_name="$7"
   local dir
 
   dir="$(dirname "$path")"
@@ -234,6 +237,9 @@ write_env_file() {
     fi
     if [[ -n "$data_dir" ]]; then
       echo "JEAN_DATA_DIR=${data_dir}"
+    fi
+    if [[ -n "$server_name" ]]; then
+      echo "JEAN_SERVER_NAME=${server_name}"
     fi
   } >"$path"
   chmod 600 "$path"
@@ -608,6 +614,7 @@ while [[ $# -gt 0 ]]; do
     --service-name) SERVICE_NAME="$2"; shift 2 ;;
     --env-file) ENV_FILE="$2"; shift 2 ;;
     --data-dir) DATA_DIR="$2"; shift 2 ;;
+    --name) SERVER_NAME="$2"; shift 2 ;;
     --repo) REPO="$2"; shift 2 ;;
     --tarball) LOCAL_TARBALL="$2"; shift 2 ;;
     --no-service) NO_SERVICE=1; shift ;;
@@ -751,7 +758,7 @@ if [[ -n "$DATA_DIR" ]]; then
 fi
 
 log "Writing env file ${ENV_FILE}"
-write_env_file "$ENV_FILE" "$HOST" "$PORT" "$TOKEN" "$NO_TOKEN" "$DATA_DIR"
+write_env_file "$ENV_FILE" "$HOST" "$PORT" "$TOKEN" "$NO_TOKEN" "$DATA_DIR" "$SERVER_NAME"
 
 if [[ "$NO_SERVICE" == "1" ]]; then
   log "Skipping service registration (--no-service)"

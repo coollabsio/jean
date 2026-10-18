@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { render, screen, fireEvent } from '@/test/test-utils'
+import { act, render, screen, fireEvent } from '@/test/test-utils'
 import { AskUserQuestion } from './AskUserQuestion'
 import type { QuestionAnswer, Question } from '@/types/chat'
 
@@ -112,6 +112,77 @@ describe('AskUserQuestion', () => {
     expect(
       screen.queryByPlaceholderText('Or type your own answer...')
     ).not.toBeInTheDocument()
+  })
+
+  it('disables Answer and Skip and ignores answer-question while submitDisabled', () => {
+    const onSubmit = vi.fn()
+    const onSkip = vi.fn()
+
+    render(
+      <AskUserQuestion
+        toolCallId="tool-1"
+        questions={questions}
+        onSubmit={onSubmit}
+        onSkip={onSkip}
+        submitDisabled
+      />
+    )
+
+    const answerButton = screen.getByRole('button', { name: /Answer/ })
+    const skipButton = screen.getByRole('button', { name: 'Skip' })
+    expect(answerButton).toBeDisabled()
+    expect(skipButton).toBeDisabled()
+
+    fireEvent.click(answerButton)
+    fireEvent.click(skipButton)
+    act(() => {
+      window.dispatchEvent(new Event('answer-question'))
+    })
+
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(onSkip).not.toHaveBeenCalled()
+  })
+
+  it('handles answer-question once submitDisabled is cleared', () => {
+    const onSubmit = vi.fn()
+    const singleQuestion: Question[] = [
+      {
+        header: 'Choice',
+        question: 'Pick one',
+        multiSelect: false,
+        options: [{ label: 'A' }, { label: 'B' }],
+      },
+    ]
+
+    const { rerender } = render(
+      <AskUserQuestion
+        toolCallId="tool-1"
+        questions={singleQuestion}
+        onSubmit={onSubmit}
+        submitDisabled
+      />
+    )
+
+    fireEvent.click(screen.getByText('A'))
+    act(() => {
+      window.dispatchEvent(new Event('answer-question'))
+    })
+    expect(onSubmit).not.toHaveBeenCalled()
+
+    rerender(
+      <AskUserQuestion
+        toolCallId="tool-1"
+        questions={singleQuestion}
+        onSubmit={onSubmit}
+      />
+    )
+
+    expect(screen.getByRole('button', { name: /Answer/ })).toBeEnabled()
+    act(() => {
+      window.dispatchEvent(new Event('answer-question'))
+    })
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+    expect(onSubmit).toHaveBeenCalledWith('tool-1', expect.any(Array))
   })
 
   it('submits secret custom answers when other answers are allowed', () => {

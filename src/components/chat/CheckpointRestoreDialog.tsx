@@ -6,7 +6,7 @@ import {
   RotateCcw,
   Sparkles,
   X,
-} from 'lucide-react'
+} from '@/components/icons/reicon'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -58,20 +58,18 @@ function RestoreRiskHint({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        'flex gap-2 rounded-md border border-amber-500/35 bg-amber-500/10 px-2.5 py-2 text-left text-xs leading-snug text-amber-950 dark:text-amber-100',
+        'flex gap-2 rounded-md border border-warning/35 bg-warning/10 px-2.5 py-2 text-left text-xs leading-snug text-warning',
         className
       )}
       role="note"
     >
-      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
       <div className="min-w-0 space-y-1">
-        <p className="font-medium text-amber-900 dark:text-amber-50">
-          Restore can make mistakes
-        </p>
-        <p className="text-amber-900/85 dark:text-amber-100/85">
-          Undoing AI edits may overwrite later work, miss shared-file changes, or
-          (with AI assist) produce imperfect merges. Review carefully and prefer
-          git commit / backup first when unsure.
+        <p className="font-medium text-warning">Restore can make mistakes</p>
+        <p className="text-warning/85">
+          Undoing AI edits may overwrite later work, miss shared-file changes,
+          or (with AI assist) produce imperfect merges. Review carefully and
+          prefer git commit / backup first when unsure.
         </p>
       </div>
     </div>
@@ -79,12 +77,7 @@ function RestoreRiskHint({ className }: { className?: string }) {
 }
 
 /** Restore actions that mutate the worktree — each requires explicit approval. */
-type PendingApproval =
-  | 'cleanOnly'
-  | 'allTurnFiles'
-  | 'full'
-  | 'applyAi'
-  | null
+type PendingApproval = 'cleanOnly' | 'allTurnFiles' | 'full' | 'applyAi' | null
 
 export interface CheckpointRestoreDialogProps {
   open: boolean
@@ -192,7 +185,7 @@ export function CheckpointRestoreDialog({
       case 'full':
         return {
           title: 'Approve full project reset?',
-          body: 'Reset the entire worktree to the state before this AI turn. All later uncommitted changes will be lost (including other sessions\' work on this worktree and files created after the checkpoint).',
+          body: "Reset the entire worktree to the state before this AI turn. All later uncommitted changes will be lost (including other sessions' work on this worktree and files created after the checkpoint).",
           confirmLabel: 'Yes, reset entire project',
           destructive: true,
         }
@@ -390,7 +383,7 @@ export function CheckpointRestoreDialog({
             )}
 
             {showApproval && pendingApproval === 'applyAi' && (
-              <p className="text-xs text-amber-800 dark:text-amber-200">
+              <p className="text-xs text-warning">
                 AI-assisted merges are best-effort. Spot-check generated file
                 contents before relying on them.
               </p>
@@ -414,13 +407,13 @@ export function CheckpointRestoreDialog({
                       {turnCount}
                     </span>{' '}
                     file(s):{' '}
-                    <span className="text-green-600 dark:text-green-400">
+                    <span className="text-success">
                       {cleanCount} safe to undo
                     </span>
                     {conflictCount > 0 && (
                       <>
                         ,{' '}
-                        <span className="text-amber-600 dark:text-amber-400">
+                        <span className="text-warning">
                           {conflictCount} also edited later
                         </span>
                       </>
@@ -428,7 +421,7 @@ export function CheckpointRestoreDialog({
                     .
                   </p>
                   {restoreAnalysis.overlappingSessionIds.length > 0 && (
-                    <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-800 dark:text-amber-200">
+                    <p className="rounded-md border border-warning/30 bg-warning/10 px-2 py-1.5 text-xs text-warning">
                       Other session(s) edited some of the same files afterward.
                       Prefer a safe undo or smart AI undo so their work is kept.
                     </p>
@@ -447,8 +440,8 @@ export function CheckpointRestoreDialog({
                             className={cn(
                               'shrink-0',
                               p.status === 'clean'
-                                ? 'text-green-600 dark:text-green-400'
-                                : 'text-amber-600 dark:text-amber-400'
+                                ? 'text-success'
+                                : 'text-warning'
                             )}
                           >
                             {pathStatusLabel(p.status)}
@@ -543,12 +536,8 @@ export function CheckpointRestoreDialog({
                   void executeApprovedRestore()
                 }}
                 disabled={restoring}
-                className={cn(
-                  'm-0 h-auto min-h-10 w-full whitespace-normal py-2.5 sm:w-auto sm:min-w-[10rem]',
-                  approvalCopy.destructive
-                    ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
-                    : undefined
-                )}
+                variant={approvalCopy.destructive ? 'destructive' : undefined}
+                className="m-0 h-auto min-h-10 w-full whitespace-normal py-2.5 sm:w-auto sm:min-w-[10rem]"
               >
                 {restoring ? (
                   <>
@@ -576,8 +565,7 @@ export function CheckpointRestoreDialog({
                 className="h-auto min-h-10 w-full whitespace-normal py-2.5 sm:w-auto"
                 disabled={
                   busy ||
-                  (selectedAiCount === 0 &&
-                    aiProposal.cleanPaths.length === 0)
+                  (selectedAiCount === 0 && aiProposal.cleanPaths.length === 0)
                 }
                 onClick={() => setPendingApproval('applyAi')}
               >
@@ -606,7 +594,10 @@ export function CheckpointRestoreDialog({
                 variant="default"
                 className="h-auto w-full flex-col items-stretch gap-0.5 whitespace-normal px-3 py-3 text-left"
                 disabled={
-                  busy || analysisLoading || !restoreAnalysis || cleanCount === 0
+                  busy ||
+                  analysisLoading ||
+                  !restoreAnalysis ||
+                  cleanCount === 0
                 }
                 onClick={() => setPendingApproval('cleanOnly')}
               >
@@ -670,8 +661,9 @@ export function CheckpointRestoreDialog({
                     {restoreAnalysis ? ` (${turnCount})` : ''}
                   </span>
                   <span className="text-xs font-normal text-muted-foreground">
-                    Reverts every path this turn touched, even if another session
-                    edited them later. Can discard later work on those files.
+                    Reverts every path this turn touched, even if another
+                    session edited them later. Can discard later work on those
+                    files.
                   </span>
                 </Button>
                 <Button

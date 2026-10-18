@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { X } from 'lucide-react'
+import { X } from '@/components/icons/reicon'
 
 import { cn } from '@/lib/utils'
 import { generateId } from '@/lib/uuid'

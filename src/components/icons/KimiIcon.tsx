@@ -1,5 +1,5 @@
 import { forwardRef } from 'react'
-import type { LucideProps } from 'lucide-react'
+import type { LucideProps } from '@/components/icons/reicon'
 
 export const KimiIcon = forwardRef<SVGSVGElement, LucideProps>(
   ({ size = 24, ...props }, ref) => (

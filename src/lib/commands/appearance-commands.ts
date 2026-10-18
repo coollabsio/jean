@@ -1,4 +1,4 @@
-import { Sun, Moon, Monitor, Maximize2 } from 'lucide-react'
+import { Sun, Moon, Monitor, Maximize2 } from '@/components/icons/reicon'
 import type { AppCommand } from './types'
 import { useUIStore } from '@/store/ui-store'
 

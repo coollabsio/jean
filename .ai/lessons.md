@@ -1,39 +1,138 @@
 # Lessons
 
+## Preserve alignment when simplifying controls
+
+- When a user asks to simplify a footer control to an icon, keep its existing side alignment unless the user explicitly asks to center it.
+- In a sidebar footer, keep a single action in the normal left-side position.
+
+## Use stable, owner-aware resource identities
+
+- Values, query keys, command arguments, and persisted references must include a stable resource ID and its owner when IDs are not globally unique.
+- Register ownership at adapter boundaries so path-only commands and remote assets route through the correct server.
+- Keep ownership visible in multi-source UI and test duplicate display names.
+- Return one ID form per server on every transport path (ID-routed, path-routed, explicit server). Mixed scoped/raw IDs make valid resources look missing.
+- Path routing matches only exact registered worktree/project paths. A file path inside a worktree does not route, so pass the owning `serverId` (`invokeForOptionalServer`).
+- Do not persist temporary session context under a broader worktree or project identity.
+
+## Keep multi-server behavior at the correct boundary
+
+- Native desktop can aggregate enabled remote servers, but Web Access must use only its serving origin.
+- Treat remote profiles as parallel adapters. Do not replace the native app's local core with a global backend switch.
+- A server can remain connected and selectable while excluded from aggregate dashboard results.
+- Gate native-only connections, aggregation, routing, caches, and ownership labels with `isNativeApp()`.
+- Store user state about a remote resource (pins, flags) on the server that owns it, not only in native local UI state, or Web Access clients of that server will not see it.
+- Change state that several clients edit through narrow per-item commands on the owning server. Full snapshot saves must not overwrite it.
+
+## Make state transitions atomic and observable
+
+- Update durable storage and the active query cache before closing setup UI, or stale cache data can reopen it.
+- Subscribe Zustand components to the data that controls rendering, not to stable getter functions.
+- Guard Zustand mutations against no-op updates so unchanged values do not notify all subscribers.
+- Serialize preference patches that fire in parallel. Local `patch_preferences` is load-merge-save and remote patches carry an expected revision, so concurrent patches lose keys or conflict.
+- Test timing-sensitive close, reopen, refresh, and restoration paths, not only the persistence call.
+
+## Verify behavior at system boundaries
+
+- Read backend selection and ownership logic before relying on a command name or frontend callback.
+- Test the real boundary contract: command arguments, CLI values, generated configuration, serialized data, and restored history.
+- Verify every responsive UI branch and each supported runtime: native desktop, Web Access, and mobile where applicable.
+- Keep long-running jobs backend-owned when they must survive client disconnects.
+
+## Normalize external backend behavior end to end
+
+- Classify a backend by its current documented transport and capabilities before integration. Do not keep old transport assumptions after a product migration.
+- Normalize exact tool names and parameter shapes at the display boundary, with readable fallbacks for known native tools.
+- Add live-stream and persisted-history parsers together, and route history by the per-run backend before generic fallback logic.
+- Resolve default, custom, and empty prompts consistently on every backend; backend mode instructions must augment the shared prompt.
+- A capability is complete only when preferences, every send path, persistence, rendering, cancellation, and tests all support it.
+- Per-session settings for a backend child (env, MCP config) need a per-run path: process env for per-run CLIs, per-thread config overrides for shared servers (Codex app-server). Shared server processes (OpenCode) cannot isolate per session.
+
+## Verify external tools from authoritative sources
+
+- Check the current official site, migration guide, installer, release manifest, and binary help before designing an integration.
+- Do not use an old registry entry or similarly named third-party package as proof of the supported product path.
+- Check Jean-managed binary locations before declaring a tool unavailable; distinguish “not on PATH” from “not installed.”
+- Verify installed skills through each harness's real discovery path. File presence alone does not prove discovery or invocation.
+
+## Make setup actions produce a usable result
+
+- If a feature needs dependent configuration, make its primary install action complete the safe required steps.
+- Do not add a second setup action when Jean can configure the dependency automatically.
+- Update default agent guidance when installation alone does not expose the intended workflow.
+
+## Keep user-facing output explicit
+
+- Discovery results must show a visible state for every result type, such as open, closed, or merged.
+- Background actions should use one toast lifecycle: loading, then success or error with the same ID.
+- Show persistent context such as resource ownership where the user needs it to understand later actions.
+
+## Treat fresh-session creation as a backend contract
+
+- Confirm that a “start” command explicitly creates a fresh session when the UI promises one.
+- Wait for the returned session ID, select that exact session, and then open its view.
+- Put one-shot investigation context on the created session so it cannot leak into later sessions.
+- Test backend session selection and restoration, not only that the UI callback runs.
+
+## Design cross-platform affordances explicitly
+
+- Hide and disable keyboard-only actions outside native desktop unless they are useful in that runtime.
+- Do not assume Unicode modifier glyphs render in browser fonts; use explicit labels such as `Ctrl` in Web Access.
+- On plain HTTP, browser clipboard reads can fail. Use paste-event data for direct paste, and offer a text field when an action needs a manual fallback.
+- Test click or tap behavior separately from native keyboard shortcuts.
+- Do not let a source-text assertion dictate production code shape. Rewrite the assertion.
+
 ## Keep task tracking proportional
 
-- The project instructions require work to be tracked in `.ai/todo.md`, but do not expand it with excessive implementation detail.
-- For small follow-up fixes, add only a short checklist and result instead of a long duplicate report.
-- Explain that `.ai/todo.md` is internal task tracking when the user asks why it changes.
+- Reset `.ai/todo.md` for each task and keep its checklist proportional to the work.
+- For small fixes, record a short plan, verification, and result instead of a duplicate implementation report.
+- Explain that `.ai/todo.md` is internal task tracking when a user asks why it changes.
 
-## Normalize backend tool vocabularies at the display boundary
+## Separate implementation limits from external limits
 
-- Do not assume similar tools share names or parameter casing across backends.
-- Capture real stream events, map exact backend names and keys to Jean's common renderer contract, and keep an explicit readable fallback for known native tools.
-- Test both live-looking tool inputs and persisted inputs so reload does not reintroduce unhandled labels.
+- For production-readiness reviews, classify every gap as either implementable in Jean or unavailable in the external backend.
+- Do not mark work complete while implementable items remain.
+- Report verification limits separately from implementation limits.
 
-## Wire backend capability semantics end to end
+## Reproduce the exact visible state before selecting a cache fix
 
-- A backend flag is not supported until the frontend selects the correct setting type and every send path forwards it.
-- For persistent-only MCP backends, add discovery and installers, but do not show a per-session switch that the CLI cannot honor.
-- Test the exact CLI value set and the generated persistent config, not only the low-level command builder.
+- Distinguish a stale canvas or list status from a stale status inside the open session.
+- Trace the exact component and every state source that can keep a running indicator visible.
+- Add a regression test for the user-visible open-session state, not only a nearby cache with similar data.
+- When UI rendering defers a resource ID, defer its owner and routing context as one value. Never combine a previous server resource ID with the new server's worktree or path.
+- If a switched chat shows an incomplete tool or running state, do not conclude that stale query routing is the full cause. Compare WebSocket event decoration and replay with the persisted session response before selecting the fix.
 
-## Do not confuse incomplete work with upstream limits
+## Test completion as one lifecycle, including selection
 
-- When the user asks for production readiness, classify each gap as either implementable in Jean or unavailable in the external backend.
-- Do not call work complete while implementable checklist items remain.
-- Do not use an upstream limitation to excuse adjacent Jean work that is still possible.
-- State verification limits separately from implementation limits.
+- A completion fix must verify the open-session indicator and the active session ID together.
+- Cache invalidation can affect both status data and automatic selection effects; test that completion never changes the user's current session.
 
-## Verify product migrations against the current official CLI
+- When fixing UI flicker, removing duplicate requests is not sufficient. Verify the actual first-paint and transition behavior. If the user reports that one header field appears late, test the rendered visibility gate, not only the data source wiring.
 
-- Do not treat an old package registry entry as proof that a product is still the supported user path.
-- Check the official product site, migration guide, installer, release manifest, and downloaded binary help before designing an integration.
-- Do not rename an integration while keeping the old transport assumptions. Reclassify the backend from its current documented protocol.
-- Do not install similarly named third-party packages. For Antigravity, use Google's official native installer and release manifest, not the unrelated npm package.
+- When a remote attachment works for the backend but not in the UI, verify both upload routing and client preview URL ownership. A remote filesystem path is not directly loadable by the native webview; render it through the owning server file URL.
 
-## Register live and history parsers together
+## Use theme tokens for color, not Tailwind hues
 
-- A new streaming backend needs two parser paths: the live response parser and the run-log reconstruction parser.
-- Route persisted runs by the per-run backend or model prefix before using a generic fallback parser.
-- Test history reload with the backend's real NDJSON format. Live streaming success does not prove that the response survives a query refresh or app reload.
+- UI chrome is monochrome (`primary`, `foreground`, `muted-foreground`, `accent`). Use color only for status.
+- Status colors: `success`, `warning`, `info`, `destructive` (+ `*-foreground` on solid backgrounds). They have light and dark values in `src/App.css`; opacity modifiers work (`bg-warning/10`).
+- Do not add hardcoded hues such as `text-yellow-400`: they are tuned for one theme and fail contrast in the other. For categorical identity colors (file types, brands, GitHub closed/merged purple), use a `-600` + `dark:-400` pair.
+
+## Keep hot render paths cheap
+
+- Streaming flushes re-render anything that subscribes to streaming state, so memoized children need stable props: `useCallback` handlers, module-level empty arrays, and `.mutate`/`.mutateAsync` instead of whole `useMutation` results (new object each render).
+- Subscribe list rows to their own slice. Mount store-heavy subscriptions only in the expanded child that needs them.
+- Do not mount hidden heavy content (collapsed Markdown, diffs, stats). Tick timers in the smallest leaf component.
+- Keep heavy libraries (xterm, diff editors) behind dynamic `import()` so core services do not pull them into the boot bundle.
+
+## Keep giant async dispatchers small
+
+- `dispatch_command` and Jean MCP `run_tool` already use most of a debug worker stack. Add new command groups as a separate async fn called through `Box::pin`, never as new inline arms.
+- Test Jean MCP changes against an isolated debug `jean-server` (own `JEAN_DATA_DIR`, port and temporary `HOME` with linked CLI credentials), so the global CLI MCP configs and the user's servers are not touched.
+
+## Backend-created sessions need an explicit mode
+
+- A session without a metadata file loads with the legacy Plan default. Sessions created by the backend (not the UI) must save their execution mode, or tools that Plan mode blocks (Jean MCP) fail.
+
+## Debug minified production crashes from the release tag
+
+- Map a user's minified stack frame by building the release tag's frontend (`git archive <tag>`, `bun install --frozen-lockfile`, `vite build`). Vendor code keeps the same chunk lines, so the column points at the real library function.
+- Run a release build only in an isolated environment: `env -i` (inherited `JEAN_HEADLESS` starts headless server mode), a temporary `HOME`, `dbus-run-session`, and fake CLI scripts. Real CLIs on `PATH` get auto-updated.

@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { CircleDot } from 'lucide-react'
+import { CircleDot } from '@/components/icons/reicon'
 import { cn } from '@/lib/utils'
 import {
   Tooltip,
@@ -27,12 +27,16 @@ export function NewIssuesBadge({
   className,
 }: NewIssuesBadgeProps) {
   const queryClient = useQueryClient()
-  const authData = queryClient.getQueryData<GhAuthStatus>(ghCliQueryKeys.auth())
+  const authData = queryClient.getQueryData<GhAuthStatus>([
+    ...ghCliQueryKeys.auth(),
+    'local',
+  ])
   const isAuthenticated = authData?.authenticated ?? false
 
   const { data: issueResult } = useGitHubIssues(projectPath, 'open', {
-    enabled: isAuthenticated,
+    enabled: isAuthenticated || projectId.includes(':'),
     staleTime: BADGE_STALE_TIME,
+    ownerId: projectId,
   })
 
   const totalCount = issueResult?.totalCount ?? 0
@@ -58,7 +62,7 @@ export function NewIssuesBadge({
           type="button"
           onClick={handleClick}
           className={cn(
-            'shrink-0 rounded bg-green-500/10 px-1.5 py-0.5 text-[11px] font-medium text-green-600 transition-colors hover:bg-green-500/20',
+            'shrink-0 rounded bg-success/10 px-1.5 py-0.5 text-[11px] font-medium text-success transition-colors hover:bg-success/20',
             className
           )}
         >

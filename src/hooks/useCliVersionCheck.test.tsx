@@ -17,6 +17,7 @@ const mockState = {
     gh_cli_source: 'jean',
     coderabbit_cli_source: 'jean',
     commandcode_cli_source: 'jean',
+    grok_cli_source: 'jean' as 'jean' | 'path',
   },
   piStatus: { installed: true, version: '1.0.0', path: '/jean/bin/pi' },
   piPathInfo: {
@@ -30,6 +31,18 @@ const mockState = {
     version: null as string | null,
     path: null as string | null,
   },
+  grokStatus: {
+    installed: false,
+    version: null as string | null,
+    path: null as string | null,
+  },
+  grokPathInfo: {
+    found: false,
+    version: null as string | null,
+    path: null as string | null,
+    packageManager: null as string | null,
+  },
+  grokVersions: [] as { version: string; prerelease: boolean }[],
 }
 
 vi.mock('@/lib/transport', () => ({
@@ -144,6 +157,21 @@ vi.mock('@/services/commandcode-cli', () => ({
   }),
 }))
 
+vi.mock('@/services/grok-cli', () => ({
+  grokCliQueryKeys: { all: ['grok-cli'] },
+  useGrokCliStatus: () => ({
+    data: mockState.grokStatus,
+    isLoading: false,
+  }),
+  useAvailableGrokVersions: () => ({
+    data: mockState.grokVersions,
+    isLoading: false,
+  }),
+  useGrokPathDetection: () => ({
+    data: mockState.grokPathInfo,
+  }),
+}))
+
 describe('useCliVersionCheck', () => {
   let queryClient: QueryClient
 
@@ -159,6 +187,7 @@ describe('useCliVersionCheck', () => {
       gh_cli_source: 'jean',
       coderabbit_cli_source: 'jean',
       commandcode_cli_source: 'jean',
+      grok_cli_source: 'jean',
     }
     mockState.piStatus = {
       installed: true,
@@ -176,6 +205,18 @@ describe('useCliVersionCheck', () => {
       version: null,
       path: null,
     }
+    mockState.grokStatus = {
+      installed: false,
+      version: null,
+      path: null,
+    }
+    mockState.grokPathInfo = {
+      found: false,
+      version: null,
+      path: null,
+      packageManager: null,
+    }
+    mockState.grokVersions = []
     queryClient = new QueryClient({
       defaultOptions: {
         queries: { retry: false },
@@ -319,6 +360,58 @@ describe('useCliVersionCheck', () => {
       command: '/opt/homebrew/bin/cmd',
       args: ['update'],
       cliType: 'commandcode',
+    })
+  })
+
+  it('auto-updates a Jean-managed Grok CLI', async () => {
+    mockState.grokStatus = {
+      installed: true,
+      version: '1.0.0',
+      path: '/jean/bin/grok',
+    }
+    mockState.grokVersions = [{ version: '1.0.40', prerelease: false }]
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    )
+
+    renderHook(() => useCliVersionCheck(), { wrapper })
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000)
+    })
+    await Promise.resolve()
+
+    expect(transportInvoke).toHaveBeenCalledWith('install_grok_cli', {
+      version: '1.0.40',
+    })
+  })
+
+  it('updates a PATH Grok CLI with grok update', async () => {
+    mockState.preferences.grok_cli_source = 'path'
+    mockState.grokStatus = {
+      installed: true,
+      version: '1.0.0',
+      path: '/usr/local/bin/grok',
+    }
+    mockState.grokVersions = [{ version: '1.0.40', prerelease: false }]
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    )
+
+    renderHook(() => useCliVersionCheck(), { wrapper })
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000)
+    })
+    await Promise.resolve()
+
+    expect(transportInvoke).toHaveBeenCalledWith('run_cli_path_update', {
+      command: '/usr/local/bin/grok',
+      args: ['update'],
+      cliType: 'grok',
     })
   })
 })

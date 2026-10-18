@@ -30,26 +30,37 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { useUIStore } from '@/store/ui-store'
+import { useUIStore, type McpLoginContext } from '@/store/ui-store'
+import { refreshMcpLoginHealth } from '@/services/mcp-auth'
+import { serverResourceKey } from '@/lib/server-resource'
 import { useShallow } from 'zustand/react/shallow'
 import { disposeTerminal, setOnStopped } from '@/lib/terminal-instances'
 import { BackendLabel } from '@/components/ui/backend-label'
 import { generateId } from '@/lib/uuid'
 import { StandaloneTerminalSurface } from '@/components/chat/StandaloneTerminalSurface'
+import { Minus } from '@/components/icons/reicon'
 
 export function CliLoginModal() {
   const [retryKey, setRetryKey] = useState(0)
-  const { isOpen, cliType, command, commandArgs, action, closeModal } =
-    useUIStore(
-      useShallow(state => ({
-        isOpen: state.cliLoginModalOpen,
-        cliType: state.cliLoginModalType,
-        command: state.cliLoginModalCommand,
-        commandArgs: state.cliLoginModalCommandArgs,
-        action: state.cliLoginModalAction,
-        closeModal: state.closeCliLoginModal,
-      }))
-    )
+  const {
+    isOpen,
+    cliType,
+    command,
+    commandArgs,
+    action,
+    mcpContext,
+    closeModal,
+  } = useUIStore(
+    useShallow(state => ({
+      isOpen: state.cliLoginModalOpen,
+      cliType: state.cliLoginModalType,
+      command: state.cliLoginModalCommand,
+      commandArgs: state.cliLoginModalCommandArgs,
+      action: state.cliLoginModalAction,
+      mcpContext: state.cliLoginModalMcpContext,
+      closeModal: state.closeCliLoginModal,
+    }))
+  )
 
   // Only render when open to avoid unnecessary terminal setup
   if (!isOpen || !command) return null
@@ -61,6 +72,7 @@ export function CliLoginModal() {
       command={command}
       commandArgs={commandArgs}
       action={action}
+      mcpContext={mcpContext}
       onClose={closeModal}
       onRetry={() => setRetryKey(k => k + 1)}
     />
@@ -84,6 +96,7 @@ interface CliLoginModalContentProps {
   command: string
   commandArgs: string[] | null
   action: 'login' | 'update' | 'install'
+  mcpContext: McpLoginContext | null
   onClose: () => void
   onRetry: () => void
 }
@@ -93,6 +106,7 @@ function CliLoginModalContent({
   command,
   commandArgs,
   action,
+  mcpContext,
   onClose,
   onRetry,
 }: CliLoginModalContentProps) {
@@ -101,6 +115,15 @@ function CliLoginModalContent({
     exitCode: number | null
     signal: string | null
   } | null>(null)
+  const minimized = useUIStore(
+    state =>
+      state.minimizedCliUpdate?.kind === 'terminal' &&
+      state.minimizedCliUpdate.type === cliType
+  )
+  const minimizedRef = useRef(minimized)
+  useEffect(() => {
+    minimizedRef.current = minimized
+  }, [minimized])
 
   const cliName =
     cliType === 'claude'
@@ -140,7 +163,12 @@ function CliLoginModalContent({
     )
 
   // Generate unique terminal ID for this login session
-  const [terminalId] = useState(() => `cli-login-${generateId()}`)
+  const [terminalId] = useState(() => {
+    const id = `cli-login-${generateId()}`
+    return mcpContext?.serverId && mcpContext.serverId !== 'local'
+      ? serverResourceKey({ serverId: mcpContext.serverId, resourceId: id })
+      : id
+  })
 
   // Buffer last N lines of terminal output for debug logging on error
   const outputBufferRef = useRef<string[]>([])
@@ -151,6 +179,7 @@ function CliLoginModalContent({
       'terminal:output',
       event => {
         if (event.payload.terminal_id !== terminalId) return
+        if (mcpContext) return // OAuth URLs/callbacks must not enter debug logs.
         const lines = event.payload.data.split('\n')
         outputBufferRef.current.push(...lines)
         if (outputBufferRef.current.length > MAX_OUTPUT_LINES) {
@@ -162,7 +191,7 @@ function CliLoginModalContent({
     return () => {
       unlisten.then(fn => fn())
     }
-  }, [terminalId])
+  }, [terminalId, mcpContext])
 
   // Cleanup terminal on unmount (needed for retry remount)
   useEffect(() => {
@@ -187,6 +216,12 @@ function CliLoginModalContent({
         // Dispose xterm instance
         disposeTerminal(terminalId)
 
+        if (mcpContext && (cliType === 'claude' || cliType === 'codex')) {
+          void refreshMcpLoginHealth(cliType, mcpContext).catch(error => {
+            toast.error(`Could not refresh MCP status: ${error}`)
+          })
+        }
+
         // Invalidate caches so views auto-refetch after login/update
         if (cliType === 'claude') {
           queryClient.invalidateQueries({ queryKey: claudeCliQueryKeys.all })
@@ -210,7 +245,9 @@ function CliLoginModalContent({
         } else if (cliType === 'kimi') {
           queryClient.invalidateQueries({ queryKey: kimiCliQueryKeys.all })
         } else if (cliType === 'antigravity') {
-          queryClient.invalidateQueries({ queryKey: antigravityCliQueryKeys.all })
+          queryClient.invalidateQueries({
+            queryKey: antigravityCliQueryKeys.all,
+          })
         } else if (cliType === 'coderabbit') {
           queryClient.invalidateQueries({
             queryKey: coderabbitCliQueryKeys.all,
@@ -223,7 +260,7 @@ function CliLoginModalContent({
         onClose()
       }
     },
-    [terminalId, onClose, cliType, queryClient]
+    [terminalId, onClose, cliType, queryClient, mcpContext]
   )
 
   // Auto-close modal on success, show error on failure
@@ -232,6 +269,7 @@ function CliLoginModalContent({
   })
 
   useEffect(() => {
+    let closeTimeout: ReturnType<typeof setTimeout> | undefined
     setOnStopped(terminalId, (exitCode, signal) => {
       const output = outputBufferRef.current.join('\n').trim()
       const logBase =
@@ -243,33 +281,93 @@ function CliLoginModalContent({
 
       if (exitCode === 0) {
         logger.debug(logBase + logOutput)
-        setTimeout(() => onLoginSuccessClose(), 1500)
+        if (minimizedRef.current) {
+          toast.success(
+            `${cliName} ${action === 'install' ? 'installed' : 'updated'} successfully`
+          )
+          onLoginSuccessClose()
+        } else {
+          closeTimeout = setTimeout(() => onLoginSuccessClose(), 1500)
+        }
       } else {
         logger.error(logBase + logOutput)
-        setExitStatus({ exitCode, signal })
+        if (minimizedRef.current) {
+          toast.error(
+            `Failed to ${action === 'install' ? 'install' : 'update'} ${cliName}`,
+            {
+              description: signal
+                ? `Process stopped by signal ${signal}`
+                : `Process exited with code ${exitCode ?? 'unknown'}`,
+            }
+          )
+          onLoginSuccessClose()
+        } else {
+          setExitStatus({ exitCode, signal })
+        }
       }
     })
-    return () => setOnStopped(terminalId, undefined)
-  }, [terminalId, cliName, command, commandArgs])
+    return () => {
+      clearTimeout(closeTimeout)
+      setOnStopped(terminalId, undefined)
+    }
+  }, [terminalId, cliName, command, commandArgs, action])
+
+  const handleMinimize = useCallback(() => {
+    if (!cliType) return
+    useUIStore.getState().setMinimizedCliUpdate({
+      type: cliType,
+      name: cliName,
+      kind: 'terminal',
+      progress: null,
+    })
+  }, [cliType, cliName])
 
   return (
-    <Dialog open={true} onOpenChange={handleOpenChange}>
-      <DialogContent className="!w-screen !h-dvh !max-w-screen !rounded-none sm:!w-[calc(100vw-64px)] sm:!max-w-[calc(100vw-64px)] sm:!h-[calc(100vh-64px)] sm:!rounded-lg flex flex-col">
+    <Dialog open={!minimized} onOpenChange={handleOpenChange}>
+      <DialogContent
+        className="!w-screen !h-dvh !max-w-screen !rounded-none sm:!w-[calc(100vw-64px)] sm:!max-w-[calc(100vw-64px)] sm:!h-[calc(100vh-64px)] sm:!rounded-lg flex flex-col"
+        showCloseButton={action === 'login'}
+      >
+        {action !== 'login' && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={handleMinimize}
+            aria-label={`Minimize ${cliName} update`}
+            className="absolute right-5 top-4 h-7 w-7"
+          >
+            <Minus className="size-4" />
+          </Button>
+        )}
         <DialogHeader>
           <DialogTitle>
-            {cliTitle}{' '}
+            {mcpContext ? `${mcpContext.serverName} — MCP sign-in` : cliTitle}{' '}
             {action === 'update'
               ? 'Update'
               : action === 'install'
                 ? 'Install'
-                : 'Login'}
+                : mcpContext
+                  ? ''
+                  : 'Login'}
           </DialogTitle>
         </DialogHeader>
+
+        {mcpContext && (
+          <p className="text-sm text-muted-foreground">
+            Open the sign-in link in the terminal below. After approval, copy
+            the full return URL from your browser and paste it here when asked.
+            If the browser cannot load the return page, you can still copy its
+            URL.
+          </p>
+        )}
 
         <StandaloneTerminalSurface
           terminalId={terminalId}
           command={command}
           commandArgs={commandArgs}
+          worktreePath={mcpContext?.worktreePath}
+          allowPasteInput={action === 'login'}
           className="min-h-0 flex-1"
         />
 

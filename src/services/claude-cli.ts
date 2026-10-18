@@ -6,7 +6,11 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { invoke, useWsConnectionStatus } from '@/lib/transport'
+import {
+  invoke,
+  invokeForOptionalServer,
+  useWsConnectionStatus,
+} from '@/lib/transport'
 import { listen } from '@/lib/transport'
 import { toast } from 'sonner'
 import { useCallback, useEffect, useState } from 'react'
@@ -20,6 +24,7 @@ import type {
 } from '@/types/claude-cli'
 
 import { hasBackendTransport } from '@/lib/environment'
+import { useOptionalSettingsTargetServerId } from '@/lib/settings-target'
 
 const isTauri = hasBackendTransport
 const USAGE_REFRESH_MS = 1000 * 60 * 5
@@ -37,8 +42,13 @@ export const claudeCliQueryKeys = {
  * Hook to detect Claude CLI in system PATH
  */
 export function useClaudePathDetection(options?: { enabled?: boolean }) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: [...claudeCliQueryKeys.all, 'path-detection'],
+    queryKey: [
+      ...claudeCliQueryKeys.all,
+      'path-detection',
+      serverId ?? 'local',
+    ],
     queryFn: async (): Promise<{
       found: boolean
       path: string | null
@@ -54,12 +64,12 @@ export function useClaudePathDetection(options?: { enabled?: boolean }) {
         }
       }
       try {
-        const result = await invoke<{
+        const result = await invokeForOptionalServer<{
           found: boolean
           path: string | null
           version: string | null
           package_manager: string | null
-        }>('detect_claude_in_path')
+        }>(serverId, 'detect_claude_in_path')
         console.debug('[ONBOARDING:SVC] claude path detection:', result)
         return result
       } catch (err) {
@@ -93,9 +103,14 @@ function getUsageRefetchInterval(snapshot?: ClaudeUsageSnapshot): number {
 /**
  * Hook to check if Claude CLI is installed and get its status
  */
-export function useClaudeCliStatus(options?: { enabled?: boolean }) {
+export function useClaudeCliStatus(options?: {
+  enabled?: boolean
+  serverId?: string
+}) {
+  const settingsServerId = useOptionalSettingsTargetServerId()
+  const serverId = options?.serverId ?? settingsServerId
   return useQuery({
-    queryKey: claudeCliQueryKeys.status(),
+    queryKey: [...claudeCliQueryKeys.status(), serverId ?? 'local'],
     queryFn: async (): Promise<ClaudeCliStatus> => {
       if (!isTauri()) {
         logger.debug('Not in Tauri context, returning mock CLI status')
@@ -109,7 +124,8 @@ export function useClaudeCliStatus(options?: { enabled?: boolean }) {
 
       try {
         console.debug('[ONBOARDING:SVC] claude: checking installed status...')
-        const status = await invoke<ClaudeCliStatus>(
+        const status = await invokeForOptionalServer<ClaudeCliStatus>(
+          serverId,
           'check_claude_cli_installed'
         )
         console.debug('[ONBOARDING:SVC] claude: status =', status)
@@ -135,8 +151,9 @@ export function useClaudeCliStatus(options?: { enabled?: boolean }) {
  * Hook to check if Claude CLI is authenticated
  */
 export function useClaudeCliAuth(options?: { enabled?: boolean }) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: claudeCliQueryKeys.auth(),
+    queryKey: [...claudeCliQueryKeys.auth(), serverId ?? 'local'],
     queryFn: async (): Promise<ClaudeAuthStatus> => {
       if (!isTauri()) {
         logger.debug('Not in Tauri context, returning mock auth status')
@@ -145,7 +162,10 @@ export function useClaudeCliAuth(options?: { enabled?: boolean }) {
 
       try {
         console.debug('[ONBOARDING:SVC] claude: checking auth status...')
-        const status = await invoke<ClaudeAuthStatus>('check_claude_cli_auth')
+        const status = await invokeForOptionalServer<ClaudeAuthStatus>(
+          serverId,
+          'check_claude_cli_auth'
+        )
         console.debug('[ONBOARDING:SVC] claude: auth =', status)
         return status
       } catch (error) {
@@ -185,8 +205,9 @@ export function useClaudeUsage(options?: { enabled?: boolean }) {
  * Hook to fetch available Claude CLI versions from GitHub
  */
 export function useAvailableCliVersions(options?: { enabled?: boolean }) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: claudeCliQueryKeys.versions(),
+    queryKey: [...claudeCliQueryKeys.versions(), serverId ?? 'local'],
     queryFn: async (): Promise<ReleaseInfo[]> => {
       if (!isTauri()) {
         logger.debug('Not in Tauri context, returning empty versions list')
@@ -196,14 +217,14 @@ export function useAvailableCliVersions(options?: { enabled?: boolean }) {
       try {
         logger.debug('Fetching available Claude CLI versions')
         // Transform snake_case from Rust to camelCase
-        const versions = await invoke<
+        const versions = await invokeForOptionalServer<
           {
             version: string
             tag_name: string
             published_at: string
             prerelease: boolean
           }[]
-        >('get_available_cli_versions')
+        >(serverId, 'get_available_cli_versions')
 
         return versions.map(v => ({
           version: v.version,
@@ -228,11 +249,14 @@ export function useAvailableCliVersions(options?: { enabled?: boolean }) {
  */
 export function useInstallClaudeCli() {
   const queryClient = useQueryClient()
+  const serverId = useOptionalSettingsTargetServerId()
 
   return useMutation({
     mutationFn: async (version?: string) => {
       logger.info('Installing Claude CLI', { version })
-      await invoke('install_claude_cli', { version: version ?? null })
+      await invokeForOptionalServer(serverId, 'install_claude_cli', {
+        version: version ?? null,
+      })
     },
     // Disable retry - installation should not be retried automatically
     retry: false,
@@ -307,11 +331,16 @@ export function useInstallProgress(): [InstallProgress | null, () => void] {
 /**
  * Combined hook for CLI setup flow
  */
-function checkManualVersion(version: string) {
-  return invoke<boolean>('check_claude_cli_version_exists', { version })
+function checkManualVersion(version: string, serverId?: string) {
+  return invokeForOptionalServer<boolean>(
+    serverId,
+    'check_claude_cli_version_exists',
+    { version }
+  )
 }
 
 export function useClaudeCliSetup() {
+  const serverId = useOptionalSettingsTargetServerId()
   const status = useClaudeCliStatus()
   const versions = useAvailableCliVersions()
   const installMutation = useInstallClaudeCli()
@@ -347,7 +376,6 @@ export function useClaudeCliSetup() {
     })
   }
 
-
   return {
     status: status.data,
     isStatusLoading: status.isLoading,
@@ -360,7 +388,8 @@ export function useClaudeCliSetup() {
     installError: installMutation.error,
     progress,
     install,
-    checkManualVersion,
+    checkManualVersion: (version: string) =>
+      checkManualVersion(version, serverId),
     refetchStatus: status.refetch,
   }
 }

@@ -2,13 +2,12 @@ import { forwardRef, useCallback } from 'react'
 import {
   Archive,
   Copy,
-  FileText,
   Pencil,
   RefreshCw,
   Shield,
   Tag,
   Trash2,
-} from 'lucide-react'
+} from '@/components/icons/reicon'
 import { cn } from '@/lib/utils'
 import { getLabelTextColor } from '@/lib/label-colors'
 import { copyToClipboard } from '@/lib/clipboard'
@@ -34,8 +33,8 @@ import {
   statusConfig,
   type SessionCardProps,
 } from './session-card-utils'
-import { SessionStatusMenu } from './SessionStatusMenu'
 import { canReconnectSession } from '@/services/chat'
+import { useChatStore } from '@/store/chat-store'
 
 export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
   function SessionListRow(
@@ -45,15 +44,12 @@ export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
       onSelect,
       onArchive,
       onDelete,
-      onPlanView,
       onApprove,
       onYolo,
       onClearContextApprove,
       onWorktreeBuildApprove,
       onWorktreeYoloApprove,
       onToggleLabel,
-      onToggleReview,
-      onSetStatusOverride,
       onReconnect,
       isRenaming,
       renameValue,
@@ -65,19 +61,9 @@ export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
     ref
   ) {
     const config = statusConfig[card.status]
-    const handleSetStatusOverride =
-      onSetStatusOverride ??
-      (onToggleReview
-        ? (status: 'idle' | 'review' | 'completed' | 'cancelled' | null) => {
-            // Fallback for callers that only wire the legacy review toggle
-            if (status === 'review') {
-              if (card.status !== 'review') onToggleReview()
-            } else if (status === null || status === 'idle') {
-              if (card.status === 'review') onToggleReview()
-            }
-          }
-        : undefined)
-    const hasPlan = !!(card.planFilePath || card.planContent)
+    const isGeneratingName = useChatStore(
+      state => state.namingSessionIds[card.session.id] ?? false
+    )
     const resumeCommand = getResumeCommand(card.session)
     const canReconnect = canReconnectSession(card.session)
     const renameInputRef = useCallback((node: HTMLInputElement | null) => {
@@ -121,7 +107,6 @@ export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
                 <span className="inline-flex shrink-0">
                   <StatusIndicator
                     status={config.indicatorStatus}
-                    variant={config.indicatorVariant}
                     shape={config.indicatorShape}
                     label={config.label}
                     className="h-2 w-2 shrink-0"
@@ -146,14 +131,16 @@ export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
                 className="flex-1 min-w-0 bg-transparent text-base outline-none ring-1 ring-ring rounded px-1 md:text-sm"
               />
             ) : (
-              <span className="flex-1 truncate text-sm">
-                {card.session.name}
+              <span className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-sm">
+                <span className="truncate">
+                  {isGeneratingName ? 'Generating…' : card.session.name}
+                </span>
               </span>
             )}
 
             {/* Blocked badge */}
             {card.hasPermissionDenials && (
-              <span className="flex items-center h-5 px-1.5 text-[10px] uppercase tracking-wide border border-yellow-500/50 text-yellow-600 dark:text-yellow-400 rounded shrink-0">
+              <span className="flex items-center h-5 px-1.5 text-[10px] uppercase tracking-wide border border-warning/50 text-warning rounded shrink-0">
                 <Shield className="mr-0.5 h-2.5 w-2.5" />
                 {card.permissionDenialCount}
               </span>
@@ -199,7 +186,7 @@ export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
                       onYolo()
                     }}
                   >
-                    YOLO
+                    Full access
                     <Kbd className="ml-1 h-3.5 text-[9px] bg-white/20 text-white">
                       {formatShortcutDisplay(
                         DEFAULT_KEYBINDINGS.approve_plan_yolo
@@ -215,7 +202,7 @@ export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
                         onClearContextApprove()
                       }}
                     >
-                      Clear Context and yolo
+                      Clear context with Full access
                       <Kbd className="ml-1 h-3.5 text-[9px] bg-white/20 text-white">
                         {formatShortcutDisplay(
                           DEFAULT_KEYBINDINGS.approve_plan_clear_context
@@ -232,7 +219,7 @@ export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
                         onWorktreeBuildApprove()
                       }}
                     >
-                      WT Build
+                      WT Approve
                       <Kbd className="ml-1 h-3.5 text-[9px]">
                         {formatShortcutDisplay(
                           DEFAULT_KEYBINDINGS.approve_plan_worktree_build
@@ -249,7 +236,7 @@ export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
                         onWorktreeYoloApprove()
                       }}
                     >
-                      WT YOLO
+                      WT Full access
                       <Kbd className="ml-1 h-3.5 text-[9px]">
                         {formatShortcutDisplay(
                           DEFAULT_KEYBINDINGS.approve_plan_worktree_yolo
@@ -276,17 +263,6 @@ export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
               {card.label ? 'Remove Label' : 'Add Label'}
             </ContextMenuItem>
           )}
-          {handleSetStatusOverride && (
-            <SessionStatusMenu
-              statusOverride={card.statusOverride}
-              automaticStatus={card.automaticStatus}
-              onSetStatusOverride={handleSetStatusOverride}
-            />
-          )}
-          <ContextMenuItem onSelect={onArchive}>
-            <Archive className="mr-2 h-4 w-4" />
-            Archive Session
-          </ContextMenuItem>
           <ContextMenuItem
             onSelect={() => {
               void copyToClipboard(card.session.id)
@@ -316,11 +292,10 @@ export const SessionListRow = forwardRef<HTMLDivElement, SessionCardProps>(
             </ContextMenuItem>
           )}
           <ContextMenuSeparator />
-          <ContextMenuItem disabled={!hasPlan} onSelect={onPlanView}>
-            <FileText className="mr-2 h-4 w-4" />
-            Plan
+          <ContextMenuItem onSelect={onArchive}>
+            <Archive className="mr-2 h-4 w-4" />
+            Archive Session
           </ContextMenuItem>
-          <ContextMenuSeparator />
           <ContextMenuItem variant="destructive" onSelect={onDelete}>
             <Trash2 className="mr-2 h-4 w-4" />
             Delete Session

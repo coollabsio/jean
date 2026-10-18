@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
-import { Zap } from 'lucide-react'
+import { Zap } from '@/components/icons/reicon'
 import { dismissibleToast } from '@/lib/dismissible-toast'
 import { invoke } from '@/lib/transport'
 import { cn } from '@/lib/utils'
@@ -83,7 +83,6 @@ export type { ChatToolbarProps }
 const EMPTY_CODEX_PROVIDERS: CodexProviderProfile[] = []
 
 /** Tracks concurrent ChatToolbar mounts (remount races during session switch). */
-let chatToolbarMountCount = 0
 
 export const ChatToolbar = memo(function ChatToolbar({
   isSending,
@@ -119,6 +118,7 @@ export const ChatToolbar = memo(function ChatToolbar({
   loadedSecurityContexts,
   loadedAdvisoryContexts,
   loadedLinearContexts,
+  loadedSentryContexts,
   attachedSavedContexts,
   onOpenMagicModal,
   onSaveContext,
@@ -145,6 +145,8 @@ export const ChatToolbar = memo(function ChatToolbar({
   onCancel,
   willSteer,
   steerWithModifier,
+  canSteer,
+  onSteer,
   queuedMessageCount,
   availableMcpServers,
   enabledMcpServers,
@@ -188,21 +190,6 @@ export const ChatToolbar = memo(function ChatToolbar({
     setProviderDropdownOpen,
     setThinkingDropdownOpen,
   })
-
-  // Signal to FloatingDock that its burger counterpart now lives in this toolbar.
-  // Use a process-wide mount count so React remount races (session key change)
-  // cannot leave chatToolbarMounted=false while a newer toolbar is mounted —
-  // that would show FloatingDock over a blank-looking chat on mobile/web.
-  useEffect(() => {
-    chatToolbarMountCount += 1
-    useUIStore.getState().setChatToolbarMounted(true)
-    return () => {
-      chatToolbarMountCount = Math.max(0, chatToolbarMountCount - 1)
-      if (chatToolbarMountCount === 0) {
-        useUIStore.getState().setChatToolbarMounted(false)
-      }
-    }
-  }, [])
 
   const { data: availableOpencodeModels } = useAvailableOpencodeModels({
     enabled: selectedBackend === 'opencode',
@@ -280,7 +267,7 @@ export const ChatToolbar = memo(function ChatToolbar({
         <span className="truncate">· {selectedModelLabel}</span>
         {getModelFastInfo(selectedBackend, selectedModel).isFast && (
           <Zap
-            className="h-3 w-3 shrink-0 fill-current text-yellow-500"
+            className="h-3 w-3 shrink-0 fill-current text-warning"
             aria-label="Fast mode"
           />
         )}
@@ -303,6 +290,7 @@ export const ChatToolbar = memo(function ChatToolbar({
     handleViewSecurityAlert,
     handleViewAdvisory,
     handleViewLinear,
+    handleViewSentry,
   } = useContextViewer({
     activeSessionId,
     activeWorktreePath,
@@ -425,7 +413,12 @@ export const ChatToolbar = memo(function ChatToolbar({
       setWorktreeLoading(worktreeId, 'push')
       const opToast = dismissibleToast.loading('Pushing changes...')
       try {
-        const result = await gitPush(activeWorktreePath, prNumber, remote)
+        const result = await gitPush(
+          activeWorktreePath,
+          prNumber,
+          remote,
+          worktreeId
+        )
         triggerImmediateGitPoll()
         if (projectId) fetchWorktreesStatus(projectId)
         if (result.permissionDenied) {
@@ -509,24 +502,28 @@ export const ChatToolbar = memo(function ChatToolbar({
           <div className={zenMode ? 'hidden' : 'contents'}>
             <DockBurgerButton className="flex @xl:hidden" />
 
-            <MobileToolbarMenu
-              isDisabled={false}
-              hasOpenPr={hasOpenPr}
-              hasIssueContexts={loadedIssueContexts.length > 0}
-              hasPrContexts={loadedPRContexts.length > 0}
-              onSaveContext={onSaveContext}
-              onLoadContext={onLoadContext}
-              onCommit={onCommit}
-              onCommitAndPush={onCommitAndPush}
-              onRevertLastCommit={handleRevertLastCommit}
-              onOpenPr={onOpenPr}
-              onReview={onReview}
-              onMerge={onMerge}
-              onMergePr={onMergePr}
-              handleSyncClick={handleSyncClick}
-              handlePullClick={handlePullClick}
-              handlePushClick={handlePushClick}
-            />
+            {onOpenMagicModal && (
+              <MobileToolbarMenu
+                isDisabled={false}
+                hasOpenPr={hasOpenPr}
+                hasIssueContexts={loadedIssueContexts.length > 0}
+                hasSentryContexts={loadedSentryContexts.length > 0}
+                hasPrContexts={loadedPRContexts.length > 0}
+                hasAdvisoryContexts={loadedAdvisoryContexts.length > 0}
+                onSaveContext={onSaveContext}
+                onLoadContext={onLoadContext}
+                onCommit={onCommit}
+                onCommitAndPush={onCommitAndPush}
+                onRevertLastCommit={handleRevertLastCommit}
+                onOpenPr={onOpenPr}
+                onReview={onReview}
+                onMerge={onMerge}
+                onMergePr={onMergePr}
+                handleSyncClick={handleSyncClick}
+                handlePullClick={handlePullClick}
+                handlePushClick={handlePushClick}
+              />
+            )}
 
             <MobileSettingsMenu
               isDisabled={false}
@@ -557,12 +554,14 @@ export const ChatToolbar = memo(function ChatToolbar({
               loadedSecurityContexts={loadedSecurityContexts}
               loadedAdvisoryContexts={loadedAdvisoryContexts}
               loadedLinearContexts={loadedLinearContexts}
+              loadedSentryContexts={loadedSentryContexts}
               attachedSavedContexts={attachedSavedContexts}
               handleViewIssue={handleViewIssue}
               handleViewPR={handleViewPR}
               handleViewSecurityAlert={handleViewSecurityAlert}
               handleViewAdvisory={handleViewAdvisory}
               handleViewLinear={handleViewLinear}
+              handleViewSentry={handleViewSentry}
               handleViewSavedContext={handleViewSavedContext}
               availableMcpServers={availableMcpServers}
               enabledMcpServers={enabledMcpServers}
@@ -601,15 +600,17 @@ export const ChatToolbar = memo(function ChatToolbar({
             <div className="block @xl:hidden h-4 w-px shrink-0 bg-border/50" />
 
             <ExecutionModeDropdown
+              backend={selectedBackend}
+              sessionId={activeSessionId}
               executionMode={executionMode}
               availableModes={availableExecutionModes}
-              disabled={hasPendingQuestions}
               onSetExecutionMode={onSetExecutionMode}
               className="flex @xl:hidden shrink-0"
               align="end"
             />
 
             <DesktopToolbarControls
+              activeSessionId={activeSessionId}
               hasPendingQuestions={hasPendingQuestions}
               selectedBackend={selectedBackend}
               selectedModel={selectedModel}
@@ -640,6 +641,7 @@ export const ChatToolbar = memo(function ChatToolbar({
               loadedSecurityContexts={loadedSecurityContexts}
               loadedAdvisoryContexts={loadedAdvisoryContexts}
               loadedLinearContexts={loadedLinearContexts}
+              loadedSentryContexts={loadedSentryContexts}
               attachedSavedContexts={attachedSavedContexts}
               providerDropdownOpen={providerDropdownOpen}
               thinkingDropdownOpen={thinkingDropdownOpen}
@@ -666,20 +668,23 @@ export const ChatToolbar = memo(function ChatToolbar({
               handleViewSecurityAlert={handleViewSecurityAlert}
               handleViewAdvisory={handleViewAdvisory}
               handleViewLinear={handleViewLinear}
+              handleViewSentry={handleViewSentry}
               handleViewSavedContext={handleViewSavedContext}
             />
 
             <div className="h-4 w-px shrink-0 bg-border/50" />
           </div>
 
-          <div className="shrink-0">
+          <div className="shrink-0 py-1">
             <SendCancelButton
               isSending={isSending}
               canSend={canSend}
               willSteer={willSteer}
               steerWithModifier={steerWithModifier}
+              canSteer={canSteer}
               queuedMessageCount={queuedMessageCount}
               onCancel={onCancel}
+              onSteer={onSteer}
             />
           </div>
         </div>

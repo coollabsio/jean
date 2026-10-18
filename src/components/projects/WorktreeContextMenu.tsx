@@ -6,7 +6,7 @@ import {
   Terminal,
   Trash2,
   X,
-} from 'lucide-react'
+} from '@/components/icons/reicon'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,7 +28,11 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { getEditorLabel, getTerminalLabel } from '@/types/preferences'
-import { canOpenInEditor, canOpenNativeApps } from '@/lib/environment'
+import {
+  canOpenInEditor,
+  canOpenInFinder,
+  canOpenInTerminal,
+} from '@/lib/environment'
 import { getFileManagerName } from '@/lib/platform'
 import type { useWorktreeMenuActions } from './useWorktreeMenuActions'
 
@@ -36,16 +40,19 @@ interface WorktreeContextMenuProps {
   // Computed once by the parent (WorktreeItem) and passed in so the hook isn't
   // run twice per worktree row.
   actions: ReturnType<typeof useWorktreeMenuActions>
+  serverId?: string
   children: React.ReactNode
 }
 
 export function WorktreeContextMenu({
   actions,
+  serverId,
   children,
 }: WorktreeContextMenuProps) {
   const {
     showDeleteConfirm,
     setShowDeleteConfirm,
+    deleteSkipTeardown,
     isBase,
     runScripts,
     preferences,
@@ -55,6 +62,7 @@ export function WorktreeContextMenu({
     handleOpenInTerminal,
     handleOpenInEditor,
     handleArchiveOrClose,
+    openDeleteConfirm,
     handleDelete,
   } = actions
 
@@ -88,9 +96,9 @@ export function WorktreeContextMenu({
           </ContextMenuSub>
         )}
 
-        {(canOpenInEditor() || canOpenNativeApps()) && (
-          <ContextMenuSeparator />
-        )}
+        {(canOpenInEditor() ||
+          canOpenInTerminal() ||
+          canOpenInFinder(serverId)) && <ContextMenuSeparator />}
 
         {canOpenInEditor() && (
           <ContextMenuItem onClick={handleOpenInEditor}>
@@ -99,14 +107,14 @@ export function WorktreeContextMenu({
           </ContextMenuItem>
         )}
 
-        {canOpenNativeApps() && (
+        {canOpenInFinder(serverId) && (
           <ContextMenuItem onClick={handleOpenInFinder}>
             <FolderOpen className="mr-2 h-4 w-4" />
             Open in {getFileManagerName()}
           </ContextMenuItem>
         )}
 
-        {canOpenNativeApps() && (
+        {canOpenInTerminal() && (
           <ContextMenuItem onClick={handleOpenInTerminal}>
             <Terminal className="mr-2 h-4 w-4" />
             Open in {getTerminalLabel(preferences?.terminal)}
@@ -130,10 +138,16 @@ export function WorktreeContextMenu({
         </ContextMenuItem>
 
         {!isBase && (
-          <ContextMenuItem onClick={() => setShowDeleteConfirm(true)}>
-            <Trash2 className="mr-2 h-4 w-4 text-destructive" />
-            Delete Worktree
-          </ContextMenuItem>
+          <>
+            <ContextMenuItem onClick={() => openDeleteConfirm(false)}>
+              <Trash2 className="mr-2 h-4 w-4 text-destructive" />
+              Delete Worktree
+            </ContextMenuItem>
+            <ContextMenuItem onClick={() => openDeleteConfirm(true)}>
+              <Trash2 className="mr-2 h-4 w-4 text-destructive" />
+              Delete Without Teardown
+            </ContextMenuItem>
+          </>
         )}
       </ContextMenuContent>
 
@@ -149,10 +163,16 @@ export function WorktreeContextMenu({
           }}
         >
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Worktree</AlertDialogTitle>
+            <AlertDialogTitle>
+              {deleteSkipTeardown
+                ? 'Delete Without Teardown'
+                : 'Delete Worktree'}
+            </AlertDialogTitle>
             <AlertDialogDescription>
               This will permanently delete the worktree, its branch, and all
               associated sessions. This action cannot be undone.
+              {deleteSkipTeardown &&
+                ' The teardown script will not run, so resources it manages may need manual cleanup.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -160,7 +180,7 @@ export function WorktreeContextMenu({
             <AlertDialogAction
               autoFocus
               onClick={handleDelete}
-              className="bg-destructive text-white hover:bg-destructive/90"
+              variant="destructive"
             >
               Delete
               <kbd className="ml-1.5 text-xs opacity-70">↵</kbd>

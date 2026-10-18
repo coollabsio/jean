@@ -71,16 +71,18 @@ describe('UsagePane', () => {
   })
 
   it('renders Claude plan summary and usage windows', () => {
+    const nowSeconds = Math.floor(Date.now() / 1000)
     mocks.useClaudeUsage.mockReturnValue(
       idleQuery({
-        planType: 'pro',
+        planType: 'max',
+        planTier: 'default_claude_max_20x',
         session: {
           usedPercent: 22,
-          resetsAt: Math.floor(Date.now() / 1000) + 3600,
+          resetsAt: nowSeconds + 4 * 3600 + 12 * 60 + 30,
         },
         weekly: {
           usedPercent: 55,
-          resetsAt: Math.floor(Date.now() / 1000) + 86_400,
+          resetsAt: nowSeconds + 3 * 86_400 + 11 * 3600 + 30 * 60,
         },
         sonnetWeekly: {
           usedPercent: 10,
@@ -95,10 +97,12 @@ describe('UsagePane', () => {
     render(<UsagePane />)
 
     expect(screen.getByText('Claude')).toBeInTheDocument()
-    expect(screen.getByText('pro')).toBeInTheDocument()
-    expect(screen.getByText('Extra: 1.5 / 50')).toBeInTheDocument()
-    expect(screen.getByText('Session')).toBeInTheDocument()
-    expect(screen.getByText('Sonnet')).toBeInTheDocument()
+    expect(screen.getByText('Max 20x plan')).toBeInTheDocument()
+    expect(screen.getByText('Extra usage: 1.5 / 50')).toBeInTheDocument()
+    expect(screen.getByText('5-hour session')).toBeInTheDocument()
+    expect(screen.getByText('Weekly · Sonnet')).toBeInTheDocument()
+    expect(screen.getByText(/Resets in 4h 12m/)).toBeInTheDocument()
+    expect(screen.getByText(/Resets in 3d 11h/)).toBeInTheDocument()
   })
 
   it('renders Codex plan summary and usage windows', () => {
@@ -126,8 +130,10 @@ describe('UsagePane', () => {
     render(<UsagePane />)
 
     expect(screen.getByText('Codex')).toBeInTheDocument()
+    expect(screen.getByText('Pro plan')).toBeInTheDocument()
     expect(screen.getByText('Credits remaining: 3')).toBeInTheDocument()
-    expect(screen.getByText('12.5%')).toBeInTheDocument()
+    expect(screen.getByText('1-hour session')).toBeInTheDocument()
+    expect(screen.getByText('13%')).toBeInTheDocument()
   })
 
   it('hides backends that are not installed or not authenticated', () => {
@@ -164,7 +170,7 @@ describe('UsagePane', () => {
     expect(screen.queryByText(/not authenticated/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/not installed/i)).not.toBeInTheDocument()
     expect(screen.getByText('Grok')).toBeInTheDocument()
-    expect(screen.getByText('X Premium+')).toBeInTheDocument()
+    expect(screen.getByText('X Premium+ plan')).toBeInTheDocument()
   })
 
   it('shows empty guidance when no ready backends exist', () => {
@@ -229,7 +235,7 @@ describe('UsagePane', () => {
     render(<UsagePane />)
 
     expect(screen.getByText('Grok')).toBeInTheDocument()
-    expect(screen.getByText('X Premium+')).toBeInTheDocument()
+    expect(screen.getByText('X Premium+ plan')).toBeInTheDocument()
     expect(screen.getByText('Grok Build')).toBeInTheDocument()
     expect(screen.getByText('Weekly credits')).toBeInTheDocument()
     expect(screen.getByText('Grok Code access: Yes')).toBeInTheDocument()
@@ -254,5 +260,23 @@ describe('UsagePane', () => {
     const retryButton = screen.getByRole('button', { name: /Retry/i })
     await user.click(retryButton)
     expect(refetch).toHaveBeenCalled()
+  })
+  it('keeps showing Claude usage when a refetch fails', () => {
+    mocks.useClaudeUsage.mockReturnValue({
+      ...idleQuery({
+        planType: 'max',
+        session: { usedPercent: 48, resetsAt: null },
+        weekly: null,
+        sonnetWeekly: null,
+        fetchedAt: 1,
+      }),
+      isError: true,
+      error: new Error('Claude usage API is rate-limiting requests.'),
+    })
+
+    render(<UsagePane />)
+
+    expect(screen.getByText('5-hour session')).toBeInTheDocument()
+    expect(screen.queryByText(/rate-limiting requests/)).not.toBeInTheDocument()
   })
 })

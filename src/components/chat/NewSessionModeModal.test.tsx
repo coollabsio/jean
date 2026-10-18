@@ -19,19 +19,26 @@ let kimiInstalled: boolean
 let isMobile: boolean
 let defaultExecutionMode: 'plan' | 'build' | 'yolo'
 let defaultBackend: 'claude' | 'codex'
+let remoteDefaultBackend: 'claude' | 'codex'
+const preferenceTargets: (string | undefined)[] = []
+const cliStatusTargets = new Map<string, string | undefined>()
 
 vi.mock('@/services/preferences', () => ({
-  usePreferences: () => ({
-    data: {
-      default_new_session_kind: 'chat',
-      default_execution_mode: defaultExecutionMode,
-      default_backend: defaultBackend,
-      selected_model: 'claude-opus-4-8[1m]',
-      selected_codex_model: 'gpt-5.6-sol',
-      default_effort_level: 'max',
-      default_codex_reasoning_effort: 'xhigh',
-    },
-  }),
+  usePreferences: (serverId?: string) => {
+    preferenceTargets.push(serverId)
+    return {
+      data: {
+        default_new_session_kind: 'chat',
+        default_execution_mode: defaultExecutionMode,
+        default_backend:
+          serverId === 'remote-1' ? remoteDefaultBackend : defaultBackend,
+        selected_model: 'claude-opus-4-8[1m]',
+        selected_codex_model: 'gpt-5.6-sol',
+        default_effort_level: 'max',
+        default_codex_reasoning_effort: 'xhigh',
+      },
+    }
+  },
 }))
 
 vi.mock('@/services/chat', () => ({
@@ -58,17 +65,23 @@ vi.mock('@/hooks/use-mobile', () => ({
 }))
 
 vi.mock('@/services/claude-cli', () => ({
-  useClaudeCliStatus: () => ({
-    data: { installed: true, path: '/usr/local/bin/claude' },
-    isLoading: false,
-  }),
+  useClaudeCliStatus: (options?: { serverId?: string }) => {
+    cliStatusTargets.set('claude', options?.serverId)
+    return {
+      data: { installed: true, path: '/usr/local/bin/claude' },
+      isLoading: false,
+    }
+  },
 }))
 
 vi.mock('@/services/codex-cli', () => ({
-  useCodexCliStatus: () => ({
-    data: { installed: true, path: '/usr/local/bin/codex' },
-    isLoading: false,
-  }),
+  useCodexCliStatus: (options?: { serverId?: string }) => {
+    cliStatusTargets.set('codex', options?.serverId)
+    return {
+      data: { installed: true, path: '/usr/local/bin/codex' },
+      isLoading: false,
+    }
+  },
 }))
 
 vi.mock('@/services/opencode-cli', () => ({
@@ -134,6 +147,7 @@ vi.mock('@/services/kimi-cli', () => ({
 describe('NewSessionModeModal', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    cliStatusTargets.clear()
     mutate.mockReset()
     invoke.mockReset()
     sessionsData = { sessions: [] }
@@ -147,6 +161,8 @@ describe('NewSessionModeModal', () => {
     isMobile = false
     defaultExecutionMode = 'plan'
     defaultBackend = 'claude'
+    remoteDefaultBackend = 'claude'
+    preferenceTargets.length = 0
     invoke.mockResolvedValue({
       commandArgs: ['--context-arg', 'context-value'],
     })
@@ -165,6 +181,55 @@ describe('NewSessionModeModal', () => {
       terminalPanelOpen: {},
       modalTerminalOpen: {},
     })
+  })
+
+  it('checks CLI availability on the worktree owning server', () => {
+    useUIStore.getState().openNewSessionModeModal({
+      worktreeId: 'remote-1:worktree-1',
+      worktreePath: '/remote/project',
+      origin: 'canvas',
+      intent: 'picker',
+    })
+
+    render(<NewSessionModeModal />)
+
+    expect(cliStatusTargets.get('claude')).toBe('remote-1')
+    expect(cliStatusTargets.get('codex')).toBe('remote-1')
+    expect(preferenceTargets).toContain('remote-1')
+  })
+
+  it('uses the owning remote server defaults for a new chat session', () => {
+    defaultBackend = 'claude'
+    remoteDefaultBackend = 'codex'
+    mutate.mockImplementation(
+      (
+        args: { backend?: string },
+        opts?: {
+          onSuccess?: (session: { id: string; backend: 'codex' }) => void
+        }
+      ) => {
+        expect(args.backend).toBeUndefined()
+        opts?.onSuccess?.({ id: 'remote-session', backend: 'codex' })
+      }
+    )
+    useUIStore.getState().openNewSessionModeModal({
+      worktreeId: 'remote-1:worktree-1',
+      worktreePath: '/remote/project',
+      origin: 'chat',
+    })
+
+    render(<NewSessionModeModal />)
+    fireEvent.keyDown(window, { key: 'Enter' })
+
+    expect(preferenceTargets).toContain('remote-1')
+    expect(invoke).toHaveBeenCalledWith(
+      'update_session_state',
+      expect.objectContaining({
+        sessionId: 'remote-session',
+        selectedModel: 'gpt-5.6-sol',
+        selectedEffortLevel: 'xhigh',
+      })
+    )
   })
 
   it('defaults Enter to a normal Jean chat session', () => {
@@ -190,7 +255,6 @@ describe('NewSessionModeModal', () => {
       {
         worktreeId: 'worktree-1',
         worktreePath: '/tmp/worktree-1',
-        backend: 'claude',
       },
       expect.any(Object)
     )
@@ -207,8 +271,10 @@ describe('NewSessionModeModal', () => {
     mutate.mockImplementation(
       (
         _args: unknown,
-        opts?: { onSuccess?: (session: { id: string }) => void }
-      ) => opts?.onSuccess?.({ id: 'session-defaults' })
+        opts?: {
+          onSuccess?: (session: { id: string; backend?: 'codex' }) => void
+        }
+      ) => opts?.onSuccess?.({ id: 'session-defaults', backend: 'codex' })
     )
     useUIStore.getState().openNewSessionModeModal({
       worktreeId: 'worktree-1',
@@ -220,7 +286,7 @@ describe('NewSessionModeModal', () => {
     fireEvent.keyDown(window, { key: 'Enter' })
 
     expect(mutate).toHaveBeenCalledWith(
-      expect.objectContaining({ backend: 'codex' }),
+      expect.not.objectContaining({ backend: expect.anything() }),
       expect.any(Object)
     )
     expect(invoke).toHaveBeenCalledWith(
@@ -256,7 +322,6 @@ describe('NewSessionModeModal', () => {
         {
           worktreeId: 'worktree-1',
           worktreePath: '/tmp/worktree-1',
-          backend: 'claude',
         },
         expect.any(Object)
       )
@@ -344,7 +409,7 @@ describe('NewSessionModeModal', () => {
       screen.queryByText('Open native Claude in a terminal session')
     ).not.toBeInTheDocument()
     expect(
-      screen.queryByRole('button', { name: 'Start Claude in yolo mode' })
+      screen.queryByRole('button', { name: 'Start Claude with Full access' })
     ).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Claude' }))
@@ -357,10 +422,12 @@ describe('NewSessionModeModal', () => {
       screen.getByRole('button', { name: 'Start normal' })
     ).toBeInTheDocument()
     expect(
-      screen.getByRole('button', { name: 'Start yolo' })
+      screen.getByRole('button', { name: 'Start with Full access' })
     ).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Start yolo' }))
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Start with Full access' })
+    )
 
     expect(screen.getByText('Claude sessions')).toBeInTheDocument()
   })
@@ -472,7 +539,7 @@ describe('NewSessionModeModal', () => {
     )
   })
 
-  it('opens the native Claude session picker before starting a yolo session', async () => {
+  it('opens the native Claude session picker before starting a Full access session', async () => {
     mutate.mockImplementation(
       (
         _args: unknown,
@@ -500,7 +567,7 @@ describe('NewSessionModeModal', () => {
     render(<NewSessionModeModal />)
 
     fireEvent.click(
-      screen.getByRole('button', { name: 'Start Claude in yolo mode' })
+      screen.getByRole('button', { name: 'Start Claude with Full access' })
     )
 
     expect(screen.getByText('Claude sessions')).toBeInTheDocument()
@@ -584,7 +651,7 @@ describe('NewSessionModeModal', () => {
     render(<NewSessionModeModal />)
 
     fireEvent.click(
-      screen.getByRole('button', { name: 'Start Codex in yolo mode' })
+      screen.getByRole('button', { name: 'Start Codex with Full access' })
     )
 
     expect(screen.getByText('Codex sessions')).toBeInTheDocument()

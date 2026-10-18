@@ -165,8 +165,15 @@ pub async fn dispatch_command(
         "save_ui_state" => {
             let ui_state = field(&args, "uiState", "ui_state")?;
             crate::save_ui_state(app.clone(), ui_state).await?;
-            emit_cache_invalidation(app, &["ui-state"]);
             Ok(Value::Null)
+        }
+        "get_pinned_recent_session_ids" => {
+            to_value(crate::get_pinned_recent_session_ids(app.clone()).await?)
+        }
+        "set_recent_session_pinned" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let pinned: bool = from_field(&args, "pinned")?;
+            to_value(crate::set_recent_session_pinned(app.clone(), session_id, pinned).await?)
         }
 
         // =====================================================================
@@ -202,6 +209,22 @@ pub async fn dispatch_command(
         "bootstrap_project" => {
             let project_id: String = field(&args, "projectId", "project_id")?;
             let result = crate::projects::bootstrap_project(app.clone(), project_id).await?;
+            to_value(result)
+        }
+        "get_recent_worktrees" => {
+            let project_ids: Option<Vec<String>> = field_opt(&args, "projectIds", "project_ids")?;
+            let offset: Option<usize> = from_field_opt(&args, "offset")?;
+            let limit: Option<usize> = from_field_opt(&args, "limit")?;
+            let include_session_ids: Option<Vec<String>> =
+                field_opt(&args, "includeSessionIds", "include_session_ids")?;
+            let result = crate::projects::get_recent_worktrees(
+                app.clone(),
+                project_ids,
+                offset,
+                limit,
+                include_session_ids,
+            )
+            .await?;
             to_value(result)
         }
         "get_worktree" => {
@@ -279,7 +302,8 @@ pub async fn dispatch_command(
         }
         "delete_worktree" => {
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
-            crate::projects::delete_worktree(app.clone(), worktree_id).await?;
+            let skip_teardown: Option<bool> = field_opt(&args, "skipTeardown", "skip_teardown")?;
+            crate::projects::delete_worktree(app.clone(), worktree_id, skip_teardown).await?;
             emit_cache_invalidation(app, &["projects"]);
             Ok(Value::Null)
         }
@@ -340,6 +364,53 @@ pub async fn dispatch_command(
             .await?;
             emit_cache_invalidation(app, &["projects"]);
             to_value(result)
+        }
+        "get_auto_fix_status" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let data = crate::projects::storage::load_projects_data(app)?;
+            let project = data
+                .projects
+                .iter()
+                .find(|project| project.id == project_id)
+                .ok_or("Project not found")?;
+            let mut status = crate::auto_fix::scheduler::get_auto_fix_status(&project_id);
+            status.active_now = project
+                .auto_fix_settings
+                .as_ref()
+                .is_some_and(crate::auto_fix::scheduler::auto_fix_active_now);
+            to_value(status)
+        }
+        "request_auto_fix_scan" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let data = crate::projects::storage::load_projects_data(app)?;
+            let settings = data
+                .projects
+                .iter()
+                .find(|project| project.id == project_id)
+                .and_then(|project| project.auto_fix_settings.as_ref())
+                .ok_or("Configure Mr. Robot first")?;
+            if !settings.enabled {
+                return Err("Mr. Robot is off".to_string());
+            }
+            if !crate::auto_fix::scheduler::auto_fix_active_now(settings) {
+                return Err("Outside active hours on the Jean server".to_string());
+            }
+            crate::auto_fix::scheduler::request_auto_fix_scan(&project_id)?;
+            emit_cache_invalidation(app, &["projects"]);
+            Ok(Value::Null)
+        }
+        "preview_auto_fix_issues" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            to_value(
+                crate::auto_fix::scheduler::preview_auto_fix_issues(app.clone(), project_id)
+                    .await?,
+            )
+        }
+        "clear_auto_fix_failures" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            crate::auto_fix::scheduler::clear_auto_fix_failures(&project_id);
+            emit_cache_invalidation(app, &["projects"]);
+            Ok(Value::Null)
         }
         "reorder_projects" => {
             let project_ids: Vec<String> = field(&args, "projectIds", "project_ids")?;
@@ -719,7 +790,8 @@ pub async fn dispatch_command(
             let worktree_ahead_count: Option<u32> =
                 field_opt(&args, "worktreeAheadCount", "worktree_ahead_count")?;
             let unpushed_count: Option<u32> = field_opt(&args, "unpushedCount", "unpushed_count")?;
-            crate::projects::update_worktree_cached_status(
+            let base_branch: Option<String> = field_opt(&args, "baseBranch", "base_branch")?;
+            let changed = crate::projects::update_worktree_cached_status(
                 app.clone(),
                 worktree_id,
                 branch,
@@ -735,9 +807,12 @@ pub async fn dispatch_command(
                 base_branch_behind_count,
                 worktree_ahead_count,
                 unpushed_count,
+                base_branch,
             )
             .await?;
-            emit_cache_invalidation(app, &["projects"]);
+            if changed {
+                emit_cache_invalidation(app, &["projects"]);
+            }
             Ok(Value::Null)
         }
         "list_worktree_files" => {
@@ -813,11 +888,13 @@ pub async fn dispatch_command(
         }
         "remove_issue_context" => {
             let session_id: String = field(&args, "sessionId", "session_id")?;
+            let worktree_id: Option<String> = field_opt(&args, "worktreeId", "worktree_id")?;
             let issue_number: u32 = field(&args, "issueNumber", "issue_number")?;
             let project_path: String = field(&args, "projectPath", "project_path")?;
             crate::projects::remove_issue_context(
                 app.clone(),
                 session_id,
+                worktree_id,
                 issue_number,
                 project_path,
             )
@@ -853,11 +930,13 @@ pub async fn dispatch_command(
         }
         "get_issue_context_content" => {
             let session_id: String = field(&args, "sessionId", "session_id")?;
+            let worktree_id: Option<String> = field_opt(&args, "worktreeId", "worktree_id")?;
             let issue_number: u32 = field(&args, "issueNumber", "issue_number")?;
             let project_path: String = field(&args, "projectPath", "project_path")?;
             let result = crate::projects::get_issue_context_content(
                 app.clone(),
                 session_id,
+                worktree_id,
                 issue_number,
                 project_path,
             )
@@ -866,11 +945,13 @@ pub async fn dispatch_command(
         }
         "get_pr_context_content" => {
             let session_id: String = field(&args, "sessionId", "session_id")?;
+            let worktree_id: Option<String> = field_opt(&args, "worktreeId", "worktree_id")?;
             let pr_number: u32 = field(&args, "prNumber", "pr_number")?;
             let project_path: String = field(&args, "projectPath", "project_path")?;
             let result = crate::projects::get_pr_context_content(
                 app.clone(),
                 session_id,
+                worktree_id,
                 pr_number,
                 project_path,
             )
@@ -971,6 +1052,15 @@ pub async fn dispatch_command(
             )
             .await?;
             to_value(result)
+        }
+        "get_context_link_usage" => {
+            let project_path: Option<String> = field_opt(&args, "projectPath", "project_path")?;
+            let project_id: Option<String> = field_opt(&args, "projectId", "project_id")?;
+            to_value(crate::projects::get_context_link_usage(
+                app,
+                project_path,
+                project_id,
+            )?)
         }
         "list_loaded_advisory_contexts" => {
             let session_id: String = field(&args, "sessionId", "session_id")?;
@@ -1116,6 +1206,21 @@ pub async fn dispatch_command(
             let result = crate::chat::list_all_sessions(app.clone()).await?;
             to_value(result)
         }
+        "search_session_messages" => {
+            let query: String = from_field(&args, "query")?;
+            let limit: Option<usize> = from_field_opt(&args, "limit")?;
+            let result =
+                crate::chat::search::search_session_messages(app.clone(), query, limit).await?;
+            to_value(result)
+        }
+        "list_unread_sessions" => {
+            let result = crate::chat::list_unread_sessions(app.clone()).await?;
+            to_value(result)
+        }
+        "get_unread_session_count" => {
+            let result = crate::chat::get_unread_session_count(app.clone()).await?;
+            to_value(result)
+        }
         "start_background_investigation" => {
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
             let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
@@ -1135,6 +1240,11 @@ pub async fn dispatch_command(
             )?;
             let execution_mode: Option<String> =
                 field_opt(&args, "executionMode", "execution_mode")?;
+            let force_new_session: Option<bool> =
+                field_opt(&args, "forceNewSession", "force_new_session")?;
+            let issue_context: Option<crate::projects::IssueContext> =
+                field_opt(&args, "issueContext", "issue_context")?;
+            let session_id: Option<String> = field_opt(&args, "sessionId", "session_id")?;
             let result = crate::jean_mcp_core::start_background_investigation(
                 app.clone(),
                 worktree_id,
@@ -1149,6 +1259,9 @@ pub async fn dispatch_command(
                 ai_language,
                 parallel_execution_prompt,
                 execution_mode,
+                issue_context,
+                force_new_session,
+                session_id,
             )
             .await?;
             to_value(result)
@@ -1627,28 +1740,6 @@ pub async fn dispatch_command(
             crate::background_tasks::commands::trigger_immediate_remote_poll(state)?;
             Ok(Value::Null)
         }
-        "set_git_poll_interval" => {
-            let seconds: u64 = from_field(&args, "seconds")?;
-            let state = app.state::<crate::background_tasks::BackgroundTaskManager>();
-            crate::background_tasks::commands::set_git_poll_interval(state, seconds)?;
-            Ok(Value::Null)
-        }
-        "get_git_poll_interval" => {
-            let state = app.state::<crate::background_tasks::BackgroundTaskManager>();
-            let result = crate::background_tasks::commands::get_git_poll_interval(state)?;
-            to_value(result)
-        }
-        "set_remote_poll_interval" => {
-            let seconds: u64 = from_field(&args, "seconds")?;
-            let state = app.state::<crate::background_tasks::BackgroundTaskManager>();
-            crate::background_tasks::commands::set_remote_poll_interval(state, seconds)?;
-            Ok(Value::Null)
-        }
-        "get_remote_poll_interval" => {
-            let state = app.state::<crate::background_tasks::BackgroundTaskManager>();
-            let result = crate::background_tasks::commands::get_remote_poll_interval(state)?;
-            to_value(result)
-        }
 
         // =====================================================================
         // Terminal
@@ -1934,7 +2025,7 @@ pub async fn dispatch_command(
         }
         "list_codex_skills" => {
             let worktree_path: Option<String> = field_opt(&args, "worktreePath", "worktree_path")?;
-            let result = crate::projects::list_codex_skills(worktree_path).await?;
+            let result = crate::projects::list_codex_skills(app.clone(), worktree_path).await?;
             to_value(result)
         }
         "list_opencode_skills" => {
@@ -1977,6 +2068,64 @@ pub async fn dispatch_command(
         }
 
         // =====================================================================
+        // Server Projects
+        // =====================================================================
+        "save_server_project" => {
+            let project_id: Option<String> = field_opt(&args, "projectId", "project_id")?;
+            let name: String = from_field(&args, "name")?;
+            let server: crate::projects::types::ProjectServer = from_field(&args, "server")?;
+            let parent_id: Option<String> = field_opt(&args, "parentId", "parent_id")?;
+            let system_prompt: Option<String> = field_opt(&args, "systemPrompt", "system_prompt")?;
+            let result = crate::projects::save_server_project(
+                app.clone(),
+                project_id,
+                name,
+                server,
+                parent_id,
+                system_prompt,
+            )
+            .await?;
+            emit_cache_invalidation(app, &["projects"]);
+            to_value(result)
+        }
+        "ensure_local_server_project" => {
+            let result = crate::projects::ensure_local_server_project(app.clone()).await?;
+            emit_cache_invalidation(app, &["projects"]);
+            to_value(result)
+        }
+        "list_ssh_public_keys" => to_value(crate::projects::list_ssh_public_keys().await?),
+        "server_user_setup_script" => {
+            let user: String = from_field(&args, "user")?;
+            let public_key: String = field(&args, "publicKey", "public_key")?;
+            let access: crate::projects::ServerUserAccess = from_field(&args, "access")?;
+            to_value(crate::projects::server_user_setup_script(user, public_key, access).await?)
+        }
+        "setup_server_user" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let root_user: String = field(&args, "rootUser", "root_user")?;
+            let user: String = from_field(&args, "user")?;
+            let public_key: String = field(&args, "publicKey", "public_key")?;
+            let access: crate::projects::ServerUserAccess = from_field(&args, "access")?;
+            let result = crate::projects::setup_server_user(
+                app.clone(),
+                project_id,
+                root_user,
+                user,
+                public_key,
+                access,
+            )
+            .await?;
+            emit_cache_invalidation(app, &["projects"]);
+            to_value(result)
+        }
+        "remove_server_project" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            crate::projects::remove_server_project(app.clone(), project_id).await?;
+            emit_cache_invalidation(app, &["projects"]);
+            Ok(Value::Null)
+        }
+
+        // =====================================================================
         // Folder Management
         // =====================================================================
         "create_folder" => {
@@ -2004,6 +2153,7 @@ pub async fn dispatch_command(
             let result =
                 crate::projects::move_item(app.clone(), item_id, new_parent_id, target_index)
                     .await?;
+            emit_cache_invalidation(app, &["projects"]);
             to_value(result)
         }
         "reorder_items" => {
@@ -2019,7 +2169,12 @@ pub async fn dispatch_command(
         // =====================================================================
         "set_project_avatar" => {
             let project_id: String = field(&args, "projectId", "project_id")?;
-            let result = crate::projects::set_project_avatar(app.clone(), project_id).await?;
+            let data: String = from_field(&args, "data")?;
+            let mime_type: String = field(&args, "mimeType", "mime_type")?;
+            let result =
+                crate::projects::set_project_avatar(app.clone(), project_id, data, mime_type)
+                    .await?;
+            emit_cache_invalidation(app, &["projects"]);
             to_value(result)
         }
         "remove_project_avatar" => {
@@ -2220,6 +2375,10 @@ pub async fn dispatch_command(
                 field_opt(&args, "selectedExecutionMode", "selected_execution_mode")?;
             let table_checked_rows: Option<std::collections::HashMap<String, Vec<u32>>> =
                 field_opt(&args, "tableCheckedRows", "table_checked_rows")?;
+            let hidden_table_checklists: Option<Vec<String>> =
+                field_opt(&args, "hiddenTableChecklists", "hidden_table_checklists")?;
+            let pinned_tables: Option<Vec<crate::chat::types::PinnedTable>> =
+                field_opt(&args, "pinnedTables", "pinned_tables")?;
             crate::chat::update_session_state(
                 app.clone(),
                 worktree_id,
@@ -2248,6 +2407,9 @@ pub async fn dispatch_command(
                 enabled_mcp_servers,
                 selected_execution_mode,
                 table_checked_rows,
+                hidden_table_checklists,
+                pinned_tables,
+                field_opt(&args, "selectedPermissionMode", "selected_permission_mode")?,
             )
             .await?;
             emit_cache_invalidation(app, &["sessions"]);
@@ -2336,6 +2498,12 @@ pub async fn dispatch_command(
             let content: String = from_field(&args, "content")?;
             let filename: Option<String> = from_field_opt(&args, "filename")?;
             let result = crate::chat::save_pasted_text(app.clone(), content, filename).await?;
+            to_value(result)
+        }
+        "save_pasted_file" => {
+            let data: String = from_field(&args, "data")?;
+            let filename: String = from_field(&args, "filename")?;
+            let result = crate::chat::save_pasted_file(app.clone(), data, filename).await?;
             to_value(result)
         }
         "update_pasted_text" => {
@@ -2817,8 +2985,8 @@ pub async fn dispatch_command(
             let result = crate::agent_browser::get_agent_browser_status(app.clone()).await?;
             to_value(result)
         }
-        "ensure_agent_browser_profile" => {
-            let result = crate::agent_browser::ensure_agent_browser_profile(app.clone()).await?;
+        "check_agent_browser_update" => {
+            let result = crate::agent_browser::check_agent_browser_update(app.clone()).await?;
             to_value(result)
         }
         "install_agent_browser" => {
@@ -2831,6 +2999,11 @@ pub async fn dispatch_command(
             let result =
                 crate::agent_browser::install_agent_browser_mcp(app.clone(), backends).await?;
             emit_cache_invalidation(app, &["mcp", "agent-browser", "preferences"]);
+            to_value(result)
+        }
+        "remove_agent_browser_mcp" => {
+            let result = crate::agent_browser::remove_agent_browser_mcp().await?;
+            emit_cache_invalidation(app, &["mcp", "agent-browser"]);
             to_value(result)
         }
         "start_opencode_server" => {
@@ -2887,6 +3060,14 @@ pub async fn dispatch_command(
         }
         "uninstall_codex_cli" => {
             crate::codex_cli::uninstall_codex_cli(app.clone()).await?;
+            Ok(Value::Null)
+        }
+
+        "respond_claude_permission" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let rpc_id: u64 = field(&args, "rpcId", "rpc_id")?;
+            let approved: bool = from_field(&args, "approved")?;
+            crate::chat::respond_claude_permission(session_id, rpc_id, approved)?;
             Ok(Value::Null)
         }
 
@@ -3132,6 +3313,25 @@ pub async fn dispatch_command(
             .await?;
             Ok(Value::Null)
         }
+        "get_acp_permission_requests" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            to_value(crate::chat::acp_permissions::get_requests(
+                app,
+                &session_id,
+            )?)
+        }
+        "respond_acp_permission" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let request_id: String = field(&args, "requestId", "request_id")?;
+            let option_id: String = field(&args, "optionId", "option_id")?;
+            let app = app.clone();
+            tokio::task::spawn_blocking(move || {
+                crate::chat::acp_permissions::respond(&app, &session_id, &request_id, &option_id)
+            })
+            .await
+            .map_err(|error| error.to_string())??;
+            Ok(Value::Null)
+        }
         "respond_opencode_permission" => {
             let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
             let request_id: String = field(&args, "requestId", "request_id")?;
@@ -3176,10 +3376,19 @@ pub async fn dispatch_command(
             let result = crate::chat::check_mcp_health(app.clone(), backend, worktree_path).await?;
             to_value(result)
         }
+        "prepare_mcp_login" => {
+            let backend: String = from_field(&args, "backend")?;
+            let server_name: String = field(&args, "serverName", "server_name")?;
+            let worktree_path: Option<String> = field_opt(&args, "worktreePath", "worktree_path")?;
+            let result =
+                crate::chat::prepare_mcp_login(app.clone(), backend, server_name, worktree_path)
+                    .await?;
+            to_value(result)
+        }
         "get_mcp_servers" => {
             let backend: Option<String> = from_field_opt(&args, "backend")?;
             let worktree_path: Option<String> = field_opt(&args, "worktreePath", "worktree_path")?;
-            let result = crate::chat::get_mcp_servers(backend, worktree_path).await?;
+            let result = crate::chat::get_mcp_servers(app.clone(), backend, worktree_path).await?;
             to_value(result)
         }
         "read_clipboard_image" => {
@@ -3655,6 +3864,32 @@ pub async fn dispatch_command(
             .await?;
             to_value(result)
         }
+        "load_sentry_issue_context" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let issue_id: String = field(&args, "issueId", "issue_id")?;
+            let result = crate::projects::load_sentry_issue_context(
+                app.clone(),
+                session_id,
+                project_id,
+                issue_id,
+            )
+            .await?;
+            to_value(result)
+        }
+        "remove_sentry_issue_context" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let issue_id: String = field(&args, "issueId", "issue_id")?;
+            crate::projects::remove_sentry_issue_context(
+                app.clone(),
+                session_id,
+                project_id,
+                issue_id,
+            )
+            .await?;
+            Ok(Value::Null)
+        }
         "remove_linear_issue_context" => {
             let session_id: String = field(&args, "sessionId", "session_id")?;
             let project_id: String = field(&args, "projectId", "project_id")?;
@@ -3760,6 +3995,10 @@ pub async fn dispatch_command(
         // =====================================================================
         // Unknown command
         // =====================================================================
+        // Agents: a separate (boxed) function keeps this function's stack frame small.
+        agent_command if AGENT_COMMANDS.contains(&agent_command) => {
+            Box::pin(dispatch_agents_command(app, agent_command, &args)).await
+        }
         _ => Err(format!("Unknown command: {command}")),
     }
 }
@@ -3779,11 +4018,126 @@ fn emit_cache_invalidation(app: &AppHandle, keys: &[&str]) {
 // Helper functions for JSON deserialization
 // =============================================================================
 
-fn to_value<T: serde::Serialize>(val: T) -> Result<Value, String> {
+const AGENT_COMMANDS: &[&str] = &[
+    "get_jean_agent_workdir",
+    "get_agent_workdir",
+    "list_agents",
+    "get_agent_details",
+    "create_agent",
+    "update_agent",
+    "delete_agent",
+    "decide_agent_approval",
+    "cancel_agent_schedule",
+    "save_agent_memory",
+    "update_agent_memory",
+    "delete_agent_memory",
+    "export_agent_memory",
+    "mark_agent_notifications_read",
+];
+
+/// Agent commands (see `crate::agents::commands`).
+async fn dispatch_agents_command(
+    app: &AppHandle,
+    command: &str,
+    args: &Value,
+) -> Result<Value, String> {
+    {
+        match command {
+            "get_jean_agent_workdir" => to_value(crate::agents::agent_workdir(app, "jean")?),
+            "get_agent_workdir" => {
+                let agent_id: String = field(args, "agentId", "agent_id")?;
+                to_value(crate::agents::agent_workdir(app, &agent_id)?)
+            }
+            "list_agents" => to_value(crate::agents::commands::list_agents(app).await?),
+            "get_agent_details" => {
+                let agent_id: String = field(args, "agentId", "agent_id")?;
+                to_value(crate::agents::commands::get_agent_details(app, &agent_id)?)
+            }
+            "create_agent" => {
+                let name: String = from_field(args, "name")?;
+                let description: Option<String> = from_field_opt(args, "description")?;
+                let icon: Option<String> = from_field_opt(args, "icon")?;
+                let role_prompt: Option<String> = field_opt(args, "rolePrompt", "role_prompt")?;
+                to_value(crate::agents::commands::create_agent(
+                    app,
+                    &name,
+                    description.as_deref().unwrap_or(""),
+                    icon.as_deref().unwrap_or("blue"),
+                    role_prompt.as_deref().unwrap_or(""),
+                )?)
+            }
+            "update_agent" => {
+                let agent_id: String = field(args, "agentId", "agent_id")?;
+                let patch: crate::agents::db::AgentPatch = from_field(args, "patch")?;
+                to_value(crate::agents::commands::update_agent(app, &agent_id, patch).await?)
+            }
+            "delete_agent" => {
+                let agent_id: String = field(args, "agentId", "agent_id")?;
+                crate::agents::commands::delete_agent(app, &agent_id)?;
+                Ok(Value::Null)
+            }
+            "decide_agent_approval" => {
+                let approval_id: i64 = field(args, "approvalId", "approval_id")?;
+                let approve: bool = from_field(args, "approve")?;
+                to_value(crate::agents::commands::decide_approval(app, approval_id, approve).await?)
+            }
+            "cancel_agent_schedule" => {
+                let agent_id: String = field(args, "agentId", "agent_id")?;
+                let schedule_id: i64 = field(args, "scheduleId", "schedule_id")?;
+                crate::agents::commands::cancel_schedule(app, &agent_id, schedule_id)?;
+                Ok(Value::Null)
+            }
+            "save_agent_memory" => {
+                let agent_id: String = field(args, "agentId", "agent_id")?;
+                let content: String = from_field(args, "content")?;
+                let kind: String = from_field(args, "kind")?;
+                let shared: Option<bool> = from_field_opt(args, "shared")?;
+                let pinned: Option<bool> = from_field_opt(args, "pinned")?;
+                to_value(crate::agents::commands::save_memory(
+                    app,
+                    &agent_id,
+                    &content,
+                    &kind,
+                    shared.unwrap_or(false),
+                    pinned.unwrap_or(false),
+                )?)
+            }
+            "update_agent_memory" => {
+                let agent_id: String = field(args, "agentId", "agent_id")?;
+                let memory_id: i64 = field(args, "memoryId", "memory_id")?;
+                let patch: crate::agents::db::MemoryPatch = from_field(args, "patch")?;
+                to_value(crate::agents::commands::update_memory(
+                    app, &agent_id, memory_id, patch,
+                )?)
+            }
+            "delete_agent_memory" => {
+                let agent_id: String = field(args, "agentId", "agent_id")?;
+                let memory_id: i64 = field(args, "memoryId", "memory_id")?;
+                crate::agents::commands::delete_memory(app, &agent_id, memory_id)?;
+                Ok(Value::Null)
+            }
+            "mark_agent_notifications_read" => {
+                let agent_id: String = field(args, "agentId", "agent_id")?;
+                crate::agents::commands::mark_notifications_read(app, &agent_id)?;
+                Ok(Value::Null)
+            }
+            "export_agent_memory" => {
+                let agent_id: String = field(args, "agentId", "agent_id")?;
+                to_value(crate::agents::commands::export_memory(app, &agent_id)?)
+            }
+            _ => Err(format!("Unknown command: {command}")),
+        }
+    }
+}
+
+pub(crate) fn to_value<T: serde::Serialize>(val: T) -> Result<Value, String> {
     serde_json::to_value(val).map_err(|e| format!("Serialization error: {e}"))
 }
 
-fn from_field<T: serde::de::DeserializeOwned>(args: &Value, field: &str) -> Result<T, String> {
+pub(crate) fn from_field<T: serde::de::DeserializeOwned>(
+    args: &Value,
+    field: &str,
+) -> Result<T, String> {
     args.get(field)
         .ok_or_else(|| format!("Missing field: {field}"))
         .and_then(|v| {
@@ -3791,7 +4145,7 @@ fn from_field<T: serde::de::DeserializeOwned>(args: &Value, field: &str) -> Resu
         })
 }
 
-fn from_field_opt<T: serde::de::DeserializeOwned>(
+pub(crate) fn from_field_opt<T: serde::de::DeserializeOwned>(
     args: &Value,
     field: &str,
 ) -> Result<Option<T>, String> {
@@ -3804,7 +4158,7 @@ fn from_field_opt<T: serde::de::DeserializeOwned>(
 }
 
 /// Try camelCase field first, then snake_case. For required fields.
-fn field<T: serde::de::DeserializeOwned>(
+pub(crate) fn field<T: serde::de::DeserializeOwned>(
     args: &Value,
     camel: &str,
     snake: &str,
@@ -3813,7 +4167,7 @@ fn field<T: serde::de::DeserializeOwned>(
 }
 
 /// Try camelCase field first, then snake_case. For optional fields.
-fn field_opt<T: serde::de::DeserializeOwned>(
+pub(crate) fn field_opt<T: serde::de::DeserializeOwned>(
     args: &Value,
     camel: &str,
     snake: &str,

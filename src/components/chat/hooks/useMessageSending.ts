@@ -43,6 +43,7 @@ import {
   useBackendAuthStatuses,
   useInstalledBackends,
 } from '@/hooks/useInstalledBackends'
+import { CODEX_GOAL_TURN_PREFIX } from '../goal-utils'
 
 interface UseMessageSendingParams {
   activeSessionId: string | null | undefined
@@ -63,7 +64,6 @@ interface UseMessageSendingParams {
     | {
         custom_cli_profiles?: { name: string }[]
         custom_codex_providers?: { name: string }[]
-        parallel_execution_prompt_enabled?: boolean
         magic_prompts?: { parallel_execution?: string | null }
         chrome_enabled?: boolean
         ai_language?: string
@@ -84,11 +84,19 @@ interface UseMessageSendingParams {
   }
   queryClient: QueryClient
   markAtBottom: () => void
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sessionsData: any
   clearInputDraft: (sessionId: string) => void
   clearChatInputState: () => void
 }
+
+/** `/goal` arguments the Claude CLI treats as "clear". */
+const CLAUDE_GOAL_CLEAR_ARGS = new Set([
+  'clear',
+  'stop',
+  'off',
+  'reset',
+  'none',
+  'cancel',
+])
 
 /**
  * Core message sending pipeline: resolveCustomProfile, buildMessageWithRefs,
@@ -114,7 +122,6 @@ export function useMessageSending({
   createSession,
   queryClient,
   markAtBottom,
-  sessionsData,
   clearInputDraft,
   clearChatInputState,
 }: UseMessageSendingParams) {
@@ -155,6 +162,21 @@ export function useMessageSending({
   const sendMessageNow = useCallback(
     (queuedMsg: QueuedMessage) => {
       if (!activeSessionId || !activeWorktreeId || !activeWorktreePath) return
+
+      const store = useChatStore.getState()
+      if (store.isSending(activeSessionId)) {
+        console.log(
+          `[Send] sendMessageNow ENQUEUING sessionId=${activeSessionId} (session is sending)`
+        )
+        store.enqueueMessage(activeSessionId, queuedMsg)
+        persistEnqueue(
+          activeWorktreeId,
+          activeWorktreePath,
+          activeSessionId,
+          queuedMsg
+        )
+        return
+      }
 
       console.log(
         `[Send] sendMessageNow sessionId=${activeSessionId} worktreeId=${activeWorktreeId}`
@@ -212,10 +234,8 @@ export function useMessageSending({
           mcpConfig: queuedMsg.mcpConfig,
           customProfileName: resolved.customProfileName,
           parallelExecutionPrompt:
-            preferences?.parallel_execution_prompt_enabled
-              ? (preferences.magic_prompts?.parallel_execution ??
-                DEFAULT_PARALLEL_EXECUTION_PROMPT)
-              : undefined,
+            preferences?.magic_prompts?.parallel_execution ??
+            DEFAULT_PARALLEL_EXECUTION_PROMPT,
           chromeEnabled: preferences?.chrome_enabled ?? false,
           aiLanguage: preferences?.ai_language,
           allowedTools,
@@ -234,7 +254,6 @@ export function useMessageSending({
       activeWorktreePath,
       sendMessage,
       queryClient,
-      preferences?.parallel_execution_prompt_enabled,
       preferences?.chrome_enabled,
       preferences?.ai_language,
       preferences?.magic_prompts?.parallel_execution,
@@ -286,10 +305,19 @@ export function useMessageSending({
   // Form submit handler
   const handleSubmit = useCallback(
     async (
-      e: React.FormEvent,
-      options?: { forceSteer?: boolean }
+      e: React.FormEvent | undefined,
+      options?: {
+        forceSteer?: boolean
+        /**
+         * Runs after the input is captured and cleared, before the message is
+         * sent. Session/worktree targets are captured at call time, so the send
+         * still goes to this session if the user navigates away meanwhile.
+         * If it throws, the draft is restored and nothing is sent.
+         */
+        beforeSend?: () => Promise<void>
+      }
     ) => {
-      e.preventDefault()
+      e?.preventDefault()
 
       const {
         inputDrafts,
@@ -327,18 +355,6 @@ export function useMessageSending({
         return
       if (!activeSessionId || !activeWorktreeId || !activeWorktreePath) return
 
-      if (
-        sessionsData &&
-        !sessionsData.sessions.some(
-          (s: { id: string }) => s.id === activeSessionId
-        )
-      ) {
-        toast.error(
-          'Session not found. Please refresh or create a new session.'
-        )
-        return
-      }
-
       // Intercept /login — interactive CLI login is not available inside Jean
       // headless chat (issue #387). Open CliLoginModal instead.
       if (
@@ -369,9 +385,7 @@ export function useMessageSending({
       const sendBackend = selectedBackendRef.current
       const provider = selectedProviderRef.current
       const usingCustomProvider =
-        !!provider &&
-        provider !== '__anthropic__' &&
-        provider !== '__default__'
+        !!provider && provider !== '__anthropic__' && provider !== '__default__'
       if (!backendsLoading && !installedBackends.includes(sendBackend)) {
         handleCliAuthError(`${sendBackend} is not installed`, sendBackend)
         return
@@ -425,8 +439,8 @@ export function useMessageSending({
           return
         }
 
-        // /goal <objective>: persist goal, then start work in the configured
-        // mode so the active goal is not left as passive metadata.
+        // /goal <objective>: persist goal metadata, then start the work in the
+        // configured mode through Jean's normal turn lifecycle.
         try {
           await invoke('codex_goal_set', {
             worktreeId,
@@ -443,8 +457,40 @@ export function useMessageSending({
           configuredGoalMode === 'yolo' ? 'yolo' : 'build'
         setExecutionMode(sessionId, goalMode)
         executionModeRef.current = goalMode
-        message = `Work toward the active goal:\n\n${arg}`
+        // The app-server goal is metadata only. Run the work through Jean's
+        // normal turn lifecycle so progress, cancellation, and recovery stay
+        // connected to the composer and the persisted RunEntry.
+        message = `${CODEX_GOAL_TURN_PREFIX}${arg}`
         startedCodexGoalTurn = true
+      }
+      // Claude CLI runs /goal natively, so the text is sent unchanged. Jean only
+      // mirrors the objective for the banner and switches to the goal mode.
+      if (
+        selectedBackendRef.current === 'claude' &&
+        /^\/goal(\s|$)/.test(textMessage)
+      ) {
+        const arg = textMessage.replace(/^\/goal\s*/, '').trim()
+        const goalTarget = {
+          worktreeId: activeWorktreeId,
+          worktreePath: activeWorktreePath,
+          sessionId: activeSessionId,
+        }
+        if (CLAUDE_GOAL_CLEAR_ARGS.has(arg)) {
+          void invoke('codex_goal_clear', goalTarget).catch(err =>
+            toast.error(`/goal failed: ${err}`)
+          )
+        } else if (arg) {
+          try {
+            await invoke('codex_goal_set', { ...goalTarget, objective: arg })
+          } catch (err) {
+            toast.error(`/goal failed: ${err}`)
+            return
+          }
+          const goalMode: ExecutionMode =
+            preferences?.codex_goal_execution_mode === 'yolo' ? 'yolo' : 'build'
+          setExecutionMode(activeSessionId, goalMode)
+          executionModeRef.current = goalMode
+        }
       }
       if (!startedCodexGoalTurn && textMessage.startsWith('/')) {
         const slashName = textMessage.slice(1).split(/\s/)[0] ?? ''
@@ -558,6 +604,15 @@ export function useMessageSending({
         queuedAt: Date.now(),
       }
 
+      if (options?.beforeSend) {
+        try {
+          await options.beforeSend()
+        } catch {
+          useChatStore.getState().setInputDraft(activeSessionId, textMessage)
+          return
+        }
+      }
+
       markAtBottom()
 
       const isSendingNow = checkIsSendingNow(activeSessionId)
@@ -649,8 +704,9 @@ export function useMessageSending({
       clearChatInputState,
       installedBackends,
       markAtBottom,
+      preferences,
+      queryClient,
       sendMessageNow,
-      sessionsData,
     ]
   )
 

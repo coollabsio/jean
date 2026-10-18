@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { toast } from 'sonner'
 
 import {
+  TOASTER_EXPAND_BY_DEFAULT,
   shouldEnableToastActionHotkey,
   triggerLatestToastAction,
 } from '@/components/ui/sonner'
@@ -12,6 +13,12 @@ vi.mock('@/lib/environment', async importOriginal => ({
     (globalThis as typeof globalThis & { __JEAN_TEST_IS_NATIVE__?: boolean })
       .__JEAN_TEST_IS_NATIVE__ ?? true,
 }))
+
+describe('toast stack', () => {
+  it('overlaps notifications until the user interacts with the stack', () => {
+    expect(TOASTER_EXPAND_BY_DEFAULT).toBe(false)
+  })
+})
 
 describe('triggerLatestToastAction', () => {
   it('runs the newest toast action', () => {

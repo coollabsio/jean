@@ -22,8 +22,12 @@ interface MagicCommandHandlers {
   handleLoadContext: () => void
   handleLinkedProjects: () => void
   handleForkSession: () => void
+  handleCheckGitHubIssues: () => void
+  handlePreReleaseReview: () => void
   handleCommit: () => void
   handleCommitAndPush: () => void
+  handleCommitInSession: () => void
+  handleCommentAndCloseIssue: () => void
   handlePull: () => void
   handlePush: () => void
   handleRevertLastCommit: () => void
@@ -34,7 +38,7 @@ interface MagicCommandHandlers {
   handleResolveConflicts: (override?: InvestigateOverride) => void
   handleInvestigateWorkflowRun: (detail: WorkflowRunDetail) => void
   handleInvestigate: (
-    type: 'issue' | 'pr' | 'advisory',
+    type: 'issue' | 'pr' | 'advisory' | 'sentry-issue',
     override?: InvestigateOverride
   ) => void
   handleReviewComments: (
@@ -64,8 +68,12 @@ export function useMagicCommands({
   handleLoadContext,
   handleLinkedProjects,
   handleForkSession,
+  handleCheckGitHubIssues,
+  handlePreReleaseReview,
   handleCommit,
   handleCommitAndPush,
+  handleCommitInSession,
+  handleCommentAndCloseIssue,
   handlePull,
   handlePush,
   handleRevertLastCommit,
@@ -86,8 +94,12 @@ export function useMagicCommands({
     handleLoadContext,
     handleLinkedProjects,
     handleForkSession,
+    handleCheckGitHubIssues,
+    handlePreReleaseReview,
     handleCommit,
     handleCommitAndPush,
+    handleCommitInSession,
+    handleCommentAndCloseIssue,
     handlePull,
     handlePush,
     handleRevertLastCommit,
@@ -109,8 +121,12 @@ export function useMagicCommands({
       handleLoadContext,
       handleLinkedProjects,
       handleForkSession,
+      handleCheckGitHubIssues,
+      handlePreReleaseReview,
       handleCommit,
       handleCommitAndPush,
+      handleCommitInSession,
+      handleCommentAndCloseIssue,
       handlePull,
       handlePush,
       handleRevertLastCommit,
@@ -151,7 +167,7 @@ export function useMagicCommands({
           break
         case 'load-context':
         case 'inject-session':
-          // Inject Session opens Load Context on the Contexts tab (Sessions list)
+          // Inject Context opens the context picker on the Sessions list.
           handlers.handleLoadContext()
           break
         case 'linked-projects':
@@ -160,11 +176,23 @@ export function useMagicCommands({
         case 'fork-session':
           handlers.handleForkSession()
           break
+        case 'check-github-issues':
+          handlers.handleCheckGitHubIssues()
+          break
+        case 'pre-release-review':
+          handlers.handlePreReleaseReview()
+          break
         case 'commit':
           handlers.handleCommit()
           break
         case 'commit-and-push':
           handlers.handleCommitAndPush()
+          break
+        case 'commit-in-session':
+          handlers.handleCommitInSession()
+          break
+        case 'comment-and-close-issue':
+          handlers.handleCommentAndCloseIssue()
           break
         case 'pull':
           handlers.handlePull()
@@ -196,7 +224,7 @@ export function useMagicCommands({
           handlers.handleInvestigate(
             (
               rest as {
-                type: 'issue' | 'pr' | 'advisory'
+                type: 'issue' | 'pr' | 'advisory' | 'sentry-issue'
                 override?: InvestigateOverride
               }
             ).type ?? 'issue',

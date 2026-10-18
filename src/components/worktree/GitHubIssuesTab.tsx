@@ -1,5 +1,10 @@
-import { useCallback } from 'react'
-import { Loader2, Search, RefreshCw, AlertCircle } from 'lucide-react'
+import { useCallback, useMemo } from 'react'
+import {
+  Loader2,
+  Search,
+  RefreshCw,
+  AlertCircle,
+} from '@/components/icons/reicon'
 import { isGhAuthError } from '@/services/github'
 import { GhAuthError } from '@/components/shared/GhAuthError'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -16,6 +21,7 @@ import { BulkInvestigateBar } from './BulkInvestigateBar'
 import { SelectAllControl } from './ItemSelectCheckbox'
 import { useMultiSelect } from './hooks/useMultiSelect'
 import type { GitHubIssue } from '@/types/github'
+import type { GetContextLinkMatches } from './ContextLinkBadge'
 
 export interface GitHubIssuesTabProps {
   searchQuery: string
@@ -32,6 +38,7 @@ export interface GitHubIssuesTabProps {
   setSelectedIndex: (index: number) => void
   onSelectIssue: (issue: GitHubIssue, background?: boolean) => void
   onInvestigateIssue: (issue: GitHubIssue, background?: boolean) => void
+  onInvestigateIssueInNewSession?: (issue: GitHubIssue) => void
   onBulkInvestigateIssues?: (issues: GitHubIssue[]) => void | Promise<void>
   onPreviewIssue: (issue: GitHubIssue) => void
   creatingFromNumber: number | null
@@ -39,6 +46,7 @@ export interface GitHubIssuesTabProps {
   searchInputRef: React.RefObject<HTMLInputElement | null>
   onGhLogin: () => void
   isGhInstalled: boolean
+  getContextMatches?: GetContextLinkMatches
 }
 
 const getIssueKey = (issue: GitHubIssue) => issue.number
@@ -58,6 +66,7 @@ export function GitHubIssuesTab({
   setSelectedIndex,
   onSelectIssue,
   onInvestigateIssue,
+  onInvestigateIssueInNewSession,
   onBulkInvestigateIssues,
   onPreviewIssue,
   creatingFromNumber,
@@ -65,8 +74,24 @@ export function GitHubIssuesTab({
   searchInputRef,
   onGhLogin,
   isGhInstalled,
+  getContextMatches,
 }: GitHubIssuesTabProps) {
   const multi = useMultiSelect(issues, getIssueKey)
+  const matchesByNumber = useMemo(
+    () =>
+      new Map(
+        getContextMatches
+          ? issues.map(
+              issue =>
+                [
+                  issue.number,
+                  getContextMatches({ type: 'issue', id: issue.number }),
+                ] as const
+            )
+          : []
+      ),
+    [issues, getContextMatches]
+  )
 
   const handleBulkInvestigate = useCallback(async () => {
     if (!onBulkInvestigateIssues || multi.selectedItems.length < 1) return
@@ -187,7 +212,7 @@ export function GitHubIssuesTab({
         )}
 
         {!isLoading && !error && issues.length > 0 && (
-          <div className="py-1">
+          <div>
             {issues.map((issue, index) => (
               <IssueItem
                 key={issue.number}
@@ -195,11 +220,17 @@ export function GitHubIssuesTab({
                 index={index}
                 isSelected={index === selectedIndex}
                 isCreating={creatingFromNumber === issue.number}
+                contextMatches={matchesByNumber.get(issue.number)}
                 isChecked={multi.isChecked(issue.number)}
                 onCheckedChange={checked => multi.toggle(issue.number, checked)}
                 onMouseEnter={() => setSelectedIndex(index)}
                 onClick={bg => onSelectIssue(issue, bg)}
                 onInvestigate={bg => onInvestigateIssue(issue, bg)}
+                onInvestigateInNewSession={
+                  onInvestigateIssueInNewSession
+                    ? () => onInvestigateIssueInNewSession(issue)
+                    : undefined
+                }
                 onPreview={() => onPreviewIssue(issue)}
                 onLabelClick={handleLabelClick}
               />

@@ -51,6 +51,12 @@ import {
   useAvailableCommandCodeVersions,
   commandcodeCliQueryKeys,
 } from '@/services/commandcode-cli'
+import {
+  useGrokCliStatus,
+  useAvailableGrokVersions,
+  useGrokPathDetection,
+  grokCliQueryKeys,
+} from '@/services/grok-cli'
 import { useUIStore } from '@/store/ui-store'
 import { isNewerVersion } from '@/lib/version-utils'
 import { logger } from '@/lib/logger'
@@ -80,6 +86,7 @@ const JEAN_INSTALL_COMMANDS: Record<CliType, string> = {
   gh: 'install_gh_cli',
   coderabbit: 'install_coderabbit_cli',
   commandcode: 'install_commandcode_cli',
+  grok: 'install_grok_cli',
 }
 
 const CLI_QUERY_KEY_GETTERS: Record<CliType, () => readonly unknown[]> = {
@@ -90,6 +97,7 @@ const CLI_QUERY_KEY_GETTERS: Record<CliType, () => readonly unknown[]> = {
   gh: () => ghCliQueryKeys.all,
   coderabbit: () => coderabbitCliQueryKeys.all,
   commandcode: () => commandcodeCliQueryKeys.all,
+  grok: () => grokCliQueryKeys.all,
 }
 
 /**
@@ -158,6 +166,9 @@ export function useCliVersionCheck() {
   const { data: coderabbitPathInfo } = useCodeRabbitPathDetection({
     enabled: shouldCheck,
   })
+  const { data: grokPathInfo } = useGrokPathDetection({
+    enabled: shouldCheck,
+  })
 
   // Defer version fetches (GitHub API) by 10s — they're only for update checks,
   // no reason to compete with startup-critical queries.
@@ -188,6 +199,9 @@ export function useCliVersionCheck() {
     useCommandCodeCliStatus({
       enabled: shouldCheck && versionCheckReady,
     })
+  const { data: grokStatus, isLoading: grokLoading } = useGrokCliStatus({
+    enabled: shouldCheck && versionCheckReady,
+  })
   const { data: claudeVersions, isLoading: claudeVersionsLoading } =
     useAvailableCliVersions({ enabled: shouldCheck && versionCheckReady })
   const { data: ghVersions, isLoading: ghVersionsLoading } =
@@ -204,6 +218,10 @@ export function useCliVersionCheck() {
     })
   const { data: commandcodeVersions, isLoading: commandcodeVersionsLoading } =
     useAvailableCommandCodeVersions({
+      enabled: shouldCheck && versionCheckReady,
+    })
+  const { data: grokVersions, isLoading: grokVersionsLoading } =
+    useAvailableGrokVersions({
       enabled: shouldCheck && versionCheckReady,
     })
 
@@ -226,6 +244,7 @@ export function useCliVersionCheck() {
       piLoading ||
       coderabbitLoading ||
       commandcodeLoading ||
+      grokLoading ||
       claudeVersionsLoading ||
       ghVersionsLoading ||
       codexVersionsLoading ||
@@ -233,6 +252,7 @@ export function useCliVersionCheck() {
       piVersionsLoading ||
       coderabbitVersionsLoading ||
       commandcodeVersionsLoading ||
+      grokVersionsLoading ||
       preferencesLoading
 
     if (!isLoading) {
@@ -275,6 +295,18 @@ export function useCliVersionCheck() {
         undefined,
         preferences?.commandcode_cli_source
       )
+      const grok = resolveCliInfo(
+        grokStatus,
+        grokPathInfo
+          ? {
+              found: grokPathInfo.found,
+              version: grokPathInfo.version,
+              path: grokPathInfo.path,
+              package_manager: grokPathInfo.packageManager,
+            }
+          : undefined,
+        preferences?.grok_cli_source
+      )
 
       const checks: {
         type: CliUpdateInfo['type']
@@ -288,11 +320,18 @@ export function useCliVersionCheck() {
         { type: 'pi', info: pi, versions: piVersions },
         { type: 'coderabbit', info: coderabbit, versions: coderabbitVersions },
       ]
-      checks.push({
-        type: 'commandcode',
-        info: commandcode,
-        versions: commandcodeVersions,
-      })
+      checks.push(
+        {
+          type: 'commandcode',
+          info: commandcode,
+          versions: commandcodeVersions,
+        },
+        {
+          type: 'grok',
+          info: grok,
+          versions: grokVersions,
+        }
+      )
 
       for (const { type, info, versions } of checks) {
         if (!info.version || !versions?.length) continue
@@ -384,12 +423,14 @@ export function useCliVersionCheck() {
     piStatus,
     coderabbitStatus,
     commandcodeStatus,
+    grokStatus,
     claudePathInfo,
     ghPathInfo,
     codexPathInfo,
     opencodePathInfo,
     piPathInfo,
     coderabbitPathInfo,
+    grokPathInfo,
     claudeVersions,
     ghVersions,
     codexVersions,
@@ -397,6 +438,7 @@ export function useCliVersionCheck() {
     piVersions,
     coderabbitVersions,
     commandcodeVersions,
+    grokVersions,
     claudeLoading,
     ghLoading,
     codexLoading,
@@ -404,6 +446,7 @@ export function useCliVersionCheck() {
     piLoading,
     coderabbitLoading,
     commandcodeLoading,
+    grokLoading,
     claudeVersionsLoading,
     ghVersionsLoading,
     codexVersionsLoading,
@@ -411,6 +454,7 @@ export function useCliVersionCheck() {
     piVersionsLoading,
     coderabbitVersionsLoading,
     commandcodeVersionsLoading,
+    grokVersionsLoading,
     preferencesLoading,
     preferences?.auto_update_ai_backends,
     preferences?.claude_cli_source,
@@ -420,6 +464,7 @@ export function useCliVersionCheck() {
     preferences?.gh_cli_source,
     preferences?.coderabbit_cli_source,
     preferences?.commandcode_cli_source,
+    preferences?.grok_cli_source,
     queryClient,
   ])
 
@@ -440,6 +485,7 @@ export function useCliVersionCheck() {
         queryClient.invalidateQueries({
           queryKey: commandcodeCliQueryKeys.all,
         })
+        queryClient.invalidateQueries({ queryKey: grokCliQueryKeys.all })
       },
       60 * 60 * 1000
     )

@@ -79,10 +79,14 @@ vi.mock('@/services/preferences', () => ({
 
 vi.mock('@/lib/environment', () => ({
   isLocalBackend: () => localBackendState.value,
-  isNativeApp: () =>
-    localBackendState.value || remoteEditorLocallyState.value,
+  isNativeApp: () => localBackendState.value || remoteEditorLocallyState.value,
   canOpenNativeApps: () =>
     localBackendState.value || nativeOpenAllowedState.value,
+  canOpenInTerminal: () =>
+    localBackendState.value ||
+    nativeOpenAllowedState.value ||
+    remoteEditorLocallyState.value,
+  canOpenInFinder: () => localBackendState.value,
   canOpenRemoteEditorLocally: () => remoteEditorLocallyState.value,
   canOpenInEditor: () =>
     localBackendState.value ||
@@ -187,7 +191,7 @@ describe('OpenInModal', () => {
     expect(screen.queryByText('Ghostty')).not.toBeInTheDocument()
   })
 
-  it('shows Finder/editor/terminal when the backend allows native open', async () => {
+  it('hides Finder but shows editor and terminal when a remote backend allows native open', async () => {
     // Browser or remote client against a WSL/--allow-native-open headless server.
     localBackendState.value = false
     nativeOpenAllowedState.value = true
@@ -196,12 +200,12 @@ describe('OpenInModal', () => {
     render(<OpenInModal />)
 
     expect(await screen.findByText('Zed')).toBeInTheDocument()
-    expect(screen.getByText('Finder')).toBeInTheDocument()
+    expect(screen.queryByText('Finder')).not.toBeInTheDocument()
     expect(screen.getByText('Ghostty')).toBeInTheDocument()
   })
 
-  it('shows Zed with E shortcut on remote native connections (local ssh:// open)', async () => {
-    // Native shell + remote Jean: editor remaps to local Zed; Finder/terminal stay host-side.
+  it('shows Zed and Terminal on remote native connections with SSH', async () => {
+    // Native shell + remote Jean: editor and terminal use the local SSH endpoint.
     localBackendState.value = false
     nativeOpenAllowedState.value = false
     remoteEditorLocallyState.value = true
@@ -212,7 +216,7 @@ describe('OpenInModal', () => {
     expect(screen.getByText('E')).toBeInTheDocument()
     expect(screen.getByText('GitHub')).toBeInTheDocument()
     expect(screen.queryByText('Finder')).not.toBeInTheDocument()
-    expect(screen.queryByText('Ghostty')).not.toBeInTheDocument()
+    expect(screen.getByText('Ghostty')).toBeInTheDocument()
   })
 
   it('hides Finder/terminal on remote connections without native open or local editor', async () => {

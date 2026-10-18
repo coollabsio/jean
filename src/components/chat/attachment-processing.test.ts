@@ -3,10 +3,11 @@ import {
   classifyAttachmentFile,
   processAttachmentFile,
 } from './attachment-processing'
-import { MAX_IMAGE_SIZE } from './image-constants'
+import { MAX_FILE_SIZE, MAX_IMAGE_SIZE } from './image-constants'
 
-const { invoke, toast, storeState } = vi.hoisted(() => ({
+const { invoke, savePastedFile, toast, storeState } = vi.hoisted(() => ({
   invoke: vi.fn(),
+  savePastedFile: vi.fn(),
   toast: {
     error: vi.fn(),
   },
@@ -15,11 +16,13 @@ const { invoke, toast, storeState } = vi.hoisted(() => ({
     updatePendingImage: vi.fn(),
     removePendingImage: vi.fn(),
     addPendingTextFile: vi.fn(),
+    addPendingFile: vi.fn(),
   },
 }))
 
 vi.mock('@/lib/transport', () => ({
   invoke: (...args: unknown[]) => invoke(...args),
+  savePastedFile: (...args: unknown[]) => savePastedFile(...args),
 }))
 
 vi.mock('sonner', () => ({
@@ -55,23 +58,30 @@ function makeFile(
 describe('attachment-processing', () => {
   beforeEach(() => {
     invoke.mockReset()
+    savePastedFile.mockReset()
     toast.error.mockReset()
     storeState.addPendingImage.mockReset()
     storeState.updatePendingImage.mockReset()
     storeState.removePendingImage.mockReset()
     storeState.addPendingTextFile.mockReset()
+    storeState.addPendingFile.mockReset()
   })
 
-  it('classifies raster, svg, and unsupported files', () => {
+  it('classifies raster, text, and other files', () => {
     expect(
       classifyAttachmentFile(makeFile('photo.png', { type: 'image/png' }))
     ).toBe('raster')
     expect(classifyAttachmentFile(makeFile('vector.svg', { type: '' }))).toBe(
-      'svg'
+      'text'
     )
     expect(
       classifyAttachmentFile(makeFile('notes.txt', { type: 'text/plain' }))
-    ).toBe('unsupported')
+    ).toBe('text')
+    expect(
+      classifyAttachmentFile(
+        makeFile('archive.zip', { type: 'application/zip' })
+      )
+    ).toBe('file')
   })
 
   it('saves raster files via save_pasted_image', async () => {
@@ -100,6 +110,7 @@ describe('attachment-processing', () => {
     expect(invoke).toHaveBeenCalledWith('save_pasted_image', {
       data: expect.any(String),
       mimeType: 'image/png',
+      sessionId: 'session-1',
     })
     expect(storeState.updatePendingImage).toHaveBeenCalledWith(
       'session-1',
@@ -131,10 +142,11 @@ describe('attachment-processing', () => {
     expect(invoke).toHaveBeenCalledWith('save_pasted_image', {
       data: expect.any(String),
       mimeType: 'image/jpeg',
+      sessionId: 'session-1',
     })
   })
 
-  it('routes svg files through save_pasted_text', async () => {
+  it('routes text files through save_pasted_text and keeps the filename', async () => {
     invoke.mockResolvedValueOnce({
       id: 'txt-1',
       path: '/tmp/vector.svg',
@@ -152,6 +164,8 @@ describe('attachment-processing', () => {
 
     expect(invoke).toHaveBeenCalledWith('save_pasted_text', {
       content: '<svg></svg>',
+      filename: 'vector.svg',
+      sessionId: 'session-1',
     })
     expect(storeState.addPendingTextFile).toHaveBeenCalledWith('session-1', {
       id: 'txt-1',
@@ -176,15 +190,39 @@ describe('attachment-processing', () => {
     })
   })
 
-  it('rejects unsupported file types', async () => {
-    await processAttachmentFile(
-      makeFile('notes.txt', { type: 'text/plain', content: 'hello' }),
-      'session-1'
-    )
+  it('rejects oversized other files before upload', async () => {
+    const oversized = makeFile('video.mp4', {
+      type: 'video/mp4',
+      size: MAX_FILE_SIZE + 1,
+    })
 
-    expect(invoke).not.toHaveBeenCalled()
-    expect(toast.error).toHaveBeenCalledWith('Unsupported image type', {
-      description: 'Allowed types: PNG, JPEG, GIF, WebP, SVG',
+    await processAttachmentFile(oversized, 'session-1')
+
+    expect(savePastedFile).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledWith('File too large', {
+      description: 'Maximum size is 50MB',
+    })
+  })
+
+  it('saves other files as linked file attachments', async () => {
+    savePastedFile.mockResolvedValueOnce({
+      id: 'file-1',
+      path: '/tmp/archive.zip',
+      filename: 'archive.zip',
+      size: 5,
+    })
+    const file = makeFile('archive.zip', {
+      type: 'application/zip',
+      content: 'bytes',
+    })
+    await processAttachmentFile(file, 'session-1')
+
+    expect(savePastedFile).toHaveBeenCalledWith(file, 'session-1')
+    expect(storeState.addPendingFile).toHaveBeenCalledWith('session-1', {
+      id: 'file-1',
+      relativePath: '/tmp/archive.zip',
+      extension: 'zip',
+      isDirectory: false,
     })
   })
 })

@@ -21,10 +21,46 @@ function blocksOverlap(snapshot: ContentBlock, live: ContentBlock): boolean {
   }
 }
 
+function blocksSharePrefix(
+  full: ContentBlock[],
+  prefix: ContentBlock[]
+): boolean {
+  if (prefix.length === 0 || full.length < prefix.length) return false
+
+  return prefix.every((block, index) => {
+    const candidate = full[index]
+    if (!candidate || candidate.type !== block.type) return false
+
+    switch (block.type) {
+      case 'text':
+        return (
+          candidate.type === 'text' && candidate.text.startsWith(block.text)
+        )
+      case 'thinking':
+        return (
+          candidate.type === 'thinking' &&
+          candidate.thinking.startsWith(block.thinking)
+        )
+      case 'tool_use':
+        return (
+          candidate.type === 'tool_use' &&
+          candidate.tool_call_id === block.tool_call_id
+        )
+      case 'user_input':
+        return candidate.type === 'user_input' && candidate.text === block.text
+    }
+  })
+}
+
 function mergeSnapshotBlocks(
   snapshot: ContentBlock[],
   live: ContentBlock[]
 ): ContentBlock[] {
+  // A refreshed snapshot and the live stream often share their beginning.
+  // Keep the longer sequence instead of appending the shorter one twice.
+  if (blocksSharePrefix(snapshot, live)) return snapshot
+  if (blocksSharePrefix(live, snapshot)) return live
+
   const maxOverlap = Math.min(snapshot.length, live.length)
   let overlap = 0
 
@@ -83,7 +119,15 @@ export function hydrateRunningSnapshot(
   options: { allowWhileSending?: boolean; dedupeReplayedOutput?: boolean } = {}
 ): void {
   const store = useChatStore.getState()
-  const normalized = coalesceContentBlocks(lastMsg.content_blocks ?? [])
+  // Live streaming never adds empty text/thinking blocks. Drop them here so
+  // the snapshot and live blocks line up and merge without duplicates.
+  const normalized = coalesceContentBlocks(
+    (lastMsg.content_blocks ?? []).filter(
+      block =>
+        !(block.type === 'thinking' && !block.thinking) &&
+        !(block.type === 'text' && !block.text)
+    )
+  )
   if (options.dedupeReplayedOutput) {
     store.setStreamingReplayContentBlocks(sessionId, normalized)
   }
@@ -93,20 +137,33 @@ export function hydrateRunningSnapshot(
   // intentionally seeds it before calling hydrate.
   if (!options.allowWhileSending && store.sendingSessionIds[sessionId]) return
 
-  useChatStore.setState(state => ({
-    streamingContentBlocks: {
-      ...state.streamingContentBlocks,
-      [sessionId]: mergeSnapshotBlocks(
-        normalized,
-        state.streamingContentBlocks[sessionId] ?? []
-      ),
-    },
-    activeToolCalls: {
-      ...state.activeToolCalls,
-      [sessionId]: mergeSnapshotToolCalls(
-        lastMsg.tool_calls ?? [],
-        state.activeToolCalls[sessionId] ?? []
-      ),
-    },
-  }))
+  useChatStore.setState(state => {
+    // Live tool calls that are missing from the running snapshot and already
+    // answered belong to an earlier paused turn (question/plan kept by
+    // pauseSession). Drop them so they do not resurface in this turn (#779).
+    const snapshotToolIds = new Set((lastMsg.tool_calls ?? []).map(t => t.id))
+    const answered = state.answeredQuestions[sessionId]
+    const isStale = (toolId: string) =>
+      !snapshotToolIds.has(toolId) && (answered?.has(toolId) ?? false)
+    const liveToolCalls = (state.activeToolCalls[sessionId] ?? []).filter(
+      tool => !isStale(tool.id)
+    )
+    const liveBlocks = (state.streamingContentBlocks[sessionId] ?? []).filter(
+      block => block.type !== 'tool_use' || !isStale(block.tool_call_id)
+    )
+
+    return {
+      streamingContentBlocks: {
+        ...state.streamingContentBlocks,
+        [sessionId]: mergeSnapshotBlocks(normalized, liveBlocks),
+      },
+      activeToolCalls: {
+        ...state.activeToolCalls,
+        [sessionId]: mergeSnapshotToolCalls(
+          lastMsg.tool_calls ?? [],
+          liveToolCalls
+        ),
+      },
+    }
+  })
 }

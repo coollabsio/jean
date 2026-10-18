@@ -9,9 +9,10 @@ the HTTP/WebSocket protocol. `src-server` is the standalone server adapter.
 
 jean-server has no embedded WebView. For an AI-controlled browser where you log
 in manually once and agents reuse cookies, Jean uses **vercel-labs/agent-browser**
-with a Jean-managed Chromium profile (`AGENT_BROWSER_PROFILE` under app data).
+with one isolated browser per Jean session. Logins are shared through the
+agent-browser restore key `jean` (`AGENT_BROWSER_RESTORE`).
 
-- Settings → **MCP Servers** → **Agent Browser** → **Install agent-browser**, then install MCP into backends
+- Settings → **MCP Servers** → **Agent Browser** → **Install agent-browser** (this also installs MCP into supported installed backends)
 - Host prerequisite: `npm` on PATH (Jean downloads agent-browser + Chromium into app data)
 - Manual fallback: `npm install -g agent-browser && agent-browser install`
 - Design: `docs/developer/server-agent-browser.md`
@@ -101,6 +102,7 @@ Common options:
 sudo ./scripts/install-jean-server.sh \
   --host 0.0.0.0 \
   --port 3456 \
+  --name "Dev Server" \
   --token "$(openssl rand -base64 32)" \
   -y
 
@@ -197,6 +199,28 @@ JEAN_SERVER_SERVICE=jean-dev.service \
 bun run install:local:server
 ```
 
+### Separate local development service
+
+On the local development host, `jean-dev.service` runs at
+`http://100.110.234.18:3457/`. It uses `/usr/local/bin/jean-server-dev` and
+`/root/.local/share/com.jean.dev`. Its separate login token is in
+`/etc/jean-dev.env` (readable only by root). It starts with no production projects
+or sessions.
+
+To rebuild and restart only this development service, use:
+
+```bash
+bun run install:local:dev
+tail -f tmp/install-local-server.log
+```
+
+This command does not restart `jean-server.service` on port `3456`.
+The development unit uses `KillMode=process` so a restart does not terminate
+child agent processes. Those processes can remain active after the service stops;
+see the [systemd kill documentation](https://github.com/systemd/systemd/blob/main/man/systemd.kill.xml).
+Separate app data is not a security boundary: both services run as the same user.
+If you add the same repository to both services, both can change its files.
+
 ## Options and environment
 
 | CLI                       | Environment                    | Default                                |
@@ -204,6 +228,7 @@ bun run install:local:server
 | `--headless`              | `JEAN_HEADLESS=1`              | off                                    |
 | `--host <addr>`           | `JEAN_HOST`                    | saved preference, normally `127.0.0.1` |
 | `--port <port>`           | `JEAN_PORT`                    | `3456`                                 |
+| `--name <name>`           | `JEAN_SERVER_NAME`             | Web Access host                        |
 | `--token <token>`         | `JEAN_TOKEN`                   | saved/generated token                  |
 | `--no-token`              | `JEAN_NO_TOKEN=1`              | off                                    |
 | `--allow-unsafe-no-token` | `JEAN_ALLOW_UNSAFE_NO_TOKEN=1` | off                                    |
@@ -271,7 +296,8 @@ browser terminals can find tools installed by shell setup scripts (for example
   without a separate install step. Prefer the **System PATH** CLI source in
   onboarding/Settings when using the container image.
 - Bind to `0.0.0.0` inside the container, but keep token auth enabled.
-- Mount Jean's app-data directory as a volume so projects, preferences, and sessions persist.
+- Mount `/home/jean` as one volume. This volume keeps app data, repositories,
+  worktrees, Git and SSH configuration, CLI authentication, and agent settings.
 - Put TLS/auth in front of the container for internet exposure.
 - For Tailscale access from a browser, prefer `tailscale serve` (HTTPS) in front
   of `127.0.0.1` rather than plain `http://100.x.y.z` — browsers block the
@@ -286,9 +312,33 @@ docker run --rm \
   -e JEAN_PORT=3456 \
   -e JEAN_TOKEN=change-me-long-random-token \
   -p 127.0.0.1:3456:3456 \
-  -v jean-data:/home/jean/.local/share/com.jean.desktop \
+  -v jean-home:/home/jean \
   ghcr.io/OWNER/REPO-server:latest
 ```
+
+### Migrate an existing Docker volume
+
+Older Jean images and examples mounted `jean-data` directly at
+`/home/jean/.local/share/com.jean.desktop`. Do not mount that volume at
+`/home/jean`: its files have the wrong relative path for a home volume.
+
+Before you replace the old container, create a new home volume and copy the old
+app data into its expected directory:
+
+```bash
+docker volume create jean-home
+docker run --rm \
+  -v jean-data:/from:ro \
+  -v jean-home:/home/jean \
+  alpine sh -c 'mkdir -p /home/jean/.local/share/com.jean.desktop && cp -a /from/. /home/jean/.local/share/com.jean.desktop/ && chown -R 1000:1000 /home/jean'
+```
+
+Then use `-v jean-home:/home/jean` when you create the new Jean container.
+The Jean user in the image has UID and GID `1000`; the final `chown` makes the
+new home volume writable by that user.
+Data that exists only in the old container writable layer is not in
+`jean-data`. Copy repositories, credentials, or configuration from the old
+container into `jean-home` before you remove that container.
 
 ## Reverse proxy
 

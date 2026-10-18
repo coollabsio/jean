@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { useProjectsStore } from './projects-store'
+import { useUIStore } from './ui-store'
 
 describe('ProjectsStore', () => {
   beforeEach(() => {
@@ -9,7 +10,10 @@ describe('ProjectsStore', () => {
       expandedProjectIds: new Set<string>(),
       expandedFolderIds: new Set<string>(),
       projectCanvasSettings: {},
-      githubDashboardFavoriteProjectIds: [],
+      projectCanvasActiveFilters: {},
+      sidebarServerFilter: null,
+      sidebarActiveTab: 'projects',
+      pinnedRecentSessionIds: [],
       addProjectDialogOpen: false,
       projectSettingsDialogOpen: false,
       projectSettingsProjectId: null,
@@ -234,6 +238,24 @@ describe('ProjectsStore', () => {
   })
 
   describe('project canvas settings', () => {
+    it('stores client view filters by scoped owner', () => {
+      const state = useProjectsStore.getState()
+
+      state.setProjectCanvasActiveFilter('server-1:project-1', 'manual')
+      state.setSidebarServerFilter('server-1')
+
+      expect(useProjectsStore.getState().projectCanvasActiveFilters).toEqual({
+        'server-1:project-1': 'manual',
+      })
+      expect(useProjectsStore.getState().sidebarServerFilter).toBe('server-1')
+    })
+
+    it('stores the selected sidebar tab', () => {
+      useProjectsStore.getState().setSidebarActiveTab('recent')
+
+      expect(useProjectsStore.getState().sidebarActiveTab).toBe('recent')
+    })
+
     it('stores worktree sort mode per project', () => {
       const { setProjectCanvasWorktreeSortMode } = useProjectsStore.getState()
 
@@ -270,19 +292,51 @@ describe('ProjectsStore', () => {
       })
     })
   })
+})
 
-  describe('GitHub dashboard favorites', () => {
-    it('toggles favorite project IDs without duplicating them', () => {
-      const { toggleGitHubDashboardFavoriteProject } =
-        useProjectsStore.getState()
+describe('dialogs close the mobile left sidebar', () => {
+  const desktopWidth = window.innerWidth
 
-      toggleGitHubDashboardFavoriteProject('project-2')
-      toggleGitHubDashboardFavoriteProject('project-1')
-      toggleGitHubDashboardFavoriteProject('project-2')
-
-      expect(
-        useProjectsStore.getState().githubDashboardFavoriteProjectIds
-      ).toEqual(['project-1'])
+  function setViewportWidth(width: number) {
+    Object.defineProperty(window, 'innerWidth', {
+      value: width,
+      configurable: true,
+      writable: true,
     })
+  }
+
+  beforeEach(() => {
+    useUIStore.setState({ leftSidebarVisible: true })
+  })
+
+  afterEach(() => {
+    setViewportWidth(desktopWidth)
+  })
+
+  it.each([
+    [
+      'project settings',
+      () => useProjectsStore.getState().openProjectSettings('p-1'),
+    ],
+    [
+      'add project dialog',
+      () => useProjectsStore.getState().setAddProjectDialogOpen(true),
+    ],
+    ['server dialog', () => useProjectsStore.getState().setServerDialog({})],
+  ])('closes it on mobile when opening the %s', (_, open) => {
+    setViewportWidth(390)
+
+    open()
+
+    expect(useUIStore.getState().leftSidebarVisible).toBe(false)
+  })
+
+  it('keeps it open on desktop', () => {
+    setViewportWidth(1280)
+
+    useProjectsStore.getState().openProjectSettings('p-1')
+
+    expect(useUIStore.getState().leftSidebarVisible).toBe(true)
+    expect(useProjectsStore.getState().projectSettingsDialogOpen).toBe(true)
   })
 })

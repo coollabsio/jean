@@ -15,7 +15,8 @@ import { useKimiCliStatus, useKimiCliAuth } from '@/services/kimi-cli'
 import { useGhCliStatus, useGhCliAuth } from '@/services/gh-cli'
 import { useUIStore } from '@/store/ui-store'
 import { isNativeApp } from '@/lib/environment'
-import { Loader2 } from 'lucide-react'
+import { useRemoteConnections } from '@/lib/remote-connections'
+import { Loader2 } from '@/components/icons/reicon'
 
 function handleCompleteSetup() {
   useUIStore.setState({
@@ -28,6 +29,7 @@ function handleCompleteSetup() {
 export function SetupIncompleteBanner() {
   const onboardingDismissed = useUIStore(state => state.onboardingDismissed)
   const onboardingOpen = useUIStore(state => state.onboardingOpen)
+  const hasRemoteServer = useRemoteConnections().length > 0
 
   const claudeStatus = useClaudeCliStatus()
   const codexStatus = useCodexCliStatus()
@@ -62,6 +64,8 @@ export function SetupIncompleteBanner() {
   if (!isNativeApp()) return null
   // Only show after user has dismissed onboarding, and while it's not currently open
   if (!onboardingDismissed || onboardingOpen) return null
+  // Backends can live on a remote server; local tools are optional then.
+  if (hasRemoteServer) return null
 
   const isLoading =
     claudeStatus.isLoading ||
@@ -101,14 +105,14 @@ export function SetupIncompleteBanner() {
   if (ghReady && hasAiBackendReady) return null
 
   return (
-    <div className="flex w-full shrink-0 items-center justify-center gap-2 bg-amber-500/15 px-4 py-1.5 text-xs text-amber-400">
+    <div className="flex w-full shrink-0 items-center justify-center gap-2 bg-warning/15 px-4 py-1.5 text-xs text-warning">
       <span>
         Setup incomplete — Jean requires GitHub CLI and at least one AI backend.
       </span>
       <button
         type="button"
         onClick={handleCompleteSetup}
-        className="rounded-md bg-amber-500/20 px-2 py-0.5 font-medium text-amber-300 transition-colors hover:bg-amber-500/30"
+        className="rounded-md bg-warning/20 px-2 py-0.5 font-medium text-warning transition-colors hover:bg-warning/30"
       >
         Complete Setup
       </button>

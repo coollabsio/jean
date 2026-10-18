@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Play } from 'lucide-react'
+import { Play } from '@/components/icons/reicon'
 import { cn } from '@/lib/utils'
 import { isPanelTerminal, useTerminalStore } from '@/store/terminal-store'
 import { useTerminalListeningPorts } from '@/services/projects'
@@ -90,8 +90,8 @@ export function TerminalStatusIndicator({
             'shrink-0 fill-none',
             iconSize,
             hasFailedTerminal
-              ? 'text-red-500'
-              : 'text-amber-500 dark:text-yellow-400 animate-icon-glow'
+              ? 'text-destructive'
+              : 'text-warning animate-icon-glow'
           )}
         />
       </TooltipTrigger>

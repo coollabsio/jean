@@ -1,7 +1,13 @@
-import { useCallback, useEffect, useEffectEvent, useState } from 'react'
-import { isLocalBackend } from '@/lib/environment'
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useState,
+} from 'react'
+import { isLocalBackend, isNativeApp } from '@/lib/environment'
 import { invoke } from '@/lib/transport'
-import { FolderOpen, FolderPlus, Globe } from 'lucide-react'
+import { FolderOpen, FolderPlus, Globe } from '@/components/icons/reicon'
 import {
   Dialog,
   DialogContent,
@@ -13,16 +19,51 @@ import { Kbd } from '@/components/ui/kbd'
 import { useProjectsStore } from '@/store/projects-store'
 import { useAddProject, useInitProject } from '@/services/projects'
 import { DirectoryBrowser } from '@/components/projects/DirectoryBrowser'
+import { ServerTargetSelect } from './ServerTargetSelect'
+import { LOCAL_SERVER_ID } from '@/types/server-resource'
+import { parseServerResourceKey } from '@/lib/server-resource'
+import { useActiveConnectionId } from '@/lib/remote-connections'
+import { isClientMacOS } from '@/lib/platform'
+import { shouldUseDirectoryBrowser } from './project-dialog-routing'
+import {
+  buildProjectDestination,
+  getLastProjectDestination,
+  rememberProjectDestination,
+} from '@/lib/project-destination'
 
 export function AddProjectDialog() {
   const {
     addProjectDialogOpen,
     addProjectParentFolderId,
+    selectedProjectId,
     setAddProjectDialogOpen,
   } = useProjectsStore()
   const addProject = useAddProject()
   const initProject = useInitProject()
   const [browserMode, setBrowserMode] = useState<'select' | 'save' | null>(null)
+  const parentServerId = addProjectParentFolderId
+    ? parseServerResourceKey(addProjectParentFolderId)?.serverId
+    : undefined
+  const activeConnectionId = useActiveConnectionId()
+  const selectedProjectServerId = selectedProjectId
+    ? parseServerResourceKey(selectedProjectId)?.serverId
+    : undefined
+  const currentServerId =
+    parentServerId ?? selectedProjectServerId ?? activeConnectionId
+  const [targetServerId, setTargetServerId] = useState(
+    currentServerId ?? LOCAL_SERVER_ID
+  )
+  const effectiveServerId = parentServerId ?? targetServerId
+  const lastDestination = useMemo(
+    () => getLastProjectDestination(effectiveServerId),
+    [addProjectDialogOpen, effectiveServerId]
+  )
+
+  useEffect(() => {
+    if (addProjectDialogOpen) {
+      setTargetServerId(currentServerId)
+    }
+  }, [addProjectDialogOpen, currentServerId])
 
   const handleCloneRemote = useCallback(() => {
     const { openCloneModal } = useProjectsStore.getState()
@@ -32,9 +73,15 @@ export function AddProjectDialog() {
   const isPending = addProject.isPending || initProject.isPending
 
   const handleAddExisting = useCallback(async () => {
-    // Remote backends (and pure web) must browse the server filesystem via
-    // DirectoryBrowser — the native OS picker only sees the local machine.
-    if (!isLocalBackend()) {
+    // The rfd-backed native folder picker aborted Jean on macOS in issue #734.
+    // DirectoryBrowser provides the same selection without the AppKit path.
+    if (
+      shouldUseDirectoryBrowser({
+        isLocalBackend: isLocalBackend(),
+        isClientMacOS,
+        isLocalTarget: effectiveServerId === LOCAL_SERVER_ID,
+      })
+    ) {
       setBrowserMode('select')
       return
     }
@@ -52,6 +99,7 @@ export function AddProjectDialog() {
           await addProject.mutateAsync({
             path: selected,
             parentId: addProjectParentFolderId ?? undefined,
+            serverId: isNativeApp() ? effectiveServerId : undefined,
           })
           setAddProjectDialogOpen(false)
         } catch (error) {
@@ -82,12 +130,21 @@ export function AddProjectDialog() {
       }
       // Other errors handled by mutation
     }
-  }, [addProject, addProjectParentFolderId, setAddProjectDialogOpen])
+  }, [
+    addProject,
+    addProjectParentFolderId,
+    effectiveServerId,
+    setAddProjectDialogOpen,
+  ])
 
   const handleInitNew = useCallback(async () => {
-    // Remote backends (and pure web) must browse the server filesystem via
-    // DirectoryBrowser — the native OS picker only sees the local machine.
-    if (!isLocalBackend()) {
+    if (
+      shouldUseDirectoryBrowser({
+        isLocalBackend: isLocalBackend(),
+        isClientMacOS,
+        isLocalTarget: effectiveServerId === LOCAL_SERVER_ID,
+      })
+    ) {
       setBrowserMode('save')
       return
     }
@@ -97,10 +154,13 @@ export function AddProjectDialog() {
       const { save } = await import('@tauri-apps/plugin-dialog')
       const selected = await save({
         title: 'Create new project',
-        defaultPath: 'my-project',
+        defaultPath: lastDestination
+          ? buildProjectDestination(lastDestination, 'my-project')
+          : 'my-project',
       })
 
       if (selected && typeof selected === 'string') {
+        rememberProjectDestination(effectiveServerId, selected)
         // Check if git identity is configured before init (commit requires it)
         try {
           const identity = await invoke<{
@@ -120,6 +180,7 @@ export function AddProjectDialog() {
         await initProject.mutateAsync({
           path: selected,
           parentId: addProjectParentFolderId ?? undefined,
+          serverId: isNativeApp() ? effectiveServerId : undefined,
         })
         setAddProjectDialogOpen(false)
       }
@@ -130,7 +191,13 @@ export function AddProjectDialog() {
       }
       // Other errors handled by mutation
     }
-  }, [initProject, addProjectParentFolderId, setAddProjectDialogOpen])
+  }, [
+    initProject,
+    addProjectParentFolderId,
+    effectiveServerId,
+    lastDestination,
+    setAddProjectDialogOpen,
+  ])
 
   const handleBrowserOpenChange = useCallback((open: boolean) => {
     if (!open) setBrowserMode(null)
@@ -143,6 +210,7 @@ export function AddProjectDialog() {
           await addProject.mutateAsync({
             path: selected,
             parentId: addProjectParentFolderId ?? undefined,
+            serverId: isNativeApp() ? effectiveServerId : undefined,
           })
           setAddProjectDialogOpen(false)
           setBrowserMode(null)
@@ -167,6 +235,7 @@ export function AddProjectDialog() {
       }
 
       if (browserMode === 'save') {
+        rememberProjectDestination(effectiveServerId, selected)
         try {
           const identity = await invoke<{
             name: string | null
@@ -185,6 +254,7 @@ export function AddProjectDialog() {
         await initProject.mutateAsync({
           path: selected,
           parentId: addProjectParentFolderId ?? undefined,
+          serverId: isNativeApp() ? effectiveServerId : undefined,
         })
         setAddProjectDialogOpen(false)
         setBrowserMode(null)
@@ -194,6 +264,7 @@ export function AddProjectDialog() {
       addProject,
       addProjectParentFolderId,
       browserMode,
+      effectiveServerId,
       initProject,
       setAddProjectDialogOpen,
     ]
@@ -253,6 +324,11 @@ export function AddProjectDialog() {
           </DialogHeader>
 
           <div className="grid gap-3 py-4">
+            <ServerTargetSelect
+              value={effectiveServerId}
+              onChange={setTargetServerId}
+              disabled={isPending || parentServerId !== undefined}
+            />
             <button
               type="button"
               onClick={handleAddExisting}
@@ -332,6 +408,8 @@ export function AddProjectDialog() {
             : 'Choose an existing git repository folder.'
         }
         defaultName={browserMode === 'save' ? 'my-project' : undefined}
+        initialPath={browserMode === 'save' ? lastDestination : undefined}
+        serverId={isNativeApp() ? effectiveServerId : undefined}
       />
     </>
   )

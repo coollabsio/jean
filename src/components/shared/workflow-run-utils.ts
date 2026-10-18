@@ -1,8 +1,35 @@
 import type { Session } from '@/types/chat'
 import type { WorkflowRun } from '@/types/github'
+import type { Worktree } from '@/types/projects'
 
 /** Cap persisted seen IDs so UI state cannot grow without bound. */
 export const MAX_SEEN_FAILED_WORKFLOW_RUN_IDS = 500
+
+/**
+ * Resolve the worktree that owns the open chat surface. Canvas session modals
+ * do not set the global active worktree, so their worktree must be recovered
+ * from the worktree query cache.
+ */
+export function resolveOpenWorkflowWorktree(
+  activeWorktreeId: string | null | undefined,
+  activeWorktreePath: string | null | undefined,
+  modalWorktreeId: string | null | undefined,
+  cachedWorktreeLists: Worktree[][]
+): Pick<Worktree, 'id' | 'path'> | null {
+  const worktreeId = activeWorktreeId ?? modalWorktreeId
+  if (!worktreeId) return null
+
+  if (activeWorktreeId === worktreeId && activeWorktreePath) {
+    return { id: worktreeId, path: activeWorktreePath }
+  }
+
+  for (const worktrees of cachedWorktreeLists) {
+    const worktree = worktrees.find(candidate => candidate.id === worktreeId)
+    if (worktree) return { id: worktree.id, path: worktree.path }
+  }
+
+  return null
+}
 
 export function isReusableWorkflowInvestigationSession(
   session: Session

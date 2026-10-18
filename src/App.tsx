@@ -1,17 +1,13 @@
-import {
-  useCallback,
-  useEffect,
-  useEffectEvent,
-  useRef,
-  useState,
-} from 'react'
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   connectTransport,
   ingestBootstrapEvents,
   invoke,
   useWsConnectionStatus,
+  useWsConnectionChecking,
   useWsAuthError,
+  useWsAuthReason,
   preloadInitialData,
   setAppDataDir,
   hasPreloadedData,
@@ -24,12 +20,17 @@ import {
   isLocalBackend,
   isNativeApp,
   setNativeOpenAllowed,
+  setWebAccessServerName,
 } from '@/lib/environment'
 import { useNativeWindowCloseGuard } from '@/hooks/useNativeWindowCloseGuard'
 import { QuitConfirmationDialog } from '@/components/layout/QuitConfirmationDialog'
 import { setServerPlatform } from '@/lib/platform'
 import { projectsQueryKeys } from '@/services/projects'
 import { chatQueryKeys } from '@/services/chat'
+import { reconcileSessionsAfterReconnect } from '@/services/session-reconcile'
+import { serverConnectionManager } from '@/lib/server-connections'
+import { parseServerResourceKey } from '@/lib/server-resource'
+import { invalidateMcpServers } from '@/services/mcp'
 import { mergeWorktreesPreservingOptimistic } from '@/lib/worktree-list-cache'
 import type { Session, WorktreeSessions } from '@/types/chat'
 import type { Worktree } from '@/types/projects'
@@ -49,6 +50,7 @@ import {
   useCodexUsageUpdateListener,
 } from './services/codex-cli'
 import { useGhCliStatus, useGhCliAuth } from './services/gh-cli'
+import { useAutoResume } from './components/chat/hooks/useAutoResume'
 import {
   useOpencodeCliStatus,
   useOpencodeCliAuth,
@@ -76,12 +78,13 @@ import { useZoom } from './hooks/use-zoom'
 import { useExternalDisplayZoomTip } from './hooks/use-external-display-zoom-tip'
 import { useImmediateSessionStateSave } from './hooks/useImmediateSessionStateSave'
 import { useCliVersionCheck } from './hooks/useCliVersionCheck'
+import { useAgentBrowserUpdateCheck } from './hooks/useAgentBrowserUpdateCheck'
 import { useServerUpdateCheck } from './hooks/useServerUpdateCheck'
-import { useQueueProcessor } from './hooks/useQueueProcessor'
+import { useCodexCodeModeHostRepair } from './hooks/useCodexCodeModeHostRepair'
+import { useServerQuerySync } from './hooks/useServerQuerySync'
 import { useBackgroundInvestigation } from './hooks/useBackgroundInvestigation'
 import { useAutoArchiveOnMerge } from './hooks/useAutoArchiveOnMerge'
 import { useMagicPromptAutoDefaults } from './hooks/useMagicPromptAutoDefaults'
-import { usePreferences } from './services/preferences'
 import useStreamingEvents from './components/chat/hooks/useStreamingEvents'
 import { hydrateRunningSnapshot } from './lib/hydrate-running-snapshot'
 import { preloadAllSounds } from './lib/sounds'
@@ -92,6 +95,7 @@ import {
 import { scheduleIdleWork } from './lib/idle'
 import { isWindows } from './lib/platform'
 import { checkWebClientVersion } from './lib/web-client-version'
+import { startNativeServerConnections } from './lib/native-server-connections'
 import {
   collectExecutionModes,
   collectWorktreePaths,
@@ -102,12 +106,14 @@ import { peekWebReloadState, saveWebReloadState } from './lib/web-reload-state'
 import {
   clearConnectionSwitch,
   getActiveRemoteConnection,
+  getRemoteConnections,
   isConnectionSwitchPending,
 } from './lib/remote-connections'
 import { RemoteConnectionRecovery } from './components/remote/RemoteConnectionRecovery'
 import { getStartupOnboardingAction } from './lib/startup-onboarding'
 import { dismissTransientUi } from './lib/dismiss-transient-ui'
 import { JeanLoadingScreen } from './components/shared/JeanLoadingScreen'
+import { relaunchAfterUIStateSave } from './lib/ui-state-relaunch'
 
 interface AutoFixStoppedEvent {
   projectId: string
@@ -121,9 +127,10 @@ function handleWsAuthTokenSubmit(token: string) {
   window.location.reload()
 }
 
-/** Full-screen auth error overlay for web access mode. */
+/** Sign-in surface for web access mode, shown until the session is authorized. */
 function WsAuthErrorOverlay() {
   const authError = useWsAuthError()
+  const authReason = useWsAuthReason()
   const remote = getActiveRemoteConnection()
 
   if (!authError) return null
@@ -133,9 +140,13 @@ function WsAuthErrorOverlay() {
   }
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-background/90">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-background">
       <WebAccessAuthScreen
         authError={authError}
+        // 'unreachable' only arises on remote paths; if one slips through
+        // (remote removed right after a drop), the sign-in form still works —
+        // submitting reloads the page, which is how connections recover.
+        reason={authReason === 'rejected' ? 'rejected' : 'signed-out'}
         onTokenSubmit={handleWsAuthTokenSubmit}
       />
     </div>
@@ -143,17 +154,27 @@ function WsAuthErrorOverlay() {
 }
 
 function App() {
+  useServerQuerySync()
   const webBackend = usesWebSocketBackend()
   const wsAuthError = useWsAuthError()
   // Track preloading state for web view
   const [isPreloading, setIsPreloading] = useState(webBackend)
   const [platformVersion, setPlatformVersion] = useState(0)
   const queryClient = useQueryClient()
-  const { data: preferences } = usePreferences()
-  const onboardingOpen = useUIStore(state => state.onboardingOpen)
-  const featureTourOpen = useUIStore(state => state.featureTourOpen)
-  const jeanMcpIntroOpen = useUIStore(state => state.jeanMcpIntroOpen)
   const hasStartedTransportRef = useRef(false)
+
+  useEffect(() => {
+    let stopped = false
+    let cleanup: () => void = () => undefined
+    void startNativeServerConnections().then(dispose => {
+      if (stopped) dispose()
+      else cleanup = dispose
+    })
+    return () => {
+      stopped = true
+      cleanup()
+    }
+  }, [])
 
   // Keep quit working during preloading and server-switch overlays (MainWindow
   // may be unmounted). Production-only; uses destroy() so Windows cannot
@@ -219,7 +240,7 @@ function App() {
 
   const relaunchApp = useCallback(async () => {
     const { relaunch } = await import('@tauri-apps/plugin-process')
-    await relaunch()
+    await relaunchAfterUIStateSave(relaunch)
   }, [])
 
   const installAppUpdate = useCallback(
@@ -361,6 +382,7 @@ function App() {
       if (data.serverPlatform) {
         setServerPlatform(data.serverPlatform)
       }
+      setWebAccessServerName(data.serverName)
       if (typeof data.nativeOpenAllowed === 'boolean') {
         setNativeOpenAllowed(data.nativeOpenAllowed)
       }
@@ -676,6 +698,11 @@ function App() {
       })
 
       for (const { sessionId, message } of runningSnapshotMessages) {
+        // Only lift the snapshot into the live stream when this client already
+        // knows the turn is sending. A Resumable run (Jean restarted, host
+        // still alive) is not in that set yet. Leave its partial reply in the
+        // transcript until resume starts, or the text disappears.
+        if (!runningSendingIds[sessionId]) continue
         hydrateRunningSnapshot(sessionId, message, {
           allowWhileSending: true,
           dedupeReplayedOutput: true,
@@ -849,6 +876,9 @@ function App() {
   // Check for CLI updates on startup (shows toast notification if updates available)
   useCliVersionCheck()
 
+  // Ask before updating the required Agent Browser integration.
+  useAgentBrowserUpdateCheck()
+
   // Headless jean-server binary updates (Web Access only)
   useServerUpdateCheck()
 
@@ -858,6 +888,9 @@ function App() {
 
   // Keep Codex usage UI fresh when the app-server pushes account rate-limit updates.
   useCodexUsageUpdateListener()
+
+  // Auto-continue armed sessions once their usage limit resets.
+  useAutoResume()
 
   // Browser mode: WebSocket starts in parallel with HTTP preload (see above).
   // Bootstrap replay events are ingested into the transport buffer before live
@@ -879,10 +912,6 @@ function App() {
     })
   }, [captureWebReloadState, webBackend])
 
-  // Global queue processor - must be at App level so queued messages execute
-  // even when the worktree is not focused (ChatWindow unmounted)
-  useQueueProcessor()
-
   // Headless background investigation - starts investigations on background
   // worktrees (CMD+Click) without opening the session modal
   useBackgroundInvestigation()
@@ -898,6 +927,7 @@ function App() {
   // terminals alive, so reloading behaves like reopening Jean without losing
   // backend work.
   const wsConnected = useWsConnectionStatus()
+  const wsCheckingConnection = useWsConnectionChecking()
   useEffect(() => {
     if (!webBackend || !wsConnected) return
 
@@ -922,7 +952,23 @@ function App() {
       )
       queryClient.invalidateQueries()
     }
+
+    // Native desktop keeps its shell across remote socket drops, so a run
+    // that finished during the gap would stay "sending" (no reload resync).
+    if (isNativeApp()) void reconcileSessionsAfterReconnect(queryClient)
   }, [wsConnected, queryClient, webBackend])
+
+  // Same resync for every enabled remote server in native multi-server mode.
+  useEffect(
+    () =>
+      serverConnectionManager.onRemoteReconnect(serverId => {
+        void reconcileSessionsAfterReconnect(
+          queryClient,
+          sessionId => parseServerResourceKey(sessionId)?.serverId === serverId
+        )
+      }),
+    [queryClient]
+  )
 
   // Add native-app class to body for desktop-only CSS (cursor, user-select, etc.)
   useEffect(() => {
@@ -945,6 +991,14 @@ function App() {
     }
   }, [])
 
+  // MCP servers can change outside Jean (e.g. `claude mcp add` or `/mcp` sign-in
+  // in an external terminal). Re-read the config files when the window gets focus.
+  useEffect(() => {
+    const onFocus = () => invalidateMcpServers()
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [])
+
   const [cliCheckReady, setCliCheckReady] = useState(false)
   useEffect(() => {
     if (!isNativeApp()) return
@@ -959,6 +1013,7 @@ function App() {
     useClaudeCliStatus({ enabled: nativeCli })
   const { data: codexStatus, isLoading: isCodexStatusLoading } =
     useCodexCliStatus({ enabled: nativeCli })
+  useCodexCodeModeHostRepair(nativeCli && !!codexStatus?.installed)
   const { data: opencodeStatus, isLoading: isOpencodeStatusLoading } =
     useOpencodeCliStatus({ enabled: nativeCli })
   const { data: cursorStatus, isLoading: isCursorStatusLoading } =
@@ -968,10 +1023,12 @@ function App() {
   })
   const { data: commandcodeStatus, isLoading: isCommandcodeStatusLoading } =
     useCommandCodeCliStatus({ enabled: nativeCli })
-  const { data: grokStatus, isLoading: isGrokStatusLoading } =
-    useGrokCliStatus({ enabled: nativeCli })
-  const { data: kimiStatus, isLoading: isKimiStatusLoading } =
-    useKimiCliStatus({ enabled: nativeCli })
+  const { data: grokStatus, isLoading: isGrokStatusLoading } = useGrokCliStatus(
+    { enabled: nativeCli }
+  )
+  const { data: kimiStatus, isLoading: isKimiStatusLoading } = useKimiCliStatus(
+    { enabled: nativeCli }
+  )
   const { data: ghStatus, isLoading: isGhStatusLoading } = useGhCliStatus({
     enabled: nativeCli,
   })
@@ -987,10 +1044,11 @@ function App() {
     useOpencodeCliAuth({
       enabled: nativeCli && !!opencodeStatus?.installed,
     })
-  const { data: cursorAuth, isLoading: isCursorAuthLoading } =
-    useCursorCliAuth({
+  const { data: cursorAuth, isLoading: isCursorAuthLoading } = useCursorCliAuth(
+    {
       enabled: nativeCli && !!cursorStatus?.installed,
-    })
+    }
+  )
   const { data: piAuth, isLoading: isPiAuthLoading } = usePiCliAuth({
     enabled: nativeCli && !!piStatus?.installed,
   })
@@ -1050,6 +1108,7 @@ function App() {
       onboardingDismissed: onboarding.onboardingDismissed,
       onboardingManuallyTriggered: onboarding.onboardingManuallyTriggered,
       requiresWslChoice,
+      hasRemoteServer: getRemoteConnections().length > 0,
     })
 
     if (action === 'wait' || action === 'none') return
@@ -1138,118 +1197,10 @@ function App() {
     queryClient,
   ])
 
-  // Show the one-time Jean MCP announcement only after setup is complete.
-  // This must never compete with first-run onboarding or the feature tour.
-  useEffect(() => {
-    if (!isNativeApp()) return
-    if (!cliCheckReady || !preferences) return
-    if (preferences.has_seen_jean_mcp_intro) return
-    if (onboardingOpen || featureTourOpen || jeanMcpIntroOpen) return
-
-    const aiStatuses = [
-      claudeStatus,
-      codexStatus,
-      opencodeStatus,
-      cursorStatus,
-      piStatus,
-      commandcodeStatus,
-      grokStatus,
-      kimiStatus,
-    ]
-    const aiAuth = [
-      claudeAuth,
-      codexAuth,
-      opencodeAuth,
-      cursorAuth,
-      piAuth,
-      commandcodeAuth,
-      grokAuth,
-      kimiAuth,
-    ]
-    if (aiStatuses.some(status => !status) || !ghStatus) return
-
-    const isLoading =
-      isClaudeStatusLoading ||
-      isCodexStatusLoading ||
-      isOpencodeStatusLoading ||
-      isCursorStatusLoading ||
-      isPiStatusLoading ||
-      isCommandcodeStatusLoading ||
-      isGrokStatusLoading ||
-      isKimiStatusLoading ||
-      isGhStatusLoading ||
-      (claudeStatus?.installed && isClaudeAuthLoading) ||
-      (codexStatus?.installed && isCodexAuthLoading) ||
-      (opencodeStatus?.installed && isOpencodeAuthLoading) ||
-      (cursorStatus?.installed && isCursorAuthLoading) ||
-      (piStatus?.installed && isPiAuthLoading) ||
-      (commandcodeStatus?.installed && isCommandcodeAuthLoading) ||
-      (grokStatus?.installed && isGrokAuthLoading) ||
-      (kimiStatus?.installed && isKimiAuthLoading) ||
-      (ghStatus?.installed && isGhAuthLoading)
-    if (isLoading) return
-
-    const ghReady = !!ghStatus?.installed && !!ghAuth?.authenticated
-    const hasAiBackendReady = aiStatuses.some(
-      (status, index) =>
-        !!status?.installed && !!aiAuth[index]?.authenticated
-    )
-
-    // If setup is incomplete, onboarding owns the startup surface.
-    if (!ghReady || !hasAiBackendReady) return
-
-    // Existing first-run tour has priority; show MCP intro on a later tick/reload
-    // after that preference has been marked seen.
-    if (!preferences.has_seen_feature_tour) return
-
-    useUIStore.getState().setJeanMcpIntroOpen(true)
-  }, [
-    preferences,
-    onboardingOpen,
-    featureTourOpen,
-    jeanMcpIntroOpen,
-    claudeStatus,
-    codexStatus,
-    opencodeStatus,
-    cursorStatus,
-    piStatus,
-    commandcodeStatus,
-    grokStatus,
-    kimiStatus,
-    ghStatus,
-    claudeAuth,
-    codexAuth,
-    opencodeAuth,
-    cursorAuth,
-    piAuth,
-    commandcodeAuth,
-    grokAuth,
-    kimiAuth,
-    ghAuth,
-    isClaudeStatusLoading,
-    isCodexStatusLoading,
-    isOpencodeStatusLoading,
-    isCursorStatusLoading,
-    isPiStatusLoading,
-    isCommandcodeStatusLoading,
-    isGrokStatusLoading,
-    isKimiStatusLoading,
-    isGhStatusLoading,
-    isClaudeAuthLoading,
-    isCodexAuthLoading,
-    isOpencodeAuthLoading,
-    isCursorAuthLoading,
-    isPiAuthLoading,
-    isCommandcodeAuthLoading,
-    isGrokAuthLoading,
-    isKimiAuthLoading,
-    isGhAuthLoading,
-    cliCheckReady,
-  ])
-
   // Show feature tour after CLI onboarding completes (first launch or manual trigger)
   useEffect(() => {
     let wasOpen = useUIStore.getState().onboardingOpen
+    let tourTimer: ReturnType<typeof setTimeout> | undefined
     const unsub = useUIStore.subscribe(state => {
       const isOpen = state.onboardingOpen
       const prevWasOpen = wasOpen
@@ -1266,14 +1217,18 @@ function App() {
           ])
           if (manuallyTriggered || (prefs && !prefs.has_seen_feature_tour)) {
             store.setOnboardingManuallyTriggered(false)
-            setTimeout(() => {
+            clearTimeout(tourTimer)
+            tourTimer = setTimeout(() => {
               useUIStore.getState().setFeatureTourOpen(true)
             }, 300)
           }
         }
       }
     })
-    return unsub
+    return () => {
+      unsub()
+      clearTimeout(tourTimer)
+    }
   }, [queryClient])
 
   // Kill all terminals on page refresh/close (backup for Rust-side cleanup)
@@ -1383,16 +1338,15 @@ function App() {
       if (ui.isUpdateInstalling) return
 
       // Web / remote: ask the host to install (desktop event or jean-server binary)
-      const version =
-        ui.pendingUpdateVersion || ui.updateModalVersion
+      const version = ui.pendingUpdateVersion || ui.updateModalVersion
       if (!version) {
         logger.warn(
           'install-pending-update fired with no version or update object'
         )
         return
       }
-      void import('@/hooks/useServerUpdateCheck').then(({ applyServerUpdate }) =>
-        applyServerUpdate(version)
+      void import('@/hooks/useServerUpdateCheck').then(
+        ({ applyServerUpdate }) => applyServerUpdate(version)
       )
     }
     window.addEventListener('install-pending-update', handleInstallPending)
@@ -1609,7 +1563,7 @@ function App() {
       window.removeEventListener('install-pending-update', handleInstallPending)
       window.removeEventListener('update-available', handleUpdateAvailable)
     }
-  }, [webBackend])
+  }, [webBackend, queryClient])
 
   // Web clients request desktop install via apply_server_update → this event.
   // Only the *host* native shell should run Tauri's updater (not a remote client
@@ -1636,6 +1590,14 @@ function App() {
   const blockOnWs =
     webBackend && !wsConnected && !wsAuthError && !hasPreloadedData()
 
+  // A browser session that has not authenticated yet has nothing to show
+  // behind the sign-in prompt. Render it alone instead of booting the whole
+  // app underneath and covering it with an overlay. Native remote clients keep
+  // the overlay: their local UI stays usable while a remote is unreachable.
+  if (webBackend && wsAuthError && !getActiveRemoteConnection()) {
+    return <WsAuthErrorOverlay />
+  }
+
   if (isPreloading || blockOnWs) {
     return (
       <>
@@ -1650,6 +1612,9 @@ function App() {
     <ErrorBoundary>
       <ThemeProvider>
         <MainWindow />
+        {webBackend && wsCheckingConnection && (
+          <JeanLoadingScreen message="Checking connection to Jean..." onTop />
+        )}
         {webBackend && <WsAuthErrorOverlay />}
         {/* App-level dialog so quit confirmation wins over loading overlay
             even if MainWindow's copy is covered / not yet mounted. */}

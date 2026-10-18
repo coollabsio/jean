@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronRight, FileText, AlertCircle, Copy, Check } from 'lucide-react'
+import { ChevronRight, FileText, AlertCircle, Copy, Check } from '@/components/icons/reicon'
 import { toast } from 'sonner'
 import { readPlanFile } from '@/services/chat'
 import { Markdown } from '@/components/ui/markdown'

@@ -6,7 +6,7 @@ import {
   ExternalLink,
   RefreshCw,
   ShieldAlert,
-} from 'lucide-react'
+} from '@/components/icons/reicon'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
@@ -29,6 +29,7 @@ import { invoke } from '@/lib/transport'
 import { toast } from 'sonner'
 import { openExternal } from '@/lib/platform'
 import { copyToClipboard } from '@/lib/clipboard'
+import { isNativeApp } from '@/lib/environment'
 import { SettingsSection } from '../SettingsSection'
 
 const LOOPBACK_BIND_HOSTS = new Set(['localhost', '127.0.0.1', '::1'])
@@ -102,6 +103,9 @@ interface BindHostOption {
 }
 
 export const WebAccessPane: React.FC = () => {
+  // Server settings can only change from the desktop app. A web client that
+  // changes them would disconnect itself.
+  const readOnly = !isNativeApp()
   const { data: preferences } = usePreferences()
   const patchPreferences = usePatchPreferences()
   const [serverStatus, setServerStatus] = useState<ServerStatus | null>(null)
@@ -211,7 +215,7 @@ export const WebAccessPane: React.FC = () => {
     async (url: string) => {
       const fullUrl =
         tokenRequired && serverStatus?.token
-          ? `${url}?token=${serverStatus.token}`
+          ? `${url}?token=${encodeURIComponent(serverStatus.token)}`
           : url
       try {
         await copyToClipboard(fullUrl)
@@ -357,6 +361,13 @@ export const WebAccessPane: React.FC = () => {
         authentication.
       </p>
 
+      {readOnly && (
+        <p className="rounded-md border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+          These settings are read-only in web access. Change them in the Jean
+          desktop app or in the server configuration.
+        </p>
+      )}
+
       <SettingsSection title="Server" anchorId="pref-web-access-section-server">
         <div className="space-y-4">
           <InlineField
@@ -367,13 +378,13 @@ export const WebAccessPane: React.FC = () => {
               <Switch
                 checked={serverStatus?.running ?? false}
                 onCheckedChange={handleToggleServer}
-                disabled={isToggling}
+                disabled={readOnly || isToggling}
               />
               <div className="flex items-center gap-1.5">
                 <div
                   className={`h-2 w-2 rounded-full ${
                     serverStatus?.running
-                      ? 'bg-green-500'
+                      ? 'bg-success'
                       : 'bg-muted-foreground/40'
                   }`}
                 />
@@ -396,7 +407,7 @@ export const WebAccessPane: React.FC = () => {
               value={portInput}
               onChange={e => setPortInput(e.target.value)}
               onBlur={handlePortBlur}
-              disabled={serverStatus?.running}
+              disabled={readOnly || serverStatus?.running}
             />
           </InlineField>
 
@@ -409,6 +420,7 @@ export const WebAccessPane: React.FC = () => {
               onCheckedChange={checked => {
                 patchPreferences.mutate({ http_server_auto_start: checked })
               }}
+              disabled={readOnly}
             />
           </InlineField>
 
@@ -423,10 +435,10 @@ export const WebAccessPane: React.FC = () => {
                 value={bindHostInput}
                 onChange={e => setBindHostInput(e.target.value)}
                 onBlur={() => void handleBindHostBlur()}
-                disabled={isToggling}
+                disabled={readOnly || isToggling}
                 placeholder="127.0.0.1"
               />
-              {bindHostOptions.length > 0 && (
+              {!readOnly && bindHostOptions.length > 0 && (
                 <Select
                   onValueChange={handleBindHostOptionSelect}
                   value={selectedBindHostOption}
@@ -460,14 +472,14 @@ export const WebAccessPane: React.FC = () => {
             <Switch
               checked={preferences?.http_server_token_required ?? true}
               onCheckedChange={handleTokenRequiredChange}
-              disabled={isToggling}
+              disabled={readOnly || isToggling}
             />
           </InlineField>
 
           {!tokenRequired && (
-            <div className="flex items-start gap-3 rounded-md border border-amber-500/50 bg-amber-500/10 p-3">
-              <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
-              <div className="text-sm text-amber-600 dark:text-amber-400">
+            <div className="flex items-start gap-3 rounded-md border border-warning/50 bg-warning/10 p-3">
+              <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
+              <div className="text-sm text-warning">
                 <strong>Security Warning:</strong> Anyone on your network can
                 access Jean without authentication. Only disable this on trusted
                 networks.
@@ -503,13 +515,15 @@ export const WebAccessPane: React.FC = () => {
                 <Button variant="ghost" size="icon" onClick={handleCopyToken}>
                   <Copy className="h-4 w-4" />
                 </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={handleRegenerateToken}
-                >
-                  <RefreshCw className="h-4 w-4" />
-                </Button>
+                {!readOnly && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleRegenerateToken}
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                  </Button>
+                )}
               </div>
             </InlineField>
           )}
@@ -553,7 +567,7 @@ export const WebAccessPane: React.FC = () => {
                             const base = `http://localhost:${serverStatus.port}`
                             openExternal(
                               tokenRequired && serverStatus.token
-                                ? `${base}?token=${serverStatus.token}`
+                                ? `${base}?token=${encodeURIComponent(serverStatus.token)}`
                                 : base
                             )
                           }}
@@ -599,7 +613,7 @@ export const WebAccessPane: React.FC = () => {
                             const base = boundUrl
                             openExternal(
                               tokenRequired && serverStatus.token
-                                ? `${base}?token=${serverStatus.token}`
+                                ? `${base}?token=${encodeURIComponent(serverStatus.token)}`
                                 : base
                             )
                           }}

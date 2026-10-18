@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getModifierSymbol } from '@/lib/platform'
+import { Kbd } from '@/components/ui/kbd'
 import { useIsMobile } from '@/hooks/use-mobile'
 import {
   Zap,
@@ -7,11 +8,22 @@ import {
   GitPullRequest,
   Shield,
   GitBranch,
-  Bug,
-} from 'lucide-react'
+  Sentry,
+} from '@/components/icons/reicon'
 import { LinearIcon } from '@/components/icons/LinearIcon'
-import type { LucideIcon } from 'lucide-react'
+import type { LucideIcon } from '@/components/icons/reicon'
 import { useGhLogin } from '@/hooks/useGhLogin'
+import { usePreferences } from '@/services/preferences'
+import {
+  resolveMagicPromptProvider,
+  resolveMagicPromptBackend,
+  DEFAULT_INVESTIGATE_ISSUE_PROMPT,
+  type CliBackend,
+} from '@/types/preferences'
+import { DesktopBackendModelPicker } from '@/components/chat/toolbar/DesktopBackendModelPicker'
+import { useInstalledBackends } from '@/hooks/useInstalledBackends'
+import { useContextLinkUsage } from '@/hooks/useContextLinkUsage'
+import { resolveSelectedModelForBackend } from '@/lib/session-defaults'
 import {
   Dialog,
   DialogContent,
@@ -19,6 +31,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { useUIStore } from '@/store/ui-store'
+import { useProjectsStore } from '@/store/projects-store'
+import { parseServerResourceKey } from '@/lib/server-resource'
+import { SettingsTargetProvider } from '@/lib/settings-target'
 import { useNewWorktreeData } from './hooks/useNewWorktreeData'
 import { useNewWorktreeHandlers } from './hooks/useNewWorktreeHandlers'
 import { useNewWorktreeKeyboard } from './hooks/useNewWorktreeKeyboard'
@@ -56,10 +71,23 @@ export const TABS: Tab[] = [
   { id: 'security', label: 'Security', key: '4', icon: Shield },
   { id: 'branches', label: 'Branches', key: '5', icon: GitBranch },
   { id: 'linear', label: 'Linear', key: '6', icon: LinearIcon },
-  { id: 'sentry', label: 'Sentry', key: '7', icon: Bug },
+  { id: 'sentry', label: 'Sentry', key: '7', icon: Sentry },
 ]
 
 export function NewWorktreeModal() {
+  const selectedProjectId = useProjectsStore(state => state.selectedProjectId)
+  const serverId = selectedProjectId
+    ? (parseServerResourceKey(selectedProjectId)?.serverId ?? 'local')
+    : 'local'
+
+  return (
+    <SettingsTargetProvider serverId={serverId}>
+      <NewWorktreeModalContent />
+    </SettingsTargetProvider>
+  )
+}
+
+function NewWorktreeModalContent() {
   const { triggerLogin: triggerGhLogin, isGhInstalled } = useGhLogin()
   const { newWorktreeModalOpen } = useUIStore()
   const isMobile = useIsMobile()
@@ -69,6 +97,11 @@ export function NewWorktreeModal() {
   const [searchQuery, setSearchQuery] = useState('')
   const [includeClosed, setIncludeClosed] = useState(false)
   const [selectedItemIndex, setSelectedItemIndex] = useState(0)
+  const [investigationBackend, setInvestigationBackend] =
+    useState<CliBackend>('claude')
+  const [investigationModel, setInvestigationModel] = useState('sonnet')
+  const [investigationProvider, setInvestigationProvider] =
+    useState('__anthropic__')
   const [previewItem, setPreviewItem] = useState<{
     type: 'issue' | 'pr' | 'security' | 'advisory'
     number: number
@@ -87,12 +120,40 @@ export function NewWorktreeModal() {
 
   // Hooks
   const data = useNewWorktreeData(searchQuery, includeClosed)
-  const handlers = useNewWorktreeHandlers(data, {
-    setActiveTab: handleTabChange,
-    setSearchQuery,
-    setSelectedItemIndex,
-    setIncludeClosed,
+  const targetServerId = data.selectedProject?.serverId
+  const { data: preferences } = usePreferences(targetServerId)
+  const { installedBackends } = useInstalledBackends({
+    enabled: newWorktreeModalOpen,
+    serverId: targetServerId,
   })
+  // Existing worktrees/sessions per issue/PR/alert/Linear issue (duplicate guard)
+  const { getMatches: getContextMatches } = useContextLinkUsage({
+    enabled: newWorktreeModalOpen,
+    projectId: data.selectedProjectId,
+    projectPath: data.selectedProject?.path ?? null,
+  })
+  const handlers = useNewWorktreeHandlers(
+    data,
+    {
+      setActiveTab: handleTabChange,
+      setSearchQuery,
+      setSelectedItemIndex,
+      setIncludeClosed,
+    },
+    {
+      backend: investigationBackend,
+      model: investigationModel,
+      provider:
+        investigationBackend !== 'claude' ||
+        investigationProvider === '__anthropic__'
+          ? null
+          : investigationProvider,
+      promptTemplate:
+        preferences?.magic_prompts?.investigate_issue ??
+        DEFAULT_INVESTIGATE_ISSUE_PROMPT,
+    },
+    getContextMatches
+  )
 
   const handlePreviewIssue = (issue: { number: number }) => {
     previewOpenRef.current = true
@@ -176,6 +237,52 @@ export function NewWorktreeModal() {
     }
   }, [newWorktreeModalOpen, handleTabChange])
 
+  const investigationKind = activeTab === 'prs' ? 'pr' : 'issue'
+  const defaultInvestigationBackend =
+    resolveMagicPromptBackend(
+      preferences?.magic_prompt_backends,
+      `investigate_${investigationKind}_backend`,
+      data.selectedProject?.default_backend ?? preferences?.default_backend
+    ) ?? 'claude'
+  const defaultInvestigationProvider =
+    defaultInvestigationBackend === 'claude'
+      ? resolveMagicPromptProvider(
+          preferences?.magic_prompt_providers,
+          `investigate_${investigationKind}_provider`,
+          preferences?.default_provider
+        )
+      : null
+  const defaultInvestigationModel = resolveSelectedModelForBackend(
+    defaultInvestigationBackend,
+    preferences?.magic_prompt_models?.[
+      `investigate_${investigationKind}_model`
+    ],
+    preferences
+  )
+
+  // Only relevant defaults reset selection, not favorites/fast-mode updates.
+  useEffect(() => {
+    if (
+      !newWorktreeModalOpen ||
+      (activeTab !== 'issues' && activeTab !== 'prs')
+    )
+      return
+    setInvestigationBackend(defaultInvestigationBackend)
+    setInvestigationProvider(defaultInvestigationProvider ?? '__anthropic__')
+    setInvestigationModel(
+      defaultInvestigationProvider &&
+        !['opus', 'sonnet', 'haiku'].includes(defaultInvestigationModel)
+        ? 'sonnet'
+        : defaultInvestigationModel
+    )
+  }, [
+    newWorktreeModalOpen,
+    activeTab,
+    defaultInvestigationBackend,
+    defaultInvestigationProvider,
+    defaultInvestigationModel,
+  ])
+
   // Focus search input when switching to searchable tabs
   useEffect(() => {
     if (
@@ -209,7 +316,7 @@ export function NewWorktreeModal() {
         }}
       >
         <DialogContent
-          className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none sm:!w-[90vw] sm:!max-w-[90vw] sm:!h-[85vh] sm:!max-h-[85vh] sm:!rounded-lg p-0 flex flex-col overflow-hidden"
+          className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 flex flex-col overflow-hidden"
           onKeyDown={handleKeyDown}
           onEscapeKeyDown={e => {
             console.log('[DIALOG-DEBUG] Parent onEscapeKeyDown', {
@@ -255,6 +362,49 @@ export function NewWorktreeModal() {
             tabs={TABS}
           />
 
+          {(activeTab === 'issues' || activeTab === 'prs') && (
+            <div className="shrink-0 border-b border-border px-3 py-2 flex items-center gap-2">
+              <span className="text-xs text-muted-foreground shrink-0">
+                Investigate with
+              </span>
+              {newWorktreeModalOpen && (
+                <DesktopBackendModelPicker
+                  triggerClassName="!flex min-w-0 flex-1 max-w-full"
+                  selectedBackend={investigationBackend}
+                  selectedModel={investigationModel}
+                  selectedProvider={
+                    investigationBackend === 'claude' &&
+                    investigationProvider !== '__anthropic__'
+                      ? investigationProvider
+                      : null
+                  }
+                  installedBackends={installedBackends}
+                  customCliProfiles={preferences?.custom_cli_profiles ?? []}
+                  onProviderChange={provider => {
+                    setInvestigationBackend('claude')
+                    setInvestigationProvider(provider)
+                    setInvestigationModel(
+                      provider === '__anthropic__'
+                        ? resolveSelectedModelForBackend(
+                            'claude',
+                            undefined,
+                            preferences
+                          )
+                        : 'sonnet'
+                    )
+                  }}
+                  onModelChange={setInvestigationModel}
+                  onBackendModelChange={(backend, model) => {
+                    setInvestigationBackend(backend)
+                    setInvestigationModel(model)
+                    if (backend !== 'claude')
+                      setInvestigationProvider('__anthropic__')
+                  }}
+                />
+              )}
+            </div>
+          )}
+
           {/* Tab content */}
           <div className="flex-1 min-h-0 flex flex-col">
             {activeTab === 'quick' && (
@@ -292,6 +442,9 @@ export function NewWorktreeModal() {
                 setSelectedIndex={setSelectedItemIndex}
                 onSelectIssue={handlers.handleSelectIssue}
                 onInvestigateIssue={handlers.handleSelectIssueAndInvestigate}
+                onInvestigateIssueInNewSession={
+                  handlers.handleInvestigateIssueInNewSession
+                }
                 onBulkInvestigateIssues={handlers.handleBulkInvestigateIssues}
                 onPreviewIssue={handlePreviewIssue}
                 creatingFromNumber={handlers.creatingFromNumber}
@@ -299,6 +452,7 @@ export function NewWorktreeModal() {
                 searchInputRef={searchInputRef}
                 onGhLogin={triggerGhLogin}
                 isGhInstalled={isGhInstalled}
+                getContextMatches={getContextMatches}
               />
             )}
 
@@ -327,6 +481,7 @@ export function NewWorktreeModal() {
                 searchInputRef={searchInputRef}
                 onGhLogin={triggerGhLogin}
                 isGhInstalled={isGhInstalled}
+                getContextMatches={getContextMatches}
               />
             )}
 
@@ -368,6 +523,7 @@ export function NewWorktreeModal() {
                   handlers.handleBulkInvestigateSecurity
                 }
                 isBulkInvestigating={handlers.isBulkInvestigating}
+                getContextMatches={getContextMatches}
               />
             )}
 
@@ -393,6 +549,7 @@ export function NewWorktreeModal() {
                 creatingFromId={handlers.creatingFromLinearId}
                 isBulkInvestigating={handlers.isBulkInvestigating}
                 searchInputRef={searchInputRef}
+                getContextMatches={getContextMatches}
               />
             )}
 
@@ -444,9 +601,9 @@ export function NewWorktreeModal() {
             <div className="shrink-0 border-t border-border px-3 py-1.5">
               <span className="text-xs text-muted-foreground">
                 Hold{' '}
-                <kbd className="mx-0.5 rounded bg-muted px-1 py-0.5 text-[10px]">
+                <Kbd className="mx-0.5 h-5 min-w-5 px-1 text-[10px]">
                   {getModifierSymbol()}
-                </kbd>{' '}
+                </Kbd>{' '}
                 to open in background
               </span>
             </div>

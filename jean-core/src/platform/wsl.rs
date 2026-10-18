@@ -92,6 +92,47 @@ pub fn update_wsl_config(enabled: bool, distro: String) {
     }
 }
 
+/// CLI flags whose following argument is a filesystem path the CLI will open.
+/// Shared by the detached chat launch and native CLI terminals for every
+/// backend; the list is Claude's flags today. When the CLI runs inside WSL these
+/// must be WSL paths — a Windows-form value (e.g. `C:\Users\..`) is resolved
+/// relative to the Linux cwd and fails (notably `--append-system-prompt-file`,
+/// which aborts the whole run).
+pub const WSL_PATH_VALUE_FLAGS: &[&str] =
+    &["--add-dir", "--append-system-prompt-file", "--settings"];
+
+pub fn looks_like_windows_path(value: &str) -> bool {
+    // UNC (`\\..`) or drive path (`C:\..` / `C:/..`). Anything else is left
+    // untouched so non-path values (models, inline `--settings` JSON) are never
+    // mangled.
+    value.starts_with("\\\\")
+        || (value.len() >= 3
+            && value.as_bytes()[0].is_ascii_alphabetic()
+            && value.as_bytes()[1] == b':'
+            && matches!(value.as_bytes()[2], b'\\' | b'/'))
+}
+
+/// Translate Windows-form path values that follow known path flags into WSL
+/// paths, leaving every other argument untouched.
+pub fn wslify_path_args(args: &[String]) -> Vec<String> {
+    let mut out = Vec::with_capacity(args.len());
+    let mut translate_next = false;
+    for arg in args {
+        if translate_next {
+            translate_next = false;
+            if looks_like_windows_path(arg) {
+                out.push(crate::platform::win_to_wsl_path(arg));
+                continue;
+            }
+        }
+        if WSL_PATH_VALUE_FLAGS.contains(&arg.as_str()) {
+            translate_next = true;
+        }
+        out.push(arg.clone());
+    }
+    out
+}
+
 /// Convert a Windows path to a WSL Unix path.
 ///
 /// Handles:
@@ -208,10 +249,35 @@ fn is_windows_batch_file(path: &str) -> bool {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct CliLaunchPlan {
-    program: String,
-    args: Vec<String>,
-    cwd: Option<std::path::PathBuf>,
+pub(crate) struct CliLaunchPlan {
+    pub(crate) program: String,
+    pub(crate) args: Vec<String>,
+    pub(crate) cwd: Option<std::path::PathBuf>,
+}
+
+/// How a Windows `.cmd`/`.bat` shim gets launched.
+///
+/// Neither option is safe for every caller, so the choice is explicit:
+///
+/// - [`BatchLaunch::CmdWrap`] emits `cmd.exe /C <shim>`. `std` then escapes the
+///   caller's arguments with its ordinary rules, which quote only whitespace —
+///   so `&`, `|` and `^` in an argument act as `cmd.exe` separators. It does,
+///   however, accept arguments containing newlines.
+/// - [`BatchLaunch::StdEscaped`] leaves the shim as the program so `std` builds
+///   the `cmd.exe` line itself, escaping each argument for batch parsing and
+///   bracketing the line so a spaced shim path still parses. `std` *rejects*
+///   any argument containing CR/LF ("batch file arguments are invalid").
+///
+/// Jean's agent backends pass whole chat prompts and pretty-printed JSON
+/// schemas as arguments (`chat/pi.rs`, `chat/cursor.rs`, `chat/antigravity.rs`,
+/// `chat/naming.rs`), and on Windows those CLIs are npm `.cmd` shims — for
+/// example `pi_cli::config::CLI_BINARY_NAME` is `pi.cmd`. Those callers need
+/// `CmdWrap` or they cannot spawn at all. The npm/npx flows pass only package
+/// names and paths, so they take `StdEscaped` and get the escaping.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BatchLaunch {
+    CmdWrap,
+    StdEscaped,
 }
 
 fn cli_launch_plan(
@@ -220,6 +286,7 @@ fn cli_launch_plan(
     is_windows: bool,
     wsl_enabled: bool,
     wsl_distro: &str,
+    batch: BatchLaunch,
 ) -> CliLaunchPlan {
     if is_windows && wsl_enabled {
         let mut args = vec!["-d".to_string(), wsl_distro.to_string()];
@@ -244,7 +311,7 @@ fn cli_launch_plan(
         program.to_string()
     };
 
-    if is_windows && is_windows_batch_file(&program) {
+    if is_windows && batch == BatchLaunch::CmdWrap && is_windows_batch_file(&program) {
         return CliLaunchPlan {
             program: "cmd.exe".to_string(),
             args: vec!["/C".to_string(), program],
@@ -252,6 +319,11 @@ fn cli_launch_plan(
         };
     }
 
+    // `StdEscaped` (and every non-batch program): leave the shim as the program
+    // so `std` builds the `cmd.exe` line, escaping each argument for batch
+    // parsing, bracketing the line so a spaced shim path such as
+    // `C:\Program Files\nodejs\npm.cmd` still parses, and passing `/d` so a
+    // user's AutoRun registry command cannot run.
     CliLaunchPlan {
         program,
         args: Vec::new(),
@@ -259,20 +331,107 @@ fn cli_launch_plan(
     }
 }
 
-/// Create a Command for a resolved CLI path.
-///
-/// This routes Unix paths through WSL when WSL mode is enabled and wraps
-/// Windows `.cmd`/`.bat` npm shims in `cmd.exe /C`, because CreateProcessW
-/// cannot launch those scripts directly.
-pub fn cli_command(program: &str, cwd: Option<&std::path::Path>) -> Command {
-    let config = get_wsl_config();
-    let plan = cli_launch_plan(program, cwd, cfg!(windows), config.enabled, &config.distro);
+pub(crate) fn wsl_resolved_cli_launch_plan(
+    program: &str,
+    cwd: Option<&std::path::Path>,
+    is_windows: bool,
+    wsl_enabled: bool,
+    wsl_distro: &str,
+) -> CliLaunchPlan {
+    if is_windows && wsl_enabled {
+        let mut args = vec!["-d".to_string(), wsl_distro.to_string()];
+        if let Some(dir) = cwd {
+            args.extend(["--cd".to_string(), win_to_wsl_path(&dir.to_string_lossy())]);
+        }
+        // npm-installed CLIs commonly use `#!/usr/bin/env node`. A login shell
+        // loads Homebrew/nvm/bun PATH and provider API keys from the user's
+        // profile. Additional Command arguments become positional parameters;
+        // `exec "$@"` preserves them exactly without shell interpolation.
+        args.extend([
+            "--exec".to_string(),
+            "bash".to_string(),
+            "-lc".to_string(),
+            "exec \"$@\"".to_string(),
+            "jean-cli".to_string(),
+            program.to_string(),
+        ]);
+        return CliLaunchPlan {
+            program: "wsl.exe".to_string(),
+            args,
+            cwd: None,
+        };
+    }
+
+    cli_launch_plan(
+        program,
+        cwd,
+        is_windows,
+        false,
+        wsl_distro,
+        BatchLaunch::CmdWrap,
+    )
+}
+
+fn command_from_cli_launch_plan(plan: CliLaunchPlan) -> Command {
     let mut cmd = silent_command(plan.program);
     cmd.args(plan.args);
     if let Some(dir) = plan.cwd {
         cmd.current_dir(dir);
     }
     cmd
+}
+
+/// Create a Command for a resolved CLI path.
+///
+/// This routes Unix paths through WSL when WSL mode is enabled. On Windows an
+/// extensionless npm shim is redirected to its `.exe`/`.cmd`/`.bat` sibling, and
+/// a batch shim is launched through `cmd.exe /C` ([`BatchLaunch::CmdWrap`]) —
+/// agent backends pass whole chat prompts and pretty-printed JSON schemas as
+/// arguments, and `std`'s batch path refuses arguments containing newlines.
+pub fn cli_command(program: &str, cwd: Option<&std::path::Path>) -> Command {
+    let config = get_wsl_config();
+    command_from_cli_launch_plan(cli_launch_plan(
+        program,
+        cwd,
+        cfg!(windows),
+        config.enabled,
+        &config.distro,
+        BatchLaunch::CmdWrap,
+    ))
+}
+
+/// Create a Command for a resolved path on the Windows host, never through WSL.
+///
+/// Applies the same extensionless-shim redirect as [`cli_command`], but launches
+/// a `.cmd`/`.bat` shim via [`BatchLaunch::StdEscaped`] so `std` escapes each
+/// argument for batch parsing. Callers must therefore keep arguments free of
+/// CR/LF — the npm/npx flows pass only package names and host paths.
+///
+/// Use this for tools whose arguments are Windows paths, such as
+/// `npm install --prefix <app data dir>`: a Linux `npm` inside the WSL distro
+/// cannot write to the host directory those flows install into.
+pub fn host_cli_command(program: &str, cwd: Option<&std::path::Path>) -> Command {
+    command_from_cli_launch_plan(cli_launch_plan(
+        program,
+        cwd,
+        cfg!(windows),
+        false,
+        "",
+        BatchLaunch::StdEscaped,
+    ))
+}
+
+/// Create a command for a WSL-resolved CLI in the user's login environment.
+///
+/// Use this when a WSL-resolved executable can depend on user-configured PATH
+/// entries or provider environment variables (for example, an npm shim whose
+/// shebang uses `/usr/bin/env node`). On non-WSL hosts this behaves like
+/// [`cli_command`].
+pub fn wsl_resolved_cli_command(program: &str, cwd: Option<&std::path::Path>) -> Command {
+    let config = get_wsl_config();
+    let plan =
+        wsl_resolved_cli_launch_plan(program, cwd, cfg!(windows), config.enabled, &config.distro);
+    command_from_cli_launch_plan(plan)
 }
 
 /// True when `path` is a Unix-style absolute path that only exists inside WSL.
@@ -353,7 +512,9 @@ pub fn list_wsl_distros() -> Vec<String> {
 /// Decode a byte slice as UTF-16LE to a String.
 fn decode_utf16le(bytes: &[u8]) -> String {
     let u16s: Vec<u16> = bytes
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
         .collect();
     String::from_utf16_lossy(&u16s)
@@ -675,6 +836,67 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_wslify_path_args_translates_path_flag_values() {
+        let args = vec![
+            "--print".to_string(),
+            "--add-dir".to_string(),
+            r"C:\Users\foo\proj".to_string(),
+            "--append-system-prompt-file".to_string(),
+            r"\\wsl.localhost\Ubuntu-22.04\home\u\ctx.md".to_string(),
+            "--model".to_string(),
+            "claude-opus-4-8[1m]".to_string(),
+            "--settings".to_string(),
+            r"C:\Users\foo\.claude\settings.json".to_string(),
+        ];
+        let out = wslify_path_args(&args);
+        assert_eq!(out[2], "/mnt/c/Users/foo/proj");
+        assert_eq!(out[4], "/home/u/ctx.md");
+        // A non-path flag's value must be left untouched.
+        assert_eq!(out[6], "claude-opus-4-8[1m]");
+        assert_eq!(out[8], "/mnt/c/Users/foo/.claude/settings.json");
+    }
+
+    #[test]
+    fn test_wslify_path_args_leaves_non_windows_values() {
+        // Path flag whose value is already a unix path (or not a Windows path).
+        let args = vec!["--add-dir".to_string(), "/home/u/x".to_string()];
+        assert_eq!(wslify_path_args(&args), args);
+    }
+
+    #[test]
+    fn test_wslify_path_args_translates_forward_slash_drive_paths() {
+        let args = vec![
+            "--add-dir".to_string(),
+            "C:/Users/foo/proj".to_string(),
+            "--settings".to_string(),
+            r"C:\Users\foo\.claude\settings.json".to_string(),
+        ];
+        let out = wslify_path_args(&args);
+        assert_eq!(out[1], "/mnt/c/Users/foo/proj");
+        assert_eq!(out[3], "/mnt/c/Users/foo/.claude/settings.json");
+    }
+
+    #[test]
+    fn test_wslify_path_args_leaves_inline_settings_json_unchanged() {
+        let args = vec![
+            "--settings".to_string(),
+            r#"{"permissions":{"allow":["Read"]}}"#.to_string(),
+        ];
+
+        assert_eq!(wslify_path_args(&args), args);
+    }
+
+    #[test]
+    fn test_looks_like_windows_path_accepts_slash_and_backslash() {
+        assert!(looks_like_windows_path(r"C:\Users\foo"));
+        assert!(looks_like_windows_path("C:/Users/foo"));
+        assert!(looks_like_windows_path(r"\\wsl.localhost\Ubuntu\home\u"));
+        assert!(!looks_like_windows_path("/home/u"));
+        assert!(!looks_like_windows_path(r#"{"permissions":{}}"#));
+        assert!(!looks_like_windows_path("claude-opus-4-8[1m]"));
+    }
+
+    #[test]
     fn detect_wsl_runtime_accepts_environment_markers() {
         assert!(detect_wsl_runtime(true, false, None));
         assert!(detect_wsl_runtime(false, true, None));
@@ -819,6 +1041,11 @@ mod tests {
     #[cfg(not(windows))]
     #[test]
     fn test_wsl_aware_command_non_windows_ignores_enabled_config() {
+        if !crate::test_support::in_isolated_process(
+            "platform::wsl::tests::test_wsl_aware_command_non_windows_ignores_enabled_config",
+        ) {
+            return;
+        }
         init_wsl_config(true, "Ubuntu".to_string());
 
         let cwd = std::path::Path::new("/tmp");
@@ -830,14 +1057,19 @@ mod tests {
         assert_eq!(cmd.get_current_dir(), Some(cwd));
     }
 
+    /// `cli_command`'s mode. Agent backends append whole chat prompts as
+    /// arguments — `chat/pi.rs` pushes the raw message, and on Windows PI is the
+    /// npm shim `pi.cmd` — and `std`'s batch path rejects any argument holding a
+    /// newline. So this mode must keep the `cmd.exe /C` shape.
     #[test]
-    fn cli_launch_plan_wraps_windows_cmd_shim() {
+    fn cli_launch_plan_cmd_wrap_mode_wraps_windows_cmd_shim() {
         let plan = cli_launch_plan(
             r"C:\Users\u\AppData\Roaming\npm\codex.cmd",
             Some(std::path::Path::new(r"C:\tmp")),
             true,
             false,
             "Ubuntu",
+            BatchLaunch::CmdWrap,
         );
 
         assert_eq!(plan.program, "cmd.exe");
@@ -849,12 +1081,111 @@ mod tests {
     }
 
     #[test]
-    fn cli_launch_plan_wraps_windows_bat_shim() {
-        let plan = cli_launch_plan(r"C:\tools\run.bat", None, true, false, "Ubuntu");
+    fn cli_launch_plan_cmd_wrap_mode_wraps_windows_bat_shim() {
+        let plan = cli_launch_plan(
+            r"C:\tools\run.bat",
+            None,
+            true,
+            false,
+            "Ubuntu",
+            BatchLaunch::CmdWrap,
+        );
 
         assert_eq!(plan.program, "cmd.exe");
         assert_eq!(plan.args, vec!["/C", r"C:\tools\run.bat"]);
         assert_eq!(plan.cwd, None);
+    }
+
+    /// `host_cli_command`'s mode, used by the npm/npx flows. Handing the shim
+    /// back as a `cmd.exe` argument would put later arguments on a cmd.exe
+    /// command line, where Rust quotes only whitespace — so `1.0.0&calc` from an
+    /// installer `version` field would reach cmd.exe unquoted and run `calc`.
+    #[test]
+    fn cli_launch_plan_std_escaped_mode_keeps_shim_as_the_program() {
+        let plan = cli_launch_plan(
+            r"C:\Users\u\AppData\Roaming\npm\codex.cmd",
+            Some(std::path::Path::new(r"C:\tmp")),
+            true,
+            false,
+            "Ubuntu",
+            BatchLaunch::StdEscaped,
+        );
+
+        assert_eq!(plan.program, r"C:\Users\u\AppData\Roaming\npm\codex.cmd");
+        assert!(
+            plan.args.is_empty(),
+            "shim must reach std as the program: {:?}",
+            plan.args
+        );
+        assert_eq!(plan.cwd, Some(std::path::PathBuf::from(r"C:\tmp")));
+    }
+
+    /// npm's own shim path always contains a space, and under `StdEscaped` it
+    /// must not become a `cmd.exe` argument: `cmd /C "<shim>" ... "<arg>"` has
+    /// four quotes, so cmd.exe strips the outer pair and mangles the command.
+    #[test]
+    fn cli_launch_plan_keeps_spaced_npm_shim_as_the_program() {
+        let plan = cli_launch_plan(
+            r"C:\Program Files\nodejs\npm.cmd",
+            None,
+            true,
+            false,
+            "Ubuntu",
+            BatchLaunch::StdEscaped,
+        );
+
+        assert_eq!(plan.program, r"C:\Program Files\nodejs\npm.cmd");
+        assert!(plan.args.is_empty(), "{:?}", plan.args);
+    }
+
+    /// End-to-end of the #675 resolution step: an extensionless npm shim on a
+    /// `PATH` that has no `.exe` must come out of planning as the `.cmd` beside
+    /// it, since that redirect is what makes the shim launchable at all.
+    #[test]
+    fn cli_launch_plan_redirects_extensionless_shim_to_its_cmd_sibling() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let extensionless = dir.path().join("npm");
+        let cmd_shim = dir.path().join("npm.cmd");
+        std::fs::write(&extensionless, b"#!/bin/sh\n").expect("write shim");
+        std::fs::write(&cmd_shim, b"@echo off\n").expect("write cmd shim");
+
+        let plan = cli_launch_plan(
+            &extensionless.to_string_lossy(),
+            None,
+            true,
+            false,
+            "Ubuntu",
+            BatchLaunch::StdEscaped,
+        );
+
+        assert_eq!(plan.program, cmd_shim.to_string_lossy());
+        assert!(plan.args.is_empty(), "{:?}", plan.args);
+    }
+
+    /// The same redirect must happen under `CmdWrap`, which then wraps the
+    /// resolved sibling.
+    #[test]
+    fn cli_launch_plan_cmd_wrap_mode_also_redirects_extensionless_shim() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let extensionless = dir.path().join("pi");
+        let cmd_shim = dir.path().join("pi.cmd");
+        std::fs::write(&extensionless, b"#!/bin/sh\n").expect("write shim");
+        std::fs::write(&cmd_shim, b"@echo off\n").expect("write cmd shim");
+
+        let plan = cli_launch_plan(
+            &extensionless.to_string_lossy(),
+            None,
+            true,
+            false,
+            "Ubuntu",
+            BatchLaunch::CmdWrap,
+        );
+
+        assert_eq!(plan.program, "cmd.exe");
+        assert_eq!(
+            plan.args,
+            vec!["/C".to_string(), cmd_shim.to_string_lossy().into_owned()]
+        );
     }
 
     #[test]
@@ -865,6 +1196,7 @@ mod tests {
             true,
             true,
             "Ubuntu",
+            BatchLaunch::CmdWrap,
         );
 
         assert_eq!(plan.program, "wsl.exe");
@@ -883,6 +1215,45 @@ mod tests {
     }
 
     #[test]
+    fn wsl_resolved_cli_launch_plan_loads_login_environment_and_preserves_appended_args() {
+        let plan = wsl_resolved_cli_launch_plan(
+            "/home/linuxbrew/.linuxbrew/bin/pi",
+            Some(std::path::Path::new(r"D:\repos\jean")),
+            true,
+            true,
+            "Ubuntu-22.04",
+        );
+
+        assert_eq!(plan.program, "wsl.exe");
+        assert_eq!(
+            plan.args,
+            vec![
+                "-d",
+                "Ubuntu-22.04",
+                "--cd",
+                "/mnt/d/repos/jean",
+                "--exec",
+                "bash",
+                "-lc",
+                "exec \"$@\"",
+                "jean-cli",
+                "/home/linuxbrew/.linuxbrew/bin/pi",
+            ]
+        );
+        assert_eq!(plan.cwd, None);
+    }
+
+    #[test]
+    fn wsl_resolved_cli_launch_plan_keeps_native_windows_cli_behavior() {
+        let plan =
+            wsl_resolved_cli_launch_plan(r"D:\nodejs\npm.cmd", None, true, false, "Ubuntu-22.04");
+
+        assert_eq!(plan.program, "cmd.exe");
+        assert_eq!(plan.args, vec!["/C", r"D:\nodejs\npm.cmd"]);
+        assert_eq!(plan.cwd, None);
+    }
+
+    #[test]
     fn cli_launch_plan_uses_direct_binary_for_normal_host_exe() {
         let plan = cli_launch_plan(
             r"C:\tools\codex.exe",
@@ -890,6 +1261,7 @@ mod tests {
             true,
             false,
             "Ubuntu",
+            BatchLaunch::CmdWrap,
         );
 
         assert_eq!(plan.program, r"C:\tools\codex.exe");

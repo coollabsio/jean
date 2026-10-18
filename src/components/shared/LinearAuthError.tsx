@@ -1,4 +1,4 @@
-import { KeyRound } from 'lucide-react'
+import { KeyRound } from '@/components/icons/reicon'
 import { Button } from '@/components/ui/button'
 import { useUIStore } from '@/store/ui-store'
 

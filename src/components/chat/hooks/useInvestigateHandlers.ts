@@ -102,7 +102,6 @@ export function useInvestigateHandlers({
   selectedModelRef,
   selectedThinkingLevelRef,
   selectedEffortLevelRef,
-  executionModeRef,
   mcpServersDataRef,
   enabledMcpServersRef,
   activeWorktreeIdRef,
@@ -249,15 +248,21 @@ export function useInvestigateHandlers({
 
       if (type === 'issue') {
         const contexts = await queryClient.fetchQuery({
-          queryKey: ['investigate-contexts', 'issue', activeWorktreeId],
+          queryKey: [
+            'investigate-contexts',
+            'issue',
+            activeSessionId,
+            activeWorktreeId,
+          ],
           queryFn: () =>
             invoke<{ number: number }[]>('list_loaded_issue_contexts', {
-              sessionId: activeWorktreeId,
+              sessionId: activeSessionId,
+              worktreeId: activeWorktreeId,
             }),
           staleTime: 0,
         })
         if ((contexts ?? []).length === 0) {
-          toast.error('No issue context loaded for this worktree')
+          toast.error('No issue context loaded for this session or worktree')
           return
         }
         const refs = (contexts ?? []).map(c => `#${c.number}`).join(', ')
@@ -272,15 +277,21 @@ export function useInvestigateHandlers({
           .replace(/\{issueRefs\}/g, refs)
       } else if (type === 'pr') {
         const contexts = await queryClient.fetchQuery({
-          queryKey: ['investigate-contexts', 'pr', activeWorktreeId],
+          queryKey: [
+            'investigate-contexts',
+            'pr',
+            activeSessionId,
+            activeWorktreeId,
+          ],
           queryFn: () =>
             invoke<{ number: number }[]>('list_loaded_pr_contexts', {
-              sessionId: activeWorktreeId,
+              sessionId: activeSessionId,
+              worktreeId: activeWorktreeId,
             }),
           staleTime: 0,
         })
         if ((contexts ?? []).length === 0) {
-          toast.error('No PR context loaded for this worktree')
+          toast.error('No PR context loaded for this session or worktree')
           return
         }
         const refs = (contexts ?? []).map(c => `#${c.number}`).join(', ')
@@ -378,7 +389,7 @@ export function useInvestigateHandlers({
             content: string
           }[]
         >('get_sentry_issue_context_contents', {
-          sessionId: activeWorktreeId,
+          sessionId: activeSessionId ?? activeWorktreeId,
           worktreeId: activeWorktreeId,
           projectId: worktreeProjectId ?? '',
         })
@@ -538,10 +549,8 @@ export function useInvestigateHandlers({
           ),
           customProfileName: resolvedInvestigateProfile,
           parallelExecutionPrompt:
-            preferences?.parallel_execution_prompt_enabled
-              ? (preferences.magic_prompts?.parallel_execution ??
-                DEFAULT_PARALLEL_EXECUTION_PROMPT)
-              : undefined,
+            preferences?.magic_prompts?.parallel_execution ??
+            DEFAULT_PARALLEL_EXECUTION_PROMPT,
           chromeEnabled: preferences?.chrome_enabled ?? false,
           aiLanguage: preferences?.ai_language,
           backend: investigateBackend,
@@ -562,7 +571,6 @@ export function useInvestigateHandlers({
       preferences?.magic_prompts?.investigate_linear_issue,
       preferences?.magic_prompts?.investigate_sentry_issue,
       preferences?.default_provider,
-      preferences?.parallel_execution_prompt_enabled,
       preferences?.magic_prompts?.parallel_execution,
       preferences?.magic_prompt_models,
       preferences?.magic_prompt_providers,
@@ -580,7 +588,6 @@ export function useInvestigateHandlers({
       selectedModelRef,
       selectedThinkingLevelRef,
       selectedEffortLevelRef,
-      executionModeRef,
       mcpServersDataRef,
       enabledMcpServersRef,
       worktreeProjectId,
@@ -815,10 +822,8 @@ export function useInvestigateHandlers({
             ),
             customProfileName: resolvedInvestigateProfile,
             parallelExecutionPrompt:
-              preferences?.parallel_execution_prompt_enabled
-                ? (preferences.magic_prompts?.parallel_execution ??
-                  DEFAULT_PARALLEL_EXECUTION_PROMPT)
-                : undefined,
+              preferences?.magic_prompts?.parallel_execution ??
+              DEFAULT_PARALLEL_EXECUTION_PROMPT,
             chromeEnabled: preferences?.chrome_enabled ?? false,
             aiLanguage: preferences?.ai_language,
             backend: investigateBackend,
@@ -875,7 +880,6 @@ export function useInvestigateHandlers({
       preferences?.magic_prompts?.investigate_workflow_run,
       preferences?.magic_prompt_models?.investigate_workflow_run_model,
       preferences?.default_provider,
-      preferences?.parallel_execution_prompt_enabled,
       preferences?.magic_prompts?.parallel_execution,
       preferences?.magic_prompt_providers,
       preferences?.magic_prompt_backends,
@@ -894,7 +898,6 @@ export function useInvestigateHandlers({
       selectedModelRef,
       selectedThinkingLevelRef,
       selectedEffortLevelRef,
-      executionModeRef,
       mcpServersDataRef,
       enabledMcpServersRef,
       defaultBackend,
@@ -1031,10 +1034,8 @@ export function useInvestigateHandlers({
             ),
             customProfileName: resolvedProfile,
             parallelExecutionPrompt:
-              preferences?.parallel_execution_prompt_enabled
-                ? (preferences.magic_prompts?.parallel_execution ??
-                  DEFAULT_PARALLEL_EXECUTION_PROMPT)
-                : undefined,
+              preferences?.magic_prompts?.parallel_execution ??
+              DEFAULT_PARALLEL_EXECUTION_PROMPT,
             chromeEnabled: preferences?.chrome_enabled ?? false,
             aiLanguage: preferences?.ai_language,
             backend: reviewCommentsBackend,
@@ -1092,7 +1093,6 @@ export function useInvestigateHandlers({
       createSession,
       queryClient,
       preferences?.default_provider,
-      preferences?.parallel_execution_prompt_enabled,
       preferences?.magic_prompts?.parallel_execution,
       preferences?.magic_prompt_models?.review_comments_model,
       preferences?.magic_prompt_providers,
@@ -1111,7 +1111,6 @@ export function useInvestigateHandlers({
       selectedModelRef,
       selectedThinkingLevelRef,
       selectedEffortLevelRef,
-      executionModeRef,
       mcpServersDataRef,
       enabledMcpServersRef,
       defaultBackend,

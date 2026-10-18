@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useMemo, memo, useState } from 'react'
-import { Plus, X, Minus, Terminal, ChevronUp } from 'lucide-react'
+import { Plus, X, Minus, Terminal, ChevronUp } from '@/components/icons/reicon'
 import { invoke } from '@/lib/transport'
 import { middleClickClose } from '@/lib/middle-click'
 import { useTerminal } from '@/hooks/useTerminal'
@@ -181,6 +181,7 @@ const TerminalTabContent = memo(function TerminalTabContent({
       </div>
       {showExtraKeys && isActive && (
         <TerminalExtraKeysBar
+          key={terminal.id}
           terminalId={terminal.id}
           keyboardOpen={keyboardInset > 0}
         />
@@ -258,7 +259,7 @@ export function TerminalView({
     removeTerminal,
     reorderPanelTerminals,
     setActiveTerminal,
-    setTerminalVisible,
+    setTerminalVisibleForWorktree,
     setTerminalPanelOpen,
   } = useTerminalStore.getState()
   const uiStateInitialized = useUIStore(state => state.uiStateInitialized)
@@ -310,11 +311,16 @@ export function TerminalView({
       ).filter(isPanelTerminal)
       if (remaining.length === 0) {
         setTerminalPanelOpen(worktreeId, false)
-        setTerminalVisible(false)
+        setTerminalVisibleForWorktree(worktreeId, false)
         useTerminalStore.getState().setModalTerminalOpen(worktreeId, false)
       }
     },
-    [worktreeId, removeTerminal, setTerminalPanelOpen, setTerminalVisible]
+    [
+      worktreeId,
+      removeTerminal,
+      setTerminalPanelOpen,
+      setTerminalVisibleForWorktree,
+    ]
   )
 
   const handleCloseTerminal = useCallback(
@@ -377,8 +383,8 @@ export function TerminalView({
   )
 
   const handleMinimize = useCallback(() => {
-    setTerminalVisible(false)
-  }, [setTerminalVisible])
+    setTerminalVisibleForWorktree(worktreeId, false)
+  }, [setTerminalVisibleForWorktree, worktreeId])
 
   const handleCloseAll = useCallback(() => {
     const panelTerminals = (
@@ -409,8 +415,9 @@ export function TerminalView({
   // still running so we can show the same confirm dialog as the tab X button.
   useEffect(() => {
     const handler = (e: Event) => {
-      const detail = (e as CustomEvent<{ worktreeId: string; terminalId: string }>)
-        .detail
+      const detail = (
+        e as CustomEvent<{ worktreeId: string; terminalId: string }>
+      ).detail
       if (!detail || detail.worktreeId !== worktreeId) return
       setPendingClose({ type: 'one', terminalId: detail.terminalId })
     }
@@ -426,7 +433,6 @@ export function TerminalView({
       }}
     >
       <AlertDialogContent
-        onEscapeKeyDown={e => e.stopPropagation()}
         onKeyDown={e => {
           if (e.key === 'Enter') {
             e.preventDefault()
@@ -471,7 +477,7 @@ export function TerminalView({
             <Terminal className="h-3.5 w-3.5" />
             <span>Terminal</span>
             {hasRunningPanelTerminal && (
-              <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+              <span className="h-1.5 w-1.5 rounded-full bg-success" />
             )}
             <div className="flex-1" />
             <ChevronUp className="h-3.5 w-3.5" />
@@ -498,126 +504,130 @@ export function TerminalView({
 
   return (
     <>
-    <div className="flex h-full flex-col bg-background">
-      {/* Tab bar - fixed height for consistency */}
-      <div
-        className={cn(
-          'flex items-stretch border-b border-border',
-          MODAL_TERMINAL_SECONDARY_ROW_CLASS
-        )}
-      >
-        <div className="flex min-w-0 items-center overflow-x-auto">
-          {terminals.map((terminal, index) => {
-            const isActive = terminal.id === activeTerminalId
-            const isRunning = runningTerminals.has(terminal.id)
-            const shortcutLabel =
-              index < 9 ? formatShortcutDisplay(`mod+${index + 1}`) : null
+      <div className="flex h-full flex-col bg-background">
+        {/* Tab bar - fixed height for consistency */}
+        <div
+          className={cn(
+            'flex items-stretch border-b border-border',
+            MODAL_TERMINAL_SECONDARY_ROW_CLASS
+          )}
+        >
+          <div className="flex min-w-0 items-center overflow-x-auto">
+            {terminals.map((terminal, index) => {
+              const isActive = terminal.id === activeTerminalId
+              const isRunning = runningTerminals.has(terminal.id)
+              const shortcutLabel =
+                index < 9 ? formatShortcutDisplay(`mod+${index + 1}`) : null
 
-            return (
-              <div
-                key={terminal.id}
-                draggable
-                onDragStart={e => handleTerminalDragStart(e, terminal.id)}
-                onDragOver={handleTerminalDragOver}
-                onDrop={e => handleTerminalDrop(e, terminal.id)}
-                onDragEnd={() => setDraggedTerminalId(null)}
-                onClick={() => handleSelectTerminal(terminal.id)}
-                {...middleClickClose(e => void handleCloseTerminal(e, terminal.id))}
-                className={cn(
-                  'group flex shrink-0 items-center gap-1.5 border-r border-border px-3 py-1.5 text-xs transition-colors cursor-pointer',
-                  isActive
-                    ? 'bg-muted text-foreground'
-                    : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
-                  draggedTerminalId === terminal.id && 'opacity-60'
-                )}
-              >
-                {/* Running indicator */}
-                {isRunning && (
-                  <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                )}
-                <span className="max-w-[100px] truncate">{terminal.label}</span>
-                {shortcutLabel && (
-                  <Kbd
-                    className={cn(
-                      'h-3.5 px-1 text-[9px]',
-                      isActive
-                        ? 'bg-background/80 text-foreground'
-                        : 'bg-background/60 text-muted-foreground'
-                    )}
-                  >
-                    {shortcutLabel}
-                  </Kbd>
-                )}
-                {/* Close button - always visible */}
-                <button
-                  type="button"
-                  aria-label="Close terminal"
-                  onClick={e => handleCloseTerminal(e, terminal.id)}
+              return (
+                <div
+                  key={terminal.id}
+                  draggable
+                  onDragStart={e => handleTerminalDragStart(e, terminal.id)}
+                  onDragOver={handleTerminalDragOver}
+                  onDrop={e => handleTerminalDrop(e, terminal.id)}
+                  onDragEnd={() => setDraggedTerminalId(null)}
+                  onClick={() => handleSelectTerminal(terminal.id)}
+                  {...middleClickClose(
+                    e => void handleCloseTerminal(e, terminal.id)
+                  )}
                   className={cn(
-                    'rounded p-0.5 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100',
-                    isActive && 'opacity-50'
+                    'group flex shrink-0 items-center gap-1.5 border-r border-border px-3 py-1.5 text-xs transition-colors cursor-pointer',
+                    isActive
+                      ? 'bg-muted text-foreground'
+                      : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
+                    draggedTerminalId === terminal.id && 'opacity-60'
                   )}
                 >
-                  <X className="h-3 w-3" />
-                </button>
-              </div>
-            )
-          })}
+                  {/* Running indicator */}
+                  {isRunning && (
+                    <span className="h-1.5 w-1.5 rounded-full bg-success" />
+                  )}
+                  <span className="max-w-[100px] truncate">
+                    {terminal.label}
+                  </span>
+                  {shortcutLabel && (
+                    <Kbd
+                      className={cn(
+                        'h-3.5 px-1 text-[9px]',
+                        isActive
+                          ? 'bg-background/80 text-foreground'
+                          : 'bg-background/60 text-muted-foreground'
+                      )}
+                    >
+                      {shortcutLabel}
+                    </Kbd>
+                  )}
+                  {/* Close button - always visible */}
+                  <button
+                    type="button"
+                    aria-label="Close terminal"
+                    onClick={e => handleCloseTerminal(e, terminal.id)}
+                    className={cn(
+                      'rounded p-0.5 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100',
+                      isActive && 'opacity-50'
+                    )}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Add terminal button - outside scroll container for full height */}
+          <button
+            type="button"
+            onClick={handleAddTerminal}
+            className="flex shrink-0 items-center px-2 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+            aria-label="New terminal"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+
+          {/* Spacer */}
+          <div className="flex-1" />
+
+          {!hideControls && (
+            <>
+              {/* Minimize button */}
+              <button
+                type="button"
+                onClick={handleMinimize}
+                className="flex h-full shrink-0 items-center px-2 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+                aria-label="Minimize terminal"
+              >
+                <Minus className="h-3.5 w-3.5" />
+              </button>
+
+              {/* Close all button */}
+              <button
+                type="button"
+                onClick={handleCloseAll}
+                className="flex h-full shrink-0 items-center px-2 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-destructive"
+                aria-label="Close all terminals"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </>
+          )}
         </div>
 
-        {/* Add terminal button - outside scroll container for full height */}
-        <button
-          type="button"
-          onClick={handleAddTerminal}
-          className="flex shrink-0 items-center px-2 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
-          aria-label="New terminal"
-        >
-          <Plus className="h-3.5 w-3.5" />
-        </button>
-
-        {/* Spacer */}
-        <div className="flex-1" />
-
-        {!hideControls && (
-          <>
-            {/* Minimize button */}
-            <button
-              type="button"
-              onClick={handleMinimize}
-              className="flex h-full shrink-0 items-center px-2 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
-              aria-label="Minimize terminal"
-            >
-              <Minus className="h-3.5 w-3.5" />
-            </button>
-
-            {/* Close all button */}
-            <button
-              type="button"
-              onClick={handleCloseAll}
-              className="flex h-full shrink-0 items-center px-2 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-red-400"
-              aria-label="Close all terminals"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </>
-        )}
+        {/* Terminal content area */}
+        <div className="relative min-h-0 flex-1 overflow-hidden">
+          {terminals.map(terminal => (
+            <TerminalTabContent
+              key={terminal.id}
+              terminal={terminal}
+              worktreeId={worktreeId}
+              worktreePath={worktreePath}
+              isActive={terminal.id === activeTerminalId}
+              isWorktreeActive={isWorktreeActive}
+            />
+          ))}
+        </div>
       </div>
-
-      {/* Terminal content area */}
-      <div className="relative min-h-0 flex-1 overflow-hidden">
-        {terminals.map(terminal => (
-          <TerminalTabContent
-            key={terminal.id}
-            terminal={terminal}
-            worktreeId={worktreeId}
-            worktreePath={worktreePath}
-            isActive={terminal.id === activeTerminalId}
-            isWorktreeActive={isWorktreeActive}
-          />
-        ))}
-      </div>
-    </div>
-    {closeConfirmDialog}
+      {closeConfirmDialog}
     </>
   )
 }

@@ -96,6 +96,13 @@ Use \`gh pr edit <PR_NUMBER> --body "<generated_markdown>"\` to update the targe
 After updating, fetch the PR's full URL with \`gh pr view <PR_NUMBER> --json url -q .url\`.
 Then confirm to the user that PR #<PR_NUMBER> was updated, show the full clickable PR URL on its own line, and show the final notes.`
 
+const RELEASE_OUTPUT_CONTRACT = `## Release output requirements
+
+- Determine the release version from the project's current version metadata.
+- Use only the release version as the release title and prefix the release version with \`v\` (for example, \`v0.1.74\`). Do not add the app name, other words, or a second \`v\` if the version already has one.
+- Do not repeat the app name or release version at the top of the release notes body. Start the body directly with the release content or its first category heading.
+- In the \`Create release on GitHub\` link, the title query parameter must contain that same version-only title, and the body query parameter must contain the notes without an app-name/version heading.`
+
 /**
  * Build the full session prompt for updating a specific PR's description.
  */
@@ -115,7 +122,7 @@ export function buildReleaseNotesFromTagSessionPrompt(
   customPrompt?: string | null
 ): string {
   if (customPrompt?.trim()) {
-    return customPrompt
+    const resolvedPrompt = customPrompt
       .replaceAll('{tag}', tag)
       .replaceAll('{previous_release_name}', releaseName)
       .replaceAll(
@@ -127,13 +134,17 @@ export function buildReleaseNotesFromTagSessionPrompt(
         'Use only verified pull request and closing issue references.'
       )
       .replaceAll('{commits}', 'Use the commit metadata you gathered.')
+
+    return `${resolvedPrompt}\n\n${RELEASE_OUTPUT_CONTRACT}`
   }
 
   return `Generate user-facing release notes for all changes since the \`${tag}\` release (${releaseName}).
 
 Inspect the repository yourself. Fetch current remote data, use \`git log\` and the GitHub CLI to identify commits and merged pull requests since \`${tag}\`, and inspect PR titles and descriptions when useful. Treat merged PR metadata as the primary source and commits as fallback context.
 
-Include a concise title and group entries under only the applicable headings: Features, Fixes, Improvements, and Breaking Changes. Keep the notes concise, user-facing, and in past tense. Include PR and closing issue references when verified, but never invent references. Skip merge commits and trivial formatting-only changes.
+${RELEASE_OUTPUT_CONTRACT}
+
+Group entries under only the applicable headings: Features, Fixes, Improvements, and Breaking Changes. Keep the notes concise, user-facing, and in past tense. Include PR and closing issue references when verified, but never invent references. Skip merge commits and trivial formatting-only changes.
 
 Reply with the finished release notes inside a single fenced \`markdown\` code block so Jean shows a copy button. Do not put any text before the code block.
 

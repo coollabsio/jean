@@ -1,15 +1,17 @@
 import { useCallback, useState, useRef, useEffect } from 'react'
-import { Folder, FolderOpen } from 'lucide-react'
+import { Folder, FolderOpen } from '@/components/icons/reicon'
 import { cn } from '@/lib/utils'
 import type { Project } from '@/types/projects'
 import { useProjectsStore } from '@/store/projects-store'
 import { useRenameFolder } from '@/services/projects'
 import { FolderContextMenu } from './FolderContextMenu'
+import { CollapsedCountBadge } from './CollapsedCountBadge'
 
 interface FolderTreeItemProps {
   folder: Project
   children: React.ReactNode
   depth: number
+  childCount: number
   isDropTarget?: boolean
 }
 
@@ -17,18 +19,21 @@ export function FolderTreeItem({
   folder,
   children,
   depth,
+  childCount,
   isDropTarget,
 }: FolderTreeItemProps) {
-  const {
-    expandedFolderIds,
-    toggleFolderExpanded,
-    editingFolderId,
-    setEditingFolderId,
-  } = useProjectsStore()
-  const isExpanded = expandedFolderIds.has(folder.id)
+  const isExpanded = useProjectsStore(state =>
+    state.expandedFolderIds.has(folder.id)
+  )
+  const toggleFolderExpanded = useProjectsStore(
+    state => state.toggleFolderExpanded
+  )
+  const setEditingFolderId = useProjectsStore(state => state.setEditingFolderId)
 
   // Derive editing state from store - survives re-renders from query invalidation
-  const isEditing = editingFolderId === folder.id
+  const isEditing = useProjectsStore(
+    state => state.editingFolderId === folder.id
+  )
   const [editName, setEditName] = useState(folder.name)
   const inputRef = useRef<HTMLInputElement>(null)
   const editStartTimeRef = useRef<number>(0)
@@ -110,9 +115,10 @@ export function FolderTreeItem({
   )
 
   return (
-    <FolderContextMenu folder={folder}>
-      <div>
-        {/* Folder Row */}
+    <div>
+      {/* Folder Row — only the row is the context-menu trigger, so nested
+          rows' long-press does not also open this menu on touch. */}
+      <FolderContextMenu folder={folder}>
         <div
           className={cn(
             'group flex cursor-pointer items-center gap-1 px-3 py-1.5 transition-colors duration-150',
@@ -147,18 +153,23 @@ export function FolderTreeItem({
               onBlur={() => handleSubmitRename(true)}
               onKeyDown={handleKeyDown}
               aria-label="Rename folder"
-              className="flex-1 bg-transparent text-base outline-none ring-1 ring-primary/50 rounded px-1 md:text-sm"
+              className="min-w-0 flex-1 bg-transparent text-base outline-none ring-1 ring-primary/50 rounded px-1 md:text-sm"
               onClick={e => e.stopPropagation()}
               autoFocus
             />
           ) : (
             <span className="flex-1 truncate text-sm">{folder.name}</span>
           )}
+          <CollapsedCountBadge
+            count={childCount}
+            label="items"
+            isExpanded={isExpanded}
+          />
         </div>
+      </FolderContextMenu>
 
-        {/* Children (nested projects/folders) */}
-        {isExpanded && children}
-      </div>
-    </FolderContextMenu>
+      {/* Children (nested projects/folders) */}
+      {isExpanded && children}
+    </div>
   )
 }

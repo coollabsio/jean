@@ -14,6 +14,7 @@ export type CliType =
   | 'pi'
   | 'coderabbit'
   | 'commandcode'
+  | 'grok'
 
 /** Binary name used by the package manager (e.g. `brew upgrade <name>`). */
 export const CLI_BINARY_NAMES: Record<CliType, string> = {
@@ -24,12 +25,14 @@ export const CLI_BINARY_NAMES: Record<CliType, string> = {
   pi: 'pi',
   coderabbit: 'coderabbit',
   commandcode: 'command-code',
+  grok: 'grok',
 }
 
 /** npm package name for CLIs that ship as npm/bun globals. */
 export const NPM_PACKAGE_NAMES: Partial<Record<CliType, string>> = {
   codex: '@openai/codex',
   pi: '@earendil-works/pi-coding-agent',
+  grok: '@xai-official/grok',
 }
 
 /** Built-in self-update subcommand args, or null if the CLI has none. */
@@ -39,6 +42,8 @@ export const CLI_SELF_UPDATE_ARGS: Record<CliType, string[] | null> = {
   coderabbit: ['update'],
   pi: ['update', '--self'],
   commandcode: ['update'],
+  // https://www.npmjs.com/package/@xai-official/grok — `grok update`
+  grok: ['update'],
   gh: null,
   codex: null,
 }
@@ -51,6 +56,7 @@ export const CLI_DISPLAY_NAMES: Record<CliType, string> = {
   pi: 'PI CLI',
   coderabbit: 'CodeRabbit CLI',
   commandcode: 'Command Code CLI',
+  grok: 'Grok CLI',
 }
 
 /** Get [command, args] for updating a PATH-mode CLI, respecting package manager.

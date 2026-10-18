@@ -14,6 +14,10 @@ fn command_should_run_on_blocking_pool(command: &str) -> bool {
         command,
         "get_sessions"
             | "bootstrap_project"
+            | "get_recent_worktrees"
+            | "list_all_sessions"
+            | "get_unread_session_count"
+            | "list_unread_sessions"
             | "list_native_cli_sessions"
             | "create_commit_with_ai"
             | "create_pr_with_ai_content"
@@ -31,6 +35,7 @@ fn command_should_run_on_blocking_pool(command: &str) -> bool {
             | "install_coderabbit_cli"
             | "update_coderabbit_cli"
             | "install_agent_browser"
+            | "check_agent_browser_update"
             | "run_coderabbit_review"
             | "trigger_coderabbit_pr_review"
     )

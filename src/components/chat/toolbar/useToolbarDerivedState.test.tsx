@@ -82,10 +82,40 @@ describe('useToolbarDerivedState', () => {
       { value: 'grok/remote', label: 'Grok Remote' },
       { value: 'grok/local', label: 'Grok Local' },
     ])
+    expect(result.current.selectedModelLabel).toBe('Remote')
     expect(result.current.selectedModelReasoning).toEqual({
       type: 'effort',
       default: 'max',
       levels: [{ value: 'max', label: 'Maximum' }],
+    })
+  })
+
+  it('shows a short name for the Grok fast build model', () => {
+    const { result } = renderHook(() =>
+      useToolbarDerivedState({
+        selectedBackend: 'grok',
+        selectedProvider: null,
+        selectedModel: 'grok/grok-4.7-build-fast',
+        customCliProfiles: [],
+        installedBackends: ['grok'],
+        grokModelOptions: [
+          {
+            value: 'grok/grok-4.7-build-fast',
+            label: 'grok/grok-4.7-build-fast',
+          },
+          { value: 'grok/future', label: 'Studio Grok' },
+        ],
+      })
+    )
+
+    expect(result.current.selectedModelLabel).toBe('4.7 Fast')
+    expect(result.current.filteredModelOptions).toContainEqual({
+      value: 'grok/grok-4.7-build-fast',
+      label: 'Grok 4.7 Fast',
+    })
+    expect(result.current.filteredModelOptions).toContainEqual({
+      value: 'grok/future',
+      label: 'Studio Grok',
     })
   })
 

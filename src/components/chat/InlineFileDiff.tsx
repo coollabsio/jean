@@ -59,16 +59,18 @@ export function InlineFileDiff(props: InlineFileDiffProps) {
     return theme
   }, [theme])
 
+  const { patch, filePath, oldString, newString } = props
+
   const fileDiff = useMemo<FileDiffMetadata | null>(() => {
     let raw: string
 
-    if ('patch' in props && props.patch) {
-      raw = ensurePatchHeaders(props.patch, props.filePath)
-    } else if ('filePath' in props && props.filePath) {
+    if (patch) {
+      raw = ensurePatchHeaders(patch, filePath)
+    } else if (filePath) {
       raw = createPatch(
-        props.filePath,
-        props.oldString ?? '',
-        props.newString ?? '',
+        filePath,
+        oldString ?? '',
+        newString ?? '',
         undefined,
         undefined,
         { context: 3 }
@@ -89,7 +91,7 @@ export function InlineFileDiff(props: InlineFileDiffProps) {
       console.error('Failed to parse inline diff patch:', err)
       return null
     }
-  }, [props])
+  }, [patch, filePath, oldString, newString])
 
   /** Full-height inline diffs (e.g. modals) get edit mode; compact chat previews stay read-only. */
   const editable = props.maxHeightClass === 'max-h-none'

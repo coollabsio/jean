@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { ChevronDown, FlaskConical } from 'lucide-react'
+import { ChevronDown, FlaskConical } from '@/components/icons/reicon'
 import { toast } from 'sonner'
 import { invoke } from '@/lib/transport'
 import { useQueryClient } from '@tanstack/react-query'
@@ -92,7 +92,7 @@ export function DevToolsDropdown({
       const model =
         session?.selected_model ??
         preferences?.selected_codex_model ??
-        'gpt-5.6-sol'
+        'gpt-6.1-sol'
       const executionMode = (store.executionModes[sessionId] ??
         session?.selected_execution_mode ??
         'plan') as ExecutionMode

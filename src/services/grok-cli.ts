@@ -3,10 +3,11 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { invoke } from '@/lib/transport'
+import { invoke, invokeForOptionalServer } from '@/lib/transport'
 import { logger } from '@/lib/logger'
 import { toast } from 'sonner'
 import { hasBackendTransport } from '@/lib/environment'
+import { useOptionalSettingsTargetServerId } from '@/lib/settings-target'
 import type {
   GrokAuthStatus,
   GrokCliStatus,
@@ -45,9 +46,17 @@ const fallbackGrokVersions: GrokReleaseInfo[] = [
   { version: 'latest', tagName: 'latest', publishedAt: '', prerelease: false },
 ]
 
+const fallbackGrokModels: GrokModelInfo[] = [
+  { id: 'grok-4.7-build-fast', label: 'Grok 4.7 Fast', isDefault: false },
+  { id: 'grok-4.7', label: 'Grok 4.7', isDefault: false },
+  { id: 'grok-4.6', label: 'Grok 4.6', isDefault: true },
+  { id: 'grok-4.5', label: 'Grok 4.5', isDefault: false },
+]
+
 export function useGrokPathDetection(options?: { enabled?: boolean }) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: [...grokCliQueryKeys.all, 'path-detection'],
+    queryKey: [...grokCliQueryKeys.all, 'path-detection', serverId ?? 'local'],
     queryFn: async (): Promise<{
       found: boolean
       path: string | null
@@ -63,7 +72,7 @@ export function useGrokPathDetection(options?: { enabled?: boolean }) {
         }
       }
       try {
-        return await invoke('detect_grok_in_path')
+        return await invokeForOptionalServer(serverId, 'detect_grok_in_path')
       } catch (error) {
         logger.debug('Grok path detection failed', { error })
         return {
@@ -80,13 +89,21 @@ export function useGrokPathDetection(options?: { enabled?: boolean }) {
   })
 }
 
-export function useGrokCliStatus(options?: { enabled?: boolean }) {
+export function useGrokCliStatus(options?: {
+  enabled?: boolean
+  serverId?: string
+}) {
+  const settingsServerId = useOptionalSettingsTargetServerId()
+  const serverId = options?.serverId ?? settingsServerId
   return useQuery({
-    queryKey: grokCliQueryKeys.status(),
+    queryKey: [...grokCliQueryKeys.status(), serverId ?? 'local'],
     queryFn: async (): Promise<GrokCliStatus> => {
       if (!isTauri()) return { installed: false, version: null, path: null }
       try {
-        return await invoke<GrokCliStatus>('check_grok_cli_installed')
+        return await invokeForOptionalServer<GrokCliStatus>(
+          serverId,
+          'check_grok_cli_installed'
+        )
       } catch (error) {
         logger.error('Failed to check Grok CLI status', { error })
         return { installed: false, version: null, path: null }
@@ -100,8 +117,9 @@ export function useGrokCliStatus(options?: { enabled?: boolean }) {
 }
 
 export function useGrokCliAuth(options?: { enabled?: boolean }) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: grokCliQueryKeys.auth(),
+    queryKey: [...grokCliQueryKeys.auth(), serverId ?? 'local'],
     queryFn: async (): Promise<GrokAuthStatus> => {
       if (!isTauri()) {
         return {
@@ -111,7 +129,10 @@ export function useGrokCliAuth(options?: { enabled?: boolean }) {
         }
       }
       try {
-        return await invoke<GrokAuthStatus>('check_grok_cli_auth')
+        return await invokeForOptionalServer<GrokAuthStatus>(
+          serverId,
+          'check_grok_cli_auth'
+        )
       } catch (error) {
         logger.error('Failed to check Grok CLI auth', { error })
         return {
@@ -146,40 +167,26 @@ export function useGrokUsage(options?: { enabled?: boolean }) {
   })
 }
 
-export function useAvailableGrokModels(options?: { enabled?: boolean }) {
+export function useAvailableGrokModels(options?: {
+  enabled?: boolean
+  serverId?: string
+}) {
+  const settingsServerId = useOptionalSettingsTargetServerId()
+  const serverId = options?.serverId ?? settingsServerId
   return useQuery({
-    queryKey: grokCliQueryKeys.models(),
+    queryKey: [...grokCliQueryKeys.models(), serverId ?? 'local'],
     queryFn: async (): Promise<GrokModelInfo[]> => {
       if (!isTauri()) {
-        return [
-          {
-            id: 'grok-4.6',
-            label: 'Grok 4.6',
-            isDefault: true,
-          },
-          {
-            id: 'grok-4.5',
-            label: 'Grok 4.5',
-            isDefault: false,
-          },
-        ]
+        return fallbackGrokModels
       }
       try {
-        return await invoke<GrokModelInfo[]>('list_grok_models')
+        return await invokeForOptionalServer<GrokModelInfo[]>(
+          serverId,
+          'list_grok_models'
+        )
       } catch (error) {
         logger.error('Failed to list Grok models', { error })
-        return [
-          {
-            id: 'grok-4.6',
-            label: 'Grok 4.6',
-            isDefault: true,
-          },
-          {
-            id: 'grok-4.5',
-            label: 'Grok 4.5',
-            isDefault: false,
-          },
-        ]
+        return fallbackGrokModels
       }
     },
     enabled: options?.enabled ?? true,
@@ -189,19 +196,20 @@ export function useAvailableGrokModels(options?: { enabled?: boolean }) {
 }
 
 export function useAvailableGrokVersions(options?: { enabled?: boolean }) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: grokCliQueryKeys.versions(),
+    queryKey: [...grokCliQueryKeys.versions(), serverId ?? 'local'],
     queryFn: async (): Promise<GrokReleaseInfo[]> => {
       if (!isTauri()) return fallbackGrokVersions
       try {
-        const versions = await invoke<
+        const versions = await invokeForOptionalServer<
           {
             version: string
             tag_name: string
             published_at: string
             prerelease: boolean
           }[]
-        >('get_available_grok_versions')
+        >(serverId, 'get_available_grok_versions')
         return versions.map(v => ({
           version: v.version,
           tagName: v.tag_name,
@@ -222,9 +230,12 @@ export function useAvailableGrokVersions(options?: { enabled?: boolean }) {
 
 export function useInstallGrokCli() {
   const queryClient = useQueryClient()
+  const serverId = useOptionalSettingsTargetServerId()
   return useMutation({
     mutationFn: async (version?: string) => {
-      await invoke('install_grok_cli', { version: version ?? null })
+      await invokeForOptionalServer(serverId, 'install_grok_cli', {
+        version: version ?? null,
+      })
     },
     retry: false,
     onSuccess: () => {
@@ -240,11 +251,16 @@ export function useInstallGrokCli() {
   })
 }
 
-function checkManualVersion(version: string) {
-  return invoke<boolean>('check_grok_cli_version_exists', { version })
+function checkManualVersion(version: string, serverId?: string) {
+  return invokeForOptionalServer<boolean>(
+    serverId,
+    'check_grok_cli_version_exists',
+    { version }
+  )
 }
 
 export function useGrokCliSetup() {
+  const serverId = useOptionalSettingsTargetServerId()
   const status = useGrokCliStatus()
   const versions = useAvailableGrokVersions()
   const installMutation = useInstallGrokCli()
@@ -259,7 +275,6 @@ export function useGrokCliSetup() {
     })
   }
 
-
   return {
     status: status.data,
     isStatusLoading: status.isLoading,
@@ -272,11 +287,17 @@ export function useGrokCliSetup() {
     installError: installMutation.error,
     progress: null,
     install,
-    checkManualVersion,
+    checkManualVersion: (version: string) =>
+      checkManualVersion(version, serverId),
     refetchStatus: status.refetch,
   }
 }
 
-export async function getGrokInstallCommand(): Promise<GrokInstallCommand> {
-  return invoke<GrokInstallCommand>('get_grok_install_command')
+export async function getGrokInstallCommand(
+  serverId?: string
+): Promise<GrokInstallCommand> {
+  return invokeForOptionalServer<GrokInstallCommand>(
+    serverId,
+    'get_grok_install_command'
+  )
 }

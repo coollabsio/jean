@@ -90,6 +90,12 @@ describe('useZoom', () => {
     document.documentElement.style.zoom = ''
     document.documentElement.style.fontSize = ''
     document.documentElement.style.removeProperty('--app-zoom')
+    document.documentElement.style.removeProperty(
+      '--mac-titlebar-action-left-inset'
+    )
+    document.documentElement.style.removeProperty(
+      '--mac-titlebar-action-top-inset'
+    )
   })
 
   afterEach(() => {
@@ -98,6 +104,12 @@ describe('useZoom', () => {
     document.documentElement.style.zoom = ''
     document.documentElement.style.fontSize = ''
     document.documentElement.style.removeProperty('--app-zoom')
+    document.documentElement.style.removeProperty(
+      '--mac-titlebar-action-left-inset'
+    )
+    document.documentElement.style.removeProperty(
+      '--mac-titlebar-action-top-inset'
+    )
   })
 
   it('applies layout-safe zoom in headless web clients', async () => {
@@ -124,8 +136,18 @@ describe('useZoom', () => {
       expect(mockSetZoom).toHaveBeenCalledWith(1.25)
     })
     expect(document.documentElement.style.getPropertyValue('--app-zoom')).toBe(
-      ''
+      '1.25'
     )
+    expect(
+      document.documentElement.style.getPropertyValue(
+        '--mac-titlebar-action-left-inset'
+      )
+    ).toBe('54.4px')
+    expect(
+      document.documentElement.style.getPropertyValue(
+        '--mac-titlebar-action-top-inset'
+      )
+    ).toBe('5px')
     expect(document.documentElement.style.fontSize).toBe('')
   })
 

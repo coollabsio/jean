@@ -1,19 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { SessionCardData } from '../session-card-utils'
 import type { LabelData } from '@/types/chat'
-import type { ApprovalContext } from '../PlanDialog'
 import { useUIStore } from '@/store/ui-store'
-import { toast } from 'sonner'
 
 interface UseCanvasShortcutEventsOptions {
   /** Currently selected card (null if none selected) */
   selectedCard: SessionCardData | null
   /** Whether shortcuts are enabled (disable when modal open) */
   enabled: boolean
-  /** Worktree ID for approval context */
-  worktreeId: string
-  /** Worktree path for approval context */
-  worktreePath: string
   /** Callback for plan approval */
   onPlanApproval: (card: SessionCardData, updatedPlan?: string) => void
   /** Callback for YOLO plan approval */
@@ -38,18 +32,6 @@ interface UseCanvasShortcutEventsOptions {
 }
 
 interface UseCanvasShortcutEventsResult {
-  /** Plan dialog file path (if open) */
-  planDialogPath: string | null
-  /** Plan dialog content (if open, for inline plans) */
-  planDialogContent: string | null
-  /** Approval context for the open plan dialog */
-  planApprovalContext: ApprovalContext | null
-  /** The card associated with the open plan dialog */
-  planDialogCard: SessionCardData | null
-  /** Close plan dialog */
-  closePlanDialog: () => void
-  /** Handle plan view button click */
-  handlePlanView: (card: SessionCardData) => void
   /** Whether the label modal is open */
   isLabelModalOpen: boolean
   /** Session ID for the label modal */
@@ -64,13 +46,11 @@ interface UseCanvasShortcutEventsResult {
 
 /**
  * Shared hook for canvas shortcut event handling.
- * Listens for approve-plan, approve-plan-yolo, open-plan events.
+ * Listens for plan approval events.
  */
 export function useCanvasShortcutEvents({
   selectedCard,
   enabled,
-  worktreeId,
-  worktreePath,
   onPlanApproval,
   onPlanApprovalYolo,
   onClearContextApproval,
@@ -79,53 +59,12 @@ export function useCanvasShortcutEvents({
   onWorktreeApprovalYolo,
   skipLabelHandling,
 }: UseCanvasShortcutEventsOptions): UseCanvasShortcutEventsResult {
-  // Plan dialog state
-  const [planDialogPath, setPlanDialogPath] = useState<string | null>(null)
-  const [planDialogContent, setPlanDialogContent] = useState<string | null>(
-    null
-  )
-  const [planApprovalContext, setPlanApprovalContext] =
-    useState<ApprovalContext | null>(null)
-  const [planDialogCard, setPlanDialogCard] = useState<SessionCardData | null>(
-    null
-  )
   // Label modal state
   const [labelModalSessionId, setLabelModalSessionId] = useState<string | null>(
     null
   )
   const [labelModalCurrentLabel, setLabelModalCurrentLabel] =
     useState<LabelData | null>(null)
-
-  // Handle plan view
-  const handlePlanView = useCallback(
-    (card: SessionCardData) => {
-      if (card.planFilePath) {
-        setPlanDialogPath(card.planFilePath)
-        setPlanDialogContent(null)
-      } else if (card.planContent) {
-        setPlanDialogContent(card.planContent)
-        setPlanDialogPath(null)
-      }
-
-      // Set approval context for the dialog
-      setPlanApprovalContext({
-        worktreeId,
-        worktreePath,
-        sessionId: card.session.id,
-        pendingPlanMessageId: card.pendingPlanMessageId,
-      })
-      setPlanDialogCard(card)
-    },
-    [worktreeId, worktreePath]
-  )
-
-  // Close handlers
-  const closePlanDialog = useCallback(() => {
-    setPlanDialogPath(null)
-    setPlanDialogContent(null)
-    setPlanApprovalContext(null)
-    setPlanDialogCard(null)
-  }, [])
 
   const closeLabelModal = useCallback(() => {
     setLabelModalSessionId(null)
@@ -209,14 +148,6 @@ export function useCanvasShortcutEvents({
       }
     }
 
-    const handleOpenPlanEvent = () => {
-      if (selectedCard.planFilePath || selectedCard.planContent) {
-        handlePlanView(selectedCard)
-      } else {
-        toast.info('No plan available for this session')
-      }
-    }
-
     const handleToggleLabelEvent = () => {
       setLabelModalSessionId(selectedCard.session.id)
       setLabelModalCurrentLabel(selectedCard.label)
@@ -240,7 +171,6 @@ export function useCanvasShortcutEvents({
       'approve-plan-worktree-yolo',
       handleWorktreeApproveYoloEvent
     )
-    window.addEventListener('open-plan', handleOpenPlanEvent)
     if (!skipLabelHandling) {
       window.addEventListener('toggle-session-label', handleToggleLabelEvent)
     }
@@ -267,7 +197,6 @@ export function useCanvasShortcutEvents({
         'approve-plan-worktree-yolo',
         handleWorktreeApproveYoloEvent
       )
-      window.removeEventListener('open-plan', handleOpenPlanEvent)
       if (!skipLabelHandling) {
         window.removeEventListener(
           'toggle-session-label',
@@ -284,17 +213,10 @@ export function useCanvasShortcutEvents({
     onClearContextApprovalBuild,
     onWorktreeApproval,
     onWorktreeApprovalYolo,
-    handlePlanView,
     skipLabelHandling,
   ])
 
   return {
-    planDialogPath,
-    planDialogContent,
-    planApprovalContext,
-    planDialogCard,
-    closePlanDialog,
-    handlePlanView,
     isLabelModalOpen: !!labelModalSessionId,
     labelModalSessionId,
     labelModalCurrentLabel,

@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
 import { invoke } from '@/lib/transport'
 import { toast } from 'sonner'
-import { useUIStore } from '@/store/ui-store'
+import { useUIStore, type InvestigationOverride } from '@/store/ui-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
 import { githubQueryKeys } from '@/services/github'
@@ -22,6 +22,12 @@ import type { useNewWorktreeData } from './useNewWorktreeData'
 import type { TabId } from '../NewWorktreeModal'
 import type { SecuritySelection } from '../SecurityAlertsTab'
 import { reportBulkInvestigateResults } from '../bulkInvestigateUtils'
+import {
+  contextLinkMatchLabel,
+  openContextLinkMatch,
+  type ContextLinkRef,
+} from '@/hooks/useContextLinkUsage'
+import type { GetContextLinkMatches } from '../ContextLinkBadge'
 
 type Data = ReturnType<typeof useNewWorktreeData>
 
@@ -32,13 +38,19 @@ interface Setters {
   setIncludeClosed: (v: boolean) => void
 }
 
-export function useNewWorktreeHandlers(data: Data, setters: Setters) {
+export function useNewWorktreeHandlers(
+  data: Data,
+  setters: Setters,
+  investigationOverride?: InvestigationOverride,
+  getMatches?: GetContextLinkMatches
+) {
   const {
     queryClient,
     selectedProjectId,
     selectedProject,
     hasBaseSession,
     baseSession,
+    worktrees,
     createWorktree,
     createBaseSession,
     createWorktreeFromBranch,
@@ -148,6 +160,42 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
     ]
   )
 
+  /**
+   * Central duplicate guard: when an item already has a worktree/session,
+   * open that instead of creating another one. Returns true if handled.
+   */
+  const openExistingMatch = useCallback(
+    (ref: ContextLinkRef, label: string): boolean => {
+      const match = getMatches?.(ref)[0]
+      if (!match) return false
+      handleOpenChange(false)
+      openContextLinkMatch(match)
+      toast.info(
+        `${label} already has a worktree — opened ${contextLinkMatchLabel(match)}`
+      )
+      return true
+    },
+    [getMatches, handleOpenChange]
+  )
+
+  /** Drop items that already have a worktree/session; toast how many were skipped. */
+  const skipLinkedItems = useCallback(
+    <T>(items: T[], toRef: (item: T) => ContextLinkRef): T[] => {
+      if (!getMatches) return items
+      const remaining = items.filter(
+        item => getMatches(toRef(item)).length === 0
+      )
+      const skipped = items.length - remaining.length
+      if (skipped > 0) {
+        toast.info(
+          `Skipped ${skipped} ${skipped === 1 ? 'item' : 'items'} that already ${skipped === 1 ? 'has' : 'have'} a worktree`
+        )
+      }
+      return remaining
+    },
+    [getMatches]
+  )
+
   const handleCreateWorktree = useCallback(
     (customName?: string, baseBranch?: string) => {
       if (!selectedProjectId) {
@@ -234,6 +282,14 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
         return
       }
 
+      if (
+        openExistingMatch(
+          { type: 'issue', id: issue.number },
+          `Issue #${issue.number}`
+        )
+      )
+        return
+
       setCreatingFromNumber(issue.number)
 
       try {
@@ -285,7 +341,13 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
         setCreatingFromNumber(null)
       }
     },
-    [selectedProjectId, selectedProject, createWorktree, handleOpenChange]
+    [
+      selectedProjectId,
+      selectedProject,
+      createWorktree,
+      handleOpenChange,
+      openExistingMatch,
+    ]
   )
 
   const handleSelectIssueAndInvestigate = useCallback(
@@ -295,6 +357,14 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
         toast.error('No project selected')
         return
       }
+
+      if (
+        openExistingMatch(
+          { type: 'issue', id: issue.number },
+          `Issue #${issue.number}`
+        )
+      )
+        return
 
       setCreatingFromNumber(issue.number)
 
@@ -337,7 +407,9 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
           issueContext,
           background,
         })
-        useUIStore.getState().markWorktreeForAutoInvestigate(worktree.id)
+        useUIStore
+          .getState()
+          .markWorktreeForAutoInvestigate(worktree.id, investigationOverride)
 
         if (background) {
           setCreatingFromNumber(null)
@@ -349,17 +421,138 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
         setCreatingFromNumber(null)
       }
     },
-    [selectedProjectId, selectedProject, createWorktree, handleOpenChange]
+    [
+      selectedProjectId,
+      selectedProject,
+      createWorktree,
+      handleOpenChange,
+      openExistingMatch,
+      investigationOverride,
+    ]
   )
 
-  /** Start background investigation for multiple issues at once (new-session multi-select). */
-  const handleBulkInvestigateIssues = useCallback(
-    async (issues: GitHubIssue[]) => {
+  const handleInvestigateIssueInNewSession = useCallback(
+    async (issue: GitHubIssue) => {
       const projectPath = selectedProject?.path
       if (!selectedProjectId || !projectPath) {
         toast.error('No project selected')
         return
       }
+
+      if (
+        openExistingMatch(
+          { type: 'issue', id: issue.number },
+          `Issue #${issue.number}`
+        )
+      )
+        return
+
+      setCreatingFromNumber(issue.number)
+
+      try {
+        const chatStore = useChatStore.getState()
+        const selectedWorktreeId =
+          useProjectsStore.getState().selectedWorktreeId
+        const currentWorktreeId =
+          chatStore.activeWorktreeId ?? selectedWorktreeId
+        let targetWorktree = worktrees.find(
+          worktree =>
+            worktree.id === currentWorktreeId &&
+            worktree.project_id === selectedProjectId
+        )
+
+        if (!targetWorktree) {
+          targetWorktree =
+            baseSession ??
+            (await createBaseSession.mutateAsync(selectedProjectId))
+        }
+
+        const issueDetail = await invoke<
+          GitHubIssue & {
+            comments: {
+              body: string
+              author: { login: string }
+              created_at: string
+            }[]
+          }
+        >('get_github_issue', {
+          issueNumber: issue.number,
+          projectPath,
+        })
+
+        const issueContext: IssueContext = {
+          number: issueDetail.number,
+          title: issueDetail.title,
+          body: issueDetail.body,
+          comments: (issueDetail.comments ?? []).flatMap(comment =>
+            comment && comment.created_at && comment.author
+              ? [
+                  {
+                    body: comment.body ?? '',
+                    author: { login: comment.author.login ?? '' },
+                    createdAt: comment.created_at,
+                  },
+                ]
+              : []
+          ),
+        }
+
+        const issuePrompt = (
+          investigationOverride?.promptTemplate ??
+          'Investigate the loaded GitHub {issueWord} ({issueRefs})'
+        )
+          .replace(/\{issueWord\}/g, 'issue')
+          .replace(/\{issueRefs\}/g, `#${issue.number}`)
+        const comments = (issueDetail.comments ?? [])
+          .map(
+            comment =>
+              `Comment by @${comment.author.login}:\n${comment.body || '(empty)'}`
+          )
+          .join('\n\n')
+        const prompt = `${issuePrompt}\n\n## GitHub issue #${issue.number}: ${issueDetail.title}\n\n${issueDetail.body || '(No description provided)'}${comments ? `\n\n## Comments\n\n${comments}` : ''}`
+
+        chatStore.registerWorktreePath(targetWorktree.id, targetWorktree.path)
+        useProjectsStore.getState().selectWorktree(targetWorktree.id)
+        useUIStore
+          .getState()
+          .markWorktreeForAutoInvestigate(targetWorktree.id, {
+            ...investigationOverride,
+            forceNewSession: true,
+            prompt,
+            issueContext,
+            openSession: true,
+          })
+
+        handleOpenChange(false)
+      } catch (error) {
+        toast.error(`Failed to start issue investigation: ${error}`)
+        setCreatingFromNumber(null)
+      }
+    },
+    [
+      selectedProjectId,
+      selectedProject,
+      worktrees,
+      baseSession,
+      createBaseSession,
+      investigationOverride,
+      handleOpenChange,
+      openExistingMatch,
+    ]
+  )
+
+  /** Start background investigation for multiple issues at once (new-session multi-select). */
+  const handleBulkInvestigateIssues = useCallback(
+    async (selectedIssues: GitHubIssue[]) => {
+      const projectPath = selectedProject?.path
+      if (!selectedProjectId || !projectPath) {
+        toast.error('No project selected')
+        return
+      }
+      const issues = skipLinkedItems(selectedIssues, issue => ({
+        type: 'issue',
+        id: issue.number,
+      }))
       if (issues.length < 1) return
 
       setIsBulkInvestigating(true)
@@ -405,7 +598,9 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
             issueContext,
             background: true,
           })
-          useUIStore.getState().markWorktreeForAutoInvestigate(worktree.id)
+          useUIStore
+            .getState()
+            .markWorktreeForAutoInvestigate(worktree.id, investigationOverride)
           return issue.number
         })
       )
@@ -420,16 +615,26 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
         'issues'
       )
     },
-    [selectedProjectId, selectedProject, createWorktree]
+    [
+      selectedProjectId,
+      selectedProject,
+      createWorktree,
+      investigationOverride,
+      skipLinkedItems,
+    ]
   )
 
   const handleBulkInvestigatePRs = useCallback(
-    async (prs: GitHubPullRequest[]) => {
+    async (selectedPrs: GitHubPullRequest[]) => {
       const projectPath = selectedProject?.path
       if (!selectedProjectId || !projectPath) {
         toast.error('No project selected')
         return
       }
+      const prs = skipLinkedItems(selectedPrs, pr => ({
+        type: 'pr',
+        id: pr.number,
+      }))
       if (prs.length < 1) return
 
       setIsBulkInvestigating(true)
@@ -495,7 +700,12 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
             prContext,
             background: true,
           })
-          useUIStore.getState().markWorktreeForAutoInvestigatePR(worktree.id)
+          useUIStore
+            .getState()
+            .markWorktreeForAutoInvestigatePR(
+              worktree.id,
+              investigationOverride
+            )
           return pr.number
         })
       )
@@ -510,16 +720,27 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
         'PRs'
       )
     },
-    [selectedProjectId, selectedProject, createWorktree]
+    [
+      selectedProjectId,
+      selectedProject,
+      createWorktree,
+      investigationOverride,
+      skipLinkedItems,
+    ]
   )
 
   const handleBulkInvestigateSecurity = useCallback(
-    async (items: SecuritySelection[]) => {
+    async (selectedItems: SecuritySelection[]) => {
       const projectPath = selectedProject?.path
       if (!selectedProjectId || !projectPath) {
         toast.error('No project selected')
         return
       }
+      const items = skipLinkedItems(selectedItems, item =>
+        item.kind === 'alert'
+          ? { type: 'security', id: item.alert.number }
+          : { type: 'advisory', id: item.advisory.ghsaId }
+      )
       if (items.length < 1) return
 
       setIsBulkInvestigating(true)
@@ -605,15 +826,19 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
         'items'
       )
     },
-    [selectedProjectId, selectedProject, createWorktree]
+    [selectedProjectId, selectedProject, createWorktree, skipLinkedItems]
   )
 
   const handleBulkInvestigateLinearIssues = useCallback(
-    async (issues: LinearIssue[]) => {
+    async (selectedIssues: LinearIssue[]) => {
       if (!selectedProjectId) {
         toast.error('No project selected')
         return
       }
+      const issues = skipLinkedItems(selectedIssues, issue => ({
+        type: 'linear',
+        id: issue.identifier,
+      }))
       if (issues.length < 1) return
 
       setIsBulkInvestigating(true)
@@ -657,7 +882,7 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
         'issues'
       )
     },
-    [selectedProjectId, createWorktree]
+    [selectedProjectId, createWorktree, skipLinkedItems]
   )
 
   const handleBulkInvestigateSentryIssues = useCallback(
@@ -713,6 +938,9 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
         return
       }
 
+      if (openExistingMatch({ type: 'pr', id: pr.number }, `PR #${pr.number}`))
+        return
+
       setCreatingFromNumber(pr.number)
 
       try {
@@ -784,7 +1012,13 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
         setCreatingFromNumber(null)
       }
     },
-    [selectedProjectId, selectedProject, createWorktree, handleOpenChange]
+    [
+      selectedProjectId,
+      selectedProject,
+      createWorktree,
+      handleOpenChange,
+      openExistingMatch,
+    ]
   )
 
   const handleSelectPRAndInvestigate = useCallback(
@@ -794,6 +1028,9 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
         toast.error('No project selected')
         return
       }
+
+      if (openExistingMatch({ type: 'pr', id: pr.number }, `PR #${pr.number}`))
+        return
 
       setCreatingFromNumber(pr.number)
 
@@ -856,7 +1093,9 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
           prContext,
           background,
         })
-        useUIStore.getState().markWorktreeForAutoInvestigatePR(worktree.id)
+        useUIStore
+          .getState()
+          .markWorktreeForAutoInvestigatePR(worktree.id, investigationOverride)
 
         if (background) {
           setCreatingFromNumber(null)
@@ -868,7 +1107,14 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
         setCreatingFromNumber(null)
       }
     },
-    [selectedProjectId, selectedProject, createWorktree, handleOpenChange]
+    [
+      selectedProjectId,
+      selectedProject,
+      createWorktree,
+      handleOpenChange,
+      openExistingMatch,
+      investigationOverride,
+    ]
   )
 
   const handleSelectSecurityAlert = useCallback(
@@ -878,6 +1124,14 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
         toast.error('No project selected')
         return
       }
+
+      if (
+        openExistingMatch(
+          { type: 'security', id: alert.number },
+          `Alert #${alert.number}`
+        )
+      )
+        return
 
       setCreatingFromNumber(alert.number)
 
@@ -921,7 +1175,13 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
         setCreatingFromNumber(null)
       }
     },
-    [selectedProjectId, selectedProject, createWorktree, handleOpenChange]
+    [
+      selectedProjectId,
+      selectedProject,
+      createWorktree,
+      handleOpenChange,
+      openExistingMatch,
+    ]
   )
 
   const handleSelectSecurityAlertAndInvestigate = useCallback(
@@ -931,6 +1191,14 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
         toast.error('No project selected')
         return
       }
+
+      if (
+        openExistingMatch(
+          { type: 'security', id: alert.number },
+          `Alert #${alert.number}`
+        )
+      )
+        return
 
       setCreatingFromNumber(alert.number)
 
@@ -978,7 +1246,13 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
         setCreatingFromNumber(null)
       }
     },
-    [selectedProjectId, selectedProject, createWorktree, handleOpenChange]
+    [
+      selectedProjectId,
+      selectedProject,
+      createWorktree,
+      handleOpenChange,
+      openExistingMatch,
+    ]
   )
 
   const handleSelectAdvisory = useCallback(
@@ -988,6 +1262,14 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
         toast.error('No project selected')
         return
       }
+
+      if (
+        openExistingMatch(
+          { type: 'advisory', id: advisory.ghsaId },
+          advisory.ghsaId
+        )
+      )
+        return
 
       setCreatingFromGhsaId(advisory.ghsaId)
 
@@ -1033,7 +1315,13 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
         setCreatingFromGhsaId(null)
       }
     },
-    [selectedProjectId, selectedProject, createWorktree, handleOpenChange]
+    [
+      selectedProjectId,
+      selectedProject,
+      createWorktree,
+      handleOpenChange,
+      openExistingMatch,
+    ]
   )
 
   const handleSelectAdvisoryAndInvestigate = useCallback(
@@ -1043,6 +1331,14 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
         toast.error('No project selected')
         return
       }
+
+      if (
+        openExistingMatch(
+          { type: 'advisory', id: advisory.ghsaId },
+          advisory.ghsaId
+        )
+      )
+        return
 
       setCreatingFromGhsaId(advisory.ghsaId)
 
@@ -1092,7 +1388,13 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
         setCreatingFromGhsaId(null)
       }
     },
-    [selectedProjectId, selectedProject, createWorktree, handleOpenChange]
+    [
+      selectedProjectId,
+      selectedProject,
+      createWorktree,
+      handleOpenChange,
+      openExistingMatch,
+    ]
   )
 
   // =========================================================================
@@ -1105,6 +1407,14 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
         toast.error('No project selected')
         return
       }
+
+      if (
+        openExistingMatch(
+          { type: 'linear', id: issue.identifier },
+          issue.identifier
+        )
+      )
+        return
 
       setCreatingFromLinearId(issue.id)
 
@@ -1140,7 +1450,7 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
         setCreatingFromLinearId(null)
       }
     },
-    [selectedProjectId, createWorktree, handleOpenChange]
+    [selectedProjectId, createWorktree, handleOpenChange, openExistingMatch]
   )
 
   const handleSelectLinearIssueAndInvestigate = useCallback(
@@ -1149,6 +1459,14 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
         toast.error('No project selected')
         return
       }
+
+      if (
+        openExistingMatch(
+          { type: 'linear', id: issue.identifier },
+          issue.identifier
+        )
+      )
+        return
 
       setCreatingFromLinearId(issue.id)
 
@@ -1190,7 +1508,7 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
         setCreatingFromLinearId(null)
       }
     },
-    [selectedProjectId, createWorktree, handleOpenChange]
+    [selectedProjectId, createWorktree, handleOpenChange, openExistingMatch]
   )
 
   // =========================================================================
@@ -1289,6 +1607,7 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
     handleSelectBranch,
     handleSelectIssue,
     handleSelectIssueAndInvestigate,
+    handleInvestigateIssueInNewSession,
     handleBulkInvestigateIssues,
     handleSelectPR,
     handleSelectPRAndInvestigate,

@@ -340,11 +340,14 @@ pub fn run() {
     // Product version must be the desktop package, not jean-core's library version.
     jean_core::set_app_version(env!("CARGO_PKG_VERSION"));
 
+    // macOS GUI apps inherit a low open-file limit (usually 256). On Unix,
+    // raise it when needed before starting Tauri so child processes inherit
+    // the safer limit too; this helper is a no-op on Windows.
+    jean_core::raise_fd_limit();
+
     if should_run_server() {
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .expect("failed to create Jean server runtime");
+        let runtime =
+            jean_core::build_tokio_runtime().expect("failed to create Jean server runtime");
         if let Err(error) = runtime.block_on(jean_core::run_server()) {
             eprintln!("Jean server failed: {error}");
             std::process::exit(1);
@@ -354,6 +357,7 @@ pub fn run() {
 
     #[cfg(target_os = "macos")]
     fix_macos_path();
+    jean_core::add_fnm_node_to_path();
 
     // Must run before tauri::Builder creates the WebKitGTK webview.
     // Policy: DMABUF off by default; full software compositing is opt-in
@@ -366,6 +370,13 @@ pub fn run() {
         tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
         tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir { file_name: None }),
     ];
+
+    // Jean's runtime (larger worker stacks) also runs Tauri's async tasks.
+    // Leaked on purpose: the runtime must live as long as the app.
+    let runtime: &'static tokio::runtime::Runtime = Box::leak(Box::new(
+        jean_core::build_tokio_runtime().expect("failed to create Jean runtime"),
+    ));
+    tauri::async_runtime::set(runtime.handle().clone());
 
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -405,10 +416,12 @@ pub fn run() {
             desktop_commands::open_worktree_in_editor,
             desktop_commands::open_project_on_github,
             desktop_commands::open_branch_on_github,
-            desktop_commands::set_project_avatar,
+            desktop_commands::save_file_as,
             desktop_commands::start_http_server,
             desktop_commands::stop_http_server,
             desktop_commands::install_remote_jean_server,
+            desktop_commands::list_ssh_config_hosts,
+            desktop_commands::test_ssh_connection,
             browser::browser_create,
             browser::browser_navigate,
             browser::browser_back,

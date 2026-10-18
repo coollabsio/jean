@@ -17,11 +17,12 @@ describe('ChatWindow context controls', () => {
 
   it('keeps loaded contexts in the toolbar submenu', () => {
     // Formatting may be multi-line; assert the prop bindings themselves.
+    // Fallbacks use stable module-level empty arrays (EMPTY_*) for memo.
     expect(source).toMatch(
-      /loadedIssueContexts=\{\s*loadedIssueContexts \?\? \[\]\s*\}/
+      /loadedIssueContexts=\{\s*loadedIssueContexts \?\?\s*EMPTY_ISSUE_CONTEXTS\s*\}/
     )
     expect(source).toMatch(
-      /loadedPRContexts=\{\s*loadedPRContexts \?\? \[\]\s*\}/
+      /loadedPRContexts=\{\s*loadedPRContexts \?\?\s*EMPTY_PR_CONTEXTS\s*\}/
     )
   })
 })

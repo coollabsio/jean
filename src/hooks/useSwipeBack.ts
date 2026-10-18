@@ -30,6 +30,7 @@ interface SwipeBackResult {
   containerRef: React.RefObject<HTMLDivElement | null>
   translateX: number
   isSwiping: boolean
+  progress: number
   transitionStyle: string
 }
 
@@ -48,6 +49,7 @@ export function useSwipeBack({
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [translateX, setTranslateX] = useState(0)
   const [isSwiping, setIsSwiping] = useState(false)
+  const [progress, setProgress] = useState(0)
   const [transitionStyle, setTransitionStyle] = useState('')
 
   const startXRef = useRef(0)
@@ -132,14 +134,56 @@ export function useSwipeBack({
       if (!touch) return
       lastXRef.current = touch.clientX
       lastTimeRef.current = Date.now()
+      const containerWidth =
+        containerRef.current?.offsetWidth ?? window.innerWidth
+      setProgress(
+        Math.min(
+          1,
+          progressDelta(startXRef.current, touch.clientX) /
+            (containerWidth * threshold)
+        )
+      )
       if (showVisualRef.current) {
-        const delta = progressDelta(startXRef.current, touch.clientX)
+        // Keep the drawer edge under the finger. Using only the distance from
+        // touch start leaves it behind by the width of the edge start zone.
+        const delta =
+          edgeRef.current === 'right'
+            ? Math.max(0, containerWidth - touch.clientX)
+            : Math.max(0, touch.clientX)
         // Visual still uses positive translateX for left-edge swipe-right.
         // Right-edge swipe-left uses negative translateX.
         setTranslateX(edgeRef.current === 'right' ? -delta : delta)
       }
     },
-    [progressDelta]
+    [progressDelta, threshold]
+  )
+
+  /** Abort an in-progress gesture without firing, snapping content back. */
+  const cancelSwipe = useCallback(() => {
+    swipingRef.current = false
+    if (showVisualRef.current) {
+      setTransitionStyle('transform 200ms ease-out')
+      setTranslateX(0)
+      setTimeout(() => {
+        setIsSwiping(false)
+        setProgress(0)
+        setTransitionStyle('')
+      }, 200)
+    } else {
+      setIsSwiping(false)
+      setProgress(0)
+    }
+  }, [])
+
+  // iOS cancels touches it claims for system gestures (e.g. edge swipe);
+  // without this the gesture stays "swiping" and pins the drawer open.
+  const handleTouchCancel = useCallback(
+    (e: TouchEvent) => {
+      if (!swipingRef.current) return
+      e.stopPropagation()
+      cancelSwipe()
+    },
+    [cancelSwipe]
   )
 
   const handleTouchEnd = useCallback(
@@ -151,6 +195,7 @@ export function useSwipeBack({
       const container = containerRef.current
       if (!container) {
         setIsSwiping(false)
+        setProgress(0)
         if (showVisualRef.current) setTranslateX(0)
         return
       }
@@ -180,6 +225,7 @@ export function useSwipeBack({
             // Reset after callback
             setTranslateX(0)
             setIsSwiping(false)
+            setProgress(0)
             setTransitionStyle('')
             firedRef.current = false
           }, 200)
@@ -189,22 +235,14 @@ export function useSwipeBack({
           onSwipeBackRef.current()
           if (showVisualRef.current) setTranslateX(0)
           setIsSwiping(false)
+          setProgress(0)
           firedRef.current = false
         }
       } else {
-        if (showVisualRef.current) {
-          setTransitionStyle('transform 200ms ease-out')
-          setTranslateX(0)
-          setTimeout(() => {
-            setIsSwiping(false)
-            setTransitionStyle('')
-          }, 200)
-        } else {
-          setIsSwiping(false)
-        }
+        cancelSwipe()
       }
     },
-    [threshold, progressDelta]
+    [threshold, progressDelta, cancelSwipe]
   )
 
   useEffect(() => {
@@ -212,16 +250,35 @@ export function useSwipeBack({
     const el = containerRef.current
     if (!el) return
 
+    // Tell the browser that vertical scrolling is allowed, but horizontal
+    // movement belongs to this gesture. This avoids waiting for the browser's
+    // native pan decision before the drawer starts following the finger.
+    const previousTouchAction = el.style.touchAction
+    el.style.touchAction = 'pan-y'
+
     el.addEventListener('touchstart', handleTouchStart, { passive: true })
     el.addEventListener('touchmove', handleTouchMove, { passive: false })
     el.addEventListener('touchend', handleTouchEnd, { passive: true })
+    el.addEventListener('touchcancel', handleTouchCancel, { passive: true })
 
     return () => {
       el.removeEventListener('touchstart', handleTouchStart)
       el.removeEventListener('touchmove', handleTouchMove)
       el.removeEventListener('touchend', handleTouchEnd)
+      el.removeEventListener('touchcancel', handleTouchCancel)
+      el.style.touchAction = previousTouchAction
+      // Disabled (or re-bound) mid-gesture: the closing touchend never
+      // reaches us, so drop the gesture instead of leaving it stuck.
+      if (swipingRef.current) cancelSwipe()
     }
-  }, [enabled, handleTouchStart, handleTouchMove, handleTouchEnd])
+  }, [
+    enabled,
+    handleTouchStart,
+    handleTouchMove,
+    handleTouchEnd,
+    handleTouchCancel,
+    cancelSwipe,
+  ])
 
-  return { containerRef, translateX, isSwiping, transitionStyle }
+  return { containerRef, translateX, isSwiping, progress, transitionStyle }
 }

@@ -12,11 +12,42 @@ vi.mock('./projects', () => ({
 
 import {
   attachSessionReference,
+  filterIssues,
   getAdvisoryContextContent,
   isGhAuthError,
   isUnsupportedGitHubRepoError,
   sessionReferenceSlug,
 } from './github'
+import type { GitHubIssue } from '@/types/github'
+
+describe('GitHub issue search', () => {
+  const issues: GitHubIssue[] = [
+    {
+      number: 1,
+      title: 'Login fails',
+      body: 'The sign-in button stays disabled',
+      state: 'open',
+      labels: [],
+      created_at: '2026-01-01',
+      author: { login: 'alice' },
+    },
+    {
+      number: 2,
+      title: 'Improve navigation',
+      body: 'Update the project list',
+      state: 'open',
+      labels: [],
+      created_at: '2026-01-01',
+      author: { login: 'bob' },
+    },
+  ]
+
+  it('matches issue titles and descriptions', () => {
+    expect(filterIssues(issues, 'login fails')).toEqual([issues[0]])
+    expect(filterIssues(issues, 'button stays disabled')).toEqual([issues[0]])
+    expect(filterIssues(issues, 'project list')).toEqual([issues[1]])
+  })
+})
 
 describe('GitHub service error classification', () => {
   it('does not treat unknown GitHub host remotes as auth errors', () => {

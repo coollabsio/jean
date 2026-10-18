@@ -1,12 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@/test/test-utils'
-import { MessageDiffModal, undoEdit, patchFromEdits } from './MessageDiffModal'
+import {
+  MessageDiffModal,
+  undoEdit,
+  applyEdit,
+  patchFromEdits,
+  reconstructFileStates,
+  extractFilePatch,
+  type EditTool,
+} from './MessageDiffModal'
 import { useState, type ReactNode } from 'react'
+import userEvent from '@testing-library/user-event'
+import { invoke, invokeForOptionalServer } from '@/lib/transport'
 
 let tauriAvailable = false
 let editorAvailable = false
 let mobile = false
 let mockFileContent: string | undefined = undefined
+let mockCheckpointRawPatch = ''
 
 vi.mock('@/hooks/use-theme', () => ({
   useTheme: () => ({ theme: 'light' }),
@@ -30,17 +41,28 @@ vi.mock('@/lib/environment', () => ({
   canOpenInEditor: () => editorAvailable,
 }))
 
-vi.mock('@/lib/transport', () => ({
-  invoke: vi.fn(async (cmd: string) => {
+vi.mock('@/lib/transport', () => {
+  const invoke = vi.fn(async (cmd: string, _args?: unknown) => {
     if (cmd === 'read_file_content') {
       if (mockFileContent === undefined) {
         throw new Error('file content not mocked')
       }
       return mockFileContent
     }
+    if (cmd === 'get_ai_checkpoint_diff') {
+      return { raw_patch: mockCheckpointRawPatch, files: [] }
+    }
+    if (cmd === 'open_file_in_default_app') return undefined
     throw new Error(`unexpected invoke: ${cmd}`)
-  }),
-}))
+  })
+  return {
+    invoke,
+    invokeForOptionalServer: vi.fn(
+      (_serverId: string | undefined, cmd: string, args?: unknown) =>
+        invoke(cmd, args)
+    ),
+  }
+})
 
 vi.mock('@pierre/diffs/react', () => ({
   FileDiff: ({ fileDiff }: { fileDiff: unknown }) => {
@@ -54,7 +76,6 @@ vi.mock('@pierre/diffs/edit', () => ({
   // Constructable stub; pierre-edit does `new Editor(options)`.
   Editor: vi.fn(),
 }))
-
 const patch = `Index: src/example.ts
 ===================================================================
 --- src/example.ts
@@ -79,6 +100,101 @@ describe('undoEdit', () => {
   })
 })
 
+describe('replace_all edits', () => {
+  it('undoes every occurrence when the edit used replace_all', () => {
+    expect(undoEdit('Y and Y and Y', 'X', 'Y', true)).toBe('X and X and X')
+  })
+
+  it('applies every occurrence forward when the edit used replace_all', () => {
+    expect(applyEdit('X X', edit('X', 'Y', { replace_all: true }))).toBe('Y Y')
+    expect(applyEdit('X X', edit('X', 'Y'))).toBe('Y X')
+  })
+})
+
+const FILE = '/repo/src/file.ts'
+
+function edit(
+  oldStr: string,
+  newStr: string,
+  extra: Partial<EditTool['input']> = {}
+): EditTool {
+  return {
+    name: 'Edit',
+    input: {
+      file_path: FILE,
+      old_string: oldStr,
+      new_string: newStr,
+      ...extra,
+    },
+  }
+}
+
+function write(content: string): EditTool {
+  return {
+    name: 'Write',
+    input: { file_path: FILE, old_string: '', new_string: content },
+  }
+}
+
+describe('reconstructFileStates', () => {
+  it('reverse-replays Edits from disk content', () => {
+    expect(reconstructFileStates('a\nc\n', [edit('b\n', 'c\n')], [])).toEqual({
+      before: 'a\nb\n',
+      after: 'a\nc\n',
+    })
+  })
+
+  it('handles a later Write after an earlier Edit (prior content known)', () => {
+    // Earlier message wrote the file, this message edited it, a later message
+    // overwrote everything — the disk no longer reflects this edit.
+    const states = reconstructFileStates(
+      'rewritten\n',
+      [edit('two\n', '2\n')],
+      [write('rewritten\n')],
+      [write('one\ntwo\n')]
+    )
+    expect(states).toEqual({ before: 'one\ntwo\n', after: 'one\n2\n' })
+  })
+
+  it('returns null after a later Write when prior content is unknown', () => {
+    // Caller falls back to patchFromEdits instead of diffing an empty file.
+    expect(
+      reconstructFileStates(
+        'rewritten\n',
+        [edit('two\n', '2\n')],
+        [write('rewritten\n')]
+      )
+    ).toBeNull()
+  })
+
+  it('handles a Write in this message followed by a later Edit', () => {
+    expect(
+      reconstructFileStates('a\nc\n', [write('a\nb\n')], [edit('b\n', 'c\n')])
+    ).toEqual({ before: '', after: 'a\nb\n' })
+  })
+
+  it('derives the after state from this Write when a later Write exists', () => {
+    expect(
+      reconstructFileStates(
+        'final\n',
+        [write('mine\n'), edit('mine', 'ours')],
+        [write('final\n')]
+      )
+    ).toEqual({ before: '', after: 'ours\n' })
+  })
+
+  it('diffs an overwrite Write against the previously known content', () => {
+    expect(
+      reconstructFileStates(
+        'new\nshared\n',
+        [write('new\nshared\n')],
+        [],
+        [write('old\nshared\n'), edit('shared', 'shared')]
+      )
+    ).toEqual({ before: 'old\nshared\n', after: 'new\nshared\n' })
+  })
+})
+
 describe('patchFromEdits', () => {
   it('builds a deletion patch for a single empty-new_string edit', () => {
     const raw = patchFromEdits('docs/service.md', [
@@ -97,8 +213,118 @@ describe('patchFromEdits', () => {
   })
 })
 
+describe('extractFilePatch', () => {
+  const raw = [
+    'diff --git a/deploy/nginx.conf b/deploy/nginx.conf',
+    '--- a/deploy/nginx.conf',
+    '+++ b/deploy/nginx.conf',
+    '@@ -1 +1 @@',
+    '-a',
+    '+b',
+    'diff --git a/nginx.conf b/nginx.conf',
+    '--- a/nginx.conf',
+    '+++ b/nginx.conf',
+    '@@ -1 +1 @@',
+    '-c',
+    '+d',
+    '',
+  ].join('\n')
+
+  it('returns only the section of the requested file', () => {
+    const section = extractFilePatch(raw, 'nginx.conf')
+    expect(section).toContain('+d')
+    expect(section).not.toContain('+b')
+    expect(extractFilePatch(raw, 'deploy/nginx.conf')).toContain('+b')
+  })
+
+  it('returns null when the file is not in the patch', () => {
+    expect(extractFilePatch(raw, 'missing.txt')).toBeNull()
+  })
+})
+
+describe('MessageDiffModal file source', () => {
+  beforeEach(() => {
+    vi.mocked(invoke).mockClear()
+    vi.mocked(invokeForOptionalServer).mockClear()
+    mockFileContent = undefined
+    mockCheckpointRawPatch = ''
+  })
+
+  it('reads the file from the server that owns it', async () => {
+    mockFileContent = 'const a = 2\n'
+    render(
+      <MessageDiffModal
+        isOpen
+        onClose={vi.fn()}
+        filePath="/repo/a.ts"
+        worktreePath="/repo"
+        edits={[
+          {
+            name: 'Edit',
+            input: {
+              file_path: '/repo/a.ts',
+              old_string: 'const a = 1',
+              new_string: 'const a = 2',
+            },
+          },
+        ]}
+        serverId="devserver"
+      />
+    )
+
+    expect(await screen.findByTestId('file-diff')).toBeInTheDocument()
+    expect(invokeForOptionalServer).toHaveBeenCalledWith(
+      'devserver',
+      'read_file_content',
+      { path: '/repo/a.ts' }
+    )
+  })
+
+  it('shows the turn checkpoint diff for a file changed without file tools', async () => {
+    mockCheckpointRawPatch = [
+      'diff --git a/other.ts b/other.ts',
+      '--- a/other.ts',
+      '+++ b/other.ts',
+      '@@ -1 +1 @@',
+      '-x',
+      '+y',
+      'diff --git a/deploy/nginx.conf b/deploy/nginx.conf',
+      '--- a/deploy/nginx.conf',
+      '+++ b/deploy/nginx.conf',
+      '@@ -1,1 +1,2 @@',
+      ' listen 80;',
+      '+return 301;',
+      '',
+    ].join('\n')
+    render(
+      <MessageDiffModal
+        isOpen
+        onClose={vi.fn()}
+        filePath="/repo/deploy/nginx.conf"
+        worktreePath="/repo"
+        edits={[]}
+        checkpointDiff={{
+          worktreeId: 'wt-1',
+          checkpointId: 'cp-1',
+          path: 'deploy/nginx.conf',
+        }}
+      />
+    )
+
+    const diff = await screen.findByTestId('file-diff')
+    expect(diff.textContent).toContain('return 301;')
+    expect(diff.textContent).not.toContain('other.ts')
+    expect(screen.getByText('+1')).toBeVisible()
+    expect(invoke).not.toHaveBeenCalledWith(
+      'read_file_content',
+      expect.anything()
+    )
+  })
+})
+
 describe('MessageDiffModal header', () => {
   beforeEach(() => {
+    vi.mocked(invoke).mockClear()
     tauriAvailable = false
     editorAvailable = false
     mobile = false
@@ -183,6 +409,30 @@ describe('MessageDiffModal header', () => {
     const closeButton = screen.getByRole('button', { name: 'Close' })
 
     expect(openButton.parentElement).toBe(closeButton.parentElement)
+  })
+
+  it('opens a relative remote file under its worktree path', async () => {
+    editorAvailable = true
+
+    render(
+      <MessageDiffModal
+        isOpen
+        onClose={vi.fn()}
+        filePath="apps/server/src/integration_routes.rs"
+        worktreePath="/srv/jean/project"
+        edits={[]}
+        patch={patch}
+      />
+    )
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: /Open in Editor/i })
+    )
+
+    expect(invoke).toHaveBeenCalledWith('open_file_in_default_app', {
+      path: '/srv/jean/project/apps/server/src/integration_routes.rs',
+      editor: undefined,
+    })
   })
 
   it('hides the open-in-editor button on mobile', async () => {
@@ -348,5 +598,23 @@ describe('MessageDiffModal empty-file edits', () => {
     const diff = await screen.findByTestId('file-diff')
     expect(diff).toHaveTextContent('removed head')
     expect(screen.queryByText('No changes to display')).not.toBeInTheDocument()
+  })
+  it('diffs an overwrite Write against earlier known content', async () => {
+    mockFileContent = 'new line\nshared\n'
+    render(
+      <MessageDiffModal
+        isOpen
+        onClose={vi.fn()}
+        filePath="/repo/src/file.ts"
+        worktreePath="/repo"
+        edits={[write('new line\nshared\n')]}
+        previousEdits={[write('old line\nshared\n')]}
+      />
+    )
+
+    const diff = await screen.findByTestId('file-diff')
+    expect(diff).toHaveTextContent('old line')
+    expect(screen.getByText('+1')).toBeVisible()
+    expect(screen.getByText('-1')).toBeVisible()
   })
 })

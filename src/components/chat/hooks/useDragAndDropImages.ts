@@ -10,7 +10,10 @@ import {
 } from '../image-constants'
 import { isLocalBackend } from '@/lib/environment'
 import { dragHasFiles } from '@/lib/drag-drop-utils'
-import { processAttachmentFiles } from '../attachment-processing'
+import {
+  isTextFilename,
+  processAttachmentFiles,
+} from '../attachment-processing'
 
 /** Tracks image paths currently being processed to prevent duplicates */
 const processingPaths = new Set<string>()
@@ -130,17 +133,14 @@ export function useDragAndDropImages(
           const paths = [...new Set(event.payload.paths)]
           const imagePaths: string[] = []
           const svgPaths: string[] = []
+          const textPaths: string[] = []
+          const filePaths: string[] = []
           for (const path of paths) {
             const ext = path.split('.').pop()?.toLowerCase() ?? ''
             if (ALLOWED_IMAGE_EXTENSIONS.includes(ext)) imagePaths.push(path)
             else if (ext === SVG_EXTENSION) svgPaths.push(path)
-          }
-
-          if (imagePaths.length === 0 && svgPaths.length === 0) {
-            toast.error('No image detected', {
-              description: 'Only PNG, JPEG, GIF, WebP, SVG files are accepted',
-            })
-            return
+            else if (isTextFilename(path)) textPaths.push(path)
+            else filePaths.push(path)
           }
 
           // Process raster images
@@ -153,12 +153,18 @@ export function useDragAndDropImages(
             processDroppedSvg(sourcePath, sessionId)
           }
 
-          // Notify if some files were skipped
-          const skippedCount =
-            paths.length - imagePaths.length - svgPaths.length
-          if (skippedCount > 0) {
-            toast.warning(`${skippedCount} file(s) skipped`, {
-              description: 'Only images are accepted',
+          for (const sourcePath of textPaths) {
+            processDroppedText(sourcePath, sessionId)
+          }
+
+          const { addPendingFile } = useChatStore.getState()
+          for (const sourcePath of filePaths) {
+            const filename = sourcePath.split(/[/\\]/).pop() ?? sourcePath
+            addPendingFile(sessionId, {
+              id: `file-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              relativePath: sourcePath,
+              extension: filename.split('.').pop()?.toLowerCase() ?? '',
+              isDirectory: false,
             })
           }
         } else if (event.payload.type === 'leave') {
@@ -217,6 +223,35 @@ export async function processDroppedSvg(
     toast.error('Failed to save SVG', {
       description: String(error),
     })
+  } finally {
+    processingPaths.delete(sourcePath)
+  }
+}
+
+/** Read a dropped text file so it gets the same preview as pasted text. */
+export async function processDroppedText(
+  sourcePath: string,
+  sessionId: string
+): Promise<void> {
+  if (processingPaths.has(sourcePath)) return
+  processingPaths.add(sourcePath)
+
+  try {
+    const { readTextFile } = await import('@tauri-apps/plugin-fs')
+    const content = await readTextFile(sourcePath)
+    const filename = sourcePath.split(/[/\\]/).pop() ?? 'attachment.txt'
+    const result = await invoke<SaveTextResponse>('save_pasted_text', {
+      content,
+      filename,
+    })
+    useChatStore.getState().addPendingTextFile(sessionId, {
+      ...result,
+      filename,
+      content,
+    })
+  } catch (error) {
+    console.error('Failed to save dropped text file:', error)
+    toast.error('Failed to save text file', { description: String(error) })
   } finally {
     processingPaths.delete(sourcePath)
   }

@@ -732,6 +732,8 @@ pub async fn install_opencode_cli(app: AppHandle, version: Option<String>) -> Re
         crate::platform::wsl_write_bytes(&wsl.distro, &unix_path, &binary_data)
             .map_err(|e| format!("Failed to write binary into WSL: {e}"))?;
         crate::platform::wsl_chmod_exec(&wsl.distro, &unix_path)?;
+        #[cfg(windows)]
+        crate::expose_managed_cli_in_wsl(&wsl.distro, "opencode", &unix_path);
         emit_progress(&app, "complete", "OpenCode CLI installed", 100);
         log::trace!("OpenCode CLI installed successfully at WSL:{unix_path}");
         return Ok(());
@@ -771,6 +773,7 @@ pub async fn install_opencode_cli(app: AppHandle, version: Option<String>) -> Re
     }
 
     emit_progress(&app, "complete", "OpenCode CLI installed", 100);
+    crate::expose_managed_cli("opencode", &binary_path);
     Ok(())
 }
 

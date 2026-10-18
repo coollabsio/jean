@@ -15,7 +15,7 @@ import {
   Loader2,
   Wand2,
   RefreshCw,
-} from 'lucide-react'
+} from '@/components/icons/reicon'
 import {
   Tooltip,
   TooltipTrigger,
@@ -35,7 +35,7 @@ import { useUIStore } from '@/store/ui-store'
 import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { useWorkflowRuns, githubQueryKeys } from '@/services/github'
-import { projectsQueryKeys } from '@/services/projects'
+import { projectsQueryKeys, useProjects } from '@/services/projects'
 import {
   useCreateSession,
   useSendMessage,
@@ -62,6 +62,7 @@ import {
   getLatestFailedWorkflowRuns,
   isFailedWorkflowRun,
   isReusableWorkflowInvestigationSession,
+  resolveOpenWorkflowWorktree,
 } from './workflow-run-utils'
 
 function timeAgo(dateString: string): string {
@@ -85,14 +86,14 @@ function extractRunId(url: string): string {
 
 function RunStatusIcon({ run }: { run: WorkflowRun }) {
   if (run.status === 'in_progress' || run.status === 'queued') {
-    return <Clock className="h-4 w-4 shrink-0 text-yellow-500" />
+    return <Clock className="h-4 w-4 shrink-0 text-warning" />
   }
   switch (run.conclusion) {
     case 'success':
-      return <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />
+      return <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
     case 'failure':
     case 'startup_failure':
-      return <XCircle className="h-4 w-4 shrink-0 text-red-500" />
+      return <XCircle className="h-4 w-4 shrink-0 text-destructive" />
     case 'cancelled':
     case 'skipped':
       return <MinusCircle className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -121,9 +122,9 @@ const SidebarItem = forwardRef<
 >(({ label, count, latestStatus, isSelected, isFocused, onClick }, ref) => {
   const countBg =
     latestStatus === 'success'
-      ? 'bg-green-500/10 text-green-600 dark:text-green-400'
+      ? 'bg-success/10 text-success'
       : latestStatus === 'failure'
-        ? 'bg-red-500/10 text-red-500'
+        ? 'bg-destructive/10 text-destructive'
         : 'bg-muted text-muted-foreground'
 
   return (
@@ -155,7 +156,6 @@ export function WorkflowRunsModal() {
   const setSessionBackend = useSetSessionBackend()
   const setSessionModel = useSetSessionModel()
   const setSessionProvider = useSetSessionProvider()
-  const { data: preferences } = usePreferences()
 
   const workflowRunsModalOpen = useUIStore(state => state.workflowRunsModalOpen)
   const workflowRunsModalProjectPath = useUIStore(
@@ -164,6 +164,11 @@ export function WorkflowRunsModal() {
   const workflowRunsModalBranch = useUIStore(
     state => state.workflowRunsModalBranch
   )
+  const { data: projects } = useProjects()
+  const targetServerId = projects?.find(
+    project => project.path === workflowRunsModalProjectPath
+  )?.serverId
+  const { data: preferences } = usePreferences(targetServerId)
   const setWorkflowRunsModalOpen = useUIStore(
     state => state.setWorkflowRunsModalOpen
   )
@@ -450,8 +455,23 @@ export function WorkflowRunsModal() {
 
       // Final fallback: use active worktree
       if (!targetWorktreeId || !targetWorktreePath) {
-        targetWorktreeId = useChatStore.getState().activeWorktreeId
-        targetWorktreePath = useChatStore.getState().activeWorktreePath
+        const chatState = useChatStore.getState()
+        const modalWorktreeId = useUIStore.getState().sessionChatModalWorktreeId
+        const cachedWorktreeLists = queryClient
+          .getQueriesData<Worktree[]>({
+            queryKey: projectsQueryKeys.all,
+          })
+          .flatMap(([queryKey, data]) =>
+            queryKey[1] === 'worktrees' && Array.isArray(data) ? [data] : []
+          )
+        const openWorktree = resolveOpenWorkflowWorktree(
+          chatState.activeWorktreeId,
+          chatState.activeWorktreePath,
+          modalWorktreeId,
+          cachedWorktreeLists
+        )
+        targetWorktreeId = openWorktree?.id ?? null
+        targetWorktreePath = openWorktree?.path ?? null
       }
 
       if (!targetWorktreeId || !targetWorktreePath) {
@@ -535,10 +555,8 @@ export function WorkflowRunsModal() {
           backend: investigateBackend,
           customProfileName: investigateCustomProfile,
           parallelExecutionPrompt:
-            preferences?.parallel_execution_prompt_enabled
-              ? (preferences.magic_prompts?.parallel_execution ??
-                DEFAULT_PARALLEL_EXECUTION_PROMPT)
-              : undefined,
+            preferences?.magic_prompts?.parallel_execution ??
+            DEFAULT_PARALLEL_EXECUTION_PROMPT,
           chromeEnabled: preferences?.chrome_enabled ?? false,
           aiLanguage: preferences?.ai_language,
         })
@@ -831,7 +849,7 @@ export function WorkflowRunsModal() {
                             {run.headBranch}
                           </span>
                           {unreadOnOpen.has(run.databaseId) && (
-                            <span className="shrink-0 rounded bg-blue-500/15 px-1 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400">
+                            <span className="shrink-0 rounded bg-info/15 px-1 py-0.5 text-[10px] font-medium text-info">
                               New
                             </span>
                           )}
@@ -844,7 +862,7 @@ export function WorkflowRunsModal() {
                                     e.stopPropagation()
                                     handleInvestigate(run)
                                   }}
-                                  className="shrink-0 inline-flex items-center gap-0.5 rounded bg-black px-1 py-0.5 text-[10px] text-white transition-colors hover:bg-black/80 dark:bg-yellow-500/20 dark:text-yellow-400 dark:hover:bg-yellow-500/30 dark:hover:text-yellow-300"
+                                  className="shrink-0 inline-flex items-center gap-0.5 rounded bg-primary px-1 py-0.5 text-[10px] text-primary-foreground transition-colors hover:bg-primary/80"
                                 >
                                   <Wand2 className="h-3 w-3" />
                                   <span>M</span>

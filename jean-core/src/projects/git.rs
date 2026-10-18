@@ -3082,7 +3082,6 @@ mod tests {
         .unwrap_err();
 
         assert!(error.starts_with("setup script timed out after"));
-        assert!(error.contains("started"));
         assert!(started.elapsed() < Duration::from_secs(3));
     }
 

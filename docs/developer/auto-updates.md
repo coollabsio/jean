@@ -21,6 +21,18 @@ Users can manually check for updates via:
 
 ## Architecture
 
+### Background CLI upgrades
+
+Managed CLI installs and updates can be minimized after the process starts.
+`CliReinstallModal` keeps its setup hook mounted, and terminal-based updates
+keep the PTY and exit listener mounted while only the dialog portal is removed.
+The shared `minimizedCliUpdate` value in `ui-store` drives a compact titlebar
+indicator. Selecting the indicator restores the dialog. A completed minimized
+operation clears the state and reports success or failure with a toast.
+
+Login commands stay modal because they can require user input. Only terminal
+actions marked as `update` or `install` show the minimize control.
+
 ### Update Flow
 
 ```

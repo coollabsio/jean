@@ -3,6 +3,21 @@ import { render, screen } from '@/test/test-utils'
 import { MessageSettingsBadges } from './MessageSettingsBadges'
 
 describe('MessageSettingsBadges', () => {
+  it('renders the provider stored on a user message', () => {
+    render(
+      <MessageSettingsBadges
+        model="claude-sonnet-4-6[1m]"
+        provider="OpenRouter"
+        executionMode="build"
+        thinkingLevel={undefined}
+        effortLevel="high"
+        isCursor={false}
+      />
+    )
+
+    expect(screen.getByText('· OpenRouter')).toBeVisible()
+  })
+
   it('renders Codex fast model labels instead of raw ids', () => {
     render(
       <MessageSettingsBadges
@@ -15,7 +30,7 @@ describe('MessageSettingsBadges', () => {
     )
 
     expect(screen.getByText('Codex · GPT 5.5 Fast')).toBeVisible()
-    expect(screen.getByText('· Yolo')).toBeVisible()
+    expect(screen.getByText('· Full access')).toBeVisible()
     expect(screen.getByText('· Medium')).toBeVisible()
   })
 
@@ -74,7 +89,7 @@ describe('MessageSettingsBadges', () => {
       />
     )
 
-    expect(screen.getByText('· Yolo')).toBeVisible()
+    expect(screen.getByText('· Full access')).toBeVisible()
     expect(screen.getByText('· Medium')).toBeVisible()
   })
 
@@ -122,7 +137,7 @@ describe('MessageSettingsBadges', () => {
     )
 
     expect(screen.getByText('Claude · claude-sonnet-5-1')).toBeVisible()
-    expect(screen.getByText('· Yolo')).toBeVisible()
+    expect(screen.getByText('· Full access')).toBeVisible()
     expect(screen.getByText('· Megathink')).toBeVisible()
   })
 
@@ -138,7 +153,7 @@ describe('MessageSettingsBadges', () => {
     )
 
     expect(screen.getByText('OpenCode · Claude 3.5 Haiku')).toBeVisible()
-    expect(screen.getByText('· Build')).toBeVisible()
+    expect(screen.getByText('· Auto-accept edits')).toBeVisible()
   })
 
   it('formats CommandCode prompt model labels with backend prefix', () => {
@@ -184,7 +199,7 @@ describe('MessageSettingsBadges', () => {
     )
 
     expect(screen.getByText('Grok · 4.5')).toBeVisible()
-    expect(screen.getByText('· Yolo')).toBeVisible()
+    expect(screen.getByText('· Full access')).toBeVisible()
     expect(screen.getByText('· Medium')).toBeVisible()
     expect(screen.queryByText('Grok 4.5')).toBeNull()
   })
@@ -201,7 +216,7 @@ describe('MessageSettingsBadges', () => {
     )
 
     expect(screen.getByText('Kimi Code · Kimi for Coding')).toBeVisible()
-    expect(screen.getByText('· Build')).toBeVisible()
+    expect(screen.getByText('· Auto-accept edits')).toBeVisible()
     expect(screen.getByText('· High')).toBeVisible()
   })
 

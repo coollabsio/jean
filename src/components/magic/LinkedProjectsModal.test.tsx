@@ -6,6 +6,18 @@ import { LinkedProjectsModal } from './LinkedProjectsModal'
 
 const mutateMock = vi.fn()
 let projectsMock: Project[] = []
+const remoteConnectionMock = vi.hoisted(() => ({
+  activeName: null as string | null,
+  connections: [] as { name: string; url: string }[],
+}))
+
+vi.mock('@/lib/remote-connections', () => ({
+  getActiveRemoteConnection: () =>
+    remoteConnectionMock.activeName
+      ? { name: remoteConnectionMock.activeName }
+      : null,
+  getRemoteConnections: () => remoteConnectionMock.connections,
+}))
 
 vi.mock('@/services/projects', () => ({
   useProjects: () => ({ data: projectsMock }),
@@ -43,6 +55,8 @@ function renderModal() {
 describe('LinkedProjectsModal', () => {
   beforeEach(() => {
     mutateMock.mockReset()
+    remoteConnectionMock.activeName = null
+    remoteConnectionMock.connections = []
     projectsMock = [
       project({
         id: 'current-project',
@@ -100,5 +114,74 @@ describe('LinkedProjectsModal', () => {
       'dark:bg-input/50',
       'shadow-sm'
     )
+  })
+
+  it('gives the project list a scrollable fixed-height viewport', () => {
+    renderModal()
+
+    const viewport = document.querySelector(
+      '[data-slot="scroll-area-viewport"]'
+    )
+    expect(viewport?.parentElement).toHaveClass('h-48', 'min-h-0')
+    expect(viewport).toHaveClass('overflow-y-auto')
+  })
+
+  it('shows the serving instance instead of Local in Web Access', () => {
+    renderModal()
+
+    expect(screen.getAllByText(window.location.host).length).toBeGreaterThan(0)
+    expect(screen.queryByText('Local')).not.toBeInTheDocument()
+  })
+
+  it('uses the custom name of the active remote instance', () => {
+    remoteConnectionMock.activeName = 'Production'
+
+    renderModal()
+
+    expect(screen.getAllByText('Production').length).toBeGreaterThan(0)
+    expect(screen.queryByText(window.location.host)).not.toBeInTheDocument()
+  })
+
+  it('uses the saved custom name when Web Access serves that connection', () => {
+    remoteConnectionMock.connections = [
+      { name: 'Production', url: window.location.origin },
+    ]
+
+    renderModal()
+
+    expect(screen.getAllByText('Production').length).toBeGreaterThan(0)
+    expect(screen.queryByText(window.location.host)).not.toBeInTheDocument()
+  })
+
+  it('shows instance names and only offers projects from the current instance', () => {
+    projectsMock = [
+      project({
+        id: 'dev:current-project',
+        resourceId: 'current-project',
+        name: 'current',
+        serverId: 'dev',
+        serverName: 'DEV Server',
+      }),
+      project({
+        id: 'dev:jean-dev',
+        resourceId: 'jean-dev',
+        name: 'jean',
+        serverId: 'dev',
+        serverName: 'DEV Server',
+      }),
+      project({ id: 'jean-local', name: 'jean' }),
+    ]
+
+    render(
+      <LinkedProjectsModal
+        open
+        onOpenChange={vi.fn()}
+        projectId="dev:current-project"
+      />
+    )
+
+    expect(screen.getByText('DEV Server')).toBeInTheDocument()
+    expect(screen.getAllByText('jean')).toHaveLength(1)
+    expect(screen.queryByText('Local')).not.toBeInTheDocument()
   })
 })

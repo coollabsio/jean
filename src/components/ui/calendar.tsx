@@ -5,7 +5,7 @@ import {
   ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
-} from 'lucide-react'
+} from '@/components/icons/reicon'
 import {
   type DayButton,
   DayPicker,

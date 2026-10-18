@@ -122,6 +122,21 @@ vi.mock('./hooks/useLoadContextData', () => ({
         url: 'https://linear.app/acme/issue/ENG-123',
       },
     ],
+    loadedSentryContexts: [
+      {
+        id: '123',
+        shortId: 'COOLIFY-BXB',
+        title: 'Failed Sentry context',
+        permalink: 'https://sentry.io/issues/123',
+        content: '# Sentry Issue COOLIFY-BXB: Failed Sentry context',
+      },
+    ],
+    isLoadingSentryContexts: false,
+    refetchSentryContexts: mocks.refetch,
+    isLoadingSentryIssues: false,
+    isRefetchingSentryIssues: false,
+    sentryIssuesError: null,
+    refetchSentryIssues: mocks.refetch,
     isLoadingLinearContexts: false,
     refetchLinearContexts: mocks.refetch,
     isLoadingLinearIssues: false,
@@ -134,6 +149,7 @@ vi.mock('./hooks/useLoadContextData', () => ({
     filteredSecurityAlerts: [],
     filteredAdvisories: [],
     filteredLinearIssues: [],
+    filteredSentryIssues: [],
     filteredContexts: [],
     filteredEntries: [],
     renameMutation: { mutate: vi.fn() },
@@ -142,6 +158,7 @@ vi.mock('./hooks/useLoadContextData', () => ({
     hasLoadedSecurityContexts: false,
     hasLoadedAdvisoryContexts: false,
     hasLoadedLinearContexts: true,
+    hasLoadedSentryContexts: true,
     hasAttachedContexts: false,
     hasContexts: false,
     hasSessions: false,
@@ -195,5 +212,50 @@ describe('LoadContextModal Linear context viewer', () => {
     expect(
       await screen.findByText(/Expected markdown content from Linear/)
     ).toBeInTheDocument()
+  })
+
+  it('offers Sentry as a context source', async () => {
+    render(
+      <LoadContextModal
+        open={true}
+        onOpenChange={vi.fn()}
+        worktreeId="wt-1"
+        worktreePath="/repo/worktree"
+        activeSessionId="session-1"
+        projectName="Jean"
+        projectId="project-1"
+      />
+    )
+
+    expect(
+      await screen.findByRole('button', { name: /Sentry/ })
+    ).toBeInTheDocument()
+  })
+
+  it('lets a failed loaded Sentry context be removed so it can be re-added', async () => {
+    const user = userEvent.setup()
+    mocks.invoke.mockResolvedValue(undefined)
+    render(
+      <LoadContextModal
+        open={true}
+        onOpenChange={vi.fn()}
+        worktreeId="wt-1"
+        worktreePath="/repo/worktree"
+        activeSessionId="session-1"
+        projectName="Jean"
+        projectId="project-1"
+      />
+    )
+
+    await user.click(await screen.findByRole('button', { name: /Sentry/ }))
+    await user.click(
+      await screen.findByRole('button', { name: 'Remove COOLIFY-BXB' })
+    )
+
+    expect(mocks.invoke).toHaveBeenCalledWith('remove_sentry_issue_context', {
+      sessionId: 'session-1',
+      projectId: 'project-1',
+      issueId: '123',
+    })
   })
 })

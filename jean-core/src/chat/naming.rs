@@ -7,7 +7,7 @@ use crate::claude_cli::resolve_cli_binary;
 use crate::projects::git;
 use crate::projects::storage::{load_projects_data, save_projects_data};
 
-use super::storage::with_sessions_mut;
+use super::storage::{load_sessions, with_sessions_mut};
 use crate::http_server::EmitExt;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
@@ -61,6 +61,8 @@ pub enum NamingStage {
     Validation,
     SessionStorage,
     GitRename,
+    /// Session was renamed (e.g. manually) while the name was being generated
+    Superseded,
 }
 
 /// Naming error with context
@@ -255,8 +257,11 @@ fn get_cli_model_alias(model: &str) -> &'static str {
 /// Also accepts StructuredOutput tool_use blocks (from --json-schema) so naming
 /// keeps working if Claude returns JSON via the tool-call path instead of text.
 fn extract_text_from_stream_json(output: &str) -> Result<String, String> {
+    if let Some(value) = super::claude::extract_claude_structured_output(output) {
+        return Ok(value.to_string());
+    }
+
     let mut text_content = String::new();
-    let mut structured_json: Option<String> = None;
 
     for line in output.lines() {
         let line = line.trim();
@@ -273,17 +278,9 @@ fn extract_text_from_stream_json(output: &str) -> Result<String, String> {
             if let Some(message) = parsed.get("message") {
                 if let Some(content) = message.get("content").and_then(|c| c.as_array()) {
                     for block in content {
-                        let block_type = block.get("type").and_then(|t| t.as_str());
-                        if block_type == Some("text") {
+                        if block.get("type").and_then(|t| t.as_str()) == Some("text") {
                             if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
                                 text_content.push_str(text);
-                            }
-                        } else if block_type == Some("tool_use")
-                            && block.get("name").and_then(|n| n.as_str())
-                                == Some("StructuredOutput")
-                        {
-                            if let Some(input) = block.get("input") {
-                                structured_json = Some(input.to_string());
                             }
                         }
                     }
@@ -298,10 +295,6 @@ fn extract_text_from_stream_json(output: &str) -> Result<String, String> {
                 }
             }
         }
-    }
-
-    if let Some(json) = structured_json {
-        return Ok(json);
     }
 
     if text_content.is_empty() {
@@ -1028,45 +1021,55 @@ fn validate_branch_name(name: &str) -> Result<String, String> {
 }
 
 /// Apply session name to storage
+///
+/// `name_at_start` is the session name when generation began. If the stored
+/// name differs now, the user renamed the session meanwhile and the generated
+/// name is discarded (`NamingStage::Superseded`).
 fn apply_session_name(
     app: &AppHandle,
     request: &NamingRequest,
     new_name: &str,
+    name_at_start: Option<&str>,
 ) -> Result<SessionNameResult, NamingError> {
     let worktree_path_str = request.worktree_path.to_string_lossy();
     let new_name_owned = new_name.to_string();
 
-    with_sessions_mut(app, &worktree_path_str, &request.worktree_id, |sessions| {
+    let applied = with_sessions_mut(app, &worktree_path_str, &request.worktree_id, |sessions| {
         let session = sessions
             .find_session_mut(&request.session_id)
             .ok_or_else(|| "Session not found".to_string())?;
 
-        let old_name = session.name.clone();
-
-        if old_name == new_name_owned {
-            return Ok(SessionNameResult {
-                session_id: request.session_id.clone(),
-                worktree_id: request.worktree_id.clone(),
-                old_name,
-                new_name: new_name_owned.clone(),
-            });
+        if is_superseded(name_at_start, &session.name) {
+            return Ok(None);
         }
 
-        session.name = new_name_owned.clone();
+        let old_name = std::mem::replace(&mut session.name, new_name_owned.clone());
 
-        Ok(SessionNameResult {
+        Ok(Some(SessionNameResult {
             session_id: request.session_id.clone(),
             worktree_id: request.worktree_id.clone(),
             old_name,
             new_name: new_name_owned.clone(),
-        })
+        }))
     })
     .map_err(|e| NamingError {
         session_id: Some(request.session_id.clone()),
         worktree_id: request.worktree_id.clone(),
         error: e,
         stage: NamingStage::SessionStorage,
+    })?;
+
+    applied.ok_or_else(|| NamingError {
+        session_id: Some(request.session_id.clone()),
+        worktree_id: request.worktree_id.clone(),
+        error: "Session was renamed while generating a name".to_string(),
+        stage: NamingStage::Superseded,
     })
+}
+
+/// True when the session name changed since naming started (manual rename).
+fn is_superseded(name_at_start: Option<&str>, current_name: &str) -> bool {
+    name_at_start.is_some_and(|start| start != current_name)
 }
 
 /// Apply branch name via git rename
@@ -1123,6 +1126,23 @@ fn execute_naming(app: &AppHandle, request: &NamingRequest) {
         return;
     }
 
+    // Remember the current session name so a manual rename during generation wins
+    let session_name_at_start = if request.generate_session_name {
+        load_sessions(
+            app,
+            &request.worktree_path.to_string_lossy(),
+            &request.worktree_id,
+        )
+        .ok()
+        .and_then(|sessions| {
+            sessions
+                .find_session(&request.session_id)
+                .map(|s| s.name.clone())
+        })
+    } else {
+        None
+    };
+
     // Generate names
     let naming_result = match generate_names(app, request) {
         Ok(result) => result,
@@ -1139,6 +1159,9 @@ fn execute_naming(app: &AppHandle, request: &NamingRequest) {
                 stage: NamingStage::Generation,
             };
             let _ = app.emit_all("naming-failed", &error);
+            if request.generate_session_name {
+                let _ = app.emit_all("session-naming-failed", &error);
+            }
             return;
         }
     };
@@ -1147,7 +1170,12 @@ fn execute_naming(app: &AppHandle, request: &NamingRequest) {
     if request.generate_session_name {
         if let Some(session_name) = &naming_result.session_name {
             match validate_session_name(session_name) {
-                Ok(validated_name) => match apply_session_name(app, request, &validated_name) {
+                Ok(validated_name) => match apply_session_name(
+                    app,
+                    request,
+                    &validated_name,
+                    session_name_at_start.as_deref(),
+                ) {
                     Ok(result) => {
                         log::info!(
                             "[Naming] Session renamed from '{}' to '{}' (session={})",
@@ -1181,6 +1209,13 @@ fn execute_naming(app: &AppHandle, request: &NamingRequest) {
             }
         } else {
             log::warn!("No session name in response");
+            let error = NamingError {
+                session_id: Some(request.session_id.clone()),
+                worktree_id: request.worktree_id.clone(),
+                error: "Naming response did not include a session name".to_string(),
+                stage: NamingStage::Generation,
+            };
+            let _ = app.emit_all("session-naming-failed", &error);
         }
     }
 
@@ -1241,6 +1276,16 @@ pub fn spawn_naming_task(app: AppHandle, request: NamingRequest) {
         request.generate_branch_name
     );
 
+    if request.generate_session_name {
+        let _ = app.emit_all(
+            "session-naming-started",
+            &serde_json::json!({
+                "session_id": request.session_id,
+                "worktree_id": request.worktree_id,
+            }),
+        );
+    }
+
     std::thread::spawn(move || {
         execute_naming(&app, &request);
     });
@@ -1249,6 +1294,13 @@ pub fn spawn_naming_task(app: AppHandle, request: NamingRequest) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn manual_rename_during_generation_supersedes_generated_name() {
+        assert!(is_superseded(Some("Session 1"), "My custom title"));
+        assert!(!is_superseded(Some("Session 1"), "Session 1"));
+        assert!(!is_superseded(None, "Session 1"));
+    }
 
     #[test]
     fn extract_text_prefers_structured_output_tool_call() {

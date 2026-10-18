@@ -15,9 +15,15 @@
 //!       "notion":     { "type": "remote", "url": "https://...", "enabled": true }
 //!     }
 //!   }
+//!
+//! Remote, managed, and env config servers come from `opencode mcp list`
+//! (see [`crate::chat::mcp_external`]).
 
-use crate::chat::McpServerInfo;
+use crate::chat::mcp_external::{self, ExternalServer};
+use crate::chat::{McpHealthStatus, McpServerInfo};
 use std::collections::HashSet;
+use std::process::Stdio;
+use tauri::AppHandle;
 
 /// Discover OpenCode MCP servers from all configuration sources.
 /// Precedence (highest to lowest): project → global.
@@ -57,7 +63,65 @@ pub fn get_mcp_servers(worktree_path: Option<&str>) -> Vec<McpServerInfo> {
         log::warn!("OpenCode MCP: dirs::home_dir() returned None");
     }
 
+    mcp_external::append("opencode", worktree_path, &mut servers);
     log::debug!("OpenCode MCP: discovered {} servers total", servers.len());
+    servers
+}
+
+/// Run `opencode mcp list` and return its stdout.
+pub fn run_mcp_list(app: &AppHandle, worktree_path: Option<&str>) -> Result<String, String> {
+    let cli_path = super::resolve_cli_binary(app);
+    if !cli_path.exists() {
+        return Err("OpenCode CLI not installed".to_string());
+    }
+    log::debug!("Running: opencode mcp list");
+    let output = crate::platform::cli_command(
+        &cli_path.to_string_lossy(),
+        worktree_path.map(std::path::Path::new),
+    )
+    .args(["mcp", "list"])
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped())
+    .output()
+    .map_err(|e| format!("Failed to run opencode mcp list: {e}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("opencode mcp list failed: {stderr}"));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+/// Parse `opencode mcp list` output. Each server is one line
+/// `● <icon> <name> <status>`, then optional error lines, then the URL or command.
+pub fn parse_mcp_list_output(output: &str) -> Vec<ExternalServer> {
+    let mut servers: Vec<ExternalServer> = Vec::new();
+    for line in crate::cursor_cli::mcp::strip_ansi(output).lines() {
+        let text = line.trim().trim_start_matches(['●', '│']).trim();
+        let mut chars = text.chars();
+        if let Some('✓' | '○' | '⚠' | '✗') = chars.next() {
+            let rest = chars.as_str().trim();
+            let (name, status) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
+            let status = status.trim();
+            let mut server = ExternalServer::new(name, "", "cli");
+            server.status = Some(if status.starts_with("connected") {
+                McpHealthStatus::Connected
+            } else if status.starts_with("disabled") {
+                McpHealthStatus::Disabled
+            } else if status.starts_with("needs authentication") {
+                McpHealthStatus::NeedsAuthentication
+            } else if status.starts_with("failed") || status.starts_with("needs client") {
+                McpHealthStatus::CouldNotConnect
+            } else {
+                McpHealthStatus::Unknown
+            });
+            servers.push(server);
+        } else if let Some(server) = servers.last_mut() {
+            // The last line of a server block is its URL or command.
+            if !text.is_empty() && !text.starts_with(['└', '┌']) {
+                server.target = text.to_string();
+            }
+        }
+    }
     servers
 }
 
@@ -179,4 +243,25 @@ fn strip_jsonc_comments(input: &str) -> String {
     }
 
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_opencode_mcp_list_output() {
+        let output = "\u{1b}[0m\n┌  MCP Servers\n│\n●  ✓ agent-browser \u{1b}[90mconnected\n│      \u{1b}[90m/bin/agent-browser mcp\n│\n●  ⚠ notion \u{1b}[90mneeds authentication\n│      \u{1b}[90mhttps://mcp.notion.com/mcp\n│\n●  ✗ broken \u{1b}[90mfailed\n    spawn ENOENT\n    missing-cmd\n│\n└  3 server(s)\n";
+        let servers = parse_mcp_list_output(output);
+        assert_eq!(servers.len(), 3);
+        assert_eq!(servers[0].name, "agent-browser");
+        assert_eq!(servers[0].target, "/bin/agent-browser mcp");
+        assert_eq!(servers[0].status, Some(McpHealthStatus::Connected));
+        assert_eq!(
+            servers[1].status,
+            Some(McpHealthStatus::NeedsAuthentication)
+        );
+        assert_eq!(servers[2].target, "missing-cmd");
+        assert_eq!(servers[2].status, Some(McpHealthStatus::CouldNotConnect));
+    }
 }

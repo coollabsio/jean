@@ -10,13 +10,19 @@ import {
 } from '@/components/ui/alert-dialog'
 import { usePreferences } from '@/services/preferences'
 import { useUIStore } from '@/store/ui-store'
+import { closeConfirmBypassLabel } from '@/lib/confirm-bypass'
+import { isNativeApp } from '@/lib/environment'
+import { useIsMobile } from '@/hooks/use-mobile'
+
+// 'session' follows the removal behavior preference; 'session-archive' always archives.
+export type CloseConfirmMode = 'worktree' | 'session' | 'session-archive'
 
 interface CloseWorktreeDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onConfirm: () => void
   branchName?: string
-  mode?: 'worktree' | 'session'
+  mode?: CloseConfirmMode
 }
 
 export function CloseWorktreeDialog({
@@ -47,8 +53,17 @@ function CloseWorktreeDialogContent({
   mode = 'worktree',
 }: CloseWorktreeDialogProps) {
   const { data: preferences } = usePreferences()
-  const isDelete = (preferences?.removal_behavior ?? 'delete') === 'delete'
-  const isSession = mode === 'session'
+  const isMobile = useIsMobile()
+  const bypassLabel = closeConfirmBypassLabel(
+    preferences?.close_confirm_bypass_modifier
+  )
+  const isArchiveOnly = mode === 'session-archive'
+  // The explicit "Archive Session" menu action never reads the bypass modifier.
+  const showBypassHint =
+    isNativeApp() && !isMobile && !isArchiveOnly && bypassLabel !== null
+  const isDelete =
+    !isArchiveOnly && (preferences?.removal_behavior ?? 'delete') === 'delete'
+  const isSession = mode !== 'worktree'
   const title = isSession
     ? isDelete
       ? 'Delete session?'
@@ -66,7 +81,6 @@ function CloseWorktreeDialogContent({
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent
-        onEscapeKeyDown={e => e.stopPropagation()}
         onKeyDown={e => {
           if (e.key === 'Enter') {
             e.preventDefault()
@@ -96,6 +110,11 @@ function CloseWorktreeDialogContent({
                   </button>
                 </p>
               )}
+              {showBypassHint && (
+                <p className="text-xs text-muted-foreground">
+                  Hold {bypassLabel} while closing to skip this confirmation.
+                </p>
+              )}
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -104,13 +123,13 @@ function CloseWorktreeDialogContent({
           <AlertDialogAction
             autoFocus
             onClick={onConfirm}
-            className={
-              isDelete
-                ? 'bg-destructive text-white hover:bg-destructive/90'
-                : undefined
-            }
+            variant={isDelete ? 'destructive' : undefined}
           >
-            {isDelete ? 'Delete' : 'Archive & Close'}
+            {isDelete
+              ? 'Delete'
+              : isArchiveOnly
+                ? 'Archive'
+                : 'Archive & Close'}
             <kbd className="ml-1.5 text-xs opacity-70">↵</kbd>
           </AlertDialogAction>
         </AlertDialogFooter>

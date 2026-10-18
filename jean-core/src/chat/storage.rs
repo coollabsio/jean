@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
-use std::io::{BufReader, BufWriter};
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -175,21 +175,14 @@ fn load_index_internal(app: &AppHandle, worktree_id: &str) -> Result<WorktreeInd
 fn save_index_internal(app: &AppHandle, index: &WorktreeIndex) -> Result<(), String> {
     log::trace!("Saving index for worktree: {}", index.worktree_id);
     let path = get_index_path(app, &index.worktree_id)?;
-    let temp_path = path.with_extension("tmp");
-
     let json_content = serde_json::to_string_pretty(index).map_err(|e| {
         log::error!("Failed to serialize index: {e}");
         format!("Failed to serialize index: {e}")
     })?;
 
-    fs::write(&temp_path, &json_content).map_err(|e| {
-        log::error!("Failed to write index file: {e}");
-        format!("Failed to write index: {e}")
-    })?;
-
-    fs::rename(&temp_path, &path).map_err(|e| {
-        log::error!("Failed to finalize index file: {e}");
-        format!("Failed to finalize index: {e}")
+    crate::platform::write_file_atomically(&path, json_content.as_bytes()).map_err(|error| {
+        log::error!("Failed to save index file: {error}");
+        error
     })?;
 
     log::trace!(
@@ -241,6 +234,32 @@ where
     Ok(result)
 }
 
+/// Keep the index's unread summary synchronized with a metadata write.
+///
+/// Metadata is the authoritative session store, so this helper only updates an
+/// existing index entry. Legacy or partially-created indexes are repaired by
+/// the unread-count command when it encounters a missing summary.
+pub fn update_session_index_unread_summary(
+    app: &AppHandle,
+    metadata: &SessionMetadata,
+) -> Result<(), String> {
+    let summary = metadata.to_unread_summary();
+    let lock = get_index_lock(&metadata.worktree_id);
+    let _guard = lock.lock().unwrap();
+
+    let mut index = load_index_internal(app, &metadata.worktree_id)?;
+    let Some(entry) = index.find_session_mut(&metadata.id) else {
+        return Ok(());
+    };
+
+    if entry.unread_summary.as_ref() == Some(&summary) {
+        return Ok(());
+    }
+
+    entry.unread_summary = Some(summary);
+    save_index_internal(app, &index)
+}
+
 // ============================================================================
 // Metadata Operations (SessionMetadata)
 // ============================================================================
@@ -274,16 +293,11 @@ fn save_metadata_internal(app: &AppHandle, metadata: &SessionMetadata) -> Result
 
 fn save_metadata_file(app: &AppHandle, metadata: &SessionMetadata) -> Result<(), String> {
     let path = get_metadata_path(app, &metadata.id)?;
-    let temp_path = path.with_extension("tmp");
-
-    let file = File::create(&temp_path)
-        .map_err(|e| format!("Failed to create temp metadata file: {e}"))?;
-
-    let writer = BufWriter::new(file);
-    serde_json::to_writer_pretty(writer, metadata)
+    let json_content = serde_json::to_vec_pretty(metadata)
         .map_err(|e| format!("Failed to write metadata: {e}"))?;
 
-    fs::rename(&temp_path, &path).map_err(|e| format!("Failed to rename metadata file: {e}"))?;
+    crate::platform::write_file_atomically(&path, &json_content)
+        .map_err(|error| format!("Failed to save metadata file: {error}"))?;
 
     log::trace!("Saved metadata for session: {}", metadata.id);
     Ok(())
@@ -296,11 +310,76 @@ pub fn load_metadata(app: &AppHandle, session_id: &str) -> Result<Option<Session
     load_metadata_internal(app, session_id)
 }
 
+/// Resolve MCP sessions against existing worktrees, including index-only empty
+/// sessions and metadata left behind when a base worktree is reopened.
+pub fn load_mcp_session_metadata(
+    app: &AppHandle,
+    session_id: &str,
+) -> Result<Option<SessionMetadata>, String> {
+    let metadata = load_metadata(app, session_id)?;
+    let projects = crate::projects::storage::load_projects_data(app)?;
+    if metadata
+        .as_ref()
+        .is_some_and(|metadata| projects.find_worktree(&metadata.worktree_id).is_some())
+    {
+        return Ok(metadata);
+    }
+
+    // Only inspect indexes owned by actual worktrees. Preserved indexes for
+    // closed base worktrees must not make those sessions runnable.
+    for worktree in &projects.worktrees {
+        let index_lock = get_index_lock(&worktree.id);
+        let _index_guard = index_lock.lock().unwrap();
+        if !get_index_path(app, &worktree.id)?.exists() {
+            continue;
+        }
+        let index = load_index_internal(app, &worktree.id)?;
+        let Some(entry) = index.sessions.iter().find(|entry| entry.id == session_id) else {
+            continue;
+        };
+
+        let metadata_lock = get_metadata_lock(session_id);
+        let _metadata_guard = metadata_lock.lock().unwrap();
+        let mut metadata = load_metadata_internal(app, session_id)?.unwrap_or_else(|| {
+            let mut metadata = SessionMetadata::new(
+                entry.id.clone(),
+                worktree.id.clone(),
+                entry.name.clone(),
+                entry.order,
+            );
+            metadata.backend = super::commands::resolve_default_backend(app, Some(&worktree.id));
+            let preferences = crate::load_preferences_sync(app).ok();
+            let policy = super::commands::default_execution_policy(
+                app,
+                &worktree.id,
+                &metadata.backend,
+                preferences.map(|prefs| prefs.default_execution_mode),
+            );
+            metadata.selected_permission_mode = Some(if policy == "plan" {
+                "yolo".to_string()
+            } else {
+                policy.clone()
+            });
+            metadata.selected_execution_mode = Some(policy);
+            metadata.archived_at = entry.archived_at;
+            metadata
+        });
+        metadata.worktree_id = worktree.id.clone();
+        save_metadata_internal(app, &metadata)?;
+        return Ok(Some(metadata));
+    }
+
+    Ok(metadata)
+}
+
 /// Save session metadata (with locking for thread safety)
 pub fn save_metadata(app: &AppHandle, metadata: &SessionMetadata) -> Result<(), String> {
-    let lock = get_metadata_lock(&metadata.id);
-    let _guard = lock.lock().unwrap();
-    save_metadata_internal(app, metadata)
+    {
+        let lock = get_metadata_lock(&metadata.id);
+        let _guard = lock.lock().unwrap();
+        save_metadata_internal(app, metadata)?;
+    }
+    update_session_index_unread_summary(app, metadata)
 }
 
 /// Atomically load, modify, and save an existing session's metadata.
@@ -314,14 +393,21 @@ pub fn with_existing_metadata_mut<F, T>(
 where
     F: FnOnce(&mut SessionMetadata) -> T,
 {
-    let lock = get_metadata_lock(session_id);
-    let _guard = lock.lock().unwrap();
+    let (result, previous_summary, metadata) = {
+        let lock = get_metadata_lock(session_id);
+        let _guard = lock.lock().unwrap();
 
-    let mut metadata = load_metadata_internal(app, session_id)?
-        .ok_or_else(|| format!("Session {session_id} not found"))?;
+        let mut metadata = load_metadata_internal(app, session_id)?
+            .ok_or_else(|| format!("Session {session_id} not found"))?;
+        let previous_summary = metadata.to_unread_summary();
+        let result = f(&mut metadata);
+        save_metadata_internal(app, &metadata)?;
+        (result, previous_summary, metadata)
+    };
 
-    let result = f(&mut metadata);
-    save_metadata_internal(app, &metadata)?;
+    if previous_summary != metadata.to_unread_summary() {
+        update_session_index_unread_summary(app, &metadata)?;
+    }
 
     Ok(result)
 }
@@ -339,20 +425,31 @@ pub fn with_metadata_mut<F, T>(
 where
     F: FnOnce(&mut SessionMetadata) -> Result<T, String>,
 {
-    let lock = get_metadata_lock(session_id);
-    let _guard = lock.lock().unwrap();
+    let (result, previous_summary, metadata) = {
+        let lock = get_metadata_lock(session_id);
+        let _guard = lock.lock().unwrap();
 
-    let mut metadata = load_metadata_internal(app, session_id)?.unwrap_or_else(|| {
-        SessionMetadata::new(
-            session_id.to_string(),
-            worktree_id.to_string(),
-            session_name.to_string(),
-            order,
-        )
-    });
+        let existing_metadata = load_metadata_internal(app, session_id)?;
+        let previous_summary = existing_metadata
+            .as_ref()
+            .map(SessionMetadata::to_unread_summary);
+        let mut metadata = existing_metadata.unwrap_or_else(|| {
+            SessionMetadata::new(
+                session_id.to_string(),
+                worktree_id.to_string(),
+                session_name.to_string(),
+                order,
+            )
+        });
 
-    let result = f(&mut metadata)?;
-    save_metadata_internal(app, &metadata)?;
+        let result = f(&mut metadata)?;
+        save_metadata_internal(app, &metadata)?;
+        (result, previous_summary, metadata)
+    };
+
+    if previous_summary.as_ref() != Some(&metadata.to_unread_summary()) {
+        update_session_index_unread_summary(app, &metadata)?;
+    }
 
     Ok(result)
 }
@@ -481,6 +578,47 @@ pub fn list_all_session_ids(app: &AppHandle) -> Result<Vec<String>, String> {
     Ok(session_ids)
 }
 
+/// Worktree ID of a session, from the session index files. New sessions have
+/// no metadata file until their first run, so callers that only have a
+/// session ID (Jean MCP) use this as a fallback.
+pub fn find_session_worktree_id(
+    app: &AppHandle,
+    session_id: &str,
+) -> Result<Option<String>, String> {
+    find_session_worktree_id_in_dir(&get_index_dir(app)?, session_id)
+}
+
+fn find_session_worktree_id_in_dir(
+    index_dir: &Path,
+    session_id: &str,
+) -> Result<Option<String>, String> {
+    let entries = fs::read_dir(index_dir)
+        .map_err(|e| format!("Failed to read session index directory: {e}"))?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_none_or(|ext| ext != "json") {
+            continue;
+        }
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        // Cheap filter before parsing every index file.
+        if !text.contains(session_id) {
+            continue;
+        }
+        let Ok(index) = serde_json::from_str::<serde_json::Value>(&text) else {
+            continue;
+        };
+        let has_session = index["sessions"]
+            .as_array()
+            .is_some_and(|sessions| sessions.iter().any(|s| s["id"] == session_id));
+        if has_session {
+            return Ok(index["worktree_id"].as_str().map(str::to_string));
+        }
+    }
+    Ok(None)
+}
+
 /// Delete orphaned session data directories that are not referenced by any index file.
 /// Returns the number of orphaned directories deleted.
 pub fn cleanup_orphaned_session_data(app: &AppHandle) -> Result<u32, String> {
@@ -569,7 +707,8 @@ fn cleanup_orphaned_session_indexes_in_dir(
             continue;
         };
 
-        if valid_index_stems.contains(stem) {
+        // Agent sessions use reserved IDs with no worktree record.
+        if valid_index_stems.contains(stem) || crate::agents::is_agent_worktree_id(stem) {
             continue;
         }
 
@@ -713,11 +852,20 @@ pub fn load_sessions(
         } else {
             // No metadata found - create minimal session from index entry
             // Use resolved backend from preferences instead of hardcoded Claude
+            let backend = super::commands::resolve_default_backend(app, Some(worktree_id));
+            let execution_mode = super::commands::default_execution_policy(
+                app,
+                worktree_id,
+                &backend,
+                crate::load_preferences_sync(app)
+                    .ok()
+                    .map(|prefs| prefs.default_execution_mode),
+            );
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs();
-            Session {
+            let mut session = Session {
                 id: entry.id.clone(),
                 name: entry.name.clone(),
                 order: entry.order,
@@ -726,7 +874,7 @@ pub fn load_sessions(
                 last_message_at: None,
                 messages: vec![],
                 message_count: Some(entry.message_count),
-                backend: super::commands::resolve_default_backend(app, Some(worktree_id)),
+                backend,
                 claude_session_id: None,
                 codex_thread_id: None,
                 codex_goal: None,
@@ -742,6 +890,7 @@ pub fn load_sessions(
                 selected_effort_level: None,
                 selected_provider: None,
                 selected_execution_mode: None,
+                selected_permission_mode: Some("yolo".to_string()),
                 session_naming_completed: false,
                 archived_at: entry.archived_at,
                 archived_by_base_close: None,
@@ -771,6 +920,8 @@ pub fn load_sessions(
                 pending_plan_message_id: None,
                 enabled_mcp_servers: None,
                 table_checked_rows: std::collections::HashMap::new(),
+                hidden_table_checklists: vec![],
+                pinned_tables: vec![],
                 last_run_status: None,
                 last_run_execution_mode: None,
                 last_run_started_at: None,
@@ -779,7 +930,10 @@ pub fn load_sessions(
                 total_runs: 0,
                 loaded_run_start_index: 0,
                 scheduled_wakeup: None,
-            }
+            };
+            // Persist an explicit policy: a missing field reloads as legacy Plan.
+            session.set_execution_policy(Some(execution_mode));
+            session
         };
         sessions.push(session);
     }
@@ -819,11 +973,20 @@ where
         } else {
             // No metadata found - create minimal session from index entry
             // Use resolved backend from preferences instead of hardcoded Claude
+            let backend = super::commands::resolve_default_backend(app, Some(worktree_id));
+            let execution_mode = super::commands::default_execution_policy(
+                app,
+                worktree_id,
+                &backend,
+                crate::load_preferences_sync(app)
+                    .ok()
+                    .map(|prefs| prefs.default_execution_mode),
+            );
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs();
-            Session {
+            let mut session = Session {
                 id: entry.id.clone(),
                 name: entry.name.clone(),
                 order: entry.order,
@@ -832,7 +995,7 @@ where
                 last_message_at: None,
                 messages: vec![],
                 message_count: Some(entry.message_count),
-                backend: super::commands::resolve_default_backend(app, Some(worktree_id)),
+                backend,
                 claude_session_id: None,
                 codex_thread_id: None,
                 codex_goal: None,
@@ -848,6 +1011,7 @@ where
                 selected_effort_level: None,
                 selected_provider: None,
                 selected_execution_mode: None,
+                selected_permission_mode: Some("yolo".to_string()),
                 session_naming_completed: false,
                 archived_at: entry.archived_at,
                 archived_by_base_close: None,
@@ -877,6 +1041,8 @@ where
                 pending_plan_message_id: None,
                 enabled_mcp_servers: None,
                 table_checked_rows: std::collections::HashMap::new(),
+                hidden_table_checklists: vec![],
+                pinned_tables: vec![],
                 last_run_status: None,
                 last_run_execution_mode: None,
                 last_run_started_at: None,
@@ -885,7 +1051,10 @@ where
                 total_runs: 0,
                 loaded_run_start_index: 0,
                 scheduled_wakeup: None,
-            }
+            };
+            // Persist an explicit policy: a missing field reloads as legacy Plan.
+            session.set_execution_policy(Some(execution_mode));
+            session
         };
         hydrated_sessions.push(session);
     }
@@ -912,22 +1081,12 @@ where
 
     for session in &sessions.sessions {
         session_ids_in_use.insert(session.id.clone());
+        let updated_entry = SessionIndexEntry::from_session(session);
 
         if let Some(entry) = index.find_session_mut(&session.id) {
-            // Update existing entry
-            entry.name = session.name.clone();
-            entry.order = session.order;
-            entry.archived_at = session.archived_at;
-            entry.message_count = session.message_count.unwrap_or(0);
+            *entry = updated_entry;
         } else {
-            // Add new entry
-            index.sessions.push(SessionIndexEntry {
-                id: session.id.clone(),
-                name: session.name.clone(),
-                order: session.order,
-                message_count: session.message_count.unwrap_or(0),
-                archived_at: session.archived_at,
-            });
+            index.sessions.push(updated_entry);
         }
     }
 
@@ -967,6 +1126,85 @@ pub fn get_sessions_path(app: &AppHandle, worktree_id: &str) -> Result<PathBuf, 
 /// Load sessions by worktree_id only (for cleanup when worktree path may not exist)
 pub fn load_sessions_by_id(app: &AppHandle, worktree_id: &str) -> Result<WorktreeSessions, String> {
     load_sessions(app, "", worktree_id)
+}
+
+fn move_session_between_indexes(
+    source: &mut WorktreeIndex,
+    target: &mut WorktreeIndex,
+    metadata: &mut SessionMetadata,
+    session_id: &str,
+) -> Result<(), String> {
+    if source.worktree_id == target.worktree_id {
+        return Err("Source and target worktrees are the same".to_string());
+    }
+    if target
+        .sessions
+        .iter()
+        .any(|session| session.id == session_id)
+    {
+        return Err(format!(
+            "Session {session_id} already exists in target worktree"
+        ));
+    }
+    let source_position = source
+        .sessions
+        .iter()
+        .position(|session| session.id == session_id)
+        .ok_or_else(|| format!("Session {session_id} not found in source worktree"))?;
+
+    let mut entry = source.sessions.remove(source_position);
+    entry.order = target.sessions.len() as u32;
+    metadata.worktree_id = target.worktree_id.clone();
+    metadata.order = entry.order;
+    target.active_session_id = Some(session_id.to_string());
+    target.sessions.push(entry);
+
+    if source.active_session_id.as_deref() == Some(session_id) {
+        source.active_session_id = source.sessions.first().map(|session| session.id.clone());
+    }
+
+    Ok(())
+}
+
+/// Move an existing session to another worktree without changing its identity or data files.
+pub fn move_session(
+    app: &AppHandle,
+    source_worktree_id: &str,
+    target_worktree_id: &str,
+    session_id: &str,
+) -> Result<(), String> {
+    if source_worktree_id == target_worktree_id {
+        return Err("Source and target worktrees are the same".to_string());
+    }
+
+    let (first_id, second_id) = if source_worktree_id < target_worktree_id {
+        (source_worktree_id, target_worktree_id)
+    } else {
+        (target_worktree_id, source_worktree_id)
+    };
+    let first_lock = get_index_lock(first_id);
+    let second_lock = get_index_lock(second_id);
+    let _first_guard = first_lock.lock().unwrap();
+    let _second_guard = second_lock.lock().unwrap();
+    let metadata_lock = get_metadata_lock(session_id);
+    let _metadata_guard = metadata_lock.lock().unwrap();
+
+    let mut source = load_index_internal(app, source_worktree_id)?;
+    let mut target = load_index_internal(app, target_worktree_id)?;
+    let mut metadata = load_metadata_internal(app, session_id)?
+        .ok_or_else(|| format!("Session {session_id} not found"))?;
+    if metadata.worktree_id != source_worktree_id {
+        return Err(format!(
+            "Session {session_id} belongs to worktree {}, not {source_worktree_id}",
+            metadata.worktree_id
+        ));
+    }
+
+    move_session_between_indexes(&mut source, &mut target, &mut metadata, session_id)?;
+    save_index_internal(app, &source)?;
+    save_index_internal(app, &target)?;
+    save_metadata_internal(app, &metadata)?;
+    Ok(())
 }
 
 /// Get the path for a closed base session's preserved index file
@@ -1032,6 +1270,16 @@ pub fn restore_base_sessions(
 
     // Save to the new location
     save_index_internal(app, &index)?;
+
+    // Session metadata must follow the index when a base worktree is reopened.
+    for entry in &index.sessions {
+        let metadata_lock = get_metadata_lock(&entry.id);
+        let _metadata_guard = metadata_lock.lock().unwrap();
+        if let Some(mut metadata) = load_metadata_internal(app, &entry.id)? {
+            metadata.worktree_id = new_worktree_id.to_string();
+            save_metadata_internal(app, &metadata)?;
+        }
+    }
 
     // Delete the preserved file
     fs::remove_file(&preserved_path).map_err(|e| {
@@ -1128,14 +1376,11 @@ pub fn save_saved_contexts_metadata(
     let _lock = SAVED_CONTEXTS_LOCK.lock().unwrap();
 
     let path = get_saved_contexts_metadata_path(app)?;
-    let temp_path = path.with_extension("tmp");
-
     let json = serde_json::to_string_pretty(metadata)
         .map_err(|e| format!("Failed to serialize metadata: {e}"))?;
 
-    fs::write(&temp_path, &json).map_err(|e| format!("Failed to write metadata file: {e}"))?;
-
-    fs::rename(&temp_path, &path).map_err(|e| format!("Failed to finalize metadata file: {e}"))?;
+    crate::platform::write_file_atomically(&path, json.as_bytes())
+        .map_err(|error| format!("Failed to save metadata file: {error}"))?;
 
     Ok(())
 }
@@ -1143,6 +1388,145 @@ pub fn save_saved_contexts_metadata(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn restoring_base_sessions_updates_metadata_owner() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = AppHandle::new(temp.path().to_path_buf(), temp.path().to_path_buf()).unwrap();
+        let index = load_index(&app, "old-base").unwrap();
+        let entry = &index.sessions[0];
+        let mut metadata = SessionMetadata::new(
+            entry.id.clone(),
+            "old-base".to_string(),
+            entry.name.clone(),
+            entry.order,
+        );
+        metadata.codex_thread_id = Some("resume-thread".to_string());
+        save_metadata(&app, &metadata).unwrap();
+        preserve_base_sessions(&app, "old-base", "project").unwrap();
+
+        let restored = restore_base_sessions(&app, "project", "new-base")
+            .unwrap()
+            .unwrap();
+        let metadata = load_metadata(&app, &entry.id).unwrap().unwrap();
+        assert_eq!(restored.worktree_id, "new-base");
+        assert_eq!(metadata.worktree_id, "new-base");
+        assert_eq!(metadata.codex_thread_id.as_deref(), Some("resume-thread"));
+    }
+
+    #[test]
+    fn move_session_between_indexes_reassigns_complete_session() {
+        let moved_entry = SessionIndexEntry {
+            id: "session-move".to_string(),
+            name: "Investigate bug".to_string(),
+            order: 4,
+            message_count: 12,
+            archived_at: None,
+            unread_summary: None,
+        };
+        let remaining_entry = SessionIndexEntry {
+            id: "session-stays".to_string(),
+            name: "Other work".to_string(),
+            order: 1,
+            message_count: 3,
+            archived_at: None,
+            unread_summary: None,
+        };
+        let mut source = WorktreeIndex {
+            worktree_id: "source".to_string(),
+            active_session_id: Some(moved_entry.id.clone()),
+            sessions: vec![moved_entry.clone(), remaining_entry.clone()],
+            version: 1,
+            branch_naming_completed: true,
+        };
+        let target_existing = SessionIndexEntry {
+            id: "target-existing".to_string(),
+            name: "Existing".to_string(),
+            order: 0,
+            message_count: 0,
+            archived_at: None,
+            unread_summary: None,
+        };
+        let mut target = WorktreeIndex {
+            worktree_id: "target".to_string(),
+            active_session_id: Some(target_existing.id.clone()),
+            sessions: vec![target_existing],
+            version: 1,
+            branch_naming_completed: true,
+        };
+        let mut metadata = SessionMetadata::new(
+            moved_entry.id.clone(),
+            source.worktree_id.clone(),
+            moved_entry.name.clone(),
+            moved_entry.order,
+        );
+        metadata.claude_session_id = Some("claude-resume-id".to_string());
+
+        move_session_between_indexes(&mut source, &mut target, &mut metadata, "session-move")
+            .expect("move session");
+
+        assert_eq!(source.sessions.len(), 1);
+        assert_eq!(source.sessions[0].id, remaining_entry.id);
+        assert_eq!(source.active_session_id.as_deref(), Some("session-stays"));
+        assert_eq!(target.active_session_id.as_deref(), Some("session-move"));
+        assert_eq!(target.sessions.len(), 2);
+        assert_eq!(target.sessions[1].id, "session-move");
+        assert_eq!(target.sessions[1].order, 1);
+        assert_eq!(metadata.worktree_id, "target");
+        assert_eq!(metadata.order, 1);
+        assert_eq!(
+            metadata.claude_session_id.as_deref(),
+            Some("claude-resume-id")
+        );
+    }
+
+    #[test]
+    fn move_session_between_indexes_rejects_invalid_moves_without_mutation() {
+        let entry = SessionIndexEntry {
+            id: "session-1".to_string(),
+            name: "Session 1".to_string(),
+            order: 0,
+            message_count: 0,
+            archived_at: None,
+            unread_summary: None,
+        };
+        let source = WorktreeIndex {
+            worktree_id: "source".to_string(),
+            active_session_id: Some(entry.id.clone()),
+            sessions: vec![entry.clone()],
+            version: 1,
+            branch_naming_completed: true,
+        };
+        let target = WorktreeIndex {
+            worktree_id: "target".to_string(),
+            active_session_id: Some(entry.id.clone()),
+            sessions: vec![entry],
+            version: 1,
+            branch_naming_completed: true,
+        };
+        let metadata = SessionMetadata::new(
+            "session-1".to_string(),
+            "source".to_string(),
+            "Session 1".to_string(),
+            0,
+        );
+        let mut actual_source = source.clone();
+        let mut actual_target = target.clone();
+        let mut actual_metadata = metadata.clone();
+
+        let error = move_session_between_indexes(
+            &mut actual_source,
+            &mut actual_target,
+            &mut actual_metadata,
+            "session-1",
+        )
+        .unwrap_err();
+
+        assert!(error.contains("already exists"));
+        assert_eq!(actual_source.sessions.len(), source.sessions.len());
+        assert_eq!(actual_target.sessions.len(), target.sessions.len());
+        assert_eq!(actual_metadata.worktree_id, metadata.worktree_id);
+    }
 
     #[test]
     fn test_sanitize_filename() {
@@ -1224,6 +1608,7 @@ mod tests {
             order: 1,
             message_count: 0,
             archived_at: None,
+            unread_summary: None,
         });
         assert_eq!(index.sessions.len(), 2);
         assert_eq!(index.next_session_number(), 3);
@@ -1247,6 +1632,30 @@ mod tests {
     }
 
     #[test]
+    fn find_session_worktree_id_reads_index_files() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let index = serde_json::json!({
+            "worktree_id": "wt-1",
+            "sessions": [{ "id": "s-1" }, { "id": "s-2" }],
+        });
+        std::fs::write(temp.path().join("wt-1.json"), index.to_string()).unwrap();
+        std::fs::write(temp.path().join("broken.json"), "{ s-3").unwrap();
+        assert_eq!(
+            find_session_worktree_id_in_dir(temp.path(), "s-2").unwrap(),
+            Some("wt-1".to_string())
+        );
+        assert_eq!(
+            find_session_worktree_id_in_dir(temp.path(), "s-3").unwrap(),
+            None
+        );
+        // A substring match alone (no session with that ID) is not a match.
+        assert_eq!(
+            find_session_worktree_id_in_dir(temp.path(), "s-").unwrap(),
+            None
+        );
+    }
+
+    #[test]
     fn test_cleanup_orphaned_session_indexes_keeps_linked_and_base_indexes() {
         use std::collections::HashSet;
 
@@ -1258,6 +1667,10 @@ mod tests {
         std::fs::write(index_dir.join("orphan-wt.json"), "{}").expect("write orphan index");
         std::fs::write(index_dir.join("base-old-project.json"), "{}").expect("write stale base");
         std::fs::write(index_dir.join("notes.txt"), "ignore").expect("write non-json");
+        let jean_agent_index = "__jean_agent__.json";
+        let custom_agent_index = "__agent_reviewer__.json";
+        std::fs::write(index_dir.join(jean_agent_index), "{}").expect("write jean agent index");
+        std::fs::write(index_dir.join(custom_agent_index), "{}").expect("write agent index");
 
         let valid_stems = HashSet::from(["wt-1".to_string(), "base-project-1".to_string()]);
 
@@ -1270,6 +1683,8 @@ mod tests {
         assert!(!index_dir.join("orphan-wt.json").exists());
         assert!(!index_dir.join("base-old-project.json").exists());
         assert!(index_dir.join("notes.txt").exists());
+        assert!(index_dir.join(jean_agent_index).exists());
+        assert!(index_dir.join(custom_agent_index).exists());
     }
 
     #[test]

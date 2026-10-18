@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { Button } from '@/components/ui/button'
-import { RotateCcw } from 'lucide-react'
+import { RotateCcw } from '@/components/icons/reicon'
 import {
   Tooltip,
   TooltipTrigger,
@@ -27,7 +27,7 @@ function formatModifiersDisplay(modifiers: {
 
   const parts: string[] = []
   if (modifiers.meta || modifiers.ctrl)
-    parts.push(useMacCtrl ? '⌃' : isClientMacOS ? '⌘' : 'Ctrl')
+    parts.push(useMacCtrl ? 'Ctrl' : isClientMacOS ? '⌘' : 'Ctrl')
   if (modifiers.shift) parts.push(isClientMacOS ? '⇧' : 'Shift')
   if (modifiers.alt) parts.push(isClientMacOS ? '⌥' : 'Alt')
 

@@ -27,6 +27,17 @@ export const isNativeApp = (): boolean =>
 export const isLocalBackend = (): boolean =>
   isNativeApp() && getActiveRemoteConnection() === null
 
+/** Label for the Jean server a web access session talks to, so people running
+ * several servers can tell which one is asking for or holding a token. */
+let _webAccessServerName: string | null = null
+
+export const setWebAccessServerName = (name?: string | null): void => {
+  _webAccessServerName = name?.trim() || null
+}
+
+export const webAccessServerLabel = (): string =>
+  _webAccessServerName ?? window.location.host
+
 /**
  * Whether the connected Jean backend can open host apps (editor/finder/terminal).
  * Set from `/api/init` (`nativeOpenAllowed`) for web/remote clients. Local
@@ -54,12 +65,23 @@ export const canOpenRemoteEditorLocally = (): boolean =>
   getActiveRemoteConnection() !== null &&
   !isNativeOpenAllowed()
 
+/** Native desktop can open a local terminal that connects to the remote host. */
+export const canOpenRemoteTerminalLocally = (): boolean =>
+  canOpenRemoteEditorLocally()
+
 /**
  * Show Open in Editor: full host-native open, or remote Jean + local Zed CLI.
  * Finder/terminal still use `canOpenNativeApps()`.
  */
 export const canOpenInEditor = (): boolean =>
   canOpenNativeApps() || canOpenRemoteEditorLocally()
+
+export const canOpenInTerminal = (): boolean =>
+  canOpenNativeApps() || canOpenRemoteTerminalLocally()
+
+/** A file manager can only browse paths owned by the local desktop backend. */
+export const canOpenInFinder = (serverId?: string): boolean =>
+  isLocalBackend() && (!serverId || serverId === 'local')
 
 /** A backend is available (either Tauri IPC, WebSocket connection, or E2E mock). */
 export const hasBackend = (): boolean => {

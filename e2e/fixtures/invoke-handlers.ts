@@ -44,6 +44,7 @@ const uiState = {
  * use invokeOverrides in the fixture.
  */
 export const defaultResponses: Record<string, unknown> = {
+  get_acp_permission_requests: [],
   // Projects
   list_projects: [project],
   list_worktrees: [worktree1, worktree2],
@@ -59,6 +60,7 @@ export const defaultResponses: Record<string, unknown> = {
     messages: [],
   },
   list_all_sessions: { worktrees: {} },
+  list_unread_sessions: { entries: [] },
   create_session: {
     id: 'session-new',
     name: 'New Session',
@@ -74,6 +76,8 @@ export const defaultResponses: Record<string, unknown> = {
   // UI State
   load_ui_state: uiState,
   save_ui_state: null,
+  get_pinned_recent_session_ids: [],
+  set_recent_session_pinned: [],
 
   // CLI checks
   check_claude_cli_installed: { installed: true, version: '1.0.0' },

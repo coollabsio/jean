@@ -41,7 +41,9 @@ describe('CodexCommandApprovalRequestCard', () => {
     await user.click(screen.getByRole('button', { name: 'Approve' }))
     expect(onApprove).toHaveBeenCalled()
 
-    await user.click(screen.getByRole('button', { name: 'Approve (yolo)' }))
+    await user.click(
+      screen.getByRole('button', { name: 'Approve (Full access)' })
+    )
     expect(onApproveYolo).toHaveBeenCalled()
 
     await user.click(screen.getByRole('button', { name: 'Decline' }))
@@ -51,7 +53,7 @@ describe('CodexCommandApprovalRequestCard', () => {
     expect(onCancel).toHaveBeenCalled()
   })
 
-  it('always offers Approve (yolo) when Codex omits acceptForSession (issue #626)', async () => {
+  it('always offers Approve (Full access) when Codex omits acceptForSession (issue #626)', async () => {
     const user = userEvent.setup()
     const onApproveYolo = vi.fn()
 
@@ -76,14 +78,18 @@ describe('CodexCommandApprovalRequestCard', () => {
 
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument()
     expect(
-      screen.getByRole('button', { name: 'Approve (yolo)' })
+      screen.getByRole('button', { name: 'Approve (Full access)' })
     ).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Cancel turn' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Cancel turn' })
+    ).toBeInTheDocument()
     expect(
       screen.queryByRole('button', { name: 'Decline' })
     ).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Approve (yolo)' }))
+    await user.click(
+      screen.getByRole('button', { name: 'Approve (Full access)' })
+    )
     expect(onApproveYolo).toHaveBeenCalled()
   })
 })

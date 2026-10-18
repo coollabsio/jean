@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import userEvent from '@testing-library/user-event'
-import { render, screen } from '@/test/test-utils'
+import { fireEvent, render, screen } from '@/test/test-utils'
 import { WorktreeDropdownMenu } from './WorktreeDropdownMenu'
 import type { Worktree } from '@/types/projects'
 import type * as EnvironmentModule from '@/lib/environment'
@@ -9,6 +9,8 @@ const envMocks = vi.hoisted(() => ({
   isNativeApp: false,
   isLocalBackend: false,
   canOpenNativeApps: false,
+  canOpenInTerminal: false,
+  canOpenInFinder: false,
   canOpenInEditor: false,
   isMobile: true,
 }))
@@ -17,6 +19,11 @@ const actionMocks = vi.hoisted(() => ({
   handleRun: vi.fn(),
   handleRunCommand: vi.fn(),
   runScripts: ['bun run dev'] as string[],
+  patchPreferences: vi.fn(),
+}))
+
+vi.mock('@/services/preferences', () => ({
+  usePatchPreferences: () => ({ mutate: actionMocks.patchPreferences }),
 }))
 
 vi.mock('@/lib/environment', async importOriginal => ({
@@ -24,6 +31,9 @@ vi.mock('@/lib/environment', async importOriginal => ({
   isNativeApp: () => envMocks.isNativeApp,
   isLocalBackend: () => envMocks.isLocalBackend,
   canOpenNativeApps: () => envMocks.canOpenNativeApps,
+  canOpenInTerminal: () => envMocks.canOpenInTerminal,
+  canOpenInFinder: (serverId?: string) =>
+    envMocks.canOpenInFinder && (!serverId || serverId === 'local'),
   canOpenInEditor: () => envMocks.canOpenInEditor,
 }))
 
@@ -48,6 +58,7 @@ vi.mock('./useWorktreeMenuActions', () => ({
   useWorktreeMenuActions: () => ({
     showDeleteConfirm: false,
     setShowDeleteConfirm: vi.fn(),
+    deleteSkipTeardown: false,
     isBase: false,
     runScripts: actionMocks.runScripts,
     preferences: {},
@@ -57,6 +68,7 @@ vi.mock('./useWorktreeMenuActions', () => ({
     handleOpenInTerminal: vi.fn(),
     handleOpenInEditor: vi.fn(),
     handleArchiveOrClose: vi.fn(),
+    openDeleteConfirm: vi.fn(),
     handleDelete: vi.fn(),
   }),
 }))
@@ -77,11 +89,14 @@ describe('WorktreeDropdownMenu', () => {
     envMocks.isNativeApp = false
     envMocks.isLocalBackend = false
     envMocks.canOpenNativeApps = false
+    envMocks.canOpenInTerminal = false
+    envMocks.canOpenInFinder = false
     envMocks.canOpenInEditor = false
     envMocks.isMobile = true
     actionMocks.runScripts = ['bun run dev']
     actionMocks.handleRun.mockClear()
     actionMocks.handleRunCommand.mockClear()
+    actionMocks.patchPreferences.mockClear()
   })
 
   it('hides the jean.json run command in mobile web access', async () => {
@@ -99,6 +114,46 @@ describe('WorktreeDropdownMenu', () => {
 
     expect(screen.queryByRole('menuitem', { name: /run/i })).toBeNull()
     expect(actionMocks.handleRun).not.toHaveBeenCalled()
+  })
+
+  it('shows the Git item in web access when there are no changes', async () => {
+    const user = userEvent.setup()
+    const onUncommittedDiffClick = vi.fn()
+    envMocks.isMobile = false
+
+    render(
+      <WorktreeDropdownMenu
+        worktree={worktree}
+        projectId="project-1"
+        projectPath="/tmp/project"
+        onUncommittedDiffClick={onUncommittedDiffClick}
+      />
+    )
+
+    await user.click(screen.getByRole('button'))
+    await user.click(screen.getByRole('menuitem', { name: 'Git' }))
+
+    expect(onUncommittedDiffClick).toHaveBeenCalled()
+  })
+
+  it('hides the Git item on native desktop', async () => {
+    const user = userEvent.setup()
+    envMocks.isNativeApp = true
+    envMocks.isMobile = false
+
+    render(
+      <WorktreeDropdownMenu
+        worktree={worktree}
+        projectId="project-1"
+        projectPath="/tmp/project"
+        uncommittedAdded={3}
+        onUncommittedDiffClick={vi.fn()}
+      />
+    )
+
+    await user.click(screen.getByRole('button'))
+
+    expect(screen.queryByRole('menuitem', { name: /^git/i })).toBeNull()
   })
 
   it('hides open-in editor/terminal/finder on remote connections without native open', async () => {
@@ -128,6 +183,7 @@ describe('WorktreeDropdownMenu', () => {
     envMocks.isLocalBackend = false
     envMocks.canOpenNativeApps = false
     envMocks.canOpenInEditor = true
+    envMocks.canOpenInTerminal = true
     envMocks.isMobile = false
 
     render(
@@ -141,18 +197,21 @@ describe('WorktreeDropdownMenu', () => {
     await user.click(screen.getByRole('button'))
 
     expect(
-      screen.getByRole('menuitem', { name: /open in/i })
+      screen.getByRole('menuitem', { name: /open in editor/i })
     ).toBeInTheDocument()
     expect(
-      screen.queryByRole('menuitem', { name: /finder/i })
-    ).toBeNull()
+      screen.getByRole('menuitem', { name: /open in terminal/i })
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: /finder/i })).toBeNull()
   })
 
-  it('shows open-in editor/terminal/finder when the remote backend allows native open', async () => {
+  it('hides Finder when the remote backend allows native open', async () => {
     const user = userEvent.setup()
     envMocks.isNativeApp = true
     envMocks.isLocalBackend = false
     envMocks.canOpenNativeApps = true
+    envMocks.canOpenInTerminal = true
+    envMocks.canOpenInFinder = false
     envMocks.canOpenInEditor = true
     envMocks.isMobile = false
 
@@ -168,5 +227,148 @@ describe('WorktreeDropdownMenu', () => {
 
     const openItems = screen.getAllByRole('menuitem', { name: /open in/i })
     expect(openItems.length).toBeGreaterThanOrEqual(1)
+    expect(screen.queryByRole('menuitem', { name: /finder/i })).toBeNull()
+  })
+
+  it('hides Finder for a remote-owned worktree in the local aggregate view', async () => {
+    const user = userEvent.setup()
+    envMocks.isNativeApp = true
+    envMocks.isLocalBackend = true
+    envMocks.canOpenInFinder = true
+    envMocks.canOpenInEditor = true
+    envMocks.canOpenInTerminal = true
+    envMocks.isMobile = false
+
+    render(
+      <WorktreeDropdownMenu
+        worktree={{ ...worktree, serverId: 'remote-1' }}
+        projectId="remote-1:project-1"
+        projectPath="/tmp/project"
+      />
+    )
+
+    await user.click(screen.getByRole('button'))
+
+    expect(screen.queryByRole('menuitem', { name: /finder/i })).toBeNull()
+  })
+
+  it('shows issues, pull requests, and workflows on desktop when counts are zero', async () => {
+    const user = userEvent.setup()
+    envMocks.isMobile = false
+
+    render(
+      <WorktreeDropdownMenu
+        worktree={worktree}
+        projectId="project-1"
+        projectPath="/tmp/project"
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Actions' }))
+
+    expect(screen.getByRole('menuitem', { name: 'Issues' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('menuitem', { name: 'Pull Requests' })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('menuitem', { name: 'Workflows' })
+    ).toBeInTheDocument()
+  })
+
+  it('hides scripts and terminal from the mobile header menu', async () => {
+    const user = userEvent.setup()
+    const onToggleTerminal = vi.fn()
+    const onToggleBrowser = vi.fn()
+
+    render(
+      <WorktreeDropdownMenu
+        worktree={worktree}
+        projectId="project-1"
+        projectPath="/tmp/project"
+        onToggleTerminal={onToggleTerminal}
+        onToggleBrowser={onToggleBrowser}
+        packageScripts={[{ name: 'test', command: 'bun', args: ['test'] }]}
+        onRunPackageScript={vi.fn()}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Actions' }))
+    expect(screen.queryByRole('menuitem', { name: 'Terminal' })).toBeNull()
+    expect(screen.queryByText('Scripts')).toBeNull()
+    await user.click(screen.getByRole('menuitem', { name: 'Browser' }))
+    expect(onToggleBrowser).toHaveBeenCalledOnce()
+    expect(onToggleTerminal).not.toHaveBeenCalled()
+  })
+
+  it('shows terminal and scripts on web desktop', async () => {
+    const user = userEvent.setup()
+    const onToggleTerminal = vi.fn()
+    envMocks.isMobile = false
+
+    render(
+      <WorktreeDropdownMenu
+        worktree={worktree}
+        projectId="project-1"
+        projectPath="/tmp/project"
+        onToggleTerminal={onToggleTerminal}
+        packageScripts={[{ name: 'test', command: 'bun', args: ['test'] }]}
+        onRunPackageScript={vi.fn()}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Actions' }))
+    expect(
+      screen.getByRole('menuitem', { name: 'Terminal' })
+    ).toBeInTheDocument()
+    expect(screen.getByText('Scripts')).toBeInTheDocument()
+  })
+
+  it('hides scripts on native desktop where the scripts button is available', async () => {
+    const user = userEvent.setup()
+    envMocks.isNativeApp = true
+    envMocks.isMobile = false
+
+    render(
+      <WorktreeDropdownMenu
+        worktree={worktree}
+        projectId="project-1"
+        projectPath="/tmp/project"
+        packageScripts={[{ name: 'test', command: 'bun', args: ['test'] }]}
+        onRunPackageScript={vi.fn()}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Actions' }))
+    expect(screen.queryByText('Scripts')).toBeNull()
+  })
+
+  it('shows script icons, favorites, and a scrollable script submenu', async () => {
+    const user = userEvent.setup()
+    envMocks.isMobile = false
+
+    render(
+      <WorktreeDropdownMenu
+        worktree={worktree}
+        projectId="project-1"
+        projectPath="/tmp/project"
+        packageScripts={[{ name: 'test', command: 'bun', args: ['test'] }]}
+        onRunPackageScript={vi.fn()}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Actions' }))
+    await user.hover(screen.getByText('Scripts'))
+
+    const favorite = await screen.findByRole('button', {
+      name: 'Favorite test',
+    })
+    expect(favorite.closest('[role="menu"]')).toHaveClass(
+      'max-h-72',
+      'overflow-y-auto'
+    )
+    fireEvent.pointerDown(favorite)
+    expect(actionMocks.patchPreferences).toHaveBeenCalledWith({
+      favorite_package_scripts: ['project-1:test'],
+    })
   })
 })

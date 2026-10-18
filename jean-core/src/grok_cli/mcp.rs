@@ -17,7 +17,11 @@
 //! Jean session enablement is applied by syncing `disabled_mcp_servers` before
 //! ACP `session/new`/`session/load`, and by passing enabled server configs as
 //! ACP `mcpServers` (client overlay).
+//!
+//! Plugin, managed gateway, and parent-directory servers come from
+//! `grok mcp doctor --json` (see [`crate::chat::mcp_external`]).
 
+use crate::chat::mcp_external::{self, ExternalServer};
 use crate::chat::{McpHealthStatus, McpServerInfo};
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
@@ -71,6 +75,7 @@ pub fn get_mcp_servers(worktree_path: Option<&str>) -> Vec<McpServerInfo> {
         server.backend = "grok".to_string();
     }
     servers.sort_by(|a, b| a.name.cmp(&b.name));
+    mcp_external::append("grok", worktree_path, &mut servers);
     servers
 }
 
@@ -79,6 +84,18 @@ pub fn check_mcp_health(
     app: &AppHandle,
     worktree_path: Option<&Path>,
 ) -> Result<HashMap<String, McpHealthStatus>, String> {
+    let stdout = run_doctor(app, worktree_path)?;
+    mcp_external::store(
+        app,
+        "grok",
+        worktree_path.and_then(Path::to_str),
+        parse_doctor_servers(&stdout),
+    );
+    Ok(parse_doctor_json(&stdout))
+}
+
+/// Run `grok mcp doctor --json` and return its stdout.
+pub fn run_doctor(app: &AppHandle, worktree_path: Option<&Path>) -> Result<String, String> {
     let cli_path = super::resolve_cli_binary(app);
     if !cli_path.exists() {
         return Err("Grok CLI not installed".to_string());
@@ -97,16 +114,33 @@ pub fn check_mcp_health(
         .map_err(|e| format!("Failed to run grok mcp doctor: {e}"))?;
 
     // doctor may exit non-zero when servers are unhealthy — still parse stdout.
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    if stdout.trim().is_empty() {
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    if stdout.trim().is_empty() && !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        if !output.status.success() {
-            return Err(format!("grok mcp doctor failed: {}", stderr.trim()));
-        }
-        return Ok(HashMap::new());
+        return Err(format!("grok mcp doctor failed: {}", stderr.trim()));
     }
+    Ok(stdout)
+}
 
-    Ok(parse_doctor_json(&stdout))
+/// Every server in `grok mcp doctor --json`, with its source as the scope.
+pub fn parse_doctor_servers(output: &str) -> Vec<ExternalServer> {
+    let Ok(json) = serde_json::from_str::<Value>(output) else {
+        return Vec::new();
+    };
+    json.get("servers")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|server| {
+            let name = server.get("name")?.as_str()?;
+            let target = server.get("target").and_then(Value::as_str).unwrap_or("");
+            let source = server
+                .get("source")
+                .and_then(Value::as_str)
+                .unwrap_or("cli");
+            Some(ExternalServer::new(name, target, source))
+        })
+        .collect()
 }
 
 /// Parse `grok mcp doctor --json` into health statuses.
@@ -607,6 +641,19 @@ mod tests {
 
         let http = servers.iter().find(|s| s["name"] == "http").unwrap();
         assert_eq!(http["headers"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn parses_doctor_servers_with_source() {
+        let output = r#"{"servers":[
+            {"name":"jean","transport":"stdio","target":"jean-server","source":"config"},
+            {"name":"managed_gateway:linear","target":"https://x","source":"managed_gateway"}
+        ]}"#;
+        let servers = parse_doctor_servers(output);
+        assert_eq!(servers.len(), 2);
+        assert_eq!(servers[1].name, "managed_gateway:linear");
+        assert_eq!(servers[1].scope, "managed_gateway");
+        assert_eq!(servers[1].target, "https://x");
     }
 
     #[test]

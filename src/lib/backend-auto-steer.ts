@@ -33,13 +33,13 @@ export function isBackendAutoSteerEnabled(
 
   switch (backend) {
     case 'opencode':
-      return preferences?.opencode_auto_steer_enabled ?? true
+      return preferences?.opencode_auto_steer_enabled ?? false
     case 'pi':
-      return preferences?.pi_auto_steer_enabled ?? true
+      return preferences?.pi_auto_steer_enabled ?? false
     case 'grok':
-      return preferences?.grok_auto_steer_enabled ?? true
+      return preferences?.grok_auto_steer_enabled ?? false
     case 'codex':
     default:
-      return preferences?.codex_auto_steer_enabled ?? true
+      return preferences?.codex_auto_steer_enabled ?? false
   }
 }

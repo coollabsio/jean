@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useEffectEvent, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { FileText, Pencil, RotateCcw } from 'lucide-react'
+import { FileText, Pencil, RotateCcw } from '@/components/icons/reicon'
 import { invoke } from '@/lib/transport'
 import { readPlanFile } from '@/services/chat'
 import { usePreferences } from '@/services/preferences'
@@ -258,7 +258,7 @@ export function PlanDialog({
       return
     }
 
-    // Mod+Shift+Y = Clear Context and yolo
+    // Mod+Shift+Y = Clear context with Full access
     if (isMod && e.shiftKey && (e.key === 'Y' || e.key === 'y')) {
       e.preventDefault()
       if (canApprove && onClearContextApprove) {
@@ -354,8 +354,8 @@ export function PlanDialog({
             {/* Right side: YOLO primary, Approve secondary */}
             <div className="flex gap-2">
               <SplitButton
-                label="YOLO"
-                tooltip={`Approve with yolo mode (${formatShortcutDisplay(DEFAULT_KEYBINDINGS.approve_plan_yolo)})`}
+                label="Full access"
+                tooltip={`Approve with Full access (${formatShortcutDisplay(DEFAULT_KEYBINDINGS.approve_plan_yolo)})`}
                 onClick={handleApproveYolo}
                 disabled={!canApprove}
               >

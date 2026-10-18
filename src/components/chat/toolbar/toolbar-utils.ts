@@ -9,14 +9,14 @@ export function getPrStatusDisplay(status: PrDisplayStatus): {
     case 'draft':
       return { label: 'Draft', className: 'text-muted-foreground' }
     case 'open':
-      return { label: 'Open', className: 'text-green-600 dark:text-green-500' }
+      return { label: 'Open', className: 'text-success' }
     case 'merged':
       return {
         label: 'Merged',
         className: 'text-purple-600 dark:text-purple-400',
       }
     case 'closed':
-      return { label: 'Closed', className: 'text-red-600 dark:text-red-400' }
+      return { label: 'Closed', className: 'text-destructive' }
     default:
       return { label: 'Unknown', className: 'text-muted-foreground' }
   }
@@ -195,52 +195,6 @@ export function formatPiModelLabel(raw: string): string {
   )
 }
 
-function getRawModelSortKey(value: string): {
-  model: string
-  numbers: number[]
-  raw: string
-} {
-  const raw = value.toLowerCase().replace(/:[^/]*$/, '')
-  const model = raw.split('/').filter(Boolean).at(-1) ?? raw
-  const numbers = [...model.matchAll(/\d+(?:\.\d+)?/g)].flatMap(match =>
-    match[0].split('.').map(Number)
-  )
-
-  return { model, numbers, raw }
-}
-
-function compareRawModelValues(left: string, right: string): number {
-  const a = getRawModelSortKey(left)
-  const b = getRawModelSortKey(right)
-  const maxNumbers = Math.max(a.numbers.length, b.numbers.length)
-
-  for (let i = 0; i < maxNumbers; i++) {
-    const aNumber = a.numbers[i]
-    const bNumber = b.numbers[i]
-    if (aNumber === undefined && bNumber === undefined) continue
-    if (aNumber === undefined) return 1
-    if (bNumber === undefined) return -1
-    if (aNumber !== bNumber) return bNumber - aNumber
-  }
-
-  const modelCompare = a.model.localeCompare(b.model, undefined, {
-    numeric: true,
-    sensitivity: 'base',
-  })
-  if (modelCompare !== 0) return modelCompare
-
-  return a.raw.localeCompare(b.raw, undefined, {
-    numeric: true,
-    sensitivity: 'base',
-  })
-}
-
-export function sortModelOptionsByRawModel<T extends { value: string }>(
-  options: readonly T[]
-): T[] {
-  return [...options].sort((a, b) => compareRawModelValues(a.value, b.value))
-}
-
 export function formatModelIdTailLabel(raw: string): string {
   const modelId = raw.split('/').filter(Boolean).at(-1) ?? raw
   const rawTokens = modelId.split('-').filter(Boolean)
@@ -269,10 +223,45 @@ export function formatCommandCodeModelLabel(raw: string): string {
   return `Command Code · ${formatModelIdTailLabel(value)}`
 }
 
+const GROK_BUILD_FAST_SUFFIX = '-build-fast'
+
+function grokModelId(raw: string): string {
+  return raw.startsWith('grok/') ? raw.slice('grok/'.length) : raw
+}
+
 export function formatGrokPromptModelLabel(raw: string): string {
-  const value = raw.startsWith('grok/') ? raw.slice('grok/'.length) : raw
-  const label = formatModelIdTailLabel(value)
-  return label.startsWith('Grok ') ? label.slice('Grok '.length) : label
+  const value = grokModelId(raw)
+  const isBuildFast = value.endsWith(GROK_BUILD_FAST_SUFFIX)
+  const base = isBuildFast
+    ? value.slice(0, -GROK_BUILD_FAST_SUFFIX.length)
+    : value
+  const label = formatModelIdTailLabel(base)
+  const short = label.startsWith('Grok ') ? label.slice('Grok '.length) : label
+  return isBuildFast ? `${short} Fast` : short
+}
+
+export function isMechanicalGrokLabel(value: string, label: string): boolean {
+  const id = grokModelId(value)
+  const normalized = label.trim().replace(/\s+/g, ' ').toLowerCase()
+  if (
+    normalized === value.toLowerCase() ||
+    normalized === id.toLowerCase() ||
+    normalized === `grok/${id}`.toLowerCase()
+  ) {
+    return true
+  }
+  if (!id.endsWith(GROK_BUILD_FAST_SUFFIX)) return false
+  const spaced = id.replaceAll('-', ' ').toLowerCase()
+  return normalized === spaced || normalized === `grok ${spaced}`
+}
+
+export function formatGrokModelOptionLabel(
+  value: string,
+  label?: string | null
+): string {
+  if (label && !isMechanicalGrokLabel(value, label)) return label
+  const short = formatGrokPromptModelLabel(value)
+  return short.startsWith('Grok ') ? short : `Grok ${short}`
 }
 
 export function formatOpenCodePromptModelLabel(raw: string): string {

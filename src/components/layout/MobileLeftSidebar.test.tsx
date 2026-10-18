@@ -25,7 +25,6 @@ describe('MobileLeftSidebar', () => {
         <MobileLeftSidebar
           open={true}
           onOpenChange={onOpenChange}
-          width={250}
         />
       </div>
     )
@@ -44,7 +43,7 @@ describe('MobileLeftSidebar', () => {
 
   it('does not render sheet content when closed', () => {
     render(
-      <MobileLeftSidebar open={false} onOpenChange={vi.fn()} width={250} />
+      <MobileLeftSidebar open={false} onOpenChange={vi.fn()} />
     )
 
     expect(screen.queryByTestId('mobile-left-sidebar')).not.toBeInTheDocument()
@@ -57,7 +56,6 @@ describe('MobileLeftSidebar', () => {
       <MobileLeftSidebar
         open={false}
         onOpenChange={onOpenChange}
-        width={250}
         isDragging
         dragOffset={112}
         dragTransition=""
@@ -67,9 +65,10 @@ describe('MobileLeftSidebar', () => {
     const sheet = await screen.findByTestId('mobile-left-sidebar')
     expect(sheet).toHaveAttribute('data-swipe-dragging', 'true')
     expect(sheet).toHaveStyle({
-      transform: 'translateX(min(0px, calc(-100% + 112px)))',
+      transform: 'translate3d(min(0px, calc(-100% + 112px)), 0, 0)',
       animation: 'none',
       transition: 'none',
+      willChange: 'transform',
     })
     expect(
       await screen.findByTestId('left-sidebar-content')
@@ -79,7 +78,6 @@ describe('MobileLeftSidebar', () => {
       <MobileLeftSidebar
         open
         onOpenChange={onOpenChange}
-        width={250}
         isDragging={false}
         dragOffset={400}
         dragTransition="transform 200ms ease-out"
@@ -95,7 +93,7 @@ describe('MobileLeftSidebar', () => {
     const onOpenChange = vi.fn()
 
     render(
-      <MobileLeftSidebar open={true} onOpenChange={onOpenChange} width={250} />
+      <MobileLeftSidebar open={true} onOpenChange={onOpenChange} />
     )
 
     await screen.findByTestId('mobile-left-sidebar')
@@ -108,7 +106,7 @@ describe('MobileLeftSidebar', () => {
   })
 
   it('does not autofocus expand-all (avoids tooltip on open)', async () => {
-    render(<MobileLeftSidebar open={true} onOpenChange={vi.fn()} width={250} />)
+    render(<MobileLeftSidebar open={true} onOpenChange={vi.fn()} />)
 
     const expandAll = await screen.findByRole('button', {
       name: 'Expand all projects',

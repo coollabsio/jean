@@ -13,8 +13,6 @@ use super::config::{
     binary_exists, ensure_cli_dir, find_system_grok_binary, get_cli_binary_path, get_cli_dir,
     resolve_cli_binary,
 };
-use crate::platform::silent_command;
-
 const AUTH_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 const MODELS_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -150,6 +148,16 @@ fn semver_parts(version: &str) -> Vec<u32> {
 fn fallback_models() -> Vec<GrokModelInfo> {
     vec![
         GrokModelInfo {
+            id: "grok-4.7-build-fast".to_string(),
+            label: "Grok 4.7 Fast".to_string(),
+            is_default: false,
+        },
+        GrokModelInfo {
+            id: "grok-4.7".to_string(),
+            label: "Grok 4.7".to_string(),
+            is_default: false,
+        },
+        GrokModelInfo {
             id: "grok-4.6".to_string(),
             label: "Grok 4.6".to_string(),
             is_default: true,
@@ -163,6 +171,16 @@ fn fallback_models() -> Vec<GrokModelInfo> {
 }
 
 fn format_model_label(id: &str) -> String {
+    let id = id.strip_prefix("grok/").unwrap_or(id);
+    if let Some(version) = id
+        .strip_prefix("grok-")
+        .and_then(|rest| rest.strip_suffix("-build-fast"))
+    {
+        if !version.is_empty() && version.chars().all(|ch| ch.is_ascii_digit() || ch == '.') {
+            return format!("Grok {version} Fast");
+        }
+    }
+
     id.split('-')
         .map(|part| {
             if part.chars().all(|ch| ch.is_ascii_digit() || ch == '.') {
@@ -290,8 +308,7 @@ fn run_command_with_timeout(
             }));
         }
         if start.elapsed() >= timeout {
-            let _ = child.kill();
-            let _ = child.wait();
+            crate::platform::kill_and_reap(&mut child);
             return Ok(TimedCommandResult::TimedOut);
         }
         std::thread::sleep(Duration::from_millis(50));
@@ -347,7 +364,7 @@ fn check_auth_via_acp(binary: &std::path::Path) -> GrokAuthStatus {
     let mut stdin = match child.stdin.take() {
         Some(stdin) => stdin,
         None => {
-            let _ = child.kill();
+            crate::platform::kill_and_reap(&mut child);
             return GrokAuthStatus {
                 authenticated: false,
                 error: Some("Failed to open Grok ACP stdin".to_string()),
@@ -358,7 +375,7 @@ fn check_auth_via_acp(binary: &std::path::Path) -> GrokAuthStatus {
     let stdout = match child.stdout.take() {
         Some(stdout) => stdout,
         None => {
-            let _ = child.kill();
+            crate::platform::kill_and_reap(&mut child);
             return GrokAuthStatus {
                 authenticated: false,
                 error: Some("Failed to open Grok ACP stdout".to_string()),
@@ -399,7 +416,7 @@ fn check_auth_via_acp(binary: &std::path::Path) -> GrokAuthStatus {
         }
     });
     if writeln!(stdin, "{initialize}").is_err() {
-        let _ = child.kill();
+        crate::platform::kill_and_reap(&mut child);
         return GrokAuthStatus {
             authenticated: false,
             error: Some("Failed to write Grok ACP initialize request".to_string()),
@@ -418,7 +435,7 @@ fn check_auth_via_acp(binary: &std::path::Path) -> GrokAuthStatus {
                 }
             }
             Err(RecvTimeoutError::Timeout) => {
-                let _ = child.kill();
+                crate::platform::kill_and_reap(&mut child);
                 return GrokAuthStatus {
                     authenticated: false,
                     error: Some("Grok auth check timed out".to_string()),
@@ -430,7 +447,7 @@ fn check_auth_via_acp(binary: &std::path::Path) -> GrokAuthStatus {
     };
 
     let Some(init) = init_result else {
-        let _ = child.kill();
+        crate::platform::kill_and_reap(&mut child);
         return GrokAuthStatus {
             authenticated: false,
             error: Some("Grok ACP did not return initialize result".to_string()),
@@ -438,7 +455,7 @@ fn check_auth_via_acp(binary: &std::path::Path) -> GrokAuthStatus {
         };
     };
     let Some(method_id) = choose_auth_method(&init) else {
-        let _ = child.kill();
+        crate::platform::kill_and_reap(&mut child);
         return GrokAuthStatus {
             authenticated: false,
             error: Some("Run `grok login` first, or set XAI_API_KEY.".to_string()),
@@ -453,7 +470,7 @@ fn check_auth_via_acp(binary: &std::path::Path) -> GrokAuthStatus {
         "params": { "methodId": method_id, "_meta": { "headless": true } }
     });
     if writeln!(stdin, "{authenticate}").is_err() {
-        let _ = child.kill();
+        crate::platform::kill_and_reap(&mut child);
         return GrokAuthStatus {
             authenticated: false,
             error: Some("Failed to write Grok ACP authenticate request".to_string()),
@@ -467,7 +484,7 @@ fn check_auth_via_acp(binary: &std::path::Path) -> GrokAuthStatus {
             Ok(line) => {
                 if let Ok(value) = serde_json::from_str::<Value>(line.trim()) {
                     if value.get("id").and_then(Value::as_i64) == Some(2) {
-                        let _ = child.kill();
+                        crate::platform::kill_and_reap(&mut child);
                         if let Some(error) = value.get("error") {
                             return GrokAuthStatus {
                                 authenticated: false,
@@ -484,7 +501,7 @@ fn check_auth_via_acp(binary: &std::path::Path) -> GrokAuthStatus {
                 }
             }
             Err(RecvTimeoutError::Timeout) => {
-                let _ = child.kill();
+                crate::platform::kill_and_reap(&mut child);
                 return GrokAuthStatus {
                     authenticated: false,
                     error: Some("Grok auth check timed out".to_string()),
@@ -495,7 +512,7 @@ fn check_auth_via_acp(binary: &std::path::Path) -> GrokAuthStatus {
         }
     }
 
-    let _ = child.kill();
+    crate::platform::kill_and_reap(&mut child);
     GrokAuthStatus {
         authenticated: false,
         error: Some("Grok ACP exited before authentication completed".to_string()),
@@ -669,10 +686,10 @@ pub async fn get_grok_install_command(app: AppHandle) -> Result<GrokInstallComma
 }
 
 pub async fn install_grok_cli(app: AppHandle, version: Option<String>) -> Result<(), String> {
-    crate::prerequisites::require_npm("Grok CLI")?;
+    let npm_path = crate::prerequisites::require_npm("Grok CLI")?;
     let cli_dir = ensure_cli_dir(&app)?;
     let package = grok_package(version.as_deref());
-    let output = silent_command("npm")
+    let output = crate::platform::host_cli_command(&npm_path, None)
         .args(["install", "--prefix"])
         .arg(&cli_dir)
         .arg(package)
@@ -704,6 +721,7 @@ pub async fn install_grok_cli(app: AppHandle, version: Option<String>) -> Result
         return Err("Grok CLI verification failed".to_string());
     }
 
+    crate::expose_managed_cli("grok", &get_cli_binary_path(&app)?);
     Ok(())
 }
 
@@ -1480,12 +1498,39 @@ Available models:
     }
 
     #[test]
-    fn fallback_models_default_to_grok_4_6() {
-        let models = fallback_models();
-        assert_eq!(models[0].id, "grok-4.6");
-        assert_eq!(models[0].label, "Grok 4.6");
+    fn parse_models_output_uses_a_short_name_for_build_fast() {
+        let output = br#"
+Default model: grok-4.7-build-fast
+
+Available models:
+  - grok-4.7
+  * grok-4.7-build-fast (default)
+"#;
+
+        let models = parse_models_output(output);
+
+        assert_eq!(models[0].id, "grok-4.7-build-fast");
+        assert_eq!(models[0].label, "Grok 4.7 Fast");
         assert!(models[0].is_default);
-        assert_eq!(models[1].id, "grok-4.5");
-        assert!(!models[1].is_default);
+        assert_eq!(models[1].label, "Grok 4.7");
+    }
+
+    #[test]
+    fn fallback_models_include_grok_4_7_and_keep_4_6_as_default() {
+        let models = fallback_models();
+        assert_eq!(models[0].id, "grok-4.7-build-fast");
+        assert_eq!(models[0].label, "Grok 4.7 Fast");
+        assert!(!models[0].is_default);
+        assert_eq!(models[1].id, "grok-4.7");
+        assert_eq!(models[1].label, "Grok 4.7");
+        let default_model = models.iter().find(|model| model.is_default);
+        assert_eq!(
+            default_model.map(|model| model.id.as_str()),
+            Some("grok-4.6")
+        );
+        assert_eq!(
+            models.last().map(|model| model.id.as_str()),
+            Some("grok-4.5")
+        );
     }
 }

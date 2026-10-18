@@ -1,4 +1,5 @@
 import {
+  memo,
   useMemo,
   useCallback,
   useRef,
@@ -72,11 +73,6 @@ const JeanConfigWizard = lazy(() =>
     default: mod.JeanConfigWizard,
   }))
 )
-const JeanMcpIntroDialog = lazy(() =>
-  import('@/components/onboarding/JeanMcpIntroDialog').then(mod => ({
-    default: mod.JeanMcpIntroDialog,
-  }))
-)
 const CliUpdateModal = lazy(() =>
   import('@/components/layout/CliUpdateModal').then(mod => ({
     default: mod.CliUpdateModal,
@@ -122,6 +118,11 @@ const AddProjectDialog = lazy(() =>
     default: mod.AddProjectDialog,
   }))
 )
+const GlobalServerDialog = lazy(() =>
+  import('@/components/projects/servers/ServerDialog').then(mod => ({
+    default: mod.GlobalServerDialog,
+  }))
+)
 const GitInitModal = lazy(() =>
   import('@/components/projects/GitInitModal').then(mod => ({
     default: mod.GitInitModal,
@@ -157,11 +158,6 @@ const ResolveConflictsDialog = lazy(() =>
     default: mod.ResolveConflictsDialog,
   }))
 )
-const GitHubDashboardModal = lazy(() =>
-  import('@/components/github-dashboard').then(mod => ({
-    default: mod.GitHubDashboardModal,
-  }))
-)
 const NewSessionModeModal = lazy(() =>
   import('@/components/chat/NewSessionModeModal').then(mod => ({
     default: mod.NewSessionModeModal,
@@ -172,12 +168,14 @@ const CloseWorktreeDialog = lazy(() =>
     default: mod.CloseWorktreeDialog,
   }))
 )
-import { FloatingDock } from '@/components/ui/floating-dock'
 import { Toaster } from '@/components/ui/sonner'
 import { MobileLeftSidebar } from './MobileLeftSidebar'
+import { SidebarTabRail } from '@/components/projects/SidebarTabRail'
+import { useShowAgents } from '@/components/agents/agents-feature'
 import { BrowserSidePane } from '@/components/browser/BrowserSidePane'
 import { BrowserPanel } from '@/components/browser/BrowserPanel'
 import { useBrowserEvents } from '@/hooks/useBrowserPane'
+import { parseServerResourceKey } from '@/lib/server-resource'
 import { useToasterOffset } from '@/hooks/useToasterOffset'
 import { useWindowMaximized } from '@/hooks/use-window-maximized'
 import { useTerminalThemeSync } from '@/hooks/useTerminalThemeSync'
@@ -189,8 +187,8 @@ import { useMainWindowEventListeners } from '@/hooks/useMainWindowEventListeners
 import { useGlobalInputSanitizer } from '@/hooks/useGlobalInputSanitizer'
 import { useCloseSessionOrWorktreeKeybinding } from '@/services/chat'
 import { useUIStatePersistence } from '@/hooks/useUIStatePersistence'
+import { useClientViewStatePersistence } from '@/hooks/useClientViewStatePersistence'
 import { useSessionStatePersistence } from '@/hooks/useSessionStatePersistence'
-import { useSessionPrefetch } from '@/hooks/useSessionPrefetch'
 import { useRestoreLastArchived } from '@/hooks/useRestoreLastArchived'
 import { useArchiveCleanup } from '@/hooks/useArchiveCleanup'
 import { usePrWorktreeSweep } from '@/hooks/usePrWorktreeSweep'
@@ -219,14 +217,33 @@ const MAX_FILE_BROWSER_WIDTH = 520
 function useRetainedMount(active: boolean) {
   const [shouldMount, setShouldMount] = useState(active)
 
-  useEffect(() => {
-    if (active) {
-      setShouldMount(true)
-    }
-  }, [active])
+  // Latch during render so the dialog mounts in the same commit it opens.
+  if (active && !shouldMount) {
+    setShouldMount(true)
+  }
 
-  return shouldMount
+  return shouldMount || active
 }
+
+/**
+ * Runs UI-state persistence in a null-rendering leaf so debounced save
+ * mutations and UI-state query updates don't re-render the whole MainWindow
+ * tree. Only the one-time `isInitialized` flip is reported to the parent.
+ */
+const UIStatePersistence = memo(function UIStatePersistence({
+  onInitializedChange,
+}: {
+  onInitializedChange: (isInitialized: boolean) => void
+}) {
+  const { isInitialized } = useUIStatePersistence()
+  useClientViewStatePersistence(isInitialized)
+
+  useEffect(() => {
+    onInitializedChange(isInitialized)
+  }, [isInitialized, onInitializedChange])
+
+  return null
+})
 
 export function MainWindow() {
   useTerminalThemeSync()
@@ -243,11 +260,12 @@ export function MainWindow() {
   const setFileBrowserVisible = useUIStore(state => state.setFileBrowserVisible)
   const viewingFilePath = useUIStore(state => state.viewingFilePath)
   const setViewingFilePath = useUIStore(state => state.setViewingFilePath)
+  const activeWorktreeId = useChatStore(state => state.activeWorktreeId)
+  const selectedProjectId = useProjectsStore(state => state.selectedProjectId)
   const preferencesOpen = useUIStore(state => state.preferencesOpen)
   const commitModalOpen = useUIStore(state => state.commitModalOpen)
   const onboardingOpen = useUIStore(state => state.onboardingOpen)
   const featureTourOpen = useUIStore(state => state.featureTourOpen)
-  const jeanMcpIntroOpen = useUIStore(state => state.jeanMcpIntroOpen)
   const openInModalOpen = useUIStore(state => state.openInModalOpen)
   const remotePickerOpen = useUIStore(state => state.remotePickerOpen)
   const resolveConflictsDialogOpen = useUIStore(
@@ -266,13 +284,15 @@ export function MainWindow() {
   const cliUpdateModalOpen = useUIStore(state => state.cliUpdateModalOpen)
   const cliLoginModalOpen = useUIStore(state => state.cliLoginModalOpen)
   const updateModalVersion = useUIStore(state => state.updateModalVersion)
-  const githubDashboardOpen = useUIStore(state => state.githubDashboardOpen)
   const newSessionModeTarget = useUIStore(state => state.newSessionModeTarget)
   const sessionChatModalOpen = useUIStore(state => state.sessionChatModalOpen)
-  const activeWorktreePath = useChatStore(state => state.activeWorktreePath)
+  const modalSidebarSwipe = useUIStore(state => state.leftSidebarSwipe)
   const selectedWorktreeId = useProjectsStore(state => state.selectedWorktreeId)
   const addProjectDialogOpen = useProjectsStore(
     state => state.addProjectDialogOpen
+  )
+  const serverDialogOpen = useProjectsStore(
+    state => state.serverDialog !== null
   )
   const projectSettingsDialogOpen = useProjectsStore(
     state => state.projectSettingsDialogOpen
@@ -286,16 +306,30 @@ export function MainWindow() {
   const isMobile = useIsMobile()
   const isTouch = useIsTouchDevice()
   const canSwipeOpenSidebar =
-    isMobile &&
-    !activeWorktreePath &&
-    !leftSidebarVisible &&
-    !sessionChatModalOpen
+    isMobile && !leftSidebarVisible && !sessionChatModalOpen
   const swipeOpenSidebar = useSwipeBack({
     onSwipeBack: useCallback(() => {
       useUIStore.getState().setLeftSidebarVisible(true)
     }, []),
     enabled: canSwipeOpenSidebar,
   })
+  // Stable prop so memoized MainWindowContent only re-renders on swipe changes
+  const sidebarSwipeIndicator = useMemo(
+    () =>
+      canSwipeOpenSidebar
+        ? {
+            isSwiping: swipeOpenSidebar.isSwiping,
+            translateX: swipeOpenSidebar.translateX,
+            progress: swipeOpenSidebar.progress,
+          }
+        : undefined,
+    [
+      canSwipeOpenSidebar,
+      swipeOpenSidebar.isSwiping,
+      swipeOpenSidebar.translateX,
+      swipeOpenSidebar.progress,
+    ]
+  )
   const swipeDown = useSwipeDown({
     onSwipeDown: useCallback(() => {
       useUIStore.getState().setCommandPaletteOpen(true)
@@ -310,16 +344,20 @@ export function MainWindow() {
     ? projects?.find(p => p.id === worktree.project_id)
     : null
 
+  const showAgents = useShowAgents()
+
   // Compute window title based on selected project/worktree
   // On mobile, show only the project name to fit the compact title bar.
   const windowTitle = useMemo(() => {
+    // Agents page is not a project page
+    if (showAgents) return 'Agents'
     if (!project || !worktree) return 'Jean'
     if (isMobile) return project.name
     const branchSuffix =
       worktree.branch !== worktree.name ? ` (${worktree.branch})` : ''
 
     return `${project.name} › ${worktree.name}${branchSuffix}`
-  }, [project, worktree, isMobile])
+  }, [project, worktree, isMobile, showAgents])
 
   // Compute polling info - null if no worktree or data not loaded.
   // Must use the worktree's own base_branch (e.g. v4.x), not the project
@@ -339,14 +377,11 @@ export function MainWindow() {
   useWorktreePolling(pollingInfo)
 
   // Persist UI state (last opened worktree, expanded projects)
-  const { isInitialized } = useUIStatePersistence()
+  // Set by <UIStatePersistence /> once persisted UI state has been restored
+  const [isInitialized, setIsInitialized] = useState(false)
 
   // Persist session-specific state (answered questions, fixed findings, etc.)
   useSessionStatePersistence()
-
-  // Prefetch sessions for the selected or expanded projects after the UI state
-  // is restored so the first render path stays light.
-  useSessionPrefetch(isInitialized ? projects : undefined)
 
   // Ref for the sidebar element to update width directly during drag
   const sidebarRef = useRef<HTMLDivElement>(null)
@@ -461,7 +496,8 @@ export function MainWindow() {
       let currentWidth = startWidth
 
       const handleMouseMove = (moveEvent: MouseEvent) => {
-        const delta = moveEvent.clientX - startX
+        // Dragging left increases width because the browser is on the right.
+        const delta = startX - moveEvent.clientX
         currentWidth = Math.min(
           MAX_FILE_BROWSER_WIDTH,
           Math.max(MIN_FILE_BROWSER_WIDTH, startWidth + delta)
@@ -491,7 +527,6 @@ export function MainWindow() {
   const shouldRenderOnboardingDialog = useRetainedMount(onboardingOpen)
   const shouldRenderFeatureTourDialog = useRetainedMount(featureTourOpen)
   const shouldRenderJeanConfigWizard = useRetainedMount(jeanConfigWizardOpen)
-  const shouldRenderJeanMcpIntroDialog = useRetainedMount(jeanMcpIntroOpen)
   const shouldRenderCliUpdateModal = useRetainedMount(cliUpdateModalOpen)
   const shouldRenderUpdateAvailableModal = useRetainedMount(
     updateModalVersion !== null
@@ -513,11 +548,11 @@ export function MainWindow() {
   const shouldRenderReleaseNotesDialog = useRetainedMount(releaseNotesModalOpen)
   const shouldRenderNewWorktreeModal = useRetainedMount(newWorktreeModalOpen)
   const shouldRenderAddProjectDialog = useRetainedMount(addProjectDialogOpen)
+  const shouldRenderServerDialog = useRetainedMount(serverDialogOpen)
   const shouldRenderGitInitModal = useRetainedMount(gitInitModalOpen)
   const shouldRenderCloneProjectModal = useRetainedMount(cloneModalOpen)
   const shouldRenderArchivedModal = useRetainedMount(archivedModalOpen)
   const shouldRenderCloseWorktreeDialog = useRetainedMount(closeConfirmOpen)
-  const shouldRenderGitHubDashboardModal = useRetainedMount(githubDashboardOpen)
   const shouldRenderNewSessionModeModal = useRetainedMount(
     newSessionModeTarget !== null
   )
@@ -536,6 +571,7 @@ export function MainWindow() {
         roundedClass
       )}
     >
+      <UIStatePersistence onInitializedChange={setIsInitialized} />
       {isNativeApp() && isLinux && <WindowResizeHandles />}
 
       {/* Touch swipe-down pull indicator */}
@@ -556,19 +592,45 @@ export function MainWindow() {
       )}
 
       {/* Title Bar - semi-transparent overlay */}
-      <TitleBar title={windowTitle} className="absolute top-0 left-0 right-0" />
+      {/* Desktop (native + web): the worktree header already shows
+          project/worktree details, and a window-centered title overlaps the
+          left sidebar. Web keeps the title in the browser tab (document.title). */}
+      <TitleBar
+        title={windowTitle}
+        hideTitle={!isMobile}
+        className="absolute top-0 left-0 right-0"
+      />
 
       {/* Dev Mode Banner */}
       <DevModeBanner />
 
       {/* Main Content Area */}
-      <div className="flex flex-1 overflow-hidden pt-8">
+      <div className="flex flex-1 overflow-hidden">
+        {/* Desktop: always-visible vertical tab rail for the left sidebar */}
+        {!isMobile && isInitialized && (
+          // Border starts below the title bar so it never crosses its buttons
+          // Collapsed: blend with the main window. Expanded: match the sidebar.
+          <div
+            className={cn(
+              'h-full shrink-0 pt-8',
+              leftSidebarVisible
+                ? 'bg-sidebar dark:bg-[#0b0b0b]'
+                : 'bg-background'
+            )}
+          >
+            <SidebarTabRail
+              togglesSidebar
+              className="h-full border-r border-border/40"
+            />
+          </div>
+        )}
+
         {/* Desktop: in-flow left sidebar (shifts layout). Only after UI state init. */}
         {!isMobile && leftSidebarVisible && isInitialized && (
           <SidebarWidthProvider value={leftSidebarSize}>
             <div
               ref={sidebarRef}
-              className="h-full overflow-hidden"
+              className="h-full overflow-hidden bg-sidebar pt-8 dark:bg-[#0b0b0b]"
               style={{ width: leftSidebarSize }}
             >
               <Suspense fallback={null}>
@@ -585,37 +647,10 @@ export function MainWindow() {
             tabIndex={-1}
             aria-orientation="vertical"
             aria-label="Resize left sidebar"
-            className="relative h-full w-px bg-border"
+            className="relative h-full w-px bg-border/40"
             onMouseDown={handleResizeStart}
           >
             {/* Invisible wider hit area for easier clicking */}
-            <div className="absolute inset-y-0 -left-1.5 -right-1.5 cursor-col-resize" />
-          </div>
-        )}
-
-        {/* Desktop: file browser sidebar */}
-        {!isMobile && fileBrowserVisible && isInitialized && (
-          <div
-            ref={fileBrowserRef}
-            className="h-full overflow-hidden"
-            style={{ width: fileBrowserSize }}
-          >
-            <Suspense fallback={null}>
-              <FileBrowserSidebar />
-            </Suspense>
-          </div>
-        )}
-
-        {/* Desktop: resize handle for file browser */}
-        {!isMobile && fileBrowserVisible && isInitialized && (
-          <div
-            role="separator"
-            tabIndex={-1}
-            aria-orientation="vertical"
-            aria-label="Resize file browser"
-            className="relative h-full w-px bg-border"
-            onMouseDown={handleFileBrowserResizeStart}
-          >
             <div className="absolute inset-y-0 -left-1.5 -right-1.5 cursor-col-resize" />
           </div>
         )}
@@ -625,10 +660,21 @@ export function MainWindow() {
           <MobileLeftSidebar
             open={leftSidebarVisible}
             onOpenChange={setLeftSidebarVisible}
-            width={leftSidebarSize}
-            isDragging={swipeOpenSidebar.isSwiping}
-            dragOffset={swipeOpenSidebar.translateX}
-            dragTransition={swipeOpenSidebar.transitionStyle}
+            isDragging={
+              sessionChatModalOpen
+                ? modalSidebarSwipe.isDragging
+                : swipeOpenSidebar.isSwiping
+            }
+            dragOffset={
+              sessionChatModalOpen
+                ? modalSidebarSwipe.dragOffset
+                : swipeOpenSidebar.translateX
+            }
+            dragTransition={
+              sessionChatModalOpen
+                ? modalSidebarSwipe.dragTransition
+                : swipeOpenSidebar.transitionStyle
+            }
           />
         )}
 
@@ -638,24 +684,50 @@ export function MainWindow() {
             <MobileFileBrowser
               open={fileBrowserVisible}
               onOpenChange={setFileBrowserVisible}
-              width={fileBrowserSize}
             />
           </Suspense>
         )}
 
         {/* Main Content + bottom browser panel stacked vertically */}
-        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden pt-8">
           <div className="relative min-w-0 flex-1 overflow-hidden">
             <MainWindowContent
               sidebarSwipeContainerRef={
                 canSwipeOpenSidebar ? swipeOpenSidebar.containerRef : undefined
               }
+              sidebarSwipeIndicator={sidebarSwipeIndicator}
             />
-            <FloatingDock />
           </div>
           {/* Browser bottom panel - native-only, pinned to bottom */}
           <BrowserPanel />
         </div>
+
+        {/* Desktop: resize handle for file browser */}
+        {!isMobile && fileBrowserVisible && isInitialized && (
+          <div
+            role="separator"
+            tabIndex={-1}
+            aria-orientation="vertical"
+            aria-label="Resize file browser"
+            className="relative z-20 h-full w-px shrink-0 cursor-col-resize bg-border/40"
+            onMouseDown={handleFileBrowserResizeStart}
+          >
+            <div className="absolute inset-y-0 z-20 -left-1.5 -right-1.5 cursor-col-resize" />
+          </div>
+        )}
+
+        {/* Desktop: file browser sidebar */}
+        {!isMobile && fileBrowserVisible && isInitialized && (
+          <div
+            ref={fileBrowserRef}
+            className="h-full overflow-hidden bg-sidebar pt-8"
+            style={{ width: fileBrowserSize }}
+          >
+            <Suspense fallback={null}>
+              <FileBrowserSidebar />
+            </Suspense>
+          </div>
+        )}
 
         {/* Browser side pane - native-only, mounts on right edge */}
         <BrowserSidePane />
@@ -667,6 +739,10 @@ export function MainWindow() {
       <Suspense fallback={null}>
         <FileContentModal
           filePath={viewingFilePath}
+          serverId={
+            parseServerResourceKey(activeWorktreeId ?? selectedProjectId ?? '')
+              ?.serverId
+          }
           onClose={() => setViewingFilePath(null)}
         />
       </Suspense>
@@ -698,11 +774,6 @@ export function MainWindow() {
       {shouldRenderJeanConfigWizard && (
         <Suspense fallback={null}>
           <JeanConfigWizard />
-        </Suspense>
-      )}
-      {shouldRenderJeanMcpIntroDialog && (
-        <Suspense fallback={null}>
-          <JeanMcpIntroDialog />
         </Suspense>
       )}
       {shouldRenderCliUpdateModal && (
@@ -785,6 +856,11 @@ export function MainWindow() {
           <AddProjectDialog />
         </Suspense>
       )}
+      {shouldRenderServerDialog && (
+        <Suspense fallback={null}>
+          <GlobalServerDialog />
+        </Suspense>
+      )}
       {shouldRenderGitInitModal && (
         <Suspense fallback={null}>
           <GitInitModal />
@@ -814,18 +890,12 @@ export function MainWindow() {
           />
         </Suspense>
       )}
-      {shouldRenderGitHubDashboardModal && (
-        <Suspense fallback={null}>
-          <GitHubDashboardModal />
-        </Suspense>
-      )}
       <BranchConflictDialog />
       <TeardownOutputDialog />
       <Toaster
         position="bottom-right"
         offset={toasterOffset}
         mobileOffset={toasterMobileOffset}
-        expand={true}
         swipeDirections={['left', 'right', 'top', 'bottom']}
         style={{ '--width': '400px' } as CSSProperties}
         toastOptions={{

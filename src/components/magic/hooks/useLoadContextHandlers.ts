@@ -31,8 +31,13 @@ import type {
   AttachedSavedContext,
 } from '@/types/github'
 import type { LinearIssue, LoadedLinearIssueContext } from '@/types/linear'
+import type { SentryIssue, SentryIssueContext } from '@/types/sentry'
 import type { MagicPromptProviders } from '@/types/preferences'
 import type { SessionWithContext } from '../LoadContextItems'
+import {
+  deleteSavedContextFile,
+  readSavedContextFile,
+} from '@/services/saved-contexts'
 
 interface LinearIssueContextContent {
   identifier: string
@@ -41,7 +46,7 @@ interface LinearIssueContextContent {
 }
 
 export interface ViewingContext {
-  type: 'issue' | 'pr' | 'security' | 'advisory' | 'saved' | 'linear'
+  type: 'issue' | 'pr' | 'security' | 'advisory' | 'saved' | 'linear' | 'sentry'
   number?: number
   ghsaId?: string
   slug?: string
@@ -61,6 +66,7 @@ interface UseLoadContextHandlersOptions {
   refetchAdvisoryContexts: () => void
   refetchAttachedContexts: () => void
   refetchLinearContexts: () => void
+  refetchSentryContexts: () => void
   refetchContexts: () => void
   renameMutation: {
     mutate: (args: { filename: string; newName: string }) => void
@@ -88,6 +94,7 @@ export function useLoadContextHandlers({
   refetchAdvisoryContexts,
   refetchAttachedContexts,
   refetchLinearContexts,
+  refetchSentryContexts,
   refetchContexts,
   renameMutation,
   preferences,
@@ -108,6 +115,12 @@ export function useLoadContextHandlers({
     new Set()
   )
   const [removingLinearIds, setRemovingLinearIds] = useState<Set<string>>(
+    new Set()
+  )
+  const [loadingSentryIds, setLoadingSentryIds] = useState<Set<string>>(
+    new Set()
+  )
+  const [removingSentryIds, setRemovingSentryIds] = useState<Set<string>>(
     new Set()
   )
   const [generatingSessionId, setGeneratingSessionId] = useState<string | null>(
@@ -132,6 +145,8 @@ export function useLoadContextHandlers({
     setRemovingAdvisoryGhsaIds(new Set())
     setLoadingLinearIds(new Set())
     setRemovingLinearIds(new Set())
+    setLoadingSentryIds(new Set())
+    setRemovingSentryIds(new Set())
     setLoadingSlugs(new Set())
     setRemovingSlugs(new Set())
     setGeneratingSessionId(null)
@@ -184,7 +199,12 @@ export function useLoadContextHandlers({
 
       setRemovingNumbers(prev => new Set(prev).add(issueNumber))
       try {
-        await removeIssueContext(activeSessionId, issueNumber, worktreePath)
+        await removeIssueContext(
+          activeSessionId,
+          issueNumber,
+          worktreePath,
+          worktreeId
+        )
         await refetchIssueContexts()
         toast.success(`Removed issue #${issueNumber} from context`)
       } catch (error) {
@@ -197,7 +217,7 @@ export function useLoadContextHandlers({
         })
       }
     },
-    [activeSessionId, worktreePath, refetchIssueContexts]
+    [activeSessionId, worktreeId, worktreePath, refetchIssueContexts]
   )
 
   const handleViewIssue = useCallback((ctx: LoadedIssueContext) => {
@@ -617,18 +637,99 @@ export function useLoadContextHandlers({
     [handleLoadLinearIssue, onClearSearch]
   )
 
+  const handleSelectSentryIssue = useCallback(
+    async (issue: SentryIssue) => {
+      if (!activeSessionId || !projectId) {
+        toast.error('No active session')
+        return
+      }
+      setLoadingSentryIds(previous => new Set(previous).add(issue.id))
+      const toastId = toast.loading(`Loading ${issue.shortId}...`)
+      try {
+        const result = await invoke<SentryIssueContext>(
+          'load_sentry_issue_context',
+          { sessionId: activeSessionId, projectId, issueId: issue.id }
+        )
+        await refetchSentryContexts()
+        toast.success(`${result.shortId}: ${result.title}`, { id: toastId })
+        onClearSearch()
+      } catch (error) {
+        toast.error(`${error}`, { id: toastId })
+      } finally {
+        setLoadingSentryIds(previous => {
+          const next = new Set(previous)
+          next.delete(issue.id)
+          return next
+        })
+      }
+    },
+    [activeSessionId, projectId, refetchSentryContexts, onClearSearch]
+  )
+
+  const handleRefreshSentryIssue = useCallback(
+    (context: SentryIssueContext) =>
+      handleSelectSentryIssue({
+        id: context.id,
+        shortId: context.shortId,
+        title: context.title,
+        permalink: context.permalink,
+        culprit: '',
+        level: '',
+        status: '',
+        count: '',
+        userCount: 0,
+        firstSeen: '',
+        lastSeen: '',
+        project: { id: '', name: '', slug: '' },
+      }),
+    [handleSelectSentryIssue]
+  )
+
+  const handleRemoveSentryIssue = useCallback(
+    async (context: SentryIssueContext) => {
+      if (!activeSessionId || !projectId) return
+      setRemovingSentryIds(previous => new Set(previous).add(context.id))
+      try {
+        await invoke('remove_sentry_issue_context', {
+          sessionId: activeSessionId,
+          projectId,
+          issueId: context.id,
+        })
+        await refetchSentryContexts()
+        toast.success(`Removed ${context.shortId} from context`)
+      } catch (error) {
+        toast.error(`Failed to remove Sentry issue: ${error}`)
+      } finally {
+        setRemovingSentryIds(previous => {
+          const next = new Set(previous)
+          next.delete(context.id)
+          return next
+        })
+      }
+    },
+    [activeSessionId, projectId, refetchSentryContexts]
+  )
+
+  const handleViewSentryIssue = useCallback((context: SentryIssueContext) => {
+    setViewingContext({
+      type: 'sentry',
+      title: `${context.shortId}: ${context.title}`,
+      content: context.content,
+    })
+  }, [])
+
   // Context handlers
   const handleDeleteContext = useCallback(
     async (e: React.MouseEvent, context: SavedContext) => {
       e.stopPropagation()
       try {
-        await invoke('delete_context_file', { path: context.path })
+        await deleteSavedContextFile(context.path, projectId)
         refetchContexts()
       } catch (err) {
         console.error('Failed to delete context:', err)
       }
     },
-    [refetchContexts]
+    [projectId, refetchContexts]
   )
 
   const handleAttachContext = useCallback(
@@ -705,21 +806,22 @@ export function useLoadContextHandlers({
     [activeSessionId]
   )
 
-  const handleViewContext = useCallback(async (ctx: SavedContext) => {
-    try {
-      const content = await invoke<string>('read_context_file', {
-        path: ctx.path,
-      })
-      setViewingContext({
-        type: 'saved',
-        slug: ctx.slug,
-        title: ctx.name || ctx.slug || 'Untitled',
-        content,
-      })
-    } catch (error) {
-      toast.error(`Failed to load context: ${error}`)
-    }
-  }, [])
+  const handleViewContext = useCallback(
+    async (ctx: SavedContext) => {
+      try {
+        const content = await readSavedContextFile(ctx.path, projectId)
+        setViewingContext({
+          type: 'saved',
+          slug: ctx.slug,
+          title: ctx.name || ctx.slug || 'Untitled',
+          content,
+        })
+      } catch (error) {
+        toast.error(`Failed to load context: ${error}`)
+      }
+    },
+    [projectId]
+  )
 
   const handleStartEdit = useCallback(
     (e: React.MouseEvent, context: SavedContext) => {
@@ -876,6 +978,8 @@ export function useLoadContextHandlers({
     removingAdvisoryGhsaIds,
     loadingLinearIds,
     removingLinearIds,
+    loadingSentryIds,
+    removingSentryIds,
     loadingSlugs,
     removingSlugs,
     generatingSessionId,
@@ -926,6 +1030,10 @@ export function useLoadContextHandlers({
     handleRemoveLinearIssue,
     handleViewLinearIssue,
     handleSelectLinearIssue,
+    handleSelectSentryIssue,
+    handleRefreshSentryIssue,
+    handleRemoveSentryIssue,
+    handleViewSentryIssue,
 
     // Context/session handlers
     handleDeleteContext,

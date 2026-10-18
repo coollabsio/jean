@@ -10,6 +10,12 @@
 export const STREAMING_LONG_FLUSH_INTERVAL_MS = 32
 
 /**
+ * Maximum time buffered output can wait when a webview does not run a queued
+ * animation frame. This can happen while a window is hidden or under App Nap.
+ */
+export const STREAMING_FRAME_FALLBACK_MS = 100
+
+/**
  * Content length (existing + buffered) at which flushes switch from every rAF
  * to a capped interval. Chosen to cover typical short replies at full rate.
  */

@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   canOpenInEditor,
+  canOpenInFinder,
+  canOpenInTerminal,
   canOpenNativeApps,
   canOpenRemoteEditorLocally,
   hasBackend,
@@ -8,8 +10,10 @@ import {
   isLocalBackend,
   isNativeApp,
   setNativeOpenAllowed,
+  setWebAccessServerName,
   setWebAccessEnabled,
   setWsConnected,
+  webAccessServerLabel,
 } from './environment'
 import {
   addRemoteConnection,
@@ -28,7 +32,14 @@ describe('environment detection', () => {
     setWsConnected(false)
     setWebAccessEnabled(false)
     setNativeOpenAllowed(false)
+    setWebAccessServerName(null)
     selectConnection(LOCAL_CONNECTION_ID)
+  })
+
+  it('uses the configured Web Access server name', () => {
+    setWebAccessServerName('Dev Server')
+
+    expect(webAccessServerLabel()).toBe('Dev Server')
   })
 
   it('does not treat partial Tauri internals as native', () => {
@@ -70,12 +81,25 @@ describe('environment detection', () => {
     expect(canOpenNativeApps()).toBe(false)
     expect(canOpenRemoteEditorLocally()).toBe(true)
     expect(canOpenInEditor()).toBe(true)
+    expect(canOpenInTerminal()).toBe(true)
+    expect(canOpenInFinder()).toBe(false)
   })
 
   it('allows host-native open when the server reports nativeOpenAllowed', () => {
     setNativeOpenAllowed(true)
     expect(canOpenNativeApps()).toBe(true)
     expect(canOpenInEditor()).toBe(true)
+  })
+
+  it('does not open remote-owned paths in the local file manager', () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: { invoke: vi.fn() },
+    })
+
+    expect(canOpenInFinder()).toBe(true)
+    expect(canOpenInFinder('local')).toBe(true)
+    expect(canOpenInFinder('remote-1')).toBe(false)
   })
 
   it('prefers host-native open over local ssh:// remap when remote allows it', () => {

@@ -7,16 +7,25 @@ use std::time::Duration;
 use serde::Deserialize;
 use tauri::AppHandle;
 
-use super::types::{AutoFixIssueCandidate, AutoFixStoppedEvent};
+use super::types::{
+    AutoFixActivity, AutoFixFailedIssue, AutoFixIssueCandidate, AutoFixIssuePreview, AutoFixStatus,
+    AutoFixStatusError, AutoFixStoppedEvent,
+};
 use crate::chat::types::{EffortLevel, ThinkingLevel};
 use crate::http_server::EmitExt;
 use crate::projects::github_issues::{GitHubComment, IssueContext};
 use crate::projects::types::{Project, ProjectAutoFixSettings, Worktree, WorktreeOrigin};
 
 const AUTO_FIX_TICK_SECONDS: u64 = 10;
+/// Start/recovery/yolo attempts per issue or session before Mr. Robot gives up.
+const AUTO_FIX_MAX_ATTEMPTS: u32 = 3;
+const GITHUB_RATE_LIMIT_BACKOFF_SECS: u64 = 15 * 60;
 const AUTO_YOLO_WATCH_SECONDS: u64 = 2;
 const AUTO_YOLO_WATCH_ATTEMPTS: usize = 900; // 30 minutes
-const AUTO_FIX_WORKTREE_CREATION_TIMEOUT_SECS: u64 = 120;
+                                             // Worktree creation can include long setup scripts. Waiting too briefly left
+                                             // worktrees that finished later without a session, so allow a generous cap.
+                                             // Any worktree that still ends up without a session is recovered by the scan.
+const AUTO_FIX_WORKTREE_CREATION_TIMEOUT_SECS: u64 = 30 * 60;
 
 #[derive(Debug)]
 enum WorktreeCreationOutcome {
@@ -70,11 +79,17 @@ struct PendingAutoYolo {
     model: Option<String>,
     /// Claude custom CLI profile name (None = Anthropic direct).
     provider: Option<String>,
+    /// Failed yolo start attempts so far.
+    attempts: u32,
 }
 
-static LAST_PROJECT_CHECKS: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
+static PROJECT_RUNTIME: OnceLock<Mutex<HashMap<String, ProjectRuntime>>> = OnceLock::new();
 static PENDING_YOLO: OnceLock<Mutex<HashMap<String, PendingAutoYolo>>> = OnceLock::new();
 static YOLO_IN_FLIGHT: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+/// `(project_id, issue_number)` pairs whose worktree/session start is in progress.
+/// Worktrees are persisted only after `git worktree add` finishes, so without
+/// this a scan during creation would start the same issue twice.
+static STARTING_ISSUES: OnceLock<Mutex<HashSet<(String, u32)>>> = OnceLock::new();
 
 /// Cached knowledge of whether any project has auto-fix enabled, so idle
 /// scheduler ticks can skip reading and parsing projects.json entirely.
@@ -111,8 +126,284 @@ fn auto_fix_scan_may_be_needed() -> bool {
     AUTO_FIX_ENABLED_CACHE.load(Ordering::Relaxed) != AUTO_FIX_CACHE_DISABLED
 }
 
-fn last_project_checks() -> &'static Mutex<HashMap<String, u64>> {
-    LAST_PROJECT_CHECKS.get_or_init(|| Mutex::new(HashMap::new()))
+/// Per-project scan timing, errors and issue failures. In memory only: a
+/// restart clears it, which also gives failed issues a fresh set of attempts.
+#[derive(Debug, Default)]
+struct ProjectRuntime {
+    last_scan_at: Option<u64>,
+    next_scan_at: u64,
+    rate_limited_until: Option<u64>,
+    last_error: Option<AutoFixStatusError>,
+    failed_issues: HashMap<u32, AutoFixFailedIssue>,
+    scanning: bool,
+    last_scan_summary: Option<String>,
+    activity: Vec<AutoFixActivity>,
+}
+
+fn project_runtime() -> &'static Mutex<HashMap<String, ProjectRuntime>> {
+    PROJECT_RUNTIME.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn with_project_runtime<T>(project_id: &str, f: impl FnOnce(&mut ProjectRuntime) -> T) -> T {
+    let mut runtime = project_runtime().lock().expect("auto fix runtime mutex");
+    f(runtime.entry(project_id.to_string()).or_default())
+}
+
+fn record_activity(project_id: &str, message: String, issue_number: Option<u32>) {
+    with_project_runtime(project_id, |runtime| {
+        runtime.activity.insert(
+            0,
+            AutoFixActivity {
+                at: now_unix_secs(),
+                message,
+                issue_number,
+            },
+        );
+        runtime.activity.truncate(30);
+    });
+}
+
+/// Request the next scheduler tick, without bypassing safety limits.
+pub fn request_auto_fix_scan(project_id: &str) -> Result<(), String> {
+    with_project_runtime(project_id, |runtime| {
+        if runtime.scanning {
+            return Err("A scan is already running".to_string());
+        }
+        if runtime
+            .rate_limited_until
+            .is_some_and(|until| until > now_unix_secs())
+        {
+            return Err("Waiting for the GitHub rate limit to reset".to_string());
+        }
+        runtime.next_scan_at = 0;
+        Ok(())
+    })
+}
+
+// Always release the scan guard, including error and capacity exits.
+struct ScanGuard(String);
+impl Drop for ScanGuard {
+    fn drop(&mut self) {
+        with_project_runtime(&self.0, |runtime| runtime.scanning = false);
+    }
+}
+
+pub async fn preview_auto_fix_issues(
+    app: AppHandle,
+    project_id: String,
+) -> Result<Vec<AutoFixIssuePreview>, String> {
+    let data = crate::projects::storage::load_projects_data(&app)?;
+    let project = data
+        .projects
+        .iter()
+        .find(|project| project.id == project_id)
+        .ok_or("Project not found")?;
+    let settings = project
+        .auto_fix_settings
+        .clone()
+        .ok_or("Configure Mr. Robot first")?;
+    if get_auto_fix_status(&project_id)
+        .rate_limited_until
+        .is_some()
+    {
+        return Err("Waiting for the GitHub rate limit to reset".to_string());
+    }
+    let issues =
+        crate::projects::github_issues::list_open_issue_labels(app, project.path.clone()).await?;
+    let worktrees: Vec<Worktree> = data
+        .worktrees
+        .iter()
+        .filter(|worktree| worktree.project_id == project_id)
+        .cloned()
+        .collect();
+    Ok(build_issue_preview(
+        &issues,
+        &worktrees,
+        &settings,
+        &starting_issue_numbers(&project_id),
+        &gave_up_issue_numbers(&project_id),
+    ))
+}
+
+fn build_issue_preview(
+    issues: &[AutoFixIssueCandidate],
+    worktrees: &[Worktree],
+    settings: &ProjectAutoFixSettings,
+    starting: &HashSet<u32>,
+    gave_up: &HashSet<u32>,
+) -> Vec<AutoFixIssuePreview> {
+    let included = normalized_label_set(&settings.included_labels);
+    let excluded = normalized_label_set(&settings.excluded_labels);
+    let open: HashSet<u32> = issues.iter().map(|issue| issue.number).collect();
+    let inactive: HashSet<String> = closed_auto_fix_issue_worktree_ids(worktrees, &open)
+        .into_iter()
+        .chain(ineligible_auto_fix_issue_worktree_ids(
+            worktrees,
+            issues,
+            &settings.included_labels,
+            &settings.excluded_labels,
+        ))
+        .collect();
+    let active = worktrees
+        .iter()
+        .filter(|worktree| {
+            worktree.archived_at.is_none()
+                && matches!(worktree.origin, Some(WorktreeOrigin::AutoFix))
+                && !inactive.contains(&worktree.id)
+        })
+        .count()
+        + starting.len();
+    let capacity = (settings.max_parallel_worktrees.max(1) as usize).saturating_sub(active);
+    let handled: HashSet<u32> = worktrees
+        .iter()
+        .filter_map(|worktree| worktree.issue_number)
+        .chain(starting.iter().copied())
+        .chain(gave_up.iter().copied())
+        .collect();
+    let selected: HashSet<u32> = select_issue_numbers_to_start(
+        issues,
+        &handled,
+        &settings.included_labels,
+        &settings.excluded_labels,
+        capacity.min(settings.issue_limit.max(1) as usize),
+    )
+    .into_iter()
+    .collect();
+    issues
+        .iter()
+        .map(|issue| {
+            let reason = if issue_has_excluded_label(issue, &excluded) {
+                "Excluded label"
+            } else if !issue_matches_included_labels(issue, &included) {
+                "No included label"
+            } else if starting.contains(&issue.number) {
+                "Starting"
+            } else if gave_up.contains(&issue.number) {
+                "Retry required"
+            } else if handled.contains(&issue.number) {
+                "Worktree already exists"
+            } else if selected.contains(&issue.number) {
+                "Next scan candidate"
+            } else if capacity == 0 {
+                "Waiting for capacity"
+            } else {
+                "Waiting for a later scan"
+            };
+            AutoFixIssuePreview {
+                issue_number: issue.number,
+                labels: issue.labels.clone(),
+                reason: reason.to_string(),
+                selected: selected.contains(&issue.number),
+            }
+        })
+        .collect()
+}
+
+fn record_project_error(project_id: &str, message: impl Into<String>) {
+    let message = message.into();
+    record_activity(project_id, message.clone(), None);
+    with_project_runtime(project_id, |runtime| {
+        runtime.last_error = Some(AutoFixStatusError {
+            message,
+            at: now_unix_secs(),
+        });
+    });
+}
+
+fn record_issue_failure(project_id: &str, issue_number: u32, error: &str) {
+    record_activity(
+        project_id,
+        format!("Start failed: {error}"),
+        Some(issue_number),
+    );
+    with_project_runtime(project_id, |runtime| {
+        let failure = runtime
+            .failed_issues
+            .entry(issue_number)
+            .or_insert_with(|| AutoFixFailedIssue {
+                issue_number,
+                attempts: 0,
+                error: String::new(),
+                failed_at: 0,
+                gave_up: false,
+            });
+        failure.attempts += 1;
+        failure.error = error.to_string();
+        failure.failed_at = now_unix_secs();
+        failure.gave_up = failure.attempts >= AUTO_FIX_MAX_ATTEMPTS;
+    });
+}
+
+fn clear_issue_failure(project_id: &str, issue_number: u32) {
+    with_project_runtime(project_id, |runtime| {
+        runtime.failed_issues.remove(&issue_number);
+    });
+}
+
+fn gave_up_issue_numbers(project_id: &str) -> HashSet<u32> {
+    with_project_runtime(project_id, |runtime| {
+        runtime
+            .failed_issues
+            .values()
+            .filter(|failure| failure.gave_up)
+            .map(|failure| failure.issue_number)
+            .collect()
+    })
+}
+
+fn is_github_rate_limit_error(error: &str) -> bool {
+    error.to_lowercase().contains("rate limit")
+}
+
+fn defer_project_for_rate_limit(project_id: &str) {
+    let until = now_unix_secs() + GITHUB_RATE_LIMIT_BACKOFF_SECS;
+    with_project_runtime(project_id, |runtime| {
+        runtime.rate_limited_until = Some(until);
+        runtime.next_scan_at = runtime.next_scan_at.max(until);
+    });
+}
+
+pub fn get_auto_fix_status(project_id: &str) -> AutoFixStatus {
+    let pending_yolo_sessions = pending_yolo()
+        .lock()
+        .expect("pending auto yolo mutex")
+        .values()
+        .filter(|entry| entry.project_id == project_id)
+        .count();
+    let mut starting_issues: Vec<u32> = starting_issue_numbers(project_id).into_iter().collect();
+    starting_issues.sort_unstable();
+    let now = now_unix_secs();
+    with_project_runtime(project_id, |runtime| {
+        let mut failed_issues: Vec<AutoFixFailedIssue> =
+            runtime.failed_issues.values().cloned().collect();
+        failed_issues.sort_by_key(|failure| failure.issue_number);
+        AutoFixStatus {
+            last_scan_at: runtime.last_scan_at,
+            next_scan_at: runtime.last_scan_at.map(|_| runtime.next_scan_at),
+            rate_limited_until: runtime.rate_limited_until.filter(|until| *until > now),
+            last_error: runtime.last_error.clone(),
+            failed_issues,
+            starting_issues,
+            pending_yolo_sessions,
+            scanning: runtime.scanning,
+            active_now: true, // The dispatch fills this using server-local active hours.
+            last_scan_summary: runtime.last_scan_summary.clone(),
+            activity: runtime.activity.clone(),
+        }
+    })
+}
+
+/// Forget failed issues and the last error so failed issues are retried.
+pub fn clear_auto_fix_failures(project_id: &str) {
+    with_project_runtime(project_id, |runtime| {
+        runtime.failed_issues.clear();
+        runtime.last_error = None;
+    });
+    record_activity(
+        project_id,
+        "Failed issues cleared for retry".to_string(),
+        None,
+    );
 }
 
 fn pending_yolo() -> &'static Mutex<HashMap<String, PendingAutoYolo>> {
@@ -121,6 +412,20 @@ fn pending_yolo() -> &'static Mutex<HashMap<String, PendingAutoYolo>> {
 
 fn auto_yolo_in_flight() -> &'static Mutex<HashSet<String>> {
     YOLO_IN_FLIGHT.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+fn starting_issues() -> &'static Mutex<HashSet<(String, u32)>> {
+    STARTING_ISSUES.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+fn starting_issue_numbers(project_id: &str) -> HashSet<u32> {
+    starting_issues()
+        .lock()
+        .expect("starting issues mutex")
+        .iter()
+        .filter(|(id, _)| id == project_id)
+        .map(|(_, issue_number)| *issue_number)
+        .collect()
 }
 
 fn mark_auto_yolo_in_flight(in_flight: &mut HashSet<String>, session_id: &str) -> bool {
@@ -224,7 +529,68 @@ pub fn is_backend_quota_or_auth_error(error: &str) -> bool {
         || (lower.contains("isn't available in this environment") && lower.contains("login"))
 }
 
+#[derive(Deserialize)]
+struct ChatErrorPayload {
+    session_id: String,
+    error: String,
+}
+
+fn record_session_activity(app: &AppHandle, session_id: &str, message: String) {
+    let Ok(Some(metadata)) = crate::chat::storage::load_metadata(app, session_id) else {
+        return;
+    };
+    let Ok(data) = crate::projects::storage::load_projects_data(app) else {
+        return;
+    };
+    if let Some(worktree) = data.find_worktree(&metadata.worktree_id) {
+        if matches!(worktree.origin, Some(WorktreeOrigin::AutoFix)) {
+            record_activity(&worktree.project_id, message, worktree.issue_number);
+        }
+    }
+}
+
 pub fn start_auto_fix_scheduler(app: AppHandle) {
+    // Planning/yolo turns run through the chat queue, so backend quota/auth
+    // failures only surface as `chat:error` events, not as scheduler errors.
+    let error_app = app.clone();
+    app.listen("chat:error", move |event| {
+        let Ok(payload) = serde_json::from_str::<ChatErrorPayload>(event.payload()) else {
+            return;
+        };
+        record_session_activity(
+            &error_app,
+            &payload.session_id,
+            format!("Session failed: {}", payload.error),
+        );
+        if !is_backend_quota_or_auth_error(&payload.error) {
+            return;
+        }
+        let app = error_app.clone();
+        tauri::async_runtime::spawn(async move {
+            stop_auto_fix_for_session_error(&app, &payload.session_id, &payload.error);
+        });
+    });
+
+    for (event_name, message) in [
+        ("chat:done", "Turn completed"),
+        ("chat:cancelled", "Turn cancelled"),
+    ] {
+        let activity_app = app.clone();
+        app.listen(event_name, move |event| {
+            let Ok(payload) = serde_json::from_str::<serde_json::Value>(event.payload()) else {
+                return;
+            };
+            let Some(session_id) = payload
+                .get("session_id")
+                .or_else(|| payload.get("sessionId"))
+                .and_then(|id| id.as_str())
+            else {
+                return;
+            };
+            record_session_activity(&activity_app, session_id, message.to_string());
+        });
+    }
+
     tauri::async_runtime::spawn(async move {
         loop {
             run_auto_yolo_watch(&app).await;
@@ -259,6 +625,9 @@ async fn run_auto_fix_scan(app: &AppHandle) {
             continue;
         }
 
+        let _scan_guard = ScanGuard(project.id.clone());
+        record_activity(&project.id, "Scan started".to_string(), None);
+
         let project_worktrees: Vec<Worktree> = data
             .worktrees
             .iter()
@@ -266,64 +635,85 @@ async fn run_auto_fix_scan(app: &AppHandle) {
             .cloned()
             .collect();
 
-        let issues = match crate::projects::github_issues::list_github_issues(
+        let issues = match crate::projects::github_issues::list_open_issue_labels(
             app.clone(),
             project.path.clone(),
-            Some("open".to_string()),
         )
         .await
         {
-            Ok(result) => result
-                .issues
-                .into_iter()
-                .map(|issue| AutoFixIssueCandidate {
-                    number: issue.number,
-                    labels: issue.labels.into_iter().map(|label| label.name).collect(),
-                })
-                .collect::<Vec<_>>(),
+            Ok(issues) => issues,
             Err(err) => {
                 log::warn!(
                     "Mr. Robot: failed to list issues for {}: {err}",
                     project.name
                 );
+                if is_github_rate_limit_error(&err) {
+                    defer_project_for_rate_limit(&project.id);
+                }
+                record_project_error(&project.id, format!("Failed to list GitHub issues: {err}"));
                 continue;
             }
         };
-        let open_issue_numbers: HashSet<u32> = issues.iter().map(|issue| issue.number).collect();
-        let closed_worktree_ids =
-            closed_auto_fix_issue_worktree_ids(&project_worktrees, &open_issue_numbers);
-        let ineligible_worktree_ids = ineligible_auto_fix_issue_worktree_ids(
-            &project_worktrees,
+        let preview = build_issue_preview(
             &issues,
-            &settings.included_labels,
-            &settings.excluded_labels,
+            &project_worktrees,
+            &settings,
+            &starting_issue_numbers(&project.id),
+            &gave_up_issue_numbers(&project.id),
         );
-        let archived_worktree_ids: Vec<String> = closed_worktree_ids
-            .into_iter()
-            .chain(ineligible_worktree_ids)
-            .collect();
-        let archived_worktree_id_set: HashSet<String> =
-            archived_worktree_ids.iter().cloned().collect();
-
-        for worktree_id in &archived_worktree_ids {
-            match crate::projects::archive_worktree(app.clone(), worktree_id.clone()).await {
-                Ok(()) => log::info!(
-                    "Mr. Robot: archived auto-fix worktree {worktree_id} because its GitHub issue is closed or no longer matches label filters"
-                ),
-                Err(err) => log::warn!(
-                    "Mr. Robot: failed to archive auto-fix worktree {worktree_id}: {err}"
-                ),
-            }
+        let candidates = preview.iter().filter(|issue| issue.selected).count();
+        let summary = format!(
+            "{} open issues · {candidates} next scan candidates",
+            issues.len()
+        );
+        with_project_runtime(&project.id, |runtime| {
+            runtime.last_scan_summary = Some(summary.clone());
+            runtime.last_error = None;
+        });
+        record_activity(&project.id, summary, None);
+        let open_issue_numbers: HashSet<u32> = issues.iter().map(|issue| issue.number).collect();
+        // Worktrees whose issue closed or no longer matches the label filters are
+        // not archived (they may hold uncommitted work), but they stop using
+        // capacity, their investigation is stopped, and they never go to yolo.
+        let inactive_worktree_ids: HashSet<String> =
+            closed_auto_fix_issue_worktree_ids(&project_worktrees, &open_issue_numbers)
+                .into_iter()
+                .chain(ineligible_auto_fix_issue_worktree_ids(
+                    &project_worktrees,
+                    &issues,
+                    &settings.included_labels,
+                    &settings.excluded_labels,
+                ))
+                .collect();
+        clear_pending_auto_yolo_for_worktrees(&inactive_worktree_ids);
+        for worktree in project_worktrees
+            .iter()
+            .filter(|worktree| inactive_worktree_ids.contains(&worktree.id))
+        {
+            stop_auto_fix_investigation(app, worktree).await;
         }
 
-        let active_auto_fix = project_worktrees
+        let starting = starting_issue_numbers(&project.id);
+        let gave_up = gave_up_issue_numbers(&project.id);
+        let active_worktrees: Vec<&Worktree> = project_worktrees
             .iter()
             .filter(|worktree| {
                 worktree.archived_at.is_none()
-                    && !archived_worktree_id_set.contains(&worktree.id)
+                    && !inactive_worktree_ids.contains(&worktree.id)
                     && matches!(worktree.origin, Some(WorktreeOrigin::AutoFix))
             })
-            .count();
+            .collect();
+        recover_auto_fix_worktrees(
+            app,
+            project,
+            &settings,
+            &active_worktrees,
+            &starting,
+            &gave_up,
+        )
+        .await;
+
+        let active_auto_fix = active_worktrees.len() + starting.len();
         let max_parallel = settings.max_parallel_worktrees.max(1) as usize;
         if active_auto_fix >= max_parallel {
             continue;
@@ -333,8 +723,9 @@ async fn run_auto_fix_scan(app: &AppHandle) {
         let limit = (settings.issue_limit.max(1) as usize).min(capacity);
         let handled: HashSet<u32> = project_worktrees
             .iter()
-            .filter(|worktree| !archived_worktree_id_set.contains(&worktree.id))
             .filter_map(|worktree| worktree.issue_number)
+            .chain(starting)
+            .chain(gave_up)
             .collect();
 
         for issue_number in select_issue_numbers_to_start(
@@ -347,27 +738,212 @@ async fn run_auto_fix_scan(app: &AppHandle) {
             let app_clone = app.clone();
             let project_clone = project.clone();
             let settings_clone = settings.clone();
+            let starting_key = (project.id.clone(), issue_number);
+            starting_issues()
+                .lock()
+                .expect("starting issues mutex")
+                .insert(starting_key.clone());
             tauri::async_runtime::spawn(async move {
-                if let Err(err) =
-                    start_issue_auto_fix(&app_clone, &project_clone, &settings_clone, issue_number)
-                        .await
+                // Errors here come from GitHub, git, or session storage. Backend
+                // quota/auth failures arrive later via `chat:error`.
+                match start_issue_auto_fix(
+                    &app_clone,
+                    &project_clone,
+                    &settings_clone,
+                    issue_number,
+                )
+                .await
                 {
-                    log::warn!(
-                        "Mr. Robot: issue #{issue_number} failed for {}: {err}",
-                        project_clone.name
-                    );
-                    if is_backend_quota_or_auth_error(&err) {
-                        emit_auto_fix_stopped(
-                            &app_clone,
-                            &project_clone,
-                            &settings_clone.planning_backend,
-                            &err,
+                    Ok(()) => {
+                        clear_issue_failure(&project_clone.id, issue_number);
+                        record_activity(
+                            &project_clone.id,
+                            "Planning started".to_string(),
+                            Some(issue_number),
                         );
                     }
+                    Err(err) => {
+                        log::warn!(
+                            "Mr. Robot: issue #{issue_number} failed for {}: {err}",
+                            project_clone.name
+                        );
+                        if is_github_rate_limit_error(&err) {
+                            // Not the issue's fault: wait, and keep its attempts.
+                            defer_project_for_rate_limit(&project_clone.id);
+                            record_project_error(&project_clone.id, err);
+                        } else {
+                            record_issue_failure(&project_clone.id, issue_number, &err);
+                        }
+                    }
                 }
+                starting_issues()
+                    .lock()
+                    .expect("starting issues mutex")
+                    .remove(&starting_key);
             });
         }
     }
+}
+
+/// Repair Mr. Robot state that lives only in memory or was interrupted:
+/// worktrees that never got their investigation (app restart or crash during
+/// creation), and plans waiting for approval whose auto-yolo queue entry was
+/// lost on restart.
+async fn recover_auto_fix_worktrees(
+    app: &AppHandle,
+    project: &Project,
+    settings: &ProjectAutoFixSettings,
+    worktrees: &[&Worktree],
+    starting: &HashSet<u32>,
+    gave_up: &HashSet<u32>,
+) {
+    for worktree in worktrees {
+        if worktree.issue_number.is_some_and(|issue_number| {
+            starting.contains(&issue_number) || gave_up.contains(&issue_number)
+        }) {
+            continue;
+        }
+        let sessions = match crate::chat::storage::load_sessions(app, &worktree.path, &worktree.id)
+        {
+            Ok(sessions) => sessions.sessions,
+            Err(err) => {
+                log::warn!(
+                    "Mr. Robot: failed to load sessions for worktree {}: {err}",
+                    worktree.id
+                );
+                continue;
+            }
+        };
+        if worktree_needs_investigation(&sessions) {
+            log::info!(
+                "Mr. Robot: starting missing investigation for worktree {}",
+                worktree.id
+            );
+            let result = start_auto_fix_investigation(app, project, settings, worktree).await;
+            match (result, worktree.issue_number) {
+                (Ok(()), Some(issue_number)) => clear_issue_failure(&project.id, issue_number),
+                (Ok(()), None) => {}
+                (Err(err), issue_number) => {
+                    log::warn!(
+                        "Mr. Robot: failed to recover worktree {}: {err}",
+                        worktree.id
+                    );
+                    match issue_number {
+                        Some(issue_number) => record_issue_failure(&project.id, issue_number, &err),
+                        None => record_project_error(&project.id, err),
+                    }
+                }
+            }
+            continue;
+        }
+
+        if !should_queue_auto_yolo(settings) {
+            continue;
+        }
+        for session in sessions
+            .iter()
+            .filter(|session| session.archived_at.is_none())
+        {
+            if session.waiting_for_input_type.as_deref() == Some("plan")
+                && session.pending_plan_message_id.is_some()
+            {
+                queue_pending_auto_yolo(project, settings, worktree, session.id.clone());
+            }
+        }
+    }
+}
+
+/// Stop investigation work in a worktree whose issue closed or became
+/// ineligible: drop the investigation prompt if it never started, and cancel a
+/// running plan-mode turn. Yolo turns are left alone because they may be in
+/// the middle of editing files.
+async fn stop_auto_fix_investigation(app: &AppHandle, worktree: &Worktree) {
+    let sessions = match crate::chat::storage::load_sessions(app, &worktree.path, &worktree.id) {
+        Ok(sessions) => sessions.sessions,
+        Err(err) => {
+            log::warn!(
+                "Mr. Robot: failed to load sessions for worktree {}: {err}",
+                worktree.id
+            );
+            return;
+        }
+    };
+    for session in sessions
+        .iter()
+        .filter(|session| session.archived_at.is_none())
+    {
+        match investigation_stop_action(
+            session,
+            crate::chat::registry::is_session_actively_managed(&session.id),
+        ) {
+            InvestigationStopAction::None => {}
+            InvestigationStopAction::ClearQueue => {
+                log::info!(
+                    "Mr. Robot: dropping queued investigation in worktree {} (issue no longer active)",
+                    worktree.id
+                );
+                if let Err(err) = crate::chat::clear_message_queue(
+                    app.clone(),
+                    worktree.id.clone(),
+                    worktree.path.clone(),
+                    session.id.clone(),
+                )
+                .await
+                {
+                    log::warn!("Mr. Robot: failed to clear queue for {}: {err}", session.id);
+                }
+            }
+            InvestigationStopAction::Cancel => {
+                log::info!(
+                    "Mr. Robot: cancelling investigation in worktree {} (issue no longer active)",
+                    worktree.id
+                );
+                if let Err(err) = crate::chat::cancel_chat_message(
+                    app.clone(),
+                    session.id.clone(),
+                    worktree.id.clone(),
+                )
+                .await
+                {
+                    log::warn!("Mr. Robot: failed to cancel {}: {err}", session.id);
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum InvestigationStopAction {
+    None,
+    ClearQueue,
+    Cancel,
+}
+
+fn investigation_stop_action(
+    session: &crate::chat::types::Session,
+    actively_running: bool,
+) -> InvestigationStopAction {
+    if actively_running {
+        return if session.last_run_execution_mode.as_deref() == Some("plan") {
+            InvestigationStopAction::Cancel
+        } else {
+            InvestigationStopAction::None
+        };
+    }
+    // Queued prompt of a session that never ran = the unstarted investigation.
+    if session.total_runs == 0 && !session.queued_messages.is_empty() {
+        return InvestigationStopAction::ClearQueue;
+    }
+    InvestigationStopAction::None
+}
+
+/// True when no non-archived session ever ran or queued a message, i.e. the
+/// investigation was never started for this worktree.
+fn worktree_needs_investigation(sessions: &[crate::chat::types::Session]) -> bool {
+    sessions
+        .iter()
+        .filter(|session| session.archived_at.is_none())
+        .all(|session| session.total_runs == 0 && session.queued_messages.is_empty())
 }
 
 fn within_active_window(start: u8, end: u8, hour: u8) -> bool {
@@ -381,7 +957,7 @@ fn within_active_window(start: u8, end: u8, hour: u8) -> bool {
     }
 }
 
-fn auto_fix_active_now(settings: &ProjectAutoFixSettings) -> bool {
+pub fn auto_fix_active_now(settings: &ProjectAutoFixSettings) -> bool {
     if !settings.active_hours_enabled {
         return true;
     }
@@ -397,13 +973,15 @@ fn should_queue_auto_yolo(settings: &ProjectAutoFixSettings) -> bool {
 fn project_due(project: &Project, settings: &ProjectAutoFixSettings) -> bool {
     let now = now_unix_secs();
     let interval = settings.interval_minutes.max(1) * 60;
-    let mut checks = last_project_checks().lock().expect("auto fix checks mutex");
-    let last = checks.get(&project.id).copied().unwrap_or(0);
-    if now.saturating_sub(last) < interval {
-        return false;
-    }
-    checks.insert(project.id.clone(), now);
-    true
+    with_project_runtime(&project.id, |runtime| {
+        if runtime.scanning || now < runtime.next_scan_at {
+            return false;
+        }
+        runtime.scanning = true;
+        runtime.last_scan_at = Some(now);
+        runtime.next_scan_at = now + interval;
+        true
+    })
 }
 
 fn closed_auto_fix_issue_worktree_ids(
@@ -474,6 +1052,11 @@ async fn start_issue_auto_fix(
         issue_number,
     )
     .await?;
+    // The issue may have closed between the scan and this fetch.
+    if !issue.state.eq_ignore_ascii_case("open") {
+        log::info!("Mr. Robot: skipping issue #{issue_number} because it is no longer open");
+        return Ok(());
+    }
     let comments: Vec<GitHubComment> = issue.comments;
     let issue_context = IssueContext {
         number: issue.number,
@@ -483,8 +1066,17 @@ async fn start_issue_auto_fix(
     };
 
     let ready_worktree = create_auto_fix_worktree(app, project.id.clone(), issue_context).await?;
+    start_auto_fix_investigation(app, project, settings, &ready_worktree).await
+}
+
+async fn start_auto_fix_investigation(
+    app: &AppHandle,
+    project: &Project,
+    settings: &ProjectAutoFixSettings,
+    worktree: &Worktree,
+) -> Result<(), String> {
     let prefs = crate::load_preferences(app.clone()).await?;
-    let prompt = build_auto_fix_investigation_prompt(&prefs, &ready_worktree);
+    let prompt = build_auto_fix_investigation_prompt(&prefs, worktree);
     let model = settings
         .planning_model
         .clone()
@@ -496,8 +1088,8 @@ async fn start_issue_auto_fix(
 
     let result = crate::jean_mcp_core::start_background_investigation_impl(
         app,
-        ready_worktree.id.clone(),
-        ready_worktree.path.clone(),
+        worktree.id.clone(),
+        worktree.path.clone(),
         prompt,
         model,
         settings.planning_backend.clone(),
@@ -509,6 +1101,9 @@ async fn start_issue_auto_fix(
         None,
         None,
         Some("auto_fix".to_string()),
+        None,
+        false,
+        None,
     )
     .await?;
 
@@ -516,29 +1111,50 @@ async fn start_issue_auto_fix(
         return Ok(());
     }
 
-    let pending_session_id = result.session_id.clone();
-    pending_yolo()
-        .lock()
-        .expect("pending auto yolo mutex")
-        .insert(
-            pending_session_id.clone(),
-            PendingAutoYolo {
-                project_id: project.id.clone(),
-                project_name: project.name.clone(),
-                worktree_id: ready_worktree.id,
-                worktree_path: ready_worktree.path,
-                session_id: result.session_id,
-                backend: settings.yolo_backend.clone(),
-                model: settings.yolo_model.clone(),
-                provider: normalize_claude_provider(
-                    &settings.yolo_backend,
-                    settings.yolo_provider.as_deref(),
-                ),
-            },
-        );
-    spawn_pending_auto_yolo_watch(app.clone(), pending_session_id);
+    if queue_pending_auto_yolo(project, settings, worktree, result.session_id.clone()) {
+        spawn_pending_auto_yolo_watch(app.clone(), result.session_id);
+    }
 
     Ok(())
+}
+
+/// Queue a session for automatic plan approval + yolo. Returns false when the
+/// session is already queued or its yolo start is in flight.
+fn queue_pending_auto_yolo(
+    project: &Project,
+    settings: &ProjectAutoFixSettings,
+    worktree: &Worktree,
+    session_id: String,
+) -> bool {
+    if auto_yolo_in_flight()
+        .lock()
+        .expect("auto yolo in flight mutex")
+        .contains(&session_id)
+    {
+        return false;
+    }
+    let mut pending = pending_yolo().lock().expect("pending auto yolo mutex");
+    if pending.contains_key(&session_id) {
+        return false;
+    }
+    pending.insert(
+        session_id.clone(),
+        PendingAutoYolo {
+            project_id: project.id.clone(),
+            project_name: project.name.clone(),
+            worktree_id: worktree.id.clone(),
+            worktree_path: worktree.path.clone(),
+            session_id,
+            backend: settings.yolo_backend.clone(),
+            model: settings.yolo_model.clone(),
+            provider: normalize_claude_provider(
+                &settings.yolo_backend,
+                settings.yolo_provider.as_deref(),
+            ),
+            attempts: 0,
+        },
+    );
+    true
 }
 
 async fn create_auto_fix_worktree(
@@ -685,6 +1301,20 @@ async fn try_start_auto_yolo_if_ready(app: &AppHandle, session_id: &str) {
         return;
     }
 
+    // Mr. Robot (or its auto-yolo option) may have been switched off while the
+    // plan was running. Never approve and execute a plan after that.
+    if !project_auto_yolo_enabled(app, &entry.project_id) {
+        log::info!(
+            "Mr. Robot: skipping auto-yolo for session {} because it is disabled",
+            entry.session_id
+        );
+        pending_yolo()
+            .lock()
+            .expect("pending auto yolo mutex")
+            .remove(&entry.session_id);
+        return;
+    }
+
     {
         let mut in_flight = auto_yolo_in_flight()
             .lock()
@@ -698,6 +1328,7 @@ async fn try_start_auto_yolo_if_ready(app: &AppHandle, session_id: &str) {
         .lock()
         .expect("pending auto yolo mutex")
         .remove(&entry.session_id);
+    record_activity(&entry.project_id, "Building started".to_string(), None);
     spawn_auto_yolo_start(app.clone(), entry);
 }
 
@@ -716,8 +1347,20 @@ fn spawn_auto_yolo_start(app: AppHandle, entry: PendingAutoYolo) {
             if is_backend_quota_or_auth_error(&err) {
                 let project = project_from_pending_auto_yolo(&entry);
                 emit_auto_fix_stopped(&app, &project, &entry.backend, &err);
+            } else if entry.attempts + 1 >= AUTO_FIX_MAX_ATTEMPTS {
+                record_project_error(
+                    &entry.project_id,
+                    format!(
+                        "Gave up running the plan with Full access for session {} after {AUTO_FIX_MAX_ATTEMPTS} attempts: {err}",
+                        entry.session_id
+                    ),
+                );
             } else {
                 let session_id = entry.session_id.clone();
+                let entry = PendingAutoYolo {
+                    attempts: entry.attempts + 1,
+                    ..entry
+                };
                 pending_yolo()
                     .lock()
                     .expect("pending auto yolo mutex")
@@ -751,8 +1394,10 @@ fn project_from_pending_auto_yolo(entry: &PendingAutoYolo) -> Project {
         sentry_auth_token: None,
         sentry_organization_slug: None,
         sentry_project_slug: None,
+        sentry_base_url: None,
         linked_project_ids: Vec::new(),
         auto_fix_settings: None,
+        server: None,
     }
 }
 
@@ -836,6 +1481,9 @@ async fn approve_plan_and_start_yolo(
         None,
         Some(Some("yolo".to_string())),
         None,
+        None, // hidden_table_checklists
+        None, // pinned_tables
+        None, // selected_permission_mode
     )
     .await?;
     let _ = crate::chat::broadcast_session_setting(
@@ -858,7 +1506,7 @@ async fn approve_plan_and_start_yolo(
         entry.session_id.clone(),
         entry.worktree_id.clone(),
         entry.worktree_path.clone(),
-        "[Mr. Robot Yolo]\nPlan approved automatically. Begin a new yolo execution turn now. Execute the approved plan, implement the fixes immediately, and do not continue planning or ask for confirmation."
+        "[Mr. Robot Full access]\nPlan approved automatically. Begin a new Full access execution turn now. Execute the approved plan, implement the fixes immediately, and do not continue planning or ask for confirmation."
             .to_string(),
         Some(model),
         Some("yolo".to_string()),
@@ -878,6 +1526,16 @@ async fn approve_plan_and_start_yolo(
     Ok(())
 }
 
+fn clear_pending_auto_yolo_for_worktrees(worktree_ids: &HashSet<String>) {
+    if worktree_ids.is_empty() {
+        return;
+    }
+    pending_yolo()
+        .lock()
+        .expect("pending auto yolo mutex")
+        .retain(|_, entry| !worktree_ids.contains(&entry.worktree_id));
+}
+
 fn clear_pending_auto_yolo_for_project(project_id: &str) {
     pending_yolo()
         .lock()
@@ -885,9 +1543,57 @@ fn clear_pending_auto_yolo_for_project(project_id: &str) {
         .retain(|_, entry| entry.project_id != project_id);
 }
 
+fn project_auto_yolo_enabled(app: &AppHandle, project_id: &str) -> bool {
+    let Ok(data) = crate::projects::storage::load_projects_data(app) else {
+        return false;
+    };
+    data.projects
+        .iter()
+        .find(|project| project.id == project_id)
+        .and_then(|project| project.auto_fix_settings.as_ref())
+        .is_some_and(|settings| settings.enabled && settings.auto_yolo_enabled)
+}
+
+/// Stop Mr. Robot for the project owning `session_id` when a backend quota/auth
+/// error hits one of its worktrees. Sessions outside Mr. Robot worktrees are ignored.
+fn stop_auto_fix_for_session_error(app: &AppHandle, session_id: &str, error: &str) {
+    let Ok(Some(metadata)) = crate::chat::storage::load_metadata(app, session_id) else {
+        return;
+    };
+    let Ok(data) = crate::projects::storage::load_projects_data(app) else {
+        return;
+    };
+    let Some(worktree) = data.find_worktree(&metadata.worktree_id) else {
+        return;
+    };
+    if !matches!(worktree.origin, Some(WorktreeOrigin::AutoFix)) {
+        return;
+    }
+    let Some(project) = data
+        .projects
+        .iter()
+        .find(|project| project.id == worktree.project_id)
+    else {
+        return;
+    };
+    let backend = serde_json::to_value(&metadata.backend)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_string))
+        .unwrap_or_default();
+    emit_auto_fix_stopped(app, project, &backend, error);
+}
+
 fn emit_auto_fix_stopped(app: &AppHandle, project: &Project, backend: &str, error: &str) {
     clear_pending_auto_yolo_for_project(&project.id);
-    disable_project_auto_fix(app, &project.id);
+    record_project_error(
+        &project.id,
+        format!("Stopped after a {backend} quota/auth error: {error}"),
+    );
+    // The same failure can be reported by both `chat:error` and the yolo start
+    // path. Only notify once, when this call actually switched Mr. Robot off.
+    if !disable_project_auto_fix(app, &project.id) {
+        return;
+    }
     let event = AutoFixStoppedEvent {
         project_id: project.id.clone(),
         project_name: project.name.clone(),
@@ -899,20 +1605,26 @@ fn emit_auto_fix_stopped(app: &AppHandle, project: &Project, backend: &str, erro
     }
 }
 
-fn disable_project_auto_fix(app: &AppHandle, project_id: &str) {
+/// Returns true when Mr. Robot was enabled and is now disabled.
+fn disable_project_auto_fix(app: &AppHandle, project_id: &str) -> bool {
     let Ok(mut data) = crate::projects::storage::load_projects_data(app) else {
-        return;
+        return false;
     };
     let Some(project) = data.find_project_mut(project_id) else {
-        return;
+        return false;
     };
     let Some(settings) = project.auto_fix_settings.as_mut() else {
-        return;
+        return false;
     };
+    if !settings.enabled {
+        return false;
+    }
     settings.enabled = false;
     if let Err(err) = crate::projects::storage::save_projects_data(app, &data) {
         log::warn!("Mr. Robot: failed to disable project setting: {err}");
+        return false;
     }
+    true
 }
 
 /// Only Claude custom CLI profiles are valid providers; other backends ignore them.
@@ -934,14 +1646,14 @@ fn normalize_claude_provider(backend: &str, provider: Option<&str>) -> Option<St
 
 fn default_model_for_backend(backend: &str) -> String {
     match backend {
-        "codex" => "gpt-5.6-sol".to_string(),
-        "opencode" => "opencode/gpt-5.6-sol".to_string(),
+        "codex" => crate::default_codex_model(),
+        "opencode" => crate::default_opencode_model(),
         "cursor" => "cursor/auto".to_string(),
         "pi" => "pi/sonnet".to_string(),
         "commandcode" => "commandcode/default".to_string(),
         "grok" => "grok/grok-4.6".to_string(),
         "antigravity" => "antigravity/auto".to_string(),
-        _ => "claude-opus-4-8[1m]".to_string(),
+        _ => "claude-opus-5-5".to_string(),
     }
 }
 
@@ -997,8 +1709,10 @@ mod tests {
             sentry_auth_token: None,
             sentry_organization_slug: None,
             sentry_project_slug: None,
+            sentry_base_url: None,
             linked_project_ids: Vec::new(),
             auto_fix_settings,
+            server: None,
         }
     }
 
@@ -1286,15 +2000,15 @@ mod tests {
     fn default_models_cover_all_auto_fix_backends() {
         assert_eq!(
             default_model_for_backend("claude"),
-            "claude-opus-4-8[1m]".to_string()
+            "claude-opus-5-5".to_string()
         );
         assert_eq!(
             default_model_for_backend("codex"),
-            "gpt-5.6-sol".to_string()
+            "gpt-6.1-sol".to_string()
         );
         assert_eq!(
             default_model_for_backend("opencode"),
-            "opencode/gpt-5.6-sol".to_string()
+            "opencode/gpt-6.1-sol".to_string()
         );
         assert_eq!(
             default_model_for_backend("grok"),
@@ -1421,6 +2135,7 @@ mod tests {
             backend: "claude".to_string(),
             model: None,
             provider: None,
+            attempts: 0,
         };
         let entry_for_other_project = PendingAutoYolo {
             project_id: "project-2".to_string(),
@@ -1431,6 +2146,7 @@ mod tests {
             backend: "claude".to_string(),
             model: None,
             provider: None,
+            attempts: 0,
         };
         {
             let mut pending = pending_yolo().lock().expect("pending auto yolo mutex");
@@ -1506,5 +2222,343 @@ mod tests {
             None
         );
         assert_eq!(normalize_claude_provider("codex", Some("OpenRouter")), None);
+    }
+
+    fn test_session(
+        total_runs: usize,
+        queued: usize,
+        archived: bool,
+    ) -> crate::chat::types::Session {
+        let mut session = crate::chat::types::Session::new(
+            "Session 1".to_string(),
+            0,
+            crate::chat::types::Backend::Claude,
+        );
+        session.total_runs = total_runs;
+        session.queued_messages = vec![serde_json::json!({}); queued];
+        session.archived_at = archived.then_some(1);
+        session
+    }
+
+    #[test]
+    fn worktree_without_runs_or_queued_messages_needs_investigation() {
+        assert!(worktree_needs_investigation(&[]));
+        assert!(worktree_needs_investigation(&[test_session(0, 0, false)]));
+        // Archived sessions do not count as started work.
+        assert!(worktree_needs_investigation(&[test_session(3, 0, true)]));
+    }
+
+    #[test]
+    fn worktree_with_run_or_queued_message_does_not_need_investigation() {
+        assert!(!worktree_needs_investigation(&[test_session(1, 0, false)]));
+        assert!(!worktree_needs_investigation(&[test_session(0, 1, false)]));
+        assert!(!worktree_needs_investigation(&[
+            test_session(0, 0, false),
+            test_session(2, 0, false),
+        ]));
+    }
+
+    #[test]
+    fn queue_pending_auto_yolo_skips_duplicates_and_in_flight_sessions() {
+        let project = test_project("queue-project", Some(test_auto_fix_settings(true)), false);
+        let settings = test_auto_fix_settings(true);
+        let worktree = test_worktree(
+            "queue-worktree",
+            Some(7),
+            Some(WorktreeOrigin::AutoFix),
+            None,
+        );
+
+        assert!(queue_pending_auto_yolo(
+            &project,
+            &settings,
+            &worktree,
+            "queue-a".to_string()
+        ));
+        assert!(!queue_pending_auto_yolo(
+            &project,
+            &settings,
+            &worktree,
+            "queue-a".to_string()
+        ));
+
+        auto_yolo_in_flight()
+            .lock()
+            .unwrap()
+            .insert("queue-b".to_string());
+        assert!(!queue_pending_auto_yolo(
+            &project,
+            &settings,
+            &worktree,
+            "queue-b".to_string()
+        ));
+
+        clear_pending_auto_yolo_for_project("queue-project");
+        auto_yolo_in_flight().lock().unwrap().remove("queue-b");
+    }
+
+    #[test]
+    fn chat_error_payload_parses_snake_case_event() {
+        let payload: ChatErrorPayload = serde_json::from_str(
+            r#"{"session_id":"s1","worktree_id":"w1","error":"Not logged in"}"#,
+        )
+        .unwrap();
+        assert_eq!(payload.session_id, "s1");
+        assert!(is_backend_quota_or_auth_error(&payload.error));
+    }
+
+    #[test]
+    fn issue_gives_up_after_max_attempts_and_clear_resets() {
+        let project_id = "retry-project";
+        for attempt in 1..AUTO_FIX_MAX_ATTEMPTS {
+            record_issue_failure(project_id, 42, "git failed");
+            assert!(
+                !gave_up_issue_numbers(project_id).contains(&42),
+                "attempt {attempt} should still retry"
+            );
+        }
+        record_issue_failure(project_id, 42, "git failed again");
+        assert!(gave_up_issue_numbers(project_id).contains(&42));
+
+        let status = get_auto_fix_status(project_id);
+        assert_eq!(status.failed_issues.len(), 1);
+        assert_eq!(status.failed_issues[0].attempts, AUTO_FIX_MAX_ATTEMPTS);
+        assert_eq!(status.failed_issues[0].error, "git failed again");
+        assert!(status.failed_issues[0].gave_up);
+
+        clear_auto_fix_failures(project_id);
+        assert!(gave_up_issue_numbers(project_id).is_empty());
+        assert!(get_auto_fix_status(project_id).failed_issues.is_empty());
+    }
+
+    #[test]
+    fn successful_start_clears_issue_failure() {
+        let project_id = "retry-success-project";
+        record_issue_failure(project_id, 7, "timeout");
+        clear_issue_failure(project_id, 7);
+        assert!(get_auto_fix_status(project_id).failed_issues.is_empty());
+    }
+
+    #[test]
+    fn preview_matches_scheduler_selection_and_explains_exclusions() {
+        let mut settings = test_auto_fix_settings(true);
+        settings.max_parallel_worktrees = 10;
+        settings.included_labels = vec!["bug".to_string()];
+        settings.excluded_labels = vec!["hold".to_string()];
+        let issues: Vec<AutoFixIssueCandidate> = vec![
+            (1, vec!["BUG"]),
+            (2, vec!["bug", "hold"]),
+            (3, vec!["feature"]),
+            (4, vec!["bug"]),
+            (5, vec!["bug"]),
+            (6, vec!["bug"]),
+            (7, vec!["bug"]),
+        ]
+        .into_iter()
+        .map(|(number, labels)| AutoFixIssueCandidate {
+            number,
+            labels: labels.into_iter().map(str::to_string).collect(),
+        })
+        .collect();
+        let worktrees = vec![test_worktree(
+            "normal",
+            Some(4),
+            Some(WorktreeOrigin::Manual),
+            None,
+        )];
+        let starting = HashSet::from([5]);
+        let gave_up = HashSet::from([6]);
+        let preview = build_issue_preview(&issues, &worktrees, &settings, &starting, &gave_up);
+        let selected: Vec<u32> = preview
+            .iter()
+            .filter(|issue| issue.selected)
+            .map(|issue| issue.issue_number)
+            .collect();
+        assert_eq!(
+            selected,
+            select_issue_numbers_to_start(
+                &issues,
+                &HashSet::from([4, 5, 6]),
+                &settings.included_labels,
+                &settings.excluded_labels,
+                1
+            )
+        );
+        let reasons: Vec<&str> = preview.iter().map(|issue| issue.reason.as_str()).collect();
+        assert_eq!(
+            reasons,
+            vec![
+                "Next scan candidate",
+                "Excluded label",
+                "No included label",
+                "Worktree already exists",
+                "Starting",
+                "Retry required",
+                "Waiting for a later scan"
+            ]
+        );
+    }
+
+    #[test]
+    fn preview_capacity_ignores_closed_ineligible_and_archived_robot_worktrees() {
+        let settings = test_auto_fix_settings(true);
+        let issues = vec![AutoFixIssueCandidate {
+            number: 1,
+            labels: vec![],
+        }];
+        let active = vec![test_worktree(
+            "robot",
+            Some(1),
+            Some(WorktreeOrigin::AutoFix),
+            None,
+        )];
+        let with_other_issue = vec![
+            AutoFixIssueCandidate {
+                number: 2,
+                labels: vec![],
+            },
+            issues[0].clone(),
+        ];
+        let preview = build_issue_preview(
+            &with_other_issue,
+            &active,
+            &settings,
+            &HashSet::new(),
+            &HashSet::new(),
+        );
+        assert_eq!(preview[0].reason, "Waiting for capacity");
+        assert!(!preview[0].selected);
+        let closed = vec![test_worktree(
+            "closed",
+            Some(999),
+            Some(WorktreeOrigin::AutoFix),
+            None,
+        )];
+        assert!(
+            build_issue_preview(
+                &issues,
+                &closed,
+                &settings,
+                &HashSet::new(),
+                &HashSet::new()
+            )[0]
+            .selected
+        );
+        let archived = vec![test_worktree(
+            "archived",
+            Some(999),
+            Some(WorktreeOrigin::AutoFix),
+            Some(1),
+        )];
+        assert!(
+            build_issue_preview(
+                &issues,
+                &archived,
+                &settings,
+                &HashSet::new(),
+                &HashSet::new()
+            )[0]
+            .selected
+        );
+    }
+
+    #[test]
+    fn scan_request_respects_backoff_and_scan_guard() {
+        let project = test_project("manual-scan-test", None, false);
+        let settings = test_auto_fix_settings(true);
+        with_project_runtime(&project.id, |runtime| {
+            runtime.next_scan_at = now_unix_secs() + 600
+        });
+        assert!(!project_due(&project, &settings));
+        request_auto_fix_scan(&project.id).unwrap();
+        assert!(project_due(&project, &settings));
+        assert!(request_auto_fix_scan(&project.id).is_err());
+        drop(ScanGuard(project.id.clone()));
+        request_auto_fix_scan(&project.id).unwrap();
+        defer_project_for_rate_limit(&project.id);
+        assert!(request_auto_fix_scan(&project.id).is_err());
+        assert!(!project_due(&project, &settings));
+    }
+
+    #[test]
+    fn activity_is_newest_first_bounded_and_project_scoped() {
+        for number in 0..35 {
+            record_activity("activity-test", format!("event {number}"), Some(number));
+        }
+        let status = get_auto_fix_status("activity-test");
+        assert_eq!(status.activity.len(), 30);
+        assert_eq!(status.activity[0].issue_number, Some(34));
+        assert_eq!(status.activity[29].issue_number, Some(5));
+        assert!(get_auto_fix_status("activity-other-project")
+            .activity
+            .is_empty());
+        let value = serde_json::to_value(status).unwrap();
+        assert_eq!(value["activity"][0]["issueNumber"], 34);
+        assert_eq!(value["scanning"], false);
+    }
+
+    #[test]
+    fn rate_limit_defers_next_scan() {
+        let project = test_project("rate-limit-project", None, false);
+        let settings = test_auto_fix_settings(true);
+        assert!(project_due(&project, &settings));
+        assert!(!project_due(&project, &settings));
+
+        with_project_runtime(&project.id, |runtime| runtime.scanning = false);
+        defer_project_for_rate_limit(&project.id);
+        let status = get_auto_fix_status(&project.id);
+        let until = status.rate_limited_until.expect("rate limited");
+        assert!(until >= now_unix_secs() + GITHUB_RATE_LIMIT_BACKOFF_SECS - 1);
+        assert!(status.next_scan_at.unwrap() >= until);
+    }
+
+    #[test]
+    fn stop_action_cancels_only_running_plan_turns() {
+        let mut plan = test_session(1, 0, false);
+        plan.last_run_execution_mode = Some("plan".to_string());
+        assert_eq!(
+            investigation_stop_action(&plan, true),
+            InvestigationStopAction::Cancel
+        );
+        // Finished plan: nothing to stop.
+        assert_eq!(
+            investigation_stop_action(&plan, false),
+            InvestigationStopAction::None
+        );
+
+        let mut yolo = test_session(2, 0, false);
+        yolo.last_run_execution_mode = Some("yolo".to_string());
+        assert_eq!(
+            investigation_stop_action(&yolo, true),
+            InvestigationStopAction::None
+        );
+    }
+
+    #[test]
+    fn stop_action_clears_only_never_started_investigation_queue() {
+        assert_eq!(
+            investigation_stop_action(&test_session(0, 1, false), false),
+            InvestigationStopAction::ClearQueue
+        );
+        // Session already ran: queued messages belong to the user.
+        assert_eq!(
+            investigation_stop_action(&test_session(1, 1, false), false),
+            InvestigationStopAction::None
+        );
+        assert_eq!(
+            investigation_stop_action(&test_session(0, 0, false), false),
+            InvestigationStopAction::None
+        );
+    }
+
+    #[test]
+    fn detects_github_rate_limit_errors() {
+        assert!(is_github_rate_limit_error(
+            "gh issue list failed: API rate limit exceeded for user"
+        ));
+        assert!(is_github_rate_limit_error(
+            "You have exceeded a secondary rate limit"
+        ));
+        assert!(!is_github_rate_limit_error("Could not resolve repository"));
     }
 }

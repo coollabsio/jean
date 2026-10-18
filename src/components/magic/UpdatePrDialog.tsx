@@ -6,7 +6,7 @@ import {
   ExternalLink,
   GitPullRequest,
   Loader2,
-} from 'lucide-react'
+} from '@/components/icons/reicon'
 import { toast } from 'sonner'
 import { openExternal } from '@/lib/platform'
 import {
@@ -26,6 +26,7 @@ import { buildReleaseNotesSessionPrompt } from '@/lib/release-notes-prompt'
 import { resolveMcpConfigForSend } from '@/services/mcp'
 import { usePreferences } from '@/services/preferences'
 import type { CliBackend } from '@/types/preferences'
+import { parseServerResourceKey } from '@/lib/server-resource'
 
 interface DetectPrResponse {
   pr_number: number
@@ -47,7 +48,10 @@ export function UpdatePrDialog() {
 
   const createSession = useCreateSession()
   const sendMessage = useSendMessage()
-  const { data: preferences } = usePreferences()
+  const targetServerId = selectedWorktreeId
+    ? parseServerResourceKey(selectedWorktreeId)?.serverId
+    : undefined
+  const { data: preferences } = usePreferences(targetServerId)
   const { data: projects } = useProjects()
   const project = worktree
     ? projects?.find(p => p.id === worktree.project_id)
@@ -256,8 +260,9 @@ export function UpdatePrDialog() {
               }}
             />
             <p className="text-xs text-muted-foreground">
-              Jean starts a yolo session that generates user-facing release
-              notes for this PR and updates its description automatically.
+              Jean starts a Full access session that generates user-facing
+              release notes for this PR and updates its description
+              automatically.
             </p>
           </div>
 

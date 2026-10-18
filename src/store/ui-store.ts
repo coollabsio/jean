@@ -1,7 +1,23 @@
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
+import type { CliBackend } from '@/types/preferences'
+import type { IssueContext } from '@/types/github'
 import type { CliType } from '@/lib/cli-update'
 import { mergeSeenFailedWorkflowRunIds } from '@/components/shared/workflow-run-utils'
+import { isMobileViewport } from '@/lib/viewport'
+
+export interface InvestigationOverride {
+  backend?: CliBackend
+  model?: string
+  provider?: string | null
+  forceNewSession?: boolean
+  /** Queue the investigation into this existing session */
+  sessionId?: string
+  prompt?: string
+  promptTemplate?: string
+  issueContext?: IssueContext
+  openSession?: boolean
+}
 
 export type PreferencePane =
   | 'general'
@@ -84,8 +100,30 @@ export type CliLoginModalType =
   | 'coderabbit'
   | null
 
+export interface McpLoginContext {
+  serverName: string
+  worktreePath: string
+  /** Owner of the backend CLI and terminal, not the viewing client. */
+  serverId?: string
+}
+
+export interface MinimizedCliUpdate {
+  type: Exclude<CliLoginModalType, null>
+  name: string
+  kind: 'reinstall' | 'terminal'
+  progress: number | null
+}
+
+/** Top-level Jean feature selected in the sidebar tab rail */
+export type RailSection = 'workspace' | 'agents'
+
 interface UIState {
   leftSidebarVisible: boolean
+  railSection: RailSection
+  /** Agent open on the Agents page */
+  selectedAgentId: string
+  /** Agents sidebar server filter: 'all' or a server ID */
+  agentsServerFilter: string
   leftSidebarSize: number // Width in pixels, persisted across sessions
   /** File browser (worktree explorer) visibility */
   fileBrowserVisible: boolean
@@ -137,6 +175,9 @@ interface UIState {
   cliLoginModalCommand: string | null
   cliLoginModalCommandArgs: string[] | null
   cliLoginModalAction: 'login' | 'update' | 'install'
+  cliLoginModalMcpContext: McpLoginContext | null
+  /** Active CLI update hidden from its modal while the process keeps running. */
+  minimizedCliUpdate: MinimizedCliUpdate | null
   /** Worktree IDs that should auto-trigger investigate-issue when created */
   autoInvestigateWorktreeIds: Set<string>
   /** Worktree IDs that should auto-trigger investigate-pr when created */
@@ -149,6 +190,7 @@ interface UIState {
   autoInvestigateLinearIssueWorktreeIds: Set<string>
   /** Worktree IDs that should auto-trigger Sentry issue investigation */
   autoInvestigateSentryIssueWorktreeIds: Set<string>
+  autoInvestigateOverrides: Record<string, InvestigationOverride>
   /** Counter for background worktree creations (CMD+Click) — skip auto-navigation */
   pendingBackgroundCreations: number
   /** Worktree IDs that should auto-open first session modal when canvas mounts */
@@ -157,12 +199,6 @@ interface UIState {
   pendingAutoOpenSessionIds: Record<string, string>
   /** Whether a session chat modal is open (for magic command keybinding checks) */
   sessionChatModalOpen: boolean
-  /** Whether the chat toolbar is mounted — used to hide the global FloatingDock
-   *  because its burger-menu counterpart now lives in the chat toolbar. */
-  chatToolbarMounted: boolean
-  /** Whether the full-width review results surface is mounted — used to hide the
-   *  global FloatingDock so it does not overlap the review Send buttons. */
-  reviewSurfaceMounted: boolean
   /** Which worktree the session chat modal is for (for magic command worktree resolution) */
   sessionChatModalWorktreeId: string | null
   /** Per-session primary surface shown inside the chat bounds */
@@ -205,7 +241,16 @@ interface UIState {
   availableCliUpdates: PendingCliUpdate[]
   toggleLeftSidebar: () => void
   setLeftSidebarVisible: (visible: boolean) => void
+  setRailSection: (section: RailSection) => void
+  setSelectedAgentId: (agentId: string) => void
+  setAgentsServerFilter: (serverId: string) => void
   setLeftSidebarSize: (size: number) => void
+  leftSidebarSwipe: {
+    isDragging: boolean
+    dragOffset: number
+    dragTransition: string
+  }
+  setLeftSidebarSwipe: (swipe: UIState['leftSidebarSwipe']) => void
   toggleFileBrowser: () => void
   setFileBrowserVisible: (visible: boolean) => void
   setFileBrowserSize: (size: number) => void
@@ -259,14 +304,24 @@ interface UIState {
     type: Exclude<CliLoginModalType, null>,
     command: string,
     commandArgs?: string[],
-    action?: 'login' | 'update' | 'install'
+    action?: 'login' | 'update' | 'install',
+    mcpContext?: McpLoginContext
   ) => void
   closeCliLoginModal: () => void
+  setMinimizedCliUpdate: (update: MinimizedCliUpdate | null) => void
+  updateMinimizedCliUpdateProgress: (progress: number) => void
+  restoreMinimizedCliUpdate: () => void
   incrementPendingBackgroundCreations: () => void
   consumePendingBackgroundCreation: () => boolean
-  markWorktreeForAutoInvestigate: (worktreeId: string) => void
+  markWorktreeForAutoInvestigate: (
+    worktreeId: string,
+    override?: InvestigationOverride
+  ) => void
   consumeAutoInvestigate: (worktreeId: string) => boolean
-  markWorktreeForAutoInvestigatePR: (worktreeId: string) => void
+  markWorktreeForAutoInvestigatePR: (
+    worktreeId: string,
+    override?: InvestigationOverride
+  ) => void
   consumeAutoInvestigatePR: (worktreeId: string) => boolean
   markWorktreeForAutoInvestigateSecurityAlert: (worktreeId: string) => void
   consumeAutoInvestigateSecurityAlert: (worktreeId: string) => boolean
@@ -291,10 +346,12 @@ interface UIState {
   ) => void
   setSessionTerminalId: (sessionId: string, terminalId: string) => void
   clearSessionTerminalSurface: (sessionId: string) => string | undefined
+  clearWorktreeState: (
+    worktreeId: string,
+    sessionIds?: readonly string[]
+  ) => void
   openNewSessionModeModal: (target: NewSessionModeTarget) => void
   closeNewSessionModeModal: () => void
-  setChatToolbarMounted: (mounted: boolean) => void
-  setReviewSurfaceMounted: (mounted: boolean) => void
   setGitDiffModalOpen: (open: boolean) => void
   toggleGitDiffSelectedFile: (filePath: string) => void
   clearGitDiffSelectedFiles: () => void
@@ -312,8 +369,6 @@ interface UIState {
   dismissCliUpdateNotice: (type: PendingCliUpdate['type']) => void
   chatSearchOpen: boolean
   setChatSearchOpen: (open: boolean) => void
-  githubDashboardOpen: boolean
-  setGitHubDashboardOpen: (open: boolean) => void
   /**
    * Zen mode: full-screen the active session chat.
    * Hides session tabs, modal action chrome, and sidebars.
@@ -337,11 +392,34 @@ export function getRemotePickerCallback() {
   return _remotePickerCallback
 }
 
+/**
+ * The mobile left sidebar sheet (z-80) stacks above dialogs and modals, so
+ * any surface opening while it is shown must close it first.
+ */
+function mustCloseMobileSidebar(state: UIState): boolean {
+  return state.leftSidebarVisible && isMobileViewport()
+}
+
+/** Close the mobile left sidebar before opening a dialog it would cover. */
+export function closeLeftSidebarOnMobile() {
+  if (isMobileViewport()) {
+    useUIStore.getState().setLeftSidebarVisible(false)
+  }
+}
+
 export const useUIStore = create<UIState>()(
   devtools(
     (set, get) => ({
       leftSidebarVisible: false,
+      railSection: 'workspace',
+      selectedAgentId: 'jean',
+      agentsServerFilter: 'all',
       leftSidebarSize: 250, // Default width in pixels
+      leftSidebarSwipe: {
+        isDragging: false,
+        dragOffset: 0,
+        dragTransition: '',
+      },
       fileBrowserVisible: false,
       fileBrowserSize: 280,
       viewingFilePath: null,
@@ -377,12 +455,15 @@ export const useUIStore = create<UIState>()(
       cliLoginModalCommand: null,
       cliLoginModalCommandArgs: null,
       cliLoginModalAction: 'login',
+      cliLoginModalMcpContext: null,
+      minimizedCliUpdate: null,
       autoInvestigateWorktreeIds: new Set(),
       autoInvestigatePRWorktreeIds: new Set(),
       autoInvestigateSecurityAlertWorktreeIds: new Set(),
       autoInvestigateAdvisoryWorktreeIds: new Set(),
       autoInvestigateLinearIssueWorktreeIds: new Set(),
       autoInvestigateSentryIssueWorktreeIds: new Set(),
+      autoInvestigateOverrides: {},
       pendingBackgroundCreations: 0,
       autoOpenSessionWorktreeIds: new Set(),
       pendingAutoOpenSessionIds: {},
@@ -391,8 +472,6 @@ export const useUIStore = create<UIState>()(
       sessionPrimarySurface: {},
       sessionTerminalIds: {},
       newSessionModeTarget: null,
-      chatToolbarMounted: false,
-      reviewSurfaceMounted: false,
       gitDiffModalOpen: false,
       gitDiffSelectedFiles: new Set<string>(),
       planDialogOpen: false,
@@ -407,7 +486,6 @@ export const useUIStore = create<UIState>()(
       pendingServerUpdate: null,
       availableCliUpdates: [],
       chatSearchOpen: false,
-      githubDashboardOpen: false,
       zenMode: false,
       toggleZenMode: () => {
         const { zenMode } = get()
@@ -460,6 +538,34 @@ export const useUIStore = create<UIState>()(
           'setLeftSidebarVisible'
         ),
 
+      setRailSection: section =>
+        set(
+          state =>
+            state.railSection === section ? state : { railSection: section },
+          undefined,
+          'setRailSection'
+        ),
+
+      setSelectedAgentId: agentId =>
+        set(
+          state =>
+            state.selectedAgentId === agentId
+              ? state
+              : { selectedAgentId: agentId },
+          undefined,
+          'setSelectedAgentId'
+        ),
+
+      setAgentsServerFilter: serverId =>
+        set(
+          state =>
+            state.agentsServerFilter === serverId
+              ? state
+              : { agentsServerFilter: serverId },
+          undefined,
+          'setAgentsServerFilter'
+        ),
+
       toggleRightSidebar: () =>
         set(
           state => ({ rightSidebarVisible: !state.rightSidebarVisible }),
@@ -473,6 +579,18 @@ export const useUIStore = create<UIState>()(
             state.leftSidebarSize === size ? state : { leftSidebarSize: size },
           undefined,
           'setLeftSidebarSize'
+        ),
+
+      setLeftSidebarSwipe: swipe =>
+        set(
+          state =>
+            state.leftSidebarSwipe.isDragging === swipe.isDragging &&
+            state.leftSidebarSwipe.dragOffset === swipe.dragOffset &&
+            state.leftSidebarSwipe.dragTransition === swipe.dragTransition
+              ? state
+              : { leftSidebarSwipe: swipe },
+          undefined,
+          'setLeftSidebarSwipe'
         ),
 
       toggleFileBrowser: () =>
@@ -499,7 +617,6 @@ export const useUIStore = create<UIState>()(
           undefined,
           'setFileBrowserSize'
         ),
-
       setViewingFilePath: path =>
         set(
           state =>
@@ -537,27 +654,54 @@ export const useUIStore = create<UIState>()(
 
       togglePreferences: () =>
         set(
-          state => ({ preferencesOpen: !state.preferencesOpen }),
+          state => ({
+            preferencesOpen: !state.preferencesOpen,
+            ...(!state.preferencesOpen && mustCloseMobileSidebar(state)
+              ? { leftSidebarVisible: false }
+              : {}),
+          }),
           undefined,
           'togglePreferences'
         ),
 
       setPreferencesOpen: open =>
         set(
-          state =>
-            state.preferencesOpen === open && state.preferencesPane === null
-              ? state
-              : { preferencesOpen: open, preferencesPane: null },
+          state => {
+            const closeSidebar = open && mustCloseMobileSidebar(state)
+            if (
+              state.preferencesOpen === open &&
+              state.preferencesPane === null &&
+              !closeSidebar
+            ) {
+              return state
+            }
+            return {
+              preferencesOpen: open,
+              preferencesPane: null,
+              ...(closeSidebar ? { leftSidebarVisible: false } : {}),
+            }
+          },
           undefined,
           'setPreferencesOpen'
         ),
 
       openPreferencesPane: pane =>
         set(
-          state =>
-            state.preferencesOpen && state.preferencesPane === pane
-              ? state
-              : { preferencesOpen: true, preferencesPane: pane },
+          state => {
+            const closeSidebar = mustCloseMobileSidebar(state)
+            if (
+              state.preferencesOpen &&
+              state.preferencesPane === pane &&
+              !closeSidebar
+            ) {
+              return state
+            }
+            return {
+              preferencesOpen: true,
+              preferencesPane: pane,
+              ...(closeSidebar ? { leftSidebarVisible: false } : {}),
+            }
+          },
           undefined,
           'openPreferencesPane'
         ),
@@ -666,10 +810,13 @@ export const useUIStore = create<UIState>()(
 
       setNewWorktreeModalOpen: open =>
         set(
-          {
+          state => ({
             newWorktreeModalOpen: open,
             ...(open ? {} : { newWorktreeModalDefaultTab: null }),
-          },
+            ...(open && mustCloseMobileSidebar(state)
+              ? { leftSidebarVisible: false }
+              : {}),
+          }),
           undefined,
           'setNewWorktreeModalOpen'
         ),
@@ -745,19 +892,27 @@ export const useUIStore = create<UIState>()(
 
       openCliUpdateModal: type =>
         set(
-          { cliUpdateModalOpen: true, cliUpdateModalType: type },
+          {
+            cliUpdateModalOpen: true,
+            cliUpdateModalType: type,
+            minimizedCliUpdate: null,
+          },
           undefined,
           'openCliUpdateModal'
         ),
 
       closeCliUpdateModal: () =>
         set(
-          { cliUpdateModalOpen: false, cliUpdateModalType: null },
+          {
+            cliUpdateModalOpen: false,
+            cliUpdateModalType: null,
+            minimizedCliUpdate: null,
+          },
           undefined,
           'closeCliUpdateModal'
         ),
 
-      openCliLoginModal: (type, command, commandArgs, action) =>
+      openCliLoginModal: (type, command, commandArgs, action, mcpContext) =>
         set(
           {
             cliLoginModalOpen: true,
@@ -765,6 +920,8 @@ export const useUIStore = create<UIState>()(
             cliLoginModalCommand: command,
             cliLoginModalCommandArgs: commandArgs ?? null,
             cliLoginModalAction: action ?? 'login',
+            cliLoginModalMcpContext: mcpContext ?? null,
+            minimizedCliUpdate: null,
           },
           undefined,
           'openCliLoginModal'
@@ -778,9 +935,40 @@ export const useUIStore = create<UIState>()(
             cliLoginModalCommand: null,
             cliLoginModalCommandArgs: null,
             cliLoginModalAction: 'login',
+            cliLoginModalMcpContext: null,
+            minimizedCliUpdate: null,
           },
           undefined,
           'closeCliLoginModal'
+        ),
+
+      setMinimizedCliUpdate: update =>
+        set(
+          state =>
+            state.minimizedCliUpdate === update
+              ? state
+              : { minimizedCliUpdate: update },
+          undefined,
+          'setMinimizedCliUpdate'
+        ),
+
+      updateMinimizedCliUpdateProgress: progress =>
+        set(
+          state => {
+            const update = state.minimizedCliUpdate
+            if (!update || update.progress === progress) return state
+            return { minimizedCliUpdate: { ...update, progress } }
+          },
+          undefined,
+          'updateMinimizedCliUpdateProgress'
+        ),
+
+      restoreMinimizedCliUpdate: () =>
+        set(
+          state =>
+            state.minimizedCliUpdate ? { minimizedCliUpdate: null } : state,
+          undefined,
+          'restoreMinimizedCliUpdate'
         ),
 
       incrementPendingBackgroundCreations: () =>
@@ -807,13 +995,16 @@ export const useUIStore = create<UIState>()(
         return false
       },
 
-      markWorktreeForAutoInvestigate: worktreeId =>
+      markWorktreeForAutoInvestigate: (worktreeId, override) =>
         set(
           state => ({
             autoInvestigateWorktreeIds: new Set([
               ...state.autoInvestigateWorktreeIds,
               worktreeId,
             ]),
+            autoInvestigateOverrides: override
+              ? { ...state.autoInvestigateOverrides, [worktreeId]: override }
+              : state.autoInvestigateOverrides,
           }),
           undefined,
           'markWorktreeForAutoInvestigate'
@@ -825,7 +1016,12 @@ export const useUIStore = create<UIState>()(
             state => {
               const newSet = new Set(state.autoInvestigateWorktreeIds)
               newSet.delete(worktreeId)
-              return { autoInvestigateWorktreeIds: newSet }
+              const { [worktreeId]: _, ...autoInvestigateOverrides } =
+                state.autoInvestigateOverrides
+              return {
+                autoInvestigateWorktreeIds: newSet,
+                autoInvestigateOverrides,
+              }
             },
             undefined,
             'consumeAutoInvestigate'
@@ -835,13 +1031,16 @@ export const useUIStore = create<UIState>()(
         return false
       },
 
-      markWorktreeForAutoInvestigatePR: worktreeId =>
+      markWorktreeForAutoInvestigatePR: (worktreeId, override) =>
         set(
           state => ({
             autoInvestigatePRWorktreeIds: new Set([
               ...state.autoInvestigatePRWorktreeIds,
               worktreeId,
             ]),
+            autoInvestigateOverrides: override
+              ? { ...state.autoInvestigateOverrides, [worktreeId]: override }
+              : state.autoInvestigateOverrides,
           }),
           undefined,
           'markWorktreeForAutoInvestigatePR'
@@ -853,7 +1052,12 @@ export const useUIStore = create<UIState>()(
             state => {
               const newSet = new Set(state.autoInvestigatePRWorktreeIds)
               newSet.delete(worktreeId)
-              return { autoInvestigatePRWorktreeIds: newSet }
+              const { [worktreeId]: _, ...autoInvestigateOverrides } =
+                state.autoInvestigateOverrides
+              return {
+                autoInvestigatePRWorktreeIds: newSet,
+                autoInvestigateOverrides,
+              }
             },
             undefined,
             'consumeAutoInvestigatePR'
@@ -1040,9 +1244,21 @@ export const useUIStore = create<UIState>()(
 
       setSessionChatModalOpen: (open: boolean, worktreeId?: string | null) =>
         set(
-          {
-            sessionChatModalOpen: open,
-            sessionChatModalWorktreeId: open ? (worktreeId ?? null) : null,
+          state => {
+            const nextWorktreeId = open ? (worktreeId ?? null) : null
+            const closeSidebar = open && mustCloseMobileSidebar(state)
+            if (
+              state.sessionChatModalOpen === open &&
+              state.sessionChatModalWorktreeId === nextWorktreeId &&
+              !closeSidebar
+            ) {
+              return state
+            }
+            return {
+              sessionChatModalOpen: open,
+              sessionChatModalWorktreeId: nextWorktreeId,
+              ...(closeSidebar ? { leftSidebarVisible: false } : {}),
+            }
           },
           undefined,
           'setSessionChatModalOpen'
@@ -1108,6 +1324,121 @@ export const useUIStore = create<UIState>()(
         return terminalId
       },
 
+      clearWorktreeState: (
+        worktreeId: string,
+        sessionIds: readonly string[] = []
+      ) =>
+        set(
+          state => {
+            const sessionIdSet = new Set(sessionIds)
+            const removeSession = (value: string): boolean =>
+              sessionIdSet.has(value)
+            const removeFromSet = (values: Set<string>): Set<string> => {
+              let changed = false
+              const next = new Set(values)
+              if (next.delete(worktreeId)) changed = true
+              return changed ? next : values
+            }
+            const removeRecordEntries = <T>(
+              record: Record<string, T>,
+              predicate: (key: string, value: T) => boolean
+            ): Record<string, T> => {
+              let changed = false
+              const next: Record<string, T> = {}
+              for (const [key, value] of Object.entries(record)) {
+                if (predicate(key, value)) {
+                  changed = true
+                } else {
+                  next[key] = value
+                }
+              }
+              return changed ? next : record
+            }
+
+            const autoInvestigateWorktreeIds = removeFromSet(
+              state.autoInvestigateWorktreeIds
+            )
+            const autoInvestigatePRWorktreeIds = removeFromSet(
+              state.autoInvestigatePRWorktreeIds
+            )
+            const autoInvestigateSecurityAlertWorktreeIds = removeFromSet(
+              state.autoInvestigateSecurityAlertWorktreeIds
+            )
+            const autoInvestigateAdvisoryWorktreeIds = removeFromSet(
+              state.autoInvestigateAdvisoryWorktreeIds
+            )
+            const autoInvestigateLinearIssueWorktreeIds = removeFromSet(
+              state.autoInvestigateLinearIssueWorktreeIds
+            )
+            const autoInvestigateSentryIssueWorktreeIds = removeFromSet(
+              state.autoInvestigateSentryIssueWorktreeIds
+            )
+            const autoOpenSessionWorktreeIds = removeFromSet(
+              state.autoOpenSessionWorktreeIds
+            )
+            const pendingAutoOpenSessionIds = removeRecordEntries(
+              state.pendingAutoOpenSessionIds,
+              key => key === worktreeId
+            )
+            const sessionPrimarySurface = removeRecordEntries(
+              state.sessionPrimarySurface,
+              sessionId => removeSession(sessionId)
+            )
+            const sessionTerminalIds = removeRecordEntries(
+              state.sessionTerminalIds,
+              sessionId => removeSession(sessionId)
+            )
+
+            const worktreeStateChanged =
+              autoInvestigateWorktreeIds !== state.autoInvestigateWorktreeIds ||
+              autoInvestigatePRWorktreeIds !==
+                state.autoInvestigatePRWorktreeIds ||
+              autoInvestigateSecurityAlertWorktreeIds !==
+                state.autoInvestigateSecurityAlertWorktreeIds ||
+              autoInvestigateAdvisoryWorktreeIds !==
+                state.autoInvestigateAdvisoryWorktreeIds ||
+              autoInvestigateLinearIssueWorktreeIds !==
+                state.autoInvestigateLinearIssueWorktreeIds ||
+              autoInvestigateSentryIssueWorktreeIds !==
+                state.autoInvestigateSentryIssueWorktreeIds ||
+              autoOpenSessionWorktreeIds !== state.autoOpenSessionWorktreeIds ||
+              pendingAutoOpenSessionIds !== state.pendingAutoOpenSessionIds ||
+              sessionPrimarySurface !== state.sessionPrimarySurface ||
+              sessionTerminalIds !== state.sessionTerminalIds ||
+              state.sessionChatModalWorktreeId === worktreeId ||
+              state.newSessionModeTarget?.worktreeId === worktreeId
+
+            if (!worktreeStateChanged) return state
+
+            return {
+              autoInvestigateWorktreeIds,
+              autoInvestigatePRWorktreeIds,
+              autoInvestigateSecurityAlertWorktreeIds,
+              autoInvestigateAdvisoryWorktreeIds,
+              autoInvestigateLinearIssueWorktreeIds,
+              autoInvestigateSentryIssueWorktreeIds,
+              autoOpenSessionWorktreeIds,
+              pendingAutoOpenSessionIds,
+              sessionPrimarySurface,
+              sessionTerminalIds,
+              sessionChatModalOpen:
+                state.sessionChatModalWorktreeId === worktreeId
+                  ? false
+                  : state.sessionChatModalOpen,
+              sessionChatModalWorktreeId:
+                state.sessionChatModalWorktreeId === worktreeId
+                  ? null
+                  : state.sessionChatModalWorktreeId,
+              newSessionModeTarget:
+                state.newSessionModeTarget?.worktreeId === worktreeId
+                  ? null
+                  : state.newSessionModeTarget,
+            }
+          },
+          undefined,
+          'clearWorktreeState'
+        ),
+
       openNewSessionModeModal: (target: NewSessionModeTarget) =>
         set(
           state =>
@@ -1129,20 +1460,6 @@ export const useUIStore = create<UIState>()(
               : { newSessionModeTarget: null },
           undefined,
           'closeNewSessionModeModal'
-        ),
-
-      setChatToolbarMounted: (mounted: boolean) =>
-        set(state =>
-          state.chatToolbarMounted === mounted
-            ? state
-            : { chatToolbarMounted: mounted }
-        ),
-
-      setReviewSurfaceMounted: (mounted: boolean) =>
-        set(state =>
-          state.reviewSurfaceMounted === mounted
-            ? state
-            : { reviewSurfaceMounted: mounted }
         ),
 
       setGitDiffModalOpen: (open: boolean) =>
@@ -1311,16 +1628,6 @@ export const useUIStore = create<UIState>()(
           },
           undefined,
           'setChatSearchOpen'
-        ),
-
-      setGitHubDashboardOpen: (open: boolean) =>
-        set(
-          state =>
-            state.githubDashboardOpen === open
-              ? state
-              : { githubDashboardOpen: open },
-          undefined,
-          'setGitHubDashboardOpen'
         ),
     }),
     {

@@ -14,17 +14,32 @@ import { browserBackend } from '@/hooks/useBrowserPane'
 import { isLocalBackend } from '@/lib/environment'
 import { invoke } from '@/lib/transport'
 import { logger } from '@/lib/logger'
+import { toRawLocalResourceId } from '@/lib/server-resource'
 import type { BrowserTab } from '@/types/browser'
 import type {
+  PendingFile,
   PendingImage,
+  PendingSkill,
   PendingTextFile,
   ReadTextResponse,
+  SendMessageArgs,
 } from '@/types/chat'
 import type {
   PendingImageDraft,
   PendingTextFileDraft,
   UIState,
 } from '@/types/ui-state'
+import { registerUIStateRelaunchSaver } from '@/lib/ui-state-relaunch'
+
+const getPinnedCanvasSettings = () =>
+  Object.fromEntries(
+    Object.entries(useProjectsStore.getState().projectCanvasSettings).flatMap(
+      ([projectId, settings]) =>
+        settings.pinnedLabels && settings.pinnedLabels.length > 0
+          ? [[projectId, { pinned_labels: settings.pinnedLabels }] as const]
+          : []
+    )
+  )
 
 /** Serialize ready (non-loading) pending images for UI-state persistence. */
 function serializePendingImages(
@@ -68,22 +83,37 @@ function serializePendingTextFiles(
 function debounce<T extends (...args: Parameters<T>) => void>(
   fn: T,
   delay: number
-): T & { cancel: () => void } {
+): T & { cancel: () => void; flush: () => void } {
   let timeoutId: ReturnType<typeof setTimeout> | null = null
+  let pendingArgs: Parameters<T> | null = null
 
   const debounced = ((...args: Parameters<T>) => {
-    if (timeoutId) clearTimeout(timeoutId)
+    if (timeoutId !== null) clearTimeout(timeoutId)
+    pendingArgs = args
     timeoutId = setTimeout(() => {
-      fn(...args)
       timeoutId = null
+      const argsToApply = pendingArgs
+      pendingArgs = null
+      if (argsToApply) fn(...(argsToApply as Parameters<T>))
     }, delay)
-  }) as T & { cancel: () => void }
+  }) as T & { cancel: () => void; flush: () => void }
 
   debounced.cancel = () => {
-    if (timeoutId) {
+    if (timeoutId !== null) {
       clearTimeout(timeoutId)
       timeoutId = null
     }
+    pendingArgs = null
+  }
+
+  debounced.flush = () => {
+    if (timeoutId === null || pendingArgs === null) return
+
+    clearTimeout(timeoutId)
+    timeoutId = null
+    const argsToApply = pendingArgs
+    pendingArgs = null
+    fn(...(argsToApply as Parameters<T>))
   }
 
   return debounced
@@ -98,25 +128,32 @@ function debounce<T extends (...args: Parameters<T>) => void>(
 export function useUIStatePersistence() {
   const { data: uiState, isSuccess: uiStateLoaded } = useUIState()
   const { data: projects = [], isSuccess: projectsLoaded } = useProjects()
-  const { mutate: saveUIState } = useSaveUIState()
+  const { mutateAsync: saveUIState } = useSaveUIState()
   const [isInitialized, setIsInitialized] = useState(false)
 
-  // Create stable debounced save function
+  // Create stable debounced save function. The UI state snapshot is built
+  // when the timer fires (or is flushed), not on every store change, so bursts
+  // of store updates only serialize the state once.
   const debouncedSaveRef = useRef<ReturnType<
-    typeof debounce<(state: UIState) => void>
+    typeof debounce<() => void>
   > | null>(null)
 
-  // Initialize debounced save function
+  // The last active session is part of the debounced UI-state snapshot. Flush
+  // it when the native window is closing so a recent session switch is not
+  // lost before the next 500ms timer fires.
   useEffect(() => {
-    debouncedSaveRef.current = debounce((state: UIState) => {
-      logger.debug('Saving UI state (debounced)')
-      saveUIState(state)
-    }, 500)
+    const flushPendingSave = () => {
+      debouncedSaveRef.current?.flush()
+    }
+
+    window.addEventListener('beforeunload', flushPendingSave)
+    window.addEventListener('pagehide', flushPendingSave)
 
     return () => {
-      debouncedSaveRef.current?.cancel()
+      window.removeEventListener('beforeunload', flushPendingSave)
+      window.removeEventListener('pagehide', flushPendingSave)
     }
-  }, [saveUIState])
+  }, [])
 
   // Helper to get current UI state from stores
   // NOTE: Durable session-specific state is stored in Session files. Unsent
@@ -131,39 +168,36 @@ export function useUIStatePersistence() {
       inputDrafts,
       pendingImages,
       pendingTextFiles,
+      pendingFiles,
+      pendingSkills,
+      dismissedSetupScripts,
       reviewSidebarVisible,
       lastOpenedPerProject,
+      autoResume,
+      lastSentArgs,
     } = useChatStore.getState()
+    // Persist only armed sessions that still have replayable send args.
+    const autoResumeForPersist = Object.entries(autoResume).flatMap(
+      ([sessionId, resumeAtMs]) => {
+        const sendArgs = lastSentArgs[sessionId]
+        return sendArgs
+          ? [
+              {
+                session_id: sessionId,
+                resume_at_ms: resumeAtMs,
+                send_args: sendArgs,
+              },
+            ]
+          : []
+      }
+    )
+    const { selectedProjectId } = useProjectsStore.getState()
     const {
-      expandedProjectIds,
-      expandedFolderIds,
-      selectedProjectId,
-      projectAccessTimestamps,
-      dashboardWorktreeCollapseOverrides,
-      projectCanvasSettings,
-      githubDashboardFavoriteProjectIds,
-    } = useProjectsStore.getState()
-    const {
-      leftSidebarSize,
-      leftSidebarVisible,
-      fileBrowserSize,
-      fileBrowserVisible,
-      zenMode,
       sessionTerminalIds,
       sessionPrimarySurface,
       seenFailedWorkflowRunIds,
     } = useUIStore.getState()
-    const {
-      terminals,
-      activeTerminalIds,
-      terminalPanelOpen,
-      terminalVisible,
-      terminalHeight,
-      modalTerminalOpen,
-      modalTerminalDockMode,
-      modalTerminalWidth,
-      modalTerminalHeight,
-    } = useTerminalStore.getState()
+    const { terminals, activeTerminalIds } = useTerminalStore.getState()
     const shouldPersistTerminalRuntime = !isLocalBackend()
     const terminalInstancesForPersist = shouldPersistTerminalRuntime
       ? Object.fromEntries(
@@ -198,34 +232,34 @@ export function useUIStatePersistence() {
       active_worktree_path: activeWorktreePath,
       last_active_worktree_id: lastActiveWorktreeId,
       active_project_id: selectedProjectId,
-      expanded_project_ids: Array.from(expandedProjectIds),
-      expanded_folder_ids: Array.from(expandedFolderIds),
-      left_sidebar_size: leftSidebarSize,
-      left_sidebar_visible: leftSidebarVisible,
-      file_browser_size: fileBrowserSize,
-      file_browser_visible: fileBrowserVisible,
-      zen_mode: zenMode,
       active_session_ids: activeSessionIds,
       input_drafts: inputDrafts,
       pending_images: serializePendingImages(pendingImages),
       pending_text_files: serializePendingTextFiles(pendingTextFiles),
+      pending_files: Object.fromEntries(
+        Object.entries(pendingFiles).map(([sessionId, files]) => [
+          sessionId,
+          files.map(file => ({
+            id: file.id,
+            relative_path: file.relativePath,
+            source_root_path: file.sourceRootPath,
+            source_project_id: file.sourceProjectId,
+            source_project_name: file.sourceProjectName,
+            extension: file.extension,
+            is_directory: file.isDirectory,
+          })),
+        ])
+      ),
+      pending_skills: pendingSkills,
+      dismissed_setup_scripts: Object.keys(dismissedSetupScripts),
       // Review sidebar visibility
       review_sidebar_visible: reviewSidebarVisible,
       // Modal terminal drawer state
-      modal_terminal_open: modalTerminalOpen,
-      modal_terminal_dock_mode: modalTerminalDockMode,
-      modal_terminal_width: modalTerminalWidth,
-      modal_terminal_height: modalTerminalHeight,
       // Terminal runtime state (web access only; native app restart must not auto-spawn old shells)
       terminal_instances: terminalInstancesForPersist,
       terminal_active_ids: shouldPersistTerminalRuntime
         ? activeTerminalIds
         : {},
-      terminal_panel_open: shouldPersistTerminalRuntime
-        ? terminalPanelOpen
-        : {},
-      terminal_visible: shouldPersistTerminalRuntime ? terminalVisible : false,
-      terminal_height: shouldPersistTerminalRuntime ? terminalHeight : 30,
       session_terminal_ids: shouldPersistTerminalRuntime
         ? sessionTerminalIds
         : {},
@@ -235,30 +269,8 @@ export function useUIStatePersistence() {
       // Browser pane state (per-worktree tabs + 3-surface visibility)
       browser_tabs: browserTabsForPersist,
       browser_active_tab_ids: browserState.activeTabIds,
-      browser_side_pane_open: browserState.sidePaneOpen,
-      browser_side_pane_width: browserState.sidePaneWidth,
-      browser_modal_open: browserState.modalOpen,
-      browser_modal_dock_mode: browserState.modalDockMode,
-      browser_modal_width: browserState.modalWidth,
-      browser_modal_height: browserState.modalHeight,
-      browser_bottom_panel_open: browserState.bottomPanelOpen,
-      browser_bottom_panel_height: browserState.bottomPanelHeight,
-      // Project access timestamps for recency sorting
-      project_access_timestamps: projectAccessTimestamps,
-      // Dashboard worktree collapse overrides
-      dashboard_worktree_collapse_overrides: dashboardWorktreeCollapseOverrides,
-      // Project canvas settings per project
-      project_canvas_settings: Object.fromEntries(
-        Object.entries(projectCanvasSettings).map(([projectId, settings]) => [
-          projectId,
-          {
-            worktree_sort_mode: settings.worktreeSortMode,
-            pinned_labels: settings.pinnedLabels,
-            labels: settings.labels,
-          },
-        ])
-      ),
-      github_dashboard_favorite_project_ids: githubDashboardFavoriteProjectIds,
+      project_canvas_settings: getPinnedCanvasSettings(),
+      // Pinned recent sessions change only through set_recent_session_pinned.
       // Last opened worktree+session per project (convert camelCase → snake_case keys)
       last_opened_per_project: Object.fromEntries(
         Object.entries(lastOpenedPerProject).map(([projectId, entry]) => [
@@ -267,9 +279,32 @@ export function useUIStatePersistence() {
         ])
       ),
       seen_failed_workflow_run_ids: seenFailedWorkflowRunIds,
+      auto_resume: autoResumeForPersist,
       version: 1, // Reset for first release
     }
   }, [])
+
+  // Initialize debounced save function
+  useEffect(() => {
+    debouncedSaveRef.current = debounce(() => {
+      logger.debug('Saving UI state (debounced)')
+      void saveUIState(getCurrentUIState())
+    }, 500)
+
+    return () => {
+      debouncedSaveRef.current?.flush()
+      debouncedSaveRef.current?.cancel()
+    }
+  }, [getCurrentUIState, saveUIState])
+
+  useEffect(() => {
+    registerUIStateRelaunchSaver(async () => {
+      debouncedSaveRef.current?.cancel()
+      await saveUIState(getCurrentUIState())
+    })
+
+    return () => registerUIStateRelaunchSaver(null)
+  }, [getCurrentUIState, saveUIState])
 
   // Step 1: Initialize stores from persisted state (once, when projects are loaded)
   useEffect(() => {
@@ -419,7 +454,11 @@ export function useUIStatePersistence() {
       logger.debug('Restoring active sessions', { activeSessionIds })
       const { setActiveSession } = useChatStore.getState()
       for (const [worktreeId, sessionId] of Object.entries(activeSessionIds)) {
-        setActiveSession(worktreeId, sessionId, { markOpened: false })
+        setActiveSession(
+          toRawLocalResourceId(worktreeId),
+          toRawLocalResourceId(sessionId),
+          { markOpened: false }
+        )
       }
     }
 
@@ -429,6 +468,49 @@ export function useUIStatePersistence() {
         count: Object.keys(inputDrafts).length,
       })
       useChatStore.setState({ inputDrafts })
+    }
+
+    const dismissedSetupScripts = Object.fromEntries(
+      (uiState.dismissed_setup_scripts ?? []).map(worktreeId => [
+        worktreeId,
+        true,
+      ])
+    )
+
+    const restoredFiles: Record<string, PendingFile[]> = {}
+    for (const [sessionId, files] of Object.entries(
+      uiState.pending_files ?? {}
+    )) {
+      const valid = files.flatMap(file =>
+        file.id && file.relative_path
+          ? [
+              {
+                id: file.id,
+                relativePath: file.relative_path,
+                sourceRootPath: file.source_root_path,
+                sourceProjectId: file.source_project_id,
+                sourceProjectName: file.source_project_name,
+                extension: file.extension,
+                isDirectory: file.is_directory,
+              },
+            ]
+          : []
+      )
+      if (valid.length > 0) restoredFiles[sessionId] = valid
+    }
+    const restoredSkills: Record<string, PendingSkill[]> = {}
+    for (const [sessionId, skills] of Object.entries(
+      uiState.pending_skills ?? {}
+    )) {
+      const valid = skills.filter(skill => skill.id && skill.name && skill.path)
+      if (valid.length > 0) restoredSkills[sessionId] = valid
+    }
+    useChatStore.setState({
+      pendingFiles: restoredFiles,
+      pendingSkills: restoredSkills,
+    })
+    if (Object.keys(dismissedSetupScripts).length > 0) {
+      useChatStore.setState({ dismissedSetupScripts })
     }
 
     // Restore unsent image attachments (files already on disk)
@@ -598,6 +680,12 @@ export function useUIStatePersistence() {
           ...persistedModalOpen,
         },
         terminalVisible: uiState.terminal_visible ?? state.terminalVisible,
+        terminalVisibleByWorktree: Object.fromEntries(
+          Object.keys(persistedPanelOpen).map(worktreeId => [
+            worktreeId,
+            uiState.terminal_visible ?? false,
+          ])
+        ),
         terminalHeight: uiState.terminal_height ?? state.terminalHeight,
       }))
 
@@ -670,6 +758,7 @@ export function useUIStatePersistence() {
           modalTerminalOpen: {},
           terminalPanelOpen: {},
           terminalVisible: false,
+          terminalVisibleByWorktree: {},
         })
         // Clear any persisted session-terminal mappings — those PTYs are dead.
         // Drop both `sessionTerminalIds[sessionId]` and `sessionPrimarySurface`
@@ -807,6 +896,12 @@ export function useUIStatePersistence() {
         runningTerminals: new Set(restoredTerminalIds),
         terminalPanelOpen: restoredPanelOpen,
         terminalVisible: uiState.terminal_visible ?? state.terminalVisible,
+        terminalVisibleByWorktree: Object.fromEntries(
+          Object.keys(restoredPanelOpen).map(worktreeId => [
+            worktreeId,
+            uiState.terminal_visible ?? false,
+          ])
+        ),
         terminalHeight: uiState.terminal_height ?? state.terminalHeight,
         modalTerminalOpen: restoredModalOpen,
       }))
@@ -868,16 +963,9 @@ export function useUIStatePersistence() {
       )
     }
 
-    const githubDashboardFavoriteProjectIds =
-      uiState.github_dashboard_favorite_project_ids ?? []
-    if (githubDashboardFavoriteProjectIds.length > 0) {
-      logger.debug('Restoring GitHub dashboard favorite projects', {
-        count: githubDashboardFavoriteProjectIds.length,
-      })
-      useProjectsStore
-        .getState()
-        .setGitHubDashboardFavoriteProjectIds(githubDashboardFavoriteProjectIds)
-    }
+    useProjectsStore
+      .getState()
+      .setPinnedRecentSessionIds(uiState.pinned_recent_session_ids ?? [])
 
     const seenFailedWorkflowRunIds = uiState.seen_failed_workflow_run_ids ?? []
     if (seenFailedWorkflowRunIds.length > 0) {
@@ -887,6 +975,29 @@ export function useUIStatePersistence() {
       useUIStore
         .getState()
         .setSeenFailedWorkflowRunIds(seenFailedWorkflowRunIds)
+    }
+
+    // Restore armed auto-continue sessions (sessionId → reset epoch ms) plus
+    // their replayable send args. The watcher (useAutoResume) fires them.
+    const persistedAutoResume = uiState.auto_resume ?? []
+    if (persistedAutoResume.length > 0) {
+      const autoResume: Record<string, number> = {}
+      const lastSentArgs: Record<string, SendMessageArgs> = {}
+      for (const entry of persistedAutoResume) {
+        if (!entry?.session_id || !entry.send_args) continue
+        if (typeof entry.resume_at_ms !== 'number') continue
+        autoResume[entry.session_id] = entry.resume_at_ms
+        lastSentArgs[entry.session_id] = entry.send_args
+      }
+      if (Object.keys(autoResume).length > 0) {
+        logger.debug('Restoring armed auto-continue sessions', {
+          count: Object.keys(autoResume).length,
+        })
+        useChatStore.setState(state => ({
+          autoResume: { ...state.autoResume, ...autoResume },
+          lastSentArgs: { ...state.lastSentArgs, ...lastSentArgs },
+        }))
+      }
     }
 
     // Restore browser pane state (per-worktree tabs + 3-surface visibility)
@@ -1008,7 +1119,10 @@ export function useUIStatePersistence() {
       const converted = Object.fromEntries(
         Object.entries(lastOpenedPerProject).map(([projectId, entry]) => [
           projectId,
-          { worktreeId: entry.worktree_id, sessionId: entry.session_id },
+          {
+            worktreeId: toRawLocalResourceId(entry.worktree_id),
+            sessionId: toRawLocalResourceId(entry.session_id),
+          },
         ])
       )
       useChatStore.setState({ lastOpenedPerProject: converted })
@@ -1030,28 +1144,23 @@ export function useUIStatePersistence() {
     }
   }, [uiStateLoaded, uiState, projects, projectsLoaded, isInitialized])
 
+  // Pinned recent sessions are shared across native and web clients. Apply
+  // them again whenever another client's change refetches the UI state.
+  useEffect(() => {
+    if (!isInitialized || !uiState) return
+    useProjectsStore
+      .getState()
+      .setPinnedRecentSessionIds(uiState.pinned_recent_session_ids ?? [])
+  }, [isInitialized, uiState])
+
   // Step 2: Subscribe to store changes and save (debounced)
   useEffect(() => {
     // Don't start saving until we've initialized from persisted state
     if (!isInitialized) return
 
     // Track previous values to detect actual changes
-    let prevExpandedProjectIds = useProjectsStore.getState().expandedProjectIds
-    let prevExpandedFolderIds = useProjectsStore.getState().expandedFolderIds
     let prevSelectedProjectId = useProjectsStore.getState().selectedProjectId
-    let prevProjectAccessTimestamps =
-      useProjectsStore.getState().projectAccessTimestamps
-    let prevDashboardCollapseOverrides =
-      useProjectsStore.getState().dashboardWorktreeCollapseOverrides
-    let prevProjectCanvasSettings =
-      useProjectsStore.getState().projectCanvasSettings
-    let prevGitHubDashboardFavoriteProjectIds =
-      useProjectsStore.getState().githubDashboardFavoriteProjectIds
-    let prevLeftSidebarSize = useUIStore.getState().leftSidebarSize
-    let prevLeftSidebarVisible = useUIStore.getState().leftSidebarVisible
-    let prevFileBrowserSize = useUIStore.getState().fileBrowserSize
-    let prevFileBrowserVisible = useUIStore.getState().fileBrowserVisible
-    let prevZenMode = useUIStore.getState().zenMode
+    let prevPinnedCanvasSettings = JSON.stringify(getPinnedCanvasSettings())
     let prevSessionTerminalIds = useUIStore.getState().sessionTerminalIds
     let prevSessionPrimarySurface = useUIStore.getState().sessionPrimarySurface
     let prevSeenFailedWorkflowRunIds =
@@ -1063,83 +1172,36 @@ export function useUIStatePersistence() {
     let prevInputDrafts = useChatStore.getState().inputDrafts
     let prevPendingImages = useChatStore.getState().pendingImages
     let prevPendingTextFiles = useChatStore.getState().pendingTextFiles
+    let prevPendingFiles = useChatStore.getState().pendingFiles
+    let prevPendingSkills = useChatStore.getState().pendingSkills
+    let prevDismissedSetupScripts =
+      useChatStore.getState().dismissedSetupScripts
     let prevReviewSidebarVisible = useChatStore.getState().reviewSidebarVisible
     let prevLastOpenedPerProject = useChatStore.getState().lastOpenedPerProject
+    let prevAutoResume = useChatStore.getState().autoResume
     let prevTerminalInstances = useTerminalStore.getState().terminals
     let prevTerminalActiveIds = useTerminalStore.getState().activeTerminalIds
-    let prevTerminalPanelOpen = useTerminalStore.getState().terminalPanelOpen
-    let prevTerminalVisible = useTerminalStore.getState().terminalVisible
-    let prevTerminalHeight = useTerminalStore.getState().terminalHeight
-    let prevModalTerminalOpen = useTerminalStore.getState().modalTerminalOpen
-    let prevModalTerminalDockMode =
-      useTerminalStore.getState().modalTerminalDockMode
-    let prevModalTerminalWidth = useTerminalStore.getState().modalTerminalWidth
-    let prevModalTerminalHeight =
-      useTerminalStore.getState().modalTerminalHeight
     let prevBrowserTabs = useBrowserStore.getState().tabs
     let prevBrowserActiveTabIds = useBrowserStore.getState().activeTabIds
-    let prevBrowserSidePaneOpen = useBrowserStore.getState().sidePaneOpen
-    let prevBrowserSidePaneWidth = useBrowserStore.getState().sidePaneWidth
-    let prevBrowserModalOpen = useBrowserStore.getState().modalOpen
-    let prevBrowserModalDockMode = useBrowserStore.getState().modalDockMode
-    let prevBrowserModalWidth = useBrowserStore.getState().modalWidth
-    let prevBrowserModalHeight = useBrowserStore.getState().modalHeight
-    let prevBrowserBottomPanelOpen = useBrowserStore.getState().bottomPanelOpen
-    let prevBrowserBottomPanelHeight =
-      useBrowserStore.getState().bottomPanelHeight
 
     // Subscribe to projects-store changes (expanded projects, folders, and selected project)
     const unsubProjects = useProjectsStore.subscribe(state => {
       // Check if expandedProjectIds, expandedFolderIds, or selectedProjectId changed
-      const projectIdsChanged =
-        state.expandedProjectIds !== prevExpandedProjectIds
-      const folderIdsChanged = state.expandedFolderIds !== prevExpandedFolderIds
       const selectedProjectChanged =
         state.selectedProjectId !== prevSelectedProjectId
-      const accessTimestampsChanged =
-        state.projectAccessTimestamps !== prevProjectAccessTimestamps
-      const collapseOverridesChanged =
-        state.dashboardWorktreeCollapseOverrides !==
-        prevDashboardCollapseOverrides
-      const projectCanvasSettingsChanged =
-        state.projectCanvasSettings !== prevProjectCanvasSettings
-      const githubDashboardFavoritesChanged =
-        state.githubDashboardFavoriteProjectIds !==
-        prevGitHubDashboardFavoriteProjectIds
+      const nextPinnedCanvasSettings = JSON.stringify(getPinnedCanvasSettings())
+      const pinnedCanvasSettingsChanged =
+        nextPinnedCanvasSettings !== prevPinnedCanvasSettings
 
-      if (
-        projectIdsChanged ||
-        folderIdsChanged ||
-        selectedProjectChanged ||
-        accessTimestampsChanged ||
-        collapseOverridesChanged ||
-        projectCanvasSettingsChanged ||
-        githubDashboardFavoritesChanged
-      ) {
-        prevExpandedProjectIds = state.expandedProjectIds
-        prevExpandedFolderIds = state.expandedFolderIds
+      if (selectedProjectChanged || pinnedCanvasSettingsChanged) {
         prevSelectedProjectId = state.selectedProjectId
-        prevProjectAccessTimestamps = state.projectAccessTimestamps
-        prevDashboardCollapseOverrides =
-          state.dashboardWorktreeCollapseOverrides
-        prevProjectCanvasSettings = state.projectCanvasSettings
-        prevGitHubDashboardFavoriteProjectIds =
-          state.githubDashboardFavoriteProjectIds
-        const currentState = getCurrentUIState()
-        debouncedSaveRef.current?.(currentState)
+        prevPinnedCanvasSettings = nextPinnedCanvasSettings
+        debouncedSaveRef.current?.()
       }
     })
 
     // Subscribe to ui-store changes (sidebar size/visibility and session terminal mapping)
     const unsubUI = useUIStore.subscribe(state => {
-      const sizeChanged = state.leftSidebarSize !== prevLeftSidebarSize
-      const visibilityChanged =
-        state.leftSidebarVisible !== prevLeftSidebarVisible
-      const fileBrowserSizeChanged =
-        state.fileBrowserSize !== prevFileBrowserSize
-      const fileBrowserVisibilityChanged =
-        state.fileBrowserVisible !== prevFileBrowserVisible
-      const zenModeChanged = state.zenMode !== prevZenMode
       const sessionTerminalIdsChanged =
         state.sessionTerminalIds !== prevSessionTerminalIds
       const sessionPrimarySurfaceChanged =
@@ -1148,25 +1210,14 @@ export function useUIStatePersistence() {
         state.seenFailedWorkflowRunIds !== prevSeenFailedWorkflowRunIds
 
       if (
-        sizeChanged ||
-        visibilityChanged ||
-        fileBrowserSizeChanged ||
-        fileBrowserVisibilityChanged ||
-        zenModeChanged ||
         sessionTerminalIdsChanged ||
         sessionPrimarySurfaceChanged ||
         seenFailedWorkflowRunIdsChanged
       ) {
-        prevLeftSidebarSize = state.leftSidebarSize
-        prevLeftSidebarVisible = state.leftSidebarVisible
-        prevFileBrowserSize = state.fileBrowserSize
-        prevFileBrowserVisible = state.fileBrowserVisible
-        prevZenMode = state.zenMode
         prevSessionTerminalIds = state.sessionTerminalIds
         prevSessionPrimarySurface = state.sessionPrimarySurface
         prevSeenFailedWorkflowRunIds = state.seenFailedWorkflowRunIds
-        const currentState = getCurrentUIState()
-        debouncedSaveRef.current?.(currentState)
+        debouncedSaveRef.current?.()
       }
     })
 
@@ -1184,10 +1235,15 @@ export function useUIStatePersistence() {
       const pendingImagesChanged = state.pendingImages !== prevPendingImages
       const pendingTextFilesChanged =
         state.pendingTextFiles !== prevPendingTextFiles
+      const pendingFilesChanged = state.pendingFiles !== prevPendingFiles
+      const pendingSkillsChanged = state.pendingSkills !== prevPendingSkills
+      const dismissedSetupScriptsChanged =
+        state.dismissedSetupScripts !== prevDismissedSetupScripts
       const reviewSidebarChanged =
         state.reviewSidebarVisible !== prevReviewSidebarVisible
       const lastOpenedChanged =
         state.lastOpenedPerProject !== prevLastOpenedPerProject
+      const autoResumeChanged = state.autoResume !== prevAutoResume
 
       if (
         worktreeChanged ||
@@ -1195,8 +1251,12 @@ export function useUIStatePersistence() {
         inputDraftsChanged ||
         pendingImagesChanged ||
         pendingTextFilesChanged ||
+        pendingFilesChanged ||
+        pendingSkillsChanged ||
+        dismissedSetupScriptsChanged ||
         reviewSidebarChanged ||
-        lastOpenedChanged
+        lastOpenedChanged ||
+        autoResumeChanged
       ) {
         prevWorktreeId = state.activeWorktreeId
         prevWorktreePath = state.activeWorktreePath
@@ -1205,10 +1265,13 @@ export function useUIStatePersistence() {
         prevInputDrafts = state.inputDrafts
         prevPendingImages = state.pendingImages
         prevPendingTextFiles = state.pendingTextFiles
+        prevPendingFiles = state.pendingFiles
+        prevPendingSkills = state.pendingSkills
+        prevDismissedSetupScripts = state.dismissedSetupScripts
         prevReviewSidebarVisible = state.reviewSidebarVisible
         prevLastOpenedPerProject = state.lastOpenedPerProject
-        const currentState = getCurrentUIState()
-        debouncedSaveRef.current?.(currentState)
+        prevAutoResume = state.autoResume
+        debouncedSaveRef.current?.()
       }
     })
 
@@ -1216,69 +1279,19 @@ export function useUIStatePersistence() {
     const unsubTerminal = useTerminalStore.subscribe(state => {
       const terminalsChanged = state.terminals !== prevTerminalInstances
       const activeIdsChanged = state.activeTerminalIds !== prevTerminalActiveIds
-      const panelOpenChanged = state.terminalPanelOpen !== prevTerminalPanelOpen
-      const terminalVisibleChanged =
-        state.terminalVisible !== prevTerminalVisible
-      const terminalHeightChanged = state.terminalHeight !== prevTerminalHeight
-      const openChanged = state.modalTerminalOpen !== prevModalTerminalOpen
-      const dockModeChanged =
-        state.modalTerminalDockMode !== prevModalTerminalDockMode
-      const widthChanged = state.modalTerminalWidth !== prevModalTerminalWidth
-      const heightChanged =
-        state.modalTerminalHeight !== prevModalTerminalHeight
-
-      if (
-        terminalsChanged ||
-        activeIdsChanged ||
-        panelOpenChanged ||
-        terminalVisibleChanged ||
-        terminalHeightChanged ||
-        openChanged ||
-        dockModeChanged ||
-        widthChanged ||
-        heightChanged
-      ) {
+      if (terminalsChanged || activeIdsChanged) {
         prevTerminalInstances = state.terminals
         prevTerminalActiveIds = state.activeTerminalIds
-        prevTerminalPanelOpen = state.terminalPanelOpen
-        prevTerminalVisible = state.terminalVisible
-        prevTerminalHeight = state.terminalHeight
-        prevModalTerminalOpen = state.modalTerminalOpen
-        prevModalTerminalDockMode = state.modalTerminalDockMode
-        prevModalTerminalWidth = state.modalTerminalWidth
-        prevModalTerminalHeight = state.modalTerminalHeight
-        const currentState = getCurrentUIState()
-        debouncedSaveRef.current?.(currentState)
+        debouncedSaveRef.current?.()
       }
     })
 
-    // Subscribe to browser-store changes (tabs, active tab, surfaces)
+    // Subscribe to backend-owned browser tab state. Pane layout is client-local.
     const unsubBrowser = useBrowserStore.subscribe(state => {
       const tabsChanged = state.tabs !== prevBrowserTabs
       const activeChanged = state.activeTabIds !== prevBrowserActiveTabIds
-      const sideOpenChanged = state.sidePaneOpen !== prevBrowserSidePaneOpen
-      const sideWidthChanged = state.sidePaneWidth !== prevBrowserSidePaneWidth
-      const modalOpenChanged = state.modalOpen !== prevBrowserModalOpen
-      const modalDockChanged = state.modalDockMode !== prevBrowserModalDockMode
-      const modalWidthChanged = state.modalWidth !== prevBrowserModalWidth
-      const modalHeightChanged = state.modalHeight !== prevBrowserModalHeight
-      const bottomOpenChanged =
-        state.bottomPanelOpen !== prevBrowserBottomPanelOpen
-      const bottomHeightChanged =
-        state.bottomPanelHeight !== prevBrowserBottomPanelHeight
 
-      if (
-        tabsChanged ||
-        activeChanged ||
-        sideOpenChanged ||
-        sideWidthChanged ||
-        modalOpenChanged ||
-        modalDockChanged ||
-        modalWidthChanged ||
-        modalHeightChanged ||
-        bottomOpenChanged ||
-        bottomHeightChanged
-      ) {
+      if (tabsChanged || activeChanged) {
         // Detect tab removals — close their backing webviews
         if (tabsChanged && isLocalBackend()) {
           const prevIds = new Set<string>()
@@ -1295,16 +1308,7 @@ export function useUIStatePersistence() {
         }
         prevBrowserTabs = state.tabs
         prevBrowserActiveTabIds = state.activeTabIds
-        prevBrowserSidePaneOpen = state.sidePaneOpen
-        prevBrowserSidePaneWidth = state.sidePaneWidth
-        prevBrowserModalOpen = state.modalOpen
-        prevBrowserModalDockMode = state.modalDockMode
-        prevBrowserModalWidth = state.modalWidth
-        prevBrowserModalHeight = state.modalHeight
-        prevBrowserBottomPanelOpen = state.bottomPanelOpen
-        prevBrowserBottomPanelHeight = state.bottomPanelHeight
-        const currentState = getCurrentUIState()
-        debouncedSaveRef.current?.(currentState)
+        debouncedSaveRef.current?.()
       }
     })
 
@@ -1316,10 +1320,11 @@ export function useUIStatePersistence() {
       unsubChat()
       unsubTerminal()
       unsubBrowser()
+      debouncedSaveRef.current?.flush()
       debouncedSaveRef.current?.cancel()
       logger.debug('UI state persistence subscriptions cleaned up')
     }
-  }, [isInitialized, getCurrentUIState])
+  }, [isInitialized])
 
   return { isInitialized }
 }

@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@/test/test-utils'
+import { useChatStore } from '@/store/chat-store'
 import { StreamingMessage } from './StreamingMessage'
 import type { QuestionAnswer, Question } from '@/types/chat'
 
@@ -22,6 +23,148 @@ describe('StreamingMessage', () => {
     getSubmittedAnswers: vi.fn(() => undefined),
     areQuestionsSkipped: vi.fn(() => false),
   }
+
+  beforeEach(() => {
+    useChatStore.setState({ pendingCodexUserInputRequests: {} })
+  })
+
+  const questionInput = {
+    questions: [
+      {
+        header: 'Bird Type',
+        question: 'What is your favorite type of bird?',
+        multiSelect: false,
+        options: [{ label: 'Raptors' }, { label: 'Songbirds' }],
+      },
+    ],
+  }
+
+  it('disables Answer/Skip for a streaming Claude AskUserQuestion (#779)', () => {
+    render(
+      <StreamingMessage
+        {...baseProps}
+        contentBlocks={[{ type: 'tool_use', tool_call_id: 'ask-1' }]}
+        toolCalls={[
+          { id: 'ask-1', name: 'AskUserQuestion', input: questionInput },
+        ]}
+      />
+    )
+
+    expect(screen.getByRole('button', { name: /Answer/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Skip' })).toBeDisabled()
+  })
+
+  it('keeps Answer/Skip enabled for a pending Codex user-input request', () => {
+    useChatStore.setState({
+      pendingCodexUserInputRequests: {
+        'session-1': [{ rpc_id: 7, item_id: 'codex-item-1', questions: [] }],
+      },
+    })
+
+    render(
+      <StreamingMessage
+        {...baseProps}
+        contentBlocks={[{ type: 'tool_use', tool_call_id: 'codex-item-1' }]}
+        toolCalls={[
+          {
+            id: 'codex-item-1',
+            name: 'AskUserQuestion',
+            input: questionInput,
+          },
+        ]}
+      />
+    )
+
+    expect(screen.getByRole('button', { name: /Answer/ })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Skip' })).toBeEnabled()
+  })
+
+  it('matches Codex requests without item_id by rpc-derived id', () => {
+    useChatStore.setState({
+      pendingCodexUserInputRequests: {
+        'session-1': [{ rpc_id: 9, item_id: '', questions: [] }],
+      },
+    })
+
+    render(
+      <StreamingMessage
+        {...baseProps}
+        contentBlocks={[
+          { type: 'tool_use', tool_call_id: 'codex-user-input-9' },
+        ]}
+        toolCalls={[
+          {
+            id: 'codex-user-input-9',
+            name: 'AskUserQuestion',
+            input: questionInput,
+          },
+        ]}
+      />
+    )
+
+    expect(screen.getByRole('button', { name: /Answer/ })).toBeEnabled()
+  })
+
+  it('disables a Claude question even when another session has Codex requests', () => {
+    useChatStore.setState({
+      pendingCodexUserInputRequests: {
+        'session-2': [{ rpc_id: 1, item_id: 'ask-1', questions: [] }],
+      },
+    })
+
+    render(
+      <StreamingMessage
+        {...baseProps}
+        contentBlocks={[{ type: 'tool_use', tool_call_id: 'ask-1' }]}
+        toolCalls={[
+          { id: 'ask-1', name: 'AskUserQuestion', input: questionInput },
+        ]}
+      />
+    )
+
+    expect(screen.getByRole('button', { name: /Answer/ })).toBeDisabled()
+  })
+
+  it('keeps OpenCode question tools answerable while streaming', () => {
+    render(
+      <StreamingMessage
+        {...baseProps}
+        contentBlocks={[{ type: 'tool_use', tool_call_id: 'question-1' }]}
+        toolCalls={[
+          { id: 'question-1', name: 'question', input: questionInput },
+        ]}
+      />
+    )
+
+    expect(screen.getByRole('button', { name: /Answer/ })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Skip' })).toBeEnabled()
+  })
+
+  it('shows the start of the answer when live blocks only have the tail', () => {
+    const tail = "|\n  grep -E 'reverb:start|terminal-server' |\n  grep -v grep"
+    render(
+      <StreamingMessage
+        {...baseProps}
+        contentBlocks={[
+          { type: 'tool_use', tool_call_id: 'bash-1' },
+          { type: 'text', text: tail },
+        ]}
+        toolCalls={[
+          {
+            id: 'bash-1',
+            name: 'Bash',
+            input: { command: 'docker exec coolify ps aux' },
+          },
+        ]}
+        streamingContent={`Check processes:\n\n\`\`\`bash\ndocker exec coolify ps aux ${tail}`}
+      />
+    )
+
+    expect(screen.getByText(/Check processes/)).toBeVisible()
+    expect(document.querySelector('code.language-bash')?.textContent).toContain(
+      'docker exec coolify ps aux |'
+    )
+  })
 
   it('renders no text before the first streaming chunk arrives', () => {
     render(<StreamingMessage {...baseProps} />)

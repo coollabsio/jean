@@ -1,6 +1,7 @@
 //! Antigravity CLI MCP discovery.
 //!
-//! Reads the documented workspace and user Antigravity MCP profiles.
+//! Reads the workspace and user Antigravity MCP profiles, and the profiles of
+//! installed plugins (`~/.gemini/config/plugins/<plugin>/mcp_config.json`).
 
 use crate::chat::McpServerInfo;
 use std::collections::HashSet;
@@ -27,6 +28,21 @@ pub fn get_mcp_servers(worktree_path: Option<&str>) -> Vec<McpServerInfo> {
             &mut servers,
             &mut seen,
         );
+        let plugins_dir = home.join(".gemini").join("config").join("plugins");
+        let mut plugin_dirs: Vec<PathBuf> = std::fs::read_dir(plugins_dir)
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| entry.ok().map(|e| e.path()))
+            .collect();
+        plugin_dirs.sort();
+        for dir in plugin_dirs {
+            collect(
+                &dir.join("mcp_config.json"),
+                "plugin",
+                &mut servers,
+                &mut seen,
+            );
+        }
     }
     servers
 }

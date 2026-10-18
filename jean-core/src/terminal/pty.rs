@@ -129,6 +129,27 @@ fn build_unix_shell_command(
     builder
 }
 
+/// `wsl.exe` arguments for running a structured command inside the distro.
+///
+/// Without `--exec`, wsl.exe hands the raw rest of its command line to
+/// `$SHELL -c`, which re-parses it: backslashes in Windows paths are lost and
+/// the Windows quoting around args with spaces or `"` reaches the shell
+/// verbatim. Exec mode splits it with `CommandLineToArgvW` instead, and the
+/// shared login-shell wrapper passes the args through `"$@"` untouched.
+fn wsl_exec_args(distro: &str, cwd: &str, command: &str, args: &[String]) -> Vec<String> {
+    let plan = crate::platform::wsl::wsl_resolved_cli_launch_plan(
+        command,
+        Some(std::path::Path::new(cwd)),
+        true,
+        true,
+        distro,
+    );
+    plan.args
+        .into_iter()
+        .chain(crate::platform::wslify_path_args(args))
+        .collect()
+}
+
 /// Spawn a terminal, optionally running a command
 ///
 /// On Unix, commands run through the user's interactive login shell so they
@@ -201,19 +222,15 @@ pub fn spawn_terminal(
                 return Err("Command is empty".to_string());
             }
             let mut c = CommandBuilder::new("wsl.exe");
-            c.arg("-d");
-            c.arg(&wsl_config.distro);
-            c.arg("--cd");
-            c.arg(&unix_cwd);
-            c.arg("--");
             if let Some(ref args) = command_args {
-                // Direct binary invocation inside WSL
-                c.arg(run_command);
-                for arg in args {
-                    c.arg(arg);
-                }
+                c.args(wsl_exec_args(&wsl_config.distro, &cwd, run_command, args));
             } else {
                 // Shell-wrapped command inside WSL
+                c.arg("-d");
+                c.arg(&wsl_config.distro);
+                c.arg("--cd");
+                c.arg(&unix_cwd);
+                c.arg("--");
                 c.arg("sh");
                 c.arg("-c");
                 c.arg(run_command);
@@ -654,7 +671,7 @@ pub fn kill_all_terminals() -> usize {
 mod tests {
     #[cfg(unix)]
     use super::build_unix_shell_command;
-    use super::{effective_pty_size, is_windows_batch_file};
+    use super::{effective_pty_size, is_windows_batch_file, wsl_exec_args};
     #[cfg(unix)]
     use super::{terminal_utf8_locale_overrides, ParentLocale};
 
@@ -675,6 +692,38 @@ mod tests {
         // Command/login PTYs always get a TUI-usable floor (issue #624).
         assert_eq!(effective_pty_size(12, 5, true), (80, 24));
         assert_eq!(effective_pty_size(100, 40, true), (100, 40));
+    }
+
+    #[test]
+    fn wsl_exec_args_bypass_shell_reparse_and_translate_paths() {
+        let args = vec![
+            "--append-system-prompt-file".to_string(),
+            r"C:\Users\John Smith\AppData\Roaming\com.jean.desktop\combined-contexts\s-terminal-context.md"
+                .to_string(),
+            "--config".to_string(),
+            "developer_instructions=\"Run `ls > out` and $(date)\"".to_string(),
+        ];
+
+        assert_eq!(
+            wsl_exec_args("Ubuntu-24.04", r"C:\repos\jean", "/usr/bin/claude", &args),
+            [
+                "-d",
+                "Ubuntu-24.04",
+                "--cd",
+                "/mnt/c/repos/jean",
+                // Exec mode: wsl.exe splits argv itself instead of `$SHELL -c`.
+                "--exec",
+                "bash",
+                "-lc",
+                "exec \"$@\"",
+                "jean-cli",
+                "/usr/bin/claude",
+                "--append-system-prompt-file",
+                "/mnt/c/Users/John Smith/AppData/Roaming/com.jean.desktop/combined-contexts/s-terminal-context.md",
+                "--config",
+                "developer_instructions=\"Run `ls > out` and $(date)\"",
+            ]
+        );
     }
 
     #[cfg(unix)]

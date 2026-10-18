@@ -21,6 +21,71 @@ pub enum WorktreeOrigin {
     AutoFix,
 }
 
+/// SSH target of a server project. A project with this config is a "server":
+/// sessions run in a local scratch folder and reach the host through `ssh`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct ProjectServer {
+    pub host: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    /// Private key for `ssh -i` (None = ssh config / agent defaults)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_file: Option<String>,
+    /// Legacy: set on old copies of Jean remote connections, which the app now
+    /// deletes (a jean-server shows its own local entry instead)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jean_connection_id: Option<String>,
+    /// The machine Jean runs on: commands run directly, without SSH
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub local: bool,
+}
+
+impl ProjectServer {
+    /// `user@host` (or `host`)
+    pub fn destination(&self) -> String {
+        match self
+            .user
+            .as_deref()
+            .map(str::trim)
+            .filter(|u| !u.is_empty())
+        {
+            Some(user) => format!("{user}@{}", self.host),
+            None => self.host.clone(),
+        }
+    }
+
+    /// Non-interactive ssh command prefix, e.g. `ssh -o BatchMode=yes -p 2222 root@host`
+    pub fn ssh_command(&self) -> String {
+        let identity = match self.identity_file.as_deref() {
+            Some(path) => format!(" -o IdentitiesOnly=yes -i '{path}'"),
+            None => String::new(),
+        };
+        let port = match self.port {
+            Some(port) if port != 22 => format!(" -p {port}"),
+            _ => String::new(),
+        };
+        format!(
+            "ssh -o BatchMode=yes{identity}{port} {}",
+            self.destination()
+        )
+    }
+
+    /// `ssh` options that select the identity file, if one is set
+    pub fn identity_args(&self) -> Vec<String> {
+        match self.identity_file.as_deref() {
+            Some(path) => vec![
+                "-o".to_string(),
+                "IdentitiesOnly=yes".to_string(),
+                "-i".to_string(),
+                path.to_string(),
+            ],
+            None => Vec::new(),
+        }
+    }
+}
+
 /// Per-project automated issue fixing settings.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProjectAutoFixSettings {
@@ -175,12 +240,30 @@ pub struct Project {
     /// Sentry project slug mapped to this Jean project
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sentry_project_slug: Option<String>,
+    /// Sentry region API base URL (auto-resolved from the org on first use)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sentry_base_url: Option<String>,
     /// IDs of linked projects for cross-project context sharing
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub linked_project_ids: Vec<String>,
     /// Per-project automated issue fixing settings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_fix_settings: Option<ProjectAutoFixSettings>,
+    /// SSH target when this project is a managed server (None = git repository)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server: Option<ProjectServer>,
+}
+
+/// Project data used by the sidebar and initial bootstrap.
+///
+/// Worktree metadata is intentionally reduced to counts here. Full worktrees
+/// and their session lists are loaded only when a project is opened.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProjectListItem {
+    #[serde(flatten)]
+    pub project: Project,
+    pub worktree_count: usize,
+    pub has_base_session: bool,
 }
 
 /// A git worktree created for a project

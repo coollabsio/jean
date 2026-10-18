@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { FALLBACK_APP_VERSION } from './app-version'
 
 const setWsConnectedMock = vi.fn()
@@ -56,6 +56,10 @@ async function loadTransportModule() {
     setWsConnected: setWsConnectedMock,
     setWebAccessEnabled: vi.fn(),
   }))
+  vi.doMock('./remote-connections', () => ({
+    getActiveRemoteConnection: () => null,
+    getRemoteConnections: () => [],
+  }))
   return import('./transport')
 }
 
@@ -102,6 +106,7 @@ async function loadRemoteNativeTransportModule(
         url: 'https://jean.example.com',
         token: 'secret',
       },
+    getRemoteConnections: () => (remote ? [remote] : []),
   }))
   if (tauriInvoke) {
     vi.doMock('@tauri-apps/api/core', () => ({ invoke: tauriInvoke }))
@@ -136,6 +141,67 @@ describe('transport bootstrap', () => {
     vi.doUnmock('@tauri-apps/api/core')
     vi.doUnmock('@tauri-apps/api/event')
     vi.doUnmock('./remote-connections')
+    vi.doUnmock('./server-connections')
+  })
+
+  it('routes composite resource commands to their owning server', async () => {
+    const invokeOnServer = vi.fn(async () => [{ id: 'w1', project_id: 'p1' }])
+    vi.doMock('./server-connections', () => ({ invokeOnServer }))
+    const transport = await loadNativeTransportModule(vi.fn())
+
+    const result = await transport.invoke('list_worktrees', {
+      projectId: 'remote%3Aone:project%2F1',
+    })
+
+    expect(invokeOnServer).toHaveBeenCalledWith(
+      'remote:one',
+      'list_worktrees',
+      { projectId: 'project/1' }
+    )
+    expect(result).toEqual([
+      {
+        id: 'remote%3Aone:w1',
+        project_id: 'remote%3Aone:p1',
+        serverId: 'remote:one',
+        resourceId: 'w1',
+      },
+    ])
+  })
+
+  it('strips scoped ids from commands sent straight to a server', async () => {
+    const invokeOnServer = vi.fn(async () => ({ id: 'p9' }))
+    vi.doMock('./server-connections', () => ({ invokeOnServer }))
+    const transport = await loadNativeTransportModule(vi.fn())
+
+    await transport.invokeForServer('remote-1', 'add_project', {
+      path: '/srv/qrcode',
+      parentId: 'remote-1:folder-7',
+    })
+
+    expect(invokeOnServer).toHaveBeenCalledWith('remote-1', 'add_project', {
+      path: '/srv/qrcode',
+      parentId: 'folder-7',
+    })
+  })
+
+  it('routes path-only Git and GitHub commands to a remote owner', async () => {
+    const invokeOnServer = vi.fn(async () => ({ issues: [], totalCount: 0 }))
+    vi.doMock('./server-connections', () => ({ invokeOnServer }))
+    const transport = await loadNativeTransportModule(vi.fn())
+    const { registerServerResourcePath } =
+      await import('./server-command-routing')
+    registerServerResourcePath('remote-1', '/srv/project')
+
+    await transport.invoke('list_github_issues', {
+      projectPath: '/srv/project',
+      state: 'open',
+    })
+
+    expect(invokeOnServer).toHaveBeenCalledWith(
+      'remote-1',
+      'list_github_issues',
+      { projectPath: '/srv/project', state: 'open' }
+    )
   })
 
   it('routes native shared commands to the selected remote Jean', async () => {
@@ -208,6 +274,34 @@ describe('transport bootstrap', () => {
     expect(result.current).not.toContain('secret')
   })
 
+  it('classifies a missing web access token as signed out', async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: false } as Response)
+    const transport = await loadTransportModule()
+    const signedOut = renderHook(() => transport.useWsAuthReason())
+
+    transport.connectTransport()
+
+    await waitFor(() => expect(signedOut.result.current).toBe('signed-out'))
+    await flushAsync()
+  })
+
+  it('classifies and clears a refused web access token', async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: false } as Response)
+    const transport = await loadTransportModule()
+    const rejected = renderHook(() => transport.useWsAuthReason())
+    window.history.replaceState({}, '', '/?token=refused-token')
+
+    transport.connectTransport()
+
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringContaining('token=refused-token')
+      )
+    )
+    await waitFor(() => expect(rejected.result.current).toBe('rejected'))
+    expect(localStorage.getItem('jean-http-token')).toBeNull()
+  })
+
   it('still connects native remotes when appVersion mismatches', async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,
@@ -247,6 +341,42 @@ describe('transport bootstrap', () => {
     })
   })
 
+  it('keeps path-routed local Open In commands on native Tauri handlers', async () => {
+    const tauriInvoke = vi.fn().mockResolvedValue(undefined)
+    const transport = await loadNativeTransportModule(tauriInvoke)
+    const { registerServerResourcePath } =
+      await import('./server-command-routing')
+    registerServerResourcePath('local', '/Users/jean/project')
+
+    await transport.invoke('open_worktree_in_finder', {
+      worktreePath: '/Users/jean/project',
+    })
+
+    expect(tauriInvoke).toHaveBeenCalledWith('open_worktree_in_finder', {
+      worktreePath: '/Users/jean/project',
+    })
+  })
+
+  it('keeps local IDs raw for commands routed by a base-session path', async () => {
+    const sessions = {
+      worktree_id: 'worktree-1',
+      active_session_id: 'session-1',
+      sessions: [{ id: 'session-1', worktree_id: 'worktree-1' }],
+    }
+    const tauriInvoke = vi.fn().mockResolvedValue(sessions)
+    const transport = await loadNativeTransportModule(tauriInvoke)
+    const { registerServerResourcePath } =
+      await import('./server-command-routing')
+    registerServerResourcePath('local', '/Users/jean/project')
+
+    const result = await transport.invoke('get_sessions', {
+      worktreeId: 'worktree-1',
+      worktreePath: '/Users/jean/project',
+    })
+
+    expect(result).toEqual(sessions)
+  })
+
   it('opens remote worktrees in local Zed via ssh:// targets', async () => {
     const tauriInvoke = vi.fn().mockResolvedValue(undefined)
     const transport = await loadRemoteNativeTransportModule(
@@ -270,6 +400,96 @@ describe('transport bootstrap', () => {
       worktreePath: 'ssh://ubuntu@192.168.1.50/home/ubuntu/jean/app/feature',
       editor: 'zed',
     })
+  })
+
+  it('opens an explicitly owned remote file in local Zed via ssh', async () => {
+    const tauriInvoke = vi.fn().mockResolvedValue(undefined)
+    const invokeOnServer = vi.fn()
+    vi.doMock('./server-connections', () => ({ invokeOnServer }))
+    const transport = await loadRemoteNativeTransportModule(
+      {
+        id: 'remote-1',
+        name: 'Server',
+        url: 'https://jean.example.com',
+        token: 'secret',
+        sshUser: 'ubuntu',
+        sshHost: '192.168.1.50',
+      },
+      tauriInvoke
+    )
+
+    await transport.invokeForServer('remote-1', 'open_file_in_default_app', {
+      path: '/home/ubuntu/jean/app/src/main.ts',
+      editor: 'zed',
+    })
+
+    expect(tauriInvoke).toHaveBeenCalledWith('open_file_in_default_app', {
+      path: 'ssh://ubuntu@192.168.1.50/home/ubuntu/jean/app/src/main.ts',
+      editor: 'zed',
+      line: undefined,
+      column: undefined,
+    })
+    expect(invokeOnServer).not.toHaveBeenCalled()
+  })
+
+  it('opens remote worktrees in a local terminal through SSH', async () => {
+    const tauriInvoke = vi.fn().mockResolvedValue(undefined)
+    const transport = await loadRemoteNativeTransportModule(
+      {
+        id: 'remote-1',
+        name: 'Server',
+        url: 'https://jean.example.com',
+        token: 'secret',
+        sshUser: 'ubuntu',
+        sshHost: '192.168.1.50',
+        sshPort: 2222,
+      },
+      tauriInvoke
+    )
+
+    await transport.invoke('open_worktree_in_terminal', {
+      worktreePath: '/home/ubuntu/jean/app/feature',
+      terminal: 'ghostty',
+    })
+
+    expect(tauriInvoke).toHaveBeenCalledWith('open_worktree_in_terminal', {
+      worktreePath: '/home/ubuntu/jean/app/feature',
+      terminal: 'ghostty',
+      sshUser: 'ubuntu',
+      sshHost: '192.168.1.50',
+      sshPort: 2222,
+    })
+  })
+
+  it('opens an owned remote worktree in local Zed instead of its headless server', async () => {
+    const tauriInvoke = vi.fn().mockResolvedValue(undefined)
+    const invokeOnServer = vi.fn()
+    vi.doMock('./server-connections', () => ({ invokeOnServer }))
+    const transport = await loadRemoteNativeTransportModule(
+      {
+        id: 'remote-1',
+        name: 'Server',
+        url: 'https://jean.example.com',
+        token: 'secret',
+        sshUser: 'ubuntu',
+        sshHost: '192.168.1.50',
+      },
+      tauriInvoke
+    )
+    const { registerServerResourcePath } =
+      await import('./server-command-routing')
+    registerServerResourcePath('remote-1', '/home/ubuntu/jean/app/feature')
+
+    await transport.invoke('open_worktree_in_editor', {
+      worktreePath: '/home/ubuntu/jean/app/feature',
+      editor: 'zed',
+    })
+
+    expect(tauriInvoke).toHaveBeenCalledWith('open_worktree_in_editor', {
+      worktreePath: 'ssh://ubuntu@192.168.1.50/home/ubuntu/jean/app/feature',
+      editor: 'zed',
+    })
+    expect(invokeOnServer).not.toHaveBeenCalled()
   })
 
   it('prefers backend native-open over ssh:// remap when the remote allows it', async () => {
@@ -473,7 +693,47 @@ describe('transport bootstrap', () => {
     const ws = getWs(0)
 
     vi.advanceTimersByTime(51_000)
-    document.dispatchEvent(new Event('visibilitychange'))
+    act(() => document.dispatchEvent(new Event('visibilitychange')))
+
+    expect(ws.close).toHaveBeenCalledTimes(1)
+  })
+
+  it('blocks the web view on wake until the socket answers a connection check', async () => {
+    const transport = await loadTransportModule()
+    const { result } = renderHook(() => transport.useWsConnectionChecking())
+
+    await act(async () => {
+      transport.connectTransport()
+      await flushAsync()
+    })
+    const ws = getWs(0)
+
+    act(() => document.dispatchEvent(new Event('visibilitychange')))
+    await waitFor(() => expect(result.current).toBe(true))
+    expect(ws.send).toHaveBeenCalledTimes(1)
+    const request = JSON.parse(ws.send.mock.calls[0]?.[0] ?? '')
+    expect(request.command).toBe('get_server_platform')
+
+    await act(async () => {
+      ws.receive({ type: 'response', id: request.id, data: 'linux' })
+    })
+    await waitFor(() => expect(result.current).toBe(false))
+    expect(ws.close).not.toHaveBeenCalled()
+  })
+
+  it('closes a zombie socket if the wake connection check does not answer', async () => {
+    vi.useFakeTimers()
+    const transport = await loadTransportModule()
+    transport.connectTransport()
+    await flushAsync()
+    const ws = getWs(0)
+
+    window.dispatchEvent(new Event('pageshow'))
+    expect(
+      transport.getLegacyWsTransport().getCheckingConnectionSnapshot()
+    ).toBe(true)
+    vi.advanceTimersByTime(3_000)
+    await flushAsync()
 
     expect(ws.close).toHaveBeenCalledTimes(1)
   })
@@ -559,6 +819,59 @@ describe('transport bootstrap', () => {
     expect(MockWebSocket.instances).toHaveLength(1)
   })
 
+  it('reconnects a parallel remote adapter five seconds after disconnect', async () => {
+    vi.useFakeTimers()
+    const transport = await loadTransportModule()
+    const adapter = new transport.WsTransport({
+      serverId: 'remote-1',
+      baseUrl: 'https://jean.example.com',
+      getToken: () => 'secret',
+      syncGlobalState: false,
+    })
+
+    adapter.enableConnect()
+    await flushAsync()
+    getWs(0).close()
+
+    await vi.advanceTimersByTimeAsync(4_999)
+    expect(MockWebSocket.instances).toHaveLength(1)
+
+    await vi.advanceTimersByTimeAsync(1)
+    await flushAsync()
+    expect(MockWebSocket.instances).toHaveLength(2)
+  })
+
+  it('builds authenticated project-file URLs for a remote server avatar', async () => {
+    const transport = await loadRemoteNativeTransportModule({
+      id: 'remote-1',
+      name: 'Build server',
+      url: 'https://jean.example.com/',
+      token: 'secret token',
+    })
+
+    expect(
+      transport.convertServerProjectFileSrc(
+        'remote-1',
+        '/home/jean/project/icon.png'
+      )
+    ).toBe(
+      'https://jean.example.com/api/project-files/%2Fhome%2Fjean%2Fproject%2Ficon.png?token=secret%20token'
+    )
+    expect(
+      transport.convertServerFileSrc('remote-1', 'project-avatars/icon.png')
+    ).toBe(
+      'https://jean.example.com/api/files/project-avatars/icon.png?token=secret%20token'
+    )
+    expect(
+      transport.convertServerFileSrc(
+        'remote-1',
+        '/home/jean/.local/share/com.jean.desktop/pasted-images/image.png'
+      )
+    ).toBe(
+      'https://jean.example.com/api/files/%2Fhome%2Fjean%2F.local%2Fshare%2Fcom.jean.desktop%2Fpasted-images%2Fimage.png?token=secret%20token'
+    )
+  })
+
   it('notifies established disconnect listeners synchronously', async () => {
     const transport = await loadTransportModule()
     const onDisconnect = vi.fn()
@@ -570,5 +883,31 @@ describe('transport bootstrap', () => {
     getWs(0).close()
 
     expect(onDisconnect).toHaveBeenCalledOnce()
+  })
+
+  it('uploads attachments to the remote server over HTTP, not the WebSocket', async () => {
+    const transport = await loadRemoteNativeTransportModule()
+    const saved = { id: 'f1', filename: 'clip.mp4', path: '/p/clip', size: 3 }
+    vi.mocked(fetch).mockImplementation(async input =>
+      String(input).includes('/api/pasted-files')
+        ? ({ ok: true, status: 200, json: async () => saved } as Response)
+        : ({
+            ok: true,
+            json: async () => ({ ok: true, appVersion: FALLBACK_APP_VERSION }),
+          } as Response)
+    )
+    const file = new File(['abc'], 'clip.mp4', { type: 'video/mp4' })
+
+    await expect(transport.savePastedFile(file, 'session-1')).resolves.toEqual(
+      saved
+    )
+
+    const call = vi
+      .mocked(fetch)
+      .mock.calls.find(([url]) => String(url).includes('/api/pasted-files'))
+    expect(String(call?.[0])).toBe(
+      'https://jean.example.com/api/pasted-files?filename=clip.mp4&token=secret'
+    )
+    expect(call?.[1]).toEqual({ method: 'POST', body: file })
   })
 })

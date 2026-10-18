@@ -9,14 +9,19 @@ import {
 import {
   FileText,
   ImageIcon,
+  Video,
   Loader2,
   AlertCircle,
   Pencil,
   Eye,
   Save,
   ExternalLink,
-} from 'lucide-react'
-import { invoke } from '@/lib/transport'
+} from '@/components/icons/reicon'
+import {
+  invoke,
+  invokeForOptionalServer,
+  invokeForServer,
+} from '@/lib/transport'
 import {
   Dialog,
   DialogContent,
@@ -35,9 +40,14 @@ import { usePreferences } from '@/services/preferences'
 import { cn } from '@/lib/utils'
 import type { SyntaxTheme } from '@/types/preferences'
 import { toast } from 'sonner'
+import { FilePathCopyRow } from './FilePathCopyRow'
 
 // Lazy load CodeEditor (Pierre File + edit mode) so the main bundle stays lean
 const CodeEditor = lazy(() => import('@/components/ui/code-editor'))
+
+// Match the dialog close (X) button: same height, grey icon, square on mobile
+const HEADER_ICON_BUTTON_CLASS =
+  'h-7 text-muted-foreground max-sm:w-7 max-sm:px-0'
 
 function isMarkdownFile(filename: string | null | undefined): boolean {
   if (!filename) return false
@@ -49,9 +59,16 @@ function isImageFile(filename: string | null | undefined): boolean {
   return /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(filename)
 }
 
+function isVideoFile(filename: string | null | undefined): boolean {
+  if (!filename) return false
+  return /\.(mp4|m4v|webm|mov|ogv)$/i.test(filename)
+}
+
 interface FileContentModalProps {
   /** File path to display, or null to close the modal */
   filePath: string | null
+  /** Jean server that owns the file path. */
+  serverId?: string
   /** Callback when modal is closed */
   onClose: () => void
 }
@@ -109,7 +126,11 @@ interface FileBase64Content {
   mimeType: string
 }
 
-export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
+export function FileContentModal({
+  filePath,
+  serverId,
+  onClose,
+}: FileContentModalProps) {
   const [content, setContent] = useState<string | null>(null)
   const [editedContent, setEditedContent] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -118,7 +139,7 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [imageError, setImageError] = useState(false)
   const [imageLoaded, setImageLoaded] = useState(false)
-  /** data: URL for images loaded via backend (works for /tmp and remote) */
+  /** data: URL for images/videos loaded via backend (works for /tmp and remote) */
   const [imageSrc, setImageSrc] = useState<string | null>(null)
 
   const { theme } = useTheme()
@@ -145,53 +166,65 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
   /** Bumps when content should remount the Pierre edit session (load / discard). */
   const [editorEpoch, setEditorEpoch] = useState(0)
 
-  const loadFileContent = useCallback(async (path: string, signal: { cancelled: boolean }) => {
-    setIsLoading(true)
-    setError(null)
-    setContent(null)
-    setEditedContent(null)
-    setIsEditing(false)
-    setEditorEpoch(e => e + 1)
+  const loadFileContent = useCallback(
+    async (path: string, signal: { cancelled: boolean }) => {
+      setIsLoading(true)
+      setError(null)
+      setContent(null)
+      setEditedContent(null)
+      setIsEditing(false)
+      setEditorEpoch(e => e + 1)
 
-    try {
-      const fileContent = await invoke<string>('read_file_content', { path })
-      if (signal.cancelled) return
-      setContent(fileContent)
-      setEditedContent(fileContent)
-      // Open in edit mode by default (matches mobile file browser)
-      setIsEditing(true)
-    } catch (err) {
-      if (signal.cancelled) return
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      if (!signal.cancelled) setIsLoading(false)
-    }
-  }, [])
+      try {
+        const fileContent = serverId
+          ? await invokeForServer<string>(serverId, 'read_file_content', {
+              path,
+            })
+          : await invoke<string>('read_file_content', { path })
+        if (signal.cancelled) return
+        setContent(fileContent)
+        setEditedContent(fileContent)
+      } catch (err) {
+        if (signal.cancelled) return
+        setError(err instanceof Error ? err.message : String(err))
+      } finally {
+        if (!signal.cancelled) setIsLoading(false)
+      }
+    },
+    [serverId]
+  )
 
-  // Load images through the backend so remote/web and paths outside project
+  // Load images and videos through the backend so remote/web and paths outside project
   // roots (e.g. /tmp screenshots) work — convertProjectFileSrc only serves
   // known project/worktree directories.
-  const loadImageContent = useCallback(async (path: string, signal: { cancelled: boolean }) => {
-    setIsLoading(true)
-    setError(null)
-    setImageError(false)
-    setImageLoaded(false)
-    setImageSrc(null)
+  const loadImageContent = useCallback(
+    async (path: string, signal: { cancelled: boolean }) => {
+      setIsLoading(true)
+      setError(null)
+      setImageError(false)
+      setImageLoaded(false)
+      setImageSrc(null)
 
-    try {
-      const result = await invoke<FileBase64Content>('read_file_base64', {
-        path,
-      })
-      if (signal.cancelled) return
-      setImageSrc(`data:${result.mimeType};base64,${result.data}`)
-    } catch (err) {
-      if (signal.cancelled) return
-      setError(err instanceof Error ? err.message : String(err))
-      setImageError(true)
-    } finally {
-      if (!signal.cancelled) setIsLoading(false)
-    }
-  }, [])
+      try {
+        const result = serverId
+          ? await invokeForServer<FileBase64Content>(
+              serverId,
+              'read_file_base64',
+              { path }
+            )
+          : await invoke<FileBase64Content>('read_file_base64', { path })
+        if (signal.cancelled) return
+        setImageSrc(`data:${result.mimeType};base64,${result.data}`)
+      } catch (err) {
+        if (signal.cancelled) return
+        setError(err instanceof Error ? err.message : String(err))
+        setImageError(true)
+      } finally {
+        if (!signal.cancelled) setIsLoading(false)
+      }
+    },
+    [serverId]
+  )
 
   useEffect(() => {
     const signal = { cancelled: false }
@@ -208,7 +241,7 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
         signal.cancelled = true
       }
     }
-    if (isImageFile(filePath)) {
+    if (isImageFile(filePath) || isVideoFile(filePath)) {
       setContent(null)
       setEditedContent(null)
       setIsEditing(false)
@@ -223,7 +256,8 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
 
   const filename = filePath ? getFilename(filePath) : filePath
 
-  const isImage = isImageFile(filename)
+  const isVideo = isVideoFile(filename)
+  const isMedia = isImageFile(filename) || isVideo
   const isMarkdown = isMarkdownFile(filename)
   const language = filePath ? getLanguageFromPath(filePath) : 'text'
 
@@ -236,10 +270,12 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
 
     setIsSaving(true)
     try {
-      await invoke('write_file_content', {
-        path: filePath,
-        content: editedContent,
-      })
+      const args = { path: filePath, content: editedContent }
+      if (serverId) {
+        await invokeForServer(serverId, 'write_file_content', args)
+      } else {
+        await invoke('write_file_content', args)
+      }
       setContent(editedContent)
       toast.success('File saved')
     } catch (err) {
@@ -248,14 +284,14 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
     } finally {
       setIsSaving(false)
     }
-  }, [filePath, editedContent])
+  }, [filePath, editedContent, serverId])
 
   // Handle open in external editor
   const handleOpenExternal = useCallback(async () => {
     if (!filePath) return
 
     try {
-      await invoke('open_file_in_default_app', {
+      await invokeForOptionalServer(serverId, 'open_file_in_default_app', {
         path: filePath,
         editor: preferences?.editor,
       })
@@ -263,7 +299,7 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
       const message = err instanceof Error ? err.message : String(err)
       toast.error(`Failed to open: ${message}`)
     }
-  }, [filePath, preferences?.editor])
+  }, [filePath, preferences?.editor, serverId])
 
   // Toggle edit mode
   const handleToggleEdit = useCallback(() => {
@@ -275,8 +311,8 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
     setIsEditing(!isEditing)
   }, [isEditing, hasChanges, content])
 
-  // Only the explicit X / DialogClose should dismiss — not outside click,
-  // ESC, or a parent sheet closing underneath on mobile.
+  // Only the explicit X / DialogClose or ESC should dismiss — not outside
+  // click or a parent sheet closing underneath on mobile.
   const handleOpenChange = useCallback(
     (open: boolean) => {
       if (!open) {
@@ -293,73 +329,90 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
   return (
     <Dialog open={!!filePath} onOpenChange={handleOpenChange}>
       <DialogContent
-        preventClose
+        onInteractOutside={e => e.preventDefault()}
+        // Keep unsaved edits: ESC only closes when there is nothing to lose
+        onEscapeKeyDown={e => {
+          if (hasChanges) e.preventDefault()
+        }}
         // Sit above mobile sheets (z-80) so the viewer is interactive
         overlayClassName="z-[90]"
         className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-auto sm:max-h-[85vh] sm:!rounded-lg sm:p-4 bg-background/95 z-[90]"
       >
-        <DialogTitle className="flex flex-col gap-1 px-4 pt-4 pr-14 sm:px-0 sm:pt-0 sm:pr-8">
-          <div className="flex items-center gap-2">
-            {isImage ? (
-              <ImageIcon className="h-4 w-4 shrink-0" />
-            ) : (
-              <FileText className="h-4 w-4 shrink-0" />
-            )}
-            <span className="truncate">{filename}</span>
+        <div className="flex min-w-0 flex-col gap-1 px-4 pt-4 pr-14 sm:px-0 sm:pt-0 sm:pr-8">
+          <DialogTitle>
+            <div className="flex items-center gap-2">
+              {isVideo ? (
+                <Video className="h-4 w-4 shrink-0" />
+              ) : isMedia ? (
+                <ImageIcon className="h-4 w-4 shrink-0" />
+              ) : (
+                <FileText className="h-4 w-4 shrink-0" />
+              )}
+              <span className="truncate">{filename}</span>
 
-            {/* Action buttons - only for non-image files */}
-            {!isImage && content !== null && (
-              <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
-                {isEditing ? (
-                  <>
+              {/* Action buttons - only for non-media files */}
+              {!isMedia && content !== null && (
+                <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
+                  {isEditing ? (
+                    <>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className={HEADER_ICON_BUTTON_CLASS}
+                        onClick={handleToggleEdit}
+                        disabled={isSaving}
+                      >
+                        <Eye className="h-4 w-4 sm:mr-1" />
+                        <span className="hidden sm:inline">View</span>
+                      </Button>
+                      <Button
+                        variant="default"
+                        size="sm"
+                        className="h-7 max-sm:w-7 max-sm:px-0"
+                        onClick={handleSave}
+                        disabled={!hasChanges || isSaving}
+                      >
+                        {isSaving ? (
+                          <Loader2 className="h-4 w-4 sm:mr-1 animate-spin" />
+                        ) : (
+                          <Save className="h-4 w-4 sm:mr-1" />
+                        )}
+                        <span className="hidden sm:inline">Save</span>
+                      </Button>
+                    </>
+                  ) : (
                     <Button
                       variant="ghost"
                       size="sm"
+                      className={HEADER_ICON_BUTTON_CLASS}
                       onClick={handleToggleEdit}
-                      disabled={isSaving}
                     >
-                      <Eye className="h-4 w-4 sm:mr-1" />
-                      <span className="hidden sm:inline">View</span>
+                      <Pencil className="h-4 w-4 sm:mr-1" />
+                      <span className="hidden sm:inline">Edit</span>
                     </Button>
+                  )}
+                  {canOpenInEditor() && (
                     <Button
-                      variant="default"
+                      variant="ghost"
                       size="sm"
-                      onClick={handleSave}
-                      disabled={!hasChanges || isSaving}
+                      className={HEADER_ICON_BUTTON_CLASS}
+                      onClick={handleOpenExternal}
                     >
-                      {isSaving ? (
-                        <Loader2 className="h-4 w-4 sm:mr-1 animate-spin" />
-                      ) : (
-                        <Save className="h-4 w-4 sm:mr-1" />
-                      )}
-                      <span className="hidden sm:inline">Save</span>
+                      <ExternalLink className="h-4 w-4 sm:mr-1" />
+                      <span className="hidden sm:inline">Open in Editor</span>
                     </Button>
-                  </>
-                ) : (
-                  <Button variant="ghost" size="sm" onClick={handleToggleEdit}>
-                    <Pencil className="h-4 w-4 sm:mr-1" />
-                    <span className="hidden sm:inline">Edit</span>
-                  </Button>
-                )}
-                {canOpenInEditor() && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleOpenExternal}
-                  >
-                    <ExternalLink className="h-4 w-4 sm:mr-1" />
-                    <span className="hidden sm:inline">Open in Editor</span>
-                  </Button>
-                )}
-              </div>
-            )}
-          </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </DialogTitle>
           {filePath && (
-            <span className="text-muted-foreground font-normal text-xs break-all [overflow-wrap:anywhere]">
-              {filePath}
-            </span>
+            <FilePathCopyRow
+              filePath={filePath}
+              pathClassName="break-all [overflow-wrap:anywhere]"
+            />
           )}
-        </DialogTitle>
+        </div>
         <DialogDescription className="sr-only">
           View or edit the contents of {filename ?? 'the selected file'}.
         </DialogDescription>
@@ -401,21 +454,39 @@ export function FileContentModal({ filePath, onClose }: FileContentModalProps) {
           </div>
         ) : !isLoading && !error ? (
           <ScrollArea className="h-[calc(100dvh-7rem)] sm:h-[calc(85vh-6rem)] mt-2 px-4 pb-4 sm:px-0 sm:pb-0">
-            {isImage ? (
+            {isMedia ? (
               <div className="flex flex-col items-center justify-center gap-3 p-4 min-h-[12rem]">
                 {!imageLoaded && !imageError && imageSrc && (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Loader2 className="h-5 w-5 animate-spin" />
-                    Loading image…
+                    {isVideo ? 'Loading video…' : 'Loading image…'}
                   </div>
                 )}
                 {imageError ? (
                   <div className="flex items-center gap-2 py-4 px-3 bg-destructive/10 text-destructive rounded-md max-w-full">
                     <AlertCircle className="h-4 w-4 shrink-0" />
                     <span className="text-sm break-words">
-                      {error ?? 'Failed to load image'}
+                      {error ??
+                        (isVideo
+                          ? 'This video format cannot be played here'
+                          : 'Failed to load image')}
                     </span>
                   </div>
+                ) : imageSrc && isVideo ? (
+                  <video
+                    src={imageSrc}
+                    controls
+                    playsInline
+                    className={cn(
+                      'max-w-full max-h-[calc(85vh-8rem)] rounded-md',
+                      !imageLoaded && 'hidden'
+                    )}
+                    onLoadedData={() => setImageLoaded(true)}
+                    onError={() => {
+                      setImageError(true)
+                      setImageLoaded(false)
+                    }}
+                  />
                 ) : imageSrc ? (
                   <img
                     src={imageSrc}

@@ -1,4 +1,4 @@
-import { Trash2 } from 'lucide-react'
+import { Trash2 } from '@/components/icons/reicon'
 import { toast } from 'sonner'
 import { invoke } from '@/lib/transport'
 import type { AppCommand } from './types'

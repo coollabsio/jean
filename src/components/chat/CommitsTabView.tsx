@@ -6,9 +6,11 @@ import {
   Search,
   Sparkles,
   ChevronDown,
+  ChevronLeft,
+  ChevronsUpDown,
   Check,
   GitBranch,
-} from 'lucide-react'
+} from '@/components/icons/reicon'
 import { parsePatchFiles, type FileDiffMetadata } from '@pierre/diffs'
 import {
   ResizablePanelGroup,
@@ -33,10 +35,12 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from '@/components/ui/tooltip'
+import { Button } from '@/components/ui/button'
 import { getFileLineStats } from '@/lib/diff-stats'
 import { cn } from '@/lib/utils'
 import { getFilename } from '@/lib/path-utils'
 import { useTheme } from '@/hooks/use-theme'
+import { useIsMobile } from '@/hooks/use-mobile'
 import { usePreferences } from '@/services/preferences'
 import {
   getCommitHistory,
@@ -85,10 +89,12 @@ interface FlatFile {
   fileDiff: FileDiffMetadata
   additions: number
   deletions: number
+  isBinary: boolean
 }
 
 interface CommitsTabViewProps {
   worktreePath: string
+  worktreeId?: string
   baseBranch: string
   diffStyle: 'split' | 'unified'
   onAddToPrompt?: (reference: string) => void
@@ -108,6 +114,7 @@ const EMPTY_ANNOTATIONS: never[] = []
 
 export function CommitsTabView({
   worktreePath,
+  worktreeId,
   baseBranch,
   diffStyle,
   onAddToPrompt,
@@ -135,9 +142,12 @@ export function CommitsTabView({
   // File selection state (within a commit's diff)
   const [selectedFileIndex, setSelectedFileIndex] = useState(0)
   const [fileFilter, setFileFilter] = useState('')
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false)
+  const [mobileFilesOpen, setMobileFilesOpen] = useState(false)
 
   // Theme
   const { theme } = useTheme()
+  const isMobile = useIsMobile()
   const { data: preferences } = usePreferences()
   const resolvedThemeType = useMemo((): 'dark' | 'light' => {
     if (theme === 'system') {
@@ -238,13 +248,16 @@ export function CommitsTabView({
             fileDiff,
             additions,
             deletions,
+            isBinary:
+              commitDiff.files.find(file => file.path === fileName)
+                ?.is_binary ?? false,
           }
         })
       )
     } catch {
       return []
     }
-  }, [commitDiff?.raw_patch])
+  }, [commitDiff])
 
   const filteredFiles = useMemo(() => {
     if (!fileFilter) return flattenedFiles
@@ -263,6 +276,8 @@ export function CommitsTabView({
 
   const handleSelectCommit = useCallback((sha: string) => {
     setSelectedCommitSha(sha)
+    setMobileDetailOpen(true)
+    setMobileFilesOpen(false)
   }, [])
 
   const handleLoadMore = useCallback(() => {
@@ -313,6 +328,264 @@ export function CommitsTabView({
   // ========================================================================
 
   const currentBranchLabel = selectedBranch ?? baseBranch ?? 'HEAD'
+
+  if (isMobile) {
+    if (!mobileDetailOpen) {
+      return (
+        <div className="mt-2 flex min-h-0 flex-1 flex-col">
+          <div className="shrink-0 border-b border-border px-3 pb-3">
+            <Popover
+              open={branchPopoverOpen}
+              onOpenChange={setBranchPopoverOpen}
+            >
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className="flex min-h-11 w-full items-center gap-2 rounded-md bg-muted px-3 py-2 text-sm"
+                >
+                  <GitBranch className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1 truncate text-left">
+                    {currentBranchLabel}
+                  </span>
+                  <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent
+                className="w-[calc(100vw-1.5rem)] p-0"
+                align="start"
+              >
+                <Command>
+                  <CommandInput placeholder="Search branches..." />
+                  <CommandList>
+                    <CommandEmpty>No branches found.</CommandEmpty>
+                    <CommandGroup>
+                      {branches.map(branch => (
+                        <CommandItem
+                          key={branch}
+                          value={branch}
+                          onSelect={() => handleSelectBranch(branch)}
+                        >
+                          <Check
+                            className={cn(
+                              'mr-2 h-4 w-4',
+                              currentBranchLabel === branch
+                                ? 'opacity-100'
+                                : 'opacity-0'
+                            )}
+                          />
+                          {branch}
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          </div>
+          <div
+            role="listbox"
+            aria-label="Commits"
+            className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain"
+          >
+            {isLoadingCommits && commits.length === 0 ? (
+              <div className="flex items-center justify-center py-10 text-sm text-muted-foreground">
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Loading commits...
+              </div>
+            ) : commitsError ? (
+              <div className="flex items-center gap-2 p-4 text-sm text-destructive">
+                <AlertCircle className="h-4 w-4" />
+                {commitsError}
+              </div>
+            ) : commits.length === 0 ? (
+              <div className="py-10 text-center text-sm text-muted-foreground">
+                No commits found
+              </div>
+            ) : (
+              <>
+                {commits.map(commit => (
+                  <button
+                    key={commit.sha}
+                    type="button"
+                    onClick={() => handleSelectCommit(commit.sha)}
+                    className="flex min-h-16 w-full flex-col gap-1 border-b border-border px-4 py-3 text-left active:bg-accent"
+                  >
+                    <span className="line-clamp-2 text-sm font-medium leading-snug">
+                      {commit.message}
+                    </span>
+                    <span className="flex w-full items-center gap-2 text-xs text-muted-foreground">
+                      <code>{commit.shortSha}</code>
+                      <span className="min-w-0 flex-1 truncate">
+                        {commit.authorName}
+                      </span>
+                      <span>{formatRelativeDate(commit.authorDate)}</span>
+                      {commit.additions > 0 && (
+                        <span className="text-success">
+                          +{commit.additions}
+                        </span>
+                      )}
+                      {commit.deletions > 0 && (
+                        <span className="text-destructive">
+                          -{commit.deletions}
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                ))}
+                {hasMore && (
+                  <button
+                    type="button"
+                    onClick={handleLoadMore}
+                    disabled={isLoadingCommits}
+                    className="min-h-11 w-full py-3 text-sm text-muted-foreground"
+                  >
+                    {isLoadingCommits ? 'Loading...' : 'Load more commits'}
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )
+    }
+
+    const selectedCommit = commits.find(
+      commit => commit.sha === selectedCommitSha
+    )
+    return (
+      <div className="mt-2 flex min-h-0 flex-1 flex-col">
+        <div className="flex shrink-0 items-start gap-2 border-b border-border px-2 py-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-11 w-11 shrink-0"
+            onClick={() => setMobileDetailOpen(false)}
+            aria-label="Back to commits"
+          >
+            <ChevronLeft className="h-5 w-5" />
+          </Button>
+          <div className="min-w-0 flex-1 py-1">
+            <p className="line-clamp-2 text-sm font-medium">
+              {selectedCommit?.message ?? 'Commit changes'}
+            </p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {selectedCommit?.shortSha} ·{' '}
+              {selectedCommit
+                ? formatRelativeDate(selectedCommit.authorDate)
+                : ''}
+            </p>
+          </div>
+        </div>
+        {isLoadingDiff ? (
+          <div className="flex flex-1 items-center justify-center text-muted-foreground">
+            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+            Loading diff...
+          </div>
+        ) : diffError ? (
+          <div className="flex flex-1 items-center justify-center p-4 text-sm text-destructive">
+            {diffError}
+          </div>
+        ) : flattenedFiles.length === 0 ? (
+          <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+            No file changes in this commit
+          </div>
+        ) : (
+          <div className="relative flex min-h-0 flex-1 flex-col">
+            {selectedFile && (
+              <button
+                type="button"
+                onClick={() => setMobileFilesOpen(value => !value)}
+                className="flex min-h-11 shrink-0 items-center gap-2 border-b border-border px-3 text-sm"
+              >
+                <FileText
+                  className={cn(
+                    'h-4 w-4 shrink-0',
+                    getStatusColor(selectedFile.fileDiff.type)
+                  )}
+                />
+                <span className="min-w-0 flex-1 truncate text-left">
+                  {selectedFile.fileName}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {selectedFileIndex + 1}/{filteredFiles.length}
+                </span>
+                <ChevronsUpDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+              </button>
+            )}
+            {mobileFilesOpen && (
+              <div className="absolute inset-x-0 bottom-0 top-11 z-20 overflow-y-auto bg-background">
+                {flattenedFiles.length > 3 && (
+                  <div className="sticky top-0 z-10 bg-background p-2">
+                    <input
+                      value={fileFilter}
+                      onChange={e => {
+                        setFileFilter(e.target.value)
+                        setSelectedFileIndex(0)
+                      }}
+                      placeholder="Filter files..."
+                      aria-label="Filter files"
+                      className="min-h-11 w-full rounded-md border border-border bg-muted px-3 text-base outline-none"
+                    />
+                  </div>
+                )}
+                {filteredFiles.map((file, index) => (
+                  <button
+                    key={file.key}
+                    type="button"
+                    onClick={() => {
+                      setSelectedFileIndex(index)
+                      setMobileFilesOpen(false)
+                    }}
+                    className={cn(
+                      'flex min-h-12 w-full items-center gap-2 border-b border-border/50 px-3 text-left text-sm',
+                      index === selectedFileIndex && 'bg-accent'
+                    )}
+                  >
+                    <FileText
+                      className={cn(
+                        'h-4 w-4 shrink-0',
+                        getStatusColor(file.fileDiff.type)
+                      )}
+                    />
+                    <span className="min-w-0 flex-1 truncate">
+                      {file.fileName}
+                    </span>
+                    <span className="text-success">+{file.additions}</span>
+                    <span className="text-destructive">-{file.deletions}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="min-h-0 flex-1 overflow-y-auto px-1">
+              {selectedFile && (
+                <MemoizedFileDiff
+                  key={selectedFile.key}
+                  fileDiff={selectedFile.fileDiff}
+                  fileName={selectedFile.fileName}
+                  rootPath={worktreePath}
+                  resourceOwnerId={worktreeId}
+                  isBinary={selectedFile.isBinary}
+                  annotations={EMPTY_ANNOTATIONS}
+                  selectedLines={null}
+                  themeType={resolvedThemeType}
+                  syntaxThemeDark={
+                    preferences?.syntax_theme_dark ?? 'vitesse-black'
+                  }
+                  syntaxThemeLight={
+                    preferences?.syntax_theme_light ?? 'github-light'
+                  }
+                  diffStyle="unified"
+                  enableLineSelection={false}
+                  onLineSelected={NOOP_LINE_SELECTED}
+                  onRemoveComment={NOOP_REMOVE_COMMENT}
+                />
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <ResizablePanelGroup direction="horizontal" className="flex-1 min-h-0 mt-2">
@@ -441,13 +714,13 @@ export function CommitsTabView({
                       {(commit.additions > 0 || commit.deletions > 0) && (
                         <span className="ml-auto shrink-0">
                           {commit.additions > 0 && (
-                            <span className="text-green-500">
+                            <span className="text-success">
                               +{commit.additions}
                             </span>
                           )}
                           {commit.additions > 0 && commit.deletions > 0 && ' '}
                           {commit.deletions > 0 && (
-                            <span className="text-red-500">
+                            <span className="text-destructive">
                               -{commit.deletions}
                             </span>
                           )}
@@ -549,12 +822,12 @@ export function CommitsTabView({
                           </span>
                           <div className="flex items-center gap-1 shrink-0">
                             {file.additions > 0 && (
-                              <span className="text-green-500">
+                              <span className="text-success">
                                 +{file.additions}
                               </span>
                             )}
                             {file.deletions > 0 && (
-                              <span className="text-red-500">
+                              <span className="text-destructive">
                                 -{file.deletions}
                               </span>
                             )}
@@ -579,6 +852,9 @@ export function CommitsTabView({
                       key={selectedFile.key}
                       fileDiff={selectedFile.fileDiff}
                       fileName={selectedFile.fileName}
+                      rootPath={worktreePath}
+                      resourceOwnerId={worktreeId}
+                      isBinary={selectedFile.isBinary}
                       annotations={EMPTY_ANNOTATIONS}
                       selectedLines={null}
                       themeType={resolvedThemeType}

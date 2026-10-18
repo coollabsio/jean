@@ -141,6 +141,14 @@ Native notifications require the `notification:default` permission in `src-tauri
 
 ## Best Practices
 
+### Titlebar progress indicators
+
+Use a titlebar indicator when a user starts a long operation in a modal and
+then minimizes that modal. Keep the process owner mounted, store only the small
+cross-component display state in Zustand, and make the indicator restore the
+modal. On completion, remove the indicator and show one success or error toast.
+Do not use this pattern for an operation that still needs user input.
+
 1. **Choose the right type**: Use toast for in-app feedback, native for system-level alerts
 2. **Keep messages concise**: Short titles and clear messages work best
 3. **Use appropriate types**: Match notification type to the action result
