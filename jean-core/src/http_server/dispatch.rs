@@ -4031,9 +4031,13 @@ const AGENT_COMMANDS: &[&str] = &[
     "create_agent_schedule",
     "update_agent_schedule",
     "save_agent_memory",
+    "search_agent_memory",
     "update_agent_memory",
     "delete_agent_memory",
+    "supersede_agent_memory",
     "export_agent_memory",
+    "save_agent_journal",
+    "search_agent_journal",
     "mark_agent_notifications_read",
 ];
 
@@ -4132,15 +4136,44 @@ async fn dispatch_agents_command(
                 let agent_id: String = field(args, "agentId", "agent_id")?;
                 let content: String = from_field(args, "content")?;
                 let kind: String = from_field(args, "kind")?;
+                let scope: Option<String> = from_field_opt(args, "scope")?;
                 let shared: Option<bool> = from_field_opt(args, "shared")?;
                 let pinned: Option<bool> = from_field_opt(args, "pinned")?;
+                let project_id: Option<String> = field_opt(args, "projectId", "project_id")?;
                 to_value(crate::agents::commands::save_memory(
                     app,
                     &agent_id,
                     &content,
                     &kind,
+                    scope.as_deref(),
                     shared.unwrap_or(false),
                     pinned.unwrap_or(false),
+                    project_id.as_deref(),
+                )?)
+            }
+            "search_agent_memory" => {
+                let agent_id: String = field(args, "agentId", "agent_id")?;
+                let query: Option<String> = from_field_opt(args, "query")?;
+                let kind: Option<String> = from_field_opt(args, "kind")?;
+                let scope: Option<String> = from_field_opt(args, "scope")?;
+                let project_id: Option<String> = field_opt(args, "projectId", "project_id")?;
+                let pinned: Option<bool> = from_field_opt(args, "pinned")?;
+                let from: Option<i64> = from_field_opt(args, "from")?;
+                let to: Option<i64> = from_field_opt(args, "to")?;
+                let limit: Option<i64> = from_field_opt(args, "limit")?;
+                to_value(crate::agents::commands::search_memory(
+                    app,
+                    &agent_id,
+                    crate::agents::commands::MemorySearchRequest {
+                        query,
+                        kind,
+                        scope,
+                        project_id,
+                        pinned,
+                        from,
+                        to,
+                        limit,
+                    },
                 )?)
             }
             "update_agent_memory" => {
@@ -4156,6 +4189,42 @@ async fn dispatch_agents_command(
                 let memory_id: i64 = field(args, "memoryId", "memory_id")?;
                 crate::agents::commands::delete_memory(app, &agent_id, memory_id)?;
                 Ok(Value::Null)
+            }
+            "supersede_agent_memory" => {
+                let agent_id: String = field(args, "agentId", "agent_id")?;
+                let memory_id: i64 = field(args, "memoryId", "memory_id")?;
+                let content: String = from_field(args, "content")?;
+                to_value(crate::agents::commands::supersede_memory(
+                    app, &agent_id, memory_id, &content,
+                )?)
+            }
+            "save_agent_journal" => {
+                let agent_id: String = field(args, "agentId", "agent_id")?;
+                let content: String = from_field(args, "content")?;
+                let occurred_at: Option<i64> = field_opt(args, "occurredAt", "occurred_at")?;
+                let project_id: Option<String> = field_opt(args, "projectId", "project_id")?;
+                to_value(crate::agents::commands::save_journal(
+                    app,
+                    &agent_id,
+                    &content,
+                    occurred_at,
+                    project_id.as_deref(),
+                )?)
+            }
+            "search_agent_journal" => {
+                let agent_id: String = field(args, "agentId", "agent_id")?;
+                let query: Option<String> = from_field_opt(args, "query")?;
+                let from: Option<i64> = from_field_opt(args, "from")?;
+                let to: Option<i64> = from_field_opt(args, "to")?;
+                let limit: Option<i64> = from_field_opt(args, "limit")?;
+                to_value(crate::agents::commands::search_journal(
+                    app,
+                    &agent_id,
+                    query.as_deref(),
+                    from,
+                    to,
+                    limit,
+                )?)
             }
             "mark_agent_notifications_read" => {
                 let agent_id: String = field(args, "agentId", "agent_id")?;

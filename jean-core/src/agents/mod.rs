@@ -4,7 +4,9 @@
 //! - events + wakes: queued updates for an agent, with an hourly budget
 //! - schedules: one-shot, interval, cron, and event wake-ups
 //! - approvals: destructive MCP tools wait for the user
-//! - memories: rules, facts and open work, added to each agent run's prompt
+//! - memories: rules, facts and open work, added to each agent run's prompt.
+//!   Scope `user` is facts about the user (every agent). Scope `shared` is
+//!   cross-agent working memory. Journal entries recall older chats.
 //!
 //! Agent sessions live under reserved worktree IDs (`__jean_agent__`,
 //! `__agent_<id>__`) and run in a scratch folder in app data.
@@ -26,8 +28,8 @@ pub use engine::start;
 /// Managed state: the single agents database connection of this process.
 pub struct AgentsDb(Mutex<Connection>);
 
-/// Most memory entries added to an agent's prompt, and their size budget.
-const PROMPT_MEMORY_LIMIT: i64 = 40;
+/// Character budget for memory lines in an agent prompt. Selection is pinned,
+/// then relevance to the current message, then recency — not a fixed count.
 const PROMPT_MEMORY_CHARS: usize = 8000;
 
 /// Open `agents.db` and register it as managed state. Call once at startup.
@@ -130,13 +132,13 @@ enum SessionRole {
 
 /// Extra system prompt for runs in an agent worktree: role, how the agent
 /// infrastructure works, other agents, and memory. `None` for normal sessions.
-pub fn system_prompt_for(app: &AppHandle, worktree_id: &str) -> Option<String> {
+pub fn system_prompt_for(app: &AppHandle, worktree_id: &str, hint: Option<&str>) -> Option<String> {
     let agent = agent_for_worktree(app, worktree_id)?;
     let is_task = db::agent_id_from_tasks_worktree(worktree_id).is_some();
     let (peers, memories, carry_over) = with_db(app, |conn| {
         Ok((
             db::list_agents(conn)?,
-            db::search_memories(conn, &agent.id, None, PROMPT_MEMORY_LIMIT)?,
+            db::select_prompt_memories(conn, &agent.id, hint, PROMPT_MEMORY_CHARS)?,
             if is_task {
                 None
             } else {
@@ -145,19 +147,49 @@ pub fn system_prompt_for(app: &AppHandle, worktree_id: &str) -> Option<String> {
         ))
     })
     .unwrap_or_default();
+    let memory_summary = if memories.entries.is_empty() {
+        "(none)".to_string()
+    } else {
+        memories
+            .entries
+            .iter()
+            .map(|memory| {
+                format!(
+                    "#{} {}{}",
+                    memory.id,
+                    memory.scope,
+                    if memory.pinned { " pinned" } else { "" }
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    log::info!(
+        "[Agents] prompt memory for {}: {memory_summary} (truncated={})",
+        agent.id,
+        memories.truncated
+    );
     let role = if is_task {
         SessionRole::Task
     } else {
         SessionRole::Chat { carry_over }
     };
     let mcp = crate::jean_mcp_config::current_mode().server_name();
-    Some(render_system_prompt(&agent, &peers, &memories, mcp, &role))
+    Some(render_system_prompt(
+        &agent,
+        &peers,
+        &memories.entries,
+        memories.truncated,
+        mcp,
+        &role,
+    ))
 }
 
 fn render_system_prompt(
     agent: &Agent,
     peers: &[Agent],
     memories: &[db::Memory],
+    memories_truncated: bool,
     mcp: &str,
     role: &SessionRole,
 ) -> String {
@@ -176,7 +208,9 @@ fn render_system_prompt(
 - Use `schedule_create` for later checks (`delayMinutes`), repeating intervals (`everyMinutes`, at least 5), cron (`cron` plus `timezone`), or an event (`event`: session_finished, session_failed, worktree_archived, pr_merged, approval_resolved). Use `schedule_update`, `schedule_list`, and `schedule_cancel` to manage them. Each run is a separate background task.
 - Use `notify_user` only for what the user must know: results of goals, questions, failures, needed decisions. Not for routine progress.
 - Use `task_list` to see your background tasks and their results.
-- Use `memory_save` for lasting rules, facts the code does not show, and open work. Do not save live state (project lists, PR status) or secrets. Use `memory_search` to find older memories, and `memory_update` / `memory_forget` to correct them.
+- Use `memory_save` for lasting rules, facts the code does not show, and open work. Do not save live state (project lists, PR status) or secrets. scope `user` is only for facts about the user (name, timezone, preferences) and every agent sees them. scope `shared` is working memory for all agents, not who the user is. Omit scope for a private memory.
+- Use `memory_search` to pull more than the prompt shows. Filter with kind, scope, projectId, pinned, and from/to (unix seconds on updated_at). Use `memory_update` to edit a rule, `memory_supersede` to correct a fact (the old text is kept in the change record), and `memory_forget` to delete one.
+- Use `journal_add` for what happened, a decision, or an outcome. Use `journal_search` to recall by text or date, including chats that were archived. Journal is history, not a lasting fact.
 - Before destructive actions, confirm with the user. Keep answers short.\n"
     ));
     match role {
@@ -206,29 +240,34 @@ fn render_system_prompt(
             out.push_str(&format!("- `{}`: {} — {}\n", p.id, p.name, p.description));
         }
     }
+    let (user_facts, rest): (Vec<&db::Memory>, Vec<&db::Memory>) =
+        memories.iter().partition(|memory| memory.scope == "user");
+    if !user_facts.is_empty() {
+        out.push_str("\n## About the user\n");
+        for memory in &user_facts {
+            out.push_str(&db::memory_prompt_line(memory));
+        }
+    }
     out.push_str("\n## Memory\n");
-    if memories.is_empty() {
+    if rest.is_empty() {
         out.push_str("(empty)\n");
     }
-    let mut used = 0;
-    for m in memories {
-        let scope = if m.agent_id.is_none() { "shared " } else { "" };
-        let pin = if m.pinned { ", pinned" } else { "" };
-        let project = m
-            .project_id
-            .as_deref()
-            .map(|p| format!(", project {p}"))
-            .unwrap_or_default();
-        let line = format!(
-            "- [#{} {scope}{}{pin}{project}] {}\n",
-            m.id, m.kind, m.content
-        );
+    let mut used: usize = user_facts
+        .iter()
+        .map(|memory| db::memory_prompt_line(memory).len())
+        .sum();
+    let mut truncated = memories_truncated;
+    for memory in rest {
+        let line = db::memory_prompt_line(memory);
         if used + line.len() > PROMPT_MEMORY_CHARS {
-            out.push_str("- (more memories exist: use memory_search)\n");
+            truncated = true;
             break;
         }
         used += line.len();
         out.push_str(&line);
+    }
+    if truncated {
+        out.push_str("- (more memories exist: use memory_search)\n");
     }
     out
 }
@@ -273,6 +312,13 @@ mod tests {
             created_at: 0,
             updated_at: 0,
             expires_at: None,
+            scope: if agent_id.is_none() {
+                "shared".into()
+            } else {
+                "agent".into()
+            },
+            superseded_by: None,
+            superseded_at: None,
         }
     }
 
@@ -288,6 +334,7 @@ mod tests {
             &me,
             &peers,
             &mems,
+            false,
             "jean",
             &SessionRole::Chat {
                 carry_over: Some("User: deploy orbit".into()),
@@ -315,7 +362,7 @@ mod tests {
             path: "/skills/review/SKILL.md".into(),
             backend: Some("codex".into()),
         });
-        let prompt = render_system_prompt(&me, &[], &[], "jean", &SessionRole::Task);
+        let prompt = render_system_prompt(&me, &[], &[], false, "jean", &SessionRole::Task);
         assert!(prompt.contains("## Skills"));
         assert!(prompt.contains(&skill_instruction("/skills/review/SKILL.md")));
     }
@@ -327,7 +374,7 @@ mod tests {
         let mems: Vec<_> = (0..20)
             .map(|i| memory(i, Some("jean"), &big, false))
             .collect();
-        let prompt = render_system_prompt(&me, &[], &mems, "jean-dev", &SessionRole::Task);
+        let prompt = render_system_prompt(&me, &[], &mems, false, "jean-dev", &SessionRole::Task);
         assert!(prompt.contains("background task"));
         assert!(!prompt.contains("previous chat"));
         assert!(prompt.contains("more memories exist"));

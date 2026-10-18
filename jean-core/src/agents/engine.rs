@@ -6,7 +6,8 @@
 //! 3. Due schedules queue updates.
 //! 4. Updates with a target session go there; updates without one start a
 //!    new task session (background work, apart from the user's chat).
-//! 5. Long chats are archived and continue in a new chat; old task
+//! 5. Long chats are archived and continue in a new chat. The end is saved
+//!    as carry-over and a shorter copy is stored as a journal entry. Old task
 //!    sessions are archived, then deleted.
 
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -1059,8 +1060,29 @@ async fn maintenance(app: &AppHandle) -> Result<bool, String> {
     Ok(changed)
 }
 
+/// Characters kept in the journal entry written when a chat rotates.
+pub(crate) const JOURNAL_CHARS: usize = 2000;
+
+/// Compact history written when a chat rotates. Keeps the end of the handoff
+/// text so the newest turns survive. No model call.
+pub(crate) fn journal_text_from_rotation(carry_over: &str, message_count: usize) -> String {
+    let prefix = format!("Archived chat ({message_count} messages).\n");
+    let budget = JOURNAL_CHARS.saturating_sub(prefix.chars().count());
+    let body = tail_chars(carry_over.trim(), budget);
+    format!("{prefix}{body}")
+}
+
+fn tail_chars(text: &str, max_chars: usize) -> String {
+    let count = text.chars().count();
+    if count <= max_chars {
+        return text.to_string();
+    }
+    text.chars().skip(count - max_chars).collect()
+}
+
 /// A long chat continues in a new one when idle: the end of the old chat goes
-/// into the new chat's prompt, and the old chat is archived.
+/// into the new chat's prompt, a shorter copy is stored as a journal entry,
+/// and the old chat is archived.
 async fn rotate_chat_if_long(app: &AppHandle, agent: &db::Agent) -> Result<bool, String> {
     let path = super::agent_workdir(app, &agent.id)?;
     let sessions = crate::chat::get_sessions(
@@ -1103,6 +1125,7 @@ async fn rotate_chat_if_long(app: &AppHandle, agent: &db::Agent) -> Result<bool,
     )
     .await?;
     let carry_over = crate::chat::handoff::format_handoff_history(&old.messages, CARRY_OVER_CHARS);
+    let journal = journal_text_from_rotation(&carry_over, old.messages.len());
     let number = sessions.sessions.len() + 1;
     let new = open_agent_session(
         app,
@@ -1119,7 +1142,21 @@ async fn rotate_chat_if_long(app: &AppHandle, agent: &db::Agent) -> Result<bool,
         new.id.clone(),
     )
     .await?;
-    super::with_db(app, |conn| db::set_carry_over(conn, &agent.id, &carry_over))?;
+    let journal_id = super::with_db(app, |conn| {
+        let entry = db::add_journal(
+            conn,
+            &db::NewJournal {
+                agent_id: &agent.id,
+                project_id: None,
+                content: &journal,
+                occurred_at: Some(db::now()),
+                source: "rotation",
+                source_session_id: Some(&home.id),
+            },
+        )?;
+        db::set_carry_over(conn, &agent.id, &carry_over)?;
+        Ok(entry.id)
+    })?;
     crate::chat::archive_session(
         app.clone(),
         agent.worktree_id.clone(),
@@ -1128,9 +1165,10 @@ async fn rotate_chat_if_long(app: &AppHandle, agent: &db::Agent) -> Result<bool,
     )
     .await?;
     log::info!(
-        "[Agents] {} continues in a new chat ({} messages archived)",
+        "[Agents] {} continues in a new chat ({} messages archived, journal #{journal_id}, {} chars)",
         agent.id,
-        old.messages.len()
+        old.messages.len(),
+        journal.chars().count()
     );
     Ok(true)
 }
@@ -1285,6 +1323,19 @@ mod tests {
         assert!(!should_rotate_chat(80, now - 60, now, limits));
         // Clock skew (activity "in the future") never rotates
         assert!(!should_rotate_chat(80, now + 60, now, limits));
+    }
+
+    #[test]
+    fn rotation_journal_keeps_the_end_of_the_chat() {
+        let long = format!("User: start\n\n{}", "x".repeat(4000));
+        let text = journal_text_from_rotation(&long, 42);
+        assert!(text.starts_with("Archived chat (42 messages)."));
+        assert!(text.chars().count() <= JOURNAL_CHARS);
+        assert!(text.ends_with('x'));
+        assert!(!text.contains("User: start"));
+        let short = journal_text_from_rotation("User: ship orbit", 3);
+        assert!(short.contains("User: ship orbit"));
+        assert!(short.contains("Archived chat (3 messages)."));
     }
 
     #[test]

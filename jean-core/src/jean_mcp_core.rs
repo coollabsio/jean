@@ -57,6 +57,10 @@ const RATE_LIMITED_TOOLS: &[&str] = &[
     "schedule_create",
     "schedule_update",
     "memory_save",
+    "memory_update",
+    "memory_forget",
+    "memory_supersede",
+    "journal_add",
     "message_agent",
 ];
 const DEFAULT_MCP_DIFF_MAX_BYTES: usize = 60_000;
