@@ -13,8 +13,11 @@ shared native/web helper, and an accessible enlarged dialog. Icon actions use
 Invalid syntax falls back to readable source without breaking the message.
 
 Mermaid rendering is serialized because its configuration is global. Rendering
-uses a temporary off-screen container removed on success or failure. Stale
-results are ignored after source/theme changes or unmount. The applied root
+uses a temporary off-screen container removed on success or failure. Each render
+uses a new ID because Mermaid removes existing elements with that ID. Stale
+results are ignored after source/theme changes or unmount. Successful SVGs are
+cached by theme and source (bounded), so remounts such as session switches do
+not run the layout again or change message height. Failures are not cached. The applied root
 `dark` class drives theme changes, including system theme changes.
 
 Treat diagram source as untrusted: retain strict Mermaid security, disallow
@@ -24,9 +27,14 @@ or bind its interactive functions. Scripts, links, embedded frames, and external
 images and SVG foreignObjects are disallowed. Labels use pure SVG text instead
 of HTML integration points, so sanitization retains their content and line breaks.
 
+Mermaid strips `secure` keys at every config depth, so locking `htmlLabels`
+also locks `flowchart.htmlLabels`. Do not lock whole diagram sections such as
+`flowchart`: that blocks harmless directives (for example `curve`).
+
 Tests: `markdown-mermaid.test.tsx` covers routing and streaming;
-`mermaid-block.test.tsx` covers controls, failures, sanitization, themes, and
-stale render handling. These mock Mermaid and do not replace real-browser
+`mermaid-block.test.tsx` covers controls, failures, sanitization, themes,
+caching, and stale render handling; `mermaid-config.test.ts` runs the real
+Mermaid directive pipeline against the locked config. These mock Mermaid and do not replace real-browser
 checks of diagram layout.
 
 Native macOS page zoom: WKWebView scales `em`-based SVG text positions

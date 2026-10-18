@@ -1,5 +1,6 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useState } from 'react'
 import DOMPurify from 'dompurify'
+import type { MermaidConfig } from 'mermaid'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { copyToClipboard } from '@/lib/clipboard'
@@ -15,18 +16,61 @@ import {
 // Mermaid owns global configuration and a render queue. Serialize initialization
 // with rendering so diagrams in different messages cannot race on the theme.
 let renderQueue: Promise<unknown> = Promise.resolve()
+// Mermaid removes any existing element with the render ID, so never reuse one.
+let renderCount = 0
+
+// Remounts (session switches, reopened modals) reuse finished SVGs instead
+// of running the layout again and changing the message height.
+const RENDER_CACHE_LIMIT = 50
+const renderCache = new Map<string, string>()
+
+interface RenderResult {
+  key: string
+  svg?: string
+  error?: boolean
+}
+
+function cacheSvg(key: string, svg: string) {
+  renderCache.delete(key)
+  renderCache.set(key, svg)
+  if (renderCache.size > RENDER_CACHE_LIMIT) {
+    renderCache.delete(renderCache.keys().next().value as string)
+  }
+}
+
+export function mermaidConfig(dark: boolean): MermaidConfig {
+  return {
+    startOnLoad: false,
+    securityLevel: 'strict',
+    theme: dark ? 'dark' : 'default',
+    suppressErrorRendering: true,
+    // Pure SVG labels survive sanitization without enabling HTML
+    // integration points inside untrusted SVG foreignObjects.
+    htmlLabels: false,
+    flowchart: { htmlLabels: false },
+    // Untrusted message directives must not weaken security or inject
+    // custom global CSS/fonts into the application. Mermaid strips secure
+    // keys at every depth, so `htmlLabels` also locks `flowchart.htmlLabels`.
+    secure: [
+      'securityLevel',
+      'startOnLoad',
+      'maxTextSize',
+      'maxEdges',
+      'suppressErrorRendering',
+      'themeCSS',
+      'themeVariables',
+      'fontFamily',
+      'htmlLabels',
+    ],
+  }
+}
 
 export function MermaidBlock({ source }: { source: string }) {
-  const id = useId().replace(/[^a-zA-Z0-9]/g, '')
   const [dark, setDark] = useState(() =>
     document.documentElement.classList.contains('dark')
   )
-  const [result, setResult] = useState<{
-    source: string
-    dark: boolean
-    svg?: string
-    error?: boolean
-  }>()
+  const key = `${dark ? 'dark' : 'light'}:${source}`
+  const [result, setResult] = useState<RenderResult>()
   const [showCode, setShowCode] = useState(false)
   const [expanded, setExpanded] = useState(false)
 
@@ -42,9 +86,16 @@ export function MermaidBlock({ source }: { source: string }) {
   }, [])
 
   useEffect(() => {
+    if (renderCache.has(key)) return
     let disposed = false
     const job = renderQueue.then(async () => {
       if (disposed) return
+      // Another block with the same source may have rendered it meanwhile.
+      const cached = renderCache.get(key)
+      if (cached) {
+        setResult({ key, svg: cached })
+        return
+      }
       const container = document.createElement('div')
       container.style.cssText =
         'position:fixed;left:-100000px;top:0;visibility:hidden'
@@ -52,31 +103,12 @@ export function MermaidBlock({ source }: { source: string }) {
       try {
         const { default: mermaid } = await import('mermaid')
         if (disposed) return
-        mermaid.initialize({
-          startOnLoad: false,
-          securityLevel: 'strict',
-          theme: dark ? 'dark' : 'default',
-          suppressErrorRendering: true,
-          // Pure SVG labels survive sanitization without enabling HTML
-          // integration points inside untrusted SVG foreignObjects.
-          htmlLabels: false,
-          flowchart: { htmlLabels: false },
-          // Untrusted message directives must not weaken security or inject
-          // custom global CSS/fonts into the application.
-          secure: [
-            'securityLevel',
-            'startOnLoad',
-            'maxTextSize',
-            'maxEdges',
-            'suppressErrorRendering',
-            'themeCSS',
-            'themeVariables',
-            'fontFamily',
-            'htmlLabels',
-            'flowchart',
-          ],
-        })
-        const { svg } = await mermaid.render(`mermaid-${id}`, source, container)
+        mermaid.initialize(mermaidConfig(dark))
+        const { svg } = await mermaid.render(
+          `mermaid-${++renderCount}`,
+          source,
+          container
+        )
         const safeSvg = DOMPurify.sanitize(svg, {
           FORBID_TAGS: [
             'script',
@@ -104,9 +136,10 @@ export function MermaidBlock({ source }: { source: string }) {
             }
           }
         })
-        if (!disposed) setResult({ source, dark, svg: container.innerHTML })
+        cacheSvg(key, container.innerHTML)
+        if (!disposed) setResult({ key, svg: container.innerHTML })
       } catch {
-        if (!disposed) setResult({ source, dark, error: true })
+        if (!disposed) setResult({ key, error: true })
       } finally {
         container.remove()
       }
@@ -115,10 +148,15 @@ export function MermaidBlock({ source }: { source: string }) {
     return () => {
       disposed = true
     }
-  }, [source, dark, id])
+  }, [key, source, dark])
 
-  const current =
-    result?.source === source && result.dark === dark ? result : undefined
+  const cachedSvg = renderCache.get(key)
+  const current: RenderResult | undefined =
+    result?.key === key
+      ? result
+      : cachedSvg
+        ? { key, svg: cachedSvg }
+        : undefined
   const diagram = current?.svg ? (
     <div
       role="img"

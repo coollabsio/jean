@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@/test/test-utils'
-import { MermaidBlock } from './mermaid-block'
+import type { MermaidBlock as MermaidBlockType } from './mermaid-block'
 
 const { renderDiagram, initialize, copy, success, error } = vi.hoisted(() => ({
   renderDiagram: vi.fn(),
@@ -13,7 +13,11 @@ vi.mock('@/lib/clipboard', () => ({ copyToClipboard: copy }))
 vi.mock('sonner', () => ({ toast: { success, error } }))
 vi.mock('mermaid', () => ({ default: { initialize, render: renderDiagram } }))
 
-beforeEach(() => {
+// The render cache and queue are module state: load a fresh module per test.
+let MermaidBlock: typeof MermaidBlockType
+beforeEach(async () => {
+  vi.resetModules()
+  ;({ MermaidBlock } = await import('./mermaid-block'))
   vi.clearAllMocks()
   document.documentElement.classList.remove('dark')
   copy.mockResolvedValue(undefined)
@@ -50,9 +54,27 @@ describe('MermaidBlock', () => {
       expect.objectContaining({
         htmlLabels: false,
         flowchart: { htmlLabels: false },
-        secure: expect.arrayContaining(['htmlLabels', 'flowchart']),
+        secure: expect.arrayContaining(['htmlLabels']),
       })
     )
+  })
+  it('reuses a finished render when the block remounts', async () => {
+    const { unmount } = render(<MermaidBlock source="flowchart TD; A --> B" />)
+    await screen.findByText('Step A')
+    unmount()
+    render(<MermaidBlock source="flowchart TD; A --> B" />)
+    expect(screen.getByText('Step A')).toBeTruthy()
+    expect(screen.queryByRole('status')).toBeNull()
+    expect(renderDiagram).toHaveBeenCalledTimes(1)
+  })
+  it('retries a failed render after a remount', async () => {
+    renderDiagram.mockRejectedValueOnce(new Error('chunk load failed'))
+    const { unmount } = render(<MermaidBlock source="flowchart TD; A --> B" />)
+    await screen.findByRole('alert')
+    unmount()
+    render(<MermaidBlock source="flowchart TD; A --> B" />)
+    await screen.findByText('Step A')
+    expect(renderDiagram).toHaveBeenCalledTimes(2)
   })
   it('freezes font-relative SVG text positions for native page zoom', async () => {
     renderDiagram.mockResolvedValue({
