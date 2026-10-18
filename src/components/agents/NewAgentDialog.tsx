@@ -184,6 +184,7 @@ export function NewAgentDialog({
           {open && (
             <AgentRunFields
               idPrefix="new-agent"
+              serverId={targetServerId}
               value={run}
               onChange={setRun}
             />

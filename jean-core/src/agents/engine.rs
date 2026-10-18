@@ -364,18 +364,24 @@ pub(crate) async fn home_session(
         .cloned()
         .ok_or_else(|| format!("Agent {} has no session", agent.id))?;
     ensure_session_mode(app, &agent.worktree_id, &path, &mut session).await?;
-    if should_stamp_agent_run(session.total_runs, session.message_count.unwrap_or(0)) {
-        if let Err(e) =
-            stamp_agent_run_config(app, agent, &agent.worktree_id, &path, &mut session).await
-        {
-            log::warn!(
-                "[Agents] run config for {} was not saved on {}: {e}",
-                agent.id,
-                session.id
-            );
-        }
-    }
     Ok((session, path))
+}
+
+/// Put the agent's run configuration on its home chat while that chat is
+/// unused, so the toolbar shows it. Called when the agent is created or its
+/// configuration changes, not on every list, so a choice the user makes in
+/// the toolbar before the first message is kept.
+pub(crate) async fn apply_run_config_to_home(
+    app: &AppHandle,
+    agent: &db::Agent,
+) -> Result<(), String> {
+    let (mut session, path) = home_session(app, agent).await?;
+    if !should_stamp_agent_run(session.total_runs, session.message_count.unwrap_or(0))
+        || crate::chat::registry::is_session_actively_managed(&session.id)
+    {
+        return Ok(());
+    }
+    stamp_agent_run_config(app, agent, &agent.worktree_id, &path, &mut session).await
 }
 
 /// Save the default execution mode once on a session that has none yet.
@@ -434,9 +440,9 @@ pub(crate) fn wake_execution_mode_for(
     wake_execution_mode(selected)
 }
 
-/// An unused session can take the agent's backend and model. A session that
-/// already has messages keeps the backend it started with; wakes still pass
-/// the agent's current values for that turn.
+/// Only an unused session is stamped. A used session changes backend on the
+/// next wake instead: `send_chat_message` saves the wake's backend and hands
+/// the history over to it.
 pub(crate) fn should_stamp_agent_run(total_runs: usize, message_count: u32) -> bool {
     total_runs == 0 && message_count == 0
 }
@@ -568,8 +574,8 @@ async fn open_agent_session(
 }
 
 /// Persist the agent's backend, model, and reasoning on a session that has no
-/// messages yet. Set fields override; an unset model with a set backend uses
-/// that backend's preference model.
+/// messages yet. Unset backend and model mean what a new chat would use: the
+/// preference backend and that backend's preference model.
 async fn stamp_agent_run_config(
     app: &AppHandle,
     agent: &db::Agent,
@@ -577,25 +583,23 @@ async fn stamp_agent_run_config(
     path: &str,
     session: &mut crate::chat::types::Session,
 ) -> Result<(), String> {
-    let backend_changed = if let Some(backend) = trimmed_opt(&agent.backend) {
-        if backend_id(&session.backend) != backend {
-            crate::chat::set_session_backend(
-                app.clone(),
-                worktree_id.to_string(),
-                path.to_string(),
-                session.id.clone(),
-                backend.to_string(),
-            )
-            .await?;
-            session.backend = serde_json::from_value(json!(backend)).unwrap_or_default();
-            true
-        } else {
-            false
-        }
-    } else {
-        false
-    };
-    if trimmed_opt(&agent.backend) == Some("cursor")
+    let prefs = crate::load_preferences(app.clone()).await.ok();
+    let backend: Backend =
+        serde_json::from_value(json!(trimmed_opt(&agent.backend)
+            .or(prefs.as_ref().map(|prefs| prefs.default_backend.as_str()))))
+        .unwrap_or_default();
+    if session.backend != backend {
+        crate::chat::set_session_backend(
+            app.clone(),
+            worktree_id.to_string(),
+            path.to_string(),
+            session.id.clone(),
+            backend_id(&backend).to_string(),
+        )
+        .await?;
+        session.backend = backend;
+    }
+    if session.backend == Backend::Cursor
         && session.selected_execution_mode.as_deref() == Some("build")
     {
         crate::chat::set_session_execution_mode(
@@ -608,25 +612,12 @@ async fn stamp_agent_run_config(
         .await?;
         session.selected_execution_mode = Some("yolo".to_string());
     }
-    let target_model = if let Some(model) = trimmed_opt(&agent.model) {
-        Some(model.to_string())
-    } else if backend_changed
-        || (trimmed_opt(&agent.backend).is_some()
-            && session
-                .selected_model
-                .as_deref()
-                .map(str::trim)
-                .unwrap_or("")
-                .is_empty())
-    {
-        crate::load_preferences(app.clone())
-            .await
-            .ok()
-            .and_then(|prefs| crate::chat::default_model_for_backend(&session.backend, &prefs))
-    } else {
-        None
-    };
-    if let Some(model) = target_model {
+    let model = trimmed_opt(&agent.model).map(str::to_string).or_else(|| {
+        prefs
+            .as_ref()
+            .and_then(|prefs| crate::chat::default_model_for_backend(&session.backend, prefs))
+    });
+    if let Some(model) = model {
         if session.selected_model.as_deref() != Some(model.as_str()) {
             crate::chat::set_session_model(
                 app.clone(),
