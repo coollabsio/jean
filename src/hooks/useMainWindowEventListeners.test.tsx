@@ -3,7 +3,7 @@ import { renderHook } from '@testing-library/react'
 import { useChatStore } from '@/store/chat-store'
 import { useTerminalStore } from '@/store/terminal-store'
 import { useUIStore } from '@/store/ui-store'
-import { QueryClient } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
   addTerminalTabForShortcut,
   allowsKeybindingRepeat,
@@ -15,12 +15,14 @@ import {
   getTerminalShortcutWorktreeId,
   hasBlockingOpenOverlay,
   handleRunEnvironmentStarted,
+  isAgentsViewActive,
   isPlainSessionTerminalFocused,
   resolveShortcutWithBypass,
   shouldAllowKeybindingThroughOpenOverlay,
   shouldLetChatInputHandleAction,
   shouldLetPlanDialogHandleAction,
   switchActiveTerminalTabByIndexForShortcut,
+  useMainWindowEventListeners,
   useWindowKeyboardFocusRestore,
 } from './useMainWindowEventListeners'
 import { chatQueryKeys } from '@/services/chat'
@@ -924,6 +926,106 @@ describe('applyCacheInvalidationKeys', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ['all-sessions'],
     })
+  })
+})
+
+describe('isAgentsViewActive', () => {
+  beforeEach(() => {
+    useUIStore.setState({ railSection: 'workspace' })
+  })
+
+  it('is active on the Agents section when Agents is on for a server', () => {
+    const queryClient = new QueryClient()
+    queryClient.setQueryData(['preferences'], { agents_enabled: true })
+    useUIStore.setState({ railSection: 'agents' })
+    expect(isAgentsViewActive(queryClient)).toBe(true)
+  })
+
+  it('counts Agents turned on for a remote server only', () => {
+    const queryClient = new QueryClient()
+    queryClient.setQueryData(['preferences'], { agents_enabled: false })
+    queryClient.setQueryData(['preferences', 'server', 'srv'], {
+      agents_enabled: true,
+    })
+    useUIStore.setState({ railSection: 'agents' })
+    expect(isAgentsViewActive(queryClient)).toBe(true)
+  })
+
+  it('is inactive in the workspace section', () => {
+    const queryClient = new QueryClient()
+    queryClient.setQueryData(['preferences'], { agents_enabled: true })
+    expect(isAgentsViewActive(queryClient)).toBe(false)
+  })
+
+  it('is inactive when Agents is off, since the projects view shows instead', () => {
+    const queryClient = new QueryClient()
+    queryClient.setQueryData(['preferences'], { agents_enabled: false })
+    useUIStore.setState({ railSection: 'agents' })
+    expect(isAgentsViewActive(queryClient)).toBe(false)
+  })
+})
+
+describe('close shortcut on the Agents page', () => {
+  function renderListeners(queryClient: QueryClient) {
+    return renderHook(() => useMainWindowEventListeners(), {
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      ),
+    })
+  }
+
+  function pressCloseShortcut(): KeyboardEvent {
+    const event = new KeyboardEvent('keydown', {
+      key: 'w',
+      code: 'KeyW',
+      metaKey: true,
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    document.body.dispatchEvent(event)
+    return event
+  }
+
+  beforeEach(() => {
+    document.body.innerHTML = ''
+    useUIStore.setState({
+      railSection: 'workspace',
+      sessionChatModalOpen: false,
+      commandPaletteOpen: false,
+      preferencesOpen: false,
+      magicModalOpen: false,
+    })
+  })
+
+  it('does nothing while an agent page is open', () => {
+    const queryClient = new QueryClient()
+    queryClient.setQueryData(['preferences'], { agents_enabled: true })
+    useUIStore.setState({ railSection: 'agents' })
+    const onClose = vi.fn()
+    window.addEventListener('close-session-or-worktree', onClose)
+    const { unmount } = renderListeners(queryClient)
+
+    const event = pressCloseShortcut()
+
+    expect(onClose).not.toHaveBeenCalled()
+    expect(event.defaultPrevented).toBe(true)
+    unmount()
+    window.removeEventListener('close-session-or-worktree', onClose)
+  })
+
+  it('still closes the session or worktree in the projects view', () => {
+    const queryClient = new QueryClient()
+    queryClient.setQueryData(['preferences'], { agents_enabled: true })
+    const onClose = vi.fn()
+    window.addEventListener('close-session-or-worktree', onClose)
+    const { unmount } = renderListeners(queryClient)
+
+    pressCloseShortcut()
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+    unmount()
+    window.removeEventListener('close-session-or-worktree', onClose)
   })
 })
 

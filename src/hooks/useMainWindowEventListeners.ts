@@ -176,6 +176,18 @@ export function resolveShortcutWithBypass(
   return { matchedAction: null, bypassConfirm: false }
 }
 
+/**
+ * The Agents page is open (section selected and Agents on for a server, the
+ * same rule as useShowAgents). It has no closable session or worktree, so
+ * the close shortcut must not reach the project close handlers.
+ */
+export function isAgentsViewActive(queryClient: QueryClient): boolean {
+  if (useUIStore.getState().railSection !== 'agents') return false
+  return queryClient
+    .getQueriesData<AppPreferences>({ queryKey: preferencesQueryKeys.all })
+    .some(([, data]) => data?.agents_enabled === true)
+}
+
 export function useWindowKeyboardFocusRestore() {
   const isMobile = useIsMobile()
 
@@ -1053,6 +1065,15 @@ export function useMainWindowEventListeners() {
       // Ctrl/Cmd+W cascade-closed every terminal/session under the cursor).
       // Consume the event so the browser does not handle the repeated shortcut.
       if (e.repeat && matchedAction && !allowsKeybindingRepeat(matchedAction)) {
+        e.preventDefault()
+        e.stopPropagation()
+        return
+      }
+
+      if (
+        matchedAction === 'close_session_or_worktree' &&
+        isAgentsViewActive(queryClient)
+      ) {
         e.preventDefault()
         e.stopPropagation()
         return
