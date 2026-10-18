@@ -1,5 +1,4 @@
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
 import { useUpdateAgent, type AgentSummary } from '@/services/agents'
 import {
   agentRunPatch,
@@ -9,9 +8,10 @@ import {
 } from './agent-config'
 import { AgentConnectors } from './AgentConnectors'
 import { AgentRunFields } from './AgentRunFields'
+import { AgentPanel, AgentSection, AgentTabBody, SaveFooter } from './agent-ui'
 import { useSavedDraft } from './use-saved-draft'
 
-/** Edit the backend, model, reasoning, and skills of an existing agent. */
+/** Run configuration and connectors of an existing agent. */
 export function AgentSettings({ agent }: { agent: AgentSummary }) {
   const updateAgent = useUpdateAgent()
   const saved = draftFromAgent(agent)
@@ -29,26 +29,30 @@ export function AgentSettings({ agent }: { agent: AgentSummary }) {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-lg flex-col gap-4 overflow-y-auto p-4">
-      <div>
-        <h2 className="text-sm font-medium">Run configuration</h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          New chats, task sessions, and wake-ups use these choices. Default
-          keeps the backend and model a new chat would use.
-        </p>
-      </div>
-      <AgentRunFields
-        idPrefix="agent-settings"
-        serverId={agent.serverId}
-        value={draft}
-        onChange={setDraft}
+    <AgentTabBody>
+      <AgentSection
+        title="Run configuration"
+        description="New chats, task sessions, and wake-ups use these choices."
+      >
+        <AgentPanel>
+          <AgentRunFields
+            idPrefix="agent-settings"
+            serverId={agent.serverId}
+            value={draft}
+            onChange={setDraft}
+          />
+          <SaveFooter
+            dirty={dirty}
+            pending={updateAgent.isPending}
+            onDiscard={() => setDraft(saved)}
+            onSave={handleSave}
+          />
+        </AgentPanel>
+      </AgentSection>
+      <AgentConnectors
+        agent={agent}
+        pendingBackend={draft.backend !== saved.backend ? draft.backend : null}
       />
-      <div className="flex justify-end">
-        <Button onClick={handleSave} disabled={!dirty || updateAgent.isPending}>
-          Save
-        </Button>
-      </div>
-      <AgentConnectors agent={agent} />
-    </div>
+    </AgentTabBody>
   )
 }

@@ -129,6 +129,16 @@ export function formFromSchedule(schedule: AgentSchedule): ScheduleForm {
   return form
 }
 
+/** Short trigger type for the routine list. */
+export function scheduleKindLabel(
+  schedule: Pick<AgentSchedule, 'event' | 'cron' | 'everySecs'>
+): string {
+  if (schedule.event) return 'Event'
+  if (schedule.cron) return 'Cron'
+  if (schedule.everySecs) return 'Interval'
+  return 'Once'
+}
+
 export function formatScheduleWhen(
   schedule: AgentSchedule,
   now = Date.now()

@@ -1,8 +1,23 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
-import { Copy, Pencil, Thumbtack, Trash2 } from '@/components/icons/reicon'
+import {
+  ChevronRight,
+  Copy,
+  Pencil,
+  Plus,
+  Search,
+  Settings2,
+  Thumbtack,
+  Trash2,
+  X,
+} from '@/components/icons/reicon'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
@@ -27,11 +42,13 @@ import {
   type MemoryScope,
 } from '@/services/agents'
 import {
+  activeFilterCount,
   describeMemoryChange,
   EMPTY_MEMORY_FILTERS,
   formatDay,
   formatJournalTime,
   groupJournalByDay,
+  journalDayLabel,
   journalSearchActive,
   journalSearchRequest,
   journalSourceLabel,
@@ -43,11 +60,26 @@ import {
   visibleChanges,
   type MemorySearchFilters,
 } from './memory-view'
+import {
+  AgentBadge,
+  AgentEmpty,
+  AgentList,
+  AgentLoading,
+  AgentPanel,
+  AgentSection,
+  AgentTabBody,
+} from './agent-ui'
 
 const KIND_LABELS: Record<MemoryKind, string> = {
   rule: 'Rule',
   fact: 'Fact',
   open_work: 'Open work',
+}
+
+const SCOPE_LABELS: Record<MemoryScope, string> = {
+  user: 'About you',
+  agent: 'Private',
+  shared: 'Shared',
 }
 
 const MAX_CHARS = 1000
@@ -74,39 +106,13 @@ function MemoryRow({
   return (
     <li
       className={cn(
-        'flex items-start gap-2 rounded-md border px-3 py-2',
+        'group flex items-start gap-3 px-3 py-2.5',
         expired && 'opacity-60'
       )}
     >
-      <div className="min-w-0 flex-1 space-y-1">
-        <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-          <span className="rounded bg-muted px-1.5 py-0.5">
-            {KIND_LABELS[memory.kind] ?? memory.kind}
-          </span>
-          {memory.scope === 'user' && (
-            <span className="rounded bg-muted px-1.5 py-0.5">about you</span>
-          )}
-          {memory.scope === 'shared' && (
-            <span className="rounded bg-muted px-1.5 py-0.5">shared</span>
-          )}
-          {memory.scope === 'agent' && (
-            <span className="rounded bg-muted px-1.5 py-0.5">private</span>
-          )}
-          {memory.pinned && (
-            <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-700 dark:text-amber-400">
-              pinned
-            </span>
-          )}
-          {memory.projectId && (
-            <span className="rounded bg-muted px-1.5 py-0.5">
-              project {memory.projectId}
-            </span>
-          )}
-          {expired && <span>expired</span>}
-          <span>#{memory.id}</span>
-        </p>
+      <div className="min-w-0 flex-1">
         {editing ? (
-          <div className="space-y-2">
+          <div className="flex flex-col gap-2">
             <Textarea
               value={draft}
               rows={3}
@@ -114,7 +120,17 @@ function MemoryRow({
               onChange={e => setDraft(e.target.value)}
               autoFocus
             />
-            <div className="flex gap-2">
+            <div className="flex justify-end gap-2">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setDraft(memory.content)
+                  setEditing(false)
+                }}
+              >
+                Cancel
+              </Button>
               <Button
                 size="sm"
                 disabled={
@@ -140,16 +156,6 @@ function MemoryRow({
               >
                 {isFact ? 'Correct' : 'Save'}
               </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  setDraft(memory.content)
-                  setEditing(false)
-                }}
-              >
-                Cancel
-              </Button>
             </div>
           </div>
         ) : (
@@ -157,14 +163,36 @@ function MemoryRow({
             {memory.content}
           </p>
         )}
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          <AgentBadge>{KIND_LABELS[memory.kind] ?? memory.kind}</AgentBadge>
+          {memory.scope !== 'user' && (
+            <AgentBadge>
+              {SCOPE_LABELS[memory.scope] ?? memory.scope}
+            </AgentBadge>
+          )}
+          {memory.pinned && (
+            <AgentBadge tone="attention">
+              <Thumbtack />
+              Pinned
+            </AgentBadge>
+          )}
+          {memory.projectId && (
+            <AgentBadge>Project {memory.projectId}</AgentBadge>
+          )}
+          {expired && <AgentBadge tone="danger">Expired</AgentBadge>}
+          <span className="text-[11px] text-muted-foreground/70">
+            #{memory.id}
+          </span>
+        </div>
       </div>
       {!editing && (
-        <div className="flex shrink-0 gap-0.5">
+        <div className="flex shrink-0 gap-0.5 text-muted-foreground">
           <Button
             size="icon-sm"
             variant="ghost"
             aria-label={memory.pinned ? 'Unpin' : 'Pin'}
             aria-pressed={memory.pinned}
+            title={memory.pinned ? 'Unpin' : 'Pin'}
             className={cn(
               memory.pinned &&
                 'text-amber-600 hover:text-amber-600 dark:text-amber-400'
@@ -186,6 +214,7 @@ function MemoryRow({
             size="icon-sm"
             variant="ghost"
             aria-label={isFact ? 'Correct' : 'Edit'}
+            title={isFact ? 'Correct' : 'Edit'}
             onClick={() => setEditing(true)}
           >
             <Pencil />
@@ -194,6 +223,7 @@ function MemoryRow({
             size="icon-sm"
             variant="ghost"
             aria-label="Forget"
+            title="Forget"
             disabled={remove.isPending}
             onClick={() =>
               remove.mutate({ agentId, memoryId: memory.id }, { onError })
@@ -214,24 +244,22 @@ function MemoryList({
 }: {
   memories: AgentMemory[]
   agentId: string
-  empty: string
+  empty: ReactNode
 }) {
-  if (!memories.length) {
-    return <p className="text-xs text-muted-foreground">{empty}</p>
-  }
+  if (!memories.length) return <AgentEmpty title={empty} />
   return (
-    <ul className="space-y-2">
+    <AgentList>
       {memories.map(memory => (
         <MemoryRow key={memory.id} memory={memory} agentId={agentId} />
       ))}
-    </ul>
+    </AgentList>
   )
 }
 
 function ChangeRow({ change }: { change: AgentMemoryChange }) {
   return (
-    <li className="space-y-1 rounded-md border px-3 py-2">
-      <p className="text-[11px] text-muted-foreground">
+    <li className="flex flex-col gap-1 px-3 py-2.5">
+      <p className="text-xs text-muted-foreground">
         {describeMemoryChange(change)} · {formatDay(change.createdAt)}{' '}
         {formatJournalTime(change.createdAt)}
       </p>
@@ -249,6 +277,48 @@ function ChangeRow({ change }: { change: AgentMemoryChange }) {
   )
 }
 
+function AddButton({
+  open,
+  label,
+  onClick,
+}: {
+  open: boolean
+  label: string
+  onClick: () => void
+}) {
+  return (
+    <Button
+      size="sm"
+      variant="ghost"
+      aria-expanded={open}
+      className="h-7 text-xs"
+      onClick={onClick}
+    >
+      {open ? <X /> : <Plus />}
+      {open ? 'Close' : label}
+    </Button>
+  )
+}
+
+function FilterField({
+  label,
+  htmlFor,
+  children,
+}: {
+  label: string
+  htmlFor: string
+  children: ReactNode
+}) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5 [&_[data-slot=native-select-wrapper]]:w-full">
+      <Label htmlFor={htmlFor} className="text-xs text-muted-foreground">
+        {label}
+      </Label>
+      {children}
+    </div>
+  )
+}
+
 /** The agent's memory: search, user facts, private and shared entries, journal. */
 export function AgentMemoryView({ agent }: { agent: AgentSummary }) {
   const { data, isLoading } = useAgentDetails(agent.id)
@@ -263,6 +333,11 @@ export function AgentMemoryView({ agent }: { agent: AgentSummary }) {
   const [filters, setFilters] =
     useState<MemorySearchFilters>(EMPTY_MEMORY_FILTERS)
   const [queryDraft, setQueryDraft] = useState('')
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const [composer, setComposer] = useState<
+    'fact' | 'memory' | 'journal' | null
+  >(null)
+  const [changesOpen, setChangesOpen] = useState(false)
   const [changesExpanded, setChangesExpanded] = useState(false)
 
   useEffect(() => {
@@ -295,10 +370,16 @@ export function AgentMemoryView({ agent }: { agent: AgentSummary }) {
     : (data?.journal ?? [])
   const { userFacts, rest } = partitionMemories(memories)
   const journalGroups = groupJournalByDay(journal)
-  const changes = visibleChanges(data?.memoryChanges ?? [], changesExpanded)
+  const allChanges = data?.memoryChanges ?? []
+  const changes = visibleChanges(allChanges, changesExpanded)
+  const filterCount = activeFilterCount(filters)
+  const memoryLoading = isLoading || (searching && memoryQuery.isLoading)
 
   const patchFilter = (patch: Partial<MemorySearchFilters>) =>
     setFilters(current => ({ ...current, ...patch }))
+
+  const toggleComposer = (next: 'fact' | 'memory' | 'journal') =>
+    setComposer(current => (current === next ? null : next))
 
   const handleAdd = (
     scope: MemoryScope,
@@ -317,6 +398,7 @@ export function AgentMemoryView({ agent }: { agent: AgentSummary }) {
         onSuccess: () => {
           if (scope === 'user') setUserFact('')
           else setContent('')
+          setComposer(null)
         },
         onError: e => toast.error(`Failed to save memory: ${e}`),
       }
@@ -336,6 +418,7 @@ export function AgentMemoryView({ agent }: { agent: AgentSummary }) {
         onSuccess: () => {
           setJournalText('')
           setJournalDay('')
+          setComposer(null)
         },
         onError: e => toast.error(`Failed to save journal entry: ${e}`),
       }
@@ -352,80 +435,36 @@ export function AgentMemoryView({ agent }: { agent: AgentSummary }) {
   }
 
   return (
-    <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-4 py-4">
-      <div className="space-y-2" data-testid="memory-search">
-        <Label htmlFor="memory-search">Search memory and journal</Label>
-        <Input
-          id="memory-search"
-          value={queryDraft}
-          placeholder="orbit deploy, timezone, a decision…"
-          onChange={e => setQueryDraft(e.target.value)}
-        />
+    <AgentTabBody>
+      <div className="flex flex-col gap-3" data-testid="memory-search">
         <div className="flex flex-wrap items-center gap-2">
-          <NativeSelect
-            value={filters.kind}
-            aria-label="Kind"
-            onChange={e =>
-              patchFilter({
-                kind: e.target.value as MemorySearchFilters['kind'],
-              })
-            }
+          <div className="relative min-w-48 flex-1">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              id="memory-search"
+              type="search"
+              value={queryDraft}
+              aria-label="Search memory and journal"
+              placeholder="Search memory and journal"
+              className="h-8 pl-8 text-sm"
+              onChange={e => setQueryDraft(e.target.value)}
+            />
+          </div>
+          <Button
+            size="sm"
+            variant={filtersOpen || filterCount > 0 ? 'secondary' : 'outline'}
+            aria-expanded={filtersOpen}
+            aria-controls="memory-filters"
+            onClick={() => setFiltersOpen(value => !value)}
           >
-            <NativeSelectOption value="">Any kind</NativeSelectOption>
-            {(Object.keys(KIND_LABELS) as MemoryKind[]).map(item => (
-              <NativeSelectOption key={item} value={item}>
-                {KIND_LABELS[item]}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-          <NativeSelect
-            value={filters.scope}
-            aria-label="Scope"
-            onChange={e =>
-              patchFilter({
-                scope: e.target.value as MemorySearchFilters['scope'],
-              })
-            }
-          >
-            <NativeSelectOption value="">Any scope</NativeSelectOption>
-            <NativeSelectOption value="user">About you</NativeSelectOption>
-            <NativeSelectOption value="agent">Private</NativeSelectOption>
-            <NativeSelectOption value="shared">Shared</NativeSelectOption>
-          </NativeSelect>
-          <NativeSelect
-            value={filters.pinned}
-            aria-label="Pinned"
-            onChange={e =>
-              patchFilter({
-                pinned: e.target.value as MemorySearchFilters['pinned'],
-              })
-            }
-          >
-            <NativeSelectOption value="">Pinned or not</NativeSelectOption>
-            <NativeSelectOption value="yes">Pinned</NativeSelectOption>
-            <NativeSelectOption value="no">Not pinned</NativeSelectOption>
-          </NativeSelect>
-          <Input
-            type="date"
-            aria-label="From"
-            value={filters.from}
-            className="w-auto"
-            onChange={e => patchFilter({ from: e.target.value })}
-          />
-          <Input
-            type="date"
-            aria-label="To"
-            value={filters.to}
-            className="w-auto"
-            onChange={e => patchFilter({ to: e.target.value })}
-          />
-          <Input
-            aria-label="Project"
-            value={filters.project}
-            placeholder="Project id"
-            className="w-36"
-            onChange={e => patchFilter({ project: e.target.value })}
-          />
+            <Settings2 />
+            Filters
+            {filterCount > 0 && (
+              <span className="rounded-full bg-primary px-1.5 text-[10px] leading-4 text-primary-foreground">
+                {filterCount}
+              </span>
+            )}
+          </Button>
           {searching && (
             <Button
               size="sm"
@@ -438,222 +477,378 @@ export function AgentMemoryView({ agent }: { agent: AgentSummary }) {
               Clear
             </Button>
           )}
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={handleExport}
+            title="Copy all memory as Markdown"
+          >
+            <Copy />
+            <span className="hidden sm:inline">Copy as Markdown</span>
+          </Button>
         </div>
-        {searchError && (
-          <p className="text-xs text-destructive">
-            Search failed: {String(searchError)}
-          </p>
-        )}
-      </div>
-
-      {showUserFactSection(filters) && (
-        <section className="space-y-2" data-testid="user-facts">
-          <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            About you ({userFacts.length})
-          </h3>
-          <p className="text-xs text-muted-foreground">
-            Facts every agent sees: name, timezone, preferences. Shared memory
-            below is working notes for all agents, not who you are.
-          </p>
-          <div className="space-y-2 rounded-md border px-3 py-3">
-            <Label htmlFor="user-fact">Add a fact about you</Label>
-            <Textarea
-              id="user-fact"
-              value={userFact}
-              rows={2}
-              maxLength={MAX_CHARS}
-              placeholder="Timezone is Helsinki. Prefers short answers."
-              onChange={e => setUserFact(e.target.value)}
-            />
-            <div className="flex justify-end">
-              <Button
-                size="sm"
-                disabled={!userFact.trim() || save.isPending}
-                onClick={() => handleAdd('user', userFact, 'fact')}
-              >
-                Add fact
-              </Button>
-            </div>
-          </div>
-          {isLoading || (searching && memoryQuery.isLoading) ? (
-            <p className="text-xs text-muted-foreground">Loading memory…</p>
-          ) : (
-            <MemoryList
-              memories={userFacts}
-              agentId={agent.id}
-              empty="No facts about you yet."
-            />
-          )}
-        </section>
-      )}
-
-      {showAgentMemorySection(filters) && (
-        <section className="space-y-2" data-testid="agent-memory">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Memory ({rest.length})
-            </h3>
-            <Button size="sm" variant="ghost" onClick={handleExport}>
-              <Copy />
-              Copy as Markdown
-            </Button>
-          </div>
-          <div className="space-y-2 rounded-md border px-3 py-3">
-            <Label htmlFor="new-memory">Add memory</Label>
-            <Textarea
-              id="new-memory"
-              value={content}
-              rows={2}
-              maxLength={MAX_CHARS}
-              placeholder="Ask before you merge pull requests in coolify."
-              onChange={e => setContent(e.target.value)}
-            />
-            <div className="flex flex-wrap items-center gap-3">
+        {filtersOpen && (
+          <div
+            id="memory-filters"
+            className="grid grid-cols-2 gap-3 rounded-lg border bg-muted/20 p-3 sm:grid-cols-3"
+          >
+            <FilterField label="Kind" htmlFor="memory-filter-kind">
               <NativeSelect
-                value={kind}
-                onChange={e => setKind(e.target.value as MemoryKind)}
-                aria-label="Kind"
+                id="memory-filter-kind"
+                className="h-8 py-1"
+                value={filters.kind}
+                onChange={e =>
+                  patchFilter({
+                    kind: e.target.value as MemorySearchFilters['kind'],
+                  })
+                }
               >
+                <NativeSelectOption value="">Any kind</NativeSelectOption>
                 {(Object.keys(KIND_LABELS) as MemoryKind[]).map(item => (
                   <NativeSelectOption key={item} value={item}>
                     {KIND_LABELS[item]}
                   </NativeSelectOption>
                 ))}
               </NativeSelect>
-              <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Checkbox
-                  checked={shared}
-                  onCheckedChange={value => setShared(value === true)}
-                />
-                Shared with all agents
-              </label>
-              <Button
-                size="sm"
-                className="ml-auto"
-                disabled={!content.trim() || save.isPending}
-                onClick={() =>
-                  handleAdd(shared ? 'shared' : 'agent', content, kind)
+            </FilterField>
+            <FilterField label="Scope" htmlFor="memory-filter-scope">
+              <NativeSelect
+                id="memory-filter-scope"
+                className="h-8 py-1"
+                value={filters.scope}
+                onChange={e =>
+                  patchFilter({
+                    scope: e.target.value as MemorySearchFilters['scope'],
+                  })
                 }
               >
-                Add
-              </Button>
-            </div>
+                <NativeSelectOption value="">Any scope</NativeSelectOption>
+                {(Object.keys(SCOPE_LABELS) as MemoryScope[]).map(item => (
+                  <NativeSelectOption key={item} value={item}>
+                    {SCOPE_LABELS[item]}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </FilterField>
+            <FilterField label="Pinned" htmlFor="memory-filter-pinned">
+              <NativeSelect
+                id="memory-filter-pinned"
+                className="h-8 py-1"
+                value={filters.pinned}
+                onChange={e =>
+                  patchFilter({
+                    pinned: e.target.value as MemorySearchFilters['pinned'],
+                  })
+                }
+              >
+                <NativeSelectOption value="">Pinned or not</NativeSelectOption>
+                <NativeSelectOption value="yes">Pinned</NativeSelectOption>
+                <NativeSelectOption value="no">Not pinned</NativeSelectOption>
+              </NativeSelect>
+            </FilterField>
+            <FilterField label="From" htmlFor="memory-filter-from">
+              <Input
+                id="memory-filter-from"
+                type="date"
+                value={filters.from}
+                className="h-8 text-sm"
+                onChange={e => patchFilter({ from: e.target.value })}
+              />
+            </FilterField>
+            <FilterField label="To" htmlFor="memory-filter-to">
+              <Input
+                id="memory-filter-to"
+                type="date"
+                value={filters.to}
+                className="h-8 text-sm"
+                onChange={e => patchFilter({ to: e.target.value })}
+              />
+            </FilterField>
+            <FilterField label="Project" htmlFor="memory-filter-project">
+              <Input
+                id="memory-filter-project"
+                value={filters.project}
+                placeholder="Project id"
+                className="h-8 text-sm"
+                onChange={e => patchFilter({ project: e.target.value })}
+              />
+            </FilterField>
           </div>
-          {isLoading || (searching && memoryQuery.isLoading) ? (
-            <p className="text-xs text-muted-foreground">Loading memory…</p>
+        )}
+        {searchError && (
+          <p className="text-xs text-destructive" role="alert">
+            Search failed: {String(searchError)}
+          </p>
+        )}
+      </div>
+
+      {showUserFactSection(filters) && (
+        <AgentSection
+          testId="user-facts"
+          title="About you"
+          count={userFacts.length}
+          description="Facts every agent sees, like your name, timezone, and preferences."
+          actions={
+            <AddButton
+              open={composer === 'fact'}
+              label="Add fact"
+              onClick={() => toggleComposer('fact')}
+            />
+          }
+        >
+          {composer === 'fact' && (
+            <AgentPanel>
+              <Label htmlFor="user-fact" className="sr-only">
+                Fact about you
+              </Label>
+              <Textarea
+                id="user-fact"
+                value={userFact}
+                rows={2}
+                maxLength={MAX_CHARS}
+                placeholder="Timezone is Helsinki. Prefers short answers."
+                onChange={e => setUserFact(e.target.value)}
+                autoFocus
+              />
+              <div className="flex justify-end">
+                <Button
+                  size="sm"
+                  disabled={!userFact.trim() || save.isPending}
+                  onClick={() => handleAdd('user', userFact, 'fact')}
+                >
+                  Add fact
+                </Button>
+              </div>
+            </AgentPanel>
+          )}
+          {memoryLoading ? (
+            <AgentLoading label="Loading memory…" />
+          ) : (
+            <MemoryList
+              memories={userFacts}
+              agentId={agent.id}
+              empty={
+                searching ? 'No matching facts.' : 'No facts about you yet.'
+              }
+            />
+          )}
+        </AgentSection>
+      )}
+
+      {showAgentMemorySection(filters) && (
+        <AgentSection
+          testId="agent-memory"
+          title="Memory"
+          count={rest.length}
+          description="Rules, facts, and open work. Shared entries are visible to every agent."
+          actions={
+            <AddButton
+              open={composer === 'memory'}
+              label="Add memory"
+              onClick={() => toggleComposer('memory')}
+            />
+          }
+        >
+          {composer === 'memory' && (
+            <AgentPanel>
+              <Label htmlFor="new-memory" className="sr-only">
+                New memory
+              </Label>
+              <Textarea
+                id="new-memory"
+                value={content}
+                rows={2}
+                maxLength={MAX_CHARS}
+                placeholder="Ask before you merge pull requests in coolify."
+                onChange={e => setContent(e.target.value)}
+                autoFocus
+              />
+              <div className="flex flex-wrap items-center gap-3">
+                <NativeSelect
+                  className="h-8 py-1"
+                  value={kind}
+                  onChange={e => setKind(e.target.value as MemoryKind)}
+                  aria-label="Kind"
+                >
+                  {(Object.keys(KIND_LABELS) as MemoryKind[]).map(item => (
+                    <NativeSelectOption key={item} value={item}>
+                      {KIND_LABELS[item]}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Checkbox
+                    checked={shared}
+                    onCheckedChange={value => setShared(value === true)}
+                  />
+                  Shared with all agents
+                </label>
+                <Button
+                  size="sm"
+                  className="ml-auto"
+                  disabled={!content.trim() || save.isPending}
+                  onClick={() =>
+                    handleAdd(shared ? 'shared' : 'agent', content, kind)
+                  }
+                >
+                  Add memory
+                </Button>
+              </div>
+            </AgentPanel>
+          )}
+          {memoryLoading ? (
+            <AgentLoading label="Loading memory…" />
           ) : (
             <MemoryList
               memories={rest}
               agentId={agent.id}
               empty={
-                searching
-                  ? 'No matching memories.'
-                  : 'No memories yet. The agent saves rules and facts with memory_save, or you add them here.'
+                searching ? (
+                  'No matching memories.'
+                ) : (
+                  <>
+                    No memories yet. The agent saves rules and facts with{' '}
+                    <code className="text-xs">memory_save</code>, or you add
+                    them here.
+                  </>
+                )
               }
             />
           )}
-        </section>
+        </AgentSection>
       )}
 
-      <section className="space-y-2" data-testid="journal-timeline">
-        <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Journal ({journal.length})
-        </h3>
-        <p className="text-xs text-muted-foreground">
-          Dated history of what happened. Archived chats are stored here so they
-          can be recalled by text or date.
-        </p>
-        <div className="space-y-2 rounded-md border px-3 py-3">
-          <Label htmlFor="journal-entry">Add journal entry</Label>
-          <Textarea
-            id="journal-entry"
-            value={journalText}
-            rows={2}
-            maxLength={MAX_JOURNAL_CHARS}
-            placeholder="Decided to ship the orbit fix on Tuesday."
-            onChange={e => setJournalText(e.target.value)}
+      <AgentSection
+        testId="journal-timeline"
+        title="Journal"
+        count={journal.length}
+        description="Dated history of what happened. Archived chats are stored here so they can be recalled by text or date."
+        actions={
+          <AddButton
+            open={composer === 'journal'}
+            label="Add entry"
+            onClick={() => toggleComposer('journal')}
           />
-          <div className="flex flex-wrap items-center gap-3">
-            <Input
-              type="date"
-              aria-label="When"
-              value={journalDay}
-              className="w-auto"
-              onChange={e => setJournalDay(e.target.value)}
+        }
+      >
+        {composer === 'journal' && (
+          <AgentPanel>
+            <Label htmlFor="journal-entry" className="sr-only">
+              Journal entry
+            </Label>
+            <Textarea
+              id="journal-entry"
+              value={journalText}
+              rows={2}
+              maxLength={MAX_JOURNAL_CHARS}
+              placeholder="Decided to ship the orbit fix on Tuesday."
+              onChange={e => setJournalText(e.target.value)}
+              autoFocus
             />
-            <Button
-              size="sm"
-              className="ml-auto"
-              disabled={!journalText.trim() || saveJournal.isPending}
-              onClick={handleJournal}
-            >
-              Add entry
-            </Button>
-          </div>
-        </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <Input
+                type="date"
+                aria-label="When"
+                value={journalDay}
+                className="h-8 w-auto text-sm"
+                onChange={e => setJournalDay(e.target.value)}
+              />
+              <Button
+                size="sm"
+                className="ml-auto"
+                disabled={!journalText.trim() || saveJournal.isPending}
+                onClick={handleJournal}
+              >
+                Add entry
+              </Button>
+            </div>
+          </AgentPanel>
+        )}
         {searchingJournal && journalQuery.isLoading ? (
-          <p className="text-xs text-muted-foreground">Loading journal…</p>
+          <AgentLoading label="Loading journal…" />
         ) : journalGroups.length ? (
-          <div className="space-y-4">
+          <div className="flex flex-col gap-4">
             {journalGroups.map(group => (
-              <div key={group.day} className="space-y-2">
+              <div key={group.day} className="flex flex-col gap-1.5">
                 <h4 className="text-xs font-medium text-muted-foreground">
-                  {group.day}
+                  {journalDayLabel(group.day)}
                 </h4>
-                <ul className="space-y-2">
+                <AgentList>
                   {group.entries.map((item: AgentJournalEntry) => (
-                    <li
-                      key={item.id}
-                      className="space-y-1 rounded-md border px-3 py-2"
-                    >
-                      <p className="text-[11px] text-muted-foreground">
-                        {formatJournalTime(item.occurredAt)} ·{' '}
-                        {journalSourceLabel(item.source)}
-                        {item.projectId ? ` · project ${item.projectId}` : ''}
-                      </p>
-                      <p className="whitespace-pre-wrap break-words text-sm text-foreground">
-                        {item.content}
-                      </p>
+                    <li key={item.id} className="flex gap-3 px-3 py-2.5">
+                      <span className="w-10 shrink-0 pt-0.5 text-xs tabular-nums text-muted-foreground">
+                        {formatJournalTime(item.occurredAt)}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="whitespace-pre-wrap break-words text-sm text-foreground">
+                          {item.content}
+                        </p>
+                        <div className="mt-1.5 flex flex-wrap gap-1.5">
+                          <AgentBadge>
+                            {journalSourceLabel(item.source)}
+                          </AgentBadge>
+                          {item.projectId && (
+                            <AgentBadge>Project {item.projectId}</AgentBadge>
+                          )}
+                        </div>
+                      </div>
                     </li>
                   ))}
-                </ul>
+                </AgentList>
               </div>
             ))}
           </div>
         ) : (
-          <p className="text-xs text-muted-foreground">
-            {searchingJournal
-              ? 'No matching journal entries.'
-              : 'No journal entries yet.'}
-          </p>
+          <AgentEmpty
+            title={
+              searchingJournal
+                ? 'No matching journal entries.'
+                : 'No journal entries yet.'
+            }
+          />
         )}
-      </section>
+      </AgentSection>
 
-      <section className="space-y-2" data-testid="memory-changes">
-        <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Recent changes ({data?.memoryChanges.length ?? 0})
-        </h3>
-        {changes.length ? (
-          <ul className="space-y-2">
-            {changes.map(change => (
-              <ChangeRow key={change.id} change={change} />
-            ))}
-          </ul>
-        ) : (
-          <p className="text-xs text-muted-foreground">
-            Edits, corrections, and forgotten entries show up here.
-          </p>
-        )}
-        {(data?.memoryChanges.length ?? 0) > 8 && (
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => setChangesExpanded(value => !value)}
-          >
-            {changesExpanded ? 'Show less' : 'Show all'}
-          </Button>
-        )}
-      </section>
-    </div>
+      <Collapsible
+        open={changesOpen}
+        onOpenChange={setChangesOpen}
+        data-testid="memory-changes"
+        className="flex flex-col gap-3"
+      >
+        <CollapsibleTrigger className="flex items-center gap-1.5 self-start rounded-md text-sm font-medium text-foreground hover:text-foreground/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
+          <ChevronRight
+            className={cn(
+              'size-3.5 text-muted-foreground transition-transform',
+              changesOpen && 'rotate-90'
+            )}
+          />
+          Recent changes
+          <span className="rounded-md bg-muted/50 px-1.5 text-xs font-medium tabular-nums text-muted-foreground">
+            {allChanges.length}
+          </span>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="flex flex-col gap-2">
+          {changes.length ? (
+            <AgentList>
+              {changes.map(change => (
+                <ChangeRow key={change.id} change={change} />
+              ))}
+            </AgentList>
+          ) : (
+            <AgentEmpty title="Edits, corrections, and forgotten entries show up here." />
+          )}
+          {allChanges.length > 8 && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="self-start"
+              onClick={() => setChangesExpanded(value => !value)}
+            >
+              {changesExpanded ? 'Show less' : `Show all ${allChanges.length}`}
+            </Button>
+          )}
+        </CollapsibleContent>
+      </Collapsible>
+    </AgentTabBody>
   )
 }

@@ -106,7 +106,7 @@ export function NewAgentDialog({
             access to all your projects through the Jean MCP tools.
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-4">
+        <div className="flex flex-col gap-4">
           {servers.length > 1 && (
             <div className="space-y-1.5">
               <Label htmlFor="agent-server">Server</Label>
@@ -182,12 +182,22 @@ export function NewAgentDialog({
             />
           </div>
           {open && (
-            <AgentRunFields
-              idPrefix="new-agent"
-              serverId={targetServerId}
-              value={run}
-              onChange={setRun}
-            />
+            <div className="flex flex-col gap-3 border-t pt-4">
+              <div>
+                <h3 className="text-sm font-medium">Run configuration</h3>
+                <p className="text-xs text-muted-foreground">
+                  Optional. You can change it later in the agent&apos;s Settings
+                  tab.
+                </p>
+              </div>
+              <AgentRunFields
+                idPrefix="new-agent"
+                serverId={targetServerId}
+                value={run}
+                onChange={setRun}
+                popoverClassName="z-[100]"
+              />
+            </div>
           )}
         </div>
         <DialogFooter>

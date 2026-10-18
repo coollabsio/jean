@@ -1,18 +1,24 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentSkill } from '@/services/agents'
 import {
+  AGENT_DEFAULT_OPTION,
   agentRunPatch,
   agentRunSummary,
   backendChoices,
   draftFromAgent,
   effortOptionsForBackend,
   EMPTY_AGENT_RUN,
+  fromPickerValue,
   modelOptionsForBackend,
+  pickerBackend,
   sameAgentRun,
   skillChoices,
   thinkingOptionsForBackend,
   toggleSkill,
+  toPickerValue,
   withBackend,
+  withBackendModel,
+  withDefaultReasoningOption,
   type AgentRunDraft,
 } from './agent-config'
 import type { AgentSummary } from '@/services/agents'
@@ -200,5 +206,101 @@ describe('agent run patch and summary', () => {
       })
     ).toBe(true)
     expect(sameAgentRun(saved, { ...saved, model: 'gpt-5.5' })).toBe(false)
+  })
+})
+
+describe('shared backend/model picker mapping', () => {
+  it('maps the inherit option to an empty draft value and back', () => {
+    expect(toPickerValue('')).toBe(AGENT_DEFAULT_OPTION)
+    expect(toPickerValue('high')).toBe('high')
+    expect(fromPickerValue(AGENT_DEFAULT_OPTION)).toBe('')
+    expect(fromPickerValue('high')).toBe('high')
+  })
+
+  it('pins a backend and model picked from an inheriting draft', () => {
+    const next = withBackendModel(EMPTY_AGENT_RUN, 'codex', 'gpt-5.5')
+    expect(next).toMatchObject({ backend: 'codex', model: 'gpt-5.5' })
+  })
+
+  it('keeps models the static list does not know (dynamic CLI models)', () => {
+    const next = withBackendModel(
+      draft({ backend: 'opencode' }),
+      'opencode',
+      'opencode/some-provider/new-model'
+    )
+    expect(next.model).toBe('opencode/some-provider/new-model')
+  })
+
+  it('stores "Default model" as an empty model that saves as null', () => {
+    const next = withBackendModel(
+      draft({ backend: 'claude', model: 'claude-opus-5', effort: 'max' }),
+      'claude',
+      AGENT_DEFAULT_OPTION
+    )
+    expect(next).toMatchObject({ backend: 'claude', model: '', effort: 'max' })
+    expect(agentRunPatch(next)).toMatchObject({
+      backend: 'claude',
+      model: null,
+      effort: 'max',
+    })
+  })
+
+  it('clears reasoning and skills of the old backend when switching', () => {
+    const next = withBackendModel(
+      draft({
+        backend: 'claude',
+        model: 'claude-opus-5',
+        effort: 'max',
+        thinkingLevel: 'ultrathink',
+        skills: [{ name: 'a', path: '/claude/SKILL.md', backend: 'claude' }],
+      }),
+      'codex',
+      'gpt-5.5'
+    )
+    expect(next).toMatchObject({
+      backend: 'codex',
+      model: 'gpt-5.5',
+      effort: '',
+      thinkingLevel: '',
+      skills: [],
+    })
+  })
+
+  it('resets to inherit with every override cleared', () => {
+    const reset = withBackend(
+      draft({ backend: 'claude', model: 'claude-opus-5', effort: 'max' }),
+      ''
+    )
+    expect(agentRunPatch(reset)).toMatchObject({
+      backend: null,
+      model: null,
+      effort: null,
+      thinkingLevel: null,
+    })
+  })
+
+  it('opens the picker on the agent backend, then the new-chat default', () => {
+    expect(
+      pickerBackend(draft({ backend: 'codex' }), 'claude', ['claude'])
+    ).toBe('codex')
+    expect(pickerBackend(EMPTY_AGENT_RUN, 'codex', ['claude', 'codex'])).toBe(
+      'codex'
+    )
+    expect(pickerBackend(EMPTY_AGENT_RUN, 'codex', ['claude'])).toBe('claude')
+    expect(pickerBackend(EMPTY_AGENT_RUN, undefined, [])).toBe('claude')
+  })
+
+  it('adds a leading Default option to effort and thinking lists', () => {
+    const options = withDefaultReasoningOption(effortOptionsForBackend('codex'))
+    expect(options[0]).toMatchObject({
+      value: AGENT_DEFAULT_OPTION,
+      label: 'Default',
+    })
+    expect(options.slice(1).map(option => option.value)).toEqual([
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+    ])
   })
 })

@@ -194,7 +194,7 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
         )}
       </header>
       <div
-        className="flex shrink-0 gap-1 border-b px-3 py-1.5"
+        className="flex shrink-0 gap-1 overflow-x-auto border-b px-3 py-1.5 [scrollbar-width:none]"
         role="tablist"
         aria-label="Agent view"
       >
@@ -205,7 +205,7 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
             role="tab"
             aria-selected={tab === id}
             className={cn(
-              'flex h-7 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+              'flex h-7 shrink-0 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
               tab === id
                 ? 'bg-muted text-foreground'
                 : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
@@ -216,7 +216,7 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
             {badge ? (
               <span
                 className={cn(
-                  'rounded-full px-1.5 text-[10px] leading-4',
+                  'min-w-4 rounded-full px-1 text-center text-[10px] tabular-nums leading-4',
                   muted
                     ? 'bg-muted-foreground/20 text-foreground'
                     : 'bg-amber-500 text-white'

@@ -5,7 +5,10 @@ import type {
   AgentMemoryChange,
 } from '@/services/agents'
 import {
+  activeFilterCount,
   dateInputToUnix,
+  EMPTY_MEMORY_FILTERS,
+  journalDayLabel,
   describeMemoryChange,
   groupJournalByDay,
   journalSearchActive,
@@ -193,3 +196,39 @@ function empty() {
     project: '',
   }
 }
+
+describe('activeFilterCount', () => {
+  it('counts set filters but not the search text', () => {
+    expect(activeFilterCount(EMPTY_MEMORY_FILTERS)).toBe(0)
+    expect(
+      activeFilterCount({ ...EMPTY_MEMORY_FILTERS, query: 'deploy' })
+    ).toBe(0)
+    expect(
+      activeFilterCount({
+        ...EMPTY_MEMORY_FILTERS,
+        kind: 'rule',
+        pinned: 'yes',
+        from: '2026-10-01',
+        project: '  ',
+      })
+    ).toBe(3)
+  })
+})
+
+describe('journalDayLabel', () => {
+  const now = new Date(2026, 9, 18, 15, 0, 0)
+
+  it('names today and yesterday', () => {
+    expect(journalDayLabel('2026-10-18', now)).toBe('Today')
+    expect(journalDayLabel('2026-10-17', now)).toBe('Yesterday')
+  })
+
+  it('shows a short date, with the year only for other years', () => {
+    expect(journalDayLabel('2026-10-16', now)).toBe('Fri 16 Oct')
+    expect(journalDayLabel('2025-12-31', now)).toBe('Wed 31 Dec 2025')
+  })
+
+  it('returns unknown input unchanged', () => {
+    expect(journalDayLabel('soon', now)).toBe('soon')
+  })
+})

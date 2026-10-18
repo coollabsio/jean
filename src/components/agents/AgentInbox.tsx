@@ -22,6 +22,14 @@ import {
   type AgentSummary,
 } from '@/services/agents'
 import { formatRelative } from './AgentActivity'
+import {
+  AgentBadge,
+  AgentEmpty,
+  AgentList,
+  AgentLoading,
+  AgentSection,
+  AgentTabBody,
+} from './agent-ui'
 
 const LEVEL_DOTS: Record<string, string> = {
   action: 'bg-amber-500',
@@ -55,8 +63,8 @@ function NotificationRow({
       <button
         type="button"
         className={cn(
-          'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent/50',
-          notification.readAt !== null && 'opacity-60'
+          'flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-none',
+          notification.readAt !== null && 'text-muted-foreground'
         )}
         onClick={() => onOpen(notification)}
       >
@@ -67,9 +75,23 @@ function NotificationRow({
           )}
           title={levelLabel(notification.level)}
         />
-        <span className="min-w-0 flex-1 truncate text-foreground">
+        <span
+          className={cn(
+            'min-w-0 flex-1 truncate',
+            notification.readAt === null
+              ? 'font-medium text-foreground'
+              : 'text-muted-foreground'
+          )}
+        >
           {notificationPreview(notification.message)}
         </span>
+        {notification.level !== 'info' && (
+          <AgentBadge
+            tone={notification.level === 'error' ? 'danger' : 'attention'}
+          >
+            {levelLabel(notification.level)}
+          </AgentBadge>
+        )}
         <span className="shrink-0 text-xs text-muted-foreground">
           {formatRelative(notification.createdAt)}
         </span>
@@ -132,71 +154,73 @@ export function AgentInbox({ agent }: { agent: AgentSummary }) {
     useState<AgentNotification | null>(null)
   const { unread, read } = splitNotifications(data?.notifications ?? [])
   return (
-    <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-4 py-4">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-xs text-muted-foreground">
-          Results, questions and errors the agent reports to you.
-        </p>
-        {agent.unreadNotifications > 0 && (
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={markRead.isPending}
-            onClick={() => markRead.mutate({ agentId: agent.id })}
-          >
-            Mark all read
-          </Button>
+    <AgentTabBody>
+      <AgentSection
+        title="Inbox"
+        count={isLoading ? undefined : unread.length}
+        description="Results, questions, and errors the agent reports to you."
+        actions={
+          agent.unreadNotifications > 0 ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={markRead.isPending}
+              onClick={() => markRead.mutate({ agentId: agent.id })}
+            >
+              Mark all read
+            </Button>
+          ) : null
+        }
+      >
+        {isLoading ? (
+          <AgentLoading label="Loading inbox…" />
+        ) : unread.length === 0 && read.length === 0 ? (
+          <AgentEmpty
+            title="Nothing yet"
+            description="The agent sends results, questions, and errors here with notify_user."
+          />
+        ) : unread.length > 0 ? (
+          <AgentList>
+            {unread.map(notification => (
+              <NotificationRow
+                key={notification.id}
+                notification={notification}
+                onOpen={setOpenNotification}
+              />
+            ))}
+          </AgentList>
+        ) : (
+          <AgentEmpty title="You're all caught up." />
         )}
-      </div>
-      {isLoading ? (
-        <p className="text-xs text-muted-foreground">Loading inbox…</p>
-      ) : unread.length === 0 && read.length === 0 ? (
-        <p className="text-xs text-muted-foreground">Nothing yet.</p>
-      ) : (
-        <>
-          {unread.length > 0 ? (
-            <ul className="space-y-0.5">
-              {unread.map(notification => (
-                <NotificationRow
-                  key={notification.id}
-                  notification={notification}
-                  onOpen={setOpenNotification}
-                />
-              ))}
-            </ul>
-          ) : (
-            <p className="text-xs text-muted-foreground">No new messages.</p>
-          )}
-          {read.length > 0 && (
-            <Collapsible open={readOpen} onOpenChange={setReadOpen}>
-              <CollapsibleTrigger className="flex items-center gap-1 pt-2 text-xs font-medium uppercase tracking-wide text-muted-foreground hover:text-foreground">
-                <ChevronRight
-                  className={cn(
-                    'size-3.5 transition-transform',
-                    readOpen && 'rotate-90'
-                  )}
-                />
-                Read ({read.length})
-              </CollapsibleTrigger>
-              <CollapsibleContent>
-                <ul className="mt-2 space-y-0.5">
-                  {read.map(notification => (
-                    <NotificationRow
-                      key={notification.id}
-                      notification={notification}
-                      onOpen={setOpenNotification}
-                    />
-                  ))}
-                </ul>
-              </CollapsibleContent>
-            </Collapsible>
-          )}
-        </>
-      )}
+        {read.length > 0 && (
+          <Collapsible open={readOpen} onOpenChange={setReadOpen}>
+            <CollapsibleTrigger className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
+              <ChevronRight
+                className={cn(
+                  'size-3.5 transition-transform',
+                  readOpen && 'rotate-90'
+                )}
+              />
+              Read ({read.length})
+            </CollapsibleTrigger>
+            <CollapsibleContent className="mt-2">
+              <AgentList>
+                {read.map(notification => (
+                  <NotificationRow
+                    key={notification.id}
+                    notification={notification}
+                    onOpen={setOpenNotification}
+                  />
+                ))}
+              </AgentList>
+            </CollapsibleContent>
+          </Collapsible>
+        )}
+      </AgentSection>
       <NotificationDialog
         notification={openNotification}
         onClose={() => setOpenNotification(null)}
       />
-    </div>
+    </AgentTabBody>
   )
 }

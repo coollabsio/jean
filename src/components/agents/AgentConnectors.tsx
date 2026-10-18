@@ -1,8 +1,15 @@
 import { useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { McpSignInButton } from '@/components/mcp/McpSignInButton'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { useState } from 'react'
+import { ChevronRight } from '@/components/icons/reicon'
+import { getBackendPlainLabel } from '@/components/ui/backend-label'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
+import { cn } from '@/lib/utils'
 import { Switch } from '@/components/ui/switch'
 import { invokeForServer } from '@/lib/transport'
 import {
@@ -12,7 +19,7 @@ import {
   type AgentSummary,
 } from '@/services/agents'
 import type { McpHealthResult, McpServerInfo } from '@/types/chat'
-import type { CliBackend } from '@/types/preferences'
+import { backendOptions, type CliBackend } from '@/types/preferences'
 import {
   connectorSectionNote,
   connectorSelected,
@@ -27,6 +34,20 @@ import {
   toggleJeanTool,
 } from './agent-connectors'
 import { useSavedDraft } from './use-saved-draft'
+import {
+  AgentBadge,
+  AgentEmpty,
+  AgentList,
+  AgentLoading,
+  AgentNotice,
+  AgentPanel,
+  AgentSection,
+  SaveFooter,
+} from './agent-ui'
+
+function isCliBackend(value: string): value is CliBackend {
+  return backendOptions.some(option => option.value === value)
+}
 
 interface JeanToolInfo {
   name: string
@@ -45,7 +66,15 @@ function loginBackend(backend: string): CliBackend | null {
 }
 
 /** Connectors and Jean tools for one agent. */
-export function AgentConnectors({ agent }: { agent: AgentSummary }) {
+export function AgentConnectors({
+  agent,
+  pendingBackend,
+}: {
+  agent: AgentSummary
+  /** Unsaved backend from Run configuration; null when it is saved */
+  pendingBackend?: string | null
+}) {
+  const [otherOpen, setOtherOpen] = useState(false)
   const updateAgent = useUpdateAgent()
   const workdir = useAgentWorkdir(agent.id)
   const backend = agent.backend ?? ''
@@ -119,143 +148,185 @@ export function AgentConnectors({ agent }: { agent: AgentSummary }) {
     )
   }
 
+  const backendName = backend
+    ? isCliBackend(backend)
+      ? getBackendPlainLabel(backend)
+      : backend
+    : null
+  const toggleTool = (name: string, on: boolean) =>
+    setTools(
+      toggleJeanTool(
+        tools,
+        name,
+        jeanTools.map(tool => tool.name),
+        on
+      )
+    )
+  const dangerousTools = jeanTools.filter(tool => tool.dangerous)
+  const otherTools = jeanTools.filter(tool => !tool.dangerous)
+
   return (
-    <div className="flex flex-col gap-4 border-t pt-4">
-      <div>
-        <h2 className="text-sm font-medium">Connectors and tools</h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {connectorSectionNote(support, backend || 'this backend', reason)}
-        </p>
-      </div>
-
-      {backend && servers.isLoading && (
-        <p className="text-xs text-muted-foreground">Loading connectors…</p>
+    <AgentSection
+      title="Connectors and tools"
+      description={connectorSectionNote(
+        support,
+        backendName ?? 'this backend',
+        reason
       )}
-      {backend && servers.isError && (
-        <p className="text-xs text-destructive" role="alert">
-          Could not list MCP servers: {String(servers.error)}
-        </p>
+      actions={
+        <AgentBadge tone={backend ? 'active' : 'neutral'}>
+          {backendName ?? 'Default backend'}
+        </AgentBadge>
+      }
+    >
+      {pendingBackend !== undefined && pendingBackend !== null && (
+        <AgentNotice>
+          Save the run configuration first. Connectors below are for the saved
+          backend ({backendName ?? 'default'}), not{' '}
+          {pendingBackend
+            ? isCliBackend(pendingBackend)
+              ? getBackendPlainLabel(pendingBackend)
+              : pendingBackend
+            : 'the default backend'}
+          .
+        </AgentNotice>
       )}
-      {backend && !canDiscover && (
-        <p className="text-xs text-muted-foreground">
-          This backend has no MCP server list of its own. Jean does not show
-          another CLI&apos;s servers here.
-        </p>
-      )}
-      {canDiscover && servers.data && servers.data.length === 0 && (
-        <p className="text-xs text-muted-foreground">
-          No MCP servers were discovered for this backend in the agent folder.
-        </p>
-      )}
-
-      <ul className="flex flex-col gap-2">
-        {(servers.data ?? []).map(server => {
-          const ref = { backend: server.backend || backend, name: server.name }
-          const selected = connectorSelected(connectors, ref)
-          const status = connectorStatus({
-            support,
-            limited,
-            selected,
-            health: health.data?.statuses[server.name],
-          })
-          return (
-            <li
-              key={`${ref.backend}:${ref.name}`}
-              className="flex items-center gap-3 rounded-md border px-3 py-2"
-            >
-              <Switch
-                checked={selected}
-                disabled={switchesDisabled}
-                aria-label={`Allow connector ${server.name}`}
-                onCheckedChange={on =>
-                  setConnectors(toggleConnector(connectors, ref, on))
-                }
-              />
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm">{server.name}</div>
-                <div className="truncate text-xs text-muted-foreground">
-                  {server.scope}
-                  {server.disabled ? ' · disabled in CLI config' : ''}
-                </div>
-              </div>
-              <Badge variant={status === 'enabled' ? 'default' : 'muted'}>
-                {connectorStatusLabel(status)}
-              </Badge>
-              {signIn && (
-                <McpSignInButton
-                  backend={signIn}
-                  serverName={server.name}
-                  worktreePath={workdir.data}
-                  serverId={agent.serverId}
-                />
-              )}
-            </li>
-          )
-        })}
-      </ul>
-
-      <div>
-        <h3 className="text-sm font-medium">Jean tools</h3>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {tools === null
-            ? 'Every Jean tool is allowed, including tools added later. Turning one off saves an allowlist of the rest. Destructive tools still wait for your approval.'
-            : 'Only the tools left on can be called. Tools added later stay off until you allow them. claude_permission_prompt stays available so Claude can ask for permission.'}
-        </p>
-      </div>
-      {catalog.isLoading && (
-        <p className="text-xs text-muted-foreground">Loading Jean tools…</p>
-      )}
-      {catalog.isError && (
-        <p className="text-xs text-destructive" role="alert">
-          Could not load the Jean tool list: {String(catalog.error)}
-        </p>
-      )}
-      <JeanToolList
-        tools={jeanTools.filter(tool => tool.dangerous)}
-        selected={tools}
-        disabled={updateAgent.isPending || jeanTools.length === 0}
-        onToggle={(name, on) =>
-          setTools(
-            toggleJeanTool(
-              tools,
-              name,
-              jeanTools.map(tool => tool.name),
-              on
-            )
-          )
-        }
-      />
-      {jeanTools.some(tool => !tool.dangerous) && (
-        <details>
-          <summary className="cursor-pointer text-xs text-muted-foreground">
-            Other Jean tools
-          </summary>
-          <div className="mt-2">
-            <JeanToolList
-              tools={jeanTools.filter(tool => !tool.dangerous)}
-              selected={tools}
-              disabled={updateAgent.isPending}
-              onToggle={(name, on) =>
-                setTools(
-                  toggleJeanTool(
-                    tools,
-                    name,
-                    jeanTools.map(tool => tool.name),
-                    on
-                  )
-                )
-              }
+      <AgentPanel>
+        <div className="flex flex-col gap-2">
+          <h4 className="text-xs font-medium text-muted-foreground">
+            MCP servers
+          </h4>
+          {backend && servers.isLoading ? (
+            <AgentLoading label="Loading connectors…" />
+          ) : backend && servers.isError ? (
+            <p className="text-xs text-destructive" role="alert">
+              Could not list MCP servers: {String(servers.error)}
+            </p>
+          ) : !backend ? (
+            <AgentEmpty
+              title="No backend is pinned"
+              description="Pick a backend in Run configuration to list its MCP servers."
             />
-          </div>
-        </details>
-      )}
+          ) : !canDiscover ? (
+            <AgentEmpty
+              title="No MCP server list"
+              description="This backend has no MCP server list of its own. Jean does not show another CLI's servers here."
+            />
+          ) : servers.data && servers.data.length === 0 ? (
+            <AgentEmpty
+              title="No MCP servers found"
+              description="No MCP servers were discovered for this backend in the agent folder."
+            />
+          ) : (
+            <AgentList>
+              {(servers.data ?? []).map(server => {
+                const ref = {
+                  backend: server.backend || backend,
+                  name: server.name,
+                }
+                const selected = connectorSelected(connectors, ref)
+                const status = connectorStatus({
+                  support,
+                  limited,
+                  selected,
+                  health: health.data?.statuses[server.name],
+                })
+                return (
+                  <li
+                    key={`${ref.backend}:${ref.name}`}
+                    className="flex items-center gap-3 px-3 py-2.5"
+                  >
+                    <Switch
+                      checked={selected}
+                      disabled={switchesDisabled}
+                      aria-label={`Allow connector ${server.name}`}
+                      onCheckedChange={on =>
+                        setConnectors(toggleConnector(connectors, ref, on))
+                      }
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm">{server.name}</div>
+                      <div className="truncate text-xs text-muted-foreground">
+                        {server.scope}
+                        {server.disabled ? ' · disabled in CLI config' : ''}
+                      </div>
+                    </div>
+                    <AgentBadge
+                      tone={status === 'enabled' ? 'active' : 'neutral'}
+                    >
+                      {connectorStatusLabel(status)}
+                    </AgentBadge>
+                    {signIn && (
+                      <McpSignInButton
+                        backend={signIn}
+                        serverName={server.name}
+                        worktreePath={workdir.data}
+                        serverId={agent.serverId}
+                      />
+                    )}
+                  </li>
+                )
+              })}
+            </AgentList>
+          )}
+        </div>
 
-      <div className="flex justify-end">
-        <Button onClick={handleSave} disabled={!dirty || updateAgent.isPending}>
-          Save connectors
-        </Button>
-      </div>
-    </div>
+        <div className="flex flex-col gap-2 pt-2">
+          <h4 className="text-xs font-medium text-muted-foreground">
+            Jean tools
+          </h4>
+          <p className="text-xs text-muted-foreground">
+            {tools === null
+              ? 'Every Jean tool is allowed, including tools added later. Turning one off saves an allowlist of the rest. Destructive tools still wait for your approval.'
+              : 'Only the tools left on can be called. Tools added later stay off until you allow them. claude_permission_prompt stays available so Claude can ask for permission.'}
+          </p>
+          {catalog.isLoading && <AgentLoading label="Loading Jean tools…" />}
+          {catalog.isError && (
+            <p className="text-xs text-destructive" role="alert">
+              Could not load the Jean tool list: {String(catalog.error)}
+            </p>
+          )}
+          <JeanToolList
+            tools={dangerousTools}
+            selected={tools}
+            disabled={updateAgent.isPending || jeanTools.length === 0}
+            onToggle={toggleTool}
+          />
+          {otherTools.length > 0 && (
+            <Collapsible open={otherOpen} onOpenChange={setOtherOpen}>
+              <CollapsibleTrigger className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground">
+                <ChevronRight
+                  className={cn(
+                    'size-3.5 transition-transform',
+                    otherOpen && 'rotate-90'
+                  )}
+                />
+                Other Jean tools ({otherTools.length})
+              </CollapsibleTrigger>
+              <CollapsibleContent className="mt-2">
+                <JeanToolList
+                  tools={otherTools}
+                  selected={tools}
+                  disabled={updateAgent.isPending}
+                  onToggle={toggleTool}
+                />
+              </CollapsibleContent>
+            </Collapsible>
+          )}
+        </div>
+
+        <SaveFooter
+          dirty={dirty}
+          pending={updateAgent.isPending}
+          label="Save connectors"
+          onDiscard={() => {
+            setConnectors(savedConnectors)
+            setTools(savedTools)
+          }}
+          onSave={handleSave}
+        />
+      </AgentPanel>
+    </AgentSection>
   )
 }
 
@@ -272,9 +343,9 @@ function JeanToolList({
 }) {
   if (tools.length === 0) return null
   return (
-    <ul className="flex flex-col gap-2">
+    <AgentList>
       {tools.map(tool => (
-        <li key={tool.name} className="flex items-center gap-3">
+        <li key={tool.name} className="flex items-center gap-3 px-3 py-2">
           <Switch
             checked={jeanToolSelected(selected, tool.name)}
             disabled={disabled}
@@ -284,9 +355,9 @@ function JeanToolList({
           <span className="min-w-0 flex-1 truncate font-mono text-xs">
             {tool.name}
           </span>
-          {tool.dangerous && <Badge variant="destructive">Dangerous</Badge>}
+          {tool.dangerous && <AgentBadge tone="danger">Dangerous</AgentBadge>}
         </li>
       ))}
-    </ul>
+    </AgentList>
   )
 }

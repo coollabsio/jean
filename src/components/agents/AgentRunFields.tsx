@@ -1,18 +1,27 @@
+import { RotateCcw } from '@/components/icons/reicon'
+import { DesktopBackendModelPicker } from '@/components/chat/toolbar/DesktopBackendModelPicker'
+import { ReasoningLevelDropdown } from '@/components/chat/toolbar/ReasoningLevelDropdown'
+import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { useInstalledBackends } from '@/hooks/useInstalledBackends'
+import { usePreferences } from '@/services/preferences'
 import { useAllBackendSkills } from '@/services/skills'
 import type { CliBackend } from '@/types/preferences'
 import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import {
+  AGENT_DEFAULT_OPTION,
   backendChoices,
   effortOptionsForBackend,
-  modelOptionsForBackend,
+  fromPickerValue,
+  pickerBackend,
   skillChoices,
   thinkingOptionsForBackend,
   toggleSkill,
+  toPickerValue,
   withBackend,
+  withBackendModel,
+  withDefaultReasoningOption,
   type AgentRunDraft,
 } from './agent-config'
 
@@ -22,131 +31,146 @@ interface AgentRunFieldsProps {
   idPrefix: string
   /** Server that runs the agent */
   serverId: string
+  /** Label of the backend/model row */
+  label?: string
+  /** What "Default" falls back to, e.g. "the agent's settings" */
+  inheritFrom?: string
+  /** Classes for picker popovers, e.g. a z-index above a raised dialog */
+  popoverClassName?: string
 }
 
-function SelectField({
-  id,
-  label,
-  hint,
-  value,
-  disabled,
-  options,
-  onChange,
-}: {
-  id: string
-  label: string
-  hint: string
-  value: string
-  disabled?: boolean
-  options: { value: string; label: string }[]
-  onChange: (value: string) => void
-}) {
-  return (
-    <div className="space-y-1.5 [&_[data-slot=native-select-wrapper]]:w-full">
-      <Label htmlFor={id}>{label}</Label>
-      <NativeSelect
-        id={id}
-        value={value}
-        disabled={disabled}
-        onChange={event => onChange(event.target.value)}
-      >
-        <NativeSelectOption value="">Default</NativeSelectOption>
-        {options.map(option => (
-          <NativeSelectOption key={option.value} value={option.value}>
-            {option.label}
-          </NativeSelectOption>
-        ))}
-      </NativeSelect>
-      <p className="text-xs text-muted-foreground">{hint}</p>
-    </div>
-  )
+const DEFAULT_MODEL_OPTION = {
+  value: AGENT_DEFAULT_OPTION,
+  label: 'Default model',
 }
 
-/** Backend, model, reasoning, and skills for one agent. */
+const FORM_TRIGGER =
+  'h-9 rounded-md border border-input bg-transparent px-3 text-sm dark:bg-input/30 dark:hover:bg-input/50'
+
+/** Backend, model, reasoning, and skills for one agent or subagent type. */
 export function AgentRunFields({
   value,
   onChange,
   idPrefix,
   serverId,
+  label = 'Backend and model',
+  inheritFrom = 'a new chat',
+  popoverClassName,
 }: AgentRunFieldsProps) {
-  // Installed backends and skill files are read on this machine. They do not
-  // apply to an agent that runs on a remote server.
   const local = serverId === LOCAL_SERVER_ID
-  const { installedBackends, isLoading } = useInstalledBackends()
-  const backends = backendChoices(
-    local ? installedBackends : [],
-    value.backend,
-    isLoading
+  const { data: preferences } = usePreferences(serverId)
+  const { installedBackends, isLoading } = useInstalledBackends({ serverId })
+  const backends = backendChoices(installedBackends, value.backend, isLoading)
+  const backendValues = backends.map(option => option.value)
+  const selectedBackend = pickerBackend(
+    value,
+    preferences?.default_backend,
+    backendValues
   )
+  // Skill files are read on this machine; they do not apply to remote agents
   const skillBackend = !local
     ? []
     : value.backend
       ? [value.backend as CliBackend]
-      : backends.map(option => option.value)
+      : backendValues
   const groups = useAllBackendSkills(undefined, skillBackend)
   const skills = skillChoices(groups, value.backend)
-  const models = modelOptionsForBackend(value.backend)
   const efforts = effortOptionsForBackend(value.backend)
   const thinking = thinkingOptionsForBackend(value.backend)
+  const inherits = !value.backend
 
   return (
-    <div className="space-y-4">
-      <SelectField
-        id={`${idPrefix}-backend`}
-        label="Backend"
-        hint={
-          value.backend === 'cursor'
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-2">
+        <div className="flex min-h-7 items-center justify-between gap-2">
+          <Label>{label}</Label>
+          {!inherits && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs text-muted-foreground"
+              onClick={() => onChange(withBackend(value, ''))}
+            >
+              <RotateCcw />
+              Use default
+            </Button>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <DesktopBackendModelPicker
+            triggerClassName={`!flex min-w-0 flex-1 basis-56 max-w-none justify-between ${FORM_TRIGGER}`}
+            selectedBackend={selectedBackend}
+            selectedModel={
+              inherits ? AGENT_DEFAULT_OPTION : toPickerValue(value.model)
+            }
+            selectedProvider={null}
+            installedBackends={backendValues}
+            customCliProfiles={preferences?.custom_cli_profiles ?? []}
+            defaultModelOption={DEFAULT_MODEL_OPTION}
+            triggerLabel={
+              inherits ? (
+                <span className="text-foreground">
+                  Default{' '}
+                  <span className="text-muted-foreground">
+                    · same as {inheritFrom}
+                  </span>
+                </span>
+              ) : undefined
+            }
+            keyboardShortcuts={false}
+            popoverClassName={popoverClassName}
+            onModelChange={model =>
+              onChange(withBackendModel(value, selectedBackend, model))
+            }
+            onBackendModelChange={(backend, model) =>
+              onChange(withBackendModel(value, backend, model))
+            }
+          />
+          {efforts.length > 0 && (
+            <ReasoningLevelDropdown
+              label="Effort"
+              showLabel
+              value={toPickerValue(value.effort)}
+              options={withDefaultReasoningOption(efforts)}
+              active={value.effort !== ''}
+              triggerClassName={FORM_TRIGGER}
+              contentClassName={popoverClassName}
+              onValueChange={effort =>
+                onChange({ ...value, effort: fromPickerValue(effort) })
+              }
+            />
+          )}
+          {thinking.length > 0 && (
+            <ReasoningLevelDropdown
+              label="Thinking"
+              showLabel
+              value={toPickerValue(value.thinkingLevel)}
+              options={withDefaultReasoningOption(thinking)}
+              active={
+                value.thinkingLevel !== '' && value.thinkingLevel !== 'off'
+              }
+              triggerClassName={FORM_TRIGGER}
+              contentClassName={popoverClassName}
+              onValueChange={thinkingLevel =>
+                onChange({
+                  ...value,
+                  thinkingLevel: fromPickerValue(thinkingLevel),
+                })
+              }
+            />
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {value.backend === 'cursor'
             ? 'Cursor has no Build mode, so wake-ups run in Yolo mode without approval prompts.'
-            : 'Default uses the same backend as a new chat.'
-        }
-        value={value.backend}
-        options={backends}
-        onChange={backend => onChange(withBackend(value, backend))}
-      />
-      <SelectField
-        id={`${idPrefix}-model`}
-        label="Model"
-        hint={
-          value.backend
-            ? 'Default uses your saved model for this backend.'
-            : 'Choose a backend to pick a model.'
-        }
-        value={
-          models.some(option => option.value === value.model) ? value.model : ''
-        }
-        disabled={!value.backend}
-        options={models}
-        onChange={model => onChange({ ...value, model })}
-      />
-      {efforts.length > 0 && (
-        <SelectField
-          id={`${idPrefix}-effort`}
-          label="Effort"
-          hint="Default leaves effort unset, the same as a new chat."
-          value={
-            efforts.some(option => option.value === value.effort)
-              ? value.effort
-              : ''
-          }
-          options={efforts}
-          onChange={effort => onChange({ ...value, effort })}
-        />
-      )}
-      {thinking.length > 0 && (
-        <SelectField
-          id={`${idPrefix}-thinking`}
-          label="Thinking"
-          hint="Default leaves thinking unset."
-          value={
-            thinking.some(option => option.value === value.thinkingLevel)
-              ? value.thinkingLevel
-              : ''
-          }
-          options={thinking}
-          onChange={thinkingLevel => onChange({ ...value, thinkingLevel })}
-        />
-      )}
-      <div className="space-y-1.5">
+            : inherits
+              ? `Default uses the backend and model of ${inheritFrom}. Pick one to pin it.`
+              : 'Default model, effort, and thinking keep your saved choices for this backend.'}
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-2">
         <Label>Skills</Label>
         {!local ? (
           <p className="text-xs text-muted-foreground">
@@ -156,13 +180,12 @@ export function AgentRunFields({
               : ''}
           </p>
         ) : skills.length === 0 ? (
-          <p className="text-xs text-muted-foreground">
-            No skills discovered
-            {value.backend ? ' for this backend' : ''}. Jean lists the skills
-            already installed for each backend.
+          <p className="rounded-lg border border-dashed px-3 py-3 text-xs text-muted-foreground">
+            No skills discovered{value.backend ? ' for this backend' : ''}. Jean
+            lists the skills already installed for each backend.
           </p>
         ) : (
-          <div className="max-h-40 space-y-1 overflow-y-auto rounded-md border p-2">
+          <div className="max-h-48 divide-y divide-border/60 overflow-y-auto rounded-lg border">
             {skills.map(skill => {
               const checked = value.skills.some(
                 item => item.path === skill.path
@@ -172,7 +195,7 @@ export function AgentRunFields({
                 <label
                   key={skill.path}
                   htmlFor={inputId}
-                  className="flex cursor-pointer items-start gap-2 rounded-sm px-1 py-1 hover:bg-muted/60"
+                  className="flex cursor-pointer items-start gap-2.5 px-3 py-2 hover:bg-muted/40"
                 >
                   <Checkbox
                     id={inputId}

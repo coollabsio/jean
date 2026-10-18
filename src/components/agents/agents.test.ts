@@ -10,10 +10,11 @@ import {
   agentRowDot,
   agentServers,
   filterAgentsByServer,
+  splitCoordinators,
 } from './AgentsSidebar'
 import { agentStatusLabel, agentSubtitle, findAgent } from './agents'
 import { describeApproval, formatRelative } from './AgentActivity'
-import { taskStatusLabel } from './AgentTasks'
+import { groupTasks, taskStatusLabel } from './AgentTasks'
 import { formatInterval } from './AgentSchedules'
 import { notificationPreview, splitNotifications } from './AgentInbox'
 import { enabledAgentServers } from './agents-feature'
@@ -305,5 +306,33 @@ describe('notificationPreview', () => {
       'Disk check: ok'
     )
     expect(notificationPreview('   ')).toBe('')
+  })
+})
+
+describe('splitCoordinators', () => {
+  it('puts built-in coordinators apart from user agents, keeping order', () => {
+    const { coordinators, custom } = splitCoordinators([
+      agent({ id: 'reviewer', builtin: false }),
+      agent({}),
+      agent({ id: 'docs', builtin: false }),
+    ])
+    expect(coordinators.map(a => a.id)).toEqual(['jean'])
+    expect(custom.map(a => a.id)).toEqual(['reviewer', 'docs'])
+  })
+})
+
+describe('groupTasks', () => {
+  it('separates running and waiting tasks from finished ones', () => {
+    const task = (id: number, status: string) =>
+      ({ id, status }) as Parameters<typeof groupTasks>[0][number]
+    const { active, finished } = groupTasks([
+      task(1, 'done'),
+      task(2, 'running'),
+      task(3, 'failed'),
+      task(4, 'waiting'),
+      task(5, 'cancelled'),
+    ])
+    expect(active.map(t => t.id)).toEqual([2, 4])
+    expect(finished.map(t => t.id)).toEqual([1, 3, 5])
   })
 })

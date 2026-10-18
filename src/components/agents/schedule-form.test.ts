@@ -7,6 +7,7 @@ import {
   formatScheduleWhen,
   formFromSchedule,
   scheduleInputFromForm,
+  scheduleKindLabel,
   scheduleUpdateFromForm,
   timezoneOptions,
   validateCronExpression,
@@ -174,5 +175,16 @@ describe('scheduleUpdateFromForm', () => {
       timezone: 'UTC',
       event: undefined,
     })
+  })
+})
+
+describe('scheduleKindLabel', () => {
+  it('names the trigger type', () => {
+    expect(scheduleKindLabel(schedule({ event: 'pr_merged' }))).toBe('Event')
+    expect(scheduleKindLabel(schedule({ cron: '0 9 * * 1-5' }))).toBe('Cron')
+    expect(scheduleKindLabel(schedule({ everySecs: 3600 }))).toBe('Interval')
+    expect(
+      scheduleKindLabel(schedule({ everySecs: null, cron: null, event: null }))
+    ).toBe('Once')
   })
 })

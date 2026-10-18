@@ -173,6 +173,54 @@ export function withBackend(
   }
 }
 
+/** Picker value for "inherit": the draft stores it as an empty string. */
+export const AGENT_DEFAULT_OPTION = '__default__'
+
+export function toPickerValue(value: string): string {
+  return value || AGENT_DEFAULT_OPTION
+}
+
+export function fromPickerValue(value: string): string {
+  return value === AGENT_DEFAULT_OPTION ? '' : value
+}
+
+/** Apply a backend + model picked in the shared backend/model picker. */
+export function withBackendModel(
+  draft: AgentRunDraft,
+  backend: string,
+  model: string
+): AgentRunDraft {
+  const next = backend === draft.backend ? draft : withBackend(draft, backend)
+  return { ...next, model: fromPickerValue(model) }
+}
+
+/** Backend the picker opens on: the agent's own, else the new-chat default. */
+export function pickerBackend(
+  draft: AgentRunDraft,
+  fallback: string | undefined,
+  choices: readonly string[]
+): CliBackend {
+  if (isCliBackend(draft.backend)) return draft.backend
+  if (fallback && isCliBackend(fallback) && choices.includes(fallback))
+    return fallback
+  const first = choices.find(isCliBackend)
+  return first ?? 'claude'
+}
+
+/** Effort or thinking options with a leading "Default" (inherit) entry. */
+export function withDefaultReasoningOption<T extends LabeledOption>(
+  options: readonly T[]
+): (LabeledOption & { description?: string })[] {
+  return [
+    {
+      value: AGENT_DEFAULT_OPTION,
+      label: 'Default',
+      description: 'Same as a new chat',
+    },
+    ...options,
+  ]
+}
+
 export function draftFromAgent(
   agent: Pick<
     AgentSummary,

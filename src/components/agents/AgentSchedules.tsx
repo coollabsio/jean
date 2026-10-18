@@ -22,12 +22,23 @@ import {
   type ScheduleKind,
 } from '@/services/agents'
 import { formatRelative } from './AgentActivity'
+import { cn } from '@/lib/utils'
+import {
+  AgentBadge,
+  AgentEmpty,
+  AgentList,
+  AgentLoading,
+  AgentNotice,
+  AgentSection,
+  AgentTabBody,
+} from './agent-ui'
 import {
   SCHEDULE_EVENTS,
   emptyScheduleForm,
   formFromSchedule,
   formatScheduleWhen,
   scheduleInputFromForm,
+  scheduleKindLabel,
   scheduleUpdateFromForm,
   timezoneOptions,
   validateScheduleForm,
@@ -61,7 +72,7 @@ function ScheduleEditor({
   const zones = timezoneOptions(form.timezone)
   return (
     <form
-      className="space-y-3 rounded-md border px-3 py-3"
+      className="flex flex-col gap-3 rounded-lg border p-4"
       onSubmit={event => {
         event.preventDefault()
         setAttempted(true)
@@ -216,16 +227,16 @@ function ScheduleEditor({
       {attempted && error && (
         <p className="text-xs text-destructive">{error}</p>
       )}
-      <div className="flex gap-2">
+      <div className="-mx-4 -mb-4 mt-1 flex justify-end gap-2 border-t bg-muted/20 px-4 py-2.5">
+        <Button size="sm" type="button" variant="ghost" onClick={onClose}>
+          Cancel
+        </Button>
         <Button
           size="sm"
           type="submit"
           disabled={pending || (attempted && Boolean(error))}
         >
-          {form.scheduleId === null ? 'Create' : 'Save'}
-        </Button>
-        <Button size="sm" type="button" variant="outline" onClick={onClose}>
-          Cancel
+          {form.scheduleId === null ? 'Create routine' : 'Save'}
         </Button>
       </div>
     </form>
@@ -245,26 +256,36 @@ function ScheduleRow({
   const update = useUpdateAgentSchedule()
   const onError = (error: unknown) => toast.error(`Failed: ${error}`)
   return (
-    <li className="flex items-start gap-3 rounded-md border px-3 py-2">
+    <li
+      className={cn(
+        'flex items-start gap-3 px-3 py-2.5',
+        schedule.paused && 'opacity-70'
+      )}
+    >
       <div className="min-w-0 flex-1">
-        <p className="flex items-baseline gap-2 text-sm">
-          <span className="truncate text-foreground">{schedule.name}</span>
-          <span className="shrink-0 text-xs text-muted-foreground">
-            {formatScheduleWhen(schedule)}
-            {schedule.lastRunAt && !schedule.event
-              ? ` · last ran ${formatRelative(schedule.lastRunAt)}`
-              : ''}
+        <p className="flex items-center gap-2 text-sm">
+          <span className="truncate font-medium text-foreground">
+            {schedule.name}
           </span>
+          <AgentBadge>{scheduleKindLabel(schedule)}</AgentBadge>
+          {schedule.paused && <AgentBadge tone="attention">Paused</AgentBadge>}
         </p>
-        <p className="line-clamp-2 text-xs text-muted-foreground">
+        <p className="mt-0.5 truncate text-xs text-muted-foreground">
+          {formatScheduleWhen(schedule)}
+          {schedule.lastRunAt && !schedule.event
+            ? ` · last ran ${formatRelative(schedule.lastRunAt)}`
+            : ''}
+        </p>
+        <p className="mt-1 line-clamp-2 text-xs text-muted-foreground/80">
           {schedule.prompt}
         </p>
       </div>
-      <div className="flex shrink-0 gap-0.5">
+      <div className="flex shrink-0 gap-0.5 text-muted-foreground">
         <Button
           size="icon-sm"
           variant="ghost"
           aria-label={schedule.paused ? 'Resume routine' : 'Pause routine'}
+          title={schedule.paused ? 'Resume' : 'Pause'}
           disabled={update.isPending}
           onClick={() =>
             update.mutate(
@@ -279,6 +300,7 @@ function ScheduleRow({
           size="icon-sm"
           variant="ghost"
           aria-label="Edit routine"
+          title="Edit"
           onClick={() => onEdit(schedule)}
         >
           <Pencil />
@@ -287,6 +309,7 @@ function ScheduleRow({
           size="icon-sm"
           variant="ghost"
           aria-label="Delete routine"
+          title="Delete"
           disabled={cancel.isPending}
           onClick={() =>
             cancel.mutate({ agentId, scheduleId: schedule.id }, { onError })
@@ -329,56 +352,61 @@ export function AgentSchedules({ agent }: { agent: AgentSummary }) {
     )
   }
 
+  const schedules = data?.schedules ?? []
+  const newButton = (
+    <Button
+      size="sm"
+      variant="outline"
+      onClick={() => setForm(emptyScheduleForm())}
+    >
+      <Plus />
+      New routine
+    </Button>
+  )
+
   return (
-    <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
-      <div className="flex items-start justify-between gap-3">
-        <p className="text-xs text-muted-foreground">
-          Each run starts a background task. Cron uses a 5-field expression in
-          the chosen timezone. Events wake the agent when something already
-          happens in Jean.
-        </p>
-        {form === null && (
-          <Button
-            size="sm"
-            variant="outline"
-            className="shrink-0"
-            onClick={() => setForm(emptyScheduleForm())}
-          >
-            <Plus />
-            New routine
-          </Button>
+    <AgentTabBody>
+      <AgentSection
+        title="Routines"
+        count={isLoading ? undefined : schedules.length}
+        description="Each run starts a background task. Cron uses a 5-field expression in the chosen timezone. Events wake the agent when something happens in Jean."
+        actions={form === null ? newButton : null}
+      >
+        {agent.paused && (
+          <AgentNotice>
+            The agent is stopped. Routines do not run until you resume it.
+          </AgentNotice>
         )}
-      </div>
-      {agent.paused && (
-        <p className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
-          The agent is stopped. Schedules do not run until you resume it.
-        </p>
-      )}
-      {form && (
-        <ScheduleEditor
-          form={form}
-          pending={pending}
-          onChange={setForm}
-          onClose={() => setForm(null)}
-          onSave={save}
-        />
-      )}
-      {isLoading ? (
-        <p className="text-xs text-muted-foreground">Loading schedules…</p>
-      ) : data?.schedules.length ? (
-        <ul className="space-y-2">
-          {data.schedules.map(schedule => (
-            <ScheduleRow
-              key={schedule.id}
-              schedule={schedule}
-              agentId={agent.id}
-              onEdit={item => setForm(formFromSchedule(item))}
-            />
-          ))}
-        </ul>
-      ) : (
-        <p className="text-xs text-muted-foreground">No schedules.</p>
-      )}
-    </div>
+        {form && (
+          <ScheduleEditor
+            form={form}
+            pending={pending}
+            onChange={setForm}
+            onClose={() => setForm(null)}
+            onSave={save}
+          />
+        )}
+        {isLoading ? (
+          <AgentLoading label="Loading routines…" />
+        ) : schedules.length ? (
+          <AgentList>
+            {schedules.map(schedule => (
+              <ScheduleRow
+                key={schedule.id}
+                schedule={schedule}
+                agentId={agent.id}
+                onEdit={item => setForm(formFromSchedule(item))}
+              />
+            ))}
+          </AgentList>
+        ) : form === null ? (
+          <AgentEmpty
+            title="No routines yet"
+            description="Run a prompt on a timer, a cron schedule, or when something happens in Jean, like a merged pull request."
+            action={newButton}
+          />
+        ) : null}
+      </AgentSection>
+    </AgentTabBody>
   )
 }

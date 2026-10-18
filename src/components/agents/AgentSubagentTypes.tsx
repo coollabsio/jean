@@ -17,6 +17,15 @@ import {
 } from '@/services/agents'
 import { AgentRunFields } from './AgentRunFields'
 import {
+  AgentBadge,
+  AgentEmpty,
+  AgentList,
+  AgentLoading,
+  AgentPanel,
+  AgentSection,
+  AgentTabBody,
+} from './agent-ui'
+import {
   EMPTY_SUBAGENT_TYPE,
   PERMISSION_MODE_OPTIONS,
   TOOL_MODE_OPTIONS,
@@ -47,115 +56,128 @@ function TypeEditor({
   const error = validateSubagentTypeDraft(draft)
   return (
     <form
-      className="space-y-3 rounded-md border px-3 py-3"
       onSubmit={event => {
         event.preventDefault()
         setAttempted(true)
         if (!error) onSave()
       }}
     >
-      <p className="text-sm font-medium">
-        {draft.id === null ? 'New subagent type' : `Edit ${draft.name}`}
-      </p>
-      <div className="space-y-1">
-        <Label htmlFor="subagent-name">Name</Label>
-        <Input
-          id="subagent-name"
-          value={draft.name}
-          maxLength={64}
-          onChange={event => onChange({ ...draft, name: event.target.value })}
-        />
-      </div>
-      <div className="space-y-1">
-        <Label htmlFor="subagent-description">Description</Label>
-        <Input
-          id="subagent-description"
-          value={draft.description}
-          maxLength={500}
-          onChange={event =>
-            onChange({ ...draft, description: event.target.value })
-          }
-        />
-      </div>
-      <div className="space-y-1">
-        <Label htmlFor="subagent-instructions">Instructions</Label>
-        <Textarea
-          id="subagent-instructions"
-          value={draft.instructions}
-          rows={4}
-          placeholder="Role prompt for this type. Leave blank to use the agent's role."
-          onChange={event =>
-            onChange({ ...draft, instructions: event.target.value })
-          }
-        />
-      </div>
-      <label className="flex items-center gap-2 text-sm">
-        <Checkbox
-          checked={draft.shared}
-          onCheckedChange={checked =>
-            onChange({ ...draft, shared: checked === true })
-          }
-        />
-        Shared with every agent
-      </label>
-      <AgentRunFields
-        idPrefix="subagent-type"
-        serverId={serverId}
-        value={draft}
-        onChange={run => onChange({ ...draft, ...run })}
-      />
-      <div className="space-y-1.5 [&_[data-slot=native-select-wrapper]]:w-full">
-        <Label htmlFor="subagent-permission">Permission mode</Label>
-        <NativeSelect
-          id="subagent-permission"
-          value={draft.permissionMode}
-          onChange={event =>
-            onChange({ ...draft, permissionMode: event.target.value })
-          }
-        >
-          <NativeSelectOption value="">Agent default</NativeSelectOption>
-          {PERMISSION_MODE_OPTIONS.map(option => (
-            <NativeSelectOption key={option.value} value={option.value}>
-              {option.label}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
-      </div>
-      <div className="space-y-1.5 [&_[data-slot=native-select-wrapper]]:w-full">
-        <Label htmlFor="subagent-tools">Tools</Label>
-        <NativeSelect
-          id="subagent-tools"
-          value={draft.toolMode}
-          onChange={event =>
-            onChange({ ...draft, toolMode: event.target.value })
-          }
-        >
-          <NativeSelectOption value="">All tools</NativeSelectOption>
-          {TOOL_MODE_OPTIONS.map(option => (
-            <NativeSelectOption key={option.value} value={option.value}>
-              {option.label}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
-        <p className="text-xs text-muted-foreground">
-          Read only limits the Jean tools to list, search, and notify. It does
-          not stop file edits or shell commands; use Plan for that. Delete,
-          push, and pull requests still need approval with all tools.
+      <AgentPanel>
+        <p className="text-sm font-medium">
+          {draft.id === null ? 'New subagent type' : `Edit ${draft.name}`}
         </p>
-      </div>
-      {attempted && error ? (
-        <p className="text-xs text-destructive" role="alert">
-          {error}
-        </p>
-      ) : null}
-      <div className="flex justify-end gap-2">
-        <Button type="button" variant="ghost" onClick={onClose}>
-          Cancel
-        </Button>
-        <Button type="submit" disabled={pending}>
-          Save
-        </Button>
-      </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="subagent-name">Name</Label>
+            <Input
+              id="subagent-name"
+              value={draft.name}
+              maxLength={64}
+              placeholder="Changelog drafter"
+              aria-invalid={attempted && Boolean(error) && !draft.name.trim()}
+              onChange={event =>
+                onChange({ ...draft, name: event.target.value })
+              }
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="subagent-description">Description</Label>
+            <Input
+              id="subagent-description"
+              value={draft.description}
+              maxLength={500}
+              placeholder="What this worker is for"
+              onChange={event =>
+                onChange({ ...draft, description: event.target.value })
+              }
+            />
+          </div>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="subagent-instructions">Instructions</Label>
+          <Textarea
+            id="subagent-instructions"
+            value={draft.instructions}
+            rows={4}
+            placeholder="Role prompt for this type. Leave blank to use the agent's role."
+            onChange={event =>
+              onChange({ ...draft, instructions: event.target.value })
+            }
+          />
+        </div>
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox
+            checked={draft.shared}
+            onCheckedChange={checked =>
+              onChange({ ...draft, shared: checked === true })
+            }
+          />
+          Shared with every agent
+        </label>
+        <div className="border-t pt-3">
+          <AgentRunFields
+            idPrefix="subagent-type"
+            serverId={serverId}
+            value={draft}
+            inheritFrom="this agent"
+            onChange={run => onChange({ ...draft, ...run })}
+          />
+        </div>
+        <div className="grid gap-3 border-t pt-3 sm:grid-cols-2 [&_[data-slot=native-select-wrapper]]:w-full">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="subagent-permission">Permission mode</Label>
+            <NativeSelect
+              id="subagent-permission"
+              value={draft.permissionMode}
+              onChange={event =>
+                onChange({ ...draft, permissionMode: event.target.value })
+              }
+            >
+              <NativeSelectOption value="">Agent default</NativeSelectOption>
+              {PERMISSION_MODE_OPTIONS.map(option => (
+                <NativeSelectOption key={option.value} value={option.value}>
+                  {option.label}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="subagent-tools">Tools</Label>
+            <NativeSelect
+              id="subagent-tools"
+              value={draft.toolMode}
+              onChange={event =>
+                onChange({ ...draft, toolMode: event.target.value })
+              }
+            >
+              <NativeSelectOption value="">All tools</NativeSelectOption>
+              {TOOL_MODE_OPTIONS.map(option => (
+                <NativeSelectOption key={option.value} value={option.value}>
+                  {option.label}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          </div>
+          <p className="text-xs text-muted-foreground sm:col-span-2">
+            Read only limits the Jean tools to list, search, and notify. It does
+            not stop file edits or shell commands; use Plan for that. Delete,
+            push, and pull requests still need approval with all tools.
+          </p>
+        </div>
+        {attempted && error ? (
+          <p className="text-xs text-destructive" role="alert">
+            {error}
+          </p>
+        ) : null}
+        <div className="-mx-4 -mb-4 flex justify-end gap-2 border-t bg-muted/20 px-4 py-2.5">
+          <Button type="button" size="sm" variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" size="sm" disabled={pending}>
+            {draft.id === null ? 'Create type' : 'Save'}
+          </Button>
+        </div>
+      </AgentPanel>
     </form>
   )
 }
@@ -195,60 +217,69 @@ function TypeRow({
   }
 
   return (
-    <li className="rounded-md border px-3 py-2">
-      <div className="flex items-start gap-2">
+    <li className="px-3 py-2.5">
+      <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium">
-            {type.name}
-            {type.shared ? (
-              <span className="ml-2 text-xs font-normal text-muted-foreground">
-                Shared
-              </span>
-            ) : null}
+          <p className="flex items-center gap-2 text-sm font-medium">
+            <span className="truncate">{type.name}</span>
+            {type.shared ? <AgentBadge>Shared</AgentBadge> : null}
           </p>
-          <p className="truncate text-xs text-muted-foreground">
-            {[type.description, summary].filter(Boolean).join(' · ')}
-          </p>
+          {type.description ? (
+            <p className="truncate text-xs text-muted-foreground">
+              {type.description}
+            </p>
+          ) : null}
+          {summary ? (
+            <p className="mt-1 truncate text-[11px] text-muted-foreground/80">
+              {summary}
+            </p>
+          ) : null}
         </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => setOpen(value => !value)}
-        >
-          <Play />
-          Run
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          aria-label={`Edit ${type.name}`}
-          onClick={() => onEdit(type)}
-        >
-          <Pencil />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          aria-label={`Delete ${type.name}`}
-          disabled={remove.isPending}
-          onClick={() =>
-            remove.mutate(
-              { agentId: agent.id, typeId: type.id },
-              {
-                onSuccess: () => toast.success(`${type.name} deleted`),
-                onError: error => toast.error(`Failed to delete: ${error}`),
-              }
-            )
-          }
-        >
-          <Trash2 />
-        </Button>
+        <div className="flex shrink-0 items-center gap-0.5">
+          <Button
+            type="button"
+            variant={open ? 'secondary' : 'outline'}
+            size="sm"
+            className="mr-1"
+            aria-expanded={open}
+            onClick={() => setOpen(value => !value)}
+          >
+            <Play />
+            Run
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label={`Edit ${type.name}`}
+            title="Edit"
+            onClick={() => onEdit(type)}
+          >
+            <Pencil />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label={`Delete ${type.name}`}
+            title="Delete"
+            disabled={remove.isPending}
+            onClick={() =>
+              remove.mutate(
+                { agentId: agent.id, typeId: type.id },
+                {
+                  onSuccess: () => toast.success(`${type.name} deleted`),
+                  onError: error => toast.error(`Failed to delete: ${error}`),
+                }
+              )
+            }
+          >
+            <Trash2 />
+          </Button>
+        </div>
       </div>
       {open ? (
-        <div className="mt-2 space-y-2">
+        <div className="mt-3 flex flex-col gap-2 rounded-md bg-muted/30 p-3">
           <Label htmlFor={`subagent-task-${type.id}`}>Task</Label>
           <Textarea
             id={`subagent-task-${type.id}`}
@@ -256,8 +287,17 @@ function TypeRow({
             rows={3}
             placeholder="What this subagent should do"
             onChange={event => setTask(event.target.value)}
+            autoFocus
           />
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => setOpen(false)}
+            >
+              Cancel
+            </Button>
             <Button
               type="button"
               size="sm"
@@ -299,54 +339,66 @@ export function AgentSubagentTypes({ agent }: { agent: AgentSummary }) {
   }
 
   return (
-    <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-medium">Subagent types</h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Named workers this agent can spawn. A type can override the backend,
-            model, effort, skills, and tools. The result comes back as an
-            update. A subagent cannot define types or spawn children.
-          </p>
-        </div>
-        {draft === null ? (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setDraft(EMPTY_SUBAGENT_TYPE)}
-          >
-            <Plus />
-            New type
-          </Button>
+    <AgentTabBody>
+      <AgentSection
+        title="Subagent types"
+        count={isLoading ? undefined : types.length}
+        description="Named workers this agent can spawn. A type can override the backend, model, effort, skills, and tools. The result comes back as an update. A subagent cannot define types or spawn children."
+        actions={
+          draft === null ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setDraft(EMPTY_SUBAGENT_TYPE)}
+            >
+              <Plus />
+              New type
+            </Button>
+          ) : null
+        }
+      >
+        {draft ? (
+          <TypeEditor
+            draft={draft}
+            serverId={agent.serverId}
+            pending={save.isPending}
+            onChange={setDraft}
+            onClose={() => setDraft(null)}
+            onSave={handleSave}
+          />
         ) : null}
-      </div>
-      {draft ? (
-        <TypeEditor
-          draft={draft}
-          serverId={agent.serverId}
-          pending={save.isPending}
-          onChange={setDraft}
-          onClose={() => setDraft(null)}
-          onSave={handleSave}
-        />
-      ) : null}
-      {isLoading ? (
-        <p className="text-xs text-muted-foreground">Loading types…</p>
-      ) : types.length ? (
-        <ul className="space-y-2">
-          {types.map(type => (
-            <TypeRow
-              key={type.id}
-              agent={agent}
-              type={type}
-              onEdit={type => setDraft(draftFromSubagentType(type))}
-            />
-          ))}
-        </ul>
-      ) : (
-        <p className="text-xs text-muted-foreground">No subagent types yet.</p>
-      )}
-    </div>
+        {isLoading ? (
+          <AgentLoading label="Loading types…" />
+        ) : types.length ? (
+          <AgentList>
+            {types.map(type => (
+              <TypeRow
+                key={type.id}
+                agent={agent}
+                type={type}
+                onEdit={type => setDraft(draftFromSubagentType(type))}
+              />
+            ))}
+          </AgentList>
+        ) : draft === null ? (
+          <AgentEmpty
+            title="No subagent types yet"
+            description="Create a type for work you hand off often, like drafting a changelog or investigating CI."
+            action={
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setDraft(EMPTY_SUBAGENT_TYPE)}
+              >
+                <Plus />
+                New type
+              </Button>
+            }
+          />
+        ) : null}
+      </AgentSection>
+    </AgentTabBody>
   )
 }

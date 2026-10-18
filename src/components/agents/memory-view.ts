@@ -65,6 +65,18 @@ export function memorySearchActive(filters: MemorySearchFilters): boolean {
   )
 }
 
+/** Filters set besides the search text, for the Filters button badge. */
+export function activeFilterCount(filters: MemorySearchFilters): number {
+  return [
+    filters.kind,
+    filters.scope,
+    filters.pinned,
+    filters.from,
+    filters.to,
+    filters.project.trim(),
+  ].filter(value => value !== '').length
+}
+
 export function journalSearchActive(filters: MemorySearchFilters): boolean {
   return filters.query.trim() !== '' || filters.from !== '' || filters.to !== ''
 }
@@ -162,6 +174,35 @@ export function groupJournalByDay(
     else groups.push({ day, entries: [entry] })
   }
   return groups
+}
+
+/** Heading for a `formatDay` group: Today, Yesterday, or "Fri 16 Oct". */
+export function journalDayLabel(day: string, now = new Date()): string {
+  const toKey = (date: Date) =>
+    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+  if (day === toKey(now)) return 'Today'
+  const yesterday = new Date(now)
+  yesterday.setDate(now.getDate() - 1)
+  if (day === toKey(yesterday)) return 'Yesterday'
+  const match = DATE_INPUT.exec(day)
+  if (!match) return day
+  const date = new Date(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3])
+  )
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  }).formatToParts(date)
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find(item => item.type === type)?.value ?? ''
+  const label = `${part('weekday')} ${part('day')} ${part('month')}`
+  return date.getFullYear() === now.getFullYear()
+    ? label
+    : `${label} ${part('year')}`
 }
 
 export function journalSourceLabel(source: string): string {

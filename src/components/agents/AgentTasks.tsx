@@ -6,7 +6,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { cn } from '@/lib/utils'
 import {
   useAgentDetails,
   type AgentSummary,
@@ -15,6 +14,15 @@ import {
 import { useChatStore } from '@/store/chat-store'
 import { formatRelative } from './AgentActivity'
 import { taskKindLabel } from './subagent-types'
+import {
+  AgentBadge,
+  AgentEmpty,
+  AgentList,
+  AgentLoading,
+  AgentSection,
+  AgentTabBody,
+  statusTone,
+} from './agent-ui'
 
 const ChatWindow = lazy(() =>
   import('@/components/chat/ChatWindow').then(mod => ({
@@ -35,6 +43,19 @@ export function taskStatusLabel(status: string): string {
   return status === 'waiting' ? 'waiting for sessions' : status
 }
 
+/** Running and waiting tasks first; finished ones apart. Order is kept. */
+export function groupTasks(tasks: AgentTask[]): {
+  active: AgentTask[]
+  finished: AgentTask[]
+} {
+  const isActive = (task: AgentTask) =>
+    task.status === 'running' || task.status === 'waiting'
+  return {
+    active: tasks.filter(isActive),
+    finished: tasks.filter(task => !isActive(task)),
+  }
+}
+
 function TaskRow({
   task,
   onOpen,
@@ -46,19 +67,24 @@ function TaskRow({
     <li>
       <button
         type="button"
-        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent/50"
+        className="flex w-full items-start gap-3 px-3 py-2.5 text-left transition-colors hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-none"
         onClick={() => onOpen(task)}
       >
-        <span className="min-w-0 flex-1 truncate text-foreground">
-          {task.title}
-        </span>
-        <span className={cn('shrink-0 text-xs', STATUS_STYLES[task.status])}>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm text-foreground">{task.title}</p>
+          <p className="mt-0.5 truncate text-xs text-muted-foreground">
+            {taskKindLabel(task.kind, task.subagentTypeName)} · updated{' '}
+            {formatRelative(task.updatedAt)}
+          </p>
+          {task.summary ? (
+            <p className="mt-1 line-clamp-1 text-xs text-muted-foreground/80">
+              {task.summary}
+            </p>
+          ) : null}
+        </div>
+        <AgentBadge tone={statusTone(task.status)} className="mt-0.5">
           {taskStatusLabel(task.status)}
-        </span>
-        <span className="shrink-0 text-xs text-muted-foreground">
-          {taskKindLabel(task.kind, task.subagentTypeName)} ·{' '}
-          {formatRelative(task.updatedAt)}
-        </span>
+        </AgentBadge>
       </button>
     </li>
   )
@@ -82,22 +108,53 @@ export function AgentTasks({
     setOpenTask(task)
   }
 
+  const { active, finished } = groupTasks(data?.tasks ?? [])
+
   return (
-    <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-4 py-4">
-      <p className="text-xs text-muted-foreground">
-        Schedules, follow-ups and agent requests run here, apart from your chat.
-        Finished tasks are archived after 3 days.
-      </p>
+    <AgentTabBody>
       {isLoading ? (
-        <p className="text-xs text-muted-foreground">Loading tasks…</p>
-      ) : data?.tasks.length ? (
-        <ul className="space-y-0.5">
-          {data.tasks.map(task => (
-            <TaskRow key={task.id} task={task} onOpen={handleOpen} />
-          ))}
-        </ul>
+        <AgentLoading label="Loading tasks…" />
+      ) : active.length === 0 && finished.length === 0 ? (
+        <AgentSection
+          title="Tasks"
+          description="Routines, follow-ups, and agent requests run here, apart from your chat. Finished tasks are archived after 3 days."
+        >
+          <AgentEmpty
+            title="No tasks"
+            description="Tasks appear when a routine runs, a subagent is spawned, or the agent follows up on work."
+          />
+        </AgentSection>
       ) : (
-        <p className="text-xs text-muted-foreground">No open tasks.</p>
+        <>
+          <AgentSection
+            title="Active"
+            count={active.length}
+            description="Routines, follow-ups, and agent requests run here, apart from your chat. Open a task to see its session."
+          >
+            {active.length ? (
+              <AgentList>
+                {active.map(task => (
+                  <TaskRow key={task.id} task={task} onOpen={handleOpen} />
+                ))}
+              </AgentList>
+            ) : (
+              <AgentEmpty title="Nothing running right now." />
+            )}
+          </AgentSection>
+          {finished.length > 0 && (
+            <AgentSection
+              title="Finished"
+              count={finished.length}
+              description="Archived after 3 days."
+            >
+              <AgentList>
+                {finished.map(task => (
+                  <TaskRow key={task.id} task={task} onOpen={handleOpen} />
+                ))}
+              </AgentList>
+            </AgentSection>
+          )}
+        </>
       )}
       <Dialog
         open={openTask !== null && workdir !== undefined}
@@ -145,6 +202,6 @@ export function AgentTasks({
           )}
         </DialogContent>
       </Dialog>
-    </div>
+    </AgentTabBody>
   )
 }
