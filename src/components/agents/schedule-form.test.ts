@@ -7,6 +7,7 @@ import {
   formatScheduleWhen,
   formFromSchedule,
   scheduleInputFromForm,
+  scheduleUpdateFromForm,
   timezoneOptions,
   validateCronExpression,
   validateScheduleForm,
@@ -143,5 +144,33 @@ describe('schedule input', () => {
     expect(stored.kind).toBe('interval')
     expect(stored.everyAmount).toBe('2')
     expect(stored.everyUnit).toBe('hours')
+  })
+})
+
+describe('scheduleUpdateFromForm', () => {
+  it('omits timing when only the name changes, so the routine keeps its time', () => {
+    const once = schedule({ name: 'Brief', prompt: 'Summarize' })
+    const renamed = { ...formFromSchedule(once), name: 'Morning brief' }
+    expect(scheduleUpdateFromForm(renamed, once)).toEqual({
+      name: 'Morning brief',
+      prompt: 'Summarize',
+      paused: false,
+    })
+  })
+
+  it('sends the new timing when it changed', () => {
+    const cron = schedule({ cron: '0 9 * * 1-5', timezone: 'UTC' })
+    const moved = { ...formFromSchedule(cron), cron: '0 10 * * 1-5' }
+    expect(scheduleUpdateFromForm(moved, cron)).toEqual({
+      name: 'Brief',
+      prompt: 'Summarize',
+      paused: false,
+      kind: 'cron',
+      everySecs: undefined,
+      delaySecs: undefined,
+      cron: '0 10 * * 1-5',
+      timezone: 'UTC',
+      event: undefined,
+    })
   })
 })

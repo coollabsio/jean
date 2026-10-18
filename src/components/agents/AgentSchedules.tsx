@@ -28,6 +28,7 @@ import {
   formFromSchedule,
   formatScheduleWhen,
   scheduleInputFromForm,
+  scheduleUpdateFromForm,
   timezoneOptions,
   validateScheduleForm,
   type ScheduleForm,
@@ -317,8 +318,13 @@ export function AgentSchedules({ agent }: { agent: AgentSummary }) {
       )
       return
     }
+    const original = data?.schedules.find(item => item.id === form.scheduleId)
     update.mutate(
-      { agentId: agent.id, scheduleId: form.scheduleId, ...input },
+      {
+        agentId: agent.id,
+        scheduleId: form.scheduleId,
+        ...(original ? scheduleUpdateFromForm(form, original) : input),
+      },
       { onSuccess: () => setForm(null), onError }
     )
   }

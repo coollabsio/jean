@@ -10,6 +10,7 @@ import {
   steerGrokTurn,
   steerOpencodeTurn,
   steerPiTurn,
+  steerClaudeTurn,
 } from '@/services/chat'
 import type { ExecutionMode, Session } from '@/types/chat'
 import type * as ChatService from '@/services/chat'
@@ -82,6 +83,7 @@ vi.mock('@/services/chat', async importOriginal => {
     steerGrokTurn: vi.fn(),
     steerOpencodeTurn: vi.fn(),
     steerPiTurn: vi.fn(),
+    steerClaudeTurn: vi.fn(),
   }
 })
 
@@ -91,6 +93,7 @@ function renderUseMessageSending({
   opencodeAutoSteer,
   piAutoSteer,
   grokAutoSteer,
+  claudeAutoSteer,
   inputValue = '/goal Ship the feature',
   selectedBackend = 'codex',
   selectedModel = 'gpt-5.5',
@@ -115,6 +118,7 @@ function renderUseMessageSending({
   opencodeAutoSteer?: boolean
   piAutoSteer?: boolean
   grokAutoSteer?: boolean
+  claudeAutoSteer?: boolean
   inputValue?: string
   selectedBackend?:
     | 'claude'
@@ -166,6 +170,7 @@ function renderUseMessageSending({
         opencode_auto_steer_enabled: opencodeAutoSteer,
         pi_auto_steer_enabled: piAutoSteer,
         grok_auto_steer_enabled: grokAutoSteer,
+        claude_auto_steer_enabled: claudeAutoSteer,
       },
       sendMessage,
       createSession,
@@ -1184,6 +1189,97 @@ describe('useMessageSending Codex auto-steer', () => {
     })
 
     expect(steerOpencodeTurn).not.toHaveBeenCalled()
+    expect(persistEnqueue).toHaveBeenCalled()
+    expect(useChatStore.getState().messageQueues['session-1']).toHaveLength(1)
+  })
+
+  it('steers the running claude turn when claude steering is enabled', async () => {
+    vi.mocked(steerClaudeTurn).mockResolvedValue(undefined)
+    const { result, sendMessage } = renderUseMessageSending({
+      selectedBackend: 'claude',
+      claudeAutoSteer: true,
+      inputValue: 'also run echo STEERED',
+    })
+
+    await act(async () => {
+      await result.current.handleSubmit({
+        preventDefault: vi.fn(),
+      } as unknown as React.FormEvent)
+    })
+
+    expect(steerClaudeTurn).toHaveBeenCalledWith(
+      'worktree-1',
+      'session-1',
+      'also run echo STEERED'
+    )
+    expect(persistEnqueue).not.toHaveBeenCalled()
+    expect(sendMessage.mutate).not.toHaveBeenCalled()
+  })
+
+  it('queues claude prompts when claude steering is disabled, even with forceSteer', async () => {
+    const { result } = renderUseMessageSending({
+      selectedBackend: 'claude',
+      claudeAutoSteer: false,
+      inputValue: 'wait for it',
+    })
+
+    await act(async () => {
+      await result.current.handleSubmit(
+        { preventDefault: vi.fn() } as unknown as React.FormEvent,
+        { forceSteer: true }
+      )
+    })
+
+    expect(steerClaudeTurn).not.toHaveBeenCalled()
+    expect(persistEnqueue).toHaveBeenCalled()
+    expect(useChatStore.getState().messageQueues['session-1']).toHaveLength(1)
+  })
+
+  it('steers claude prompts with attachments as path refs', async () => {
+    vi.mocked(steerClaudeTurn).mockResolvedValue(undefined)
+    const { result } = renderUseMessageSending({
+      selectedBackend: 'claude',
+      claudeAutoSteer: true,
+      inputValue: 'look at this',
+    })
+    useChatStore.setState({
+      pendingImages: {
+        'session-1': [
+          { id: 'img-1', path: '/tmp/img.png', filename: 'img.png' },
+        ],
+      },
+    })
+
+    await act(async () => {
+      await result.current.handleSubmit({
+        preventDefault: vi.fn(),
+      } as unknown as React.FormEvent)
+    })
+
+    expect(steerClaudeTurn).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(steerClaudeTurn).mock.calls[0]?.[2]).toContain(
+      '/tmp/img.png'
+    )
+    expect(persistEnqueue).not.toHaveBeenCalled()
+  })
+
+  it('falls back to queueing when claude steering fails', async () => {
+    vi.mocked(steerClaudeTurn).mockRejectedValue(
+      new Error('Claude run is not steerable')
+    )
+    const { result } = renderUseMessageSending({
+      selectedBackend: 'claude',
+      claudeAutoSteer: true,
+      inputValue: 'also check the tests',
+    })
+
+    await act(async () => {
+      await result.current.handleSubmit({
+        preventDefault: vi.fn(),
+      } as unknown as React.FormEvent)
+    })
+
+    expect(steerClaudeTurn).toHaveBeenCalled()
     expect(persistEnqueue).toHaveBeenCalled()
     expect(useChatStore.getState().messageQueues['session-1']).toHaveLength(1)
   })

@@ -177,7 +177,7 @@ pub async fn create_agent(
     })?;
     // The home chat is created on first list. Stamp it now so the toolbar
     // shows this agent's backend and model before the user sends a message.
-    if let Err(e) = super::engine::home_session(app, &agent).await {
+    if let Err(e) = super::engine::apply_run_config_to_home(app, &agent).await {
         log::warn!(
             "[Agents] could not prepare home session for {}: {e}",
             agent.id
@@ -196,7 +196,7 @@ pub async fn update_agent(
     let pausing = patch.paused == Some(true);
     let agent = super::with_db(app, |conn| db::update_agent(conn, agent_id, &patch))?;
     if patch.changes_run_config() {
-        if let Err(e) = super::engine::home_session(app, &agent).await {
+        if let Err(e) = super::engine::apply_run_config_to_home(app, &agent).await {
             log::warn!(
                 "[Agents] could not update home session for {}: {e}",
                 agent.id
@@ -304,7 +304,9 @@ fn timing_from_kind(
             db::validate_schedule_timing(None, None, None, None, Some(now_unix + delay), now_unix)
         }
         "interval" => {
-            let every = every_secs.ok_or_else(|| "Interval requires everySecs".to_string())?;
+            let every = every_secs
+                .filter(|secs| *secs > 0)
+                .ok_or_else(|| "Interval requires a positive everySecs".to_string())?;
             db::validate_schedule_timing(
                 Some(every),
                 None,
@@ -552,6 +554,17 @@ pub async fn spawn_subagent(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn interval_kind_rejects_non_positive_seconds() {
+        for every in [None, Some(0), Some(-300)] {
+            let err =
+                timing_from_kind("interval", every, None, None, None, None, 1_000).unwrap_err();
+            assert!(err.contains("everySecs"), "{err}");
+        }
+        let ok = timing_from_kind("interval", Some(600), None, None, None, None, 1_000).unwrap();
+        assert_eq!((ok.every_secs, ok.next_run_at), (Some(600), 1_600));
+    }
 
     #[test]
     fn activity_preview_takes_first_clean_line() {

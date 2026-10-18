@@ -43,7 +43,7 @@ interface MagicCommandHandlers {
   ) => void
   handleReviewComments: (
     prompt: string | string[],
-    options?: { executionMode?: ExecutionMode }
+    options?: { executionMode?: ExecutionMode; override?: InvestigateOverride }
   ) => void
 }
 
@@ -239,9 +239,11 @@ export function useMagicCommands({
             prompt?: string
             prompts?: string[]
             executionMode?: ExecutionMode
+            override?: InvestigateOverride
           }
           handlers.handleReviewComments(detail.prompts ?? detail.prompt ?? '', {
             executionMode: detail.executionMode,
+            override: detail.override,
           })
           break
         }
@@ -282,7 +284,10 @@ export function useMagicCommands({
         if (pendingMagicCommand.prompts?.length || pendingMagicCommand.prompt) {
           handlers.handleReviewComments(
             pendingMagicCommand.prompts ?? pendingMagicCommand.prompt ?? '',
-            { executionMode: pendingMagicCommand.executionMode }
+            {
+              executionMode: pendingMagicCommand.executionMode,
+              override: pendingMagicCommand.override,
+            }
           )
         }
         break

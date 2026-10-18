@@ -265,6 +265,16 @@ fn next_run(expr: &CronExpr, after_unix: i64, tz: Tz) -> Result<i64, String> {
     // Stay on this wall-clock minute. A fall-back hour has two real instants
     // for the same minute, and the later one can still be in the future.
     let mut local = truncate_minute(start.naive_local())?;
+    // In the earlier pass of a fall-back hour, the rest of that pass comes
+    // first, then the whole hour again in the later offset.
+    if let LocalResult::Ambiguous(early, _) = tz.from_local_datetime(&local) {
+        if (0..60).contains(&(after_unix - early.timestamp())) {
+            if let Some(unix) = next_in_early_pass(expr, &tz, local)? {
+                return Ok(unix);
+            }
+            local = overlap_start(&tz, local)?;
+        }
+    }
     for _ in 0..SEARCH_MINUTES {
         if !expr.months[local.month() as usize] {
             local = next_month_start(local, expr)?;
@@ -288,6 +298,44 @@ fn next_run(expr: &CronExpr, after_unix: i64, tz: Tz) -> Result<i64, String> {
         }
     }
     Err("Cron expression has no run in the next 4 years".to_string())
+}
+
+fn matches(expr: &CronExpr, local: NaiveDateTime) -> bool {
+    expr.months[local.month() as usize]
+        && day_matches(expr, local.date())
+        && expr.hours[local.hour() as usize]
+        && expr.minutes[local.minute() as usize]
+}
+
+/// First match after `local` that is still in the earlier pass of the overlap.
+fn next_in_early_pass(
+    expr: &CronExpr,
+    tz: &Tz,
+    local: NaiveDateTime,
+) -> Result<Option<i64>, String> {
+    let mut wall = add_minutes(local, 1)?;
+    while let LocalResult::Ambiguous(early, _) = tz.from_local_datetime(&wall) {
+        if matches(expr, wall) {
+            return Ok(Some(early.timestamp()));
+        }
+        wall = add_minutes(wall, 1)?;
+    }
+    Ok(None)
+}
+
+/// First wall-clock minute of the fall-back overlap that contains `local`.
+fn overlap_start(tz: &Tz, local: NaiveDateTime) -> Result<NaiveDateTime, String> {
+    let mut wall = local;
+    loop {
+        let previous = add_minutes(wall, -1)?;
+        if !matches!(
+            tz.from_local_datetime(&previous),
+            LocalResult::Ambiguous(..)
+        ) {
+            return Ok(wall);
+        }
+        wall = previous;
+    }
 }
 
 fn day_matches(expr: &CronExpr, date: NaiveDate) -> bool {
@@ -576,6 +624,47 @@ mod tests {
             NaiveDate::from_ymd_opt(2026, 11, 2).unwrap()
         );
         assert_eq!((shown.hour(), shown.minute()), (1, 30));
+    }
+
+    #[test]
+    fn fall_back_keeps_every_slot_in_both_passes() {
+        let zone = tz("America/New_York");
+        let expr = parse("*/5 * * * *").unwrap();
+        let wall = |hour, minute| {
+            NaiveDate::from_ymd_opt(2026, 11, 1)
+                .unwrap()
+                .and_hms_opt(hour, minute, 0)
+                .unwrap()
+        };
+        let (early_one, late_one) = match zone.from_local_datetime(&wall(1, 0)) {
+            LocalResult::Ambiguous(early, late) => (early.timestamp(), late.timestamp()),
+            other => panic!("expected the overlap, got {other:?}"),
+        };
+        assert_eq!(next_run(&expr, early_one, zone).unwrap(), early_one + 300);
+        let early_last = early_one + 55 * 60;
+        assert_eq!(next_run(&expr, early_last, zone).unwrap(), late_one);
+        assert_eq!(next_run(&expr, late_one, zone).unwrap(), late_one + 300);
+
+        let mut prev = early_one - 300;
+        let mut runs = 0;
+        while prev < late_one + 3600 {
+            let next = next_run(&expr, prev, zone).unwrap();
+            assert_eq!(next - prev, 300, "gap after {prev}");
+            prev = next;
+            runs += 1;
+        }
+        assert_eq!(runs, 25);
+
+        // Only 1:30 matches: the earlier pass has nothing left after 1:45.
+        let half = parse("30 1 * * *").unwrap();
+        let late_half = match zone.from_local_datetime(&wall(1, 30)) {
+            LocalResult::Ambiguous(_, late) => late.timestamp(),
+            other => panic!("expected the overlap, got {other:?}"),
+        };
+        assert_eq!(
+            next_run(&half, early_one + 45 * 60, zone).unwrap(),
+            late_half
+        );
     }
 
     #[test]

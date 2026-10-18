@@ -24,6 +24,7 @@ import {
   type CodexMcpElicitationRequest,
   type CodexDynamicToolCallRequest,
   type ExecutionMode,
+  type SendMessageArgs,
   type PermissionMode,
   type LabelData,
   type ScheduledWakeup,
@@ -200,6 +201,13 @@ interface ChatUIState {
   // Last sent message per session (for restoring on error)
   lastSentMessages: Record<string, string>
 
+  // Full send args per session (captured at send time) so a background
+  // auto-continue can replay the exact send after a usage limit resets.
+  lastSentArgs: Record<string, SendMessageArgs>
+
+  // Sessions armed for auto-continue → reset epoch (ms) to wait for
+  autoResume: Record<string, number>
+
   // Last sent attachments per session (for restoring on cancellation)
   lastSentAttachments: Record<
     string,
@@ -315,6 +323,7 @@ interface ChatUIState {
     prompt?: string
     prompts?: string[]
     executionMode?: ExecutionMode
+    override?: { backend: CliBackend; model: string }
   } | null
   setPendingMagicCommand: (
     cmd: {
@@ -322,6 +331,7 @@ interface ChatUIState {
       prompt?: string
       prompts?: string[]
       executionMode?: ExecutionMode
+      override?: { backend: CliBackend; model: string }
     } | null
   ) => void
 
@@ -557,6 +567,9 @@ interface ChatUIState {
   setError: (sessionId: string, error: string | null) => void
   setLastSentMessage: (sessionId: string, message: string) => void
   clearLastSentMessage: (sessionId: string) => void
+  setLastSentArgs: (sessionId: string, args: SendMessageArgs) => void
+  armAutoResume: (sessionId: string, resumeAtMs: number) => void
+  disarmAutoResume: (sessionId: string) => void
   setLastSentAttachments: (
     sessionId: string,
     attachments: {
@@ -976,6 +989,8 @@ export const useChatStore = create<ChatUIState>()(
       submittedAnswers: {},
       errors: {},
       lastSentMessages: {},
+      lastSentArgs: {},
+      autoResume: {},
       lastSentAttachments: {},
       setupScriptResults: {},
       dismissedSetupScripts: {},
@@ -2967,6 +2982,38 @@ export const useChatStore = create<ChatUIState>()(
           },
           undefined,
           'clearLastSentMessage'
+        ),
+
+      setLastSentArgs: (sessionId, args) =>
+        set(
+          state => ({
+            lastSentArgs: { ...state.lastSentArgs, [sessionId]: args },
+          }),
+          undefined,
+          'setLastSentArgs'
+        ),
+
+      armAutoResume: (sessionId, resumeAtMs) =>
+        set(
+          state => {
+            if (state.autoResume[sessionId] === resumeAtMs) return state
+            return {
+              autoResume: { ...state.autoResume, [sessionId]: resumeAtMs },
+            }
+          },
+          undefined,
+          'armAutoResume'
+        ),
+
+      disarmAutoResume: sessionId =>
+        set(
+          state => {
+            if (!(sessionId in state.autoResume)) return state
+            const { [sessionId]: _, ...rest } = state.autoResume
+            return { autoResume: rest }
+          },
+          undefined,
+          'disarmAutoResume'
         ),
 
       setLastSentAttachments: (sessionId, attachments) =>

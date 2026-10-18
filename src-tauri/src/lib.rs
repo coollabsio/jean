@@ -35,6 +35,7 @@ fn should_run_server() -> bool {
         "-V",
         "--jean-mcp-stdio",
         "--jean-pi-rpc-host",
+        "--jean-claude-host",
         "--jean-grok-acp-host",
         "--jean-kimi-acp-host",
     ];
