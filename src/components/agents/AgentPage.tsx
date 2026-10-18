@@ -13,6 +13,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { cn } from '@/lib/utils'
 import {
   useAgentWorkdir,
@@ -23,7 +24,12 @@ import {
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import { LOCAL_SERVER_ID } from '@/types/server-resource'
-import { agentStatusLabel, useSelectedAgent } from './agents'
+import {
+  agentStatusLabel,
+  useSelectedAgent,
+  visibleAgentTabs,
+  type AgentTab,
+} from './agents'
 import { AgentActivity, PendingApprovals } from './AgentActivity'
 import { AgentMemoryView } from './AgentMemoryView'
 import { AgentTasks } from './AgentTasks'
@@ -44,16 +50,6 @@ const LOADING = (
     Loading agent…
   </div>
 )
-
-type AgentTab =
-  | 'chat'
-  | 'inbox'
-  | 'tasks'
-  | 'subagents'
-  | 'schedules'
-  | 'activity'
-  | 'memory'
-  | 'settings'
 
 function unavailableMessage(error: unknown): string {
   return String(error).includes('Unknown command')
@@ -79,7 +75,11 @@ export function AgentPage() {
 }
 
 function AgentPageContent({ agent }: { agent: AgentSummary }) {
-  const [tab, setTab] = useState<AgentTab>('chat')
+  const [selectedTab, setTab] = useState<AgentTab>('chat')
+  const advanced = useUIStore(state => state.agentsAdvanced)
+  const shownTabs = visibleAgentTabs(advanced, agent, selectedTab)
+  // Turning Advanced off while on an advanced-only tab returns to Chat
+  const tab = shownTabs.includes(selectedTab) ? selectedTab : 'chat'
   const { data: workdir, error } = useAgentWorkdir(agent.id)
   // The chat tab always shows the agent's current chat (a long chat
   // continues in a new one).
@@ -118,7 +118,7 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
       }
     )
 
-  const tabs: {
+  const allTabs: {
     id: AgentTab
     label: string
     badge?: number
@@ -134,6 +134,7 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
     { id: 'memory', label: 'Memory' },
     { id: 'settings', label: 'Settings' },
   ]
+  const tabs = allTabs.filter(item => shownTabs.includes(item.id))
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col font-sans">
@@ -166,6 +167,19 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
               .join(' · ')}
           </p>
         </div>
+        <label
+          className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground select-none hover:text-foreground"
+          title="Show tasks, subagents, activity, memory, settings, and tool activity in chat"
+        >
+          <Checkbox
+            checked={advanced}
+            onCheckedChange={value =>
+              useUIStore.getState().setAgentsAdvanced(value === true)
+            }
+            aria-label="Advanced"
+          />
+          Advanced
+        </label>
         <Button
           variant="outline"
           size="sm"
@@ -247,6 +261,9 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
                   isModal
                   worktreeId={agent.worktreeId}
                   worktreePath={workdir}
+                  workingLabel={
+                    advanced ? undefined : `${agent.name} is working`
+                  }
                 />
               </Suspense>
             ) : (

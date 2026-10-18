@@ -322,6 +322,11 @@ function useStableMutation<T extends { mutate: unknown; mutateAsync: unknown }>(
   return useMemo(() => ({ mutate, mutateAsync }), [mutate, mutateAsync])
 }
 
+/** Tool calls that wait for the user and must stay visible in a quiet chat. */
+function needsUserInput(toolCall: ToolCall): boolean {
+  return isAskUserQuestion(toolCall) || isPlanToolCall(toolCall)
+}
+
 interface ChatWindowProps {
   /** When true, hides terminal panel and other elements not needed in modal */
   isModal?: boolean
@@ -329,6 +334,12 @@ interface ChatWindowProps {
   worktreeId?: string
   /** Override worktree path (used in modal mode to avoid setting global state) */
   worktreePath?: string
+  /**
+   * Quiet chat (agents): compact history, and while a turn runs only this
+   * label and the timer instead of tool activity. Questions and plans still
+   * render because they need the user.
+   */
+  workingLabel?: string
 }
 
 // PERFORMANCE: memoized - props are primitives, so parents re-rendering
@@ -353,6 +364,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
   isModal = false,
   worktreeId: propWorktreeId,
   worktreePath: propWorktreePath,
+  workingLabel,
 }: ChatWindowProps = {}) {
   const isMobile = useIsMobile()
   const zenMode = useUIStore(state => state.zenMode)
@@ -2493,6 +2505,8 @@ const ChatWindowContent = memo(function ChatWindowContent({
     return -1
   }, [messages])
 
+  const compactView =
+    Boolean(preferences?.compact_chat_view_enabled) || Boolean(workingLabel)
   const compactHistoryWindow = useMemo(
     () => getCurrentPromptWindow(messages),
     [messages]
@@ -2533,7 +2547,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
   }, [isCompactHistoryExpanded, scrollViewportRef])
   const handleShowTableInChat = useShowTableInChat({
     sessionId: deferredSessionId,
-    isCompact: Boolean(preferences?.compact_chat_view_enabled),
+    isCompact: compactView,
     compactStartIndex: compactHistoryWindow.startIndex,
     isCompactHistoryExpanded,
     onExpandCompactHistory: handleShowHiddenCompactPrompts,
@@ -2783,7 +2797,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                       projectId={worktree?.project_id}
                                     />
                                   )}
-                                {preferences?.compact_chat_view_enabled ? (
+                                {compactView ? (
                                   <CompactMessageList
                                     ref={virtualizedListRef}
                                     messages={compactMessages}
@@ -2942,7 +2956,9 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                 {(currentStreamingContentBlocks.length > 0 ||
                                   currentToolCalls.length > 0 ||
                                   streamingContent.trim().length > 0) &&
-                                  (preferences?.compact_chat_view_enabled ? (
+                                  (!workingLabel ||
+                                    currentToolCalls.some(needsUserInput)) &&
+                                  (compactView ? (
                                     <CompactStreamingTicker
                                       sessionId={activeSessionId}
                                       contentBlocks={
@@ -2986,6 +3002,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                     />
                                   ))}
                                 <StreamingStatusBar
+                                  workingLabel={workingLabel}
                                   isSending={isSending}
                                   sendStartedAt={sendStartedAt}
                                   restoredRunStatus={
@@ -3212,7 +3229,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                 onClearGoal={handleClearGoal}
                               />
                             )}
-                            {preferences?.compact_chat_view_enabled &&
+                            {compactView &&
                               !zenMode &&
                               !isCompactHistoryExpanded &&
                               compactHistoryWindow.hiddenPromptCount > 0 && (

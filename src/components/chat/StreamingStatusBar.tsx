@@ -1,5 +1,6 @@
 import { memo } from 'react'
 import type { RunStatus } from '@/types/chat'
+import { WorkingWaveform } from '@/components/ui/status-indicator'
 import { useElapsedTime } from './hooks/useElapsedTime'
 
 interface StreamingStatusBarProps {
@@ -8,6 +9,8 @@ interface StreamingStatusBarProps {
   restoredRunStatus?: RunStatus
   restoredExecutionMode?: string
   completedDurationMs?: number | null
+  /** Quiet chats: "<agent> is working" next to the timer */
+  workingLabel?: string
 }
 
 export function shouldShowRestoredRun({
@@ -39,6 +42,7 @@ export const StreamingStatusBar = memo(function StreamingStatusBar({
   restoredRunStatus,
   restoredExecutionMode,
   completedDurationMs,
+  workingLabel,
 }: StreamingStatusBarProps) {
   const elapsed = useElapsedTime(isSending ? sendStartedAt : null)
 
@@ -50,6 +54,21 @@ export const StreamingStatusBar = memo(function StreamingStatusBar({
   const visible = isSending || showRestored
 
   if (!visible) return null
+
+  if (workingLabel) {
+    return (
+      <div
+        className="mt-1 inline-flex min-h-5 items-center gap-2 text-sm text-muted-foreground select-none"
+        role="status"
+      >
+        <WorkingWaveform />
+        <span>{workingLabel}</span>
+        <span className="font-mono text-xs tabular-nums text-muted-foreground/60">
+          {showRestored ? '…' : (elapsed ?? '0s')}
+        </span>
+      </div>
+    )
+  }
 
   return (
     <div className="mt-1 inline-flex min-h-4 items-center text-xs text-muted-foreground/40 tabular-nums font-mono select-none">

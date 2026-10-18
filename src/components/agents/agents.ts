@@ -64,3 +64,43 @@ export function agentStatusLabel(agent: AgentSummary): string {
     return `Following ${agent.activeDelegations} session${agent.activeDelegations === 1 ? '' : 's'}`
   return 'Idle'
 }
+
+export type AgentTab =
+  | 'chat'
+  | 'inbox'
+  | 'tasks'
+  | 'subagents'
+  | 'schedules'
+  | 'activity'
+  | 'memory'
+  | 'settings'
+
+const ALL_AGENT_TABS: AgentTab[] = [
+  'chat',
+  'inbox',
+  'tasks',
+  'subagents',
+  'schedules',
+  'activity',
+  'memory',
+  'settings',
+]
+
+/**
+ * Tabs of an agent page. Without Advanced: Chat and Schedules, plus Inbox
+ * while it has unread messages or is open (reading them must not hide it).
+ */
+export function visibleAgentTabs(
+  advanced: boolean,
+  agent: Pick<AgentSummary, 'unreadNotifications'>,
+  current: AgentTab
+): AgentTab[] {
+  if (advanced) return ALL_AGENT_TABS
+  return ALL_AGENT_TABS.filter(
+    tab =>
+      tab === 'chat' ||
+      tab === 'schedules' ||
+      (tab === 'inbox' &&
+        (agent.unreadNotifications > 0 || current === 'inbox'))
+  )
+}

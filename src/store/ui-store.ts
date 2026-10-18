@@ -126,6 +126,8 @@ interface UIState {
   selectedAgentId: string
   /** Agents sidebar server filter: 'all' or a server ID */
   agentsServerFilter: string
+  /** Agent pages show every tab and tool activity (off: Chat and Schedules) */
+  agentsAdvanced: boolean
   leftSidebarSize: number // Width in pixels, persisted across sessions
   /** File browser (worktree explorer) visibility */
   fileBrowserVisible: boolean
@@ -246,6 +248,7 @@ interface UIState {
   setRailSection: (section: RailSection) => void
   setSelectedAgentId: (agentId: string) => void
   setAgentsServerFilter: (serverId: string) => void
+  setAgentsAdvanced: (advanced: boolean) => void
   setLeftSidebarSize: (size: number) => void
   leftSidebarSwipe: {
     isDragging: boolean
@@ -416,6 +419,7 @@ export const useUIStore = create<UIState>()(
       railSection: 'workspace',
       selectedAgentId: 'jean',
       agentsServerFilter: 'all',
+      agentsAdvanced: false,
       leftSidebarSize: 250, // Default width in pixels
       leftSidebarSwipe: {
         isDragging: false,
@@ -556,6 +560,16 @@ export const useUIStore = create<UIState>()(
               : { selectedAgentId: agentId },
           undefined,
           'setSelectedAgentId'
+        ),
+
+      setAgentsAdvanced: advanced =>
+        set(
+          state =>
+            state.agentsAdvanced === advanced
+              ? state
+              : { agentsAdvanced: advanced },
+          undefined,
+          'setAgentsAdvanced'
         ),
 
       setAgentsServerFilter: serverId =>

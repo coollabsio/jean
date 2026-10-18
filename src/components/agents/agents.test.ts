@@ -12,7 +12,12 @@ import {
   filterAgentsByServer,
   splitCoordinators,
 } from './AgentsSidebar'
-import { agentStatusLabel, agentSubtitle, findAgent } from './agents'
+import {
+  agentStatusLabel,
+  agentSubtitle,
+  findAgent,
+  visibleAgentTabs,
+} from './agents'
 import { describeApproval, formatRelative } from './AgentActivity'
 import { groupTasks, taskStatusLabel } from './AgentTasks'
 import { formatInterval } from './AgentSchedules'
@@ -334,5 +339,42 @@ describe('groupTasks', () => {
     ])
     expect(active.map(t => t.id)).toEqual([2, 4])
     expect(finished.map(t => t.id)).toEqual([1, 3, 5])
+  })
+})
+
+describe('visibleAgentTabs', () => {
+  it('shows only Chat and Schedules by default', () => {
+    expect(visibleAgentTabs(false, agent({}), 'chat')).toEqual([
+      'chat',
+      'schedules',
+    ])
+  })
+
+  it('adds Inbox while it has unread messages or is open', () => {
+    expect(
+      visibleAgentTabs(false, agent({ unreadNotifications: 2 }), 'chat')
+    ).toEqual(['chat', 'inbox', 'schedules'])
+    expect(visibleAgentTabs(false, agent({}), 'inbox')).toEqual([
+      'chat',
+      'inbox',
+      'schedules',
+    ])
+  })
+
+  it('hides advanced tabs even when one was open', () => {
+    expect(visibleAgentTabs(false, agent({}), 'memory')).not.toContain('memory')
+  })
+
+  it('shows every tab in advanced mode', () => {
+    expect(visibleAgentTabs(true, agent({}), 'chat')).toEqual([
+      'chat',
+      'inbox',
+      'tasks',
+      'subagents',
+      'schedules',
+      'activity',
+      'memory',
+      'settings',
+    ])
   })
 })
