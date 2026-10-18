@@ -562,6 +562,55 @@ describe('useQueuedPromptActions', () => {
     expect(cancelChatMessage).toHaveBeenCalledWith('session-1', 'worktree-1')
   })
 
+  it('allows editing queued muse prompts (no steer API)', async () => {
+    useChatStore.setState({
+      messageQueues: {
+        'session-1': [createMessage('msg-1', { backend: 'muse' })],
+      },
+    })
+    const { result } = renderHook(() => useQueuedPromptActions())
+
+    await act(async () => {
+      await result.current.handleEditQueuedMessage(
+        'session-1',
+        'msg-1',
+        'updated muse prompt'
+      )
+    })
+
+    expect(persistUpdateQueued).toHaveBeenCalledWith(
+      'worktree-1',
+      '/tmp/worktree-1',
+      'session-1',
+      'msg-1',
+      'updated muse prompt'
+    )
+    expect(
+      useChatStore.getState().messageQueues['session-1']?.[0]?.message
+    ).toBe('updated muse prompt')
+  })
+
+  it('busy muse session: promotes to front and cancels instead of steering', async () => {
+    useChatStore.setState({
+      sendingSessionIds: { 'session-1': true },
+      selectedBackends: { 'session-1': 'muse' },
+    })
+    const { result } = renderHook(() => useQueuedPromptActions())
+
+    await act(async () => {
+      await result.current.handleSendQueuedNow('session-1', 'msg-3')
+    })
+
+    expect(steerCodexTurn).not.toHaveBeenCalled()
+    expect(steerGrokTurn).not.toHaveBeenCalled()
+    expect(steerOpencodeTurn).not.toHaveBeenCalled()
+    expect(steerPiTurn).not.toHaveBeenCalled()
+    expect(
+      useChatStore.getState().messageQueues['session-1']?.map(m => m.id)
+    ).toEqual(['msg-3', 'msg-1', 'msg-2'])
+    expect(cancelChatMessage).toHaveBeenCalledWith('session-1', 'worktree-1')
+  })
+
   it('busy claude session with steering on: steers the running turn', async () => {
     queryClient.setQueryData(preferencesQueryKeys.preferences(), {
       claude_auto_steer_enabled: true,

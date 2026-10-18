@@ -13,6 +13,7 @@ const preferences = {
   selected_commandcode_model: 'commandcode/deepseek/deepseek-v4-flash',
   selected_kimi_model: 'kimi/custom-coding-model',
   selected_antigravity_model: 'antigravity/flash',
+  selected_muse_model: 'muse/muse-spark-1.2',
 } as unknown as AppPreferences
 
 describe('resolveDefaultModelForBackend', () => {
@@ -64,6 +65,18 @@ describe('resolveDefaultModelForBackend', () => {
     expect(
       resolveDefaultModelForBackend('antigravity', {} as AppPreferences)
     ).toBe('antigravity/auto')
+  })
+
+  it('uses the Muse model preference for Muse sessions', () => {
+    expect(resolveDefaultModelForBackend('muse', preferences)).toBe(
+      'muse/muse-spark-1.2'
+    )
+  })
+
+  it('falls back to the Muse server default model', () => {
+    expect(resolveDefaultModelForBackend('muse', {} as AppPreferences)).toBe(
+      'muse/default'
+    )
   })
 
   it('uses the first available PI provider model when the stored PI default is unavailable', () => {

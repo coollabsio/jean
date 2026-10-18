@@ -677,7 +677,8 @@ async fn open_agent_session(
 
 /// Persist the agent's backend, model, and reasoning on a session that has no
 /// messages yet. Unset backend and model mean what a new chat would use: the
-/// preference backend and that backend's preference model.
+/// preference backend and that backend's preference model. Unset effort and
+/// thinking clear any stored choice.
 async fn stamp_agent_run_config(
     app: &AppHandle,
     agent: &db::Agent,
@@ -751,6 +752,15 @@ async fn stamp_agent_run_config(
             .await?;
             session.selected_effort_level = Some(parsed);
         }
+    } else if session.selected_effort_level.is_some() {
+        crate::chat::clear_session_effort_level(
+            app.clone(),
+            worktree_id.to_string(),
+            path.to_string(),
+            session.id.clone(),
+        )
+        .await?;
+        session.selected_effort_level = None;
     }
     if let Some(thinking) = trimmed_opt(&agent.thinking_level) {
         if session
@@ -771,6 +781,15 @@ async fn stamp_agent_run_config(
             .await?;
             session.selected_thinking_level = Some(parsed);
         }
+    } else if session.selected_thinking_level.is_some() {
+        crate::chat::clear_session_thinking_level(
+            app.clone(),
+            worktree_id.to_string(),
+            path.to_string(),
+            session.id.clone(),
+        )
+        .await?;
+        session.selected_thinking_level = None;
     }
     Ok(())
 }

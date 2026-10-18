@@ -360,6 +360,7 @@ fn reconcile_completed_running_runs(
     let mut reconciled = false;
     let mut claude_session_id = metadata.claude_session_id.clone();
     let mut kimi_session_id = metadata.kimi_session_id.clone();
+    let mut muse_session_id = metadata.muse_session_id.clone();
 
     for run in &mut metadata.runs {
         if run.status != RunStatus::Running || !has_result(&run.run_id) {
@@ -379,6 +380,13 @@ fn reconcile_completed_running_runs(
             if let Some(session_id) = run.kimi_session_id.clone() {
                 kimi_session_id = Some(session_id);
             }
+        } else if run.backend.as_ref().unwrap_or(&metadata_backend) == &Backend::Muse {
+            if run.muse_session_id.is_none() {
+                run.muse_session_id = extract_provider_session_id(&run.run_id);
+            }
+            if let Some(session_id) = run.muse_session_id.clone() {
+                muse_session_id = Some(session_id);
+            }
         } else {
             if run.claude_session_id.is_none() {
                 run.claude_session_id = extract_provider_session_id(&run.run_id);
@@ -393,6 +401,7 @@ fn reconcile_completed_running_runs(
     if reconciled {
         metadata.claude_session_id = claude_session_id;
         metadata.kimi_session_id = kimi_session_id;
+        metadata.muse_session_id = muse_session_id;
         metadata.is_reviewing = false;
         if metadata.status_override.as_deref() == Some("review") {
             metadata.status_override = None;
@@ -539,6 +548,7 @@ pub fn start_run(
         grok_session_id: None,
         kimi_session_id: None,
         antigravity_session_id: None,
+        muse_session_id: None,
         checkpoint_id: None,
     };
 
@@ -1397,7 +1407,8 @@ fn should_inject_synthetic_exit_plan(
         | Backend::Pi
         | Backend::Commandcode
         | Backend::Kimi
-        | Backend::Antigravity => base_match,
+        | Backend::Antigravity
+        | Backend::Muse => base_match,
         // Grok owns live injection in grok.rs; recover plan tool on history reload
         // only when assistant text looks like a real plan (not research preamble).
         Backend::Grok => {
@@ -1449,6 +1460,14 @@ fn inject_synthetic_exit_plan(backend: &Backend, run_id: &str, assistant_msg: &m
             serde_json::json!({
                 "plan": assistant_msg.content,
                 "source": "antigravity",
+            }),
+        )
+    } else if matches!(backend, Backend::Muse) {
+        (
+            "ExitPlanMode",
+            serde_json::json!({
+                "plan": assistant_msg.content,
+                "source": "muse",
             }),
         )
     } else if matches!(backend, Backend::Grok) {
@@ -1576,6 +1595,12 @@ fn run_uses_antigravity_history_parser(metadata_backend: &Backend, run: &RunEntr
             .as_deref()
             .is_some_and(|model| model.starts_with("antigravity/"))
         || (run.model.is_none() && metadata_backend == &Backend::Antigravity)
+}
+
+fn run_uses_muse_history_parser(metadata_backend: &Backend, run: &RunEntry) -> bool {
+    run.backend.as_ref() == Some(&Backend::Muse)
+        || run.model.as_deref().is_some_and(crate::is_muse_model)
+        || (run.model.is_none() && metadata_backend == &Backend::Muse)
 }
 
 fn cancelled_codex_run_has_visible_artifacts(
@@ -1739,6 +1764,8 @@ pub fn load_session_messages_window(
                 super::kimi::parse_kimi_run_to_message(&lines, run)
             } else if run_uses_antigravity_history_parser(&metadata.backend, run) {
                 super::antigravity::parse_antigravity_run_to_message(&lines, run)
+            } else if run_uses_muse_history_parser(&metadata.backend, run) {
+                super::muse::parse_muse_run_to_message(&lines, run)
             } else {
                 parse_run_to_message(&lines, run)
             };
@@ -1852,6 +1879,21 @@ mod tests {
     use super::*;
     use crate::chat::types::SessionMetadata;
 
+    #[test]
+    fn backend_session_id_ignores_run_header() {
+        let header_only = r#"{"_run_meta":true,"session_id":"jean-session","run_id":"r1"}"#;
+        assert_eq!(last_backend_session_id(header_only.as_bytes()), None);
+
+        let with_result = format!(
+            "{header_only}\n{}\n",
+            r#"{"type":"result","session_id":"claude-session"}"#
+        );
+        assert_eq!(
+            last_backend_session_id(with_result.as_bytes()).as_deref(),
+            Some("claude-session")
+        );
+    }
+
     fn sample_run() -> RunEntry {
         RunEntry {
             run_id: "run-123".to_string(),
@@ -1878,6 +1920,7 @@ mod tests {
             grok_session_id: None,
             kimi_session_id: None,
             antigravity_session_id: None,
+            muse_session_id: None,
             checkpoint_id: None,
         }
     }
@@ -2159,6 +2202,31 @@ mod tests {
         assert_eq!(msg.tool_calls[0].name, "ExitPlanMode");
         assert_eq!(msg.tool_calls[0].input["source"], "kimi");
         assert_eq!(msg.tool_calls[0].input["plan"], "Here is the plan");
+    }
+
+    #[test]
+    fn muse_history_uses_msp_parser_and_recovers_plan_tool() {
+        let mut run = sample_run();
+        run.backend = Some(Backend::Muse);
+        run.model = Some("muse/default".to_string());
+        run.execution_mode = Some("plan".to_string());
+        let lines = vec![
+            r#"{"type":"session","session_id":"muse-1"}"#.to_string(),
+            r#"{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"itemId":"m","kind":"agentMessage","status":"completed","text":"1. Inspect"}}}"#.to_string(),
+            r#"{"type":"result","session_id":"muse-1","cancelled":false}"#.to_string(),
+        ];
+        assert!(run_uses_muse_history_parser(&Backend::Muse, &run));
+        let mut msg = super::super::muse::parse_muse_run_to_message(&lines, &run)
+            .expect("Muse history message");
+        assert_eq!(msg.content, "1. Inspect");
+        assert!(should_inject_synthetic_exit_plan(
+            &Backend::Muse,
+            &run,
+            &msg
+        ));
+        inject_synthetic_exit_plan(&Backend::Muse, &run.run_id, &mut msg);
+        assert_eq!(msg.tool_calls[0].name, "ExitPlanMode");
+        assert_eq!(msg.tool_calls[0].input["source"], "muse");
     }
 
     #[test]
@@ -2909,6 +2977,7 @@ Move services between instances without downtime.
             grok_session_id: None,
             kimi_session_id: None,
             antigravity_session_id: None,
+            muse_session_id: None,
             checkpoint_id: None,
         };
 
@@ -3306,6 +3375,11 @@ pub fn recover_incomplete_runs(app: &tauri::AppHandle) -> Result<Vec<RecoveredRu
                             if run.backend.as_ref().unwrap_or(&metadata_backend) == &Backend::Kimi {
                                 run.kimi_session_id = Some(sid.clone());
                                 metadata.kimi_session_id = Some(sid);
+                            } else if run.backend.as_ref().unwrap_or(&metadata_backend)
+                                == &Backend::Muse
+                            {
+                                run.muse_session_id = Some(sid.clone());
+                                metadata.muse_session_id = Some(sid);
                             } else if run.claude_session_id.is_none() {
                                 run.claude_session_id = Some(sid.clone());
                                 metadata.claude_session_id = Some(sid);
@@ -3517,18 +3591,26 @@ pub fn extract_session_id_from_jsonl(
         BufReader::new(file)
     };
 
+    last_backend_session_id(reader)
+}
+
+/// Last non-empty `session_id` in run JSONL lines, ignoring Jean's run header.
+fn last_backend_session_id(reader: impl BufRead) -> Option<String> {
     let mut last_session_id = None;
-    for line in reader.lines().flatten() {
-        // Look for session_id in JSON lines (typically in result or system lines)
-        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line) {
-            if let Some(sid) = val.get("session_id").and_then(|v| v.as_str()) {
-                if !sid.is_empty() {
-                    last_session_id = Some(sid.to_string());
-                }
+    for line in reader.lines().map_while(Result::ok) {
+        let Ok(val) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        // The run header carries Jean's own session id, never a backend resume id.
+        if val.get("_run_meta").is_some() {
+            continue;
+        }
+        if let Some(sid) = val.get("session_id").and_then(|v| v.as_str()) {
+            if !sid.is_empty() {
+                last_session_id = Some(sid.to_string());
             }
         }
     }
-
     last_session_id
 }
 

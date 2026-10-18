@@ -582,7 +582,8 @@ export function useMessageSending({
         selectedBackend === 'pi' ||
         selectedBackend === 'grok' ||
         selectedBackend === 'kimi' ||
-        selectedBackend === 'antigravity'
+        selectedBackend === 'antigravity' ||
+        selectedBackend === 'muse'
       const queuedMessage: QueuedMessage = {
         id: generateId(),
         message,

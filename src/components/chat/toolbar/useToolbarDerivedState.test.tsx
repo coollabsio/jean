@@ -179,6 +179,50 @@ describe('useToolbarDerivedState', () => {
     ])
   })
 
+  it('lists Muse models and labels the selected Muse model', () => {
+    const { result } = renderHook(() =>
+      useToolbarDerivedState({
+        selectedBackend: 'muse',
+        selectedProvider: null,
+        selectedModel: 'muse/muse-spark-1.2',
+        customCliProfiles: [],
+        installedBackends: ['claude', 'muse'],
+      })
+    )
+
+    expect(result.current.backendModelSections[1]).toEqual({
+      backend: 'muse',
+      label: 'Muse',
+      options: [
+        { value: 'muse/default', label: 'Default' },
+        { value: 'muse/muse-spark-1.2', label: 'Muse Spark 1.2' },
+      ],
+    })
+    expect(result.current.selectedModelLabel).toBe('Muse Spark 1.2')
+  })
+
+  it('prefers CLI-reported Muse models over the static list', () => {
+    const museModelOptions = [
+      { value: 'muse/default', label: 'Default' },
+      { value: 'muse/muse-spark-2', label: 'Muse Spark 2' },
+    ]
+    const { result } = renderHook(() =>
+      useToolbarDerivedState({
+        selectedBackend: 'muse',
+        selectedProvider: null,
+        selectedModel: 'muse/muse-spark-2',
+        museModelOptions,
+        customCliProfiles: [],
+        installedBackends: ['muse'],
+      })
+    )
+
+    expect(result.current.backendModelSections).toEqual([
+      { backend: 'muse', label: 'Muse', options: museModelOptions },
+    ])
+    expect(result.current.selectedModelLabel).toBe('Muse Spark 2')
+  })
+
   it('counts enabled MCP servers identified by backend-prefixed keys', () => {
     const { result } = renderHook(() =>
       useToolbarDerivedState({

@@ -42,6 +42,7 @@ import { useAvailableOpencodeModels } from '@/services/opencode-cli'
 import { useAvailableGrokModels } from '@/services/grok-cli'
 import { useAvailableKimiModels } from '@/services/kimi-cli'
 import { useAvailableAntigravityModels } from '@/services/antigravity-cli'
+import { useAvailableMuseModels } from '@/services/muse-cli'
 import { startCommitJob } from '@/services/commit-jobs'
 import { invoke, listen } from '@/lib/transport'
 import { dismissibleToast } from '@/lib/dismissible-toast'
@@ -84,7 +85,10 @@ import {
   refreshWorktreeSessionsCaches,
   useSession,
 } from '@/services/chat'
-import { resolveSelectedModelForBackend } from '@/lib/session-defaults'
+import {
+  resolveDefaultModelForBackend,
+  resolveSelectedModelForBackend,
+} from '@/lib/session-defaults'
 import { getModelImpliedBackend } from '@/lib/model-utils'
 import {
   clearWorktreePr,
@@ -98,6 +102,7 @@ import {
   OPENCODE_MODEL_OPTIONS,
   GROK_MODEL_OPTIONS,
   ANTIGRAVITY_MODEL_OPTIONS,
+  MUSE_MODEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
 import {
   formatGrokModelOptionLabel,
@@ -341,6 +346,10 @@ export function MagicModal() {
     enabled: installedBackends.includes('antigravity'),
     serverId: targetServerId,
   })
+  const { data: availableMuseModels } = useAvailableMuseModels({
+    enabled: installedBackends.includes('muse'),
+    serverId: targetServerId,
+  })
   const { data: modelCatalog } = useModelCatalog()
 
   // Build columns dynamically based on PR state
@@ -426,6 +435,13 @@ export function MagicModal() {
       label: model.label || model.id,
     }))
   }, [availableAntigravityModels])
+  const museModelOptions = useMemo(() => {
+    if (!availableMuseModels?.length) return MUSE_MODEL_OPTIONS
+    return availableMuseModels.map(model => ({
+      value: model.id,
+      label: model.label || model.id,
+    }))
+  }, [availableMuseModels])
 
   const claudeModelOptions = useMemo(
     () =>
@@ -452,23 +468,7 @@ export function MagicModal() {
       ) ?? 'claude'
     const model =
       preferences?.magic_prompt_models?.[modelKey] ??
-      (backend === 'codex'
-        ? (preferences?.selected_codex_model ?? 'gpt-6.1-sol')
-        : backend === 'opencode'
-          ? (preferences?.selected_opencode_model ?? 'opencode/gpt-6.1-sol')
-          : backend === 'cursor'
-            ? (preferences?.selected_cursor_model ?? 'cursor/auto')
-            : backend === 'commandcode'
-              ? (preferences?.selected_commandcode_model ??
-                'commandcode/default')
-              : backend === 'kimi'
-                ? (preferences?.selected_kimi_model ?? 'kimi/default')
-                : backend === 'grok'
-                  ? (preferences?.selected_grok_model ?? 'grok/grok-4.6')
-                  : backend === 'antigravity'
-                    ? (preferences?.selected_antigravity_model ??
-                      'antigravity/auto')
-                    : (preferences?.selected_model ?? 'sonnet'))
+      resolveDefaultModelForBackend(backend, preferences)
     const provider = resolveMagicPromptProvider(
       preferences?.magic_prompt_providers,
       providerKey,
@@ -488,23 +488,7 @@ export function MagicModal() {
       ) ?? 'claude'
     const model =
       preferences?.magic_prompt_models?.[RESOLVE_CONFLICTS_MODEL_KEY] ??
-      (backend === 'codex'
-        ? (preferences?.selected_codex_model ?? 'gpt-6.1-sol')
-        : backend === 'opencode'
-          ? (preferences?.selected_opencode_model ?? 'opencode/gpt-6.1-sol')
-          : backend === 'cursor'
-            ? (preferences?.selected_cursor_model ?? 'cursor/auto')
-            : backend === 'commandcode'
-              ? (preferences?.selected_commandcode_model ??
-                'commandcode/default')
-              : backend === 'kimi'
-                ? (preferences?.selected_kimi_model ?? 'kimi/default')
-                : backend === 'grok'
-                  ? (preferences?.selected_grok_model ?? 'grok/grok-4.6')
-                  : backend === 'antigravity'
-                    ? (preferences?.selected_antigravity_model ??
-                      'antigravity/auto')
-                    : (preferences?.selected_model ?? 'sonnet'))
+      resolveDefaultModelForBackend(backend, preferences)
     const provider = resolveMagicPromptProvider(
       preferences?.magic_prompt_providers,
       RESOLVE_CONFLICTS_PROVIDER_KEY,
@@ -582,6 +566,8 @@ export function MagicModal() {
           return kimiModelOptions
         case 'antigravity':
           return antigravityModelOptions
+        case 'muse':
+          return museModelOptions
         default:
           return investigateClaudeModelOptions
       }
@@ -591,6 +577,7 @@ export function MagicModal() {
       grokModelOptions,
       investigateClaudeModelOptions,
       kimiModelOptions,
+      museModelOptions,
       opencodeModelOptions,
     ]
   )
@@ -609,6 +596,8 @@ export function MagicModal() {
         return 'Kimi Code'
       case 'antigravity':
         return 'Antigravity'
+      case 'muse':
+        return 'Muse'
       default:
         return 'Claude'
     }
@@ -645,6 +634,8 @@ export function MagicModal() {
           return kimiModelOptions
         case 'antigravity':
           return antigravityModelOptions
+        case 'muse':
+          return museModelOptions
         default:
           return resolveClaudeModelOptions
       }
@@ -653,6 +644,7 @@ export function MagicModal() {
       antigravityModelOptions,
       grokModelOptions,
       kimiModelOptions,
+      museModelOptions,
       opencodeModelOptions,
       resolveClaudeModelOptions,
     ]
@@ -1187,14 +1179,7 @@ export function MagicModal() {
                 preferences?.magic_prompt_models?.[
                   RESOLVE_CONFLICTS_MODEL_KEY
                 ] ??
-                (resolvedBackend === 'codex'
-                  ? (preferences?.selected_codex_model ?? 'gpt-6.1-sol')
-                  : resolvedBackend === 'opencode'
-                    ? (preferences?.selected_opencode_model ??
-                      'opencode/gpt-6.1-sol')
-                    : resolvedBackend === 'cursor'
-                      ? (preferences?.selected_cursor_model ?? 'cursor/auto')
-                      : (preferences?.selected_model ?? 'sonnet'))
+                resolveDefaultModelForBackend(resolvedBackend, preferences)
               const resolvedSessionProvider =
                 override?.backend && override.backend !== 'claude'
                   ? null
@@ -1366,14 +1351,7 @@ ${resolveInstructions}`
             const resolvedModel =
               override?.model ??
               preferences?.magic_prompt_models?.[RESOLVE_CONFLICTS_MODEL_KEY] ??
-              (resolvedBackend === 'codex'
-                ? (preferences?.selected_codex_model ?? 'gpt-6.1-sol')
-                : resolvedBackend === 'opencode'
-                  ? (preferences?.selected_opencode_model ??
-                    'opencode/gpt-6.1-sol')
-                  : resolvedBackend === 'cursor'
-                    ? (preferences?.selected_cursor_model ?? 'cursor/auto')
-                    : (preferences?.selected_model ?? 'sonnet'))
+              resolveDefaultModelForBackend(resolvedBackend, preferences)
             const resolvedSessionProvider =
               override?.backend && override.backend !== 'claude'
                 ? null
@@ -2717,6 +2695,7 @@ ${resolveInstructions}`
                               'grok',
                               'kimi',
                               'antigravity',
+                              'muse',
                             ].includes(backend)
                           ).length <= 1
                         }
@@ -2747,6 +2726,11 @@ ${resolveInstructions}`
                         {installedBackends.includes('antigravity') && (
                           <SelectItem value="antigravity">
                             <BackendLabel backend="antigravity" />
+                          </SelectItem>
+                        )}
+                        {installedBackends.includes('muse') && (
+                          <SelectItem value="muse">
+                            <BackendLabel backend="muse" />
                           </SelectItem>
                         )}
                       </SelectContent>

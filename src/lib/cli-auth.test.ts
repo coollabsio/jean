@@ -62,6 +62,10 @@ describe('loginArgsForBackend', () => {
     expect(loginArgsForBackend('codex')).toEqual(['login', '--device-auth'])
     expect(loginArgsForBackend('opencode')).toEqual(['auth', 'login'])
   })
+
+  it('uses the browser login subcommand for Muse', () => {
+    expect(loginArgsForBackend('muse')).toEqual(['login'])
+  })
 })
 
 describe('isCodexBubblewrapError', () => {

@@ -29,6 +29,7 @@ const { mockInvoke, mockInstalledBackends, mockBackendAuthStatuses } =
         'grok',
         'kimi',
         'antigravity',
+        'muse',
       ] as string[],
       isLoading: false,
     },
@@ -43,6 +44,7 @@ const { mockInvoke, mockInstalledBackends, mockBackendAuthStatuses } =
         grok: true,
         kimi: true,
         antigravity: true,
+        muse: true,
       } as Record<string, boolean | undefined>,
       isLoading: false,
     },
@@ -128,8 +130,16 @@ function renderUseMessageSending({
     | 'pi'
     | 'grok'
     | 'antigravity'
+    | 'muse'
   selectedModel?: string
-  selectedEffortLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+  selectedEffortLevel?:
+    | 'off'
+    | 'minimal'
+    | 'low'
+    | 'medium'
+    | 'high'
+    | 'xhigh'
+    | 'ultra'
   sessionsData?: { sessions: { id: string }[] }
   createSession?: {
     mutateAsync: (args: {
@@ -206,6 +216,7 @@ function resetInstalledBackendsMock() {
     'grok',
     'kimi',
     'antigravity',
+    'muse',
   ]
   mockInstalledBackends.isLoading = false
   mockBackendAuthStatuses.authByBackend = {
@@ -218,6 +229,7 @@ function resetInstalledBackendsMock() {
     grok: true,
     kimi: true,
     antigravity: true,
+    muse: true,
   }
   mockBackendAuthStatuses.isLoading = false
 }
@@ -763,6 +775,88 @@ describe('useMessageSending Antigravity effort', () => {
     expect(steerPiTurn).not.toHaveBeenCalled()
     expect(persistEnqueue).toHaveBeenCalled()
     expect(useChatStore.getState().messageQueues['session-1']).toHaveLength(1)
+    expect(sendMessage.mutate).not.toHaveBeenCalled()
+  })
+})
+
+describe('useMessageSending Muse', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockInvoke.mockResolvedValue(undefined)
+    resetInstalledBackendsMock()
+    useChatStore.setState({
+      inputDrafts: {},
+      pendingImages: {},
+      pendingFiles: {},
+      pendingTextFiles: {},
+      pendingSkills: {},
+      sendingSessionIds: {},
+      executionModes: {},
+      permissionModes: {},
+      selectedModels: {},
+      executingModes: {},
+      errors: {},
+      lastSentMessages: {},
+      reviewingSessions: {},
+      waitingForInputSessionIds: {},
+      messageQueues: {},
+      approvedTools: {},
+      streamingContents: {},
+      activeToolCalls: {},
+      streamingContentBlocks: {},
+      streamingThinkingContent: {},
+    })
+  })
+
+  it('sends with the muse backend, model, and Muse-only effort level', async () => {
+    const { result, sendMessage } = renderUseMessageSending({
+      selectedBackend: 'muse',
+      selectedModel: 'muse/muse-spark-1.2',
+      selectedEffortLevel: 'ultra',
+      inputValue: 'inspect muse effort',
+    })
+
+    await act(async () => {
+      await result.current.handleSubmit({
+        preventDefault: vi.fn(),
+      } as unknown as React.FormEvent)
+    })
+
+    expect(sendMessage.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        backend: 'muse',
+        model: 'muse/muse-spark-1.2',
+        effortLevel: 'ultra',
+        thinkingLevel: 'off',
+      }),
+      expect.any(Object)
+    )
+  })
+
+  it('queues muse prompts while a turn is running (no steer API)', async () => {
+    useChatStore.setState({ sendingSessionIds: { 'session-1': true } })
+    const { result, sendMessage } = renderUseMessageSending({
+      selectedBackend: 'muse',
+      selectedModel: 'muse/default',
+      inputValue: 'also inspect muse',
+    })
+
+    await act(async () => {
+      await result.current.handleSubmit({
+        preventDefault: vi.fn(),
+      } as unknown as React.FormEvent)
+    })
+
+    expect(steerCodexTurn).not.toHaveBeenCalled()
+    expect(steerGrokTurn).not.toHaveBeenCalled()
+    expect(steerOpencodeTurn).not.toHaveBeenCalled()
+    expect(steerPiTurn).not.toHaveBeenCalled()
+    expect(steerClaudeTurn).not.toHaveBeenCalled()
+    expect(persistEnqueue).toHaveBeenCalled()
+    const queued = useChatStore.getState().messageQueues['session-1']
+    expect(queued?.map(m => [m.backend, m.model, m.message])).toEqual([
+      ['muse', 'muse/default', 'also inspect muse'],
+    ])
     expect(sendMessage.mutate).not.toHaveBeenCalled()
   })
 })

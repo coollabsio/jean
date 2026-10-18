@@ -71,12 +71,13 @@ export function shouldHydrateCompletedSessionFromBackend(
 
   // Grok ACP streams word fragments with leading spaces. If the optimistic
   // UI text lost those spaces, replace it with the run-log parse (known good).
-  // Antigravity is also always hydrated so the backend run-log parse (which
-  // carries the antigravity_session_id conversation id used for resume)
-  // replaces the optimistic assistant message.
+  // Antigravity and Muse are also always hydrated so the backend run-log parse
+  // (which carries the antigravity_session_id / muse_session_id used for
+  // resume) replaces the optimistic assistant message.
   if (
     options?.backend === 'grok' ||
     options?.backend === 'antigravity' ||
+    options?.backend === 'muse' ||
     looksLikeCollapsedStreamSpaces(content) ||
     contentBlocks.some(
       block => block.type === 'text' && looksLikeCollapsedStreamSpaces(block.text)

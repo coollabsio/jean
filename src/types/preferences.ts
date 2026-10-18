@@ -1035,6 +1035,10 @@ export const KIMI_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
 export const ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
   makeMagicPromptModelsPreset('antigravity/auto')
 
+/** Muse preset for all magic prompts */
+export const MUSE_DEFAULT_MAGIC_PROMPT_MODELS: MagicPromptModels =
+  makeMagicPromptModelsPreset('muse/default')
+
 /** Default reasoning efforts for Claude backend (null = use model default) */
 export const DEFAULT_MAGIC_PROMPT_EFFORTS: MagicPromptReasoningEfforts = {
   investigate_issue_effort: null,
@@ -1242,6 +1246,7 @@ export const GROK_DEFAULT_MAGIC_PROMPT_BACKENDS = makeBackendsPreset('grok')
 export const KIMI_DEFAULT_MAGIC_PROMPT_BACKENDS = makeBackendsPreset('kimi')
 export const ANTIGRAVITY_DEFAULT_MAGIC_PROMPT_BACKENDS =
   makeBackendsPreset('antigravity')
+export const MUSE_DEFAULT_MAGIC_PROMPT_BACKENDS = makeBackendsPreset('muse')
 
 /**
  * Resolve a magic prompt provider for a given key.
@@ -1393,6 +1398,7 @@ export interface AppPreferences {
   selected_grok_model: GrokModel // Default Grok model
   selected_kimi_model?: KimiModel // Default Kimi Code model
   selected_antigravity_model?: AntigravityModel // Default Antigravity CLI model
+  selected_muse_model?: MuseModel // Default Muse Code model
   default_codex_reasoning_effort: CodexReasoningEffort // Default reasoning effort for Codex: 'low' | 'medium' | 'high' | 'xhigh'
   default_codex_model_verbosity: CodexModelVerbosity // Default model verbosity for Codex chat: 'low' | 'medium' | 'high'
   default_grok_reasoning_effort: GrokReasoningEffort // Default reasoning effort for Grok: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
@@ -1423,6 +1429,7 @@ export interface AppPreferences {
   grok_cli_source: 'jean' | 'path' // Grok CLI source: 'jean' (managed) or 'path' (system PATH)
   kimi_cli_source?: 'jean' | 'path' // Kimi Code CLI source: 'jean' (managed) or 'path' (system PATH)
   antigravity_cli_source?: 'jean' | 'path' // Antigravity CLI source: 'jean' (managed) or 'path' (system PATH)
+  muse_cli_source?: 'jean' | 'path' // Muse Code CLI source: 'jean' (managed) or 'path' (system PATH)
   gh_cli_source: 'jean' | 'path' // GitHub CLI source: 'jean' (managed) or 'path' (system PATH)
   pi_cli_source: 'jean' | 'path' // PI CLI source: 'jean' (managed) or 'path' (system PATH)
   commandcode_cli_source?: 'jean' | 'path' // Command Code CLI source: 'jean' (managed) or 'path' (system PATH)
@@ -2008,6 +2015,7 @@ export type CommandCodeModel = `commandcode/${string}`
 export type GrokModel = `grok/${string}`
 export type KimiModel = `kimi/${string}`
 export type AntigravityModel = `antigravity/${string}`
+export type MuseModel = `muse/${string}`
 export type MagicPromptModel =
   | ClaudeModel
   | CodexModel
@@ -2018,6 +2026,7 @@ export type MagicPromptModel =
   | GrokModel
   | KimiModel
   | AntigravityModel
+  | MuseModel
 
 /** Check if a model string identifies an OpenCode model */
 export function isOpenCodeModel(model: string): model is OpenCodeModel {
@@ -2051,6 +2060,10 @@ export function isAntigravityCliModel(
   model: string
 ): model is AntigravityModel {
   return model.startsWith('antigravity/')
+}
+/** Check if a model string identifies a Muse Code model */
+export function isMuseModel(model: string): model is MuseModel {
+  return model.startsWith('muse/')
 }
 
 /** Check if a model string identifies a Codex model */
@@ -2116,6 +2129,7 @@ export type CliBackend =
   | 'grok'
   | 'kimi'
   | 'antigravity'
+  | 'muse'
 
 export const backendOptions: { value: CliBackend; label: string }[] = [
   { value: 'claude', label: 'Claude' },
@@ -2127,6 +2141,7 @@ export const backendOptions: { value: CliBackend; label: string }[] = [
   { value: 'grok', label: 'Grok' },
   { value: 'kimi', label: 'Kimi Code' },
   { value: 'antigravity', label: 'Antigravity CLI (Beta)' },
+  { value: 'muse', label: 'Muse (Beta)' },
 ]
 
 export type TerminalApp =
@@ -2239,6 +2254,7 @@ export const newSessionKindOptions: {
   { value: 'grok', label: 'Grok' },
   { value: 'kimi', label: 'Kimi Code' },
   { value: 'antigravity', label: 'Antigravity CLI (Beta)' },
+  { value: 'muse', label: 'Muse (Beta)' },
 ]
 
 export function getNewSessionKindLabel(
@@ -2548,6 +2564,7 @@ export const defaultPreferences: AppPreferences = {
   selected_grok_model: 'grok/grok-4.6', // Default Grok model
   selected_kimi_model: 'kimi/default', // Use Kimi Code's configured default model
   selected_antigravity_model: 'antigravity/auto', // Use Antigravity CLI automatic model routing
+  selected_muse_model: 'muse/default', // Use Muse Code's server default model
   default_codex_reasoning_effort: 'high', // Default: high reasoning
   default_codex_model_verbosity: 'medium', // Default: medium verbosity (not low — Jean #535)
   default_grok_reasoning_effort: 'high', // Default: high reasoning
@@ -2578,6 +2595,7 @@ export const defaultPreferences: AppPreferences = {
   grok_cli_source: 'jean', // Default: Jean-managed
   kimi_cli_source: 'jean', // Default: Jean-managed
   antigravity_cli_source: 'jean', // Default: Jean-managed
+  muse_cli_source: 'jean', // Default: Jean-managed
   gh_cli_source: 'jean', // Default: Jean-managed
   pi_cli_source: 'jean', // Default: Jean-managed
   commandcode_cli_source: 'jean', // Default: Jean-managed
