@@ -22,13 +22,13 @@ Shift+Tab toggles Plan/Build without cycling permissions. Plan approval uses the
 
 ## Capabilities
 
-| Backend                               | Permission choices                                                 |
-| ------------------------------------- | ------------------------------------------------------------------ |
-| Claude                                | Supervised, Auto-accept edits, Auto, Full access                   |
-| Codex                                 | Supervised, Auto-accept edits, Auto, Full access                   |
-| OpenCode                              | Supervised, Auto-accept edits, Full access                         |
-| Grok, Kimi                            | Supervised, Auto-accept edits, Auto, Full access                   |
-| Cursor, PI, Command Code, Antigravity | Full access; retain existing Legacy Build sessions where supported |
+| Backend                                     | Permission choices                                                 |
+| ------------------------------------------- | ------------------------------------------------------------------ |
+| Claude                                      | Supervised, Auto-accept edits, Auto, Full access                   |
+| Codex                                       | Supervised, Auto-accept edits, Auto, Full access                   |
+| OpenCode                                    | Supervised, Auto-accept edits, Full access                         |
+| Grok, Kimi                                  | Supervised, Auto-accept edits, Auto, Full access                   |
+| Cursor, PI, Command Code, Antigravity, Muse | Full access; retain existing Legacy Build sessions where supported |
 
 Unsupported restricted policies must not become Full access. Backend selection falls back to Plan, and direct IPC/MCP sends reject unsupported policies.
 
@@ -52,12 +52,13 @@ Pending requests live in session metadata, not persisted global UI state. Waitin
 
 ### Other backend audit
 
-| Backend      | Native capability                                                              | Why no new menu choices yet                                                                                                                                                                            |
-| ------------ | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Cursor       | Per-tool Shell/Read/Write/MCP allow/deny rules, sandbox, forced approval flags | Jean uses a streaming CLI without a live approval callback. A sandbox does not mean edit-only approval; adding choices requires scoped runtime rules and a supported response path.                    |
-| PI           | Tool filtering, OS/container isolation, extension hooks                        | PI explicitly does not provide built-in per-tool approval. Project trust is not tool approval. A Jean extension/approval integration is required before advertising these policies.                    |
-| Command Code | Interactive standard, accept-edits, and bypass policies                        | Published 1.74.1 print mode blocks write/shell tools unless permissions are bypassed. Its accept-edits CLI flag alone cannot provide interactive approvals in Jean's print transport.                  |
-| Antigravity  | Allow/deny/ask rules and terminal sandbox                                      | Its documented asks target the editor/TUI; Jean's streaming CLI currently reports denied tools, not a live reply interface. Existing sandbox plus skip-permissions behavior is not edit-only approval. |
+| Backend      | Native capability                                                                                    | Why no new menu choices yet                                                                                                                                                                                         |
+| ------------ | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cursor       | Per-tool Shell/Read/Write/MCP allow/deny rules, sandbox, forced approval flags                       | Jean uses a streaming CLI without a live approval callback. A sandbox does not mean edit-only approval; adding choices requires scoped runtime rules and a supported response path.                                 |
+| PI           | Tool filtering, OS/container isolation, extension hooks                                              | PI explicitly does not provide built-in per-tool approval. Project trust is not tool approval. A Jean extension/approval integration is required before advertising these policies.                                 |
+| Command Code | Interactive standard, accept-edits, and bypass policies                                              | Published 1.74.1 print mode blocks write/shell tools unless permissions are bypassed. Its accept-edits CLI flag alone cannot provide interactive approvals in Jean's print transport.                               |
+| Antigravity  | Allow/deny/ask rules and terminal sandbox                                                            | Its documented asks target the editor/TUI; Jean's streaming CLI currently reports denied tools, not a live reply interface. Existing sandbox plus skip-permissions behavior is not edit-only approval.              |
+| Muse         | Permission profiles `:read-only`, `:ask-me`, `:auto-review`, `:unrestricted`; MSP `approval/request` | The detached MSP host answers approval requests itself (approve in Build and Yolo, deny in Plan). Forwarding them to Jean's approval card needs a bridge like the ACP one before Supervised or Auto can be offered. |
 
 Do not expose policies for these transports until Jean can enforce the real approval contract. Preserve existing user configurations; do not rewrite global allowlists to simulate a per-session policy.
 

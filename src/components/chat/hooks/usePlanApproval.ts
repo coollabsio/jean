@@ -193,6 +193,7 @@ export function usePlanApproval({
       const isPi = sessionBackend === 'pi'
       const isGrok = sessionBackend === 'grok'
       const isAntigravity = sessionBackend === 'antigravity'
+      const isMuse = sessionBackend === 'muse'
       const buildEffortOverride = overridesApply
         ? preferences?.build_effort_level
         : null
@@ -201,6 +202,7 @@ export function usePlanApproval({
         isPi ||
         isGrok ||
         isAntigravity ||
+        isMuse ||
         supportsAdaptiveThinking(model, cliStatus?.version ?? null)
       const defaultGrokEffort = isEffortLevel(
         preferences?.default_grok_reasoning_effort
@@ -214,9 +216,11 @@ export function usePlanApproval({
             ? defaultGrokEffort
             : isAntigravity
               ? 'adaptive'
-              : isEffortLevel(preferences?.default_effort_level)
-                ? preferences?.default_effort_level
-                : undefined
+              : isMuse
+                ? 'high'
+                : isEffortLevel(preferences?.default_effort_level)
+                  ? preferences?.default_effort_level
+                  : undefined
         : undefined
       const baseMsg = isCodex
         ? 'Execute the plan you created. Implement all changes described.'
@@ -410,6 +414,7 @@ export function usePlanApproval({
       const isPiYolo = sessionBackend === 'pi'
       const isGrokYolo = sessionBackend === 'grok'
       const isAntigravityYolo = sessionBackend === 'antigravity'
+      const isMuseYolo = sessionBackend === 'muse'
       const yoloEffortOverride = overridesApplyYolo
         ? preferences?.yolo_effort_level
         : null
@@ -418,6 +423,7 @@ export function usePlanApproval({
         isPiYolo ||
         isGrokYolo ||
         isAntigravityYolo ||
+        isMuseYolo ||
         supportsAdaptiveThinking(model, cliStatus?.version ?? null)
       const defaultGrokEffortYolo = isEffortLevel(
         preferences?.default_grok_reasoning_effort
@@ -431,9 +437,11 @@ export function usePlanApproval({
             ? defaultGrokEffortYolo
             : isAntigravityYolo
               ? 'adaptive'
-              : isEffortLevel(preferences?.default_effort_level)
-                ? preferences?.default_effort_level
-                : undefined
+              : isMuseYolo
+                ? 'high'
+                : isEffortLevel(preferences?.default_effort_level)
+                  ? preferences?.default_effort_level
+                  : undefined
         : undefined
       const baseMsgYolo = isCodexYolo
         ? 'Execute the plan you created. Implement all changes described.'

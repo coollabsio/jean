@@ -38,6 +38,7 @@ fn should_run_server() -> bool {
         "--jean-claude-host",
         "--jean-grok-acp-host",
         "--jean-kimi-acp-host",
+        "--jean-muse-msp-host",
     ];
     std::env::var("JEAN_HEADLESS").is_ok_and(|value| value != "0" && value != "false")
         || std::env::args().any(|argument| SERVER_ARGS.contains(&argument.as_str()))

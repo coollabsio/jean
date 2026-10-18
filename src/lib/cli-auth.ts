@@ -34,6 +34,7 @@ export function isCliAuthError(error: string): boolean {
     lower.includes('run `codex`') ||
     lower.includes('run `opencode`') ||
     lower.includes('run `agy`') ||
+    lower.includes('run `muse login`') ||
     lower.includes('launch the cli without arguments to sign in')
   ) {
     return true
@@ -113,6 +114,8 @@ export function loginArgsForBackend(
     case 'antigravity':
       // Antigravity authentication is selected from its interactive start screen.
       return []
+    case 'muse':
+      return ['login']
     default:
       return ['login']
   }
@@ -130,6 +133,7 @@ const STATUS_COMMANDS: Partial<
   grok: { command: 'check_grok_cli_installed' },
   kimi: { command: 'check_kimi_cli_installed' },
   antigravity: { command: 'check_antigravity_cli_installed' },
+  muse: { command: 'check_muse_cli_installed' },
 }
 
 /**
@@ -173,7 +177,8 @@ export async function openBackendLoginModal(
       backend === 'commandcode' ||
       backend === 'grok' ||
       backend === 'kimi' ||
-      backend === 'antigravity'
+      backend === 'antigravity' ||
+      backend === 'muse'
         ? backend
         : null
     if (!loginType) {

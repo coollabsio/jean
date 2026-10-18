@@ -5,6 +5,7 @@ import {
   useMcpServers,
   invalidateMcpServers,
   getNewServersToAutoEnable,
+  isAutoLoadedMcpBackend,
   mcpKey,
 } from '@/services/mcp'
 import type { Project } from '@/types/projects'
@@ -70,10 +71,10 @@ export function useMcpServerResolution({
   ])
 
   const effectiveBaseEnabledMcpServers = useMemo(() => {
-    if (selectedBackend !== 'antigravity') return baseEnabledMcpServers
+    if (!isAutoLoadedMcpBackend(selectedBackend)) return baseEnabledMcpServers
     const automatic = availableMcpServers
       .filter(server => !server.disabled)
-      .map(server => mcpKey('antigravity', server.name))
+      .map(server => mcpKey(selectedBackend, server.name))
     return [...new Set([...baseEnabledMcpServers, ...automatic])]
   }, [availableMcpServers, baseEnabledMcpServers, selectedBackend])
 

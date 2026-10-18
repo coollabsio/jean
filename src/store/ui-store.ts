@@ -30,6 +30,7 @@ export type PreferencePane =
   | 'grok'
   | 'kimi'
   | 'antigravity'
+  | 'muse'
   | 'github'
   | 'coderabbit'
   | 'appearance'
@@ -97,6 +98,7 @@ export type CliLoginModalType =
   | 'grok'
   | 'kimi'
   | 'antigravity'
+  | 'muse'
   | 'coderabbit'
   | null
 

@@ -451,6 +451,7 @@ export function GeneralPane({
                     'grok',
                     'kimi',
                     'antigravity',
+                    'muse',
                   ] as CliBackend[]
                 )
                   .filter(backend => installedBackendsSet.has(backend))
@@ -461,7 +462,8 @@ export function GeneralPane({
                       backend === 'commandcode' ||
                       backend === 'grok' ||
                       backend === 'kimi' ||
-                      backend === 'antigravity' ? (
+                      backend === 'antigravity' ||
+                      backend === 'muse' ? (
                         <BackendLabel backend={backend} />
                       ) : backend === 'claude' ? (
                         'Claude'

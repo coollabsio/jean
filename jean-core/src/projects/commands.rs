@@ -1609,6 +1609,7 @@ fn clear_session_runtime_state(session: &mut Session) {
     session.commandcode_session_id = None;
     session.grok_session_id = None;
     session.kimi_session_id = None;
+    session.muse_session_id = None;
     session.is_reviewing = false;
     if session.status_override.as_deref() == Some("review") {
         session.status_override = None;
@@ -1677,6 +1678,7 @@ fn prepare_forked_metadata(
     metadata.commandcode_session_id = None;
     metadata.grok_session_id = None;
     metadata.kimi_session_id = None;
+    metadata.muse_session_id = None;
     metadata.session_naming_completed = false;
     metadata.archived_at = None;
     metadata.archived_by_base_close = None;
@@ -8697,6 +8699,19 @@ fn generate_pr_content_from_inputs(
         response.body = augment_pr_references_in_body(&response.body, related_pr_issue_refs);
         return Ok(response);
     }
+    if backend == crate::chat::types::Backend::Muse {
+        let json_str = crate::chat::muse::execute_one_shot_muse(
+            app,
+            &prompt,
+            model_str,
+            Some(PR_CONTENT_SCHEMA),
+            Some(std::path::Path::new(repo_path)),
+        )?;
+        let mut response: PrContentResponse = serde_json::from_str(&json_str)
+            .map_err(|error| format!("Failed to parse Muse PR content: {error}"))?;
+        response.body = augment_pr_references_in_body(&response.body, related_pr_issue_refs);
+        return Ok(response);
+    }
 
     log::trace!("Generating PR content with Claude CLI (JSON schema)");
 
@@ -9502,6 +9517,17 @@ fn generate_commit_message_once(
         return serde_json::from_str(&json_str)
             .map_err(|error| format!("Failed to parse Antigravity commit message: {error}"));
     }
+    if backend == crate::chat::types::Backend::Muse {
+        let json_str = crate::chat::muse::execute_one_shot_muse(
+            app,
+            prompt,
+            model_str,
+            Some(COMMIT_MESSAGE_SCHEMA),
+            working_dir,
+        )?;
+        return serde_json::from_str(&json_str)
+            .map_err(|error| format!("Failed to parse Muse commit message: {error}"));
+    }
 
     log::trace!("Generating commit message with Claude CLI (JSON schema)");
 
@@ -9782,6 +9808,7 @@ fn review_backend_allows_repository_investigation(backend: &crate::chat::types::
             | crate::chat::types::Backend::Codex
             | crate::chat::types::Backend::Cursor
             | crate::chat::types::Backend::Antigravity
+            | crate::chat::types::Backend::Muse
     )
 }
 
@@ -10292,6 +10319,18 @@ fn generate_review(
         )?;
         let response = serde_json::from_str(&json_str)
             .map_err(|error| format!("Failed to parse Antigravity review: {error}"))?;
+        return validate_review_response(response, working_dir);
+    }
+    if backend == crate::chat::types::Backend::Muse {
+        let json_str = crate::chat::muse::execute_one_shot_muse(
+            app,
+            prompt,
+            model_str,
+            Some(REVIEW_SCHEMA),
+            review_working_dir,
+        )?;
+        let response = serde_json::from_str(&json_str)
+            .map_err(|error| format!("Failed to parse Muse review: {error}"))?;
         return validate_review_response(response, working_dir);
     }
 
@@ -11870,6 +11909,20 @@ fn generate_release_notes_content(
         )?;
         let mut response: ReleaseNotesResponse = serde_json::from_str(&json_str)
             .map_err(|error| format!("Failed to parse Antigravity release notes: {error}"))?;
+        response.body =
+            augment_pr_references_in_body(&response.body, &release_notes_context.pr_issue_refs);
+        return Ok(response);
+    }
+    if backend == crate::chat::types::Backend::Muse {
+        let json_str = crate::chat::muse::execute_one_shot_muse(
+            app,
+            &prompt,
+            model_str,
+            Some(RELEASE_NOTES_SCHEMA),
+            Some(std::path::Path::new(project_path)),
+        )?;
+        let mut response: ReleaseNotesResponse = serde_json::from_str(&json_str)
+            .map_err(|error| format!("Failed to parse Muse release notes: {error}"))?;
         response.body =
             augment_pr_references_in_body(&response.body, &release_notes_context.pr_issue_refs);
         return Ok(response);
@@ -15113,6 +15166,9 @@ mod tests {
         ));
         assert!(review_backend_allows_repository_investigation(
             &Backend::Antigravity
+        ));
+        assert!(review_backend_allows_repository_investigation(
+            &Backend::Muse
         ));
         assert!(!review_backend_allows_repository_investigation(
             &Backend::Opencode

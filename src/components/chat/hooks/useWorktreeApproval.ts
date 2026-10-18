@@ -85,6 +85,7 @@ function getDefaultModelForBackend(
         selected_grok_model?: string | null
         selected_kimi_model?: string | null
         selected_antigravity_model?: string | null
+        selected_muse_model?: string | null
       }
     | undefined
 ): string {
@@ -111,6 +112,9 @@ function getDefaultModelForBackend(
   }
   if (backend === 'antigravity') {
     return preferences?.selected_antigravity_model ?? 'antigravity/auto'
+  }
+  if (backend === 'muse') {
+    return preferences?.selected_muse_model ?? 'muse/default'
   }
   return preferences?.selected_model ?? 'claude-opus-5-5'
 }
@@ -409,6 +413,8 @@ export function useWorktreeApproval({
         // Antigravity has no per-backend default effort pref; adaptive lets
         // the CLI use its native model default when no level is forced.
         effortLevel = mapCodexReasoningToEffort(modeEffortPref) ?? 'adaptive'
+      } else if (backend === 'muse') {
+        effortLevel = mapCodexReasoningToEffort(modeEffortPref) ?? 'high'
       } else {
         const fallbackThinking = isThinkingLevel(preferences?.thinking_level)
           ? preferences.thinking_level

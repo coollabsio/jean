@@ -68,6 +68,7 @@ vi.mock('@/services/mcp', () => ({
     refetchAll: vi.fn(),
   }),
   groupServersByBackend: vi.fn(() => ({})),
+  isAutoLoadedMcpBackend: vi.fn(() => false),
   mcpKey: vi.fn((backend: string, name: string) => `${backend}:${name}`),
   migrateLegacyMcpKeys: vi.fn((keys: string[]) => ({
     changed: false,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Backend, ChatMessage } from '@/types/chat'
 import {
+  getMessagePromptModelLabel,
   getProviderChangeBeforeMessage,
   inferBackendFromModel,
 } from './message-settings-labels'
@@ -49,12 +50,23 @@ describe('inferBackendFromModel', () => {
     expect(inferBackendFromModel('antigravity/gemini-3.1-pro-high')).toBe(
       'antigravity'
     )
+    expect(inferBackendFromModel('muse/default')).toBe('muse')
+    expect(inferBackendFromModel('muse/muse-spark-1.2')).toBe('muse')
   })
 
   it('returns null for missing model', () => {
     expect(inferBackendFromModel(undefined)).toBeNull()
     expect(inferBackendFromModel(null)).toBeNull()
     expect(inferBackendFromModel('')).toBeNull()
+  })
+})
+
+describe('getMessagePromptModelLabel', () => {
+  it('labels Muse prompts with the Muse provider and model', () => {
+    expect(getMessagePromptModelLabel('muse/default')).toBe('Muse · Default')
+    expect(getMessagePromptModelLabel('muse/muse-spark-1.2')).toBe(
+      'Muse · Muse Spark 1.2'
+    )
   })
 })
 
@@ -141,6 +153,20 @@ describe('getProviderChangeBeforeMessage', () => {
       to: 'antigravity',
       fromLabel: 'Grok',
       toLabel: 'Antigravity CLI',
+    })
+  })
+
+  it('detects Antigravity → Muse switches', () => {
+    const messages = [
+      userMessage('u1', 'antigravity/auto'),
+      assistantMessage('a1'),
+      userMessage('u2', 'muse/default', 3),
+    ]
+    expect(getProviderChangeBeforeMessage(messages, 2)).toEqual({
+      from: 'antigravity',
+      to: 'muse',
+      fromLabel: 'Antigravity CLI',
+      toLabel: 'Muse',
     })
   })
 

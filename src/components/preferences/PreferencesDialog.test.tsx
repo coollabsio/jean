@@ -55,6 +55,10 @@ vi.mock('./panes/CursorPane', () => ({
   CursorPane: () => <div>Cursor pane</div>,
 }))
 
+vi.mock('./panes/MusePane', () => ({
+  MusePane: () => <div>Muse pane</div>,
+}))
+
 vi.mock('./panes/GitHubPane', () => ({
   GitHubPane: () => <div>GitHub CLI pane</div>,
 }))
@@ -218,6 +222,7 @@ describe('PreferencesDialog', () => {
       'Grok',
       'Kimi Code',
       'Antigravity CLIBeta',
+      'MuseBeta',
       'GitHub CLI',
       'CodeRabbit CLI',
       'Terminal',
@@ -256,18 +261,14 @@ describe('PreferencesDialog', () => {
       expect(within(button).queryByText('Beta')).toBeNull()
     }
 
-    const antigravityButton = within(navigationMenu)
-      .getByText('Antigravity CLI')
-      .closest('button')
-    if (!antigravityButton) {
-      throw new Error(
-        'Expected Antigravity CLI navigation button to be rendered'
-      )
-    }
+    for (const label of ['Antigravity CLI', 'Muse']) {
+      const button = within(navigationMenu).getByText(label).closest('button')
+      if (!button) {
+        throw new Error(`Expected ${label} navigation button to be rendered`)
+      }
 
-    expect(within(antigravityButton).getByText('Beta')).toHaveClass(
-      'bg-warning/10'
-    )
+      expect(within(button).getByText('Beta')).toHaveClass('bg-warning/10')
+    }
 
     const kimiButton = within(navigationMenu)
       .getByText('Kimi Code')
@@ -279,6 +280,31 @@ describe('PreferencesDialog', () => {
     expect(within(kimiButton).getByLabelText('Kimi Code')).toHaveClass(
       'translate-x-0.5'
     )
+  })
+
+  it('opens the Muse pane from the desktop navigation', async () => {
+    const user = userEvent.setup()
+
+    render(<PreferencesDialog />)
+
+    const navigationMenu = screen
+      .getByRole('dialog')
+      .querySelector<HTMLElement>('[data-sidebar="menu"]')
+    if (!navigationMenu) {
+      throw new Error('Expected desktop navigation menu to be rendered')
+    }
+
+    const museButton = within(navigationMenu)
+      .getByText('Muse')
+      .closest('button')
+    if (!museButton) {
+      throw new Error('Expected Muse navigation button to be rendered')
+    }
+
+    expect(screen.queryByText('Muse pane')).toBeNull()
+    await user.click(museButton)
+
+    expect(screen.getByText('Muse pane')).toBeInTheDocument()
   })
 
   it('shows Web Access but hides Keybindings in the mobile pane selector', async () => {

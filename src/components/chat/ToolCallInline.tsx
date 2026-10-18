@@ -359,6 +359,7 @@ function isRecognizedExternalTool(name: string): boolean {
     name.startsWith('mcp__') ||
     name.startsWith('mcp:') ||
     isAntigravityNativeToolName(name) ||
+    isMuseNativeToolName(name) ||
     isJeanMcpToolName(name)
   )
 }
@@ -385,6 +386,25 @@ function isAntigravityNativeToolName(name: string): boolean {
       'task_boundary',
     ].includes(name)
   )
+}
+
+/** Native Muse Code tools that use Jean's generic expandable renderer. */
+function isMuseNativeToolName(name: string): boolean {
+  return [
+    'add_memory',
+    'bash_input',
+    'code_exec',
+    'code_wait',
+    'cron_create',
+    'cron_delete',
+    'cron_list',
+    'edit_memory',
+    'search',
+    'subagent_cancel',
+    'update_goal',
+    'work_stop',
+    'write_todos',
+  ].includes(name)
 }
 
 /** Title-case a snake_case / kebab-case tool id for display. */
@@ -1307,6 +1327,8 @@ export function normalizeToolCallForDisplay(
 
   switch (normalizedName) {
     case 'Bash':
+    case 'bash':
+    case 'exec_command':
     case 'run_command':
     case 'shell_command':
     case 'run_terminal_command':
@@ -1317,11 +1339,12 @@ export function normalizeToolCallForDisplay(
         name: 'Bash',
         input: {
           ...withoutVariant,
-          command: input.command ?? input.CommandLine,
+          command: input.command ?? input.CommandLine ?? input.cmd,
         },
       }
     case 'view_file':
     case 'read_file':
+    case 'read':
     case 'Read':
       return {
         name: 'Read',
@@ -1338,6 +1361,7 @@ export function normalizeToolCallForDisplay(
       }
     case 'write_to_file':
     case 'write_file':
+    case 'write':
     case 'Write':
       return {
         name: 'Write',
@@ -1354,6 +1378,8 @@ export function normalizeToolCallForDisplay(
         },
       }
     case 'replace_file_content':
+    case 'edit_file':
+    case 'edit':
     case 'Edit':
       return {
         name: 'Edit',
@@ -1369,11 +1395,13 @@ export function normalizeToolCallForDisplay(
             input.old_string ??
             input.oldText ??
             input.old_text ??
+            input.old_str ??
             input.TargetContent,
           new_string:
             input.new_string ??
             input.newText ??
             input.new_text ??
+            input.new_str ??
             input.ReplacementContent,
         },
       }
@@ -1425,11 +1453,13 @@ export function normalizeToolCallForDisplay(
         },
       }
     case 'search_web':
+    case 'web_search':
       return {
         name: 'WebSearch',
         input: { ...withoutVariant, query: input.query ?? input.Query },
       }
     case 'read_url_content':
+    case 'web_fetch':
       return {
         name: 'WebFetch',
         input: { ...withoutVariant, url: input.url ?? input.Url },
@@ -2069,7 +2099,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
 
     // OpenCode-only tools
     case 'apply_patch': {
-      const patchText = input.patchText as string | undefined
+      const patchText = firstStringField(input, ['patchText', 'patch', 'input'])
       const fileCount = patchText
         ? (patchText.match(/^---\s/gm) || []).length
         : 0
@@ -2401,7 +2431,8 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
       return {
         icon: <Terminal className="h-4 w-4 shrink-0" />,
         label: isKnownExternal
-          ? isAntigravityNativeToolName(normalized.name)
+          ? isAntigravityNativeToolName(normalized.name) ||
+            isMuseNativeToolName(normalized.name)
             ? humanizeSnakeCase(normalized.name)
             : normalized.name
           : `${normalized.name} (unhandled tool)`,

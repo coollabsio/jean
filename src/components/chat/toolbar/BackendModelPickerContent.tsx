@@ -40,6 +40,7 @@ import { useAvailableCommandCodeModels } from '@/services/commandcode-cli'
 import { useAvailableGrokModels } from '@/services/grok-cli'
 import { useAvailableKimiModels } from '@/services/kimi-cli'
 import { useAvailableAntigravityModels } from '@/services/antigravity-cli'
+import { useAvailableMuseModels } from '@/services/muse-cli'
 import {
   getCatalogModelFastInfo,
   useModelCatalog,
@@ -182,6 +183,9 @@ export function BackendModelPickerContent({
   const { data: availableAntigravityModels } = useAvailableAntigravityModels({
     enabled: installedBackends.includes('antigravity'),
   })
+  const { data: availableMuseModels } = useAvailableMuseModels({
+    enabled: installedBackends.includes('muse'),
+  })
 
   const opencodeModelOptions = useMemo(() => {
     if (opencodeModelsError) return []
@@ -241,6 +245,14 @@ export function BackendModelPickerContent({
       })),
     [availableAntigravityModels]
   )
+  const museModelOptions = useMemo(
+    () =>
+      availableMuseModels?.map(model => ({
+        value: model.id,
+        label: model.label,
+      })),
+    [availableMuseModels]
+  )
 
   const { backendModelSections: baseBackendModelSections } =
     useToolbarDerivedState({
@@ -253,6 +265,7 @@ export function BackendModelPickerContent({
       commandcodeModelOptions,
       grokModelOptions,
       kimiModelOptions,
+      museModelOptions,
       customCliProfiles,
       installedBackends,
     })

@@ -61,6 +61,7 @@ export type Backend =
   | 'grok'
   | 'kimi'
   | 'antigravity'
+  | 'muse'
 
 /** Wire-compatible execution policies. Plan remains a read-only workflow. */
 export type ExecutionMode = 'plan' | 'build' | 'yolo' | 'supervised' | 'auto'
@@ -196,7 +197,7 @@ export interface PlanToolInput {
   plan_preview?: string
   explanation?: string
   steps?: PlanStep[]
-  source?: 'claude' | 'codex' | 'grok' | 'kimi' | 'antigravity'
+  source?: 'claude' | 'codex' | 'grok' | 'kimi' | 'antigravity' | 'muse'
 }
 
 /**
@@ -319,6 +320,8 @@ export interface Session {
   kimi_session_id?: string
   /** Antigravity CLI conversation ID used for conversation continuity. */
   antigravity_session_id?: string
+  /** Muse Code MSP session ID for resuming conversations */
+  muse_session_id?: string | null
   /** Selected model for this session */
   selected_model?: string
   /** Selected thinking level for this session */

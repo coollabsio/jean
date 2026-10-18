@@ -37,6 +37,7 @@
 - Test the real boundary contract: command arguments, CLI values, generated configuration, serialized data, and restored history.
 - Verify every responsive UI branch and each supported runtime: native desktop, Web Access, and mobile where applicable.
 - Keep long-running jobs backend-owned when they must survive client disconnects.
+- Test detached hosts through the real spawn path (argv + env). A test that calls the host function directly cannot catch argv parsing bugs.
 
 ## Normalize external backend behavior end to end
 

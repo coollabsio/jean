@@ -330,6 +330,7 @@ const AGENT_BACKENDS: &[&str] = &[
     "grok",
     "kimi",
     "antigravity",
+    "muse",
 ];
 const AGENT_EFFORTS: &[&str] = &[
     "off",

@@ -51,6 +51,8 @@ const mocks = vi.hoisted(() => {
     } | null,
     selectedWorktreeId: 'wt-1',
     installedBackendsOptions: vi.fn(),
+    installedBackends: ['claude', 'codex'] as CliBackend[],
+    resolveConflictsBackend: 'codex' as CliBackend,
     preferencesServerId: vi.fn(),
     worktreePaths: {} as Record<string, string>,
     worktree,
@@ -212,6 +214,7 @@ vi.mock('@/services/preferences', () => ({
         default_backend: 'claude',
         selected_model: 'claude-opus-4-8[1m]',
         selected_codex_model: 'gpt-5.5',
+        selected_muse_model: 'muse/muse-spark-1.2',
         magic_prompt_models: {},
         magic_prompt_efforts: {},
         magic_prompt_modes: {},
@@ -219,7 +222,7 @@ vi.mock('@/services/preferences', () => ({
           resolve_conflicts: 'Resolve and finish.',
         },
         magic_prompt_backends: {
-          resolve_conflicts_backend: 'codex',
+          resolve_conflicts_backend: mocks.resolveConflictsBackend,
         },
       },
     }
@@ -238,7 +241,7 @@ vi.mock('@/services/opencode-cli', () => ({
 vi.mock('@/hooks/useInstalledBackends', () => ({
   useInstalledBackends: (options?: { serverId?: string }) => {
     mocks.installedBackendsOptions(options)
-    return { installedBackends: ['claude', 'codex'] }
+    return { installedBackends: mocks.installedBackends }
   },
 }))
 
@@ -324,6 +327,8 @@ describe('MagicModal manual PR link', () => {
     mocks.selectedModels = {}
     mocks.investigationSession = null
     mocks.selectedWorktreeId = 'wt-1'
+    mocks.installedBackends = ['claude', 'codex']
+    mocks.resolveConflictsBackend = 'codex'
     mocks.invokeMock.mockImplementation((command: string) => {
       if (command === 'detect_and_link_pr') return Promise.resolve(null)
       if (command === 'link_worktree_pr') {
@@ -654,6 +659,59 @@ describe('MagicModal manual PR link', () => {
     )
   })
 
+  it.each([
+    ['settings', /Use Magic Prompt settings/],
+    ['custom', /Choose backend/],
+  ])(
+    'resolves conflicts with the Muse model when Muse is the magic prompt backend (%s)',
+    async (_mode, radioName) => {
+      const user = userEvent.setup()
+      mocks.installedBackends = ['claude', 'muse']
+      mocks.resolveConflictsBackend = 'muse'
+      mocks.invokeMock.mockImplementation((command: string) => {
+        if (command === 'get_merge_conflicts') {
+          return Promise.resolve({
+            has_conflicts: true,
+            conflicts: ['src/file.ts'],
+            conflict_diff: '<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> b',
+          })
+        }
+        if (command === 'create_session') {
+          return Promise.resolve({
+            id: 'conflict-session',
+            name: 'Resolve conflicts',
+            order: 1,
+            created_at: 1,
+            updated_at: 1,
+            messages: [],
+            backend: 'muse',
+          })
+        }
+        return Promise.resolve(undefined)
+      })
+
+      render(<MagicModal />)
+      await user.click(
+        screen.getByRole('button', { name: /resolve conflicts/i })
+      )
+      await user.click(screen.getByRole('radio', { name: radioName }))
+      await user.click(
+        screen.getByRole('button', { name: /^resolve conflicts$/i })
+      )
+
+      await waitFor(() => {
+        expect(mocks.invokeMock).toHaveBeenCalledWith(
+          'send_chat_message',
+          expect.objectContaining({
+            sessionId: 'conflict-session',
+            model: 'muse/muse-spark-1.2',
+            backend: 'muse',
+          })
+        )
+      })
+    }
+  )
+
   it('sends resolve conflicts immediately in yolo from the keyboard shortcut', async () => {
     const user = userEvent.setup()
     mocks.invokeMock.mockImplementation((command: string) => {
@@ -864,7 +922,9 @@ describe('MagicModal manual PR link', () => {
     const dispatchSpy = vi.spyOn(window, 'dispatchEvent')
     render(<MagicModal />)
 
-    await user.click(screen.getByRole('button', { name: /commit this session/i }))
+    await user.click(
+      screen.getByRole('button', { name: /commit this session/i })
+    )
 
     expect(dispatchSpy).toHaveBeenCalledWith(
       expect.objectContaining({

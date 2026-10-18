@@ -33,6 +33,7 @@ import { useCommandCodeCliStatus } from '@/services/commandcode-cli'
 import { useGrokCliStatus } from '@/services/grok-cli'
 import { useKimiCliStatus } from '@/services/kimi-cli'
 import { useAntigravityCliStatus } from '@/services/antigravity-cli'
+import { useMuseCliStatus } from '@/services/muse-cli'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import {
@@ -59,6 +60,7 @@ const BACKEND_ORDER: CliBackend[] = [
   'grok',
   'kimi',
   'antigravity',
+  'muse',
 ]
 
 const backendCommands: Record<CliBackend, string> = {
@@ -71,6 +73,7 @@ const backendCommands: Record<CliBackend, string> = {
   grok: 'grok',
   kimi: 'kimi',
   antigravity: 'antigravity',
+  muse: 'muse',
 }
 
 const YOLO_ARGS_BY_BACKEND: Partial<Record<CliBackend, string[]>> = {
@@ -80,6 +83,7 @@ const YOLO_ARGS_BY_BACKEND: Partial<Record<CliBackend, string[]>> = {
   grok: ['--always-approve', '--sandbox', 'off'],
   kimi: ['--yolo'],
   antigravity: ['--approval-mode', 'yolo'],
+  muse: ['--yolo'],
 }
 
 export function NewSessionModeModal() {
@@ -102,6 +106,7 @@ export function NewSessionModeModal() {
   const grokStatus = useGrokCliStatus(statusOptions)
   const kimiStatus = useKimiCliStatus(statusOptions)
   const antigravityStatus = useAntigravityCliStatus(statusOptions)
+  const museStatus = useMuseCliStatus(statusOptions)
   const { data: preferences } = usePreferences(targetServerId)
   const [nativePickerKind, setNativePickerKind] =
     useState<NativeCliSessionKind | null>(null)
@@ -154,6 +159,10 @@ export function NewSessionModeModal() {
         installed: antigravityStatus.data?.installed,
         path: antigravityStatus.data?.path,
       },
+      muse: {
+        installed: museStatus.data?.installed,
+        path: museStatus.data?.path,
+      },
     }
 
     return BACKEND_ORDER.map((backend, index) => {
@@ -180,6 +189,8 @@ export function NewSessionModeModal() {
     kimiStatus.data?.path,
     antigravityStatus.data?.installed,
     antigravityStatus.data?.path,
+    museStatus.data?.installed,
+    museStatus.data?.path,
     opencodeStatus.data?.installed,
     opencodeStatus.data?.path,
     piStatus.data?.installed,
@@ -195,7 +206,8 @@ export function NewSessionModeModal() {
     commandcodeStatus.isLoading ||
     grokStatus.isLoading ||
     kimiStatus.isLoading ||
-    antigravityStatus.isLoading
+    antigravityStatus.isLoading ||
+    museStatus.isLoading
 
   const nativePickerCommand = useMemo(() => {
     if (nativePickerKind === null || nativePickerKind === 'terminal') {

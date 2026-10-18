@@ -859,6 +859,9 @@ export function getResumeCommand(session: Session): string | null {
   if (session.backend === 'antigravity' && session.antigravity_session_id) {
     return `agy --conversation ${session.antigravity_session_id}`
   }
+  if (session.backend === 'muse' && session.muse_session_id) {
+    return `muse resume ${session.muse_session_id}`
+  }
   return null
 }
 
@@ -872,6 +875,7 @@ export function getResumeSessionId(session: Session): string | null {
   if (session.backend === 'kimi') return session.kimi_session_id ?? null
   if (session.backend === 'antigravity')
     return session.antigravity_session_id ?? null
+  if (session.backend === 'muse') return session.muse_session_id ?? null
   return null
 }
 
@@ -940,6 +944,12 @@ export function getResumeArgs(
     return {
       command: preferResolvedCliCommand(cmd, 'agy', resolved),
       args: ['--conversation', session.antigravity_session_id],
+    }
+  }
+  if (session.backend === 'muse' && session.muse_session_id) {
+    return {
+      command: preferResolvedCliCommand(cmd, 'muse', resolved),
+      args: ['resume', session.muse_session_id],
     }
   }
   return null

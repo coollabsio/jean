@@ -11,6 +11,7 @@ import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
 import { chatQueryKeys, refreshWorktreeSessionsCaches } from '@/services/chat'
 import { startCommitJob } from '@/services/commit-jobs'
+import { resolveDefaultModelForBackend } from '@/lib/session-defaults'
 import { buildMcpConfigJson } from '@/services/mcp'
 import {
   saveWorktreePr,
@@ -213,13 +214,7 @@ export function useGitOperations({
       const model =
         override?.model ??
         preferences?.magic_prompt_models?.resolve_conflicts_model ??
-        (backend === 'codex'
-          ? (preferences?.selected_codex_model ?? 'gpt-6.1-sol')
-          : backend === 'opencode'
-            ? (preferences?.selected_opencode_model ?? 'opencode/gpt-6.1-sol')
-            : backend === 'cursor'
-              ? (preferences?.selected_cursor_model ?? 'cursor/auto')
-              : (preferences?.selected_model ?? 'sonnet'))
+        resolveDefaultModelForBackend(backend, preferences)
       const provider =
         override?.backend && override.backend !== 'claude'
           ? null
@@ -380,13 +375,7 @@ export function useGitOperations({
       const model =
         override?.model ??
         preferences?.magic_prompt_models?.resolve_conflicts_model ??
-        (backend === 'codex'
-          ? (preferences?.selected_codex_model ?? 'gpt-6.1-sol')
-          : backend === 'opencode'
-            ? (preferences?.selected_opencode_model ?? 'opencode/gpt-6.1-sol')
-            : backend === 'cursor'
-              ? (preferences?.selected_cursor_model ?? 'cursor/auto')
-              : (preferences?.selected_model ?? 'sonnet'))
+        resolveDefaultModelForBackend(backend, preferences)
       const provider =
         override?.backend && override.backend !== 'claude'
           ? null
