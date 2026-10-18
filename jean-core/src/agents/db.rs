@@ -2,6 +2,9 @@
 //! approvals and memory. All functions take a `&Connection` so they can be
 //! unit-tested with an in-memory database.
 
+use std::cmp::Ordering;
+use std::collections::HashMap;
+
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
@@ -176,6 +179,52 @@ const MIGRATIONS: &[&str] = &[
     r#"
     ALTER TABLE agents ADD COLUMN mcp_servers TEXT;
     ALTER TABLE agents ADD COLUMN jean_tools TEXT;
+    "#,
+    // v6: memory scope (agent / shared / user), supersede, change audit, journal.
+    // Existing rows: agent_id NULL becomes scope 'shared'; the rest stay 'agent'.
+    // Do not edit v1–v5.
+    r#"
+    ALTER TABLE memories ADD COLUMN scope TEXT NOT NULL DEFAULT 'agent';
+    ALTER TABLE memories ADD COLUMN superseded_by INTEGER;
+    ALTER TABLE memories ADD COLUMN superseded_at INTEGER;
+    UPDATE memories SET scope = 'shared' WHERE agent_id IS NULL;
+    CREATE TABLE memory_changes (
+        id INTEGER PRIMARY KEY,
+        memory_id INTEGER NOT NULL,
+        actor_agent_id TEXT,
+        owner_agent_id TEXT,
+        action TEXT NOT NULL,
+        scope TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        before_content TEXT,
+        after_content TEXT,
+        created_at INTEGER NOT NULL
+    );
+    CREATE INDEX memory_changes_owner ON memory_changes(owner_agent_id, id);
+    CREATE TABLE journal (
+        id INTEGER PRIMARY KEY,
+        agent_id TEXT NOT NULL,
+        project_id TEXT,
+        content TEXT NOT NULL,
+        occurred_at INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        source TEXT NOT NULL,
+        source_session_id TEXT
+    );
+    CREATE INDEX journal_agent_time ON journal(agent_id, occurred_at);
+    CREATE VIRTUAL TABLE journal_fts USING fts5(
+        content, content='journal', content_rowid='id'
+    );
+    CREATE TRIGGER journal_ai AFTER INSERT ON journal BEGIN
+        INSERT INTO journal_fts(rowid, content) VALUES (new.id, new.content);
+    END;
+    CREATE TRIGGER journal_ad AFTER DELETE ON journal BEGIN
+        INSERT INTO journal_fts(journal_fts, rowid, content) VALUES ('delete', old.id, old.content);
+    END;
+    CREATE TRIGGER journal_au AFTER UPDATE ON journal BEGIN
+        INSERT INTO journal_fts(journal_fts, rowid, content) VALUES ('delete', old.id, old.content);
+        INSERT INTO journal_fts(rowid, content) VALUES (new.id, new.content);
+    END;
     "#,
     // Subagent types. This is its own step so a later rebase can renumber it.
     // Do not fold this SQL into an older migration.
@@ -880,6 +929,10 @@ pub fn delete_agent(conn: &Connection, id: &str) -> Result<(), String> {
         return Err("Built-in agents cannot be deleted".to_string());
     }
     conn.execute("DELETE FROM memories WHERE agent_id = ?1", [id])
+        .map_err(err)?;
+    conn.execute("DELETE FROM memory_changes WHERE owner_agent_id = ?1", [id])
+        .map_err(err)?;
+    conn.execute("DELETE FROM journal WHERE agent_id = ?1", [id])
         .map_err(err)?;
     conn.execute("DELETE FROM agents WHERE id = ?1", [id])
         .map_err(err)?;
@@ -2201,12 +2254,17 @@ pub fn get_carry_over(conn: &Connection, agent_id: &str) -> Result<Option<String
 // ============================================================================
 
 pub const MEMORY_KINDS: &[&str] = &["rule", "fact", "open_work"];
+/// `agent` is private. `shared` is cross-agent working memory (rules, facts,
+/// open work). `user` is facts about the user, visible to every agent.
+pub const MEMORY_SCOPES: &[&str] = &["agent", "shared", "user"];
+pub const JOURNAL_SOURCES: &[&str] = &["user", "agent", "rotation"];
+pub const MAX_JOURNAL_CHARS: usize = 2000;
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Memory {
     pub id: i64,
-    /// None = shared by all agents.
+    /// None for `shared` and `user` scopes.
     pub agent_id: Option<String>,
     pub project_id: Option<String>,
     pub kind: String,
@@ -2215,10 +2273,15 @@ pub struct Memory {
     pub created_at: i64,
     pub updated_at: i64,
     pub expires_at: Option<i64>,
+    /// agent | shared | user
+    pub scope: String,
+    /// Set when a newer fact replaced this one. Hidden from search and prompts.
+    pub superseded_by: Option<i64>,
+    pub superseded_at: Option<i64>,
 }
 
 const MEMORY_COLUMNS: &str =
-    "m.id, m.agent_id, m.project_id, m.kind, m.content, m.pinned, m.created_at, m.updated_at, m.expires_at";
+    "m.id, m.agent_id, m.project_id, m.kind, m.content, m.pinned, m.created_at, m.updated_at, m.expires_at, m.scope, m.superseded_by, m.superseded_at";
 
 fn memory_from_row(row: &rusqlite::Row) -> rusqlite::Result<Memory> {
     Ok(Memory {
@@ -2231,11 +2294,16 @@ fn memory_from_row(row: &rusqlite::Row) -> rusqlite::Result<Memory> {
         created_at: row.get(6)?,
         updated_at: row.get(7)?,
         expires_at: row.get(8)?,
+        scope: row.get(9)?,
+        superseded_by: row.get(10)?,
+        superseded_at: row.get(11)?,
     })
 }
 
 pub struct NewMemory<'a> {
     pub agent_id: Option<&'a str>,
+    /// None derives `agent` when `agent_id` is set, otherwise `shared`.
+    pub scope: Option<&'a str>,
     pub project_id: Option<&'a str>,
     pub kind: &'a str,
     pub content: &'a str,
@@ -2260,48 +2328,173 @@ fn validate_memory(kind: &str, content: &str) -> Result<String, String> {
     Ok(content.to_string())
 }
 
+fn resolve_scope<'a>(m: &NewMemory<'a>) -> Result<(&'static str, Option<&'a str>), String> {
+    let requested = m.scope.unwrap_or(if m.agent_id.is_some() {
+        "agent"
+    } else {
+        "shared"
+    });
+    match requested {
+        "agent" => {
+            let id = m
+                .agent_id
+                .ok_or_else(|| "Agent memory needs an owner".to_string())?;
+            Ok(("agent", Some(id)))
+        }
+        "shared" => Ok(("shared", None)),
+        "user" => {
+            if m.kind != "fact" {
+                return Err(
+                    "User-level memory is only for facts about the user (name, timezone, preferences)."
+                        .to_string(),
+                );
+            }
+            Ok(("user", None))
+        }
+        other => Err(format!(
+            "scope must be agent, shared, or user (got {other})"
+        )),
+    }
+}
+
+/// One line in an agent prompt. Shared by budget selection and rendering.
+pub fn memory_prompt_line(memory: &Memory) -> String {
+    let scope = match memory.scope.as_str() {
+        "user" => "user ",
+        "shared" => "shared ",
+        _ => "",
+    };
+    let pin = if memory.pinned { ", pinned" } else { "" };
+    let project = memory
+        .project_id
+        .as_deref()
+        .map(|project| format!(", project {project}"))
+        .unwrap_or_default();
+    format!(
+        "- [#{} {scope}{}{pin}{project}] {}\n",
+        memory.id, memory.kind, memory.content
+    )
+}
+
+fn record_memory_change(
+    conn: &Connection,
+    memory_id: i64,
+    owner_agent_id: Option<&str>,
+    actor_agent_id: Option<&str>,
+    action: &str,
+    scope: &str,
+    kind: &str,
+    before_content: Option<&str>,
+    after_content: Option<&str>,
+) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO memory_changes (memory_id, actor_agent_id, owner_agent_id, action, scope, kind, before_content, after_content, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            memory_id,
+            actor_agent_id,
+            owner_agent_id,
+            action,
+            scope,
+            kind,
+            before_content,
+            after_content,
+            now()
+        ],
+    )
+    .map_err(err)?;
+    Ok(())
+}
+
 /// Save a memory. The same text in the same scope updates the existing entry
-/// instead of adding a duplicate.
-pub fn save_memory(conn: &Connection, m: &NewMemory) -> Result<Memory, String> {
+/// instead of adding a duplicate, and keeps its pin and project. Use
+/// `update_memory` to unpin. `actor_agent_id` is None when the user saves
+/// from the Memory view.
+pub fn save_memory(
+    conn: &Connection,
+    m: &NewMemory,
+    actor_agent_id: Option<&str>,
+) -> Result<Memory, String> {
+    let (scope, agent_id) = resolve_scope(m)?;
     let content = validate_memory(m.kind, m.content)?;
     let ts = now();
     let existing: Option<i64> = conn
         .query_row(
-            "SELECT id FROM memories WHERE agent_id IS ?1 AND content = ?2",
-            params![m.agent_id, content],
+            "SELECT id FROM memories WHERE agent_id IS ?1 AND scope = ?2 AND content = ?3 AND superseded_by IS NULL",
+            params![agent_id, scope, content],
             |row| row.get(0),
         )
         .optional()
         .map_err(err)?;
-    let id = if let Some(id) = existing {
+    if let Some(id) = existing {
+        let previous = get_memory(conn, id)?.ok_or_else(|| "Memory was not saved".to_string())?;
         conn.execute(
-            "UPDATE memories SET kind=?2, project_id=?3, pinned=?4, expires_at=?5, updated_at=?6 WHERE id=?1",
+            "UPDATE memories SET kind=?2, project_id=COALESCE(?3, project_id), pinned=MAX(pinned, ?4), expires_at=?5, updated_at=?6 WHERE id=?1",
             params![id, m.kind, m.project_id, m.pinned as i64, m.expires_at, ts],
         )
         .map_err(err)?;
-        id
-    } else {
-        let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM memories WHERE agent_id IS ?1",
-                [m.agent_id],
-                |row| row.get(0),
-            )
-            .map_err(err)?;
-        if count >= MAX_MEMORIES_PER_SCOPE {
-            return Err(format!(
-                "Memory is full ({MAX_MEMORIES_PER_SCOPE} entries). Forget old entries first."
-            ));
+        let saved = get_memory(conn, id)?.ok_or_else(|| "Memory was not saved".to_string())?;
+        let changed = previous.kind != saved.kind
+            || previous.pinned != saved.pinned
+            || previous.project_id != saved.project_id
+            || previous.expires_at != saved.expires_at;
+        if changed {
+            record_memory_change(
+                conn,
+                saved.id,
+                saved.agent_id.as_deref(),
+                actor_agent_id,
+                "update",
+                &saved.scope,
+                &saved.kind,
+                Some(&previous.content),
+                Some(&saved.content),
+            )?;
         }
-        conn.execute(
-            "INSERT INTO memories (agent_id, project_id, kind, content, pinned, source_session_id, created_at, updated_at, expires_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?8)",
-            params![m.agent_id, m.project_id, m.kind, content, m.pinned as i64, m.source_session_id, ts, m.expires_at],
+        return Ok(saved);
+    }
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM memories WHERE scope = ?1 AND agent_id IS ?2 AND superseded_by IS NULL",
+            params![scope, agent_id],
+            |row| row.get(0),
         )
         .map_err(err)?;
-        conn.last_insert_rowid()
-    };
-    get_memory(conn, id)?.ok_or_else(|| "Memory was not saved".to_string())
+    if count >= MAX_MEMORIES_PER_SCOPE {
+        return Err(format!(
+            "Memory is full ({MAX_MEMORIES_PER_SCOPE} entries). Forget old entries first."
+        ));
+    }
+    conn.execute(
+        "INSERT INTO memories (agent_id, project_id, kind, content, pinned, source_session_id, created_at, updated_at, expires_at, scope)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?8, ?9)",
+        params![
+            agent_id,
+            m.project_id,
+            m.kind,
+            content,
+            m.pinned as i64,
+            m.source_session_id,
+            ts,
+            m.expires_at,
+            scope
+        ],
+    )
+    .map_err(err)?;
+    let saved = get_memory(conn, conn.last_insert_rowid())?
+        .ok_or_else(|| "Memory was not saved".to_string())?;
+    record_memory_change(
+        conn,
+        saved.id,
+        saved.agent_id.as_deref(),
+        actor_agent_id,
+        "create",
+        &saved.scope,
+        &saved.kind,
+        None,
+        Some(&saved.content),
+    )?;
+    Ok(saved)
 }
 
 pub fn get_memory(conn: &Connection, id: i64) -> Result<Option<Memory>, String> {
@@ -2322,110 +2515,646 @@ pub struct MemoryPatch {
     pub pinned: Option<bool>,
 }
 
-/// Update a memory that `agent_id` can see (its own or shared).
+fn visible_memory(conn: &Connection, agent_id: &str, id: i64) -> Result<Memory, String> {
+    get_memory(conn, id)?
+        .filter(|memory| {
+            memory
+                .agent_id
+                .as_deref()
+                .is_none_or(|owner| owner == agent_id)
+        })
+        .ok_or_else(|| format!("Memory not found: {id}"))
+}
+
+/// Update a memory that `agent_id` can see (its own, shared, or a user fact).
 pub fn update_memory(
     conn: &Connection,
     agent_id: &str,
     id: i64,
     patch: &MemoryPatch,
+    actor_agent_id: Option<&str>,
 ) -> Result<Memory, String> {
-    let mut memory = get_memory(conn, id)?
-        .filter(|m| m.agent_id.as_deref().is_none_or(|owner| owner == agent_id))
-        .ok_or_else(|| format!("Memory not found: {id}"))?;
-    let kind = patch.kind.clone().unwrap_or(memory.kind.clone());
-    let content = validate_memory(&kind, patch.content.as_deref().unwrap_or(&memory.content))?;
-    memory.kind = kind;
-    memory.content = content;
-    if let Some(pinned) = patch.pinned {
-        memory.pinned = pinned;
+    let previous = visible_memory(conn, agent_id, id)?;
+    if previous.superseded_by.is_some() {
+        return Err(format!("Memory {id} was already corrected"));
     }
-    memory.updated_at = now();
+    if previous.scope == "user" && patch.kind.as_deref().is_some_and(|kind| kind != "fact") {
+        return Err(
+            "User-level memory is only for facts about the user (name, timezone, preferences)."
+                .to_string(),
+        );
+    }
+    let kind = patch.kind.clone().unwrap_or(previous.kind.clone());
+    let content = validate_memory(&kind, patch.content.as_deref().unwrap_or(&previous.content))?;
+    let pinned = patch.pinned.unwrap_or(previous.pinned);
+    let changed = kind != previous.kind || content != previous.content || pinned != previous.pinned;
+    let updated_at = if changed { now() } else { previous.updated_at };
     conn.execute(
         "UPDATE memories SET kind=?2, content=?3, pinned=?4, updated_at=?5 WHERE id=?1",
-        params![
-            id,
-            memory.kind,
-            memory.content,
-            memory.pinned as i64,
-            memory.updated_at
-        ],
+        params![id, kind, content, pinned as i64, updated_at],
     )
     .map_err(err)?;
+    let memory = get_memory(conn, id)?.ok_or_else(|| format!("Memory not found: {id}"))?;
+    if changed {
+        record_memory_change(
+            conn,
+            memory.id,
+            memory.agent_id.as_deref(),
+            actor_agent_id,
+            "update",
+            &memory.scope,
+            &memory.kind,
+            Some(&previous.content),
+            Some(&memory.content),
+        )?;
+    }
     Ok(memory)
 }
 
-/// Delete a memory that `agent_id` can see. Returns false when not found.
-pub fn forget_memory(conn: &Connection, agent_id: &str, id: i64) -> Result<bool, String> {
-    let changed = conn
-        .execute(
-            "DELETE FROM memories WHERE id=?1 AND (agent_id IS NULL OR agent_id=?2)",
-            params![id, agent_id],
+/// Replace a fact. The old row stays, marked superseded, and drops out of
+/// search and prompts. The change record keeps the previous text.
+pub fn supersede_memory(
+    conn: &Connection,
+    agent_id: &str,
+    actor_agent_id: Option<&str>,
+    id: i64,
+    content: &str,
+    source_session_id: Option<&str>,
+) -> Result<Memory, String> {
+    let previous = visible_memory(conn, agent_id, id)?;
+    if previous.superseded_by.is_some() {
+        return Err(format!("Memory {id} was already corrected"));
+    }
+    if previous.kind != "fact" {
+        return Err("Only facts can be corrected this way. Edit the entry instead.".to_string());
+    }
+    let content = validate_memory("fact", content)?;
+    if content == previous.content {
+        return Ok(previous);
+    }
+    let existing: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM memories WHERE id != ?1 AND agent_id IS ?2 AND scope = ?3 AND kind = 'fact' AND content = ?4 AND superseded_by IS NULL",
+            params![previous.id, previous.agent_id, previous.scope, content],
+            |row| row.get(0),
         )
+        .optional()
+        .map_err(err)?;
+    let ts = now();
+    let new_id = if let Some(existing) = existing {
+        existing
+    } else {
+        conn.execute(
+            "INSERT INTO memories (agent_id, project_id, kind, content, pinned, source_session_id, created_at, updated_at, expires_at, scope)
+             VALUES (?1, ?2, 'fact', ?3, ?4, ?5, ?6, ?6, ?7, ?8)",
+            params![
+                previous.agent_id,
+                previous.project_id,
+                content,
+                previous.pinned as i64,
+                source_session_id,
+                ts,
+                previous.expires_at,
+                previous.scope
+            ],
+        )
+        .map_err(err)?;
+        conn.last_insert_rowid()
+    };
+    conn.execute(
+        "UPDATE memories SET superseded_by=?2, superseded_at=?3 WHERE id=?1",
+        params![previous.id, new_id, ts],
+    )
+    .map_err(err)?;
+    let saved = get_memory(conn, new_id)?.ok_or_else(|| "Memory was not saved".to_string())?;
+    record_memory_change(
+        conn,
+        saved.id,
+        saved.agent_id.as_deref(),
+        actor_agent_id,
+        "supersede",
+        &saved.scope,
+        &saved.kind,
+        Some(&previous.content),
+        Some(&saved.content),
+    )?;
+    Ok(saved)
+}
+
+/// Delete a memory that `agent_id` can see. Returns false when not found.
+/// The previous text is kept in `memory_changes`.
+pub fn forget_memory(
+    conn: &Connection,
+    agent_id: &str,
+    id: i64,
+    actor_agent_id: Option<&str>,
+) -> Result<bool, String> {
+    let Some(memory) = get_memory(conn, id)? else {
+        return Ok(false);
+    };
+    if memory
+        .agent_id
+        .as_deref()
+        .is_some_and(|owner| owner != agent_id)
+    {
+        return Ok(false);
+    }
+    record_memory_change(
+        conn,
+        memory.id,
+        memory.agent_id.as_deref(),
+        actor_agent_id,
+        "forget",
+        &memory.scope,
+        &memory.kind,
+        Some(&memory.content),
+        None,
+    )?;
+    let changed = conn
+        .execute("DELETE FROM memories WHERE id=?1", [id])
         .map_err(err)?;
     Ok(changed > 0)
 }
 
 /// FTS5 query from free text: each word becomes a quoted prefix term, so user
 /// input can never be a syntax error ("orbit push" -> "orbit"* "push"*).
-fn fts_query(text: &str) -> Option<String> {
-    let terms: Vec<String> = text
-        .split(|c: char| !c.is_alphanumeric() && c != '_' && c != '-')
+fn fts_terms(text: &str, limit: usize) -> Vec<String> {
+    text.split(|c: char| !c.is_alphanumeric() && c != '_' && c != '-')
         .filter(|w| !w.is_empty())
-        .take(10)
+        .take(limit)
         .map(|w| format!("\"{}\"*", w.replace('"', "")))
-        .collect();
+        .collect()
+}
+
+/// Search-box query. Terms are ANDed, which is what a short search expects.
+fn fts_query(text: &str) -> Option<String> {
+    let terms = fts_terms(text, 10);
     (!terms.is_empty()).then(|| terms.join(" "))
 }
 
-/// Memories `agent_id` can see (own + shared), excluding expired entries.
-/// With a query: full-text match ranked by relevance; without: pinned first, then newest.
-pub fn search_memories(
-    conn: &Connection,
-    agent_id: &str,
-    query: Option<&str>,
-    limit: i64,
-) -> Result<Vec<Memory>, String> {
-    let at = now();
-    let scope =
-        "(m.agent_id IS NULL OR m.agent_id = ?1) AND (m.expires_at IS NULL OR m.expires_at > ?2)";
-    match query.and_then(fts_query) {
+/// Prompt hint. A user message is a sentence, so AND would match nothing.
+/// Keep distinctive words and OR them; bm25 then prefers the closer match.
+fn fts_hint_query(text: &str) -> Option<String> {
+    const STOP: &[&str] = &[
+        "about", "and", "any", "are", "but", "can", "could", "did", "does", "for", "from", "have",
+        "how", "into", "know", "not", "our", "that", "the", "this", "was", "what", "when", "where",
+        "who", "why", "with", "would", "you", "your",
+    ];
+    let terms: Vec<String> = text
+        .split(|c: char| !c.is_alphanumeric() && c != '_' && c != '-')
+        .filter(|word| word.chars().count() >= 3)
+        .filter(|word| !STOP.contains(&word.to_ascii_lowercase().as_str()))
+        .take(8)
+        .map(|word| format!("\"{}\"*", word.replace('"', "")))
+        .collect();
+    (!terms.is_empty()).then(|| terms.join(" OR "))
+}
+
+/// Filters for memory search. `scope` None means everything this agent can see.
+#[derive(Debug, Clone)]
+pub struct MemorySearch<'a> {
+    pub agent_id: &'a str,
+    pub query: Option<&'a str>,
+    pub kind: Option<&'a str>,
+    pub scope: Option<&'a str>,
+    pub project_id: Option<&'a str>,
+    pub pinned: Option<bool>,
+    /// Inclusive range on `updated_at` (unix seconds).
+    pub from: Option<i64>,
+    pub to: Option<i64>,
+    pub include_expired: bool,
+    pub limit: i64,
+}
+
+const MEMORY_FILTER_SQL: &str = "
+    (m.agent_id IS NULL OR m.agent_id = :agent)
+    AND m.superseded_by IS NULL
+    AND (:include_expired != 0 OR m.expires_at IS NULL OR m.expires_at > :now)
+    AND (:kind IS NULL OR m.kind = :kind)
+    AND (:scope IS NULL OR m.scope = :scope)
+    AND (:project IS NULL OR m.project_id = :project)
+    AND (:pinned IS NULL OR m.pinned = :pinned)
+    AND (:from_ts IS NULL OR m.updated_at >= :from_ts)
+    AND (:to_ts IS NULL OR m.updated_at <= :to_ts)
+";
+
+fn validate_memory_filters(search: &MemorySearch) -> Result<(), String> {
+    if let Some(kind) = search.kind.filter(|kind| !kind.is_empty()) {
+        if !MEMORY_KINDS.contains(&kind) {
+            return Err(format!("kind must be one of: {}", MEMORY_KINDS.join(", ")));
+        }
+    }
+    if let Some(scope) = search.scope.filter(|scope| !scope.is_empty()) {
+        if !MEMORY_SCOPES.contains(&scope) {
+            return Err(format!(
+                "scope must be one of: {}",
+                MEMORY_SCOPES.join(", ")
+            ));
+        }
+    }
+    if let (Some(from), Some(to)) = (search.from, search.to) {
+        if from > to {
+            return Err("from must be before to".to_string());
+        }
+    }
+    Ok(())
+}
+
+/// Memories `agent_id` can see (own + shared + user facts).
+/// With a query: FTS5 bm25, pinned first, then relevance, then newest.
+/// Without: pinned first, then newest. Superseded rows are excluded.
+pub fn search_memories(conn: &Connection, search: &MemorySearch) -> Result<Vec<Memory>, String> {
+    validate_memory_filters(search)?;
+    // Callers cap the limit. Prompt selection and the UI list need every row.
+    let limit = search.limit.max(1);
+    let pinned = search.pinned.map(|value| value as i64);
+    let include_expired = search.include_expired as i64;
+    let kind = search.kind.filter(|kind| !kind.is_empty());
+    let scope = search.scope.filter(|scope| !scope.is_empty());
+    let project = search.project_id.filter(|project| !project.is_empty());
+    match search.query.and_then(fts_query) {
         Some(fts) => {
             let mut stmt = conn
                 .prepare(&format!(
-                    "SELECT {MEMORY_COLUMNS} FROM memories_fts f JOIN memories m ON m.id = f.rowid
-                     WHERE memories_fts MATCH ?3 AND {scope} ORDER BY rank LIMIT ?4"
+                    "SELECT {MEMORY_COLUMNS} FROM memories_fts f
+                     JOIN memories m ON m.id = f.rowid
+                     WHERE memories_fts MATCH :fts AND {MEMORY_FILTER_SQL}
+                     ORDER BY m.pinned DESC, f.rank, m.updated_at DESC, m.id DESC
+                     LIMIT :limit"
                 ))
                 .map_err(err)?;
             let rows = stmt
-                .query_map(params![agent_id, at, fts, limit], memory_from_row)
+                .query_map(
+                    rusqlite::named_params! {
+                        ":fts": fts,
+                        ":agent": search.agent_id,
+                        ":now": now(),
+                        ":include_expired": include_expired,
+                        ":kind": kind,
+                        ":scope": scope,
+                        ":project": project,
+                        ":pinned": pinned,
+                        ":from_ts": search.from,
+                        ":to_ts": search.to,
+                        ":limit": limit,
+                    },
+                    memory_from_row,
+                )
                 .map_err(err)?;
             rows.collect::<Result<_, _>>().map_err(err)
         }
         None => {
             let mut stmt = conn
                 .prepare(&format!(
-                    "SELECT {MEMORY_COLUMNS} FROM memories m WHERE {scope}
-                     ORDER BY m.pinned DESC, m.updated_at DESC, m.id DESC LIMIT ?3"
+                    "SELECT {MEMORY_COLUMNS} FROM memories m
+                     WHERE {MEMORY_FILTER_SQL}
+                     ORDER BY m.pinned DESC, m.updated_at DESC, m.id DESC
+                     LIMIT :limit"
                 ))
                 .map_err(err)?;
             let rows = stmt
-                .query_map(params![agent_id, at, limit], memory_from_row)
+                .query_map(
+                    rusqlite::named_params! {
+                        ":agent": search.agent_id,
+                        ":now": now(),
+                        ":include_expired": include_expired,
+                        ":kind": kind,
+                        ":scope": scope,
+                        ":project": project,
+                        ":pinned": pinned,
+                        ":from_ts": search.from,
+                        ":to_ts": search.to,
+                        ":limit": limit,
+                    },
+                    memory_from_row,
+                )
                 .map_err(err)?;
             rows.collect::<Result<_, _>>().map_err(err)
         }
     }
 }
 
-/// All memories `agent_id` can see, for the UI (includes expired ones).
+/// All current memories `agent_id` can see, for the UI (includes expired ones).
 pub fn list_memories(conn: &Connection, agent_id: &str) -> Result<Vec<Memory>, String> {
+    search_memories(
+        conn,
+        &MemorySearch {
+            agent_id,
+            query: None,
+            kind: None,
+            scope: None,
+            project_id: None,
+            pinned: None,
+            from: None,
+            to: None,
+            include_expired: true,
+            limit: MAX_MEMORIES_PER_SCOPE * 3,
+        },
+    )
+}
+
+/// Memories chosen for a prompt: user facts first, then pinned, then FTS
+/// relevance to `hint`, then recency. Stops at `char_budget` (entry lines).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct PromptMemories {
+    pub entries: Vec<Memory>,
+    pub truncated: bool,
+}
+
+pub fn select_prompt_memories(
+    conn: &Connection,
+    agent_id: &str,
+    hint: Option<&str>,
+    char_budget: usize,
+) -> Result<PromptMemories, String> {
+    let candidates = search_memories(
+        conn,
+        &MemorySearch {
+            agent_id,
+            query: None,
+            kind: None,
+            scope: None,
+            project_id: None,
+            pinned: None,
+            from: None,
+            to: None,
+            include_expired: false,
+            limit: MAX_MEMORIES_PER_SCOPE * 3,
+        },
+    )?;
+    let ranks = match hint
+        .map(str::trim)
+        .filter(|hint| !hint.is_empty())
+        .and_then(fts_hint_query)
+    {
+        Some(fts) => fts_ranks(conn, &fts)?,
+        None => HashMap::new(),
+    };
+    let (mut user_facts, mut rest) = (Vec::new(), Vec::new());
+    for memory in candidates {
+        if memory.scope == "user" {
+            user_facts.push(memory);
+        } else {
+            rest.push(memory);
+        }
+    }
+    user_facts.sort_by(|a, b| {
+        b.pinned
+            .cmp(&a.pinned)
+            .then(b.updated_at.cmp(&a.updated_at))
+            .then(b.id.cmp(&a.id))
+    });
+    rest.sort_by(|a, b| {
+        b.pinned
+            .cmp(&a.pinned)
+            .then(rank_bucket(ranks.get(&a.id)).cmp(&rank_bucket(ranks.get(&b.id))))
+            .then_with(|| cmp_rank(ranks.get(&a.id).copied(), ranks.get(&b.id).copied()))
+            .then(b.updated_at.cmp(&a.updated_at))
+            .then(b.id.cmp(&a.id))
+    });
+    let mut entries = Vec::new();
+    let mut used = 0usize;
+    let mut truncated = false;
+    for memory in user_facts.into_iter().chain(rest) {
+        let line_len = memory_prompt_line(&memory).len();
+        if used + line_len > char_budget {
+            truncated = true;
+            continue;
+        }
+        used += line_len;
+        entries.push(memory);
+    }
+    Ok(PromptMemories { entries, truncated })
+}
+
+fn rank_bucket(rank: Option<&f64>) -> u8 {
+    if rank.is_some() {
+        0
+    } else {
+        1
+    }
+}
+
+fn cmp_rank(a: Option<f64>, b: Option<f64>) -> Ordering {
+    match (a, b) {
+        (Some(left), Some(right)) => left.partial_cmp(&right).unwrap_or(Ordering::Equal),
+        _ => Ordering::Equal,
+    }
+}
+
+fn fts_ranks(conn: &Connection, fts: &str) -> Result<HashMap<i64, f64>, String> {
     let mut stmt = conn
-        .prepare(&format!(
-            "SELECT {MEMORY_COLUMNS} FROM memories m WHERE m.agent_id IS NULL OR m.agent_id = ?1
-             ORDER BY m.pinned DESC, m.updated_at DESC, m.id DESC"
-        ))
+        .prepare("SELECT rowid, rank FROM memories_fts WHERE memories_fts MATCH ?1")
         .map_err(err)?;
-    let rows = stmt.query_map([agent_id], memory_from_row).map_err(err)?;
+    let rows = stmt
+        .query_map(params![fts], |row| Ok((row.get(0)?, row.get(1)?)))
+        .map_err(err)?;
     rows.collect::<Result<_, _>>().map_err(err)
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryChange {
+    pub id: i64,
+    pub memory_id: i64,
+    /// None when the user made the change from the Memory view.
+    pub actor_agent_id: Option<String>,
+    /// None for shared and user scopes.
+    pub owner_agent_id: Option<String>,
+    /// create | update | forget | supersede
+    pub action: String,
+    pub scope: String,
+    pub kind: String,
+    pub before_content: Option<String>,
+    pub after_content: Option<String>,
+    pub created_at: i64,
+}
+
+/// Changes this agent is allowed to see: its own memories, plus shared and user facts.
+pub fn list_memory_changes(
+    conn: &Connection,
+    agent_id: &str,
+    limit: i64,
+) -> Result<Vec<MemoryChange>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, memory_id, actor_agent_id, owner_agent_id, action, scope, kind, before_content, after_content, created_at
+             FROM memory_changes
+             WHERE owner_agent_id IS NULL OR owner_agent_id = ?1 OR actor_agent_id = ?1
+             ORDER BY id DESC
+             LIMIT ?2",
+        )
+        .map_err(err)?;
+    let rows = stmt
+        .query_map(params![agent_id, limit.clamp(1, 200)], |row| {
+            Ok(MemoryChange {
+                id: row.get(0)?,
+                memory_id: row.get(1)?,
+                actor_agent_id: row.get(2)?,
+                owner_agent_id: row.get(3)?,
+                action: row.get(4)?,
+                scope: row.get(5)?,
+                kind: row.get(6)?,
+                before_content: row.get(7)?,
+                after_content: row.get(8)?,
+                created_at: row.get(9)?,
+            })
+        })
+        .map_err(err)?;
+    rows.collect::<Result<_, _>>().map_err(err)
+}
+
+// ============================================================================
+// Journal
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct JournalEntry {
+    pub id: i64,
+    pub agent_id: String,
+    pub project_id: Option<String>,
+    pub content: String,
+    pub occurred_at: i64,
+    pub created_at: i64,
+    /// user | agent | rotation
+    pub source: String,
+    pub source_session_id: Option<String>,
+}
+
+pub struct NewJournal<'a> {
+    pub agent_id: &'a str,
+    pub project_id: Option<&'a str>,
+    pub content: &'a str,
+    pub occurred_at: Option<i64>,
+    pub source: &'a str,
+    pub source_session_id: Option<&'a str>,
+}
+
+fn journal_from_row(row: &rusqlite::Row) -> rusqlite::Result<JournalEntry> {
+    Ok(JournalEntry {
+        id: row.get(0)?,
+        agent_id: row.get(1)?,
+        project_id: row.get(2)?,
+        content: row.get(3)?,
+        occurred_at: row.get(4)?,
+        created_at: row.get(5)?,
+        source: row.get(6)?,
+        source_session_id: row.get(7)?,
+    })
+}
+
+const JOURNAL_COLUMNS: &str =
+    "id, agent_id, project_id, content, occurred_at, created_at, source, source_session_id";
+
+pub fn add_journal(conn: &Connection, entry: &NewJournal) -> Result<JournalEntry, String> {
+    if !JOURNAL_SOURCES.contains(&entry.source) {
+        return Err(format!(
+            "journal source must be one of: {}",
+            JOURNAL_SOURCES.join(", ")
+        ));
+    }
+    let content = entry.content.trim();
+    if content.is_empty() {
+        return Err("Journal entry cannot be empty".to_string());
+    }
+    if content.chars().count() > MAX_JOURNAL_CHARS {
+        return Err(format!(
+            "Journal entry is too long (max {MAX_JOURNAL_CHARS} characters)."
+        ));
+    }
+    let ts = now();
+    let occurred_at = entry.occurred_at.unwrap_or(ts);
+    if !(0..=ts + 366 * 86_400).contains(&occurred_at) {
+        return Err(
+            "occurredAt must be unix seconds, not later than one year from now".to_string(),
+        );
+    }
+    conn.execute(
+        "INSERT INTO journal (agent_id, project_id, content, occurred_at, created_at, source, source_session_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            entry.agent_id,
+            entry.project_id,
+            content,
+            occurred_at,
+            ts,
+            entry.source,
+            entry.source_session_id
+        ],
+    )
+    .map_err(err)?;
+    conn.query_row(
+        &format!("SELECT {JOURNAL_COLUMNS} FROM journal WHERE id=?1"),
+        [conn.last_insert_rowid()],
+        journal_from_row,
+    )
+    .map_err(err)
+}
+
+#[derive(Debug, Clone)]
+pub struct JournalSearch<'a> {
+    pub agent_id: &'a str,
+    pub query: Option<&'a str>,
+    /// Inclusive range on `occurred_at`.
+    pub from: Option<i64>,
+    pub to: Option<i64>,
+    pub limit: i64,
+}
+
+/// Recall this agent's journal by text and/or date. Other agents' entries are hidden.
+pub fn search_journal(
+    conn: &Connection,
+    search: &JournalSearch,
+) -> Result<Vec<JournalEntry>, String> {
+    if let (Some(from), Some(to)) = (search.from, search.to) {
+        if from > to {
+            return Err("from must be before to".to_string());
+        }
+    }
+    let limit = search.limit.clamp(1, 200);
+    match search.query.and_then(fts_query) {
+        Some(fts) => {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT j.id, j.agent_id, j.project_id, j.content, j.occurred_at, j.created_at, j.source, j.source_session_id
+                     FROM journal_fts f
+                     JOIN journal j ON j.id = f.rowid
+                     WHERE journal_fts MATCH ?1 AND j.agent_id = ?2
+                       AND (?3 IS NULL OR j.occurred_at >= ?3)
+                       AND (?4 IS NULL OR j.occurred_at <= ?4)
+                     ORDER BY f.rank, j.occurred_at DESC, j.id DESC
+                     LIMIT ?5",
+                )
+                .map_err(err)?;
+            let rows = stmt
+                .query_map(
+                    params![fts, search.agent_id, search.from, search.to, limit],
+                    journal_from_row,
+                )
+                .map_err(err)?;
+            rows.collect::<Result<_, _>>().map_err(err)
+        }
+        None => {
+            let mut stmt = conn
+                .prepare(&format!(
+                    "SELECT {JOURNAL_COLUMNS} FROM journal
+                     WHERE agent_id = ?1
+                       AND (?2 IS NULL OR occurred_at >= ?2)
+                       AND (?3 IS NULL OR occurred_at <= ?3)
+                     ORDER BY occurred_at DESC, id DESC
+                     LIMIT ?4"
+                ))
+                .map_err(err)?;
+            let rows = stmt
+                .query_map(
+                    params![search.agent_id, search.from, search.to, limit],
+                    journal_from_row,
+                )
+                .map_err(err)?;
+            rows.collect::<Result<_, _>>().map_err(err)
+        }
+    }
 }
 
 // ============================================================================
@@ -2888,6 +3617,8 @@ pub fn create_subagent_task(
 
 #[cfg(test)]
 mod tests {
+    use rusqlite::params;
+
     use super::*;
 
     fn db() -> Connection {
@@ -2965,6 +3696,7 @@ mod tests {
             &conn,
             &NewMemory {
                 agent_id: Some(&a.id),
+                scope: None,
                 project_id: None,
                 kind: "fact",
                 content: "x",
@@ -2972,6 +3704,7 @@ mod tests {
                 source_session_id: None,
                 expires_at: None,
             },
+            None,
         )
         .unwrap();
         delete_agent(&conn, &a.id).unwrap();
@@ -3110,6 +3843,7 @@ mod tests {
     fn mem<'a>(agent: Option<&'a str>, content: &'a str) -> NewMemory<'a> {
         NewMemory {
             agent_id: agent,
+            scope: None,
             project_id: None,
             kind: "rule",
             content,
@@ -3119,20 +3853,44 @@ mod tests {
         }
     }
 
+    fn save(conn: &Connection, memory: &NewMemory) -> Result<Memory, String> {
+        save_memory(conn, memory, None)
+    }
+
+    fn find(conn: &Connection, agent: &str, query: Option<&str>) -> Vec<Memory> {
+        search_memories(
+            conn,
+            &MemorySearch {
+                agent_id: agent,
+                query,
+                kind: None,
+                scope: None,
+                project_id: None,
+                pinned: None,
+                from: None,
+                to: None,
+                include_expired: false,
+                limit: 10,
+            },
+        )
+        .unwrap()
+    }
+
     #[test]
     fn memory_save_dedupes_and_validates() {
         let conn = db();
-        let a = save_memory(&conn, &mem(Some(JEAN_AGENT_ID), "Never push orbit to main")).unwrap();
-        let b = save_memory(
+        let a = save(&conn, &mem(Some(JEAN_AGENT_ID), "Never push orbit to main")).unwrap();
+        let b = save(
             &conn,
             &mem(Some(JEAN_AGENT_ID), "  Never push orbit to main "),
         )
         .unwrap();
         assert_eq!(a.id, b.id);
         // Same text in another scope is a separate entry
-        let shared = save_memory(&conn, &mem(None, "Never push orbit to main")).unwrap();
+        let shared = save(&conn, &mem(None, "Never push orbit to main")).unwrap();
         assert_ne!(shared.id, a.id);
-        assert!(save_memory(
+        assert_eq!(shared.scope, "shared");
+        assert!(save(
             &conn,
             &NewMemory {
                 kind: "secret",
@@ -3140,9 +3898,9 @@ mod tests {
             }
         )
         .is_err());
-        assert!(save_memory(&conn, &mem(None, "   ")).is_err());
+        assert!(save(&conn, &mem(None, "   ")).is_err());
         let long = "x".repeat(MAX_MEMORY_CHARS + 1);
-        assert!(save_memory(&conn, &mem(None, &long)).is_err());
+        assert!(save(&conn, &mem(None, &long)).is_err());
     }
 
     #[test]
@@ -3150,18 +3908,18 @@ mod tests {
         let conn = db();
         let other =
             create_agent(&conn, "Other", "", "blue", "", &AgentRunConfig::default()).unwrap();
-        save_memory(
+        save(
             &conn,
             &mem(Some(JEAN_AGENT_ID), "Orbit deploys need approval"),
         )
         .unwrap();
-        save_memory(&conn, &mem(None, "User prefers short answers")).unwrap();
-        save_memory(
+        save(&conn, &mem(None, "User prefers short answers")).unwrap();
+        save(
             &conn,
             &mem(Some(&other.id), "Orbit secret plan of other agent"),
         )
         .unwrap();
-        save_memory(
+        save(
             &conn,
             &NewMemory {
                 expires_at: Some(1),
@@ -3170,24 +3928,29 @@ mod tests {
         )
         .unwrap();
 
-        let hits = search_memories(&conn, JEAN_AGENT_ID, Some("orbit"), 10).unwrap();
+        let hits = find(&conn, JEAN_AGENT_ID, Some("orbit"));
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].content, "Orbit deploys need approval");
         // Prefix match and syntax-safe input
-        assert_eq!(
-            search_memories(&conn, JEAN_AGENT_ID, Some("deplo"), 10)
-                .unwrap()
-                .len(),
-            1
-        );
-        assert!(search_memories(&conn, JEAN_AGENT_ID, Some("\"(* AND"), 10).is_ok());
+        assert_eq!(find(&conn, JEAN_AGENT_ID, Some("deplo")).len(), 1);
+        assert!(search_memories(
+            &conn,
+            &MemorySearch {
+                agent_id: JEAN_AGENT_ID,
+                query: Some("\"(* AND"),
+                kind: None,
+                scope: None,
+                project_id: None,
+                pinned: None,
+                from: None,
+                to: None,
+                include_expired: false,
+                limit: 10,
+            }
+        )
+        .is_ok());
         // No query: own + shared, not expired, not other agent
-        assert_eq!(
-            search_memories(&conn, JEAN_AGENT_ID, None, 10)
-                .unwrap()
-                .len(),
-            2
-        );
+        assert_eq!(find(&conn, JEAN_AGENT_ID, None).len(), 2);
         // UI list includes expired
         assert_eq!(list_memories(&conn, JEAN_AGENT_ID).unwrap().len(), 3);
     }
@@ -3197,7 +3960,7 @@ mod tests {
         let conn = db();
         let other =
             create_agent(&conn, "Other", "", "blue", "", &AgentRunConfig::default()).unwrap();
-        let m = save_memory(&conn, &mem(Some(&other.id), "other fact")).unwrap();
+        let m = save(&conn, &mem(Some(&other.id), "other fact")).unwrap();
         assert!(update_memory(
             &conn,
             JEAN_AGENT_ID,
@@ -3205,10 +3968,11 @@ mod tests {
             &MemoryPatch {
                 pinned: Some(true),
                 ..Default::default()
-            }
+            },
+            None,
         )
         .is_err());
-        assert!(!forget_memory(&conn, JEAN_AGENT_ID, m.id).unwrap());
+        assert!(!forget_memory(&conn, JEAN_AGENT_ID, m.id, None).unwrap());
         let updated = update_memory(
             &conn,
             &other.id,
@@ -3218,23 +3982,528 @@ mod tests {
                 pinned: Some(true),
                 ..Default::default()
             },
+            Some(&other.id),
         )
         .unwrap();
         assert!(updated.pinned);
         // FTS index follows updates
+        assert_eq!(find(&conn, &other.id, Some("new")).len(), 1);
+        assert!(find(&conn, &other.id, Some("other")).is_empty());
+        assert!(forget_memory(&conn, &other.id, m.id, Some(&other.id)).unwrap());
+        assert!(find(&conn, &other.id, Some("new")).is_empty());
+        let changes = list_memory_changes(&conn, &other.id, 10).unwrap();
+        assert!(changes.iter().any(|change| change.action == "forget"));
+        assert!(changes
+            .iter()
+            .all(|change| change.owner_agent_id.as_deref() == Some(other.id.as_str())));
+        assert!(list_memory_changes(&conn, JEAN_AGENT_ID, 10)
+            .unwrap()
+            .is_empty());
+    }
+
+    fn fact<'a>(agent: Option<&'a str>, scope: &'a str, content: &'a str) -> NewMemory<'a> {
+        NewMemory {
+            kind: "fact",
+            scope: Some(scope),
+            ..mem(agent, content)
+        }
+    }
+
+    fn touch(conn: &Connection, id: i64, updated_at: i64) {
+        conn.execute(
+            "UPDATE memories SET updated_at=?2, created_at=?2 WHERE id=?1",
+            params![id, updated_at],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn migration_v6_keeps_existing_memories_and_assigns_scope() {
+        let conn = Connection::open_in_memory().unwrap();
+        for (index, sql) in MIGRATIONS.iter().enumerate().take(5) {
+            conn.execute_batch(&format!(
+                "BEGIN; {sql} PRAGMA user_version = {}; COMMIT;",
+                index + 1
+            ))
+            .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO memories (agent_id, project_id, kind, content, pinned, source_session_id, created_at, updated_at, expires_at)
+             VALUES (NULL, NULL, 'fact', 'User likes tea', 0, NULL, 10, 10, NULL)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO memories (agent_id, project_id, kind, content, pinned, source_session_id, created_at, updated_at, expires_at)
+             VALUES ('jean', NULL, 'rule', 'Private rule', 1, NULL, 11, 11, NULL)",
+            [],
+        )
+        .unwrap();
+        init(&conn).unwrap();
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, MIGRATIONS.len() as i64);
+        let memories = list_memories(&conn, JEAN_AGENT_ID).unwrap();
+        let shared = memories
+            .iter()
+            .find(|m| m.content == "User likes tea")
+            .unwrap();
+        let private = memories
+            .iter()
+            .find(|m| m.content == "Private rule")
+            .unwrap();
+        assert_eq!(shared.scope, "shared");
+        assert!(shared.agent_id.is_none());
+        assert_eq!(private.scope, "agent");
+        assert_eq!(private.agent_id.as_deref(), Some(JEAN_AGENT_ID));
+        assert_eq!(private.superseded_by, None);
+        assert_eq!(find(&conn, JEAN_AGENT_ID, Some("tea")).len(), 1);
+        let journal_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM journal", [], |row| row.get(0))
+            .unwrap();
+        let change_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM memory_changes", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(journal_count, 0);
+        assert_eq!(change_count, 0);
+    }
+
+    #[test]
+    fn user_facts_are_visible_to_every_agent_and_private_memory_is_not() {
+        let conn = db();
+        let other =
+            create_agent(&conn, "Other", "", "blue", "", &AgentRunConfig::default()).unwrap();
+        save(&conn, &fact(Some(JEAN_AGENT_ID), "user", "Name is Ada")).unwrap();
+        assert!(save(
+            &conn,
+            &NewMemory {
+                kind: "rule",
+                scope: Some("user"),
+                ..mem(Some(JEAN_AGENT_ID), "A rule about Ada")
+            }
+        )
+        .is_err());
+        let private = save(&conn, &mem(Some(JEAN_AGENT_ID), "Jean private note")).unwrap();
+        save(&conn, &mem(Some(&other.id), "Other private note")).unwrap();
+        save(&conn, &mem(None, "Shared deploy rule")).unwrap();
+
+        let jean = find(&conn, JEAN_AGENT_ID, None);
+        let other_hits = find(&conn, &other.id, None);
+        assert!(jean
+            .iter()
+            .any(|m| m.content == "Name is Ada" && m.scope == "user"));
+        assert!(other_hits.iter().any(|m| m.content == "Name is Ada"));
+        assert!(jean.iter().any(|m| m.content == "Shared deploy rule"));
+        assert!(other_hits.iter().any(|m| m.content == "Shared deploy rule"));
+        assert!(jean.iter().any(|m| m.id == private.id));
+        assert!(!other_hits.iter().any(|m| m.content == "Jean private note"));
+        assert!(!jean.iter().any(|m| m.content == "Other private note"));
+
+        let jean_prompt = select_prompt_memories(&conn, JEAN_AGENT_ID, None, 8000).unwrap();
+        let other_prompt = select_prompt_memories(&conn, &other.id, None, 8000).unwrap();
+        assert!(jean_prompt.entries.iter().any(|m| m.scope == "user"));
+        assert!(other_prompt
+            .entries
+            .iter()
+            .any(|m| m.content == "Name is Ada"));
+        assert!(!other_prompt.entries.iter().any(|m| m.id == private.id));
+    }
+
+    #[test]
+    fn prompt_selection_ranks_pinned_then_relevance_inside_the_budget() {
+        let conn = db();
+        let pinned = save(&conn, &mem(Some(JEAN_AGENT_ID), "Never force-push main")).unwrap();
+        conn.execute("UPDATE memories SET pinned=1 WHERE id=?1", [pinned.id])
+            .unwrap();
+        touch(&conn, pinned.id, 100);
+        let user = save(&conn, &fact(None, "user", "Timezone is Helsinki")).unwrap();
+        touch(&conn, user.id, 50);
+        let checklist = save(
+            &conn,
+            &mem(Some(JEAN_AGENT_ID), "Orbit deploy checklist for production"),
+        )
+        .unwrap();
+        touch(&conn, checklist.id, 200);
+        let weak = save(&conn, &mem(Some(JEAN_AGENT_ID), "orbit deploy note")).unwrap();
+        touch(&conn, weak.id, 900);
+        let noise = save(&conn, &mem(Some(JEAN_AGENT_ID), "Buy oat milk")).unwrap();
+        touch(&conn, noise.id, 1000);
+        let other =
+            create_agent(&conn, "Other", "", "blue", "", &AgentRunConfig::default()).unwrap();
+        save(&conn, &mem(Some(&other.id), "Orbit deploy secret plan")).unwrap();
+
+        let selected =
+            select_prompt_memories(&conn, JEAN_AGENT_ID, Some("orbit deploy"), 8000).unwrap();
+        let ids: Vec<i64> = selected.entries.iter().map(|m| m.id).collect();
+        assert_eq!(ids[0], user.id);
+        let rest: Vec<i64> = ids.into_iter().skip(1).collect();
+        assert_eq!(rest[0], pinned.id);
+        let checklist_at = rest.iter().position(|id| *id == checklist.id).unwrap();
+        let weak_at = rest.iter().position(|id| *id == weak.id).unwrap();
+        let noise_at = rest.iter().position(|id| *id == noise.id).unwrap();
+        assert!(checklist_at < noise_at);
+        assert!(weak_at < noise_at);
+        let ranked = search_memories(
+            &conn,
+            &MemorySearch {
+                agent_id: JEAN_AGENT_ID,
+                query: Some("orbit deploy"),
+                kind: None,
+                scope: None,
+                project_id: None,
+                pinned: None,
+                from: None,
+                to: None,
+                include_expired: false,
+                limit: 10,
+            },
+        )
+        .unwrap();
+        assert!(ranked.iter().any(|m| m.id == checklist.id));
+        assert!(ranked.iter().all(|m| m.id != noise.id));
+        assert!(ranked
+            .windows(2)
+            .all(|pair| pair[0].pinned || !pair[1].pinned));
+        assert!(!selected
+            .entries
+            .iter()
+            .any(|m| m.content.contains("secret")));
+        assert!(!selected.truncated);
+
+        let tight = select_prompt_memories(&conn, JEAN_AGENT_ID, Some("orbit deploy"), 80).unwrap();
+        assert!(tight.truncated);
+        assert!(tight.entries.iter().any(|m| m.id == user.id));
+        let used: usize = tight
+            .entries
+            .iter()
+            .map(|m| memory_prompt_line(m).len())
+            .sum();
+        assert!(used <= 80);
+        assert!(tight.entries.len() < selected.entries.len());
+    }
+
+    #[test]
+    fn prompt_hint_from_a_question_ranks_the_matching_memory_first() {
+        let conn = db();
+        let orbit = save(
+            &conn,
+            &mem(Some(JEAN_AGENT_ID), "orbit deploy uses the blue cluster"),
+        )
+        .unwrap();
+        touch(&conn, orbit.id, 100);
+        let soup = save(
+            &conn,
+            &mem(
+                Some(JEAN_AGENT_ID),
+                "The cafeteria serves tomato soup on Friday",
+            ),
+        )
+        .unwrap();
+        touch(&conn, soup.id, 500);
+        let selected = select_prompt_memories(
+            &conn,
+            JEAN_AGENT_ID,
+            Some("What do you know about the orbit deploy?"),
+            8000,
+        )
+        .unwrap();
+        let ids: Vec<i64> = selected.entries.iter().map(|m| m.id).collect();
+        let orbit_at = ids.iter().position(|id| *id == orbit.id).unwrap();
+        let soup_at = ids.iter().position(|id| *id == soup.id).unwrap();
+        assert!(orbit_at < soup_at);
+    }
+
+    #[test]
+    fn memory_search_filters_kind_scope_project_pinned_and_date() {
+        let conn = db();
+        let rule = save(
+            &conn,
+            &NewMemory {
+                project_id: Some("orbit"),
+                pinned: true,
+                ..mem(Some(JEAN_AGENT_ID), "Ask before merging orbit")
+            },
+        )
+        .unwrap();
+        touch(&conn, rule.id, 1_000);
+        let fact = save(&conn, &fact(None, "user", "Prefers short answers")).unwrap();
+        touch(&conn, fact.id, 5_000);
+        let hits = search_memories(
+            &conn,
+            &MemorySearch {
+                agent_id: JEAN_AGENT_ID,
+                query: Some("orbit"),
+                kind: Some("rule"),
+                scope: Some("agent"),
+                project_id: Some("orbit"),
+                pinned: Some(true),
+                from: Some(500),
+                to: Some(1_500),
+                include_expired: false,
+                limit: 10,
+            },
+        )
+        .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, rule.id);
+        assert!(search_memories(
+            &conn,
+            &MemorySearch {
+                agent_id: JEAN_AGENT_ID,
+                query: None,
+                kind: Some("fact"),
+                scope: Some("user"),
+                project_id: None,
+                pinned: Some(false),
+                from: Some(4_000),
+                to: Some(6_000),
+                include_expired: false,
+                limit: 10,
+            },
+        )
+        .unwrap()
+        .iter()
+        .any(|m| m.id == fact.id));
+        assert!(search_memories(
+            &conn,
+            &MemorySearch {
+                agent_id: JEAN_AGENT_ID,
+                query: None,
+                kind: None,
+                scope: None,
+                project_id: None,
+                pinned: None,
+                from: Some(9_000),
+                to: Some(1_000),
+                include_expired: false,
+                limit: 10,
+            },
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn supersede_hides_the_old_fact_and_records_the_change() {
+        let conn = db();
+        let old = save(&conn, &fact(Some(JEAN_AGENT_ID), "user", "Timezone is UTC")).unwrap();
+        let corrected = supersede_memory(
+            &conn,
+            JEAN_AGENT_ID,
+            Some(JEAN_AGENT_ID),
+            old.id,
+            "Timezone is Helsinki",
+            None,
+        )
+        .unwrap();
+        assert_ne!(corrected.id, old.id);
+        assert!(find(&conn, JEAN_AGENT_ID, Some("Helsinki"))
+            .iter()
+            .any(|m| m.id == corrected.id));
+        assert!(find(&conn, JEAN_AGENT_ID, Some("UTC")).is_empty());
+        let prompt = select_prompt_memories(&conn, JEAN_AGENT_ID, Some("timezone"), 8000).unwrap();
+        assert!(prompt.entries.iter().all(|m| m.id != old.id));
+        let changes = list_memory_changes(&conn, JEAN_AGENT_ID, 10).unwrap();
+        let change = changes.iter().find(|c| c.action == "supersede").unwrap();
+        assert_eq!(change.before_content.as_deref(), Some("Timezone is UTC"));
         assert_eq!(
-            search_memories(&conn, &other.id, Some("new"), 10)
-                .unwrap()
-                .len(),
+            change.after_content.as_deref(),
+            Some("Timezone is Helsinki")
+        );
+        assert_eq!(change.actor_agent_id.as_deref(), Some(JEAN_AGENT_ID));
+        assert!(supersede_memory(&conn, JEAN_AGENT_ID, None, old.id, "again", None).is_err());
+        assert!(supersede_memory(
+            &conn,
+            JEAN_AGENT_ID,
+            None,
+            save(&conn, &mem(Some(JEAN_AGENT_ID), "a rule")).unwrap().id,
+            "nope",
+            None,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn resave_keeps_the_pin_and_lists_more_than_200_memories() {
+        let conn = db();
+        let pinned = save(
+            &conn,
+            &NewMemory {
+                pinned: true,
+                ..fact(None, "user", "Timezone is Helsinki")
+            },
+        )
+        .unwrap();
+        let again = save(&conn, &fact(None, "user", "Timezone is Helsinki")).unwrap();
+        assert_eq!(again.id, pinned.id);
+        assert!(again.pinned);
+        for i in 0..210 {
+            save(&conn, &mem(Some(JEAN_AGENT_ID), &format!("note {i}"))).unwrap();
+        }
+        assert_eq!(list_memories(&conn, JEAN_AGENT_ID).unwrap().len(), 211);
+        let prompt = select_prompt_memories(&conn, JEAN_AGENT_ID, None, usize::MAX).unwrap();
+        assert_eq!(prompt.entries.len(), 211);
+    }
+
+    #[test]
+    fn supersede_does_not_merge_into_a_rule_with_the_same_text() {
+        let conn = db();
+        let rule = save(&conn, &mem(Some(JEAN_AGENT_ID), "Deploy on Fridays")).unwrap();
+        let old = save(
+            &conn,
+            &fact(Some(JEAN_AGENT_ID), "agent", "Deploy on Mondays"),
+        )
+        .unwrap();
+        let corrected = supersede_memory(
+            &conn,
+            JEAN_AGENT_ID,
+            None,
+            old.id,
+            "Deploy on Fridays",
+            None,
+        )
+        .unwrap();
+        assert_ne!(corrected.id, rule.id);
+        assert_eq!(corrected.kind, "fact");
+    }
+
+    #[test]
+    fn journal_rejects_millisecond_timestamps() {
+        let conn = db();
+        let entry = |occurred_at| NewJournal {
+            agent_id: JEAN_AGENT_ID,
+            project_id: None,
+            content: "Shipped",
+            occurred_at: Some(occurred_at),
+            source: "agent",
+            source_session_id: None,
+        };
+        assert!(add_journal(&conn, &entry(now() * 1000)).is_err());
+        assert!(add_journal(&conn, &entry(-1)).is_err());
+        assert!(add_journal(&conn, &entry(now())).is_ok());
+    }
+
+    #[test]
+    fn forget_removes_the_row_and_keeps_the_old_text() {
+        let conn = db();
+        let memory = save(&conn, &fact(None, "user", "Lives in Espoo")).unwrap();
+        assert!(forget_memory(&conn, JEAN_AGENT_ID, memory.id, None).unwrap());
+        assert!(get_memory(&conn, memory.id).unwrap().is_none());
+        assert!(find(&conn, JEAN_AGENT_ID, Some("Espoo")).is_empty());
+        let changes = list_memory_changes(&conn, JEAN_AGENT_ID, 10).unwrap();
+        let forgotten = changes.iter().find(|c| c.action == "forget").unwrap();
+        assert_eq!(forgotten.before_content.as_deref(), Some("Lives in Espoo"));
+        assert!(forgotten.after_content.is_none());
+        assert!(forgotten.actor_agent_id.is_none());
+    }
+
+    #[test]
+    fn journal_recall_by_text_and_date_stays_on_one_agent() {
+        let conn = db();
+        let other =
+            create_agent(&conn, "Other", "", "blue", "", &AgentRunConfig::default()).unwrap();
+        add_journal(
+            &conn,
+            &NewJournal {
+                agent_id: JEAN_AGENT_ID,
+                project_id: None,
+                content: "Shipped the orbit fix",
+                occurred_at: Some(1_700),
+                source: "rotation",
+                source_session_id: Some("chat-1"),
+            },
+        )
+        .unwrap();
+        add_journal(
+            &conn,
+            &NewJournal {
+                agent_id: JEAN_AGENT_ID,
+                project_id: Some("orbit"),
+                content: "Renamed the reviewer agent",
+                occurred_at: Some(5_000),
+                source: "agent",
+                source_session_id: None,
+            },
+        )
+        .unwrap();
+        add_journal(
+            &conn,
+            &NewJournal {
+                agent_id: &other.id,
+                project_id: None,
+                content: "Shipped the orbit fix for someone else",
+                occurred_at: Some(1_700),
+                source: "user",
+                source_session_id: None,
+            },
+        )
+        .unwrap();
+        let by_text = search_journal(
+            &conn,
+            &JournalSearch {
+                agent_id: JEAN_AGENT_ID,
+                query: Some("orbit"),
+                from: None,
+                to: None,
+                limit: 10,
+            },
+        )
+        .unwrap();
+        assert_eq!(by_text.len(), 1);
+        assert_eq!(by_text[0].content, "Shipped the orbit fix");
+        assert_eq!(by_text[0].source, "rotation");
+        let by_date = search_journal(
+            &conn,
+            &JournalSearch {
+                agent_id: JEAN_AGENT_ID,
+                query: None,
+                from: Some(4_000),
+                to: Some(6_000),
+                limit: 10,
+            },
+        )
+        .unwrap();
+        assert_eq!(by_date.len(), 1);
+        assert!(by_date[0].content.contains("Renamed"));
+        assert!(search_journal(
+            &conn,
+            &JournalSearch {
+                agent_id: JEAN_AGENT_ID,
+                query: Some("orbit"),
+                from: Some(4_000),
+                to: Some(6_000),
+                limit: 10,
+            },
+        )
+        .unwrap()
+        .is_empty());
+        assert_eq!(
+            search_journal(
+                &conn,
+                &JournalSearch {
+                    agent_id: &other.id,
+                    query: Some("orbit"),
+                    from: None,
+                    to: None,
+                    limit: 10,
+                },
+            )
+            .unwrap()
+            .len(),
             1
         );
-        assert!(search_memories(&conn, &other.id, Some("other"), 10)
-            .unwrap()
-            .is_empty());
-        assert!(forget_memory(&conn, &other.id, m.id).unwrap());
-        assert!(search_memories(&conn, &other.id, Some("new"), 10)
-            .unwrap()
-            .is_empty());
+        assert!(add_journal(
+            &conn,
+            &NewJournal {
+                agent_id: JEAN_AGENT_ID,
+                project_id: None,
+                content: " ",
+                occurred_at: None,
+                source: "user",
+                source_session_id: None,
+            },
+        )
+        .is_err());
     }
 
     #[test]

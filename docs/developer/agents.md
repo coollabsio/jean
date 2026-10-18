@@ -24,7 +24,9 @@ SQLite). Migrations are a list in `agents/db.rs` (`MIGRATIONS`, tracked with
 | `wakes` | One row per wake-up, for the hourly budget (`max_wakes_per_hour`). |
 | `schedules` | One-shot, interval (`every_secs`), cron, and event routines. |
 | `approvals` | Destructive MCP calls that wait for the user. |
-| `memories` + `memories_fts` | Rules, facts, open work. `agent_id` NULL = shared. FTS5 kept in sync by triggers. |
+| `memories` + `memories_fts` | Rules, facts, open work. `scope` is `agent` (private), `shared` (cross-agent working memory), or `user` (facts about the user). `agent_id` NULL for shared and user. Superseded rows stay but drop out of search and prompts. FTS5 kept in sync by triggers. |
+| `memory_changes` | Audit of create, update, forget, and supersede (before and after text, who did it). |
+| `journal` + `journal_fts` | Dated history for one agent, including a short copy of a chat when it rotates. |
 
 All functions in `db.rs` take a `&Connection`, so tests use an in-memory
 database. Runtime code uses `agents::with_db(app, |conn| ...)`.
@@ -128,7 +130,8 @@ tick (every 5s, or nudge())
   │    └─ no target ──► new task session (max 2 running per agent)
   └─ maintenance (every 60s):
        ├─ chat ≥ 40 messages and idle 10 min ──► new chat, old one archived,
-       │                                        end saved as carry_over
+       │                                        end saved as carry_over, shorter
+       │                                        copy stored as a journal entry
        └─ finished tasks: archive after 3 days, delete 30 days later
 ```
 
@@ -226,9 +229,40 @@ Not included, on purpose:
 - **An external webhook.** Jean has no inbound agent webhook. Adding one would
   be a new server and a new trust boundary, not a small hook.
 
+## Memory
+
+Three scopes. Do not treat `shared` as "facts about the user".
+
+| Scope | Who sees it | What it is |
+|---|---|---|
+| `agent` | That agent only | Private rules, facts, and open work. `agent_id` is the owner. |
+| `shared` | Every agent | Cross-agent working memory: rules, facts, and open work that are not about who the user is. `agent_id` is NULL. This is the old shared pool. Migration v6 sets `scope = 'shared'` on existing rows with `agent_id` NULL and `scope = 'agent'` on the rest. |
+| `user` | Every agent | Facts about the user only (name, timezone, preferences). `kind` must be `fact`. `agent_id` is NULL. A separate section in the prompt and in the Memory view. |
+
+`shared` stays a working-memory pool because it already mixes rules and open work. A preference is not the same thing as a shared operational rule, so user facts are a new scope rather than a reuse of `shared`.
+
+Writes are direct, the same way other memory is written. The approval gate stays on destructive project tools (delete, push, merge, pull request). Every create, update, forget, and supersede appends a `memory_changes` row with the previous text, the new text, and who did it (`actor_agent_id` NULL means the user, from the Memory view). The Memory view lists that record. Superseding a fact inserts the new text and sets `superseded_by` on the old row, so the old text leaves search and prompts but the change remains. Only facts can be superseded; rules and open work are edited in place.
+
+### Search and the prompt
+
+`memory_search` (MCP) and `search_agent_memory` (command) use FTS5. Ranking is pinned first, then bm25 relevance, then `updated_at`. Filters: kind, scope, project, pinned, and an inclusive `from`/`to` range on `updated_at` (unix seconds). An agent never sees another agent's private rows. Expired rows are hidden from the tool and from prompts; the Memory view includes them until they are forgotten. Superseded rows are hidden from all of these.
+
+Prompt assembly does not take the newest 40. `select_prompt_memories` fills an 8000-character budget:
+
+1. User facts (pinned, then newest).
+2. Then the agent's other visible memories: pinned, then FTS relevance to the current user message, then newest. The hint drops stopwords and words shorter than 3 characters, then ORs the rest, so a normal question can match. The search box still ANDs its terms.
+
+Entries that do not fit are skipped. The prompt says to call `memory_search` for the rest. The chosen ids are logged as `[Agents] prompt memory for <id>: ...`.
+
+### Journal
+
+`journal` is per agent and separate from durable facts. `journal_add` / `save_agent_journal` record what happened, a decision, or an outcome (max 2000 characters). `journal_search` / `search_agent_journal` recall by FTS text and/or `occurred_at` range. Another agent's journal is not visible.
+
+When a chat rotates (40 messages and 10 minutes idle), the end is still saved as `carry_over` for the new chat. The same text is also trimmed to 2000 characters, keeping the newest part, and stored as a journal entry with source `rotation`. That is a copy of the handoff, not a model summary. The log line is `[Agents] <id> continues in a new chat (... journal #<id> ...)`.
+
 ## MCP tools (`agents/mcp.rs`)
 
-Agent-only tools: `schedule_create/update/list/cancel`, `memory_save/search/update/forget`,
+Agent-only tools: `schedule_create/update/list/cancel`, `memory_save/search/update/forget/supersede`, `journal_add/search`,
 `message_agent`, `notify_user` (emits `agents:notification` for the toast),
 `task_list`. The caller is identified by `JEAN_MCP_SESSION`. Codex threads
 get it per thread through a config override
@@ -255,7 +289,7 @@ Registered in `http_server/dispatch.rs` (`AGENT_COMMANDS`, served by
 `list_agents`, `get_agent_details`, `create_agent`, `update_agent`,
 `delete_agent`, `decide_agent_approval`, `create_agent_schedule`,
 `update_agent_schedule`, `cancel_agent_schedule`,
-`save/update/delete/export_agent_memory`, `mark_agent_notifications_read`,
+`save/search/update/delete/supersede/export_agent_memory`, `save/search_agent_journal`, `mark_agent_notifications_read`,
 `get_agent_workdir`.
 `create_agent_schedule` takes `kind` (`once`, `interval`, `cron`, `event`)
 plus the fields for that kind (`delaySecs`, `everySecs`, `cron` + `timezone`,

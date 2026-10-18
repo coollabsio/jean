@@ -191,9 +191,12 @@ export interface AgentApproval {
 
 export type MemoryKind = 'rule' | 'fact' | 'open_work'
 
+/** agent = private. shared = cross-agent working memory. user = facts about the user. */
+export type MemoryScope = 'agent' | 'shared' | 'user'
+
 export interface AgentMemory {
   id: number
-  /** null = shared by all agents */
+  /** null for shared and user scopes */
   agentId: string | null
   projectId: string | null
   kind: MemoryKind
@@ -202,6 +205,39 @@ export interface AgentMemory {
   createdAt: number
   updatedAt: number
   expiresAt: number | null
+  scope: MemoryScope
+  /** Set when a newer fact replaced this one. */
+  supersededBy: number | null
+  supersededAt: number | null
+}
+
+export interface AgentJournalEntry {
+  id: number
+  agentId: string
+  projectId: string | null
+  content: string
+  /** Unix seconds for when this happened. */
+  occurredAt: number
+  createdAt: number
+  /** user | agent | rotation */
+  source: string
+  sourceSessionId: string | null
+}
+
+export interface AgentMemoryChange {
+  id: number
+  memoryId: number
+  /** null when the user made the change in the Memory view */
+  actorAgentId: string | null
+  /** null for shared and user scopes */
+  ownerAgentId: string | null
+  /** create | update | forget | supersede */
+  action: string
+  scope: string
+  kind: string
+  beforeContent: string | null
+  afterContent: string | null
+  createdAt: number
 }
 
 export interface AgentDetails {
@@ -209,6 +245,8 @@ export interface AgentDetails {
   schedules: AgentSchedule[]
   approvals: AgentApproval[]
   memories: AgentMemory[]
+  journal: AgentJournalEntry[]
+  memoryChanges: AgentMemoryChange[]
   tasks: AgentTask[]
   notifications: AgentNotification[]
   subagentTypes: SubagentType[]
@@ -481,10 +519,68 @@ export function useSaveAgentMemory() {
       agentId: string
       content: string
       kind: MemoryKind
-      shared: boolean
+      scope: MemoryScope
       pinned: boolean
+      projectId?: string | null
     }) => invoke<AgentMemory>('save_agent_memory', args)
   )
+}
+
+export interface AgentMemoryQuery {
+  query?: string
+  kind?: MemoryKind
+  scope?: MemoryScope
+  projectId?: string
+  pinned?: boolean
+  from?: number
+  to?: number
+}
+
+export function useSearchAgentMemory(
+  agentId: string,
+  request: AgentMemoryQuery,
+  enabled: boolean
+) {
+  return useQuery({
+    queryKey: [...agentsQueryKeys.details(agentId), 'memory-search', request],
+    queryFn: () =>
+      invoke<AgentMemory[]>('search_agent_memory', { agentId, ...request }),
+    enabled: enabled && !!agentId,
+  })
+}
+
+export function useSupersedeAgentMemory() {
+  return useAgentsMutation(
+    (args: { agentId: string; memoryId: number; content: string }) =>
+      invoke<AgentMemory>('supersede_agent_memory', args)
+  )
+}
+
+export function useSaveAgentJournal() {
+  return useAgentsMutation(
+    (args: {
+      agentId: string
+      content: string
+      occurredAt?: number | null
+      projectId?: string | null
+    }) => invoke<AgentJournalEntry>('save_agent_journal', args)
+  )
+}
+
+export function useSearchAgentJournal(
+  agentId: string,
+  request: AgentMemoryQuery,
+  enabled: boolean
+) {
+  return useQuery({
+    queryKey: [...agentsQueryKeys.details(agentId), 'journal-search', request],
+    queryFn: () =>
+      invoke<AgentJournalEntry[]>('search_agent_journal', {
+        agentId,
+        ...request,
+      }),
+    enabled: enabled && !!agentId,
+  })
 }
 
 export function useUpdateAgentMemory() {
