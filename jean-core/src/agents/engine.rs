@@ -1324,6 +1324,8 @@ mod tests {
             effort: None,
             thinking_level: None,
             skills: Vec::new(),
+            mcp_servers: None,
+            jean_tools: None,
         }
     }
 

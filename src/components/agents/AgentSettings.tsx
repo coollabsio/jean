@@ -8,6 +8,7 @@ import {
   sameAgentRun,
   type AgentRunDraft,
 } from './agent-config'
+import { AgentConnectors } from './AgentConnectors'
 import { AgentRunFields } from './AgentRunFields'
 
 /** Edit the backend, model, reasoning, and skills of an existing agent. */
@@ -47,13 +48,11 @@ export function AgentSettings({ agent }: { agent: AgentSummary }) {
         onChange={setDraft}
       />
       <div className="flex justify-end">
-        <Button
-          onClick={handleSave}
-          disabled={!dirty || updateAgent.isPending}
-        >
+        <Button onClick={handleSave} disabled={!dirty || updateAgent.isPending}>
           Save
         </Button>
       </div>
+      <AgentConnectors agent={agent} />
     </div>
   )
 }
