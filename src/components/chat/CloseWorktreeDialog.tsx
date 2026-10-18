@@ -10,6 +10,9 @@ import {
 } from '@/components/ui/alert-dialog'
 import { usePreferences } from '@/services/preferences'
 import { useUIStore } from '@/store/ui-store'
+import { closeConfirmBypassLabel } from '@/lib/confirm-bypass'
+import { isNativeApp } from '@/lib/environment'
+import { useIsMobile } from '@/hooks/use-mobile'
 
 // 'session' follows the removal behavior preference; 'session-archive' always archives.
 export type CloseConfirmMode = 'worktree' | 'session' | 'session-archive'
@@ -50,7 +53,14 @@ function CloseWorktreeDialogContent({
   mode = 'worktree',
 }: CloseWorktreeDialogProps) {
   const { data: preferences } = usePreferences()
+  const isMobile = useIsMobile()
+  const bypassLabel = closeConfirmBypassLabel(
+    preferences?.close_confirm_bypass_modifier
+  )
   const isArchiveOnly = mode === 'session-archive'
+  // The explicit "Archive Session" menu action never reads the bypass modifier.
+  const showBypassHint =
+    isNativeApp() && !isMobile && !isArchiveOnly && bypassLabel !== null
   const isDelete =
     !isArchiveOnly && (preferences?.removal_behavior ?? 'delete') === 'delete'
   const isSession = mode !== 'worktree'
@@ -98,6 +108,11 @@ function CloseWorktreeDialogContent({
                   >
                     Change in Settings
                   </button>
+                </p>
+              )}
+              {showBypassHint && (
+                <p className="text-xs text-muted-foreground">
+                  Hold {bypassLabel} while closing to skip this confirmation.
                 </p>
               )}
             </div>

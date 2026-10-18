@@ -87,9 +87,7 @@ export function modelOptionsForBackend(backend: string): LabeledOption[] {
 }
 
 export function effortOptionsForBackend(backend: string): LabeledOption[] {
-  return isCliBackend(backend)
-    ? (EFFORT_OPTIONS_BY_BACKEND[backend] ?? [])
-    : []
+  return isCliBackend(backend) ? (EFFORT_OPTIONS_BY_BACKEND[backend] ?? []) : []
 }
 
 /** Claude sessions store a thinking level separately from effort. */
@@ -150,8 +148,12 @@ export function withBackend(
   draft: AgentRunDraft,
   backend: string
 ): AgentRunDraft {
-  const models = new Set(modelOptionsForBackend(backend).map(option => option.value))
-  const efforts = new Set(effortOptionsForBackend(backend).map(option => option.value))
+  const models = new Set(
+    modelOptionsForBackend(backend).map(option => option.value)
+  )
+  const efforts = new Set(
+    effortOptionsForBackend(backend).map(option => option.value)
+  )
   const thinking = new Set(
     thinkingOptionsForBackend(backend).map(option => option.value)
   )

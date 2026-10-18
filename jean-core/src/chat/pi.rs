@@ -615,6 +615,19 @@ pub(crate) fn run_id_from_output_file(output_file: &Path) -> String {
 
 #[cfg(unix)]
 pub(crate) fn pi_rpc_socket_path(app_data_dir: &Path, session_id: &str, run_id: &str) -> PathBuf {
+    host_socket_path(app_data_dir, 'p', session_id, run_id)
+}
+
+/// Short socket path `<app_data>/r/<prefix><8 sid chars><8 run chars>.sock`
+/// for detached host processes. Kept short for the ~104-byte macOS
+/// `sun_path` limit.
+#[cfg(unix)]
+pub(crate) fn host_socket_path(
+    app_data_dir: &Path,
+    prefix: char,
+    session_id: &str,
+    run_id: &str,
+) -> PathBuf {
     fn short_id(value: &str) -> String {
         let short = value
             .chars()
@@ -629,14 +642,20 @@ pub(crate) fn pi_rpc_socket_path(app_data_dir: &Path, session_id: &str, run_id: 
     }
 
     app_data_dir.join("r").join(format!(
-        "p{}{}.sock",
+        "{prefix}{}{}.sock",
         short_id(session_id),
         short_id(run_id)
     ))
 }
 
+/// Wait until a detached host accepts connections on `socket_path`.
+/// Fails early when the host process `pid` exits first.
 #[cfg(unix)]
-fn wait_for_pi_rpc_socket(socket_path: &Path, pid: u32) -> Result<(), String> {
+pub(crate) fn wait_for_host_socket(
+    socket_path: &Path,
+    pid: u32,
+    label: &str,
+) -> Result<(), String> {
     use crate::platform::is_process_alive;
     use std::os::unix::net::UnixStream;
 
@@ -648,13 +667,13 @@ fn wait_for_pi_rpc_socket(socket_path: &Path, pid: u32) -> Result<(), String> {
         }
         if !is_process_alive(pid) {
             return Err(format!(
-                "PI RPC host exited before socket became ready: {}",
+                "{label} exited before socket became ready: {}",
                 socket_path.display()
             ));
         }
         if started.elapsed() > timeout {
             return Err(format!(
-                "Timed out waiting for PI RPC host socket at {}",
+                "Timed out waiting for {label} socket at {}",
                 socket_path.display()
             ));
         }
@@ -722,7 +741,7 @@ fn spawn_pi_rpc_host(
     }
 
     let pid = super::detached::spawn_detached_process(&exe, &args, &log_file, &app_data)?;
-    wait_for_pi_rpc_socket(&socket_path, pid)?;
+    wait_for_host_socket(&socket_path, pid, "PI RPC host")?;
     Ok((pid, socket_path))
 }
 

@@ -17,6 +17,7 @@ import { taskStatusLabel } from './AgentTasks'
 import { formatInterval } from './AgentSchedules'
 import { notificationPreview, splitNotifications } from './AgentInbox'
 import { enabledAgentServers } from './agents-feature'
+import { agentRunSummary } from './agent-config'
 
 function agent(overrides: Partial<AgentSummary>): AgentSummary {
   return {
@@ -200,6 +201,24 @@ describe('multi-server agents', () => {
     expect(remote.skills).toEqual([])
     expect(agentServerId(remote.id)).toBe('srv')
     expect(agentServerId(local.id)).toBe('local')
+  })
+
+  it('defaults the run configuration of agents from an older server', () => {
+    const {
+      backend: _backend,
+      model: _model,
+      effort: _effort,
+      thinkingLevel: _thinkingLevel,
+      skills: _skills,
+      ...old
+    } = agent({ id: 'reviewer' })
+    const remote = scopeAgentSummary('srv', 'Old server', old)
+    expect(remote.backend).toBeNull()
+    expect(remote.model).toBeNull()
+    expect(remote.effort).toBeNull()
+    expect(remote.thinkingLevel).toBeNull()
+    expect(remote.skills).toEqual([])
+    expect(agentRunSummary(remote)).toBeNull()
   })
 
   it('loads agents from online servers and skips failing ones', async () => {

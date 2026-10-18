@@ -225,7 +225,7 @@ pub(crate) async fn settle_agent_update(
     run_config_changed: bool,
 ) {
     if run_config_changed {
-        if let Err(e) = super::engine::home_session(app, agent).await {
+        if let Err(e) = super::engine::apply_run_config_to_home(app, agent).await {
             log::warn!(
                 "[Agents] could not update home session for {}: {e}",
                 agent.id
@@ -349,7 +349,9 @@ fn timing_from_kind(
             db::validate_schedule_timing(None, None, None, None, Some(now_unix + delay), now_unix)
         }
         "interval" => {
-            let every = every_secs.ok_or_else(|| "Interval requires everySecs".to_string())?;
+            let every = every_secs
+                .filter(|secs| *secs > 0)
+                .ok_or_else(|| "Interval requires a positive everySecs".to_string())?;
             db::validate_schedule_timing(
                 Some(every),
                 None,
@@ -530,6 +532,17 @@ pub(crate) fn render_memory_markdown(agent_id: &str, memories: &[db::Memory]) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn interval_kind_rejects_non_positive_seconds() {
+        for every in [None, Some(0), Some(-300)] {
+            let err =
+                timing_from_kind("interval", every, None, None, None, None, 1_000).unwrap_err();
+            assert!(err.contains("everySecs"), "{err}");
+        }
+        let ok = timing_from_kind("interval", Some(600), None, None, None, None, 1_000).unwrap();
+        assert_eq!((ok.every_secs, ok.next_run_at), (Some(600), 1_600));
+    }
 
     #[test]
     fn activity_preview_takes_first_clean_line() {

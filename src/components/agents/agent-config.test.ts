@@ -40,19 +40,19 @@ describe('backend and model choices', () => {
 
   it('lists models and reasoning only after a backend is chosen', () => {
     expect(modelOptionsForBackend('')).toEqual([])
-    expect(modelOptionsForBackend('codex').map(option => option.value)).toContain(
-      'gpt-5.5'
-    )
-    expect(effortOptionsForBackend('codex').map(option => option.value)).toEqual(
-      ['low', 'medium', 'high', 'xhigh']
-    )
+    expect(
+      modelOptionsForBackend('codex').map(option => option.value)
+    ).toContain('gpt-5.5')
+    expect(
+      effortOptionsForBackend('codex').map(option => option.value)
+    ).toEqual(['low', 'medium', 'high', 'xhigh'])
     expect(
       effortOptionsForBackend('antigravity').map(option => option.value)
     ).toContain('adaptive')
     expect(effortOptionsForBackend('cursor')).toEqual([])
-    expect(thinkingOptionsForBackend('claude').map(option => option.value)).toContain(
-      'ultrathink'
-    )
+    expect(
+      thinkingOptionsForBackend('claude').map(option => option.value)
+    ).toContain('ultrathink')
     expect(thinkingOptionsForBackend('codex')).toEqual([])
   })
 })
@@ -85,7 +85,11 @@ describe('skills', () => {
     {
       backend: 'codex' as const,
       skills: [
-        { name: 'review', path: '/skills/review/SKILL.md', description: 'Review' },
+        {
+          name: 'review',
+          path: '/skills/review/SKILL.md',
+          description: 'Review',
+        },
         { name: 'review-dup', path: '/skills/review/SKILL.md' },
       ],
     },

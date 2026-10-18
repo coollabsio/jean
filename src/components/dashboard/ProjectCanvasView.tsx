@@ -176,6 +176,7 @@ import { CloseWorktreeDialog } from '@/components/chat/CloseWorktreeDialog'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { hasBackendTransport } from '@/lib/environment'
 import { consumeWebReloadState } from '@/lib/web-reload-state'
+import { readCloseBypassDetail } from '@/lib/confirm-bypass'
 import { useLatestRef } from '@/hooks/useLatestRef'
 import {
   shouldDisableWorktreeTextSelection,
@@ -2867,6 +2868,8 @@ export function ProjectCanvasView({
       // Consume the event to prevent the legacy useCloseSessionOrWorktreeKeybinding fallback
       e.stopImmediatePropagation()
 
+      const bypassConfirm = readCloseBypassDetail(e)
+
       // No modal open — close the worktree of the selected card
       if (selectedIndex !== null && flatCards[selectedIndex]) {
         const item = flatCards[selectedIndex]
@@ -2875,7 +2878,7 @@ export function ProjectCanvasView({
         const section = worktreeSections.find(
           s => s.worktree.id === item.worktreeId
         )
-        if (preferences?.confirm_session_close === false) {
+        if (bypassConfirm || preferences?.confirm_session_close === false) {
           closeWorktreeDirectly(item.worktreeId)
         } else {
           setCloseWorktreeTarget({

@@ -302,3 +302,21 @@ export function scheduleInputFromForm(form: ScheduleForm): ScheduleInput {
   }
   return { ...base, event: form.event }
 }
+
+/**
+ * Patch for an existing routine. Timing is sent only when it changed, because
+ * the server re-times a routine whenever `kind` is set.
+ */
+export function scheduleUpdateFromForm(
+  form: ScheduleForm,
+  original: AgentSchedule
+): Partial<ScheduleInput> {
+  const { kind, everySecs, delaySecs, cron, timezone, event, ...rest } =
+    scheduleInputFromForm(form)
+  const timing = { kind, everySecs, delaySecs, cron, timezone, event }
+  const before = scheduleInputFromForm(formFromSchedule(original))
+  const unchanged = (Object.keys(timing) as (keyof typeof timing)[]).every(
+    key => timing[key] === before[key]
+  )
+  return unchanged ? rest : { ...rest, ...timing }
+}

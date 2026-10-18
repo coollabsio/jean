@@ -44,14 +44,12 @@ export function AgentSettings({ agent }: { agent: AgentSummary }) {
       </div>
       <AgentRunFields
         idPrefix="agent-settings"
+        serverId={agent.serverId}
         value={draft}
         onChange={setDraft}
       />
       <div className="flex justify-end">
-        <Button
-          onClick={handleSave}
-          disabled={!dirty || updateAgent.isPending}
-        >
+        <Button onClick={handleSave} disabled={!dirty || updateAgent.isPending}>
           Save
         </Button>
       </div>

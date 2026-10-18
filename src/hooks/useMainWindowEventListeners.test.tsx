@@ -16,6 +16,7 @@ import {
   hasBlockingOpenOverlay,
   handleRunEnvironmentStarted,
   isPlainSessionTerminalFocused,
+  resolveShortcutWithBypass,
   shouldAllowKeybindingThroughOpenOverlay,
   shouldLetChatInputHandleAction,
   shouldLetPlanDialogHandleAction,
@@ -99,6 +100,51 @@ describe('shouldLetChatInputHandleAction', () => {
     expect(
       shouldLetChatInputHandleAction('previous_session', document.body, false)
     ).toBe(false)
+  })
+})
+
+describe('resolveShortcutWithBypass', () => {
+  it('maps the modifier-decorated close shortcut to the close action and flags bypass', () => {
+    // Shift held → `mod+shift+w`, which is unbound; strip Shift → `mod+w`.
+    expect(
+      resolveShortcutWithBypass('mod+shift+w', DEFAULT_KEYBINDINGS, 'shift')
+    ).toEqual({
+      matchedAction: 'close_session_or_worktree',
+      bypassConfirm: true,
+    })
+  })
+
+  it('maps the plain close shortcut without a bypass flag', () => {
+    expect(
+      resolveShortcutWithBypass('mod+w', DEFAULT_KEYBINDINGS, 'shift')
+    ).toEqual({
+      matchedAction: 'close_session_or_worktree',
+      bypassConfirm: false,
+    })
+  })
+
+  it('does not strip-and-retry when the bypass modifier is off', () => {
+    expect(
+      resolveShortcutWithBypass('mod+shift+w', DEFAULT_KEYBINDINGS, 'none')
+    ).toEqual({ matchedAction: null, bypassConfirm: false })
+  })
+
+  it('rejects the retry when the stripped shortcut maps to a non-close action', () => {
+    // Alt held → `mod+alt+t` (unbound); strip Alt → `mod+t` = new_session.
+    // Narrow acceptance: only the close action may ride the stripped retry.
+    expect(
+      resolveShortcutWithBypass('mod+alt+t', DEFAULT_KEYBINDINGS, 'alt')
+    ).toEqual({ matchedAction: null, bypassConfirm: false })
+  })
+
+  it('prefers a direct user binding of the decorated shortcut over the bypass', () => {
+    const keybindings = {
+      ...DEFAULT_KEYBINDINGS,
+      new_worktree: 'mod+shift+w',
+    }
+    expect(
+      resolveShortcutWithBypass('mod+shift+w', keybindings, 'shift')
+    ).toEqual({ matchedAction: 'new_worktree', bypassConfirm: false })
   })
 })
 

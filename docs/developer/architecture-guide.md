@@ -301,14 +301,35 @@ Additional systems (no dedicated docs yet):
   terminal session from the session-tab context menu; the original chat session
   remains unchanged.
 
-  **Codex terminal attention.** Full-screen Codex terminals receive a
-  session-scoped `notify` override for the official `agent-turn-complete`
-  event. Jean tails that notification file, persists the Codex thread id and
-  terminal activity timestamp, marks the session waiting, invalidates session
-  caches, and emits `terminal:attention`. Submitting terminal input clears the
-  waiting state. The backing Jean `sessionId` must therefore be carried through
+  **Terminal attention.** Full-screen Codex and Claude terminals report their
+  turn lifecycle into a terminal-scoped signal file
+  (`<app_data>/terminal-notifications/{terminal}.jsonl`, one NDJSON line per
+  event — keyed by terminal, not session, because the tailer thread that deletes
+  the file lives and dies with its terminal). Codex gets a `notify` override for
+  the official `agent-turn-complete`
+  event; Claude gets `UserPromptSubmit` / `Stop` / `StopFailure` / `Notification`
+  (`permission_prompt|worker_permission_prompt` — plain-word matchers are exact,
+  not regex) / `SessionEnd` hooks injected as inline `--settings`
+  JSON, so the user's own `~/.claude/settings.json` is never touched. Jean tails
+  the file, persists the Codex thread id and terminal activity timestamp, flips
+  the session between working, waiting, and idle, invalidates session caches,
+  and emits `terminal:working` / `terminal:attention` / `terminal:idle`.
+  Attention also plays the configured waiting sound and fires an OS banner,
+  matching `chat:done`; `terminal:idle` (the CLI is gone) silently clears both
+  flags. The tailer emits one final `terminal:idle` when its terminal
+  disappears, whatever ended the CLI — Codex has no session-end event to report
+  with, and submitting `/exit` itself counts as terminal input, so without it a
+  quit Codex session stays pinned to "in progress". In Codex terminals, Enter
+  clears the waiting state and marks the session working (Codex has no
+  prompt-submit event). Claude terminals ignore Enter, because Enter also
+  confirms dialogs, menus, and local slash commands that start no turn; there a
+  lone Esc or Ctrl-C settles the session to idle, because `Stop` does not fire
+  on an interrupt. The backing Jean `sessionId` must therefore be carried through
   terminal creation, native-session reconnect, frontend terminal persistence,
-  `start_terminal`, and both native/WebSocket transports.
+  `start_terminal`, and both native/WebSocket transports. Terminals opened in an
+  *external* OS terminal cannot be instrumented and stay idle. Only the CLI
+  Jean itself launches is instrumented; one the user starts *by hand* in that
+  terminal carries no hook and does not report.
 
   **Web-mode persistence.** In web access (Axum HTTP server + WebSocket),
   panel/side/drawer and modal terminals survive a full browser refresh. Three
@@ -518,6 +539,7 @@ src-tauri/src/
 ├── chat/                  # Session lifecycle management
 │   ├── commands.rs        # Tauri commands (send message, create session, image processing)
 │   ├── claude.rs          # Claude CLI process spawning and management
+│   ├── claude_host.rs     # Detached Claude host for mid-turn steering (Unix)
 │   ├── pi.rs              # PI RPC host/stream parsing/steering integration
 │   ├── detached.rs        # Detached process recovery (survives app quit via nohup)
 │   ├── registry.rs        # Active session registry
@@ -741,6 +763,25 @@ When opening a URL in the system browser, use `crate::platform::open_url_in_brow
 re-exported as `jean_core::open_url_in_browser`). On Windows it runs `cmd /c start` through
 `silent_command()` so the intermediary console never flashes. Do not call raw
 `Command::new("cmd")` with `/c start`.
+
+## Claude CLI mid-turn steering
+
+Claude runs normally use `cat input.jsonl | nohup claude --print --input-format stream-json ... >> run.jsonl`. stdin closes after the first message, so nothing can reach a running turn. When `claude_auto_steer_enabled` is on (default off), on Unix, and the resolved CLI lists `--replay-user-messages` in `--help`, Jean starts a detached **Claude host** instead (`jean-core/src/chat/claude_host.rs`, modeled on the PI RPC host).
+
+- Jean launches itself with `--jean-claude-host` via `spawn_detached_process_with_env` (`set -m; nohup`, own process group). The host owns the `claude` child, writes the initial prompt, keeps stdin open, and appends child stdout/stderr to the run JSONL. The run survives Jean quitting.
+- Socket: `<app_data>/r/c<sid8><run8>.sock`. Request `{"type":"steer","message":...}`; reply `{"ok":true}` or `{"ok":false,"error":...}`. `steer_claude_turn` returns the error and the frontend falls back to the queue.
+- Finish rule (pure `ClaudeHostState`): on `result`, close stdin (CLI exits) unless a steer was written that the CLI has not echoed yet. A safety net closes stdin 30 s after a `result` when a pending steer is never consumed.
+- Echo filter: with `--replay-user-messages` the CLI re-emits each consumed stdin message as `{"type":"user","isReplay":true,...}`. The host drops the first one (the initial prompt) and rewrites each later one as `{"type":"steered_user_message","text":...}`. No parser sees a replayed user line, so the prompt never shows twice. `parse_run_to_message` already maps `steered_user_message` to `ContentBlock::UserInput`.
+- Markers: the host writes `{"type":"jean_claude_host_start"}` first and `{"type":"jean_claude_host_exit","code":N}` last. `tail_claude_output` sees the start marker and then ends only at the exit marker (or on cancel / dead process), not at the first `result`. Usage is summed over all `result` lines. The tailer emits `chat:steered` when it reads `steered_user_message`, so live and history positions match.
+- Recovery and cancel are unchanged: `run.pid` is the host PID, `recover_incomplete_runs` uses liveness + `type:"result"`, and `kill_process_tree` reaps the host process group (host + `claude` + MCP children).
+
+Known limitations:
+
+- A steer only lands at a tool boundary. A long tool call or a subagent Task call delays it. Nothing shows in the UI until the CLI consumes the steer.
+- A steer during a no-tool answer becomes a second turn in the same process (like the queue, but without a new run).
+- Model, execution mode, effort, and thinking cannot change for a steer. They apply from the next normal message.
+- Mid-turn injection is observed CLI behavior (tested with Claude Code 2.1.285+), not a documented contract. This is why the setting is off by default.
+- One extra host process per running Claude session. Windows/WSL, older CLIs, and runs started before the setting was enabled keep the plain pipeline; steering them fails and the prompt is queued.
 
 ## Antigravity CLI backend
 
