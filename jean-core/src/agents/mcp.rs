@@ -32,6 +32,11 @@ const AGENT_TOOLS: &[&str] = &[
     "notify_user",
     "task_list",
     "list_connectors",
+    "agent_list",
+    "agent_create",
+    "agent_update",
+    "agent_delete",
+    "agent_revert",
 ];
 
 /// Subagent type tools. Kept separate so later rebases can move this block.
@@ -62,6 +67,8 @@ const READ_ONLY_SUBAGENT_TOOLS: &[&str] = &[
     "notify_user",
     "list_connectors",
 ];
+/// Source used when the user already approved a tool and it is run again.
+pub const APPROVED_REPLAY_SOURCE: &str = "agent-approval";
 
 const MIN_EVERY_MINUTES: i64 = 5;
 const MAX_MINUTES: i64 = 60 * 24 * 30;
@@ -186,7 +193,23 @@ fn subagent_type_write(args: &Value) -> Result<db::SubagentTypeWrite, String> {
 
 /// MCP definitions of the agent tools (appended to the Jean tool registry).
 pub fn tool_definitions() -> Value {
-    let mut tools = json!([
+    let mut tools = base_tool_definitions()
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    for extra in [
+        self_management_tool_definitions(),
+        subagent_tool_definitions(),
+    ] {
+        if let Some(extra) = extra.as_array() {
+            tools.extend(extra.iter().cloned());
+        }
+    }
+    Value::Array(tools)
+}
+
+fn base_tool_definitions() -> Value {
+    json!([
         {"name":"schedule_create","description":"Agent sessions only. Wake yourself later with a prompt. Choose one: delayMinutes (once), everyMinutes (repeating, min 5), cron (5 fields) plus timezone, or event (session_finished, session_failed, worktree_archived, pr_merged, approval_resolved). The run is a background task.","inputSchema":{"type":"object","properties":{"name":{"type":"string"},"prompt":{"type":"string"},"delayMinutes":{"type":"number","minimum":1},"everyMinutes":{"type":"number","minimum":5},"cron":{"type":"string"},"timezone":{"type":"string"},"event":{"type":"string","enum":["session_finished","session_failed","worktree_archived","pr_merged","approval_resolved"]}},"required":["name","prompt"],"additionalProperties":false}},
         {"name":"schedule_update","description":"Agent sessions only. Change one of your schedules: name, prompt, paused, or its timing (the same fields as schedule_create).","inputSchema":{"type":"object","properties":{"scheduleId":{"type":"integer"},"name":{"type":"string"},"prompt":{"type":"string"},"paused":{"type":"boolean"},"delayMinutes":{"type":"number","minimum":1},"everyMinutes":{"type":"number","minimum":5},"cron":{"type":"string"},"timezone":{"type":"string"},"event":{"type":"string","enum":["session_finished","session_failed","worktree_archived","pr_merged","approval_resolved"]}},"required":["scheduleId"],"additionalProperties":false}},
         {"name":"schedule_list","description":"Agent sessions only. List your active schedules, including paused ones.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
@@ -202,13 +225,17 @@ pub fn tool_definitions() -> Value {
         {"name":"notify_user","description":"Agent sessions only. Tell the user something they must know: a result of a goal, a question, a failure, or a needed decision (level 'action'). Shows on the agent page and as a notification. Not for routine progress.","inputSchema":{"type":"object","properties":{"message":{"type":"string","maxLength":2000},"level":{"type":"string","enum":["info","action","error"]}},"required":["message"],"additionalProperties":false}},
         {"name":"task_list","description":"Agent sessions only. List your recent background tasks (schedule runs, follow-ups, agent requests) with status and one-line result.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":50}},"additionalProperties":false}},
         {"name":"list_connectors","description":"Agent sessions only. Read-only. List the MCP connectors saved for this agent, whether a limit is saved, and whether this session's backend can apply that limit. Does not change the limit or sign in.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}}
-    ]);
-    if let (Some(tools), Some(extra)) =
-        (tools.as_array_mut(), subagent_tool_definitions().as_array())
-    {
-        tools.extend(extra.iter().cloned());
-    }
-    tools
+    ])
+}
+
+fn self_management_tool_definitions() -> Value {
+    json!([
+        {"name":"agent_list","description":"Agent sessions only. List agents (id, name, description, color, paused, backend, model). Your own entry also includes instructions and skills.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
+        {"name":"agent_create","description":"Agent sessions only. Create an agent. It cannot be given a backend, model, effort, thinking level, skill, or wake budget beyond yours. Optional schedules use the same timing fields as schedule_create. Jean, the coordinator, may set any valid config.","inputSchema":{"type":"object","properties":{"name":{"type":"string"},"description":{"type":"string"},"icon":{"type":"string","enum":["blue","green","pink","purple","orange","yellow"]},"color":{"type":"string","enum":["blue","green","pink","purple","orange","yellow"]},"instructions":{"type":"string"},"backend":{"type":["string","null"]},"model":{"type":["string","null"]},"effort":{"type":["string","null"]},"thinkingLevel":{"type":["string","null"]},"skills":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"path":{"type":"string"},"backend":{"type":"string"}},"required":["path"],"additionalProperties":false}},"paused":{"type":"boolean"},"schedules":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"prompt":{"type":"string"},"delayMinutes":{"type":"number"},"everyMinutes":{"type":"number"},"cron":{"type":"string"},"timezone":{"type":"string"},"event":{"type":"string"}},"required":["name","prompt"],"additionalProperties":false}}},"required":["name"],"additionalProperties":false}},
+        {"name":"agent_update","description":"Agent sessions only. Update yourself (omit agentId): name, description, instructions, color, backend, model, effort, thinkingLevel, skills, or paused. Updating a different agent returns approvalRequired unless you are Jean. You cannot grant another agent more than you have.","inputSchema":{"type":"object","properties":{"agentId":{"type":"string"},"name":{"type":"string"},"description":{"type":"string"},"icon":{"type":"string"},"color":{"type":"string"},"instructions":{"type":"string"},"backend":{"type":["string","null"]},"model":{"type":["string","null"]},"effort":{"type":["string","null"]},"thinkingLevel":{"type":["string","null"]},"skills":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"path":{"type":"string"},"backend":{"type":"string"}},"required":["path"],"additionalProperties":false}},"paused":{"type":"boolean"}},"additionalProperties":false}},
+        {"name":"agent_delete","description":"Agent sessions only. Delete an agent. Returns approvalRequired unless you are Jean. Built-in agents cannot be deleted.","inputSchema":{"type":"object","properties":{"agentId":{"type":"string"}},"required":["agentId"],"additionalProperties":false}},
+        {"name":"agent_revert","description":"Agent sessions only. Undo the latest change to an agent (omit agentId for yourself): a field change, a schedule change, a create, or a delete. Reverting your own creation, or another agent's change, returns approvalRequired unless you are Jean.","inputSchema":{"type":"object","properties":{"agentId":{"type":"string"}},"additionalProperties":false}}
+    ])
 }
 
 fn caller_agent(app: &AppHandle, source: &str) -> Result<db::Agent, String> {
@@ -237,7 +264,7 @@ fn required_int(args: &Value, key: &str) -> Result<i64, String> {
     int_arg(args, key).ok_or_else(|| format!("Missing required argument: {key}"))
 }
 
-fn timing_from_tool_args(args: &Value, now: i64) -> Result<db::ScheduleTiming, String> {
+pub(crate) fn timing_from_tool_args(args: &Value, now: i64) -> Result<db::ScheduleTiming, String> {
     let cron = str_arg(args, "cron");
     let event = str_arg(args, "event");
     let timezone = str_arg(args, "timezone");
@@ -329,7 +356,21 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value, source: &str) -> Res
             let prompt = required_str(args, "prompt")?;
             let timing = timing_from_tool_args(args, db::now())?;
             let schedule = super::with_db(app, |conn| {
-                db::insert_schedule(conn, &agent.id, &title, &prompt, &timing, false)
+                let tx = conn
+                    .transaction()
+                    .map_err(|e| format!("Agents db error: {e}"))?;
+                let schedule =
+                    db::insert_schedule(&tx, &agent.id, &title, &prompt, &timing, false)?;
+                super::self_manage::record_schedule_change(
+                    &tx,
+                    &agent.id,
+                    "schedule_create",
+                    None,
+                    Some(&schedule),
+                    Some(source),
+                )?;
+                tx.commit().map_err(|e| format!("Agents db error: {e}"))?;
+                Ok(schedule)
             })?;
             json!({ "schedule": schedule })
         }
@@ -339,20 +380,33 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value, source: &str) -> Res
             let prompt = str_arg(args, "prompt");
             let paused = args.get("paused").and_then(Value::as_bool);
             let schedule = super::with_db(app, |conn| {
-                let current = db::get_schedule(conn, &agent.id, id)?
+                let tx = conn
+                    .transaction()
+                    .map_err(|e| format!("Agents db error: {e}"))?;
+                let before = db::get_schedule(&tx, &agent.id, id)?
                     .ok_or_else(|| format!("No active schedule #{id}"))?;
-                let timing = update_timing_args(args, &current)?
+                let timing = update_timing_args(args, &before)?
                     .map(|merged| timing_from_tool_args(&merged, db::now()))
                     .transpose()?;
-                db::update_schedule(
-                    conn,
+                let schedule = db::update_schedule(
+                    &tx,
                     &agent.id,
                     id,
                     name.as_deref(),
                     prompt.as_deref(),
                     paused,
                     timing.as_ref(),
-                )
+                )?;
+                super::self_manage::record_schedule_change(
+                    &tx,
+                    &agent.id,
+                    "schedule_update",
+                    Some(&before),
+                    Some(&schedule),
+                    Some(source),
+                )?;
+                tx.commit().map_err(|e| format!("Agents db error: {e}"))?;
+                Ok(schedule)
             })?;
             json!({ "schedule": schedule })
         }
@@ -362,7 +416,25 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value, source: &str) -> Res
         }
         "schedule_cancel" => {
             let id = required_int(args, "scheduleId")?;
-            let cancelled = super::with_db(app, |conn| db::cancel_schedule(conn, &agent.id, id))?;
+            let cancelled = super::with_db(app, |conn| {
+                let tx = conn
+                    .transaction()
+                    .map_err(|e| format!("Agents db error: {e}"))?;
+                let before = db::get_schedule(&tx, &agent.id, id)?;
+                let cancelled = db::cancel_schedule(&tx, &agent.id, id)?;
+                if cancelled {
+                    super::self_manage::record_schedule_change(
+                        &tx,
+                        &agent.id,
+                        "schedule_cancel",
+                        before.as_ref(),
+                        None,
+                        Some(source),
+                    )?;
+                }
+                tx.commit().map_err(|e| format!("Agents db error: {e}"))?;
+                Ok(cancelled)
+            })?;
             if !cancelled {
                 return Err(format!("No active schedule #{id}"));
             }
@@ -589,11 +661,22 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value, source: &str) -> Res
                 "note": "The result arrives as an update message. End your turn now."
             })
         }
+        "agent_list" | "agent_create" | "agent_update" | "agent_delete" | "agent_revert" => {
+            super::self_manage::run_tool(app, name, args, source, &agent, false).await?
+        }
         "list_connectors" => {
             return Ok(super::connectors::report_for_session(app, &agent, source).await);
         }
         _ => return Err(format!("Unknown agent tool: {name}")),
     };
+    super::notify_changed(app);
+    Ok(result)
+}
+
+/// Run an agent tool the user approved. Only the approval handler calls this;
+/// the actor comes from the stored approval, never from an MCP caller.
+pub async fn run_approved(app: &AppHandle, name: &str, args: &Value) -> Result<Value, String> {
+    let result = super::self_manage::run_approved(app, name, args).await?;
     super::notify_changed(app);
     Ok(result)
 }

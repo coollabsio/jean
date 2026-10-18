@@ -108,6 +108,29 @@ describe('formatRelative', () => {
 })
 
 describe('describeApproval', () => {
+  it('names agent self-management approvals', () => {
+    const approval: AgentApproval = {
+      id: 4,
+      agentId: 'helper',
+      tool: 'agent_update',
+      args: { agentId: 'reviewer', targetName: 'Reviewer', name: 'Docs' },
+      status: 'pending',
+      result: null,
+      createdAt: 0,
+    }
+    expect(describeApproval(approval)).toBe('Update agent Reviewer')
+    expect(describeApproval({ ...approval, tool: 'agent_delete' })).toBe(
+      'Delete agent Reviewer'
+    )
+    expect(
+      describeApproval({
+        ...approval,
+        tool: 'agent_revert',
+        args: { agentId: 'reviewer' },
+      })
+    ).toBe('Revert the last change to reviewer')
+  })
+
   it('names the action and its worktree', () => {
     const approval: AgentApproval = {
       id: 1,

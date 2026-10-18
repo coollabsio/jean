@@ -17,6 +17,7 @@ mod cron;
 pub mod db;
 mod engine;
 pub mod mcp;
+mod self_manage;
 mod subagents;
 
 use std::sync::Mutex;
@@ -48,18 +49,20 @@ pub fn init(app: &AppHandle) -> Result<(), String> {
 }
 
 /// Run `f` with the agents database. Fails when it is not open.
+/// The closure receives `&mut` so a caller can open a SQLite transaction.
+/// The mutex already gives this process exclusive access to the connection.
 pub fn with_db<T>(
     app: &AppHandle,
-    f: impl FnOnce(&Connection) -> Result<T, String>,
+    f: impl FnOnce(&mut Connection) -> Result<T, String>,
 ) -> Result<T, String> {
     let state = app
         .try_state::<AgentsDb>()
         .ok_or_else(|| "Agents database is not available".to_string())?;
-    let conn = state
+    let mut conn = state
         .0
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    f(&conn)
+    f(&mut conn)
 }
 
 /// The agent that owns this worktree ID (its chat or its task worktree).
@@ -271,6 +274,7 @@ fn render_system_prompt(
 - Delete, permanent delete, push, merge, and pull request creation need the user's approval. The tool then returns `approvalRequired`. Tell the user what you asked for and end your turn. The result arrives as an update.
 - Use `schedule_create` for later checks (`delayMinutes`), repeating intervals (`everyMinutes`, at least 5), cron (`cron` plus `timezone`), or an event (`event`: session_finished, session_failed, worktree_archived, pr_merged, approval_resolved). Use `schedule_update`, `schedule_list`, and `schedule_cancel` to manage them. Each run is a separate background task.
 - Use `spawn_subagent` to hand one task to a subagent type from `subagent_type_list`. Pass the type name and the task. The result arrives as an update. Use `subagent_type_save` and `subagent_type_delete` to define types. A subagent cannot define types or spawn further subagents.
+- Use `agent_list` to see agents. Use `agent_update` with no `agentId` to change your name, description, instructions, color, backend, model, effort, skills, or paused state. Use `agent_create` to make an agent; it cannot receive more backend, model, effort, thinking, skills, or wake budget than you have. Use `agent_revert` to undo the latest change.
 - Use `notify_user` only for what the user must know: results of goals, questions, failures, needed decisions. Not for routine progress.
 - Use `task_list` to see your background tasks and their results.
 - Use `list_connectors` to see the MCP connectors saved for you and whether this backend applies that limit. It is read-only.
@@ -279,6 +283,11 @@ fn render_system_prompt(
 - Use `journal_add` for what happened, a decision, or an outcome. Use `journal_search` to recall by text or date, including chats that were archived. Journal is history, not a lasting fact.
 - Before destructive actions, confirm with the user. Keep answers short.\n"
     ));
+    if agent.builtin {
+        out.push_str("- You are Jean, the coordinator. You may create, update, and delete any other agent directly. Deleting yourself is refused.\n");
+    } else {
+        out.push_str("- Updating another agent or deleting an agent returns `approvalRequired`. You cannot delete yourself without that approval.\n");
+    }
     match role {
         SessionRole::Chat { carry_over } => {
             out.push_str("\n## This session: chat with the user\n- The user talks with you here. Background work (schedules, follow-ups of tasks, requests from other agents) runs in separate task sessions. Use `task_list` when the user asks about it.\n");
@@ -419,6 +428,8 @@ mod tests {
         assert!(prompt.contains("Role of Jean"));
         assert!(prompt.contains("Use only the `jean` MCP server"));
         assert!(prompt.contains("pass `executionMode`"));
+        assert!(prompt.contains("`agent_create`"));
+        assert!(prompt.contains("approvalRequired"));
         assert!(prompt.contains("`reviewer`: Reviewer"));
         assert!(!prompt.contains("`jean`: Jean"));
         assert!(prompt.contains("spawn_subagent"));

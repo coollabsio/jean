@@ -7,13 +7,20 @@ import { useWorktree } from '@/services/projects'
 import {
   useAgentDetails,
   useDecideAgentApproval,
+  useRevertAgentChange,
   type AgentApproval,
+  type AgentChange,
   type AgentDelegation,
   type AgentSummary,
 } from '@/services/agents'
 import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
+import {
+  agentChangeActorLabel,
+  agentChangeDetail,
+  latestChangeIdForTarget,
+} from './agent-changes'
 
 /** "5m ago" / "in 2h" for unix seconds. */
 export function formatRelative(unixSeconds: number, now = Date.now()): string {
@@ -34,6 +41,24 @@ export function formatRelative(unixSeconds: number, now = Date.now()): string {
 /** One line that says what an approval will do. */
 export function describeApproval(approval: AgentApproval): string {
   const args = approval.args ?? {}
+  if (
+    approval.tool === 'agent_update' ||
+    approval.tool === 'agent_delete' ||
+    approval.tool === 'agent_revert'
+  ) {
+    const who =
+      (typeof args.targetName === 'string' && args.targetName) ||
+      (typeof args.agentId === 'string' && args.agentId) ||
+      (typeof args.name === 'string' && args.name) ||
+      ''
+    const verb =
+      approval.tool === 'agent_delete'
+        ? 'Delete agent'
+        : approval.tool === 'agent_revert'
+          ? 'Revert the last change to'
+          : 'Update agent'
+    return `${verb} ${who}`.trim()
+  }
   const target =
     (args.worktreeId as string | undefined) ??
     (args.worktreePath as string | undefined) ??
@@ -200,6 +225,53 @@ function DelegationRow({ delegation }: { delegation: AgentDelegation }) {
   )
 }
 
+function ChangeRow({
+  change,
+  canRevert,
+  agentId,
+}: {
+  change: AgentChange
+  canRevert: boolean
+  agentId: string
+}) {
+  const revert = useRevertAgentChange()
+  const detail = agentChangeDetail(change)
+  return (
+    <li className="flex flex-col gap-2 rounded-md border px-3 py-2 sm:flex-row sm:items-center">
+      <div className="min-w-0 flex-1">
+        <p className="text-sm text-foreground">{change.summary}</p>
+        <p className="text-xs text-muted-foreground">
+          {agentChangeActorLabel(change.actorAgentId)} ·{' '}
+          {formatRelative(change.createdAt)}
+        </p>
+        {detail ? (
+          <p className="truncate text-xs text-muted-foreground">{detail}</p>
+        ) : null}
+      </div>
+      {canRevert && (
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={revert.isPending}
+          onClick={() => {
+            const id = toast.loading('Reverting change…')
+            revert.mutate(
+              { agentId, changeId: change.id },
+              {
+                onSuccess: () => toast.success('Change reverted', { id }),
+                onError: error =>
+                  toast.error(`Failed to revert: ${error}`, { id }),
+              }
+            )
+          }}
+        >
+          Revert
+        </Button>
+      )}
+    </li>
+  )
+}
+
 function Section({
   title,
   empty,
@@ -241,6 +313,22 @@ export function AgentActivity({ agent }: { agent: AgentSummary }) {
           until the next hour.
         </p>
       )}
+      <Section title="Changes" empty="No self-management changes yet.">
+        {data.changes.map(change => (
+          <ChangeRow
+            key={change.id}
+            change={change}
+            agentId={agent.id}
+            canRevert={
+              change.id ===
+              latestChangeIdForTarget(
+                data.changes,
+                parseServerResourceKey(agent.id)?.resourceId ?? agent.id
+              )
+            }
+          />
+        ))}
+      </Section>
       <Section title="Approvals" empty="No approval requests.">
         {data.approvals.map(approval => (
           <ApprovalRow key={approval.id} approval={approval} />

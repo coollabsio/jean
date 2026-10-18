@@ -4097,6 +4097,7 @@ const AGENT_COMMANDS: &[&str] = &[
     "save_agent_subagent_type",
     "delete_agent_subagent_type",
     "spawn_agent_subagent",
+    "revert_agent_change",
     "get_agent_connector_catalog",
 ];
 
@@ -4324,6 +4325,10 @@ async fn dispatch_agents_command(
                     crate::agents::commands::spawn_subagent(app, &agent_id, &type_name, &task)
                         .await?,
                 )
+            }
+            "revert_agent_change" => {
+                let change_id: i64 = field(args, "changeId", "change_id")?;
+                to_value(crate::agents::commands::revert_agent_change(app, change_id).await?)
             }
             "get_agent_connector_catalog" => to_value(crate::agents::connectors::catalog_payload()),
             _ => Err(format!("Unknown command: {command}")),
