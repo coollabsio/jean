@@ -720,9 +720,11 @@ export function BackendModelPickerContent({
                 >
                   <div className="min-w-0 flex-1">
                     <div className="truncate">{option.label}</div>
-                    <div className="truncate text-xs text-muted-foreground">
-                      {option.value}
-                    </div>
+                    {option.value !== defaultModelOption?.value && (
+                      <div className="truncate text-xs text-muted-foreground">
+                        {option.value}
+                      </div>
+                    )}
                   </div>
                   <div
                     className="ml-2 grid shrink-0 grid-cols-[5.75rem_1.5rem_1rem] items-center gap-2"

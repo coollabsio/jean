@@ -1,5 +1,4 @@
 import {
-  Brain,
   CircleDot,
   ExternalLink,
   FolderOpen,
@@ -75,6 +74,7 @@ import {
 import { DesktopBackendModelPicker } from '@/components/chat/toolbar/DesktopBackendModelPicker'
 import { ExecutionModeDropdown } from '@/components/chat/toolbar/ExecutionModeDropdown'
 import { DockBurgerButton } from '@/components/chat/toolbar/DockBurgerButton'
+import { ReasoningLevelDropdown } from '@/components/chat/toolbar/ReasoningLevelDropdown'
 import type { ModelReasoningCapability } from '@/services/model-catalog'
 
 /** Stable default so omit/undefined doesn't allocate a new [] each render. */
@@ -790,89 +790,30 @@ export function DesktopToolbarControls({
       )}
 
       {hideReasoningControl ? null : usesEffortControl ? (
-        <DropdownMenu
+        <ReasoningLevelDropdown
           open={thinkingDropdownOpen}
           onOpenChange={setThinkingDropdownOpen}
-        >
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  className="hidden @xl:flex h-8 items-center gap-1.5 px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-                >
-                  <Brain className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400" />
-                  <span>{displayedEffortLabel}</span>
-                </button>
-              </DropdownMenuTrigger>
-            </TooltipTrigger>
-            <TooltipContent>
-              {`Effort: ${displayedEffortLabel} (⌘⇧E)`}
-            </TooltipContent>
-          </Tooltip>
-          <DropdownMenuContent align="start" onCloseAutoFocus={focusChatInput}>
-            <DropdownMenuRadioGroup
-              value={displayedEffortLevel}
-              onValueChange={handleEffortLevelChange}
-            >
-              {effortLevelOptions.map((option, i) => (
-                <DropdownMenuRadioItem key={option.value} value={option.value}>
-                  <Brain className="mr-2 h-4 w-4" />
-                  {option.label}
-                  <span className="ml-auto pl-4 text-xs text-muted-foreground">
-                    {option.description}
-                  </span>
-                  <Kbd className="ml-2 text-[10px]">{i + 1}</Kbd>
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+          value={displayedEffortLevel}
+          options={effortLevelOptions}
+          onValueChange={handleEffortLevelChange}
+          tooltip={`Effort: ${displayedEffortLabel} (⌘⇧E)`}
+          showShortcuts
+          triggerClassName="hidden @xl:flex"
+          onCloseAutoFocus={focusChatInput}
+        />
       ) : (
-        <DropdownMenu
+        <ReasoningLevelDropdown
           open={thinkingDropdownOpen}
           onOpenChange={setThinkingDropdownOpen}
-        >
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  className="hidden @xl:flex h-8 items-center gap-1.5 px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-                >
-                  <Brain
-                    className={cn(
-                      'h-3.5 w-3.5',
-                      displayedThinkingLevel !== 'off' &&
-                        'text-purple-600 dark:text-purple-400'
-                    )}
-                  />
-                  <span>{displayedThinkingLabel}</span>
-                </button>
-              </DropdownMenuTrigger>
-            </TooltipTrigger>
-            <TooltipContent>
-              {`Thinking: ${displayedThinkingLabel} (⌘⇧E)`}
-            </TooltipContent>
-          </Tooltip>
-          <DropdownMenuContent align="start" onCloseAutoFocus={focusChatInput}>
-            <DropdownMenuRadioGroup
-              value={displayedThinkingLevel}
-              onValueChange={handleThinkingLevelChange}
-            >
-              {thinkingLevelOptions.map((option, i) => (
-                <DropdownMenuRadioItem key={option.value} value={option.value}>
-                  <Brain className="mr-2 h-4 w-4" />
-                  {option.label}
-                  <span className="ml-auto pl-4 text-xs text-muted-foreground">
-                    {'tokens' in option ? option.tokens : option.description}
-                  </span>
-                  <Kbd className="ml-2 text-[10px]">{i + 1}</Kbd>
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+          value={displayedThinkingLevel}
+          options={thinkingLevelOptions}
+          onValueChange={handleThinkingLevelChange}
+          active={displayedThinkingLevel !== 'off'}
+          tooltip={`Thinking: ${displayedThinkingLabel} (⌘⇧E)`}
+          showShortcuts
+          triggerClassName="hidden @xl:flex"
+          onCloseAutoFocus={focusChatInput}
+        />
       )}
 
       <div className="hidden @xl:block h-4 w-px bg-border/50" />

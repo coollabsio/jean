@@ -1,5 +1,5 @@
 import { ChevronsUpDown, Zap } from '@/components/icons/reicon'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import {
   Popover,
   PopoverContent,
@@ -52,6 +52,14 @@ interface DesktopBackendModelPickerProps {
   onProviderChange?: (provider: string) => void
   onModelChange: (model: string) => void
   onBackendModelChange: (backend: CliBackend, model: string) => void
+  /** Extra first option in every backend list, e.g. "Default model" */
+  defaultModelOption?: { value: string; label: string }
+  /** Replaces the backend · model text in the trigger */
+  triggerLabel?: ReactNode
+  /** Register the ⌘⇧M / Tab picker shortcuts (chat toolbar only) */
+  keyboardShortcuts?: boolean
+  /** Extra classes for the popover, e.g. a z-index above a raised dialog */
+  popoverClassName?: string
 }
 
 export function DesktopBackendModelPicker({
@@ -67,11 +75,16 @@ export function DesktopBackendModelPicker({
   onProviderChange,
   onModelChange,
   onBackendModelChange,
+  defaultModelOption,
+  triggerLabel,
+  keyboardShortcuts = true,
+  popoverClassName,
 }: DesktopBackendModelPickerProps) {
   const isMobile = useIsMobile()
   const [open, setOpen] = useState(false)
   // Keyboard-only affordances (Tab shortcut hint + handler) are native-desktop only
-  const keyboardShortcutsEnabled = isNativeApp() && !isMobile
+  const keyboardShortcutsEnabled =
+    keyboardShortcuts && isNativeApp() && !isMobile
 
   useToolbarDropdownShortcuts({
     setModelDropdownOpen: setOpen,
@@ -192,6 +205,8 @@ export function DesktopBackendModelPicker({
   // useToolbarDerivedState resolves Antigravity labels from the static option
   // list only — prefer the CLI-reported label for the trigger when available.
   const selectedModelLabel = useMemo(() => {
+    if (defaultModelOption && selectedModel === defaultModelOption.value)
+      return defaultModelOption.label
     if (selectedBackend !== 'antigravity') return derivedSelectedModelLabel
     return (
       antigravityModelOptions?.find(option => option.value === selectedModel)
@@ -202,6 +217,7 @@ export function DesktopBackendModelPicker({
     )
   }, [
     antigravityModelOptions,
+    defaultModelOption,
     derivedSelectedModelLabel,
     selectedBackend,
     selectedModel,
@@ -215,12 +231,15 @@ export function DesktopBackendModelPicker({
   }, [backendModelSections, installedBackends])
   const hasMultipleChoices = selectableChoiceCount > 1
 
-  const handleOpenChange = useCallback((nextOpen: boolean) => {
-    setOpen(nextOpen)
-    if (!nextOpen) {
-      window.dispatchEvent(new CustomEvent('focus-chat-input'))
-    }
-  }, [])
+  const handleOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      setOpen(nextOpen)
+      if (!nextOpen && keyboardShortcuts) {
+        window.dispatchEvent(new CustomEvent('focus-chat-input'))
+      }
+    },
+    [keyboardShortcuts]
+  )
 
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
@@ -236,25 +255,29 @@ export function DesktopBackendModelPicker({
                 triggerClassName
               )}
             >
-              <span className="min-w-0 flex items-center gap-1.5">
-                <BackendLabel
-                  backend={selectedBackend}
-                  className="shrink-0"
-                  badgeClassName="text-[9px] leading-3"
-                />
-                <span className="truncate">· {selectedModelLabel}</span>
-                {onProviderChange && selectedBackend === 'claude' && (
-                  <span className="truncate text-muted-foreground">
-                    · {getProviderDisplayName(selectedProvider)}
-                  </span>
-                )}
-                {getModelFastInfo(selectedBackend, selectedModel).isFast && (
-                  <Zap
-                    className="h-3 w-3 shrink-0 fill-current text-warning"
-                    aria-label="Fast mode"
+              {triggerLabel ? (
+                <span className="min-w-0 truncate">{triggerLabel}</span>
+              ) : (
+                <span className="min-w-0 flex items-center gap-1.5">
+                  <BackendLabel
+                    backend={selectedBackend}
+                    className="shrink-0"
+                    badgeClassName="text-[9px] leading-3"
                   />
-                )}
-              </span>
+                  <span className="truncate">· {selectedModelLabel}</span>
+                  {onProviderChange && selectedBackend === 'claude' && (
+                    <span className="truncate text-muted-foreground">
+                      · {getProviderDisplayName(selectedProvider)}
+                    </span>
+                  )}
+                  {getModelFastInfo(selectedBackend, selectedModel).isFast && (
+                    <Zap
+                      className="h-3 w-3 shrink-0 fill-current text-warning"
+                      aria-label="Fast mode"
+                    />
+                  )}
+                </span>
+              )}
               {keyboardShortcutsEnabled && installedBackends.length > 1 && (
                 <Kbd className="ml-1 hidden 2xl:inline-flex text-[10px]">
                   Tab
@@ -279,7 +302,7 @@ export function DesktopBackendModelPicker({
       </Tooltip>
       <PopoverContent
         align="end"
-        className="w-[min(36rem,calc(100vw-4rem))] p-0"
+        className={cn('w-[min(36rem,calc(100vw-4rem))] p-0', popoverClassName)}
         onKeyDown={event => {
           if (event.key === 'Escape') {
             event.stopPropagation()
@@ -299,6 +322,7 @@ export function DesktopBackendModelPicker({
           onModelChange={onModelChange}
           onBackendModelChange={onBackendModelChange}
           onRequestClose={() => handleOpenChange(false)}
+          defaultModelOption={defaultModelOption}
         />
       </PopoverContent>
     </Popover>
