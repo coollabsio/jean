@@ -301,7 +301,9 @@ pub fn prompt_section(agent: &Agent) -> Option<String> {
         }
         out.push_str("Any other Jean tool is refused.\n");
     }
-    out.push_str("Use `list_connectors` to read this limit. It does not change it.\n");
+    if jean_tool_allowed(agent.jean_tools.as_deref(), "list_connectors") {
+        out.push_str("Use `list_connectors` to read this limit. It does not change it.\n");
+    }
     Some(out)
 }
 
@@ -593,13 +595,15 @@ mod tests {
                 backend: "codex".into(),
                 name: "alpha".into(),
             }]),
-            jean_tools: Some(vec!["notify_user".into()]),
+            jean_tools: Some(vec!["list_connectors".into(), "notify_user".into()]),
         };
         let prompt = prompt_section(&agent).unwrap();
         assert!(prompt.contains("cannot apply"));
         assert!(prompt.contains("codex:alpha"));
         assert!(prompt.contains("notify_user"));
         assert!(prompt.contains("list_connectors"));
+        agent.jean_tools = Some(Vec::new());
+        assert!(!prompt_section(&agent).unwrap().contains("list_connectors"));
         agent.mcp_servers = None;
         agent.jean_tools = None;
         assert!(prompt_section(&agent).is_none());

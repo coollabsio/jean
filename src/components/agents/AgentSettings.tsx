@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { useUpdateAgent, type AgentSummary } from '@/services/agents'
@@ -10,17 +9,13 @@ import {
 } from './agent-config'
 import { AgentConnectors } from './AgentConnectors'
 import { AgentRunFields } from './AgentRunFields'
+import { useSavedDraft } from './use-saved-draft'
 
 /** Edit the backend, model, reasoning, and skills of an existing agent. */
 export function AgentSettings({ agent }: { agent: AgentSummary }) {
   const updateAgent = useUpdateAgent()
   const saved = draftFromAgent(agent)
-  const [draft, setDraft] = useState<AgentRunDraft>(saved)
-  const [seen, setSeen] = useState<AgentRunDraft>(saved)
-  if (!sameAgentRun(seen, saved) && sameAgentRun(draft, seen)) {
-    setDraft(saved)
-    setSeen(saved)
-  }
+  const [draft, setDraft] = useSavedDraft<AgentRunDraft>(saved, sameAgentRun)
   const dirty = !sameAgentRun(draft, saved)
 
   const handleSave = () => {

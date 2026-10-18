@@ -172,48 +172,12 @@ const MIGRATIONS: &[&str] = &[
     );
     "#,
     // v5: per-agent connector allowlist and Jean tool allowlist.
-    // NULL means today's behavior (no agent-specific limit). The SQL lives in
-    // `migrate_agent_connectors` so a later rebase can renumber this step.
-    migrate_agent_connectors_sql(),
+    // NULL means today's behavior (no agent-specific limit).
+    r#"
+    ALTER TABLE agents ADD COLUMN mcp_servers TEXT;
+    ALTER TABLE agents ADD COLUMN jean_tools TEXT;
+    "#,
 ];
-
-/// SQL for the connector allowlist columns. Kept as its own step.
-pub const fn migrate_agent_connectors_sql() -> &'static str {
-    "\
-ALTER TABLE agents ADD COLUMN mcp_servers TEXT;
-ALTER TABLE agents ADD COLUMN jean_tools TEXT;
-"
-}
-
-fn agents_column_exists(conn: &Connection, column: &str) -> Result<bool, String> {
-    let mut stmt = conn.prepare("PRAGMA table_info(agents)").map_err(err)?;
-    let names = stmt
-        .query_map([], |row| row.get::<_, String>(1))
-        .map_err(err)?;
-    for name in names {
-        if name.map_err(err)? == column {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
-/// Add `mcp_servers` and `jean_tools` if they are missing.
-///
-/// Idempotent. `init` runs the numbered step and then this function, so a
-/// later rebase can move the step without leaving the columns behind or
-/// failing on a second `ALTER`.
-pub fn migrate_agent_connectors(conn: &Connection) -> Result<(), String> {
-    if agents_column_exists(conn, "mcp_servers")? {
-        if !agents_column_exists(conn, "jean_tools")? {
-            conn.execute_batch("ALTER TABLE agents ADD COLUMN jean_tools TEXT;")
-                .map_err(|e| format!("Agents connector migration failed: {e}"))?;
-        }
-        return Ok(());
-    }
-    conn.execute_batch(migrate_agent_connectors_sql())
-        .map_err(|e| format!("Agents connector migration failed: {e}"))
-}
 
 const JEAN_ROLE_PROMPT: &str = "You are Jean, the coordinator agent of the Jean app. You are the boss of all the user's projects.
 - Delegate coding work to sessions inside the correct project worktree. Do not edit project files directly.
@@ -269,9 +233,6 @@ pub fn init(conn: &Connection) -> Result<(), String> {
         ))
         .map_err(|e| format!("Agents db migration {} failed: {e}", index + 1))?;
     }
-    // Re-apply outside the version number so a rebase that renumbers the step
-    // still adds the columns. No-op when the numbered step already ran.
-    migrate_agent_connectors(conn)?;
     let ts = now();
     conn.execute(
         "INSERT OR IGNORE INTO agents (id, name, description, icon, role_prompt, worktree_id, builtin, created_at, updated_at)

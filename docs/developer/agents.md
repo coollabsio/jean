@@ -269,9 +269,8 @@ stacks).
 
 An agent can save an allowlist of the user's MCP servers and, separately, of
 Jean MCP tools. The columns are `agents.mcp_servers` and `agents.jean_tools`
-(JSON, nullable). Migration v5 adds them in `migrate_agent_connectors` /
-`migrate_agent_connectors_sql` in `agents/db.rs`. Do not edit v1–v4. Existing
-rows stay `NULL`.
+(JSON, nullable). Migration v5 in `agents/db.rs` adds them. Do not edit
+v1–v4. Existing rows stay `NULL`.
 
 | Stored value | Meaning |
 |---|---|
@@ -371,7 +370,10 @@ different from `NULL`, where a chat can still send the session's own
 Jean tool names are a second allowlist, enforced in `call_tool` before the
 approval gate. `NULL` allows every tool. A list allows only those names.
 `claude_permission_prompt` stays callable so Claude's permission hook still
-works. Destructive tools that are allowed still wait for approval. The
+works. Destructive tools that are allowed still wait for approval. The list
+applies only to the agent's own session. A session the agent starts with
+`create_session` or `send_chat_message` is a normal session with no limit, so
+leave those tools off when the limit must hold. The
 read-only agent tool `list_connectors` reports the saved limit, the discovered
 servers, and whether this backend applied the limit. It does not change
 anything and does not return server config (that can hold tokens).

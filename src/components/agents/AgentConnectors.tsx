@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { McpSignInButton } from '@/components/mcp/McpSignInButton'
@@ -27,6 +26,7 @@ import {
   toggleConnector,
   toggleJeanTool,
 } from './agent-connectors'
+import { useSavedDraft } from './use-saved-draft'
 
 interface JeanToolInfo {
   name: string
@@ -88,26 +88,14 @@ export function AgentConnectors({ agent }: { agent: AgentSummary }) {
 
   const savedConnectors = agent.mcpServers ?? null
   const savedTools = agent.jeanTools ?? null
-  const [connectors, setConnectors] = useState<AgentConnector[] | null>(
-    savedConnectors
+  const [connectors, setConnectors] = useSavedDraft<AgentConnector[] | null>(
+    savedConnectors,
+    sameConnectors
   )
-  const [tools, setTools] = useState<string[] | null>(savedTools)
-  const [seenConnectors, setSeenConnectors] = useState(savedConnectors)
-  const [seenTools, setSeenTools] = useState(savedTools)
-  if (
-    !sameConnectors(seenConnectors, savedConnectors) &&
-    sameConnectors(connectors, seenConnectors)
-  ) {
-    setConnectors(savedConnectors)
-    setSeenConnectors(savedConnectors)
-  }
-  if (
-    !sameJeanTools(seenTools, savedTools) &&
-    sameJeanTools(tools, seenTools)
-  ) {
-    setTools(savedTools)
-    setSeenTools(savedTools)
-  }
+  const [tools, setTools] = useSavedDraft<string[] | null>(
+    savedTools,
+    sameJeanTools
+  )
 
   const dirty =
     !sameConnectors(connectors, savedConnectors) ||
