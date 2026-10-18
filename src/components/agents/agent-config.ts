@@ -11,6 +11,7 @@ import {
   KIMI_EFFORT_LEVEL_OPTIONS,
   KIMI_MODEL_OPTIONS,
   MODEL_OPTIONS,
+  MUSE_EFFORT_LEVEL_OPTIONS,
   MUSE_MODEL_OPTIONS,
   OPENCODE_MODEL_OPTIONS,
   PI_EFFORT_LEVEL_OPTIONS,
@@ -63,6 +64,7 @@ const EFFORT_OPTIONS_BY_BACKEND: Partial<Record<CliBackend, LabeledOption[]>> =
     grok: GROK_EFFORT_LEVEL_OPTIONS,
     kimi: KIMI_EFFORT_LEVEL_OPTIONS,
     antigravity: ANTIGRAVITY_EFFORT_LEVEL_OPTIONS,
+    muse: MUSE_EFFORT_LEVEL_OPTIONS,
   }
 
 function isCliBackend(value: string): value is CliBackend {
@@ -198,20 +200,6 @@ export function agentRunPatch(
       backend: skill.backend ?? null,
     })),
   }
-}
-
-/** Take a settings update from the server when the form still matches the
- * last value it showed, or already matches the server (after a save).
- * A draft the user edited stays put. */
-export function shouldSyncAgentDraft(
-  seen: AgentRunDraft,
-  draft: AgentRunDraft,
-  saved: AgentRunDraft
-): boolean {
-  return (
-    !sameAgentRun(seen, saved) &&
-    (sameAgentRun(draft, seen) || sameAgentRun(draft, saved))
-  )
 }
 
 export function sameAgentRun(a: AgentRunDraft, b: AgentRunDraft): boolean {

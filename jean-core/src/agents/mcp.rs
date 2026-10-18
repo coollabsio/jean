@@ -28,6 +28,7 @@ const AGENT_TOOLS: &[&str] = &[
     "message_agent",
     "notify_user",
     "task_list",
+    "list_connectors",
     "agent_list",
     "agent_create",
     "agent_update",
@@ -69,7 +70,8 @@ fn base_tool_definitions() -> Value {
         {"name":"memory_forget","description":"Agent sessions only. Delete a memory that is wrong or no longer needed.","inputSchema":{"type":"object","properties":{"memoryId":{"type":"integer"}},"required":["memoryId"],"additionalProperties":false}},
         {"name":"message_agent","description":"Agent sessions only. Send a request to another agent. Its answer arrives automatically as an update message; end your turn after sending.","inputSchema":{"type":"object","properties":{"agentId":{"type":"string"},"message":{"type":"string"}},"required":["agentId","message"],"additionalProperties":false}},
         {"name":"notify_user","description":"Agent sessions only. Tell the user something they must know: a result of a goal, a question, a failure, or a needed decision (level 'action'). Shows on the agent page and as a notification. Not for routine progress.","inputSchema":{"type":"object","properties":{"message":{"type":"string","maxLength":2000},"level":{"type":"string","enum":["info","action","error"]}},"required":["message"],"additionalProperties":false}},
-        {"name":"task_list","description":"Agent sessions only. List your recent background tasks (schedule runs, follow-ups, agent requests) with status and one-line result.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":50}},"additionalProperties":false}}
+        {"name":"task_list","description":"Agent sessions only. List your recent background tasks (schedule runs, follow-ups, agent requests) with status and one-line result.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":50}},"additionalProperties":false}},
+        {"name":"list_connectors","description":"Agent sessions only. Read-only. List the MCP connectors saved for this agent, whether a limit is saved, and whether this session's backend can apply that limit. Does not change the limit or sign in.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}}
     ])
 }
 
@@ -132,13 +134,37 @@ pub(crate) fn timing_from_tool_args(args: &Value, now: i64) -> Result<db::Schedu
     )
 }
 
-fn tool_has_timing(args: &Value) -> bool {
-    ["cron", "event", "everyMinutes", "delayMinutes"]
+fn tool_has_arg(args: &Value, key: &str) -> bool {
+    args.get(key)
+        .is_some_and(|value| !value.is_null() && value.as_str() != Some(""))
+}
+
+/// Timing arguments for `schedule_update`, merged with the stored schedule:
+/// a new cron without `timezone` keeps the stored timezone, and a
+/// `timezone`-only update reuses the stored cron. `None` = timing unchanged.
+fn update_timing_args(args: &Value, current: &db::Schedule) -> Result<Option<Value>, String> {
+    let has_cron = tool_has_arg(args, "cron");
+    let has_timezone = tool_has_arg(args, "timezone");
+    let has_other = ["event", "everyMinutes", "delayMinutes"]
         .iter()
-        .any(|key| {
-            args.get(key)
-                .is_some_and(|value| !value.is_null() && value.as_str() != Some(""))
-        })
+        .any(|key| tool_has_arg(args, key));
+    if !has_cron && !has_timezone && !has_other {
+        return Ok(None);
+    }
+    let mut merged = args.clone();
+    if has_cron && !has_timezone {
+        if let (Some(_), Some(timezone)) = (&current.cron, &current.timezone) {
+            merged["timezone"] = json!(timezone);
+        }
+    }
+    if has_timezone && !has_cron && !has_other {
+        let cron = current
+            .cron
+            .as_ref()
+            .ok_or_else(|| "timezone applies only to cron schedules".to_string())?;
+        merged["cron"] = json!(cron);
+    }
+    Ok(Some(merged))
 }
 
 /// First run time and repeat interval from schedule arguments.
@@ -200,16 +226,15 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value, source: &str) -> Res
             let name = str_arg(args, "name");
             let prompt = str_arg(args, "prompt");
             let paused = args.get("paused").and_then(Value::as_bool);
-            let timing = if tool_has_timing(args) {
-                Some(timing_from_tool_args(args, db::now())?)
-            } else {
-                None
-            };
             let schedule = super::with_db(app, |conn| {
                 let tx = conn
                     .transaction()
                     .map_err(|e| format!("Agents db error: {e}"))?;
-                let before = db::get_schedule(&tx, &agent.id, id)?;
+                let before = db::get_schedule(&tx, &agent.id, id)?
+                    .ok_or_else(|| format!("No active schedule #{id}"))?;
+                let timing = update_timing_args(args, &before)?
+                    .map(|merged| timing_from_tool_args(&merged, db::now()))
+                    .transpose()?;
                 let schedule = db::update_schedule(
                     &tx,
                     &agent.id,
@@ -223,7 +248,7 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value, source: &str) -> Res
                     &tx,
                     &agent.id,
                     "schedule_update",
-                    before.as_ref(),
+                    Some(&before),
                     Some(&schedule),
                     Some(source),
                 )?;
@@ -374,6 +399,9 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value, source: &str) -> Res
         "agent_list" | "agent_create" | "agent_update" | "agent_delete" | "agent_revert" => {
             super::self_manage::run_tool(app, name, args, source, &agent, false).await?
         }
+        "list_connectors" => {
+            return Ok(super::connectors::report_for_session(app, &agent, source).await);
+        }
         _ => return Err(format!("Unknown agent tool: {name}")),
     };
     super::notify_changed(app);
@@ -483,8 +511,52 @@ mod tests {
             timing_from_tool_args(&json!({"cron": "0 * * * *", "everyMinutes": 30}), 0).is_err()
         );
         assert!(timing_from_tool_args(&json!({"event": "webhook"}), 0).is_err());
-        assert!(tool_has_timing(&json!({"everyMinutes": 30})));
-        assert!(!tool_has_timing(&json!({"paused": true})));
+    }
+
+    #[test]
+    fn update_timing_keeps_the_stored_cron_and_timezone() {
+        let stored = db::Schedule {
+            id: 1,
+            agent_id: "jean".into(),
+            name: "brief".into(),
+            prompt: "check".into(),
+            every_secs: None,
+            next_run_at: 0,
+            last_run_at: None,
+            cron: Some("0 9 * * 1-5".into()),
+            timezone: Some("Europe/Berlin".into()),
+            event: None,
+            paused: false,
+        };
+        assert_eq!(
+            update_timing_args(&json!({"paused": true}), &stored).unwrap(),
+            None
+        );
+
+        let now = 1_767_225_600;
+        let new_cron = update_timing_args(&json!({"cron": "0 10 * * *"}), &stored)
+            .unwrap()
+            .unwrap();
+        let timing = timing_from_tool_args(&new_cron, now).unwrap();
+        assert_eq!(timing.cron.as_deref(), Some("0 10 * * *"));
+        assert_eq!(timing.timezone.as_deref(), Some("Europe/Berlin"));
+
+        let new_zone = update_timing_args(&json!({"timezone": "Asia/Tokyo"}), &stored)
+            .unwrap()
+            .unwrap();
+        let timing = timing_from_tool_args(&new_zone, now).unwrap();
+        assert_eq!(timing.cron.as_deref(), Some("0 9 * * 1-5"));
+        assert_eq!(timing.timezone.as_deref(), Some("Asia/Tokyo"));
+
+        let interval = db::Schedule {
+            cron: None,
+            timezone: None,
+            every_secs: Some(600),
+            ..stored
+        };
+        assert!(update_timing_args(&json!({"timezone": "UTC"}), &interval)
+            .unwrap_err()
+            .contains("cron"));
     }
 
     #[test]

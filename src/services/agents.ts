@@ -63,6 +63,21 @@ export interface AgentSummary {
   thinkingLevel: string | null
   /** Skill files injected into this agent's prompt and wake-ups. */
   skills: AgentSkill[]
+  /**
+   * MCP servers this agent may use. Null means no saved limit (today's
+   * behavior). An empty list allows no user MCP servers.
+   */
+  mcpServers?: AgentConnector[] | null
+  /**
+   * Jean MCP tool names this agent may call. Null allows every tool.
+   */
+  jeanTools?: string[] | null
+}
+
+/** One discovered MCP server selected for an agent. */
+export interface AgentConnector {
+  backend: string
+  name: string
 }
 
 export interface AgentTask {
@@ -206,6 +221,10 @@ export interface AgentPatch {
   thinkingLevel?: string | null
   /** Replaces the selected skills. An empty list clears them. */
   skills?: AgentSkill[]
+  /** Null clears a saved connector limit. An empty list allows none. */
+  mcpServers?: AgentConnector[] | null
+  /** Null allows every Jean tool. An empty list allows none. */
+  jeanTools?: string[] | null
 }
 
 export const agentsQueryKeys = {

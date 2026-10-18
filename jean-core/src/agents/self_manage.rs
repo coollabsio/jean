@@ -25,6 +25,7 @@ const MAX_INITIAL_SCHEDULES: usize = 10;
 
 const EFFORT_RANK: &[&str] = &[
     "off",
+    "none",
     "adaptive",
     "minimal",
     "low",
@@ -330,16 +331,18 @@ pub fn create_for_actor(
         )?;
     }
     if let Some(actor) = actor.filter(|agent| !agent.builtin) {
-        if agent.max_wakes_per_hour > actor.max_wakes_per_hour {
-            agent = db::update_agent(
-                &tx,
-                &agent.id,
-                &AgentPatch {
-                    max_wakes_per_hour: Some(actor.max_wakes_per_hour),
-                    ..AgentPatch::default()
-                },
-            )?;
-        }
+        // The child keeps the creator's connector and Jean tool limits, so a
+        // limited agent cannot create an unlimited one.
+        agent = db::update_agent(
+            &tx,
+            &agent.id,
+            &AgentPatch {
+                max_wakes_per_hour: Some(agent.max_wakes_per_hour.min(actor.max_wakes_per_hour)),
+                mcp_servers: Some(actor.mcp_servers.clone()),
+                jean_tools: Some(actor.jean_tools.clone()),
+                ..AgentPatch::default()
+            },
+        )?;
     }
     for schedule in &input.schedules {
         db::insert_schedule(
@@ -563,6 +566,12 @@ pub fn agent_diff_summary(before: &Agent, after: &Agent) -> Option<String> {
             after.skills.len()
         ));
     }
+    if before.mcp_servers != after.mcp_servers {
+        parts.push("connectors changed".to_string());
+    }
+    if before.jean_tools != after.jean_tools {
+        parts.push("Jean tools changed".to_string());
+    }
     if parts.is_empty() {
         None
     } else {
@@ -747,6 +756,8 @@ fn patch_from_agent(agent: &Agent) -> AgentPatch {
         effort: Some(agent.effort.clone()),
         thinking_level: Some(agent.thinking_level.clone()),
         skills: Some(agent.skills.clone()),
+        mcp_servers: Some(agent.mcp_servers.clone()),
+        jean_tools: Some(agent.jean_tools.clone()),
     }
 }
 
@@ -1057,6 +1068,8 @@ fn patch_is_empty(patch: &AgentPatch) -> bool {
         && patch.effort.is_none()
         && patch.thinking_level.is_none()
         && patch.skills.is_none()
+        && patch.mcp_servers.is_none()
+        && patch.jean_tools.is_none()
 }
 
 fn initial_schedules(args: &Value) -> Result<Vec<InitialSchedule>, String> {
@@ -1175,6 +1188,8 @@ mod tests {
             effort: None,
             thinking_level: None,
             skills: Vec::new(),
+            mcp_servers: None,
+            jean_tools: None,
         }
     }
 
@@ -1476,6 +1491,35 @@ mod tests {
         )
         .unwrap();
         assert_eq!(raised.effort.as_deref(), Some("max"));
+    }
+
+    #[test]
+    fn a_child_keeps_the_creators_connector_and_tool_limits() {
+        let mut conn = memory_db();
+        let mut parent = db::get_agent(&conn, db::JEAN_AGENT_ID).unwrap().unwrap();
+        parent.builtin = false;
+        parent.mcp_servers = Some(vec![db::AgentConnector {
+            backend: "claude".into(),
+            name: "orbit".into(),
+        }]);
+        parent.jean_tools = Some(vec!["notify_user".into()]);
+        let child = create_for_actor(
+            &mut conn,
+            Some(&parent),
+            None,
+            &CreateInput {
+                name: "Helper".into(),
+                description: String::new(),
+                icon: "blue".into(),
+                role_prompt: String::new(),
+                config: AgentRunConfig::default(),
+                paused: false,
+                schedules: Vec::new(),
+            },
+        )
+        .unwrap();
+        assert_eq!(child.mcp_servers, parent.mcp_servers);
+        assert_eq!(child.jean_tools, parent.jean_tools);
     }
 
     #[test]

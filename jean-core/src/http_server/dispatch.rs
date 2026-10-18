@@ -4089,6 +4089,7 @@ const AGENT_COMMANDS: &[&str] = &[
     "export_agent_memory",
     "mark_agent_notifications_read",
     "revert_agent_change",
+    "get_agent_connector_catalog",
 ];
 
 /// Agent commands (see `crate::agents::commands`).
@@ -4224,6 +4225,7 @@ async fn dispatch_agents_command(
                 let change_id: i64 = field(args, "changeId", "change_id")?;
                 to_value(crate::agents::commands::revert_agent_change(app, change_id).await?)
             }
+            "get_agent_connector_catalog" => to_value(crate::agents::connectors::catalog_payload()),
             _ => Err(format!("Unknown command: {command}")),
         }
     }

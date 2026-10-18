@@ -10,6 +10,7 @@
 //! `__agent_<id>__`) and run in a scratch folder in app data.
 
 pub mod commands;
+pub mod connectors;
 mod cron;
 pub mod db;
 mod engine;
@@ -180,6 +181,7 @@ fn render_system_prompt(
 - Use `agent_list` to see agents. Use `agent_update` with no `agentId` to change your name, description, instructions, color, backend, model, effort, skills, or paused state. Use `agent_create` to make an agent; it cannot receive more backend, model, effort, thinking, skills, or wake budget than you have. Use `agent_revert` to undo the latest change.
 - Use `notify_user` only for what the user must know: results of goals, questions, failures, needed decisions. Not for routine progress.
 - Use `task_list` to see your background tasks and their results.
+- Use `list_connectors` to see the MCP connectors saved for you and whether this backend applies that limit. It is read-only.
 - Use `memory_save` for lasting rules, facts the code does not show, and open work. Do not save live state (project lists, PR status) or secrets. Use `memory_search` to find older memories, and `memory_update` / `memory_forget` to correct them.
 - Before destructive actions, confirm with the user. Keep answers short.\n"
     ));
@@ -207,6 +209,10 @@ fn render_system_prompt(
             out.push_str(&skill_instruction(&skill.path));
             out.push('\n');
         }
+    }
+    if let Some(section) = connectors::prompt_section(agent) {
+        out.push('\n');
+        out.push_str(&section);
     }
     let others: Vec<&Agent> = peers.iter().filter(|p| p.id != agent.id).collect();
     if !others.is_empty() {
@@ -268,6 +274,8 @@ mod tests {
             effort: None,
             thinking_level: None,
             skills: Vec::new(),
+            mcp_servers: None,
+            jean_tools: None,
         }
     }
 

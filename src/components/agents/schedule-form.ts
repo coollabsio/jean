@@ -190,7 +190,8 @@ export function cronMinutes(field: string): number[] | null {
       end = Number(rawEnd)
     } else {
       start = Number(range)
-      end = start
+      // `N/step` means `N-59/step`, as in cronie and the server parser.
+      end = stepText === undefined ? start : 59
     }
     if (
       !Number.isInteger(start) ||
