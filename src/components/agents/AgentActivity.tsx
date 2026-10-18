@@ -253,12 +253,17 @@ function ChangeRow({
           size="sm"
           variant="outline"
           disabled={revert.isPending}
-          onClick={() =>
+          onClick={() => {
+            const id = toast.loading('Reverting change…')
             revert.mutate(
               { agentId, changeId: change.id },
-              { onError: error => toast.error(`Failed to revert: ${error}`) }
+              {
+                onSuccess: () => toast.success('Change reverted', { id }),
+                onError: error =>
+                  toast.error(`Failed to revert: ${error}`, { id }),
+              }
             )
-          }
+          }}
         >
           Revert
         </Button>
@@ -308,10 +313,7 @@ export function AgentActivity({ agent }: { agent: AgentSummary }) {
           until the next hour.
         </p>
       )}
-      <Section
-        title="Changes"
-        empty="No self-management changes yet."
-      >
+      <Section title="Changes" empty="No self-management changes yet.">
         {data.changes.map(change => (
           <ChangeRow
             key={change.id}

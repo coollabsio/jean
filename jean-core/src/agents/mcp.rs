@@ -170,11 +170,6 @@ pub(crate) fn schedule_timing(
 
 /// Run an agent tool for the calling agent session.
 pub async fn run(app: &AppHandle, name: &str, args: &Value, source: &str) -> Result<Value, String> {
-    if source == APPROVED_REPLAY_SOURCE {
-        let result = super::self_manage::run_approved(app, name, args).await?;
-        super::notify_changed(app);
-        return Ok(result);
-    }
     let agent = caller_agent(app, source)?;
     let result = match name {
         "schedule_create" => {
@@ -381,6 +376,14 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value, source: &str) -> Res
         }
         _ => return Err(format!("Unknown agent tool: {name}")),
     };
+    super::notify_changed(app);
+    Ok(result)
+}
+
+/// Run an agent tool the user approved. Only the approval handler calls this;
+/// the actor comes from the stored approval, never from an MCP caller.
+pub async fn run_approved(app: &AppHandle, name: &str, args: &Value) -> Result<Value, String> {
+    let result = super::self_manage::run_approved(app, name, args).await?;
     super::notify_changed(app);
     Ok(result)
 }

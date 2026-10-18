@@ -199,13 +199,17 @@ export function agentRunPatch(
 }
 
 /** Take a settings update from the server when the form still matches the
- * last value it showed. A draft the user edited stays put. */
+ * last value it showed, or already matches the server (after a save).
+ * A draft the user edited stays put. */
 export function shouldSyncAgentDraft(
   seen: AgentRunDraft,
   draft: AgentRunDraft,
   saved: AgentRunDraft
 ): boolean {
-  return !sameAgentRun(seen, saved) && sameAgentRun(draft, seen)
+  return (
+    !sameAgentRun(seen, saved) &&
+    (sameAgentRun(draft, seen) || sameAgentRun(draft, saved))
+  )
 }
 
 export function sameAgentRun(a: AgentRunDraft, b: AgentRunDraft): boolean {

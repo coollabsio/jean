@@ -371,15 +371,19 @@ pub fn create_for_actor(
     Ok(agent)
 }
 
+/// Update an agent and write its audit row in one transaction.
 pub fn apply_actor_update(
-    conn: &rusqlite::Connection,
+    conn: &mut rusqlite::Connection,
     actor_id: &str,
     session_id: Option<&str>,
     target_id: &str,
     patch: &AgentPatch,
 ) -> Result<Agent, String> {
+    let tx = conn
+        .transaction()
+        .map_err(|e| format!("Agents db error: {e}"))?;
     let before =
-        db::get_agent(conn, target_id)?.ok_or_else(|| format!("Agent not found: {target_id}"))?;
+        db::get_agent(&tx, target_id)?.ok_or_else(|| format!("Agent not found: {target_id}"))?;
     let mut patch = patch.clone();
     if let Some(name) = patch.name.as_deref() {
         limit_text("Name", name.trim(), MAX_NAME_CHARS)?;
@@ -393,24 +397,30 @@ pub fn apply_actor_update(
     if let Some(icon) = patch.icon.clone() {
         patch.icon = Some(normalize_icon(&icon, before.builtin)?);
     }
-    let after = db::update_agent(conn, target_id, &patch)?;
-    record_agent_diff(conn, actor_id, session_id, &before, &after)?;
+    let after = db::update_agent(&tx, target_id, &patch)?;
+    record_agent_diff(&tx, actor_id, session_id, &before, &after)?;
+    tx.commit().map_err(|e| format!("Agents db error: {e}"))?;
     Ok(after)
 }
 
+/// Delete an agent and write its audit row in one transaction, so a
+/// delete without a snapshot to revert to cannot be stored.
 pub fn apply_actor_delete(
-    conn: &rusqlite::Connection,
+    conn: &mut rusqlite::Connection,
     actor_id: &str,
     session_id: Option<&str>,
     target_id: &str,
 ) -> Result<(), String> {
+    let tx = conn
+        .transaction()
+        .map_err(|e| format!("Agents db error: {e}"))?;
     let before =
-        db::get_agent(conn, target_id)?.ok_or_else(|| format!("Agent not found: {target_id}"))?;
+        db::get_agent(&tx, target_id)?.ok_or_else(|| format!("Agent not found: {target_id}"))?;
     let before_json =
         serde_json::to_string(&before).map_err(|e| format!("Failed to store agent: {e}"))?;
-    db::delete_agent(conn, target_id)?;
+    db::delete_agent(&tx, target_id)?;
     db::insert_agent_change(
-        conn,
+        &tx,
         &db::NewAgentChange {
             actor_agent_id: actor_id,
             target_agent_id: target_id,
@@ -423,6 +433,7 @@ pub fn apply_actor_delete(
             created_at: db::now(),
         },
     )?;
+    tx.commit().map_err(|e| format!("Agents db error: {e}"))?;
     Ok(())
 }
 
@@ -600,17 +611,6 @@ pub fn revert_change(
 ) -> Result<AgentChange, String> {
     let change = db::get_agent_change(conn, change_id)?
         .ok_or_else(|| format!("Change #{change_id} not found"))?;
-    revert_loaded(conn, actor_id, session_id, &change)
-}
-
-pub fn revert_latest(
-    conn: &mut rusqlite::Connection,
-    actor_id: &str,
-    session_id: Option<&str>,
-    target_agent_id: &str,
-) -> Result<AgentChange, String> {
-    let change = db::latest_agent_change(conn, target_agent_id)?
-        .ok_or_else(|| format!("No changes for {target_agent_id}"))?;
     revert_loaded(conn, actor_id, session_id, &change)
 }
 
@@ -797,7 +797,15 @@ pub async fn run_approved(app: &AppHandle, name: &str, args: &Value) -> Result<V
     let actor = super::with_db(app, |conn| {
         db::get_agent(conn, &actor_id)?.ok_or_else(|| format!("Unknown agent: {actor_id}"))
     })?;
-    run_tool(app, name, args, "agent-approval", &actor, true).await
+    run_tool(
+        app,
+        name,
+        args,
+        super::mcp::APPROVED_REPLAY_SOURCE,
+        &actor,
+        true,
+    )
+    .await
 }
 
 fn tool_changes_run(args: &Value) -> bool {
@@ -947,11 +955,23 @@ async fn revert_tool(
                 .map(|agent| agent.name)
                 .unwrap_or_else(|| target_id.clone()))
         })?;
-        return approval_pending(app, actor, source, "agent_revert", args, &name);
+        // Pin the change the user approves. A newer change makes the replay fail.
+        let mut stored = args.clone();
+        if let Some(obj) = stored.as_object_mut() {
+            obj.insert("changeId".to_string(), json!(change.id));
+        }
+        return approval_pending(app, actor, source, "agent_revert", &stored, &name);
     }
+    let change_id = if approved {
+        args.get("changeId")
+            .and_then(Value::as_i64)
+            .unwrap_or(change.id)
+    } else {
+        change.id
+    };
     let session = (!approved).then_some(source);
     let stored = super::with_db(app, |conn| {
-        revert_latest(conn, &actor.id, session, &target_id)
+        revert_change(conn, &actor.id, session, change_id)
     })?;
     Ok(json!({ "reverted": true, "change": stored }))
 }
@@ -1367,7 +1387,7 @@ mod tests {
         assert_eq!(created.icon, "green");
         assert_eq!(created.effort.as_deref(), Some("low"));
         let updated = apply_actor_update(
-            &conn,
+            &mut conn,
             USER_ACTOR,
             None,
             &created.id,
@@ -1445,7 +1465,7 @@ mod tests {
         assert_eq!(child.effort.as_deref(), Some("low"));
         assert_eq!(child.max_wakes_per_hour, parent.max_wakes_per_hour);
         let raised = apply_actor_update(
-            &conn,
+            &mut conn,
             &child.id,
             None,
             &child.id,
@@ -1482,10 +1502,51 @@ mod tests {
             None,
         )
         .unwrap();
-        revert_latest(&mut conn, USER_ACTOR, None, db::JEAN_AGENT_ID).unwrap();
+        let change = db::latest_agent_change(&conn, db::JEAN_AGENT_ID)
+            .unwrap()
+            .unwrap();
+        revert_change(&mut conn, USER_ACTOR, None, change.id).unwrap();
         assert!(db::list_schedules(&conn, db::JEAN_AGENT_ID)
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn a_pinned_revert_fails_when_a_newer_change_landed() {
+        let mut conn = memory_db();
+        let agent =
+            db::create_agent(&conn, "Pinned", "", "blue", "", &AgentRunConfig::default()).unwrap();
+        let rename = |conn: &mut Connection, name: &str| {
+            let patch = AgentPatch {
+                name: Some(name.into()),
+                ..AgentPatch::default()
+            };
+            apply_actor_update(conn, USER_ACTOR, None, &agent.id, &patch).unwrap();
+        };
+        rename(&mut conn, "First");
+        let approved = db::latest_agent_change(&conn, &agent.id).unwrap().unwrap();
+        rename(&mut conn, "Second");
+        assert!(revert_change(&mut conn, USER_ACTOR, None, approved.id)
+            .unwrap_err()
+            .contains("Only the latest change"));
+        let kept = db::get_agent(&conn, &agent.id).unwrap().unwrap();
+        assert_eq!(kept.name, "Second");
+    }
+
+    #[test]
+    fn a_failed_audit_write_rolls_back_the_update_and_the_delete() {
+        let mut conn = memory_db();
+        let agent =
+            db::create_agent(&conn, "Keep", "", "blue", "", &AgentRunConfig::default()).unwrap();
+        conn.execute_batch("DROP TABLE agent_changes").unwrap();
+        let patch = AgentPatch {
+            name: Some("Renamed".into()),
+            ..AgentPatch::default()
+        };
+        assert!(apply_actor_update(&mut conn, USER_ACTOR, None, &agent.id, &patch).is_err());
+        assert!(apply_actor_delete(&mut conn, USER_ACTOR, None, &agent.id).is_err());
+        let kept = db::get_agent(&conn, &agent.id).unwrap().unwrap();
+        assert_eq!(kept.name, "Keep");
     }
 
     #[test]

@@ -329,7 +329,9 @@ latest change for that agent:
 - delete → insert the snapshot again
 - schedule create → cancel; cancel → reactivate; update → previous schedule
 
-Only that latest change can be reverted. Revert writes its own audit row, so
+Only that latest change can be reverted. A revert that waits for approval
+stores the change ID; if a newer change lands first, the approved revert fails
+and changes nothing. Revert writes its own audit row, so
 reverting again undoes the revert. The Agents list, header, and settings form
 refresh from `cache:invalidate` key `agents`. Settings keep a draft the user
 is editing; an untouched form takes the server values.

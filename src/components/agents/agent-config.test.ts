@@ -207,9 +207,20 @@ describe('agent run patch and summary', () => {
     const seen = draft({ backend: 'codex' })
     const saved = draft({ backend: 'claude', model: 'sonnet' })
     expect(shouldSyncAgentDraft(seen, seen, saved)).toBe(true)
-    expect(shouldSyncAgentDraft(seen, draft({ backend: 'codex', effort: 'high' }), saved)).toBe(
-      false
-    )
+    expect(
+      shouldSyncAgentDraft(
+        seen,
+        draft({ backend: 'codex', effort: 'high' }),
+        saved
+      )
+    ).toBe(false)
     expect(shouldSyncAgentDraft(saved, saved, saved)).toBe(false)
+  })
+
+  it('keeps syncing after the user saves the form', () => {
+    const seen = draft({ backend: 'codex' })
+    const saved = draft({ backend: 'claude', model: 'sonnet' })
+    // After a save, the draft equals the server value and `seen` is stale.
+    expect(shouldSyncAgentDraft(seen, saved, saved)).toBe(true)
   })
 })

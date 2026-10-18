@@ -58,6 +58,10 @@ const RATE_LIMITED_TOOLS: &[&str] = &[
     "schedule_update",
     "memory_save",
     "message_agent",
+    "agent_create",
+    "agent_update",
+    "agent_delete",
+    "agent_revert",
 ];
 const DEFAULT_MCP_DIFF_MAX_BYTES: usize = 60_000;
 const MAX_MCP_DIFF_BYTES: usize = 200_000;
@@ -355,6 +359,12 @@ pub async fn call_tool(
     source: &str,
     depth: u32,
 ) -> Result<Value, ToolError> {
+    // Reserved for replays of approved tools. A caller cannot claim it.
+    if source == crate::agents::mcp::APPROVED_REPLAY_SOURCE {
+        return Err(ToolError::invalid_params(format!(
+            "Source {source} is reserved"
+        )));
+    }
     let prefs = crate::load_preferences(app.clone())
         .await
         .map_err(ToolError::internal)?;
@@ -411,6 +421,9 @@ pub fn run_approved_tool(
     args: Value,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, String>> + Send>> {
     Box::pin(async move {
+        if crate::agents::mcp::is_agent_tool(&name) {
+            return crate::agents::mcp::run_approved(&app, &name, &args).await;
+        }
         run_tool(
             &app,
             &name,
@@ -4055,6 +4068,18 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"F
             assert!(
                 RATE_LIMITED_TOOLS.contains(&limited),
                 "session archive tool {limited} must be rate-limited"
+            );
+        }
+
+        for limited in [
+            "agent_create",
+            "agent_update",
+            "agent_delete",
+            "agent_revert",
+        ] {
+            assert!(
+                RATE_LIMITED_TOOLS.contains(&limited),
+                "agent self-management tool {limited} must be rate-limited"
             );
         }
 
