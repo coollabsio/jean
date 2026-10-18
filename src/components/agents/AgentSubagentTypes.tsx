@@ -30,12 +30,14 @@ import {
 
 function TypeEditor({
   draft,
+  serverId,
   pending,
   onChange,
   onClose,
   onSave,
 }: {
   draft: SubagentTypeDraft
+  serverId: string
   pending: boolean
   onChange: (draft: SubagentTypeDraft) => void
   onClose: () => void
@@ -98,6 +100,7 @@ function TypeEditor({
       </label>
       <AgentRunFields
         idPrefix="subagent-type"
+        serverId={serverId}
         value={draft}
         onChange={run => onChange({ ...draft, ...run })}
       />
@@ -321,6 +324,7 @@ export function AgentSubagentTypes({ agent }: { agent: AgentSummary }) {
       {draft ? (
         <TypeEditor
           draft={draft}
+          serverId={agent.serverId}
           pending={save.isPending}
           onChange={setDraft}
           onClose={() => setDraft(null)}

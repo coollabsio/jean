@@ -4093,6 +4093,7 @@ const AGENT_COMMANDS: &[&str] = &[
     "save_agent_subagent_type",
     "delete_agent_subagent_type",
     "spawn_agent_subagent",
+    "get_agent_connector_catalog",
 ];
 
 /// Agent commands (see `crate::agents::commands`).
@@ -4255,6 +4256,7 @@ async fn dispatch_agents_command(
                         .await?,
                 )
             }
+            "get_agent_connector_catalog" => to_value(crate::agents::connectors::catalog_payload()),
             _ => Err(format!("Unknown command: {command}")),
         }
     }

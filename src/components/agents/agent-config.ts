@@ -11,6 +11,8 @@ import {
   KIMI_EFFORT_LEVEL_OPTIONS,
   KIMI_MODEL_OPTIONS,
   MODEL_OPTIONS,
+  MUSE_EFFORT_LEVEL_OPTIONS,
+  MUSE_MODEL_OPTIONS,
   OPENCODE_MODEL_OPTIONS,
   PI_EFFORT_LEVEL_OPTIONS,
   PI_MODEL_OPTIONS,
@@ -51,6 +53,7 @@ const MODEL_OPTIONS_BY_BACKEND: Record<CliBackend, LabeledOption[]> = {
   grok: GROK_MODEL_OPTIONS,
   kimi: KIMI_MODEL_OPTIONS,
   antigravity: ANTIGRAVITY_MODEL_OPTIONS,
+  muse: MUSE_MODEL_OPTIONS,
 }
 
 const EFFORT_OPTIONS_BY_BACKEND: Partial<Record<CliBackend, LabeledOption[]>> =
@@ -61,6 +64,7 @@ const EFFORT_OPTIONS_BY_BACKEND: Partial<Record<CliBackend, LabeledOption[]>> =
     grok: GROK_EFFORT_LEVEL_OPTIONS,
     kimi: KIMI_EFFORT_LEVEL_OPTIONS,
     antigravity: ANTIGRAVITY_EFFORT_LEVEL_OPTIONS,
+    muse: MUSE_EFFORT_LEVEL_OPTIONS,
   }
 
 function isCliBackend(value: string): value is CliBackend {

@@ -171,6 +171,12 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (schedule_id, event_key)
     );
     "#,
+    // v5: per-agent connector allowlist and Jean tool allowlist.
+    // NULL means today's behavior (no agent-specific limit).
+    r#"
+    ALTER TABLE agents ADD COLUMN mcp_servers TEXT;
+    ALTER TABLE agents ADD COLUMN jean_tools TEXT;
+    "#,
     // Subagent types. This is its own step so a later rebase can renumber it.
     // Do not fold this SQL into an older migration.
     subagent_types_migration_sql(),
@@ -334,10 +340,26 @@ pub struct Agent {
     pub thinking_level: Option<String>,
     #[serde(default)]
     pub skills: Vec<AgentSkill>,
+    /// MCP servers this agent may use (`backend` + `name`). `None` keeps
+    /// today's behavior: no agent limit. `Some` is an allowlist, including
+    /// an empty one.
+    #[serde(default)]
+    pub mcp_servers: Option<Vec<AgentConnector>>,
+    /// Jean MCP tool names this agent may call. `None` allows every tool.
+    #[serde(default)]
+    pub jean_tools: Option<Vec<String>>,
+}
+
+/// One discovered MCP server the agent is allowed to use.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentConnector {
+    pub backend: String,
+    pub name: String,
 }
 
 const AGENT_COLUMNS: &str =
-    "id, name, description, icon, role_prompt, worktree_id, paused, max_wakes_per_hour, builtin, backend, model, effort, thinking_level, skills";
+    "id, name, description, icon, role_prompt, worktree_id, paused, max_wakes_per_hour, builtin, backend, model, effort, thinking_level, skills, mcp_servers, jean_tools";
 
 const AGENT_BACKENDS: &[&str] = &[
     "claude",
@@ -349,9 +371,11 @@ const AGENT_BACKENDS: &[&str] = &[
     "grok",
     "kimi",
     "antigravity",
+    "muse",
 ];
 const AGENT_EFFORTS: &[&str] = &[
     "off",
+    "none",
     "adaptive",
     "minimal",
     "low",
@@ -382,7 +406,36 @@ fn agent_from_row(row: &rusqlite::Row) -> rusqlite::Result<Agent> {
         effort: row.get(11)?,
         thinking_level: row.get(12)?,
         skills: parse_skills(&skills_json),
+        mcp_servers: parse_connectors(row.get(14)?),
+        jean_tools: parse_jean_tools(row.get(15)?),
     })
+}
+
+fn parse_connectors(raw: Option<String>) -> Option<Vec<AgentConnector>> {
+    parse_json_column(raw, "connector allowlist")
+}
+
+fn parse_jean_tools(raw: Option<String>) -> Option<Vec<String>> {
+    parse_json_column(raw, "Jean tool allowlist")
+}
+
+/// `NULL` is no limit. Invalid JSON fails closed to an empty allowlist.
+fn parse_json_column<T: serde::de::DeserializeOwned>(
+    raw: Option<String>,
+    label: &str,
+) -> Option<T> {
+    let raw = raw?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed == "null" {
+        return None;
+    }
+    match serde_json::from_str(trimmed) {
+        Ok(value) => Some(value),
+        Err(e) => {
+            log::warn!("Ignoring invalid agent {label} JSON ({e}); using an empty allowlist");
+            serde_json::from_str("[]").ok()
+        }
+    }
 }
 
 fn parse_skills(raw: &str) -> Vec<AgentSkill> {
@@ -499,6 +552,81 @@ fn normalize_run_config(config: &AgentRunConfig) -> Result<AgentRunConfig, Strin
 
 fn skills_json(skills: &[AgentSkill]) -> Result<String, String> {
     serde_json::to_string(skills).map_err(|e| format!("Failed to store agent skills: {e}"))
+}
+
+const MAX_AGENT_CONNECTORS: usize = 64;
+const MAX_JEAN_TOOLS: usize = 128;
+
+/// Drop duplicates and reject names that could be read as a CLI flag.
+pub fn normalize_agent_connectors(list: &[AgentConnector]) -> Result<Vec<AgentConnector>, String> {
+    let mut out = Vec::new();
+    for connector in list {
+        let backend = normalize_agent_backend(Some(connector.backend.as_str()))?
+            .ok_or_else(|| "Connector backend cannot be empty".to_string())?;
+        let name = connector.name.trim();
+        if name.is_empty() {
+            return Err("Connector name cannot be empty".to_string());
+        }
+        if name.chars().count() > 128 {
+            return Err("Connector name is too long".to_string());
+        }
+        if name.starts_with('-') || name.chars().any(char::is_control) {
+            return Err(
+                "Connector name cannot start with '-' or contain control characters".to_string(),
+            );
+        }
+        if out
+            .iter()
+            .any(|existing: &AgentConnector| existing.backend == backend && existing.name == name)
+        {
+            continue;
+        }
+        if out.len() >= MAX_AGENT_CONNECTORS {
+            return Err(format!(
+                "An agent can have at most {MAX_AGENT_CONNECTORS} connectors"
+            ));
+        }
+        out.push(AgentConnector {
+            backend,
+            name: name.to_string(),
+        });
+    }
+    out.sort_by(|a, b| a.backend.cmp(&b.backend).then(a.name.cmp(&b.name)));
+    Ok(out)
+}
+
+/// Tool names are the registry's `name` field: letters, digits, underscore.
+pub fn normalize_jean_tools(list: &[String]) -> Result<Vec<String>, String> {
+    let mut out = Vec::new();
+    for tool in list {
+        let name = tool.trim();
+        if name.is_empty() {
+            return Err("Jean tool name cannot be empty".to_string());
+        }
+        if name.len() > 80 || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            return Err(format!("Invalid Jean tool name: {name}"));
+        }
+        if out.iter().any(|existing: &String| existing == name) {
+            continue;
+        }
+        if out.len() >= MAX_JEAN_TOOLS {
+            return Err(format!(
+                "An agent can have at most {MAX_JEAN_TOOLS} Jean tools"
+            ));
+        }
+        out.push(name.to_string());
+    }
+    out.sort();
+    Ok(out)
+}
+
+fn optional_json<T: Serialize>(value: &Option<T>, label: &str) -> Result<Option<String>, String> {
+    match value {
+        None => Ok(None),
+        Some(value) => serde_json::to_string(value)
+            .map(Some)
+            .map_err(|e| format!("Failed to store agent {label}: {e}")),
+    }
 }
 
 pub fn list_agents(conn: &Connection) -> Result<Vec<Agent>, String> {
@@ -643,6 +771,12 @@ pub struct AgentPatch {
     /// `None` leaves skills unchanged. An empty list clears them.
     #[serde(default)]
     pub skills: Option<Vec<AgentSkill>>,
+    /// `None` leaves the allowlist unchanged. `Some(None)` clears it (no limit).
+    /// `Some(Some(list))` saves that list, including an empty one.
+    #[serde(default, deserialize_with = "deserialize_clearable")]
+    pub mcp_servers: Option<Option<Vec<AgentConnector>>>,
+    #[serde(default, deserialize_with = "deserialize_clearable")]
+    pub jean_tools: Option<Option<Vec<String>>>,
 }
 
 /// `null` clears the field. A missing key never calls this and stays `None`.
@@ -702,10 +836,22 @@ pub fn update_agent(conn: &Connection, id: &str, patch: &AgentPatch) -> Result<A
     if let Some(v) = &patch.skills {
         agent.skills = normalize_agent_skills(v)?;
     }
+    if let Some(v) = &patch.mcp_servers {
+        agent.mcp_servers = match v {
+            None => None,
+            Some(list) => Some(normalize_agent_connectors(list)?),
+        };
+    }
+    if let Some(v) = &patch.jean_tools {
+        agent.jean_tools = match v {
+            None => None,
+            Some(list) => Some(normalize_jean_tools(list)?),
+        };
+    }
     conn.execute(
         "UPDATE agents SET name=?2, description=?3, icon=?4, role_prompt=?5, paused=?6,
          max_wakes_per_hour=?7, backend=?8, model=?9, effort=?10, thinking_level=?11,
-         skills=?12, updated_at=?13 WHERE id=?1",
+         skills=?12, mcp_servers=?13, jean_tools=?14, updated_at=?15 WHERE id=?1",
         params![
             id,
             agent.name,
@@ -719,6 +865,8 @@ pub fn update_agent(conn: &Connection, id: &str, patch: &AgentPatch) -> Result<A
             agent.effort,
             agent.thinking_level,
             skills_json(&agent.skills)?,
+            optional_json(&agent.mcp_servers, "connectors")?,
+            optional_json(&agent.jean_tools, "Jean tools")?,
             now()
         ],
     )
@@ -1312,8 +1460,15 @@ pub fn update_schedule(
     if name.is_none() && prompt.is_none() && paused.is_none() && timing.is_none() {
         return Err("Nothing to update".to_string());
     }
+    // Validate every field before the first write, so a bad field does not
+    // leave a partial update behind.
+    let name = name
+        .map(|name| require_schedule_text("Name", name, 200))
+        .transpose()?;
+    let prompt = prompt
+        .map(|prompt| require_schedule_text("Prompt", prompt, 8000))
+        .transpose()?;
     if let Some(name) = name {
-        let name = require_schedule_text("Name", name, 200)?;
         conn.execute(
             "UPDATE schedules SET name=?2 WHERE id=?1",
             params![id, name],
@@ -1321,7 +1476,6 @@ pub fn update_schedule(
         .map_err(err)?;
     }
     if let Some(prompt) = prompt {
-        let prompt = require_schedule_text("Prompt", prompt, 8000)?;
         conn.execute(
             "UPDATE schedules SET prompt=?2 WHERE id=?1",
             params![id, prompt],
@@ -1521,6 +1675,18 @@ pub fn fire_event_schedules(
         fired.push(schedule);
     }
     Ok(fired)
+}
+
+/// Delete session and archive event keys older than `before`. Their keys carry
+/// a timestamp, so they only dedup repeats of one emit and never match again.
+/// `pr:` and `approval:` keys are kept: the same PR or approval can repeat.
+pub fn prune_event_keys(conn: &Connection, before: i64) -> Result<usize, String> {
+    conn.execute(
+        "DELETE FROM schedule_event_keys
+         WHERE fired_at < ?1 AND (event_key LIKE 'session:%' OR event_key LIKE 'archive:%')",
+        [before],
+    )
+    .map_err(err)
 }
 
 pub fn next_schedule_at(conn: &Connection, agent_id: &str) -> Result<Option<i64>, String> {
@@ -3305,6 +3471,74 @@ mod tests {
         assert_eq!(set.backend, Some(Some("codex".into())));
         assert_eq!(set.thinking_level, Some(Some("ultrathink".into())));
         assert_eq!(set.skills.unwrap()[0].path, "/skills/review/SKILL.md");
+        assert!(set.mcp_servers.is_none());
+        assert!(set.jean_tools.is_none());
+    }
+
+    #[test]
+    fn connector_allowlist_is_null_until_set_and_null_clears_it() {
+        let conn = db();
+        let jean = get_agent(&conn, JEAN_AGENT_ID).unwrap().unwrap();
+        assert_eq!(jean.mcp_servers, None);
+        assert_eq!(jean.jean_tools, None);
+
+        let saved = update_agent(
+            &conn,
+            JEAN_AGENT_ID,
+            &AgentPatch {
+                mcp_servers: Some(Some(vec![
+                    AgentConnector {
+                        backend: " Claude ".into(),
+                        name: " orbit ".into(),
+                    },
+                    AgentConnector {
+                        backend: "claude".into(),
+                        name: "orbit".into(),
+                    },
+                ])),
+                jean_tools: Some(Some(vec!["delete_worktree".into(), "notify_user".into()])),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            saved.mcp_servers,
+            Some(vec![AgentConnector {
+                backend: "claude".into(),
+                name: "orbit".into(),
+            }])
+        );
+        assert_eq!(
+            saved.jean_tools,
+            Some(vec!["delete_worktree".into(), "notify_user".into()])
+        );
+
+        let kept = update_agent(
+            &conn,
+            JEAN_AGENT_ID,
+            &AgentPatch {
+                name: Some("Jean".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(kept.mcp_servers, saved.mcp_servers);
+        assert_eq!(kept.jean_tools, saved.jean_tools);
+
+        let cleared = update_agent(
+            &conn,
+            JEAN_AGENT_ID,
+            &serde_json::from_str(r#"{"mcpServers":null,"jeanTools":null}"#).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(cleared.mcp_servers, None);
+        assert_eq!(cleared.jean_tools, None);
+        assert!(normalize_agent_connectors(&[AgentConnector {
+            backend: "claude".into(),
+            name: "--flag".into(),
+        }])
+        .is_err());
+        assert!(normalize_jean_tools(&["has space".into()]).is_err());
     }
 
     #[test]
@@ -3470,6 +3704,41 @@ mod tests {
                 .unwrap_err()
                 .contains("between")
         );
+        // The interval limit is 30 days, so a daily routine is valid.
+        assert!(validate_schedule_timing(Some(86_400), None, None, None, None, 0).is_ok());
+        assert!(validate_schedule_timing(Some(31 * 86_400), None, None, None, None, 0).is_err());
+    }
+
+    #[test]
+    fn prune_event_keys_drops_only_old_session_and_archive_keys() {
+        let conn = db();
+        let timing =
+            validate_schedule_timing(None, None, None, Some("pr_merged"), None, 0).unwrap();
+        let schedule =
+            insert_schedule(&conn, JEAN_AGENT_ID, "merged", "look", &timing, false).unwrap();
+        for (key, fired_at) in [
+            ("session:s:done:1", 10),
+            ("archive:wt:1", 10),
+            ("pr:wt:1", 10),
+            ("approval:1", 10),
+            ("session:s:done:2", 500),
+        ] {
+            conn.execute(
+                "INSERT INTO schedule_event_keys (schedule_id, event_key, fired_at) VALUES (?1, ?2, ?3)",
+                params![schedule.id, key, fired_at],
+            )
+            .unwrap();
+        }
+        assert_eq!(prune_event_keys(&conn, 100).unwrap(), 2);
+        let mut left: Vec<String> = conn
+            .prepare("SELECT event_key FROM schedule_event_keys")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        left.sort();
+        assert_eq!(left, ["approval:1", "pr:wt:1", "session:s:done:2"]);
     }
 
     #[test]
@@ -3492,6 +3761,31 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn update_schedule_rejects_bad_prompt_without_renaming() {
+        let conn = db();
+        let timing =
+            validate_schedule_timing(None, None, None, Some("pr_merged"), None, 0).unwrap();
+        let schedule =
+            insert_schedule(&conn, JEAN_AGENT_ID, "before", "check", &timing, false).unwrap();
+        let error = update_schedule(
+            &conn,
+            JEAN_AGENT_ID,
+            schedule.id,
+            Some("after"),
+            Some("   "),
+            None,
+            None,
+        )
+        .unwrap_err();
+        assert!(error.contains("Prompt"), "{error}");
+        let stored = get_schedule(&conn, JEAN_AGENT_ID, schedule.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.name, "before");
+        assert_eq!(stored.prompt, "check");
     }
 
     fn reviewer(conn: &Connection) -> Agent {

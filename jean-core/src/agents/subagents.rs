@@ -254,6 +254,8 @@ mod tests {
             effort: Some("low".into()),
             thinking_level: Some("think".into()),
             skills: Vec::new(),
+            mcp_servers: None,
+            jean_tools: None,
         };
         let overlay = overlay_agent(&parent, &resolved());
         assert_eq!(overlay.backend.as_deref(), Some("codex"));

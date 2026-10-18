@@ -379,11 +379,22 @@ pub async fn call_tool(
         }
     }
 
+    // A saved Jean-tool allowlist refuses the call before the approval gate,
+    // so a blocked destructive tool does not create an approval request.
+    if let Some(agent) = crate::agents::agent_for_session(app, source) {
+        if !crate::agents::connectors::jean_tool_allowed(agent.jean_tools.as_deref(), name) {
+            return Err(ToolError::internal(format!(
+                "This agent is not allowed to use the Jean tool {name}"
+            )));
+        }
+    }
+
     // Read-only subagents cannot call mutating tools. The approval gate still
     // applies to every other agent session.
     if let Some(reason) = crate::agents::mcp::subagent_tool_block(app, name, source) {
         return Err(ToolError::invalid_params(reason));
     }
+
     // Agent sessions need the user's approval for destructive tools.
     let result_json = match crate::agents::mcp::approval_gate(app, name, &arguments, source) {
         Some(pending) => pending,
