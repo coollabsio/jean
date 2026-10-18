@@ -43,7 +43,7 @@ function TouchProbe({
 
 function fireTouch(
   el: Element,
-  type: 'touchstart' | 'touchmove' | 'touchend',
+  type: 'touchstart' | 'touchmove' | 'touchend' | 'touchcancel',
   clientX: number,
   clientY = 100
 ) {
@@ -65,8 +65,8 @@ function fireTouch(
   const event = new TouchEvent(type, {
     bubbles: true,
     cancelable: true,
-    touches: type === 'touchend' ? [] : [touch],
-    targetTouches: type === 'touchend' ? [] : [touch],
+    touches: type === 'touchend' || type === 'touchcancel' ? [] : [touch],
+    targetTouches: type === 'touchend' || type === 'touchcancel' ? [] : [touch],
     changedTouches: [touch],
   })
   el.dispatchEvent(event)
@@ -220,6 +220,55 @@ describe('useSwipeBack', () => {
       vi.advanceTimersByTime(250)
     })
 
+    expect(onSwipeBack).not.toHaveBeenCalled()
+  })
+
+  it('resets swiping when the browser cancels the touch', () => {
+    const onSwipeBack = vi.fn()
+    const { getByTestId } = render(
+      <TouchProbe onSwipeBack={onSwipeBack} animateToEnd={false} />
+    )
+    const el = getByTestId('swipe-target')
+    Object.defineProperty(el, 'offsetWidth', { value: 400, configurable: true })
+
+    act(() => {
+      fireTouch(el, 'touchstart', 8)
+      fireTouch(el, 'touchmove', 300)
+    })
+    expect(el.getAttribute('data-swiping')).toBe('true')
+
+    act(() => {
+      fireTouch(el, 'touchcancel', 300)
+    })
+
+    expect(el.getAttribute('data-swiping')).toBe('false')
+    expect(el.getAttribute('data-progress')).toBe('0')
+    expect(onSwipeBack).not.toHaveBeenCalled()
+  })
+
+  it('resets swiping when disabled mid-gesture', () => {
+    const onSwipeBack = vi.fn()
+    const { getByTestId, rerender } = render(
+      <TouchProbe onSwipeBack={onSwipeBack} animateToEnd={false} />
+    )
+    const el = getByTestId('swipe-target')
+    Object.defineProperty(el, 'offsetWidth', { value: 400, configurable: true })
+
+    act(() => {
+      fireTouch(el, 'touchstart', 8)
+      fireTouch(el, 'touchmove', 100)
+    })
+    expect(el.getAttribute('data-swiping')).toBe('true')
+
+    rerender(
+      <TouchProbe
+        onSwipeBack={onSwipeBack}
+        animateToEnd={false}
+        enabled={false}
+      />
+    )
+
+    expect(el.getAttribute('data-swiping')).toBe('false')
     expect(onSwipeBack).not.toHaveBeenCalled()
   })
 

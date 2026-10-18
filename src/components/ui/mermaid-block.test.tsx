@@ -30,7 +30,9 @@ describe('MermaidBlock', () => {
   it('groups view choices and keeps icon actions accessible', async () => {
     render(<MermaidBlock source="flowchart TD; A --> B" />)
     await screen.findByText('Step A')
-    expect(screen.getByRole('group', { name: 'Diagram view' })).toBeTruthy()
+    expect(
+      screen.getByRole('radiogroup', { name: 'Diagram view' })
+    ).toBeTruthy()
     expect(screen.getByRole('radio', { name: 'Diagram' })).toHaveAttribute(
       'aria-checked',
       'true'

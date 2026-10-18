@@ -205,6 +205,7 @@ const KEY_TO_OPTION: Record<string, MagicOption> = {
   q: 'check-github-issues',
   c: 'commit',
   p: 'commit-and-push',
+  l: 'commit-in-session',
   h: 'comment-and-close-issue',
   t: 'sync',
   d: 'pull',
@@ -2291,6 +2292,7 @@ ${resolveInstructions}`
         </span>
         {!mobile && (
           <kbd
+            data-web-visible
             className={cn(
               'rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground shadow-[0_2px_0_var(--btn-edge)] transition-[translate,box-shadow] duration-[80ms] group-active:translate-y-0.5 group-active:shadow-none',
               edgeNeutral

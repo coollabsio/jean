@@ -29,6 +29,9 @@ extern crate self as tauri;
 mod runtime;
 pub use runtime::*;
 
+#[cfg(test)]
+mod test_support;
+
 use crate::http_server::EmitExt;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -38,6 +41,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod agent_browser;
+pub mod agents;
 mod antigravity_cli;
 mod auto_fix;
 mod background_tasks;
@@ -78,6 +82,7 @@ pub use platform::open_url_in_browser;
 pub use projects::open_worktree_in_editor;
 
 // Process startup helper shared by the desktop and headless entry points.
+pub use platform::add_fnm_node_to_path;
 pub use platform::raise_fd_limit;
 
 // Validation functions
@@ -233,6 +238,8 @@ pub struct AppPreferences {
     pub magic_prompt_modes: MagicPromptModes, // Per-prompt execution modes for chat-style magic prompts
     #[serde(default)]
     pub magic_models_auto_initialized: bool, // Whether magic prompt models were auto-set based on installed backends
+    #[serde(default)]
+    pub commit_close_issue: bool, // Commit magic: add "Closes #N" for the worktree's linked GitHub issue
     #[serde(default = "default_file_edit_mode")]
     pub file_edit_mode: String, // How to edit files: inline (Pierre) or external (VS Code, etc.)
     #[serde(default)]
@@ -269,6 +276,8 @@ pub struct AppPreferences {
     pub auto_archive_on_pr_merged: bool, // Auto-archive worktrees when their PR is merged
     #[serde(default)]
     pub debug_mode_enabled: bool, // Show debug panel in chat sessions (default: false)
+    #[serde(default)]
+    pub agents_enabled: bool, // Experimental: show the Agents tab (default: false)
     #[serde(default)]
     pub default_enabled_mcp_servers: Vec<String>, // MCP server names enabled by default (empty = none)
     #[serde(default)]
@@ -311,6 +320,8 @@ pub struct AppPreferences {
     pub canvas_layout: String, // Canvas display mode: grid or list
     #[serde(default = "default_confirm_session_close")]
     pub confirm_session_close: bool, // Show confirmation dialog before closing sessions/worktrees
+    #[serde(default = "default_close_confirm_bypass_modifier")]
+    pub close_confirm_bypass_modifier: String, // Modifier that skips the close confirmation ("none" disables)
     #[serde(default = "default_execution_mode")]
     pub default_execution_mode: String, // Default workflow/permission policy for new sessions
     #[serde(default = "default_backend")]
@@ -419,6 +430,8 @@ pub struct AppPreferences {
     pub jean_mcp_max_depth: u32, // Max recursive spawn depth via Jean MCP (default 3)
     #[serde(default = "default_jean_mcp_rate_limit")]
     pub jean_mcp_rate_limit_per_minute: u32, // Per-source rate limit for session-spawning tools (default 20)
+    #[serde(default)]
+    pub agent_browser_enabled: bool, // Install agent-browser and add its MCP server to CLI configs (default false)
 }
 
 fn default_finished_session_animation_enabled() -> bool {
@@ -663,6 +676,10 @@ fn default_confirm_session_close() -> bool {
     true // Enabled by default
 }
 
+fn default_close_confirm_bypass_modifier() -> String {
+    "none".to_string() // Off by default — closing stays behind the confirmation dialog
+}
+
 fn default_execution_mode() -> String {
     "yolo".to_string()
 }
@@ -901,6 +918,25 @@ mod tests {
     }
 
     #[test]
+    fn agent_browser_prompt_lines_follow_preference() {
+        let prompt = default_global_system_prompt();
+        let mut prefs = AppPreferences::default();
+
+        let off = crate::apply_agent_browser_preference(prompt.clone(), Some(&prefs));
+        assert!(!off.to_ascii_lowercase().contains("agent browser"));
+        assert!(off.contains("Verify UI changes in the running app instead."));
+        assert!(
+            !crate::apply_agent_browser_preference(prompt.clone(), None).contains("Agent Browser")
+        );
+
+        prefs.agent_browser_enabled = true;
+        assert_eq!(
+            crate::apply_agent_browser_preference(prompt.clone(), Some(&prefs)),
+            prompt
+        );
+    }
+
+    #[test]
     fn default_global_system_prompt_prefers_interactive_plan_questions() {
         let prompt = default_global_system_prompt();
 
@@ -923,8 +959,9 @@ mod tests {
         assert!(prompt.contains("Jean Run Environment"));
         assert!(prompt.contains("get_run_environments"));
         assert!(prompt.contains("test against its `url`, port, and startup command"));
-        assert!(prompt.contains("use the Agent Browser when it is available"));
-        assert!(prompt.contains("no other browser testing method"));
+        assert!(prompt.contains("start_run_environment"));
+        assert!(!prompt.contains("use the returned/startup command"));
+        assert!(prompt.contains("no other browser tool is available, use the Agent Browser"));
         assert!(prompt.contains("VERY IMPORTANT: Keep Code Simple"));
         assert!(prompt.contains("Always implement the simplest maintainable solution"));
         assert!(prompt.contains("Clickable References"));
@@ -2106,6 +2143,25 @@ When specifying subagent_type for Task tool calls, always use the fully qualifie
         .to_string()
 }
 
+/// Drop Agent Browser instructions from a system prompt when the integration
+/// is off, so agents are not told to use a browser tool that is not there.
+pub(crate) fn apply_agent_browser_preference(
+    prompt: String,
+    preferences: Option<&AppPreferences>,
+) -> String {
+    if preferences.is_some_and(|prefs| prefs.agent_browser_enabled) {
+        return prompt;
+    }
+    prompt
+        .lines()
+        .filter(|line| {
+            let line = line.to_ascii_lowercase();
+            !line.contains("agent browser") && !line.contains("agent-browser")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn default_global_system_prompt() -> String {
     r#"Always use ASD-STE100 Simplified Technical English when you talk to me.
 
@@ -2150,8 +2206,7 @@ fn default_global_system_prompt() -> String {
 - Do not re-run a passing check when the code it covers has not changed since.
 - Write new tests only for behavior that can break silently: business logic, parsing/serialization, state transitions, persistence, and a regression test for each fixed bug.
 - Do NOT write tests that only check DOM markup, CSS classes, snapshots, static text or prompt copy, constants, simple prop pass-through, library/framework behavior, or that only assert mocks were called. Verify UI changes in the running app instead.
-- Before UI, HTTP, browser, or end-to-end verification, call Jean MCP `get_run_environments` and test against the returned url/port/command when a Run environment is available.
-- For the current selected project, if there is no other browser testing method, use the Agent Browser when it is available.
+- If a UI check needs a browser and no other browser tool is available, use the Agent Browser.
 
 ### 6. Demand Elegance (Balanced)
 - For non-trivial changes: pause and ask "is there a more elegant way?"
@@ -2194,7 +2249,7 @@ fn default_global_system_prompt() -> String {
 ## Jean Run Environment
 - When you need to test a running app (UI, HTTP, browser, smoke, e2e), call Jean MCP `get_run_environments` first (pass this worktreeId when known).
 - If an environment is running, test against its `url`, port, and startup command. Do not guess localhost ports or start a second dev server when Jean already has one.
-- If nothing is running and verification needs a live server, say so and use the returned/startup command rather than inventing a different command or port.
+- If nothing is running and verification needs a live server, start it with Jean MCP `start_run_environment`. Do not start a dev server by hand. If no Run command is configured, say so; do not invent a command or port.
 - In how-to-test notes, include the exact URL/port you used.
 
 ## Important!
@@ -2711,6 +2766,7 @@ impl Default for AppPreferences {
             magic_prompt_efforts: MagicPromptReasoningEfforts::default(),
             magic_prompt_modes: MagicPromptModes::default(),
             magic_models_auto_initialized: false,
+            commit_close_issue: false,
             file_edit_mode: default_file_edit_mode(),
             ai_language: String::new(),
             waiting_sound: default_waiting_sound(),
@@ -2729,6 +2785,7 @@ impl Default for AppPreferences {
             auto_pull_base_branch: default_auto_pull_base_branch(),
             auto_archive_on_pr_merged: default_auto_archive_on_pr_merged(),
             debug_mode_enabled: false,
+            agents_enabled: false,
             default_effort_level: default_effort_level(),
             default_enabled_mcp_servers: Vec::new(),
             known_mcp_servers: Vec::new(),
@@ -2751,6 +2808,7 @@ impl Default for AppPreferences {
             fast_mode_models: Vec::new(),
             canvas_layout: default_canvas_layout(),
             confirm_session_close: default_confirm_session_close(),
+            close_confirm_bypass_modifier: default_close_confirm_bypass_modifier(),
             default_execution_mode: default_execution_mode(),
             default_backend: default_backend(),
             default_new_session_kind: default_new_session_kind(),
@@ -2805,6 +2863,7 @@ impl Default for AppPreferences {
             jean_mcp_enabled: default_jean_mcp_enabled(),
             jean_mcp_max_depth: default_jean_mcp_max_depth(),
             jean_mcp_rate_limit_per_minute: default_jean_mcp_rate_limit(),
+            agent_browser_enabled: false,
         }
     }
 }
@@ -3005,6 +3064,10 @@ pub struct UIState {
     #[serde(default)]
     pub seen_failed_workflow_run_ids: Vec<u64>,
 
+    /// Sessions armed for auto-continue after a usage limit resets
+    #[serde(default)]
+    pub auto_resume: Vec<AutoResumeEntry>,
+
     /// Version for future migration support
     #[serde(default = "default_ui_state_version")]
     pub version: u32,
@@ -3012,6 +3075,16 @@ pub struct UIState {
 
 fn default_ui_state_version() -> u32 {
     1
+}
+
+/// A session armed for auto-continue after a usage limit resets. `send_args`
+/// is the opaque frontend `SendMessageArgs` payload, replayed verbatim.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutoResumeEntry {
+    pub session_id: String,
+    #[serde(default)]
+    pub resume_at_ms: Option<f64>,
+    pub send_args: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3141,6 +3214,7 @@ impl Default for UIState {
             pinned_recent_session_ids: Vec::new(),
             last_opened_per_project: std::collections::HashMap::new(),
             seen_failed_workflow_run_ids: Vec::new(),
+            auto_resume: Vec::new(),
             version: default_ui_state_version(),
         }
     }
@@ -3426,6 +3500,7 @@ const CLIENT_ONLY_PREFERENCE_KEYS: &[&str] = &[
     "mobile_zoom_level",
     "sync_zoom_levels",
     "confirm_session_close",
+    "close_confirm_bypass_modifier",
     "expand_tool_calls_by_default",
     "window_vibrancy",
     "finished_session_animation_enabled",
@@ -4680,6 +4755,19 @@ fn resolve_headless_token_required(
     }
 }
 
+/// Worker stack size of Jean's tokio runtimes. Debug builds keep very large
+/// async frames (the command and Jean MCP dispatchers), and any Jean MCP call
+/// overflowed tokio's 2 MiB default stack there.
+pub const RUNTIME_THREAD_STACK_SIZE: usize = 8 * 1024 * 1024;
+
+/// Multi-thread tokio runtime for the app and server entry points.
+pub fn build_tokio_runtime() -> std::io::Result<tokio::runtime::Runtime> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(RUNTIME_THREAD_STACK_SIZE)
+        .build()
+}
+
 /// Initialize the shared runtime used by both transport adapters.
 pub fn initialize_runtime(context: &RuntimeContext) -> Result<(), String> {
     let (broadcaster, _) = http_server::WsBroadcaster::new();
@@ -4704,6 +4792,11 @@ pub fn initialize_runtime(context: &RuntimeContext) -> Result<(), String> {
     task_manager.start();
     context.manage(task_manager);
     auto_fix::scheduler::start_auto_fix_scheduler(context.clone());
+    // Agents keep working without clients: open their database and start the loop.
+    match agents::init(context) {
+        Ok(()) => agents::start(context.clone()),
+        Err(error) => log::error!("Agents are unavailable: {error}"),
+    }
 
     let cleanup_context = context.clone();
     async_runtime::spawn_blocking(move || {
@@ -4736,13 +4829,33 @@ pub async fn start_runtime_services(context: RuntimeContext) -> Result<(), Strin
         repair_managed_cli_links(&link_context, &link_preferences);
     });
 
-    // Required integrations are repaired on every launch. Do this outside the
-    // startup path because agent-browser can download Chromium on first use.
+    // Integrations are repaired on every launch. Do this outside the startup
+    // path because agent-browser can download Chromium on first use.
+    let agent_browser_enabled = preferences.agent_browser_enabled;
     async_runtime::spawn(async move {
         if let Err(error) =
             jean_mcp_config::install_jean_mcp_config_impl(context.clone(), None, None).await
         {
             log::warn!("Failed to activate required Jean MCP configs: {error}");
+        }
+
+        // Agent Browser is opt-in. When it is off, remove the MCP entries that
+        // Jean wrote, so CLIs do not start it.
+        if !agent_browser_enabled {
+            match async_runtime::spawn_blocking(agent_browser::remove_agent_browser_mcp_sync).await
+            {
+                Ok(results) => {
+                    for result in results.into_iter().filter(|r| r.status == "error") {
+                        log::warn!(
+                            "Failed to remove agent-browser MCP for {}: {}",
+                            result.backend,
+                            result.message
+                        );
+                    }
+                }
+                Err(error) => log::warn!("agent-browser MCP removal task failed: {error}"),
+            }
+            return;
         }
 
         let status = agent_browser::resolve_agent_browser_binary(&context);
@@ -4753,32 +4866,40 @@ pub async fn start_runtime_services(context: RuntimeContext) -> Result<(), Strin
             })
             .await
             {
-                Ok(Ok(_)) => log::info!("Installed required agent-browser integration"),
+                Ok(Ok(_)) => log::info!("Installed agent-browser integration"),
                 Ok(Err(error)) => {
-                    log::warn!("Failed to install required agent-browser: {error}");
+                    log::warn!("Failed to install agent-browser: {error}");
                     return;
                 }
                 Err(error) => {
-                    log::warn!("Required agent-browser install task failed: {error}");
+                    log::warn!("agent-browser install task failed: {error}");
                     return;
                 }
             }
         }
 
-        match agent_browser::install_agent_browser_mcp(context, None).await {
+        match agent_browser::install_agent_browser_mcp(context.clone(), None).await {
             Ok(results) => {
                 for result in results
                     .into_iter()
                     .filter(|result| result.status == "error")
                 {
                     log::warn!(
-                        "Failed to activate required agent-browser for {}: {}",
+                        "Failed to activate agent-browser for {}: {}",
                         result.backend,
                         result.message
                     );
                 }
             }
-            Err(error) => log::warn!("Failed to activate required agent-browser MCP: {error}"),
+            Err(error) => log::warn!("Failed to activate agent-browser MCP: {error}"),
+        }
+
+        match async_runtime::spawn_blocking(move || agent_browser::import_legacy_profile(&context))
+            .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => log::warn!("{error}"),
+            Err(error) => log::warn!("Legacy agent-browser profile import task failed: {error}"),
         }
     });
 
@@ -5022,6 +5143,7 @@ pub async fn run_server() -> Result<(), String> {
     async_runtime::set(tokio::runtime::Handle::current());
     #[cfg(target_os = "linux")]
     platform::fix_headless_path();
+    platform::add_fnm_node_to_path();
     let cli = parse_cli_args();
     // WSL headless auto-allows native open; explicit flag covers non-WSL local servers.
     platform::set_allow_native_open(cli.allow_native_open);

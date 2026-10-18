@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { invokeForOptionalServer } from '@/lib/transport'
 
 export interface SystemPrerequisites {
   gitInstalled: boolean
@@ -13,6 +13,10 @@ export interface SystemPrerequisites {
   manualInstallUrl: string
 }
 
-export function checkSystemPrerequisites() {
-  return invoke<SystemPrerequisites>('check_system_prerequisites')
+/** Checks the local core, or the given Jean server when `serverId` is set. */
+export function checkSystemPrerequisites(serverId?: string) {
+  return invokeForOptionalServer<SystemPrerequisites>(
+    serverId,
+    'check_system_prerequisites'
+  )
 }

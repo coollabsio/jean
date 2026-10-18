@@ -213,7 +213,11 @@ describe('McpServersPane Jean MCP install', () => {
     renderPane()
 
     expect(await screen.findByText(/required · automatic/i)).toBeInTheDocument()
-    expect(screen.queryByRole('switch')).not.toBeInTheDocument()
+    // The only switch on this pane belongs to Agent Browser.
+    expect(screen.getAllByRole('switch')).toHaveLength(1)
+    expect(
+      screen.getByRole('switch', { name: /enable agent browser/i })
+    ).toBeInTheDocument()
     expect(mocks.patchPreferencesMutate).not.toHaveBeenCalledWith(
       expect.objectContaining({ jean_mcp_enabled: false })
     )

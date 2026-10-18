@@ -44,6 +44,7 @@ import { MessageItem } from './MessageItem'
 import { getProviderChangeBeforeMessage } from './message-settings-labels'
 import { ProviderChangeSeparator } from './ProviderChangeSeparator'
 import { EditedFilesDisplay } from './EditedFilesDisplay'
+import { parseServerResourceKey } from '@/lib/server-resource'
 import { AskUserQuestion } from './AskUserQuestion'
 import { SteeredPromptGroup } from './SteeredPromptGroup'
 import { buildTimeline, coalesceContentBlocks } from './tool-call-utils'
@@ -872,6 +873,23 @@ export const CompactMessageList = memo(
         return last.messages.flatMap(({ message }) => message.tool_calls ?? [])
       }, [renderItems])
 
+      // Once the latest turn finishes, its surfaced edited files also list
+      // the turn checkpoint's changes made without file tools (e.g. Bash).
+      const latestTurnUserMessageId = useMemo(() => {
+        if (isSending) return undefined
+        const last = renderItems[renderItems.length - 1]
+        if (!last || last.kind !== 'compact') return undefined
+        const firstIndex = last.messages[0]?.globalIndex ?? 0
+        for (let i = firstIndex - 1; i >= 0; i--) {
+          const message = messages[i]
+          if (message?.role === 'user') return message.id
+        }
+        return undefined
+      }, [renderItems, messages, isSending])
+      const ownerServerId = parseServerResourceKey(
+        worktreeId ?? sessionId
+      )?.serverId
+
       const renderMessageItem = useCallback(
         (
           item: { message: ChatMessage; globalIndex: number },
@@ -1251,6 +1269,11 @@ export const CompactMessageList = memo(
                       <EditedFilesDisplay
                         toolCalls={surfacedLatestToolCalls}
                         worktreePath={worktreePath}
+                        serverId={
+                          ownerServerId === 'local' ? undefined : ownerServerId
+                        }
+                        worktreeId={worktreeId ?? undefined}
+                        turnUserMessageId={latestTurnUserMessageId}
                       />
                     )}
                   </div>

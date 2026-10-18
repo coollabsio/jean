@@ -760,7 +760,7 @@ pub fn build_thread_start_params(
     model: Option<&str>,
     execution_mode: Option<&str>,
     search_enabled: bool,
-    base_instructions_content: Option<&str>,
+    developer_instructions_content: Option<&str>,
     model_verbosity: Option<&str>,
     codex_provider: Option<&crate::CodexProviderProfile>,
 ) -> serde_json::Value {
@@ -833,10 +833,11 @@ pub fn build_thread_start_params(
         }
     }
 
-    // Base instructions (system-level context: issues, PRs, custom prompts)
-    if let Some(content) = base_instructions_content {
+    // Jean context (global prompt, issues, PRs, custom prompts) is additive
+    // developer guidance. `baseInstructions` would replace Codex's own prompt.
+    if let Some(content) = developer_instructions_content {
         if !content.is_empty() {
-            params["baseInstructions"] = serde_json::json!(content);
+            params["developerInstructions"] = serde_json::json!(content);
         }
     }
 
@@ -1069,7 +1070,7 @@ pub fn execute_codex_via_server(
     search_enabled: bool,
     add_dirs: &[String],
     prompt: &str,
-    base_instructions_content: Option<&str>,
+    developer_instructions_content: Option<&str>,
     codex_provider: Option<&crate::CodexProviderProfile>,
 ) -> Result<CodexResponse, String> {
     use super::codex_server;
@@ -1105,15 +1106,16 @@ pub fn execute_codex_via_server(
     let thread_id = match (|| -> Result<String, String> {
         if let Some(tid) = existing_thread_id {
             // Resume existing thread
-            let resume_params = build_thread_start_params(
+            let mut resume_params = build_thread_start_params(
                 working_dir,
                 model,
                 execution_mode,
                 search_enabled,
-                base_instructions_content,
+                developer_instructions_content,
                 Some(model_verbosity),
                 codex_provider,
             );
+            apply_agent_browser_session(&mut resume_params, session_id);
             let mut full_params =
                 serde_json::json!({ "threadId": tid, "persistExtendedHistory": true });
             // Copy overridable fields
@@ -1125,7 +1127,7 @@ pub fn execute_codex_via_server(
                 "sandbox",
                 "config",
                 "serviceTier",
-                "baseInstructions",
+                "developerInstructions",
             ] {
                 if let Some(v) = resume_params.get(key) {
                     full_params[key] = v.clone();
@@ -1136,11 +1138,12 @@ pub fn execute_codex_via_server(
                 Err(e) => {
                     log::warn!("Failed to resume thread {tid}: {e}, starting new thread");
                     start_new_thread(
+                        session_id,
                         working_dir,
                         model,
                         execution_mode,
                         search_enabled,
-                        base_instructions_content,
+                        developer_instructions_content,
                         Some(model_verbosity),
                         codex_provider,
                     )
@@ -1148,11 +1151,12 @@ pub fn execute_codex_via_server(
             }
         } else {
             start_new_thread(
+                session_id,
                 working_dir,
                 model,
                 execution_mode,
                 search_enabled,
-                base_instructions_content,
+                developer_instructions_content,
                 Some(model_verbosity),
                 codex_provider,
             )
@@ -1840,26 +1844,44 @@ pub fn resume_codex_after_crash(
 
 /// Start a new Codex thread via app-server.
 #[allow(clippy::too_many_arguments)]
+/// Give this thread's agent-browser MCP server its own browser session, so
+/// parallel Jean sessions do not share one browser.
+fn apply_agent_browser_session(params: &mut serde_json::Value, session_id: &str) {
+    let overrides = [
+        crate::agent_browser::codex_session_config_override(session_id),
+        // Jean MCP must see the real session (agents, approvals, current context).
+        crate::jean_mcp_config::codex_session_config_override(session_id),
+    ];
+    for (key, value) in overrides.into_iter().flatten() {
+        if !params["config"].is_object() {
+            params["config"] = serde_json::json!({});
+        }
+        params["config"][key] = value;
+    }
+}
+
 fn start_new_thread(
+    session_id: &str,
     working_dir: &std::path::Path,
     model: Option<&str>,
     execution_mode: Option<&str>,
     search_enabled: bool,
-    base_instructions_content: Option<&str>,
+    developer_instructions_content: Option<&str>,
     model_verbosity: Option<&str>,
     codex_provider: Option<&crate::CodexProviderProfile>,
 ) -> Result<String, String> {
     use super::codex_server;
 
-    let params = build_thread_start_params(
+    let mut params = build_thread_start_params(
         working_dir,
         model,
         execution_mode,
         search_enabled,
-        base_instructions_content,
+        developer_instructions_content,
         model_verbosity,
         codex_provider,
     );
+    apply_agent_browser_session(&mut params, session_id);
 
     let result = codex_server::send_request("thread/start", params)?;
     let thread_id = result
@@ -5897,6 +5919,38 @@ mod tests {
         );
         assert_eq!(params["model"], "gpt-5.4");
         assert_eq!(params["serviceTier"], "fast");
+    }
+
+    #[test]
+    fn jean_context_goes_to_developer_instructions_not_base_instructions() {
+        let params = build_thread_start_params(
+            std::path::Path::new("/tmp"),
+            Some("gpt-5.5"),
+            Some("plan"),
+            false,
+            Some("Jean global system prompt"),
+            None,
+            None,
+        );
+
+        assert_eq!(params["developerInstructions"], "Jean global system prompt");
+        assert!(params.get("baseInstructions").is_none());
+    }
+
+    #[test]
+    fn empty_developer_instructions_are_omitted() {
+        let params = build_thread_start_params(
+            std::path::Path::new("/tmp"),
+            Some("gpt-5.5"),
+            Some("plan"),
+            false,
+            Some(""),
+            None,
+            None,
+        );
+
+        assert!(params.get("developerInstructions").is_none());
+        assert!(params.get("baseInstructions").is_none());
     }
 
     #[test]

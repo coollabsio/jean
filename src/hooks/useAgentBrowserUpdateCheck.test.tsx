@@ -9,6 +9,10 @@ vi.mock('@/lib/query-client', () => ({
   queryClient: { invalidateQueries: vi.fn(), setQueryData: vi.fn() },
 }))
 vi.mock('@/services/mcp', () => ({ invalidateAllMcpServers: vi.fn() }))
+const prefs = vi.hoisted(() => ({ agent_browser_enabled: true }))
+vi.mock('@/services/preferences', () => ({
+  usePreferences: () => ({ data: prefs }),
+}))
 vi.mock('sonner', () => ({
   toast: {
     info: vi.fn(),
@@ -23,9 +27,19 @@ describe('useAgentBrowserUpdateCheck', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.clearAllMocks()
+    prefs.agent_browser_enabled = true
   })
 
   afterEach(() => vi.useRealTimers())
+
+  it('does not check for updates when Agent Browser is off', async () => {
+    prefs.agent_browser_enabled = false
+
+    renderHook(() => useAgentBrowserUpdateCheck())
+    await act(async () => vi.advanceTimersByTimeAsync(15_000))
+
+    expect(invoke).not.toHaveBeenCalled()
+  })
 
   it('asks for confirmation before it updates Agent Browser', async () => {
     vi.mocked(invoke).mockResolvedValue({

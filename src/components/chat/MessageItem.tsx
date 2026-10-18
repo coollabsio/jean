@@ -327,6 +327,22 @@ export const MessageItem = memo(function MessageItem({
     return turnHasFileEdits(getMessages(), messageIndex)
   }, [message.role, getMessages, messageIndex])
 
+  // The last assistant message of a finished turn also lists the turn
+  // checkpoint's changes made without file tools (e.g. Bash edits).
+  const turnUserMessageId = useMemo(() => {
+    if (message.role !== 'assistant' || !worktreeId || !getMessages) {
+      return undefined
+    }
+    const messages = getMessages()
+    const next = messages[messageIndex + 1]
+    if (next ? next.role !== 'user' : isSending) return undefined
+    for (let i = messageIndex - 1; i >= 0; i--) {
+      const previous = messages[i]
+      if (previous?.role === 'user') return previous.id
+    }
+    return undefined
+  }, [message.role, worktreeId, getMessages, messageIndex, isSending])
+
   // Only offer Restore after the agent turn finishes (not mid-stream).
   const showTurnRestore = useMemo(() => {
     if (!userTurnHasFileEdits || !getMessages) return false
@@ -951,7 +967,7 @@ export const MessageItem = memo(function MessageItem({
 
       {/* Show edited files at the bottom of assistant messages */}
       {message.role === 'assistant' &&
-        (message.tool_calls?.length ?? 0) > 0 &&
+        ((message.tool_calls?.length ?? 0) > 0 || turnUserMessageId) &&
         !hideEditedFiles &&
         !skipToolCalls && (
           <EditedFilesDisplay
@@ -959,6 +975,9 @@ export const MessageItem = memo(function MessageItem({
             worktreePath={worktreePath}
             getMessages={getMessages}
             messageIndex={messageIndex}
+            serverId={messageServerId === 'local' ? undefined : messageServerId}
+            worktreeId={worktreeId ?? undefined}
+            turnUserMessageId={turnUserMessageId}
           />
         )}
 

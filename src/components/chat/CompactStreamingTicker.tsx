@@ -1,10 +1,6 @@
 import { memo, useMemo, useState } from 'react'
-import {
-  Loader2,
-  Activity,
-  Brain,
-  ChevronRight,
-} from '@/components/icons/reicon'
+import { Activity, Brain, ChevronRight } from '@/components/icons/reicon'
+import { WorkingWaveform } from '@/components/ui/status-indicator'
 import type { ContentBlock, ToolCall } from '@/types/chat'
 import { isAskUserQuestion, isPlanToolCall } from '@/types/chat'
 import {
@@ -18,6 +14,7 @@ import {
   summarizeToolCall,
 } from './ToolCallInline'
 import { EditedFilesDisplay } from './EditedFilesDisplay'
+import { parseServerResourceKey } from '@/lib/server-resource'
 import { StreamingMessage } from './StreamingMessage'
 import { SteeredPromptGroup } from './SteeredPromptGroup'
 import {
@@ -217,8 +214,10 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
     streamingContent,
     onCopySteeredText,
     worktreePath,
+    sessionId,
     showLoadingIndicator = true,
   } = props
+  const ownerServerId = parseServerResourceKey(sessionId)?.serverId
   const [isOpen, setIsOpen] = useState(false)
 
   // Keyed on toolCalls only so these keep a stable identity across
@@ -445,9 +444,7 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
                   {stepCount} step{stepCount === 1 ? '' : 's'}
                 </span>
               )}
-              {showLoadingIndicator && (
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-foreground" />
-              )}
+              {showLoadingIndicator && <WorkingWaveform label="Working" />}
               <ChevronRight
                 className={
                   'h-3.5 w-3.5 transition-transform duration-200' +
@@ -472,6 +469,7 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
       <EditedFilesDisplay
         toolCalls={activityToolCalls}
         worktreePath={worktreePath}
+        serverId={ownerServerId === 'local' ? undefined : ownerServerId}
       />
       {hasPlan && (
         <StreamingMessage

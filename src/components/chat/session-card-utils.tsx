@@ -18,6 +18,7 @@ import {
   type CodexMcpElicitationRequest,
   type CodexDynamicToolCallRequest,
 } from '@/types/chat'
+import type { StoredReviewResults } from '@/types/projects'
 import {
   buildNativeResumeArgs,
   getNativeTerminalResumeLaunch,
@@ -355,6 +356,15 @@ export function getEffectiveSessionWaiting(
   return storeState.waitingForInputSessionIds[session.id] ?? false
 }
 
+/** Review jobs store a `running` entry in `review_results` until they finish. */
+function hasRunningReviewEntry(results: StoredReviewResults | undefined) {
+  return (
+    !!results &&
+    'reviews' in results &&
+    results.reviews.some(entry => entry.status === 'running')
+  )
+}
+
 /** Backend-created Code Review tabs have no chat transcript (background job). */
 export function isDedicatedEmptyCodeReviewSession(
   session: Session | null | undefined
@@ -672,9 +682,9 @@ export function computeSessionCardData(
   } else if (sessionSending && executionMode === 'yolo') {
     status = 'yoloing'
   } else if (
-    session.name.startsWith('Code Review') &&
     session.is_reviewing &&
-    !session.review_results
+    (hasRunningReviewEntry(session.review_results) ||
+      (session.name.startsWith('Code Review') && !session.review_results))
   ) {
     status = 'reviewing'
   } else if (

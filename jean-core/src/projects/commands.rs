@@ -9163,6 +9163,17 @@ fn get_recent_commits(repo_path: &str, count: u32) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+/// Insert an extra rule into the prompt's "Rules:" list, or append it.
+fn add_commit_prompt_rule(prompt: &str, rule: &str) -> String {
+    match prompt.find("Rules:\n") {
+        Some(index) => {
+            let insert_at = index + "Rules:\n".len();
+            format!("{}- {rule}\n{}", &prompt[..insert_at], &prompt[insert_at..])
+        }
+        None => format!("{prompt}\n\nAdditional rule:\n- {rule}"),
+    }
+}
+
 /// Stage only specific files. Resets the index first to ensure a clean state.
 fn stage_specific_files(repo_path: &str, files: &[String]) -> Result<(), String> {
     // Reset staging area to ensure only the specified files are staged
@@ -9565,6 +9576,11 @@ pub async fn create_commit_with_ai(
 ) -> Result<CreateCommitResponse, String> {
     log::trace!("Creating commit for: {worktree_path}");
 
+    let preferences = crate::load_preferences_sync(&app).unwrap_or_default();
+    let worktree = load_projects_data(&app)
+        .ok()
+        .and_then(|d| d.worktrees.into_iter().find(|w| w.path == worktree_path));
+
     // 1. Check for uncommitted changes
     let status = get_git_status(&worktree_path)?;
     if status.trim().is_empty() {
@@ -9616,19 +9632,20 @@ pub async fn create_commit_with_ai(
         .replace("{diff}", &diff)
         .replace("{recent_commits}", &recent_commits)
         .replace("{remote_info}", "");
+    let prompt = match worktree.as_ref().and_then(|w| w.issue_number) {
+        Some(issue_number) if preferences.commit_close_issue => add_commit_prompt_rule(
+            &prompt,
+            &format!("Add a \"Closes #{issue_number}\" footer line so the commit closes GitHub issue #{issue_number}."),
+        ),
+        _ => prompt,
+    };
 
     // 6. Generate commit message with Claude CLI
-    let commit_magic_backend = crate::get_preferences_path(&app)
-        .ok()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|c| serde_json::from_str::<crate::AppPreferences>(&c).ok())
-        .and_then(|p| p.magic_prompt_backends.commit_message_backend);
-    let worktree_id = load_projects_data(&app).ok().and_then(|d| {
-        d.worktrees
-            .iter()
-            .find(|w| w.path == worktree_path)
-            .map(|w| w.id.clone())
-    });
+    let commit_magic_backend = preferences
+        .magic_prompt_backends
+        .commit_message_backend
+        .clone();
+    let worktree_id = worktree.as_ref().map(|w| w.id.clone());
     let response = generate_commit_message(
         &app,
         &prompt,
@@ -10646,8 +10663,6 @@ pub async fn start_review_job(
 
     if let Err(error) = update_review_session_entry(
         &app,
-        &worktree_id,
-        &worktree_path,
         &session_id,
         entry_backend,
         entry_model,
@@ -10728,8 +10743,6 @@ pub async fn start_review_job(
                 {
                     let _ = update_review_session_entry(
                         &task_app,
-                        &worktree_id,
-                        &worktree_path,
                         &session_id,
                         &result_backend,
                         &result_model,
@@ -10756,8 +10769,6 @@ pub async fn start_review_job(
                 };
                 let _ = update_review_session_entry(
                     &task_app,
-                    &worktree_id,
-                    &worktree_path,
                     &session_id,
                     &result_backend,
                     &result_model,
@@ -10777,8 +10788,6 @@ pub async fn start_review_job(
 
 fn update_review_session_entry(
     app: &AppHandle,
-    worktree_id: &str,
-    worktree_path: &str,
     session_id: &str,
     backend: &str,
     model: &str,
@@ -10786,21 +10795,29 @@ fn update_review_session_entry(
     response: Option<&ReviewResponse>,
     error: Option<&str>,
 ) -> Result<(), String> {
-    crate::chat::with_sessions_mut(app, worktree_path, worktree_id, |sessions| {
-        let session = sessions
-            .find_session_mut(session_id)
-            .ok_or_else(|| format!("Session not found: {session_id}"))?;
-        session.review_results = Some(merge_review_entry(
-            session.review_results.take(),
+    let finished = status != ReviewJobStatus::Running;
+    crate::chat::storage::with_existing_metadata_mut(app, session_id, |metadata| {
+        metadata.review_results = Some(merge_review_entry(
+            metadata.review_results.take(),
             backend,
             model,
             status,
             response,
             error,
         )?);
-        session.is_reviewing = REVIEW_JOB_REGISTRY.has_running_for_session(session_id);
-        Ok(())
-    })
+        metadata.is_reviewing = REVIEW_JOB_REGISTRY.has_running_for_session(session_id);
+        if finished {
+            metadata.review_activity_at = Some(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+            );
+        }
+        Ok::<(), String>(())
+    })??;
+    crate::chat::emit_sessions_cache_invalidation(app);
+    Ok(())
 }
 
 pub async fn get_review_job(job_id: String) -> Result<Option<ReviewJob>, String> {
@@ -13818,13 +13835,70 @@ fn collect_codex_skills(home: &Path, worktree: Option<&Path>) -> Vec<ClaudeSkill
     skills
 }
 
-/// List Codex CLI skills from the current Codex and legacy Jean locations.
-pub async fn list_codex_skills(worktree_path: Option<String>) -> Result<Vec<ClaudeSkill>, String> {
+/// Ask the Codex app-server which skills are enabled for `cwd`, including plugin skills.
+fn list_codex_skills_from_app_server(
+    app: &AppHandle,
+    cwd: &str,
+) -> Result<Vec<ClaudeSkill>, String> {
+    crate::chat::codex_server::ensure_running(app)?;
+    let response = crate::chat::codex_server::send_request(
+        "skills/list",
+        serde_json::json!({ "cwds": [cwd], "forceReload": true }),
+    );
+    crate::chat::codex_server::release_usage();
+    Ok(parse_codex_skills_list(&response?))
+}
+
+/// Parse a `skills/list` response into enabled skills, sorted and deduplicated by name.
+fn parse_codex_skills_list(response: &serde_json::Value) -> Vec<ClaudeSkill> {
+    let mut skills_map = std::collections::HashMap::new();
+    let entries = response["data"].as_array().into_iter().flatten();
+    for skill in entries.flat_map(|entry| entry["skills"].as_array().into_iter().flatten()) {
+        let (Some(name), Some(path)) = (skill["name"].as_str(), skill["path"].as_str()) else {
+            continue;
+        };
+        if !skill["enabled"].as_bool().unwrap_or(true) {
+            continue;
+        }
+        let description = skill["description"]
+            .as_str()
+            .filter(|d| !d.is_empty())
+            .map(str::to_string);
+        skills_map.entry(name.to_string()).or_insert(ClaudeSkill {
+            name: name.to_string(),
+            path: path.to_string(),
+            description,
+        });
+    }
+    let mut skills: Vec<ClaudeSkill> = skills_map.into_values().collect();
+    skills.sort_by(|a, b| a.name.cmp(&b.name));
+    skills
+}
+
+/// List Codex CLI skills. Codex itself is the source of truth (it knows which
+/// plugins are enabled); scan skill directories only when Codex is unavailable.
+pub async fn list_codex_skills(
+    app: AppHandle,
+    worktree_path: Option<String>,
+) -> Result<Vec<ClaudeSkill>, String> {
     log::trace!("Listing Codex CLI skills");
 
-    let skills = get_home_dir()
-        .map(|home| collect_codex_skills(&home, worktree_path.as_deref().map(Path::new)))
-        .unwrap_or_default();
+    let home = get_home_dir();
+    let skills = tokio::task::spawn_blocking(move || {
+        let cwd = worktree_path
+            .clone()
+            .or_else(|| home.as_ref().map(|h| h.to_string_lossy().into_owned()));
+        if let Some(cwd) = cwd {
+            match list_codex_skills_from_app_server(&app, &cwd) {
+                Ok(skills) => return skills,
+                Err(e) => log::debug!("Codex skills/list failed, scanning directories: {e}"),
+            }
+        }
+        home.map(|home| collect_codex_skills(&home, worktree_path.as_deref().map(Path::new)))
+            .unwrap_or_default()
+    })
+    .await
+    .map_err(|e| format!("Failed to list Codex skills: {e}"))?;
     log::trace!("Found {} Codex CLI skills", skills.len());
     Ok(skills)
 }
@@ -13944,7 +14018,7 @@ fn opencode_config_dir(home: &std::path::Path) -> std::path::PathBuf {
 pub struct PluginSkillGroup {
     /// Plugin display name (e.g., "Superpowers", "Frontend Design")
     pub plugin_name: String,
-    /// Skills found in this plugin's skills/ directory
+    /// Skills found in this plugin's skills/ directory, named `<plugin-id>:<skill>`
     pub skills: Vec<ClaudeSkill>,
 }
 
@@ -14052,7 +14126,14 @@ pub async fn list_plugin_skills() -> Result<Vec<PluginSkillGroup>, String> {
         let plugin_id = plugin_key.split('@').next().unwrap_or(plugin_key);
         let plugin_name = plugin_id_to_display_name(plugin_id);
 
-        let mut skills: Vec<ClaudeSkill> = skills_map.into_values().collect();
+        // Namespace like Claude CLI (`pstack:bro`) so users can search by plugin
+        let mut skills: Vec<ClaudeSkill> = skills_map
+            .into_values()
+            .map(|skill| ClaudeSkill {
+                name: format!("{plugin_id}:{}", skill.name),
+                ..skill
+            })
+            .collect();
         skills.sort_by(|a, b| a.name.cmp(&b.name));
 
         groups.push(PluginSkillGroup {
@@ -14374,6 +14455,47 @@ mod tests {
         assert!(!provided_cached_value_changed(&Some(1), &Some(1)));
         assert!(provided_cached_value_changed(&Some(2), &Some(1)));
         assert!(provided_cached_value_changed(&Some(1), &None));
+    }
+
+    #[test]
+    fn codex_skills_list_keeps_enabled_plugin_and_system_skills() {
+        let response = serde_json::json!({
+            "data": [
+                {
+                    "cwd": "/repo",
+                    "skills": [
+                        { "name": "pages:write-page", "path": "/p/write-page/SKILL.md", "description": "Write a page", "enabled": true, "scope": "user", "pluginId": "pages@openai-curated-remote" },
+                        { "name": "imagegen", "path": "/s/imagegen/SKILL.md", "description": "", "enabled": true, "scope": "system" },
+                        { "name": "off", "path": "/s/off/SKILL.md", "description": "Disabled", "enabled": false, "scope": "user" }
+                    ],
+                    "errors": []
+                },
+                {
+                    "cwd": "/other",
+                    "skills": [
+                        { "name": "imagegen", "path": "/dup/SKILL.md", "description": "dup", "enabled": true, "scope": "system" }
+                    ]
+                }
+            ]
+        });
+
+        let skills = parse_codex_skills_list(&response);
+
+        let summary: Vec<_> = skills
+            .iter()
+            .map(|s| (s.name.as_str(), s.path.as_str(), s.description.as_deref()))
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                ("imagegen", "/s/imagegen/SKILL.md", None),
+                (
+                    "pages:write-page",
+                    "/p/write-page/SKILL.md",
+                    Some("Write a page")
+                ),
+            ]
+        );
     }
 
     #[test]
@@ -15778,6 +15900,18 @@ Body
             "Claude CLI failed: reached max turns before producing structured output"
         );
         assert!(!result.contains("Looking at the diff"));
+    }
+
+    #[test]
+    fn add_commit_prompt_rule_inserts_into_rules_or_appends() {
+        let with_rules = add_commit_prompt_rule("Intro\n\nRules:\n- Existing\n\nDiff", "New rule");
+        assert_eq!(
+            with_rules,
+            "Intro\n\nRules:\n- New rule\n- Existing\n\nDiff"
+        );
+
+        let custom = add_commit_prompt_rule("Custom prompt", "New rule");
+        assert_eq!(custom, "Custom prompt\n\nAdditional rule:\n- New rule");
     }
 
     #[test]

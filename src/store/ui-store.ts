@@ -4,12 +4,15 @@ import type { CliBackend } from '@/types/preferences'
 import type { IssueContext } from '@/types/github'
 import type { CliType } from '@/lib/cli-update'
 import { mergeSeenFailedWorkflowRunIds } from '@/components/shared/workflow-run-utils'
+import { isMobileViewport } from '@/lib/viewport'
 
 export interface InvestigationOverride {
   backend?: CliBackend
   model?: string
   provider?: string | null
   forceNewSession?: boolean
+  /** Queue the investigation into this existing session */
+  sessionId?: string
   prompt?: string
   promptTemplate?: string
   issueContext?: IssueContext
@@ -111,8 +114,16 @@ export interface MinimizedCliUpdate {
   progress: number | null
 }
 
+/** Top-level Jean feature selected in the sidebar tab rail */
+export type RailSection = 'workspace' | 'agents'
+
 interface UIState {
   leftSidebarVisible: boolean
+  railSection: RailSection
+  /** Agent open on the Agents page */
+  selectedAgentId: string
+  /** Agents sidebar server filter: 'all' or a server ID */
+  agentsServerFilter: string
   leftSidebarSize: number // Width in pixels, persisted across sessions
   /** File browser (worktree explorer) visibility */
   fileBrowserVisible: boolean
@@ -230,6 +241,9 @@ interface UIState {
   availableCliUpdates: PendingCliUpdate[]
   toggleLeftSidebar: () => void
   setLeftSidebarVisible: (visible: boolean) => void
+  setRailSection: (section: RailSection) => void
+  setSelectedAgentId: (agentId: string) => void
+  setAgentsServerFilter: (serverId: string) => void
   setLeftSidebarSize: (size: number) => void
   leftSidebarSwipe: {
     isDragging: boolean
@@ -378,10 +392,28 @@ export function getRemotePickerCallback() {
   return _remotePickerCallback
 }
 
+/**
+ * The mobile left sidebar sheet (z-80) stacks above dialogs and modals, so
+ * any surface opening while it is shown must close it first.
+ */
+function mustCloseMobileSidebar(state: UIState): boolean {
+  return state.leftSidebarVisible && isMobileViewport()
+}
+
+/** Close the mobile left sidebar before opening a dialog it would cover. */
+export function closeLeftSidebarOnMobile() {
+  if (isMobileViewport()) {
+    useUIStore.getState().setLeftSidebarVisible(false)
+  }
+}
+
 export const useUIStore = create<UIState>()(
   devtools(
     (set, get) => ({
       leftSidebarVisible: false,
+      railSection: 'workspace',
+      selectedAgentId: 'jean',
+      agentsServerFilter: 'all',
       leftSidebarSize: 250, // Default width in pixels
       leftSidebarSwipe: {
         isDragging: false,
@@ -506,6 +538,34 @@ export const useUIStore = create<UIState>()(
           'setLeftSidebarVisible'
         ),
 
+      setRailSection: section =>
+        set(
+          state =>
+            state.railSection === section ? state : { railSection: section },
+          undefined,
+          'setRailSection'
+        ),
+
+      setSelectedAgentId: agentId =>
+        set(
+          state =>
+            state.selectedAgentId === agentId
+              ? state
+              : { selectedAgentId: agentId },
+          undefined,
+          'setSelectedAgentId'
+        ),
+
+      setAgentsServerFilter: serverId =>
+        set(
+          state =>
+            state.agentsServerFilter === serverId
+              ? state
+              : { agentsServerFilter: serverId },
+          undefined,
+          'setAgentsServerFilter'
+        ),
+
       toggleRightSidebar: () =>
         set(
           state => ({ rightSidebarVisible: !state.rightSidebarVisible }),
@@ -594,27 +654,54 @@ export const useUIStore = create<UIState>()(
 
       togglePreferences: () =>
         set(
-          state => ({ preferencesOpen: !state.preferencesOpen }),
+          state => ({
+            preferencesOpen: !state.preferencesOpen,
+            ...(!state.preferencesOpen && mustCloseMobileSidebar(state)
+              ? { leftSidebarVisible: false }
+              : {}),
+          }),
           undefined,
           'togglePreferences'
         ),
 
       setPreferencesOpen: open =>
         set(
-          state =>
-            state.preferencesOpen === open && state.preferencesPane === null
-              ? state
-              : { preferencesOpen: open, preferencesPane: null },
+          state => {
+            const closeSidebar = open && mustCloseMobileSidebar(state)
+            if (
+              state.preferencesOpen === open &&
+              state.preferencesPane === null &&
+              !closeSidebar
+            ) {
+              return state
+            }
+            return {
+              preferencesOpen: open,
+              preferencesPane: null,
+              ...(closeSidebar ? { leftSidebarVisible: false } : {}),
+            }
+          },
           undefined,
           'setPreferencesOpen'
         ),
 
       openPreferencesPane: pane =>
         set(
-          state =>
-            state.preferencesOpen && state.preferencesPane === pane
-              ? state
-              : { preferencesOpen: true, preferencesPane: pane },
+          state => {
+            const closeSidebar = mustCloseMobileSidebar(state)
+            if (
+              state.preferencesOpen &&
+              state.preferencesPane === pane &&
+              !closeSidebar
+            ) {
+              return state
+            }
+            return {
+              preferencesOpen: true,
+              preferencesPane: pane,
+              ...(closeSidebar ? { leftSidebarVisible: false } : {}),
+            }
+          },
           undefined,
           'openPreferencesPane'
         ),
@@ -723,10 +810,13 @@ export const useUIStore = create<UIState>()(
 
       setNewWorktreeModalOpen: open =>
         set(
-          {
+          state => ({
             newWorktreeModalOpen: open,
             ...(open ? {} : { newWorktreeModalDefaultTab: null }),
-          },
+            ...(open && mustCloseMobileSidebar(state)
+              ? { leftSidebarVisible: false }
+              : {}),
+          }),
           undefined,
           'setNewWorktreeModalOpen'
         ),
@@ -1154,9 +1244,21 @@ export const useUIStore = create<UIState>()(
 
       setSessionChatModalOpen: (open: boolean, worktreeId?: string | null) =>
         set(
-          {
-            sessionChatModalOpen: open,
-            sessionChatModalWorktreeId: open ? (worktreeId ?? null) : null,
+          state => {
+            const nextWorktreeId = open ? (worktreeId ?? null) : null
+            const closeSidebar = open && mustCloseMobileSidebar(state)
+            if (
+              state.sessionChatModalOpen === open &&
+              state.sessionChatModalWorktreeId === nextWorktreeId &&
+              !closeSidebar
+            ) {
+              return state
+            }
+            return {
+              sessionChatModalOpen: open,
+              sessionChatModalWorktreeId: nextWorktreeId,
+              ...(closeSidebar ? { leftSidebarVisible: false } : {}),
+            }
           },
           undefined,
           'setSessionChatModalOpen'

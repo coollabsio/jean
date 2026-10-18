@@ -11,7 +11,6 @@ use serde_json::{json, Value};
 use tauri::AppHandle;
 
 use crate::chat::types::LabelData;
-use crate::http_server::dispatch::dispatch_command;
 use crate::http_server::EmitExt;
 use crate::projects::github_issues::{attach_issue_context_for_session, IssueContext};
 
@@ -54,6 +53,10 @@ const RATE_LIMITED_TOOLS: &[&str] = &[
     "unarchive_session",
     "unarchive_worktree",
     "unlink_worktree_pr",
+    // Agent tools that write
+    "schedule_create",
+    "memory_save",
+    "message_agent",
 ];
 const DEFAULT_MCP_DIFF_MAX_BYTES: usize = 60_000;
 const MAX_MCP_DIFF_BYTES: usize = 200_000;
@@ -216,6 +219,9 @@ pub fn tool_registry() -> Value {
     if let Some(ship) = tool_registry_ship_loop().as_array() {
         tools.extend(ship.iter().cloned());
     }
+    if let Some(agent_tools) = crate::agents::mcp::tool_definitions().as_array() {
+        tools.extend(agent_tools.iter().cloned());
+    }
     Value::Array(tools)
 }
 
@@ -372,7 +378,11 @@ pub async fn call_tool(
         }
     }
 
-    let result_json = run_tool(app, name, arguments, source).await?;
+    // Agent sessions need the user's approval for destructive tools.
+    let result_json = match crate::agents::mcp::approval_gate(app, name, &arguments, source) {
+        Some(pending) => pending,
+        None => run_tool(app, name, arguments, source).await?,
+    };
     Ok(json!({
         "content": [{
             "type": "text",
@@ -380,6 +390,30 @@ pub async fn call_tool(
         }],
         "isError": false,
     }))
+}
+
+// Keep the large command-dispatch future off the MCP router's stack. In debug
+// builds, inline dispatch futures in each match arm exhaust a normal test stack.
+async fn dispatch_command(app: &AppHandle, command: &str, args: Value) -> Result<Value, String> {
+    Box::pin(crate::http_server::dispatch::dispatch_command(
+        app, command, args,
+    ))
+    .await
+}
+
+/// Run a tool that the user approved for an agent (no approval gate).
+/// Boxed: approvals are decided through `dispatch_command`, which this tool
+/// call can reach again, so the future type would otherwise be recursive.
+pub fn run_approved_tool(
+    app: AppHandle,
+    name: String,
+    args: Value,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, String>> + Send>> {
+    Box::pin(async move {
+        run_tool(&app, &name, args, "agent-approval")
+            .await
+            .map_err(|e| e.message)
+    })
 }
 
 async fn run_tool(
@@ -976,6 +1010,9 @@ async fn run_tool(
                     .await
                     .map_err(ToolError::internal)?;
                 }
+                // Default empty sessions can exist only in the index. Persist
+                // their metadata before returning an ID to MCP clients.
+                resolve_session_worktree(app, &session_id)?;
                 return dispatch_command(
                     app,
                     "get_session",
@@ -1032,6 +1069,8 @@ async fn run_tool(
                     "ultracode",
                 ],
             )?;
+            // Agent callers: the agent gets an update when this session's run ends.
+            crate::agents::mcp::record_delegation(app, source, &session_id, &worktree_id);
             let mut payload = serde_json::Map::new();
             payload.insert("sessionId".to_string(), Value::String(session_id.clone()));
             payload.insert("worktreeId".to_string(), Value::String(worktree_id));
@@ -1209,6 +1248,7 @@ async fn run_tool(
         }
         "get_session_status" => {
             let session_id = require_str(&args, "sessionId")?;
+            resolve_session_worktree(app, &session_id)?;
             dispatch_command(
                 app,
                 "get_session_status",
@@ -1873,6 +1913,12 @@ async fn run_tool(
             )
         }
         CLAUDE_PERMISSION_PROMPT_TOOL => Ok(claude_permission_prompt(app, source, &args).await),
+        // Boxed: keeps this large function's stack frame small.
+        agent_tool if crate::agents::mcp::is_agent_tool(agent_tool) => {
+            Box::pin(crate::agents::mcp::run(app, agent_tool, &args, source))
+                .await
+                .map_err(ToolError::invalid_params)
+        }
         other => Err(ToolError::invalid_params(format!("Unknown tool: {other}"))),
     }
 }
@@ -2289,6 +2335,7 @@ async fn start_autoinvestigating(
         Some(source.to_string()),
         None,
         false,
+        None,
     )
     .await
     .map_err(ToolError::internal)?;
@@ -2490,6 +2537,7 @@ pub async fn start_background_investigation_impl(
     source: Option<String>,
     issue_context: Option<IssueContext>,
     force_new_session: bool,
+    target_session_id: Option<String>,
 ) -> Result<BackgroundInvestigationResult, String> {
     let sessions = crate::chat::get_sessions(
         app.clone(),
@@ -2499,9 +2547,19 @@ pub async fn start_background_investigation_impl(
         Some(false),
     )
     .await?;
-    // Prefer the active/first session; create one if the worktree has none yet
-    // (e.g. programmatically empty index before the UI opens a tab).
-    let session_id = match select_reusable_investigation_session(&sessions, force_new_session) {
+    if let Some(id) = &target_session_id {
+        if !sessions.sessions.iter().any(|session| &session.id == id) {
+            return Err(format!(
+                "Background investigation: session {id} not found in worktree {worktree_id}"
+            ));
+        }
+    }
+    // Use the requested session, else prefer the active/first session; create
+    // one if the worktree has none yet (e.g. programmatically empty index
+    // before the UI opens a tab).
+    let session_id = match target_session_id
+        .or_else(|| select_reusable_investigation_session(&sessions, force_new_session))
+    {
         Some(id) => id,
         None => {
             let created = crate::chat::create_session(
@@ -2559,6 +2617,16 @@ pub async fn start_background_investigation_impl(
     let execution_mode = execution_mode
         .filter(|mode| matches!(mode.as_str(), "plan" | "yolo"))
         .unwrap_or_else(|| "plan".to_string());
+    // Persist the magic prompt mode on the session; otherwise the toolbar and
+    // follow-up turns fall back to the session's default policy.
+    crate::chat::set_session_execution_mode(
+        app.clone(),
+        worktree_id.clone(),
+        worktree_path.clone(),
+        session_id.clone(),
+        execution_mode.clone(),
+    )
+    .await?;
     // Detect yolo and append an unconditional fix-after-investigation directive
     // (also strips weak "if yolo" / anti-fix lines). Idempotent if the UI
     // already applied the same transform.
@@ -2631,6 +2699,7 @@ pub async fn start_background_investigation(
     execution_mode: Option<String>,
     issue_context: Option<IssueContext>,
     force_new_session: Option<bool>,
+    session_id: Option<String>,
 ) -> Result<BackgroundInvestigationResult, String> {
     start_background_investigation_impl(
         &app,
@@ -2649,6 +2718,7 @@ pub async fn start_background_investigation(
         Some("ui".to_string()),
         issue_context,
         force_new_session.unwrap_or(false),
+        session_id,
     )
     .await
 }
@@ -2963,6 +3033,10 @@ fn resolve_project_path(app: &AppHandle, project_id: &str) -> Result<String, Too
 }
 
 fn resolve_worktree_path(app: &AppHandle, worktree_id: &str) -> Result<String, ToolError> {
+    // Agent sessions run in their scratch folder (no worktree record).
+    if let Some(path) = crate::agents::workdir_for_worktree(app, worktree_id) {
+        return Ok(path);
+    }
     let data = crate::projects::storage::load_projects_data(app)
         .map_err(|e| ToolError::internal(format!("load_projects_data: {e}")))?;
     data.find_worktree(worktree_id)
@@ -2993,7 +3067,7 @@ fn resolve_session_worktree(
     app: &AppHandle,
     session_id: &str,
 ) -> Result<(String, String), ToolError> {
-    let metadata = crate::chat::storage::load_metadata(app, session_id)
+    let metadata = crate::chat::storage::load_mcp_session_metadata(app, session_id)
         .map_err(|e| ToolError::internal(format!("load_metadata: {e}")))?
         .ok_or_else(|| ToolError::invalid_params(format!("Unknown sessionId: {session_id}")))?;
     let worktree_path = resolve_worktree_path(app, &metadata.worktree_id)?;
@@ -3034,12 +3108,14 @@ fn ensure_mcp_session_can_run(
     session_id: &str,
     worktree_id: &str,
 ) -> Result<(), ToolError> {
-    let metadata = crate::chat::storage::load_metadata(app, session_id)
+    // A new session (no metadata until its first run) cannot be archived yet.
+    // Callers resolve the session first, so it is known to exist.
+    let archived_at = crate::chat::storage::load_metadata(app, session_id)
         .map_err(|e| ToolError::internal(format!("load_metadata: {e}")))?
-        .ok_or_else(|| ToolError::invalid_params(format!("Unknown sessionId: {session_id}")))?;
+        .and_then(|metadata| metadata.archived_at);
     crate::chat::ensure_session_can_run(
         session_id,
-        metadata.archived_at,
+        archived_at,
         worktree_id,
         crate::chat::worktree_archived_at(app, worktree_id),
     )
@@ -3119,6 +3195,384 @@ pub fn jsonrpc_error(id: Option<Value>, code: i32, message: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn session_lookup_app() -> (tempfile::TempDir, AppHandle) {
+        let temp = tempfile::tempdir().unwrap();
+        let app = AppHandle::new(temp.path().to_path_buf(), temp.path().to_path_buf()).unwrap();
+        let worktree = serde_json::from_value(json!({
+            "id": "current-base", "project_id": "project", "name": "base",
+            "path": temp.path().to_string_lossy(), "branch": "main",
+            "created_at": 1, "session_type": "base"
+        }))
+        .unwrap();
+        crate::projects::storage::save_projects_data(
+            &app,
+            &crate::projects::types::ProjectsData {
+                projects: vec![],
+                worktrees: vec![worktree],
+            },
+        )
+        .unwrap();
+        (temp, app)
+    }
+
+    #[tokio::test]
+    async fn mcp_recovered_empty_session_uses_new_session_execution_policy() {
+        for (backend, default_policy, expected_policy) in [
+            ("claude", "build", "build"),
+            ("codex", "supervised", "supervised"),
+            ("cursor", "build", "plan"),
+        ] {
+            for force_new in [false, true] {
+                let (_temp, app) = session_lookup_app();
+                let preferences = crate::AppPreferences {
+                    default_backend: backend.to_string(),
+                    default_execution_mode: default_policy.to_string(),
+                    ..Default::default()
+                };
+                std::fs::write(
+                    crate::get_preferences_path(&app).unwrap(),
+                    serde_json::to_vec(&preferences).unwrap(),
+                )
+                .unwrap();
+                if force_new {
+                    crate::chat::storage::save_empty_index(&app, "current-base").unwrap();
+                }
+                let created = run_tool(
+                    &app,
+                    "create_session",
+                    json!({ "worktreeId": "current-base" }),
+                    "test",
+                )
+                .await
+                .unwrap();
+                let metadata =
+                    crate::chat::storage::load_metadata(&app, created["id"].as_str().unwrap())
+                        .unwrap()
+                        .unwrap();
+                assert_eq!(
+                    metadata.selected_execution_mode.as_deref(),
+                    Some(expected_policy)
+                );
+                assert_eq!(
+                    metadata.selected_permission_mode.as_deref(),
+                    Some(if expected_policy == "plan" {
+                        "yolo"
+                    } else {
+                        expected_policy
+                    })
+                );
+                assert_eq!(created["selected_execution_mode"], expected_policy);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn mcp_create_session_persists_metadata_before_status_lookup() {
+        for force_new in [false, true] {
+            let (_temp, app) = session_lookup_app();
+            if force_new {
+                crate::chat::storage::save_empty_index(&app, "current-base").unwrap();
+            }
+            let created = run_tool(
+                &app,
+                "create_session",
+                json!({ "worktreeId": "current-base" }),
+                "test",
+            )
+            .await
+            .unwrap();
+            let session_id = created["id"].as_str().unwrap();
+            let metadata = crate::chat::storage::load_metadata(&app, session_id)
+                .unwrap()
+                .expect("create_session must persist metadata before returning");
+            assert_eq!(metadata.worktree_id, "current-base");
+            let status = run_tool(
+                &app,
+                "get_session_status",
+                json!({ "sessionId": session_id }),
+                "test",
+            )
+            .await
+            .unwrap();
+            assert_eq!(status["status"], "idle");
+            assert_eq!(status["worktreeId"], "current-base");
+        }
+    }
+
+    // Use an app-local CLI fixture, never an installed CLI or external account.
+    #[cfg(unix)]
+    fn session_send_app() -> (tempfile::TempDir, AppHandle) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let (temp, app) = session_lookup_app();
+        let preferences = crate::AppPreferences {
+            auto_branch_naming: false,
+            auto_session_naming: false,
+            claude_cli_source: "jean".to_string(),
+            default_execution_mode: "build".to_string(),
+            ..Default::default()
+        };
+        std::fs::write(
+            crate::get_preferences_path(&app).unwrap(),
+            serde_json::to_vec(&preferences).unwrap(),
+        )
+        .unwrap();
+        crate::claude_cli::ensure_cli_dir(&app).unwrap();
+        let binary = crate::claude_cli::get_cli_binary_path(&app).unwrap();
+        std::fs::write(
+            &binary,
+            r#"#!/bin/sh
+set -eu
+fixture_dir=$(dirname "$0")
+cat > "$fixture_dir/received.jsonl"
+pwd -P > "$fixture_dir/working-directory"
+printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Fixture reply"}]},"session_id":"fixture-resume"}'
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"Fixture reply","session_id":"fixture-resume"}'
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        (temp, app)
+    }
+
+    #[cfg(unix)]
+    async fn assert_mcp_send_completed(
+        app: &AppHandle,
+        session_id: &str,
+        message: &str,
+        expected_execution_mode: &str,
+    ) {
+        use crate::chat::types::RunStatus;
+
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if let Some(metadata) =
+                    crate::chat::storage::load_metadata(app, session_id).unwrap()
+                {
+                    if let Some(run) = metadata.runs.last() {
+                        assert_ne!(run.status, RunStatus::Crashed, "background send crashed");
+                        assert_ne!(
+                            run.status,
+                            RunStatus::Cancelled,
+                            "background send cancelled"
+                        );
+                        if run.status == RunStatus::Completed
+                            && !crate::chat::registry::is_session_actively_managed(session_id)
+                        {
+                            assert_eq!(metadata.worktree_id, "current-base");
+                            assert_eq!(metadata.runs.len(), 1);
+                            assert_eq!(run.user_message, message);
+                            assert_eq!(
+                                run.execution_mode.as_deref(),
+                                Some(expected_execution_mode)
+                            );
+                            assert_eq!(
+                                metadata.claude_session_id.as_deref(),
+                                Some("fixture-resume")
+                            );
+                            break;
+                        }
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("MCP returned started but did not complete the background send");
+
+        let fixture_dir = crate::claude_cli::get_cli_dir(app).unwrap();
+        let received: Value =
+            serde_json::from_slice(&std::fs::read(fixture_dir.join("received.jsonl")).unwrap())
+                .unwrap();
+        assert_eq!(received["message"]["content"], message);
+        let cwd = std::fs::read_to_string(fixture_dir.join("working-directory")).unwrap();
+        let expected_cwd = std::fs::canonicalize(app.path().app_data_dir().unwrap()).unwrap();
+        assert_eq!(std::path::Path::new(cwd.trim()), expected_cwd);
+
+        // Read through MCP after completion, not just through the CLI fixture.
+        let history = run_tool(
+            app,
+            "read_session_messages",
+            json!({ "sessionId": session_id }),
+            "test",
+        )
+        .await
+        .unwrap();
+        assert_eq!(history["id"], session_id);
+        let messages = history["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[0]["content"], message);
+        assert_eq!(messages[1]["role"], "assistant");
+        assert_eq!(messages[1]["content"], "Fixture reply");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn mcp_create_session_can_send_and_read_immediately() {
+        if !crate::test_support::in_isolated_process(
+            "jean_mcp_core::tests::mcp_create_session_can_send_and_read_immediately",
+        ) {
+            return;
+        }
+        for force_new in [false, true] {
+            let (_temp, app) = session_send_app();
+            if force_new {
+                crate::chat::storage::save_empty_index(&app, "current-base").unwrap();
+            }
+            let created = run_tool(
+                &app,
+                "create_session",
+                json!({ "worktreeId": "current-base" }),
+                "test",
+            )
+            .await
+            .unwrap();
+            let session_id = created["id"].as_str().unwrap();
+            assert!(crate::chat::storage::load_metadata(&app, session_id)
+                .unwrap()
+                .is_some());
+            let args = json!({ "sessionId": session_id, "message": "hello world" });
+            let status = run_tool(&app, "get_session_status", args.clone(), "test")
+                .await
+                .unwrap();
+            assert_eq!(status["worktreeId"], "current-base");
+            assert_eq!(status["status"], "idle");
+            let messages = run_tool(&app, "read_session_messages", args.clone(), "test")
+                .await
+                .unwrap();
+            assert_eq!(messages["id"], session_id);
+            let sent = run_tool(&app, "send_chat_message", args, "test")
+                .await
+                .unwrap();
+            assert_eq!(
+                sent,
+                json!({ "sessionId": session_id, "status": "started" })
+            );
+            assert_mcp_send_completed(&app, session_id, "hello world", "build").await;
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn mcp_repairs_stale_base_session_owner_without_losing_metadata() {
+        if !crate::test_support::in_isolated_process(
+            "jean_mcp_core::tests::mcp_repairs_stale_base_session_owner_without_losing_metadata",
+        ) {
+            return;
+        }
+        let (_temp, app) = session_send_app();
+        let index = crate::chat::storage::load_index(&app, "current-base").unwrap();
+        let session_id = &index.sessions[0].id;
+        let mut metadata = crate::chat::types::SessionMetadata::new(
+            session_id.clone(),
+            "deleted-base".to_string(),
+            "Saved session".to_string(),
+            0,
+        );
+        metadata.codex_thread_id = Some("resume-thread".to_string());
+        metadata.archived_at = Some(123);
+        crate::chat::storage::save_metadata(&app, &metadata).unwrap();
+
+        assert_eq!(
+            resolve_session_worktree(&app, session_id).unwrap().0,
+            "current-base"
+        );
+        let repaired = crate::chat::storage::load_metadata(&app, session_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(repaired.worktree_id, "current-base");
+        assert_eq!(repaired.codex_thread_id, metadata.codex_thread_id);
+        assert_eq!(repaired.archived_at, Some(123));
+        let error = run_tool(
+            &app,
+            "send_chat_message",
+            json!({ "sessionId": session_id, "message": "hello" }),
+            "test",
+        )
+        .await
+        .unwrap_err();
+        assert!(error.message.to_lowercase().contains("archived"));
+
+        crate::chat::storage::with_existing_metadata_mut(&app, session_id, |metadata| {
+            metadata.archived_at = None;
+            metadata.worktree_id = "deleted-base".to_string();
+        })
+        .unwrap();
+        let sent = run_tool(
+            &app,
+            "send_chat_message",
+            json!({ "sessionId": session_id, "message": "hello" }),
+            "test",
+        )
+        .await
+        .unwrap();
+        assert_eq!(sent["status"], "started");
+        assert_mcp_send_completed(&app, session_id, "hello", "plan").await;
+    }
+
+    #[test]
+    fn mcp_index_only_archived_session_stays_archived_and_unknown_ids_stay_unknown() {
+        let (_temp, app) = session_lookup_app();
+        let session_id = crate::chat::storage::with_index_mut(&app, "current-base", |index| {
+            index.sessions[0].archived_at = Some(123);
+            Ok(index.sessions[0].id.clone())
+        })
+        .unwrap();
+        let (worktree_id, _) = resolve_session_worktree(&app, &session_id).unwrap();
+        assert!(ensure_mcp_session_can_run(&app, &session_id, &worktree_id).is_err());
+        assert!(resolve_session_worktree(&app, "unknown-session").is_err());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn mcp_create_session_can_send_as_the_next_call() {
+        if !crate::test_support::in_isolated_process(
+            "jean_mcp_core::tests::mcp_create_session_can_send_as_the_next_call",
+        ) {
+            return;
+        }
+        let (_temp, app) = session_send_app();
+        let created = run_tool(
+            &app,
+            "create_session",
+            json!({ "worktreeId": "current-base" }),
+            "test",
+        )
+        .await
+        .unwrap();
+        let session_id = created["id"].as_str().unwrap();
+        let sent = run_tool(
+            &app,
+            "send_chat_message",
+            json!({ "sessionId": session_id, "message": "hello world" }),
+            "test",
+        )
+        .await
+        .unwrap();
+        assert_eq!(sent["status"], "started");
+        assert_eq!(sent["sessionId"], session_id);
+        assert_mcp_send_completed(&app, session_id, "hello world", "build").await;
+    }
+
+    #[test]
+    fn mcp_session_recovery_does_not_bypass_worktree_archive_or_reopen_closed_base() {
+        let (_temp, app) = session_lookup_app();
+        let index = crate::chat::storage::load_index(&app, "current-base").unwrap();
+        let session_id = &index.sessions[0].id;
+        let mut projects = crate::projects::storage::load_projects_data(&app).unwrap();
+        projects.worktrees[0].archived_at = Some(123);
+        crate::projects::storage::save_projects_data(&app, &projects).unwrap();
+        let (worktree_id, _) = resolve_session_worktree(&app, session_id).unwrap();
+        assert!(ensure_mcp_session_can_run(&app, session_id, &worktree_id).is_err());
+        assert!(ensure_mcp_worktree_not_archived(&app, &worktree_id).is_err());
+
+        crate::chat::storage::preserve_base_sessions(&app, "current-base", "project").unwrap();
+        projects.worktrees.clear();
+        crate::projects::storage::save_projects_data(&app, &projects).unwrap();
+        assert!(resolve_session_worktree(&app, session_id).is_err());
+    }
 
     #[test]
     fn mcp_permission_validation_matches_advertised_modes() {

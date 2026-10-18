@@ -308,31 +308,59 @@ function focusSiblingRow(row: HTMLElement, step: 1 | -1) {
 }
 
 /**
- * Table row that adds itself to the prompt chip on click, then opens a small
- * form under the row for an optional note. A click on a row that is already
- * in the prompt opens the same form to edit the note or remove the row.
+ * Table row that adds itself to the prompt chip on click and opens a small
+ * form under the row, with focus in the note field. The form also edits the
+ * note of a row that is already in the prompt, or removes the row.
  *
  * Keyboard: Up/Down move between rows, Enter opens the note form (a second
  * Enter adds the row to the prompt), Delete/Backspace remove the row.
+ *
+ * Closing the form: Enter/Save keep the note, Escape discards it. After a
+ * click-opened form, Enter/Save move focus to the chat input; otherwise focus
+ * returns to the row. A click outside keeps a changed note, and leaves focus
+ * where the click put it.
  */
 function PromptRow({ row, rowIndex, inPrompt, note, onSave }: PromptRowProps) {
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState(note)
   const rowRef = useRef<HTMLElement>(null)
+  const noteRef = useRef<HTMLTextAreaElement>(null)
+  // Where focus goes when the form closes from inside (Enter, Save, Remove,
+  // Escape). Null after a click outside: focus stays where the click put it.
+  const closeFocusRef = useRef<'row' | 'chat' | null>(null)
+  // A click opened the form, and the click added the row to the prompt.
+  const fromClickRef = useRef(false)
+  const isMobile = useIsMobile()
   const rowNumber = rowIndex + 1
 
-  const openForm = (addNow: boolean) => {
-    if (addNow && !inPrompt) onSave(rowIndex, '')
+  const openForm = (fromClick: boolean) => {
+    closeFocusRef.current = null
+    fromClickRef.current = fromClick
     setDraft(note)
     setOpen(true)
   }
+  const closeForm = (focus: 'row' | 'chat' | null) => {
+    closeFocusRef.current = focus
+    setOpen(false)
+  }
   const saveNote = () => {
     if (!inPrompt || draft.trim() !== note) onSave(rowIndex, draft)
-    setOpen(false)
+    // Skip the chat input on mobile to avoid the on-screen keyboard popup.
+    closeForm(fromClickRef.current && !isMobile ? 'chat' : 'row')
   }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={next => {
+        if (next) return
+        // Only a click or focus outside the form gets here (Escape is
+        // handled below). Keep a changed note instead of losing it.
+        const added = inPrompt || fromClickRef.current
+        if (added && draft.trim() !== note) onSave(rowIndex, draft)
+        closeForm(null)
+      }}
+    >
       <PopoverAnchor asChild>
         {cloneElement(row, {
           ref: rowRef,
@@ -350,6 +378,12 @@ function PromptRow({ row, rowIndex, inPrompt, note, onSave }: PromptRowProps) {
             const target = event.target as HTMLElement
             if (target.closest(ROW_CLICK_IGNORE)) return
             if (window.getSelection()?.toString()) return
+            if (open) {
+              // A click on the row of the open form keeps the form open.
+              noteRef.current?.focus()
+              return
+            }
+            if (!inPrompt) onSave(rowIndex, '')
             openForm(true)
           },
           onKeyDown: (event: React.KeyboardEvent<HTMLElement>) => {
@@ -373,10 +407,26 @@ function PromptRow({ row, rowIndex, inPrompt, note, onSave }: PromptRowProps) {
       <PopoverContent
         align="start"
         className="w-80 p-3"
-        onCloseAutoFocus={event => {
-          // Return focus to the row so keyboard navigation can continue.
+        onInteractOutside={event => {
+          // The row is the anchor: a click on it must not close the form.
+          if (rowRef.current?.contains(event.target as Node)) {
+            event.preventDefault()
+          }
+        }}
+        onEscapeKeyDown={event => {
           event.preventDefault()
-          rowRef.current?.focus({ preventScroll: true })
+          closeForm('row')
+        }}
+        onCloseAutoFocus={event => {
+          // Radix runs this after the close animation. After a click outside,
+          // focus is already on the clicked element (another row's form, the
+          // chat input): never pull it back.
+          event.preventDefault()
+          if (closeFocusRef.current === 'chat') {
+            window.dispatchEvent(new CustomEvent('focus-chat-input'))
+          } else if (closeFocusRef.current === 'row') {
+            rowRef.current?.focus({ preventScroll: true })
+          }
         }}
       >
         <form
@@ -395,6 +445,7 @@ function PromptRow({ row, rowIndex, inPrompt, note, onSave }: PromptRowProps) {
               : `Add row ${rowNumber} to the prompt. Note (optional)`}
           </label>
           <Textarea
+            ref={noteRef}
             id={`prompt-row-note-${rowIndex}`}
             value={draft}
             onChange={event => setDraft(event.target.value)}
@@ -420,7 +471,7 @@ function PromptRow({ row, rowIndex, inPrompt, note, onSave }: PromptRowProps) {
                 size="sm"
                 onClick={() => {
                   onSave(rowIndex, null)
-                  setOpen(false)
+                  closeForm('row')
                 }}
               >
                 Remove

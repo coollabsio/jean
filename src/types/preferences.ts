@@ -682,8 +682,7 @@ export const DEFAULT_GLOBAL_SYSTEM_PROMPT = `Always use ASD-STE100 Simplified Te
 - Do not re-run a passing check when the code it covers has not changed since.
 - Write new tests only for behavior that can break silently: business logic, parsing/serialization, state transitions, persistence, and a regression test for each fixed bug.
 - Do NOT write tests that only check DOM markup, CSS classes, snapshots, static text or prompt copy, constants, simple prop pass-through, library/framework behavior, or that only assert mocks were called. Verify UI changes in the running app instead.
-- Before UI, HTTP, browser, or end-to-end verification, call Jean MCP \`get_run_environments\` and test against the returned url/port/command when a Run environment is available.
-- For the current selected project, if there is no other browser testing method, use the Agent Browser when it is available.
+- If a UI check needs a browser and no other browser tool is available, use the Agent Browser.
 
 ### 6. Demand Elegance (Balanced)
 - For non-trivial changes: pause and ask "is there a more elegant way?"
@@ -726,7 +725,7 @@ export const DEFAULT_GLOBAL_SYSTEM_PROMPT = `Always use ASD-STE100 Simplified Te
 ## Jean Run Environment
 - When you need to test a running app (UI, HTTP, browser, smoke, e2e), call Jean MCP \`get_run_environments\` first (pass this worktreeId when known).
 - If an environment is running, test against its \`url\`, port, and startup command. Do not guess localhost ports or start a second dev server when Jean already has one.
-- If nothing is running and verification needs a live server, say so and use the returned/startup command rather than inventing a different command or port.
+- If nothing is running and verification needs a live server, start it with Jean MCP \`start_run_environment\`. Do not start a dev server by hand. If no Run command is configured, say so; do not invent a command or port.
 - In how-to-test notes, include the exact URL/port you used.
 
 ## Important!
@@ -1283,6 +1282,19 @@ export function resolveMagicPromptBackend(
   ) as CliBackend | null
 }
 
+/** Modifier held while closing to skip the confirmation dialog ('none' disables). */
+export type CloseConfirmBypassModifier = 'shift' | 'alt' | 'none'
+
+export const CLOSE_CONFIRM_BYPASS_MODIFIERS = [
+  'shift',
+  'alt',
+  'none',
+] as const satisfies readonly CloseConfirmBypassModifier[]
+
+/** Off by default: closing stays behind the confirmation dialog until opted out. */
+export const DEFAULT_CLOSE_CONFIRM_BYPASS_MODIFIER: CloseConfirmBypassModifier =
+  'none'
+
 // Types that match the Rust AppPreferences struct
 // Only contains settings that should be persisted to disk
 // Note: Field names use snake_case to match Rust struct exactly
@@ -1339,6 +1351,7 @@ export interface AppPreferences {
   auto_pull_base_branch: boolean // Auto-pull base branch before creating a new worktree
   auto_archive_on_pr_merged: boolean // Auto-archive worktrees when their PR is merged
   debug_mode_enabled: boolean // Show debug panel in chat sessions
+  agents_enabled?: boolean // Experimental: show the Agents tab
   default_enabled_mcp_servers: string[] // MCP server names enabled by default (empty = none)
   known_mcp_servers: string[] // All MCP server names ever seen (prevents re-enabling user-disabled servers)
   has_seen_feature_tour: boolean // Whether user has seen the feature tour onboarding
@@ -1368,6 +1381,7 @@ export interface AppPreferences {
   fast_mode_models: string[] // Model keys ("backend:baseModel") with fast tier last enabled
 
   confirm_session_close: boolean // Show confirmation dialog before closing sessions/worktrees
+  close_confirm_bypass_modifier: CloseConfirmBypassModifier // Modifier that skips the close confirmation ('none' disables)
   default_execution_mode: ExecutionMode // Default workflow/permission policy for new sessions
   default_backend: CliBackend // Default CLI backend for new sessions
   default_new_session_kind: NewSessionKind // Default action for CMD+T: 'chat', 'terminal', or a CLI backend
@@ -1401,6 +1415,7 @@ export interface AppPreferences {
   linear_api_key: string | null // Global Linear personal API key (inherited by all projects)
   sentry_auth_token?: string | null // Global Sentry auth token (inherited by all projects)
   magic_models_auto_initialized: boolean // Whether magic prompt models were auto-set based on installed backends
+  commit_close_issue?: boolean // Commit magic: add "Closes #N" for the worktree's linked GitHub issue
   claude_cli_source: 'jean' | 'path' // Claude CLI source: 'jean' (managed) or 'path' (system PATH)
   codex_cli_source: 'jean' | 'path' // Codex CLI source: 'jean' (managed) or 'path' (system PATH)
   opencode_cli_source: 'jean' | 'path' // OpenCode CLI source: 'jean' (managed) or 'path' (system PATH)
@@ -1424,6 +1439,7 @@ export interface AppPreferences {
   jean_mcp_enabled: boolean // Expose Jean MCP server to spawned CLIs through explicit CLI config entries
   jean_mcp_max_depth: number // Max recursive spawn depth via Jean MCP (default 3)
   jean_mcp_rate_limit_per_minute: number // Per-source rate limit for session-spawning tools (default 20)
+  agent_browser_enabled: boolean // Install agent-browser and add its MCP server to CLI configs (default false)
 }
 
 export type TerminalBackgroundMode = 'auto' | 'light' | 'dark' | 'custom'
@@ -1584,6 +1600,7 @@ export type ClaudeModel =
   | 'claude-opus-5-5'
   | 'claude-opus-5'
   | 'claude-sonnet-5-5'
+  | 'claude-haiku-5-5'
   | 'claude-sonnet-5'
   | 'claude-opus-4-8'
   | 'claude-opus-4-8[1m]'
@@ -1606,6 +1623,7 @@ export type ClaudeModel =
 export const modelOptions: { value: ClaudeModel; label: string }[] = [
   { value: 'claude-opus-5-5', label: 'Claude Opus 5.5' },
   { value: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5' },
+  { value: 'claude-haiku-5-5', label: 'Claude Haiku 5.5' },
   { value: 'claude-fable-5-1', label: 'Claude Fable 5.1' },
   { value: 'claude-fable-5', label: 'Claude Fable 5' },
   { value: 'claude-opus-5', label: 'Claude Opus 5' },
@@ -2496,6 +2514,7 @@ export const defaultPreferences: AppPreferences = {
   auto_pull_base_branch: true, // Default: enabled
   auto_archive_on_pr_merged: true, // Default: enabled
   debug_mode_enabled: false, // Default: disabled
+  agents_enabled: false, // Default: disabled (experimental)
   default_enabled_mcp_servers: [], // Default: no MCP servers enabled
   known_mcp_servers: [], // Default: no known servers
   has_seen_feature_tour: false, // Default: not seen
@@ -2516,6 +2535,7 @@ export const defaultPreferences: AppPreferences = {
   favorite_base_branches: [],
   fast_mode_models: [],
   confirm_session_close: true, // Default: enabled (show confirmation)
+  close_confirm_bypass_modifier: DEFAULT_CLOSE_CONFIRM_BYPASS_MODIFIER, // Default: off — closing always confirms until opted out
   default_execution_mode: 'yolo', // Default: Full access
   default_backend: 'claude', // Default: Claude
   default_new_session_kind: 'chat', // Default: Jean Chat for CMD+T
@@ -2549,6 +2569,7 @@ export const defaultPreferences: AppPreferences = {
   linear_api_key: null, // Default: no global Linear API key
   sentry_auth_token: null, // Default: no global Sentry auth token
   magic_models_auto_initialized: false, // Default: not yet auto-set
+  commit_close_issue: false,
   claude_cli_source: 'jean', // Default: Jean-managed
   codex_cli_source: 'jean', // Default: Jean-managed
   opencode_cli_source: 'jean', // Default: Jean-managed
@@ -2571,4 +2592,5 @@ export const defaultPreferences: AppPreferences = {
   jean_mcp_enabled: true, // Default: enabled
   jean_mcp_max_depth: 3,
   jean_mcp_rate_limit_per_minute: 20,
+  agent_browser_enabled: false, // Default: off
 }

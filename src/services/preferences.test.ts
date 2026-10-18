@@ -128,6 +128,7 @@ describe('model option helpers', () => {
     expect(modelOptions.map(option => option.value)).toEqual([
       'claude-opus-5-5',
       'claude-sonnet-5-5',
+      'claude-haiku-5-5',
       'claude-fable-5-1',
       'claude-fable-5',
       'claude-opus-5',
@@ -151,6 +152,7 @@ describe('model option helpers', () => {
     expect(normalizeClaudeModel('claude-opus-5')).toBe('claude-opus-5')
     expect(normalizeClaudeModel('claude-sonnet-5-5')).toBe('claude-sonnet-5-5')
     expect(normalizeClaudeModel('claude-sonnet-5')).toBe('claude-sonnet-5')
+    expect(normalizeClaudeModel('claude-haiku-5-5')).toBe('claude-haiku-5-5')
     expect(normalizeClaudeModel('claude-opus-4-8')).toBe('claude-opus-4-8')
     expect(normalizeClaudeModel('claude-opus-4-7')).toBe('claude-opus-4-7')
     expect(normalizeClaudeModel('claude-opus-4-6')).toBe('claude-opus-4-6')
@@ -276,11 +278,9 @@ describe('model option helpers', () => {
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
       'test against its `url`, port, and startup command'
     )
+    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain('start_run_environment')
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
-      'use the Agent Browser when it is available'
-    )
-    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
-      'no other browser testing method'
+      'no other browser tool is available, use the Agent Browser'
     )
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
       'VERY IMPORTANT: Keep Code Simple'
@@ -521,6 +521,7 @@ describe('preferences service', () => {
         auto_save_context: false,
         auto_pull_base_branch: true,
         confirm_session_close: true,
+        close_confirm_bypass_modifier: 'shift',
         default_execution_mode: 'plan',
         default_backend: 'claude',
         default_new_session_kind: 'chat',
@@ -566,6 +567,7 @@ describe('preferences service', () => {
         jean_mcp_enabled: false,
         jean_mcp_max_depth: 3,
         jean_mcp_rate_limit_per_minute: 20,
+        agent_browser_enabled: false,
       }
       vi.mocked(invoke).mockResolvedValueOnce(mockPreferences)
 
@@ -675,6 +677,7 @@ describe('preferences service', () => {
         auto_save_context: false,
         auto_pull_base_branch: true,
         confirm_session_close: true,
+        close_confirm_bypass_modifier: 'shift',
         default_execution_mode: 'plan',
         default_backend: 'claude',
         default_new_session_kind: 'chat',
@@ -720,6 +723,7 @@ describe('preferences service', () => {
         jean_mcp_enabled: false,
         jean_mcp_max_depth: 3,
         jean_mcp_rate_limit_per_minute: 20,
+        agent_browser_enabled: false,
       }
       vi.mocked(invoke).mockResolvedValueOnce(prefsWithOldBinding)
 
@@ -808,6 +812,7 @@ describe('preferences service', () => {
         auto_save_context: false,
         auto_pull_base_branch: true,
         confirm_session_close: true,
+        close_confirm_bypass_modifier: 'shift',
         default_execution_mode: 'plan',
         default_backend: 'claude',
         default_new_session_kind: 'chat',
@@ -854,6 +859,7 @@ describe('preferences service', () => {
         jean_mcp_enabled: false,
         jean_mcp_max_depth: 3,
         jean_mcp_rate_limit_per_minute: 20,
+        agent_browser_enabled: false,
       }
       vi.mocked(invoke).mockResolvedValueOnce(prefsWithDeprecatedFastModel)
 
@@ -934,6 +940,7 @@ describe('preferences service', () => {
         auto_save_context: false,
         auto_pull_base_branch: true,
         confirm_session_close: true,
+        close_confirm_bypass_modifier: 'shift',
         default_execution_mode: 'plan',
         default_backend: 'claude',
         default_new_session_kind: 'chat',
@@ -979,6 +986,7 @@ describe('preferences service', () => {
         jean_mcp_enabled: false,
         jean_mcp_max_depth: 3,
         jean_mcp_rate_limit_per_minute: 20,
+        agent_browser_enabled: false,
       }
 
       const { result } = renderHook(() => useSavePreferences(), {
@@ -1061,6 +1069,7 @@ describe('preferences service', () => {
         auto_save_context: false,
         auto_pull_base_branch: true,
         confirm_session_close: true,
+        close_confirm_bypass_modifier: 'shift',
         default_execution_mode: 'plan',
         default_backend: 'claude',
         default_new_session_kind: 'chat',
@@ -1106,6 +1115,7 @@ describe('preferences service', () => {
         jean_mcp_enabled: false,
         jean_mcp_max_depth: 3,
         jean_mcp_rate_limit_per_minute: 20,
+        agent_browser_enabled: false,
       }
 
       const { result } = renderHook(() => useSavePreferences(), {
@@ -1230,6 +1240,7 @@ describe('preferences service', () => {
         auto_save_context: false,
         auto_pull_base_branch: true,
         confirm_session_close: true,
+        close_confirm_bypass_modifier: 'shift',
         default_execution_mode: 'plan',
         default_backend: 'claude',
         default_new_session_kind: 'chat',
@@ -1275,6 +1286,7 @@ describe('preferences service', () => {
         jean_mcp_enabled: false,
         jean_mcp_max_depth: 3,
         jean_mcp_rate_limit_per_minute: 20,
+        agent_browser_enabled: false,
       }
 
       const { result } = renderHook(() => useSavePreferences(), {
@@ -1355,6 +1367,7 @@ describe('preferences service', () => {
         auto_save_context: false,
         auto_pull_base_branch: true,
         confirm_session_close: true,
+        close_confirm_bypass_modifier: 'shift',
         default_execution_mode: 'plan',
         default_backend: 'claude',
         default_new_session_kind: 'chat',
@@ -1400,6 +1413,7 @@ describe('preferences service', () => {
         jean_mcp_enabled: false,
         jean_mcp_max_depth: 3,
         jean_mcp_rate_limit_per_minute: 20,
+        agent_browser_enabled: false,
       }
 
       const { result } = renderHook(() => useSavePreferences(), {

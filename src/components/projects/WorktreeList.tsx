@@ -14,6 +14,7 @@ import { isBaseSession, type Worktree } from '@/types/projects'
 import type { WorktreeSessions } from '@/types/chat'
 import { invoke } from '@/lib/transport'
 import { cn } from '@/lib/utils'
+import { useIsTouchDevice } from '@/hooks/use-touch-device'
 import { chatQueryKeys } from '@/services/chat'
 import { isTauri, useReorderWorktrees } from '@/services/projects'
 import { useProjectsStore } from '@/store/projects-store'
@@ -176,6 +177,9 @@ export function WorktreeList({
   loadSessionCounts = true,
 }: WorktreeListProps) {
   const reorderWorktrees = useReorderWorktrees()
+  // draggable="true" makes mobile browsers lift the row on long-press, which
+  // fights the context menu; touch has no reorder gesture anyway.
+  const isTouchDevice = useIsTouchDevice()
   const worktreeSortMode = useProjectsStore(
     state =>
       state.projectCanvasSettings[projectId]?.worktreeSortMode ?? 'created'
@@ -529,6 +533,7 @@ export function WorktreeList({
             projectPath={projectPath}
             defaultBranch={defaultBranch}
             disabled={
+              isTouchDevice ||
               searchActive ||
               reorderWorktrees.isPending ||
               !canReorderWorktree(worktree)

@@ -23,7 +23,6 @@ import {
   useAllBackendsMcpHealth,
   groupServersByBackend,
   mcpKey,
-  isRequiredMcpServer,
   migrateLegacyMcpKeys,
 } from '@/services/mcp'
 import { useInstalledBackends } from '@/hooks/useInstalledBackends'
@@ -281,11 +280,7 @@ export const McpServersPane: React.FC = () => {
                           enabledServersSet.has(mcpKey(backend, server.name)))
                       }
                       onCheckedChange={() => handleToggle(backend, server.name)}
-                      disabled={
-                        server.disabled ||
-                        backend === 'antigravity' ||
-                        isRequiredMcpServer(server.name)
-                      }
+                      disabled={server.disabled || backend === 'antigravity'}
                     />
                     <Label
                       htmlFor={`mcp-${backend}-${server.name}`}
@@ -319,8 +314,7 @@ export const McpServersPane: React.FC = () => {
                     <span className="text-xs text-muted-foreground">
                       {server.disabled
                         ? 'disabled'
-                        : backend === 'antigravity' ||
-                            isRequiredMcpServer(server.name)
+                        : backend === 'antigravity'
                           ? 'automatic'
                           : server.scope}
                     </span>

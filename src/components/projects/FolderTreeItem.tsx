@@ -115,9 +115,10 @@ export function FolderTreeItem({
   )
 
   return (
-    <FolderContextMenu folder={folder}>
-      <div>
-        {/* Folder Row */}
+    <div>
+      {/* Folder Row — only the row is the context-menu trigger, so nested
+          rows' long-press does not also open this menu on touch. */}
+      <FolderContextMenu folder={folder}>
         <div
           className={cn(
             'group flex cursor-pointer items-center gap-1 px-3 py-1.5 transition-colors duration-150',
@@ -165,10 +166,10 @@ export function FolderTreeItem({
             isExpanded={isExpanded}
           />
         </div>
+      </FolderContextMenu>
 
-        {/* Children (nested projects/folders) */}
-        {isExpanded && children}
-      </div>
-    </FolderContextMenu>
+      {/* Children (nested projects/folders) */}
+      {isExpanded && children}
+    </div>
   )
 }

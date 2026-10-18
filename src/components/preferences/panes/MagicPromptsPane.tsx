@@ -2461,6 +2461,20 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                 </Select>
               </div>
             )}
+            {selectedKey === 'commit_message' && (
+              <div className="flex flex-col gap-2">
+                <label className="flex items-center gap-2 text-xs">
+                  <Switch
+                    checked={preferences?.commit_close_issue ?? false}
+                    onCheckedChange={checked =>
+                      patchPreferences.mutate({ commit_close_issue: checked })
+                    }
+                  />
+                  Add &quot;Closes #issue&quot; when the worktree has a linked
+                  GitHub issue
+                </label>
+              </div>
+            )}
             <Button
               variant="outline"
               size="sm"

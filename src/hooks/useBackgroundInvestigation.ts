@@ -28,7 +28,7 @@ import type { Worktree } from '@/types/projects'
 import { parseServerResourceKey } from '@/lib/server-resource'
 import { LOCAL_SERVER_ID } from '@/types/server-resource'
 
-type InvestigationType =
+export type InvestigationType =
   | 'issue'
   | 'pr'
   | 'security-alert'
@@ -525,7 +525,7 @@ const investigationConfig = {
  * Process a single background investigation: build prompt, then ask the backend
  * to reuse the same active/first session selection and send flow as Jean MCP.
  */
-async function processBackgroundInvestigation(
+export async function processBackgroundInvestigation(
   worktreeId: string,
   type: InvestigationType,
   localPreferences: ReturnType<typeof usePreferences>['data'],
@@ -628,6 +628,7 @@ async function processBackgroundInvestigation(
     aiLanguage: preferences?.ai_language,
     executionMode,
     forceNewSession: override?.forceNewSession,
+    sessionId: override?.sessionId,
     issueContext: override?.issueContext,
   })
 
@@ -639,6 +640,7 @@ async function processBackgroundInvestigation(
     setSelectedModel,
     setSelectedProvider,
     setSelectedBackend,
+    setExecutionMode,
     setExecutingMode,
     clearStreamingContent,
     clearToolCalls,
@@ -667,6 +669,7 @@ async function processBackgroundInvestigation(
   setSelectedModel(sessionId, selectedModel)
   setSelectedProvider(sessionId, provider)
   setSelectedBackend(sessionId, backend)
+  setExecutionMode(sessionId, executionMode)
   setExecutingMode(sessionId, executionMode)
   clearStreamingContent(sessionId)
   clearToolCalls(sessionId)

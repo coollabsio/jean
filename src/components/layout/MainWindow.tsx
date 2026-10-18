@@ -170,6 +170,8 @@ const CloseWorktreeDialog = lazy(() =>
 )
 import { Toaster } from '@/components/ui/sonner'
 import { MobileLeftSidebar } from './MobileLeftSidebar'
+import { SidebarTabRail } from '@/components/projects/SidebarTabRail'
+import { useShowAgents } from '@/components/agents/agents-feature'
 import { BrowserSidePane } from '@/components/browser/BrowserSidePane'
 import { BrowserPanel } from '@/components/browser/BrowserPanel'
 import { useBrowserEvents } from '@/hooks/useBrowserPane'
@@ -342,16 +344,20 @@ export function MainWindow() {
     ? projects?.find(p => p.id === worktree.project_id)
     : null
 
+  const showAgents = useShowAgents()
+
   // Compute window title based on selected project/worktree
   // On mobile, show only the project name to fit the compact title bar.
   const windowTitle = useMemo(() => {
+    // Agents page is not a project page
+    if (showAgents) return 'Agents'
     if (!project || !worktree) return 'Jean'
     if (isMobile) return project.name
     const branchSuffix =
       worktree.branch !== worktree.name ? ` (${worktree.branch})` : ''
 
     return `${project.name} › ${worktree.name}${branchSuffix}`
-  }, [project, worktree, isMobile])
+  }, [project, worktree, isMobile, showAgents])
 
   // Compute polling info - null if no worktree or data not loaded.
   // Must use the worktree's own base_branch (e.g. v4.x), not the project
@@ -586,11 +592,12 @@ export function MainWindow() {
       )}
 
       {/* Title Bar - semi-transparent overlay */}
-      {/* Native desktop: the worktree header already shows project/worktree
-          details, so the title bar shows only the server badge. */}
+      {/* Desktop (native + web): the worktree header already shows
+          project/worktree details, and a window-centered title overlaps the
+          left sidebar. Web keeps the title in the browser tab (document.title). */}
       <TitleBar
         title={windowTitle}
-        hideTitle={isNativeApp() && !isMobile}
+        hideTitle={!isMobile}
         className="absolute top-0 left-0 right-0"
       />
 
@@ -599,6 +606,25 @@ export function MainWindow() {
 
       {/* Main Content Area */}
       <div className="flex flex-1 overflow-hidden">
+        {/* Desktop: always-visible vertical tab rail for the left sidebar */}
+        {!isMobile && isInitialized && (
+          // Border starts below the title bar so it never crosses its buttons
+          // Collapsed: blend with the main window. Expanded: match the sidebar.
+          <div
+            className={cn(
+              'h-full shrink-0 pt-8',
+              leftSidebarVisible
+                ? 'bg-sidebar dark:bg-[#0b0b0b]'
+                : 'bg-background'
+            )}
+          >
+            <SidebarTabRail
+              togglesSidebar
+              className="h-full border-r border-border/40"
+            />
+          </div>
+        )}
+
         {/* Desktop: in-flow left sidebar (shifts layout). Only after UI state init. */}
         {!isMobile && leftSidebarVisible && isInitialized && (
           <SidebarWidthProvider value={leftSidebarSize}>

@@ -27,7 +27,10 @@ export function NewIssuesBadge({
   className,
 }: NewIssuesBadgeProps) {
   const queryClient = useQueryClient()
-  const authData = queryClient.getQueryData<GhAuthStatus>(ghCliQueryKeys.auth())
+  const authData = queryClient.getQueryData<GhAuthStatus>([
+    ...ghCliQueryKeys.auth(),
+    'local',
+  ])
   const isAuthenticated = authData?.authenticated ?? false
 
   const { data: issueResult } = useGitHubIssues(projectPath, 'open', {

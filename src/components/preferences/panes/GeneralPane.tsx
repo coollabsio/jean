@@ -184,7 +184,10 @@ import {
   type OpenInDefault,
   newSessionKindOptions,
   type NewSessionKind,
+  CLOSE_CONFIRM_BYPASS_MODIFIERS,
+  type CloseConfirmBypassModifier,
 } from '@/types/preferences'
+import { closeConfirmBypassLabel } from '@/lib/confirm-bypass'
 import {
   COMMANDCODE_MODEL_OPTIONS,
   CURSOR_MODEL_OPTIONS,
@@ -254,6 +257,14 @@ const InlineField: React.FC<{
     {children}
   </div>
 )
+
+// Module-level is safe: closeConfirmBypassLabel reads `isClientMacOS`, itself a
+// module-level const derived from `navigator`, so it is settled at import time.
+const BYPASS_MODIFIER_LABELS: Record<CloseConfirmBypassModifier, string> = {
+  shift: closeConfirmBypassLabel('shift') ?? 'Shift',
+  alt: closeConfirmBypassLabel('alt') ?? 'Alt',
+  none: 'Off',
+}
 
 type PreferencesPaneScope =
   | 'general'
@@ -1397,7 +1408,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         queryKey: claudeCliQueryKeys.auth(),
       })
       const result = await queryClient.fetchQuery<ClaudeAuthStatus>({
-        queryKey: claudeCliQueryKeys.auth(),
+        queryKey: [...claudeCliQueryKeys.auth(), serverId],
       })
 
       if (result?.authenticated) {
@@ -1416,6 +1427,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     cliStatus?.supports_auth_command,
     openCliLoginModal,
     queryClient,
+    serverId,
   ])
 
   const handleGhLogin = useCallback(async () => {
@@ -1427,7 +1439,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
       // Invalidate cache and refetch to get fresh status
       await queryClient.invalidateQueries({ queryKey: ghCliQueryKeys.auth() })
       const result = await queryClient.fetchQuery<GhAuthStatus>({
-        queryKey: ghCliQueryKeys.auth(),
+        queryKey: [...ghCliQueryKeys.auth(), serverId],
       })
 
       if (result?.authenticated) {
@@ -1440,7 +1452,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
 
     // Not authenticated, open login modal
     openCliLoginModal('gh', ghStatus.path, ['auth', 'login'])
-  }, [ghStatus?.path, openCliLoginModal, queryClient])
+  }, [ghStatus?.path, openCliLoginModal, queryClient, serverId])
 
   const handleCodexLogin = useCallback(async () => {
     if (!codexStatus?.path) return
@@ -1451,7 +1463,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         queryKey: codexCliQueryKeys.auth(),
       })
       const result = await queryClient.fetchQuery<CodexAuthStatus>({
-        queryKey: codexCliQueryKeys.auth(),
+        queryKey: [...codexCliQueryKeys.auth(), serverId],
       })
 
       if (result?.authenticated) {
@@ -1464,7 +1476,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
 
     // Not authenticated, open login modal (device-code auth for terminal/headless)
     openCliLoginModal('codex', codexStatus.path, loginArgsForBackend('codex'))
-  }, [codexStatus?.path, openCliLoginModal, queryClient])
+  }, [codexStatus?.path, openCliLoginModal, queryClient, serverId])
 
   const handleCodeRabbitLogin = useCallback(async () => {
     if (!coderabbitStatus?.path) return
@@ -1498,7 +1510,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         queryKey: opencodeCliQueryKeys.auth(),
       })
       const result = await queryClient.fetchQuery<OpenCodeAuthStatus>({
-        queryKey: opencodeCliQueryKeys.auth(),
+        queryKey: [...opencodeCliQueryKeys.auth(), serverId],
       })
 
       if (result?.authenticated) {
@@ -1510,7 +1522,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     }
 
     openCliLoginModal('opencode', opencodeStatus.path, ['auth', 'login'])
-  }, [opencodeStatus?.path, openCliLoginModal, queryClient])
+  }, [opencodeStatus?.path, openCliLoginModal, queryClient, serverId])
 
   const handleClaudeRelogin = useCallback(() => {
     if (!cliStatus?.path) return
@@ -1547,7 +1559,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         queryKey: cursorCliQueryKeys.auth(),
       })
       const result = await queryClient.fetchQuery<CursorAuthStatus>({
-        queryKey: cursorCliQueryKeys.auth(),
+        queryKey: [...cursorCliQueryKeys.auth(), serverId],
       })
 
       if (result?.authenticated) {
@@ -1559,7 +1571,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     }
 
     openCliLoginModal('cursor', cursorStatus.path, ['login'])
-  }, [cursorStatus?.path, openCliLoginModal, queryClient])
+  }, [cursorStatus?.path, openCliLoginModal, queryClient, serverId])
 
   const handleCursorRelogin = useCallback(() => {
     if (!cursorStatus?.path) return
@@ -1595,7 +1607,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         queryKey: piCliQueryKeys.auth(),
       })
       const result = await queryClient.fetchQuery<PiAuthStatus>({
-        queryKey: piCliQueryKeys.auth(),
+        queryKey: [...piCliQueryKeys.auth(), serverId],
       })
       if (result?.authenticated) {
         toast.success('PI CLI is already authenticated')
@@ -1605,7 +1617,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
       setCheckingPiAuth(false)
     }
     openCliLoginModal('pi', piStatus.path, [])
-  }, [piStatus?.path, openCliLoginModal, queryClient])
+  }, [piStatus?.path, openCliLoginModal, queryClient, serverId])
 
   const handlePiRelogin = useCallback(() => {
     if (!piStatus?.path) return
@@ -1627,7 +1639,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         queryKey: commandcodeCliQueryKeys.auth(),
       })
       const result = await queryClient.fetchQuery<CommandCodeAuthStatus>({
-        queryKey: commandcodeCliQueryKeys.auth(),
+        queryKey: [...commandcodeCliQueryKeys.auth(), serverId],
       })
       if (result?.authenticated) {
         toast.success('Command Code CLI is already authenticated')
@@ -1637,7 +1649,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
       setCheckingCommandCodeAuth(false)
     }
     openCliLoginModal('commandcode', commandcodeStatus.path, ['login'])
-  }, [commandcodeStatus?.path, openCliLoginModal, queryClient])
+  }, [commandcodeStatus?.path, openCliLoginModal, queryClient, serverId])
 
   const handleCommandCodeRelogin = useCallback(() => {
     if (!commandcodeStatus?.path) return
@@ -1663,7 +1675,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         queryKey: grokCliQueryKeys.auth(),
       })
       const result = await queryClient.fetchQuery<GrokAuthStatus>({
-        queryKey: grokCliQueryKeys.auth(),
+        queryKey: [...grokCliQueryKeys.auth(), serverId],
       })
       if (result?.authenticated) {
         toast.success('Grok CLI is already authenticated')
@@ -1673,7 +1685,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
       setCheckingGrokAuth(false)
     }
     openCliLoginModal('grok', grokStatus.path, ['login'])
-  }, [grokStatus?.path, openCliLoginModal, queryClient])
+  }, [grokStatus?.path, openCliLoginModal, queryClient, serverId])
 
   const handleGrokRelogin = useCallback(() => {
     if (!grokStatus?.path) return
@@ -1695,7 +1707,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         queryKey: kimiCliQueryKeys.auth(),
       })
       const result = await queryClient.fetchQuery<KimiAuthStatus>({
-        queryKey: kimiCliQueryKeys.auth(),
+        queryKey: [...kimiCliQueryKeys.auth(), serverId],
       })
       if (result?.authenticated) {
         toast.success('Kimi Code CLI is already authenticated')
@@ -1705,7 +1717,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
       setCheckingKimiAuth(false)
     }
     openCliLoginModal('kimi', kimiStatus.path, ['login'])
-  }, [kimiStatus?.path, openCliLoginModal, queryClient])
+  }, [kimiStatus?.path, openCliLoginModal, queryClient, serverId])
 
   const handleKimiRelogin = useCallback(() => {
     if (!kimiStatus?.path) return
@@ -4497,8 +4509,36 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               </InlineField>
 
               <InlineField
-                label="Close original session on clear context"
-                description="Automatically close the original session when using Clear context with Full access"
+                label="Skip close confirmation"
+                description="Hold this modifier while closing a session or worktree to skip the confirmation dialog."
+              >
+                <Select
+                  value={preferences?.close_confirm_bypass_modifier ?? 'none'}
+                  onValueChange={(value: CloseConfirmBypassModifier) => {
+                    if (preferences) {
+                      patchPreferences.mutate({
+                        close_confirm_bypass_modifier: value,
+                      })
+                    }
+                  }}
+                  disabled={patchPreferences.isPending}
+                >
+                  <SelectTrigger className="w-full sm:w-48">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CLOSE_CONFIRM_BYPASS_MODIFIERS.map(modifier => (
+                      <SelectItem key={modifier} value={modifier}>
+                        {BYPASS_MODIFIER_LABELS[modifier]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </InlineField>
+
+              <InlineField
+                label="Archive original session on clear context"
+                description="Archive the original planning session when a plan is approved with Clear context or in a new worktree. You can restore it from archived sessions."
               >
                 <Switch
                   checked={preferences?.close_original_on_clear_context ?? true}

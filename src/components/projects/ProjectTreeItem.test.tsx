@@ -1,10 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import userEvent from '@testing-library/user-event'
 import { render, screen } from '@/test/test-utils'
-import {
-  ProjectTreeItem,
-  shouldShowProjectStatusBadges,
-} from './ProjectTreeItem'
+import { ProjectTreeItem } from './ProjectTreeItem'
 import type { Project, Worktree } from '@/types/projects'
 import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
@@ -86,16 +83,6 @@ const worktree: Worktree = {
   status: 'ready',
   session_type: 'worktree',
 }
-
-describe('shouldShowProjectStatusBadges', () => {
-  it('hides GitHub status badges when the sidebar is narrow', () => {
-    expect(shouldShowProjectStatusBadges(280, false, true, false)).toBe(false)
-  })
-
-  it('shows GitHub status badges in a wide expanded project row', () => {
-    expect(shouldShowProjectStatusBadges(360, false, true, false)).toBe(true)
-  })
-})
 
 describe('ProjectTreeItem', () => {
   beforeEach(() => {

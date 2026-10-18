@@ -76,7 +76,10 @@ fn build_system_prompt_parts(
                 })
                 .unwrap_or_else(crate::default_global_system_prompt)
         });
-    parts.push(global_prompt);
+    parts.push(crate::apply_agent_browser_preference(
+        global_prompt,
+        prefs.as_ref(),
+    ));
 
     let parallel_prompt = prefs
         .as_ref()
@@ -374,6 +377,14 @@ fn toml_basic_string(value: &str) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string())
 }
 
+fn codex_terminal_context_args(content: &str) -> Vec<String> {
+    // Add Jean's context without replacing Codex's core instructions.
+    vec![
+        "--config".to_string(),
+        format!("developer_instructions={}", toml_basic_string(content)),
+    ]
+}
+
 pub fn prepare_backend_terminal_context(
     app: &tauri::AppHandle,
     session_id: &str,
@@ -389,10 +400,7 @@ pub fn prepare_backend_terminal_context(
         TerminalContextBackend::Codex => {
             let content = std::fs::read_to_string(&context_file)
                 .map_err(|e| format!("Failed to read terminal context file: {e}"))?;
-            vec![
-                "--config".to_string(),
-                format!("base_instructions={}", toml_basic_string(&content)),
-            ]
+            codex_terminal_context_args(&content)
         }
         TerminalContextBackend::Opencode
         | TerminalContextBackend::Cursor
@@ -426,5 +434,17 @@ mod tests {
     fn toml_basic_string_escapes_multiline_context() {
         let encoded = toml_basic_string("hello\n\"quoted\"");
         assert_eq!(encoded, "\"hello\\n\\\"quoted\\\"\"");
+    }
+
+    #[test]
+    fn codex_terminal_context_adds_developer_instructions() {
+        let content = "# Jean context\n\"quoted\" \\ path\n日本語";
+        let args = codex_terminal_context_args(content);
+
+        assert_eq!(args.len(), 2);
+        assert_eq!(args[0], "--config");
+        let config: toml::Value = toml::from_str(&args[1]).unwrap();
+        assert_eq!(config["developer_instructions"].as_str(), Some(content));
+        assert!(config.get("base_instructions").is_none());
     }
 }

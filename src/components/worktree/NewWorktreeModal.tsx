@@ -22,6 +22,7 @@ import {
 } from '@/types/preferences'
 import { DesktopBackendModelPicker } from '@/components/chat/toolbar/DesktopBackendModelPicker'
 import { useInstalledBackends } from '@/hooks/useInstalledBackends'
+import { useContextLinkUsage } from '@/hooks/useContextLinkUsage'
 import { resolveSelectedModelForBackend } from '@/lib/session-defaults'
 import {
   Dialog,
@@ -125,6 +126,12 @@ function NewWorktreeModalContent() {
     enabled: newWorktreeModalOpen,
     serverId: targetServerId,
   })
+  // Existing worktrees/sessions per issue/PR/alert/Linear issue (duplicate guard)
+  const { getMatches: getContextMatches } = useContextLinkUsage({
+    enabled: newWorktreeModalOpen,
+    projectId: data.selectedProjectId,
+    projectPath: data.selectedProject?.path ?? null,
+  })
   const handlers = useNewWorktreeHandlers(
     data,
     {
@@ -144,7 +151,8 @@ function NewWorktreeModalContent() {
       promptTemplate:
         preferences?.magic_prompts?.investigate_issue ??
         DEFAULT_INVESTIGATE_ISSUE_PROMPT,
-    }
+    },
+    getContextMatches
   )
 
   const handlePreviewIssue = (issue: { number: number }) => {
@@ -308,7 +316,7 @@ function NewWorktreeModalContent() {
         }}
       >
         <DialogContent
-          className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none sm:!w-[90vw] sm:!max-w-[90vw] sm:!h-[85vh] sm:!max-h-[85vh] sm:!rounded-lg p-0 flex flex-col overflow-hidden"
+          className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 flex flex-col overflow-hidden"
           onKeyDown={handleKeyDown}
           onEscapeKeyDown={e => {
             console.log('[DIALOG-DEBUG] Parent onEscapeKeyDown', {
@@ -444,6 +452,7 @@ function NewWorktreeModalContent() {
                 searchInputRef={searchInputRef}
                 onGhLogin={triggerGhLogin}
                 isGhInstalled={isGhInstalled}
+                getContextMatches={getContextMatches}
               />
             )}
 
@@ -472,6 +481,7 @@ function NewWorktreeModalContent() {
                 searchInputRef={searchInputRef}
                 onGhLogin={triggerGhLogin}
                 isGhInstalled={isGhInstalled}
+                getContextMatches={getContextMatches}
               />
             )}
 
@@ -513,6 +523,7 @@ function NewWorktreeModalContent() {
                   handlers.handleBulkInvestigateSecurity
                 }
                 isBulkInvestigating={handlers.isBulkInvestigating}
+                getContextMatches={getContextMatches}
               />
             )}
 
@@ -538,6 +549,7 @@ function NewWorktreeModalContent() {
                 creatingFromId={handlers.creatingFromLinearId}
                 isBulkInvestigating={handlers.isBulkInvestigating}
                 searchInputRef={searchInputRef}
+                getContextMatches={getContextMatches}
               />
             )}
 

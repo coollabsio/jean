@@ -10,6 +10,9 @@ import {
   useAppDataDir,
 } from '@/services/projects'
 import { useChatStore } from '@/store/chat-store'
+import { useAgentsEnabledServers } from '@/components/agents/agents-feature'
+import { useAgentsList, type AgentSummary } from '@/services/agents'
+import { AgentIcon } from '@/components/icons/JeanAgentIcon'
 import { useProjectsStore } from '@/store/projects-store'
 import {
   convertFileSrc,
@@ -52,6 +55,12 @@ interface ProjectCommand {
   execute: () => void
 }
 
+/** Agent row label: agents on other servers show the server name. */
+function agentDescription(agent: AgentSummary, multiServer: boolean) {
+  const base = agent.description || 'Open agent'
+  return multiServer ? `${base} · ${agent.serverName}` : base
+}
+
 export function CommandPalette() {
   const native = isNativeApp()
   useRemoteConnections()
@@ -76,6 +85,11 @@ export function CommandPalette() {
   const activeServerId = selectedProject
     ? (selectedProject.serverId ?? LOCAL_SERVER_ID)
     : getActiveConnectionId()
+
+  // Agents (only when the Agents feature is on for a server)
+  const agentServers = useAgentsEnabledServers()
+  const { data: agents = [] } = useAgentsList(agentServers)
+  const multiServerAgents = new Set(agents.map(a => a.serverId)).size > 1
 
   // Create dynamic project commands (sorted by last-accessed, most recent first)
   // Current project is excluded so the previous project is first (quick CMD+K → Enter switching)
@@ -132,6 +146,8 @@ export function CommandPalette() {
             (project.serverName ?? 'local').toLowerCase(),
           ],
           execute: () => {
+            // Leave the Agents page so the project is visible
+            useUIStore.getState().setRailSection('workspace')
             useChatStore.getState().clearActiveWorktree()
             if (isServer) openServerProject(project.id, queryClient)
             else useProjectsStore.getState().selectProject(project.id)
@@ -162,6 +178,18 @@ export function CommandPalette() {
         )
       : projectCommands
 
+    const filteredAgents =
+      agentServers.length === 0
+        ? []
+        : searchLower
+          ? agents.filter(
+              agent =>
+                agent.name.toLowerCase().includes(searchLower) ||
+                agent.serverName.toLowerCase().includes(searchLower) ||
+                'agent'.includes(searchLower)
+            )
+          : agents
+
     // Group static commands
     const staticGroups = staticCommands.reduce(
       (acc, command) => {
@@ -177,8 +205,20 @@ export function CommandPalette() {
       staticGroups,
       projectCommands: filteredProjectCommands.filter(cmd => !cmd.isServer),
       serverCommands: filteredProjectCommands.filter(cmd => cmd.isServer),
+      agents: filteredAgents,
     }
-  }, [commandContext, search, projectCommands])
+  }, [commandContext, search, projectCommands, agents, agentServers.length])
+
+  const handleAgentSelect = useCallback(
+    (agentId: string) => {
+      setCommandPaletteOpen(false)
+      setSearch('')
+      const ui = useUIStore.getState()
+      ui.setRailSection('agents')
+      ui.setSelectedAgentId(agentId)
+    },
+    [setCommandPaletteOpen]
+  )
 
   // Handle command execution
   const handleCommandSelect = useCallback(
@@ -272,6 +312,29 @@ export function CommandPalette() {
         {commandGroups.serverCommands.length > 0 && (
           <CommandGroup heading="Servers">
             {commandGroups.serverCommands.map(renderProjectItem)}
+          </CommandGroup>
+        )}
+
+        {commandGroups.agents.length > 0 && (
+          <CommandGroup heading="Agents">
+            {commandGroups.agents.map(agent => (
+              <CommandItem
+                key={agent.id}
+                value={`agent-${agent.id} ${agent.name} ${agent.serverName}`}
+                onSelect={() => handleAgentSelect(agent.id)}
+                className="items-start"
+              >
+                <span className="flex h-lh shrink-0 items-center leading-snug">
+                  <AgentIcon icon={agent.icon} className="size-4" />
+                </span>
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className="truncate leading-snug">{agent.name}</span>
+                  <span className="truncate text-xs leading-snug text-muted-foreground">
+                    {agentDescription(agent, multiServerAgents)}
+                  </span>
+                </div>
+              </CommandItem>
+            ))}
           </CommandGroup>
         )}
 

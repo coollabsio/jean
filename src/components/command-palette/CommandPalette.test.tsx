@@ -16,6 +16,9 @@ const {
   isNativeApp,
   getActiveConnectionId,
   projectStoreState,
+  setRailSection,
+  setSelectedAgentId,
+  agentState,
 } = vi.hoisted(() => ({
   fetchRemoteServerInfo: vi.fn(async () => ({
     ok: true,
@@ -35,6 +38,19 @@ const {
     projectAccessTimestamps: {} as Record<string, number>,
     selectedProjectId: null as string | null,
   },
+  setRailSection: vi.fn(),
+  setSelectedAgentId: vi.fn(),
+  agentState: {
+    servers: [] as string[],
+    agents: [] as {
+      id: string
+      name: string
+      description: string
+      icon: string
+      serverId: string
+      serverName: string
+    }[],
+  },
 }))
 
 const remoteConnections = [
@@ -53,10 +69,21 @@ const remoteConnections = [
 ]
 
 vi.mock('@/store/ui-store', () => ({
-  useUIStore: () => ({
-    commandPaletteOpen: true,
-    setCommandPaletteOpen,
-  }),
+  useUIStore: Object.assign(
+    () => ({
+      commandPaletteOpen: true,
+      setCommandPaletteOpen,
+    }),
+    { getState: () => ({ setRailSection, setSelectedAgentId }) }
+  ),
+}))
+
+vi.mock('@/components/agents/agents-feature', () => ({
+  useAgentsEnabledServers: () => agentState.servers,
+}))
+
+vi.mock('@/services/agents', () => ({
+  useAgentsList: () => ({ data: agentState.agents }),
 }))
 
 vi.mock('@/hooks/use-command-context', () => ({
@@ -136,8 +163,7 @@ vi.mock('@/store/chat-store', () => ({
 
 vi.mock('@/store/projects-store', () => ({
   useProjectsStore: Object.assign(
-    (selector: (state: unknown) => unknown) =>
-      selector(projectStoreState),
+    (selector: (state: unknown) => unknown) => selector(projectStoreState),
     { getState: () => ({ selectProject }) }
   ),
 }))
@@ -175,6 +201,8 @@ describe('CommandPalette projects', () => {
     isNativeApp.mockReturnValue(true)
     getActiveConnectionId.mockReturnValue('remote-1')
     projectStoreState.selectedProjectId = null
+    agentState.servers = []
+    agentState.agents = []
   })
 
   it('does not offer global server switching', () => {
@@ -218,16 +246,18 @@ describe('CommandPalette projects', () => {
 
     expect(visibleProjectNames()[0]).toContain('Active Tool')
 
-    fireEvent.change(screen.getByPlaceholderText('Type a command or search...'), {
-      target: { value: 'tool' },
-    })
+    fireEvent.change(
+      screen.getByPlaceholderText('Type a command or search...'),
+      {
+        target: { value: 'tool' },
+      }
+    )
 
     expect(
       visibleProjectNames().map(name =>
         name?.replace(/^./, '').replace(/Open on .*/, '')
       )
-    )
-      .toEqual(['Active Tool', 'Build Tool', 'Local Tool'])
+    ).toEqual(['Active Tool', 'Build Tool', 'Local Tool'])
   })
 
   it('treats unscoped projects as local when local is active', () => {
@@ -262,5 +292,65 @@ describe('CommandPalette projects', () => {
 
     expect(openServerProject).toHaveBeenCalledWith('server-1', {})
     expect(selectProject).not.toHaveBeenCalled()
+  })
+
+  it('leaves the Agents page when a project is selected', () => {
+    render(<CommandPalette />)
+
+    fireEvent.click(
+      screen.getByText('Local Tool').closest('[cmdk-item]') as Element
+    )
+
+    expect(setRailSection).toHaveBeenCalledWith('workspace')
+    expect(selectProject).toHaveBeenCalledWith('project-2')
+  })
+})
+
+describe('CommandPalette agents', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    isNativeApp.mockReturnValue(true)
+    getActiveConnectionId.mockReturnValue('local')
+    projectStoreState.selectedProjectId = null
+    agentState.servers = ['local']
+    agentState.agents = [
+      {
+        id: 'jean',
+        name: 'Jean',
+        description: 'The boss',
+        icon: 'jean',
+        serverId: 'local',
+        serverName: 'Local',
+      },
+      {
+        id: 'remote-2:reviewer',
+        name: 'Reviewer',
+        description: 'Reviews PRs',
+        icon: 'blue',
+        serverId: 'remote-2',
+        serverName: 'Build server',
+      },
+    ]
+  })
+
+  it('lists agents and opens the selected agent', () => {
+    render(<CommandPalette />)
+
+    const row = screen.getByText('Reviewer').closest('[cmdk-item]')
+    expect(row?.closest('[cmdk-group]')).toHaveTextContent(/^Agents/)
+    expect(row).toHaveTextContent('Reviews PRs · Build server')
+
+    fireEvent.click(row as Element)
+
+    expect(setRailSection).toHaveBeenCalledWith('agents')
+    expect(setSelectedAgentId).toHaveBeenCalledWith('remote-2:reviewer')
+  })
+
+  it('hides agents when the feature is off', () => {
+    agentState.servers = []
+
+    render(<CommandPalette />)
+
+    expect(screen.queryByText('Reviewer')).not.toBeInTheDocument()
   })
 })

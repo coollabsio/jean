@@ -15,7 +15,6 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
 
 pub const JEAN_MCP_MODE_ENV: &str = "JEAN_MCP_MODE";
@@ -205,6 +204,30 @@ pub struct JeanMcpInstallResult {
 
 pub fn current_mode() -> JeanMcpInstallMode {
     JeanMcpInstallMode::current()
+}
+
+/// Codex threads share the persistent `~/.codex/config.toml` Jean MCP entry,
+/// whose session env is a fixed label. This per-thread config override gives
+/// Jean MCP the real calling session (needed for agent tools and approvals).
+pub fn codex_session_config_override(session_id: &str) -> Option<(String, serde_json::Value)> {
+    let path = dirs::home_dir()?.join(".codex").join("config.toml");
+    codex_session_config_override_at(&path, current_mode().server_name(), session_id)
+}
+
+fn codex_session_config_override_at(
+    path: &Path,
+    server_name: &str,
+    session_id: &str,
+) -> Option<(String, serde_json::Value)> {
+    let doc = std::fs::read_to_string(path)
+        .ok()?
+        .parse::<toml_edit::DocumentMut>()
+        .ok()?;
+    doc.get("mcp_servers")?.get(server_name)?;
+    Some((
+        format!("mcp_servers.{server_name}.env.{JEAN_MCP_SESSION_ENV}"),
+        serde_json::Value::from(session_id),
+    ))
 }
 
 pub fn get_stable_launcher_command() -> String {
@@ -411,8 +434,9 @@ fn install_jsonc_server(
     entry: &JeanMcpEntry,
     server_json: fn(&JeanMcpEntry) -> serde_json::Value,
 ) -> Result<(PathBuf, Option<PathBuf>), String> {
-    with_config_lock(&path, || {
-        let content = read_optional(&path)?;
+    let target = crate::platform::resolve_write_target(&path)?;
+    with_config_lock(&target, || {
+        let content = read_optional(&target)?;
         let value = server_json(entry);
         let updated = if content.trim().is_empty() {
             serde_json::to_string_pretty(&json!({
@@ -425,7 +449,8 @@ fn install_jsonc_server(
             patch_jsonc_object_property(&content, container_key, &entry.server_name, &value)?
         };
         validate_jsonc(&updated, &path)?;
-        let backup = write_atomic_with_backup(&path, &updated)?;
+        let backup =
+            crate::platform::write_file_atomically_with_backup(&target, updated.as_bytes())?;
         Ok((path.clone(), backup))
     })
 }
@@ -454,8 +479,9 @@ fn install_toml_mcp_server(
     label: &str,
     clear_disabled_list: bool,
 ) -> Result<(PathBuf, Option<PathBuf>), String> {
-    with_config_lock(&path, || {
-        let content = read_optional(&path)?;
+    let target = crate::platform::resolve_write_target(&path)?;
+    with_config_lock(&target, || {
+        let content = read_optional(&target)?;
         let mut doc = if content.trim().is_empty() {
             toml_edit::DocumentMut::new()
         } else {
@@ -477,7 +503,8 @@ fn install_toml_mcp_server(
         updated
             .parse::<toml_edit::DocumentMut>()
             .map_err(|e| format!("Generated invalid {label} TOML: {e}"))?;
-        let backup = write_atomic_with_backup(&path, &updated)?;
+        let backup =
+            crate::platform::write_file_atomically_with_backup(&target, updated.as_bytes())?;
         Ok((path.clone(), backup))
     })
 }
@@ -548,6 +575,39 @@ mod antigravity_tests {
             "--jean-mcp-stdio"
         );
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn toml_install_keeps_symlinked_config() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let target = temp.path().join("dotfiles-config.toml");
+        std::fs::write(&target, "model = \"gpt-5\"\n").expect("target");
+        let link = temp.path().join("config.toml");
+        std::os::unix::fs::symlink("dotfiles-config.toml", &link).expect("link");
+        let entry = JeanMcpEntry {
+            mode: JeanMcpInstallMode::Dev,
+            server_name: "jean-dev".to_string(),
+            command: "/usr/bin/jean".to_string(),
+            socket: "/tmp/jean.sock".to_string(),
+            token: "secret".to_string(),
+        };
+
+        let (path, backup) =
+            install_toml_mcp_server(link.clone(), &entry, "Codex", false).expect("install");
+
+        assert_eq!(path, link);
+        assert!(std::fs::symlink_metadata(&link)
+            .expect("link metadata")
+            .file_type()
+            .is_symlink());
+        let content = std::fs::read_to_string(&target).expect("read target");
+        assert!(content.contains("model = \"gpt-5\""));
+        assert!(content.contains("[mcp_servers.jean-dev]"));
+        assert_eq!(
+            std::fs::read_to_string(backup.expect("backup")).expect("backup"),
+            "model = \"gpt-5\"\n"
+        );
+    }
 }
 
 fn with_config_lock<T>(path: &Path, f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
@@ -570,34 +630,6 @@ fn read_optional(path: &Path) -> Result<String, String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
         Err(e) => Err(format!("Failed to read {}: {e}", path.display())),
     }
-}
-
-fn write_atomic_with_backup(path: &Path, content: &str) -> Result<Option<PathBuf>, String> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create {}: {e}", parent.display()))?;
-    }
-
-    let backup = if path.exists() {
-        let ts = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or_default();
-        let backup = path.with_extension(format!(
-            "{}.bak.{ts}",
-            path.extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("config")
-        ));
-        std::fs::copy(path, &backup)
-            .map_err(|e| format!("Failed to create backup {}: {e}", backup.display()))?;
-        Some(backup)
-    } else {
-        None
-    };
-
-    crate::platform::write_file_atomically(path, content.as_bytes())?;
-    Ok(backup)
 }
 
 fn validate_jsonc(content: &str, path: &Path) -> Result<(), String> {
@@ -1085,6 +1117,21 @@ mod tests {
             socket: "/tmp/jean.sock".to_string(),
             token: "tok".to_string(),
         }
+    }
+
+    #[test]
+    fn codex_session_override_targets_existing_jean_entry_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[mcp_servers.jean]\ncommand = \"jean\"\n").unwrap();
+        let (key, value) = codex_session_config_override_at(&path, "jean", "s-1").unwrap();
+        assert_eq!(key, "mcp_servers.jean.env.JEAN_MCP_SESSION");
+        assert_eq!(value, serde_json::json!("s-1"));
+        assert!(codex_session_config_override_at(&path, "jean-dev", "s-1").is_none());
+        assert!(
+            codex_session_config_override_at(&dir.path().join("missing.toml"), "jean", "s-1")
+                .is_none()
+        );
     }
 
     #[test]

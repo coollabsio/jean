@@ -9,8 +9,16 @@
 const dbg = (...args: unknown[]) => console.debug('[ONBOARDING:CLI]', ...args)
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { invoke } from '@/lib/transport'
-import { Download, Loader2, RefreshCw } from '@/components/icons/reicon'
+import { toast } from 'sonner'
+import { invoke, listen } from '@/lib/transport'
+import {
+  ChevronRight,
+  Copy,
+  Download,
+  ExternalLink,
+  Loader2,
+  RefreshCw,
+} from '@/components/icons/reicon'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -22,6 +30,14 @@ import {
 } from '@/components/ui/select'
 import { StandaloneTerminalSurface } from '@/components/chat/StandaloneTerminalSurface'
 import { disposeTerminal, setOnStopped } from '@/lib/terminal-instances'
+import { openExternal } from '@/lib/platform'
+import { copyToClipboard } from '@/lib/clipboard'
+import { cn } from '@/lib/utils'
+import { InlineError } from './InlineError'
+import { detectSignIn, type SignInDetection } from './sign-in-detection'
+
+/** Keep only the tail of terminal output for sign-in detection. */
+const SIGN_IN_BUFFER_LIMIT = 16 * 1024
 
 interface CliVersionInfo {
   version: string
@@ -378,28 +394,6 @@ export function ErrorState({
   )
 }
 
-export interface AuthCheckingStateProps {
-  cliName: string
-}
-
-export function AuthCheckingState({ cliName }: AuthCheckingStateProps) {
-  useEffect(() => {
-    dbg('AuthCheckingState MOUNTED for', cliName)
-    return () => dbg('AuthCheckingState UNMOUNTED for', cliName)
-  }, [cliName])
-
-  return (
-    <div className="space-y-6">
-      <div className="text-center">
-        <p className="font-medium">Checking Authentication</p>
-        <p className="text-sm text-muted-foreground mt-1">
-          Verifying {cliName} login status...
-        </p>
-      </div>
-    </div>
-  )
-}
-
 export interface AuthLoginStateProps {
   cliName: string
   terminalId: string
@@ -498,63 +492,165 @@ export function AuthLoginState({
     }
   }, [terminalId])
 
+  // Watch terminal output for a sign-in URL / device code.
+  // Keyed by terminalId so a new terminal never shows the previous link.
+  const [signInState, setSignInState] = useState<
+    (SignInDetection & { terminalId: string }) | null
+  >(null)
+  const signIn = signInState?.terminalId === terminalId ? signInState : null
+  const outputBufferRef = useRef('')
+
+  useEffect(() => {
+    if (action !== 'login') return
+    outputBufferRef.current = ''
+    const unlisten = listen<{ terminal_id: string; data: string }>(
+      'terminal:output',
+      event => {
+        if (event.payload.terminal_id !== terminalId) return
+        const buffer = (outputBufferRef.current + event.payload.data).slice(
+          -SIGN_IN_BUFFER_LIMIT
+        )
+        outputBufferRef.current = buffer
+        const { url, code } = detectSignIn(buffer)
+        if (!url) return
+        setSignInState(prev =>
+          prev?.terminalId === terminalId &&
+          prev.url === url &&
+          prev.code === code
+            ? prev
+            : { terminalId, url, code }
+        )
+      }
+    )
+    return () => {
+      unlisten
+        .then(fn => fn())
+        .catch(() => {
+          /* noop */
+        })
+    }
+  }, [terminalId, action])
+
+  const [terminalVisible, setTerminalVisible] = useState(true)
+
+  const handleOpenSignIn = useCallback(() => {
+    if (!signIn?.url) return
+    openExternal(signIn.url).catch(error => {
+      toast.error(`Could not open browser: ${error}`)
+    })
+  }, [signIn?.url])
+
+  const handleCopyCode = useCallback(() => {
+    if (!signIn?.code) return
+    copyToClipboard(signIn.code)
+      .then(() => toast.success('Code copied'))
+      .catch(error => toast.error(`Could not copy code: ${error}`))
+  }, [signIn?.code])
+
+  const exitLabel = exitStatus?.signal
+    ? `signal ${exitStatus.signal}`
+    : `exit ${exitStatus?.exitCode ?? 'unknown'}`
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <div className="text-center">
         <p className="font-medium">
-          {cliName} {action === 'install' ? 'Installation' : 'Login'} Required
-        </p>
-        <p className="text-sm text-muted-foreground mt-1">
-          Complete the{' '}
-          {action === 'install' ? 'installation' : 'authentication'}
-          {' process below.'}
+          {action === 'install'
+            ? `Installing ${cliName}`
+            : `Sign in to ${cliName}`}
         </p>
         {action === 'login' && (
-          <p className="text-xs text-muted-foreground mt-2">
-            Click the terminal, then use ↑/↓ and Enter to choose options. The
-            provider list may take a few seconds to appear.
+          <p className="mt-1 text-xs text-muted-foreground">
+            Use ↑/↓ and Enter in the terminal if it asks.
           </p>
         )}
       </div>
 
-      <StandaloneTerminalSurface
-        terminalId={terminalId}
-        command={command}
-        commandArgs={commandArgs}
-        allowPasteInput={action === 'login'}
-        className="h-[min(50dvh,380px)] min-h-[200px] sm:h-[360px]"
-      />
+      {signIn?.url && (
+        <div
+          className="space-y-2 rounded-lg border bg-muted/30 p-3"
+          data-testid="sign-in-card"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <Button onClick={handleOpenSignIn} size="sm">
+              <ExternalLink className="mr-1.5 size-3.5" />
+              Open sign-in page
+            </Button>
+            {signIn.code && (
+              <div className="flex items-center gap-1 rounded-md border bg-background py-0.5 pl-2.5 pr-0.5">
+                <code
+                  className="font-mono text-sm font-semibold tracking-wider select-all"
+                  data-testid="sign-in-code"
+                >
+                  {signIn.code}
+                </code>
+                <Button
+                  onClick={handleCopyCode}
+                  variant="ghost"
+                  size="icon"
+                  className="size-7"
+                  aria-label="Copy code"
+                >
+                  <Copy className="size-3.5" />
+                </Button>
+              </div>
+            )}
+          </div>
+          {!signIn.code && (
+            <p className="text-xs text-muted-foreground">
+              Approve in your browser. Paste any code back here.
+            </p>
+          )}
+        </div>
+      )}
+
+      <div className="space-y-2">
+        <button
+          type="button"
+          onClick={() => setTerminalVisible(value => !value)}
+          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+          aria-expanded={terminalVisible}
+        >
+          <ChevronRight
+            className={cn(
+              'size-3.5 transition-transform',
+              terminalVisible && 'rotate-90'
+            )}
+          />
+          {terminalVisible ? 'Hide terminal' : 'Show terminal'}
+        </button>
+        {/* Keep mounted when hidden: unmounting kills the PTY session. */}
+        <div className={cn(!terminalVisible && 'hidden')}>
+          <StandaloneTerminalSurface
+            terminalId={terminalId}
+            command={command}
+            commandArgs={commandArgs}
+            allowPasteInput={action === 'login'}
+            className={
+              signIn?.url
+                ? 'h-[min(40dvh,280px)] min-h-[180px]'
+                : 'h-[min(50dvh,380px)] min-h-[200px] sm:h-[360px]'
+            }
+          />
+        </div>
+      </div>
 
       {exitStatus && (
-        <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3">
-          <p className="text-sm font-medium text-destructive">
-            {actionLabel} process exited unexpectedly
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {exitStatus.signal
-              ? `Signal: ${exitStatus.signal}`
-              : `Exit code: ${exitStatus.exitCode ?? 'unknown'}`}
-          </p>
-        </div>
+        <InlineError
+          message={
+            action === 'install'
+              ? `Installation did not finish (${exitLabel}).`
+              : `Sign-in did not finish (${exitLabel}).`
+          }
+          onRetry={onRetry}
+        />
       )}
 
       <div className="flex gap-2">
         {exitStatus ? (
-          <>
-            <Button onClick={handleCompleteOnce} className="flex-1" size="lg">
-              Check {actionLabel} Status
-            </Button>
-            {onRetry && (
-              <Button
-                onClick={onRetry}
-                variant="outline"
-                className="flex-1"
-                size="lg"
-              >
-                Retry {actionLabel}
-              </Button>
-            )}
-          </>
+          <Button onClick={handleCompleteOnce} className="flex-1" size="lg">
+            Check {actionLabel} Status
+          </Button>
         ) : (
           <Button onClick={handleCompleteOnce} className="flex-1" size="lg">
             I&apos;ve Completed {actionLabel}
@@ -574,118 +670,3 @@ export function AuthLoginState({
     </div>
   )
 }
-
-export interface CliPathSelectorProps {
-  cliName: string
-  pathFound: boolean
-  pathVersion: string | null
-  pathPath: string | null
-  isLoading: boolean
-  currentSource?: 'path' | 'jean' | null
-  jeanInstalled?: boolean
-  onSelectPath: () => void
-  onSelectJean: () => void
-}
-
-export function CliPathSelector({
-  cliName,
-  pathFound,
-  pathVersion,
-  pathPath,
-  isLoading,
-  currentSource,
-  jeanInstalled,
-  onSelectPath,
-  onSelectJean,
-}: CliPathSelectorProps) {
-  useEffect(() => {
-    dbg(
-      'CliPathSelector MOUNTED:',
-      cliName,
-      'pathFound:',
-      pathFound,
-      'pathVersion:',
-      pathVersion,
-      'pathPath:',
-      pathPath,
-      'isLoading:',
-      isLoading
-    )
-    return () => dbg('CliPathSelector UNMOUNTED:', cliName)
-  }, [cliName, pathFound, pathVersion, pathPath, isLoading])
-
-  return (
-    <div className="space-y-4">
-      <div className="text-center text-sm text-muted-foreground">
-        {pathFound
-          ? `Choose how to run ${cliName}.`
-          : `No system ${cliName} detected — Jean will manage the installation.`}
-      </div>
-
-      <div className="space-y-3">
-        <button
-          type="button"
-          onClick={() => {
-            if (!pathFound) return
-            dbg('CliPathSelector: user selected PATH for', cliName)
-            onSelectPath()
-          }}
-          disabled={isLoading || !pathFound}
-          className="w-full p-4 rounded-lg border-2 border-primary/50 hover:border-primary bg-primary/5 hover:bg-primary/10 transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <div className="flex items-center justify-between">
-            <div className="font-medium">Use system {cliName}</div>
-            {currentSource === 'path' && (
-              <span className="text-xs px-2 py-0.5 rounded bg-primary/20 text-primary">
-                current
-              </span>
-            )}
-          </div>
-          <div className="text-sm text-muted-foreground">
-            {pathFound
-              ? `Version: ${pathVersion || 'unknown'}`
-              : 'Not detected'}
-          </div>
-          {pathFound && pathPath && (
-            <div className="text-xs text-muted-foreground mt-1 break-all">
-              {pathPath}
-            </div>
-          )}
-        </button>
-
-        <button
-          type="button"
-          onClick={() => {
-            dbg('CliPathSelector: user selected JEAN for', cliName)
-            onSelectJean()
-          }}
-          disabled={isLoading}
-          className="w-full p-4 rounded-lg border-2 border-border hover:border-primary/50 hover:bg-muted transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <div className="flex items-center justify-between">
-            <div className="font-medium">
-              {jeanInstalled
-                ? `Use Jean-managed ${cliName}`
-                : 'Install with Jean'}
-            </div>
-            {currentSource === 'jean' && (
-              <span className="text-xs px-2 py-0.5 rounded bg-primary/20 text-primary">
-                current
-              </span>
-            )}
-          </div>
-          <div className="text-sm text-muted-foreground">
-            {jeanInstalled
-              ? 'Continue with the version Jean manages (or pick another version next).'
-              : 'Jean will install and manage the CLI.'}
-          </div>
-        </button>
-      </div>
-    </div>
-  )
-}
-
-/** @deprecated Use CliPathSelector instead */
-export const ClaudePathSelector = (
-  props: Omit<CliPathSelectorProps, 'cliName'>
-) => <CliPathSelector {...props} cliName="Claude CLI" />

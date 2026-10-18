@@ -48,7 +48,27 @@ vi.mock('@/store/chat-store', () => ({
   },
 }))
 
+vi.mock('@/hooks/useInstalledBackends', () => ({
+  useInstalledBackends: () => ({ installedBackends: ['claude'] }),
+}))
+
+vi.mock('@/components/chat/toolbar/DesktopBackendModelPicker', () => ({
+  DesktopBackendModelPicker: ({
+    onBackendModelChange,
+  }: {
+    onBackendModelChange: (backend: string, model: string) => void
+  }) => (
+    <button
+      type="button"
+      onClick={() => onBackendModelChange('codex', 'gpt-6.1-sol')}
+    >
+      pick codex
+    </button>
+  ),
+}))
+
 vi.mock('@/services/projects', () => ({
+  useProjects: () => ({ data: [] }),
   useWorktrees: () => ({
     data: [
       {
@@ -228,6 +248,48 @@ describe('ReviewCommentsDialog', () => {
       expect(detail.prompts[0]).toContain('Please fix this')
       expect(detail.prompts[1]).toContain('Second comment body')
       expect(detail.prompt).toBeUndefined()
+    } finally {
+      window.removeEventListener('magic-command', magicCommand)
+    }
+  })
+
+  it('sends the picked backend and model, and resets it on reopen', async () => {
+    const user = userEvent.setup()
+    const magicCommand = vi.fn()
+    window.addEventListener('magic-command', magicCommand)
+
+    try {
+      const { rerender } = render(<ReviewCommentsDialog />)
+      await screen.findByRole('button', { name: /send to chat/i })
+
+      await user.click(screen.getByRole('button', { name: 'pick codex' }))
+      await user.click(screen.getByRole('button', { name: /send to chat/i }))
+
+      await waitFor(() => {
+        expect(magicCommand).toHaveBeenCalledTimes(1)
+      })
+      expect(
+        (magicCommand.mock.calls[0]?.[0] as CustomEvent).detail.override
+      ).toEqual({ backend: 'codex', model: 'gpt-6.1-sol' })
+
+      mocks.resetReviewCommentsModalOpen(false)
+      rerender(<ReviewCommentsDialog />)
+      mocks.resetReviewCommentsModalOpen()
+      rerender(<ReviewCommentsDialog />)
+
+      await waitFor(() => {
+        expect(
+          screen.getByRole('button', { name: /send to chat/i })
+        ).toBeEnabled()
+      })
+      await user.click(screen.getByRole('button', { name: /send to chat/i }))
+
+      await waitFor(() => {
+        expect(magicCommand).toHaveBeenCalledTimes(2)
+      })
+      expect(
+        (magicCommand.mock.calls[1]?.[0] as CustomEvent).detail.override
+      ).toBeUndefined()
     } finally {
       window.removeEventListener('magic-command', magicCommand)
     }

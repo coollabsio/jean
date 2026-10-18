@@ -11,11 +11,14 @@ export type WorktreeCloseDecision = 'confirm' | 'close'
 
 /**
  * A middle-click on a worktree row confirms before closing unless
- * `confirm_session_close` is explicitly disabled (undefined defaults to on).
+ * `confirm_session_close` is explicitly disabled (undefined defaults to on),
+ * or the caller held the configured bypass modifier (`bypassConfirm`).
  */
 export function decideWorktreeMiddleClose(
-  confirmSessionClose: boolean | undefined
+  confirmSessionClose: boolean | undefined,
+  bypassConfirm = false
 ): WorktreeCloseDecision {
+  if (bypassConfirm) return 'close'
   return confirmSessionClose === false ? 'close' : 'confirm'
 }
 
@@ -35,10 +38,23 @@ export function decideSessionMiddleClose(params: {
   activeSessionCount: number
   sessionIsEmpty: boolean
   confirmSessionClose: boolean | undefined
+  bypassConfirm?: boolean
 }): SessionCloseDecision {
-  const { sessionIsEmpty, confirmSessionClose } = params
+  const { sessionIsEmpty, confirmSessionClose, bypassConfirm = false } = params
+  if (bypassConfirm) return 'delete'
   if (confirmSessionClose !== false && !sessionIsEmpty) {
     return 'confirm'
   }
   return 'delete'
+}
+
+/**
+ * A session is empty when it has no messages and no unsent draft text.
+ * A typed but unsent prompt must not be lost without a confirmation.
+ */
+export function isSessionEmpty(
+  session: { id: string; message_count?: number },
+  inputDrafts: Record<string, string>
+): boolean {
+  return !session.message_count && !inputDrafts[session.id]?.trim()
 }

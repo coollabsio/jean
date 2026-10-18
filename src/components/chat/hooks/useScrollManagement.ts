@@ -83,6 +83,31 @@ function isViewportAtBottom(viewport: HTMLDivElement) {
   )
 }
 
+/**
+ * True when an upward wheel will scroll a nested element (code block, tool
+ * output) instead of the chat viewport. The browser only chains the scroll to
+ * the viewport once the inner element reaches its top.
+ */
+function nestedScrollerConsumesWheelUp(
+  target: EventTarget | null,
+  viewport: HTMLDivElement
+) {
+  let el = target instanceof Element ? target : null
+  while (el && el !== viewport) {
+    if (el instanceof HTMLElement && el.scrollTop > 0) {
+      const { overflowY } = getComputedStyle(el)
+      if (
+        (overflowY === 'auto' || overflowY === 'scroll') &&
+        el.scrollHeight > el.clientHeight
+      ) {
+        return true
+      }
+    }
+    el = el.parentElement
+  }
+  return false
+}
+
 function scrollToTail(viewport: HTMLDivElement) {
   viewport.scrollTop = viewport.scrollHeight
 }
@@ -265,6 +290,15 @@ export function useScrollManagement({
     if (!viewport) return
 
     const handleWheel = (e: WheelEvent) => {
+      // Horizontal swipes (code blocks, tables) carry small vertical jitter,
+      // and a nested scroller can consume an upward wheel. Neither moves the
+      // viewport, so they must not mark the chat as scrolled away; real
+      // viewport scrolls are still detected by handleScroll.
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return
+      if (e.deltaY < 0 && nestedScrollerConsumesWheelUp(e.target, viewport)) {
+        return
+      }
+
       if (e.deltaY < 0) {
         // User scrolling up — cancel auto-scroll and block re-activation for 1s
         if (scrollTimeoutRef.current) {

@@ -246,22 +246,28 @@ Additional systems (no dedicated docs yet):
   on startup and after managed installs or upgrades. A real system `PATH`
   installation always takes precedence.
 
-- **Required agent integrations** - Jean MCP and Agent Browser are mandatory
-  runtime services. Startup always enables the Jean MCP socket, repairs the
-  supported CLI config entries, and installs Agent Browser plus Chrome for
-  Testing when they are missing. These repairs run in the background so the UI
-  and HTTP server do not wait for a first-run browser download. Legacy
-  `jean_mcp_enabled: false` values are migrated to `true`, and Agent Browser is
-  always included in effective MCP server selection. The Settings controls can
-  report status and retry a failed repair, but cannot disable either service.
+- **Agent integrations** - Jean MCP is a mandatory runtime service. Startup
+  always enables the Jean MCP socket and repairs the supported CLI config
+  entries. Legacy `jean_mcp_enabled: false` values are migrated to `true`.
+  Agent Browser is opt-in through `agent_browser_enabled` (default `false`,
+  Settings → MCP Servers → Agent Browser). When it is on, startup installs
+  Agent Browser plus Chrome for Testing when they are missing and repairs its
+  MCP entries. When it is off, startup removes the Jean-written
+  `agent-browser` MCP entries from the CLI configs. Jean identifies its own
+  entries by `AGENT_BROWSER_RESTORE = "jean"` and keeps user-added entries.
+  When it is off, `apply_agent_browser_preference()` also removes every
+  global system prompt line that mentions Agent Browser before Jean sends it
+  to any backend.
+  These repairs run in the background so the UI and HTTP server do not wait
+  for a first-run browser download.
   Agent Browser installation follows the official `npm install agent-browser`
   and `agent-browser install` flow:
   https://github.com/vercel-labs/agent-browser#installation
   Jean uses `agent-browser@latest` for its managed npm prefix. Do not remove
   the explicit tag: npm otherwise keeps the existing caret range, and a range
   such as `^0.37.1` does not accept `0.38.1` for a pre-1.0 package.
-  After startup settles, the client checks the npm registry for the latest
-  Agent Browser version. When a newer version exists, Jean shows a persistent
+  When Agent Browser is on and startup settles, the client checks the npm
+  registry for the latest Agent Browser version. When a newer version exists, Jean shows a persistent
   notification with **Update** and **Later** actions. Jean does not update the
   browser until the user selects **Update**.
 
@@ -295,14 +301,35 @@ Additional systems (no dedicated docs yet):
   terminal session from the session-tab context menu; the original chat session
   remains unchanged.
 
-  **Codex terminal attention.** Full-screen Codex terminals receive a
-  session-scoped `notify` override for the official `agent-turn-complete`
-  event. Jean tails that notification file, persists the Codex thread id and
-  terminal activity timestamp, marks the session waiting, invalidates session
-  caches, and emits `terminal:attention`. Submitting terminal input clears the
-  waiting state. The backing Jean `sessionId` must therefore be carried through
+  **Terminal attention.** Full-screen Codex and Claude terminals report their
+  turn lifecycle into a terminal-scoped signal file
+  (`<app_data>/terminal-notifications/{terminal}.jsonl`, one NDJSON line per
+  event — keyed by terminal, not session, because the tailer thread that deletes
+  the file lives and dies with its terminal). Codex gets a `notify` override for
+  the official `agent-turn-complete`
+  event; Claude gets `UserPromptSubmit` / `Stop` / `StopFailure` / `Notification`
+  (`permission_prompt|worker_permission_prompt` — plain-word matchers are exact,
+  not regex) / `SessionEnd` hooks injected as inline `--settings`
+  JSON, so the user's own `~/.claude/settings.json` is never touched. Jean tails
+  the file, persists the Codex thread id and terminal activity timestamp, flips
+  the session between working, waiting, and idle, invalidates session caches,
+  and emits `terminal:working` / `terminal:attention` / `terminal:idle`.
+  Attention also plays the configured waiting sound and fires an OS banner,
+  matching `chat:done`; `terminal:idle` (the CLI is gone) silently clears both
+  flags. The tailer emits one final `terminal:idle` when its terminal
+  disappears, whatever ended the CLI — Codex has no session-end event to report
+  with, and submitting `/exit` itself counts as terminal input, so without it a
+  quit Codex session stays pinned to "in progress". In Codex terminals, Enter
+  clears the waiting state and marks the session working (Codex has no
+  prompt-submit event). Claude terminals ignore Enter, because Enter also
+  confirms dialogs, menus, and local slash commands that start no turn; there a
+  lone Esc or Ctrl-C settles the session to idle, because `Stop` does not fire
+  on an interrupt. The backing Jean `sessionId` must therefore be carried through
   terminal creation, native-session reconnect, frontend terminal persistence,
-  `start_terminal`, and both native/WebSocket transports.
+  `start_terminal`, and both native/WebSocket transports. Terminals opened in an
+  *external* OS terminal cannot be instrumented and stay idle. Only the CLI
+  Jean itself launches is instrumented; one the user starts *by hand* in that
+  terminal carries no hook and does not report.
 
   **Web-mode persistence.** In web access (Axum HTTP server + WebSocket),
   panel/side/drawer and modal terminals survive a full browser refresh. Three

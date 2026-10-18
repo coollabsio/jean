@@ -26,6 +26,9 @@ const ROUTED_ARGUMENT_KEYS = new Set([
   'parent_id',
   'activeSessionId',
   'active_session_id',
+  // Agents: each Jean server has its own agents
+  'agentId',
+  'agent_id',
 ])
 
 const PATH_ARGUMENT_KEYS = new Set([
@@ -108,6 +111,21 @@ export function resolveServerCommand(
 
   const stripped = strip(args) as Record<string, unknown>
   return serverId ? { serverId, args: stripped } : null
+}
+
+/** Reduce scoped ids to the raw ids their owning server stores and matches. */
+export function stripServerScope(
+  serverId: ServerId,
+  args?: Record<string, unknown>
+): Record<string, unknown> | undefined {
+  if (!args) return args
+  try {
+    const routed = resolveServerCommand(args)
+    return routed?.serverId === serverId ? routed.args : args
+  } catch {
+    // Mixed or ambiguous ownership: send the arguments exactly as they arrived.
+    return args
+  }
 }
 
 function scopedId(serverId: ServerId, resourceId: unknown): unknown {
@@ -271,6 +289,10 @@ export function decorateServerResult<T>(
     ['get_session', 'create_session', 'unarchive_session'].includes(command)
   ) {
     return decorateSession(serverId, value) as T
+  }
+  // These return the next active session id (or null) as a bare string.
+  if (command === 'close_session' || command === 'archive_session') {
+    return scopedId(serverId, value) as T
   }
   if (
     command === 'start_background_investigation' &&

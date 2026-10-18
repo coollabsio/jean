@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { useProjectsStore } from './projects-store'
+import { useUIStore } from './ui-store'
 
 describe('ProjectsStore', () => {
   beforeEach(() => {
@@ -290,5 +291,52 @@ describe('ProjectsStore', () => {
         pinnedLabels: [{ name: 'Bug', color: '#eab308', pinned: true }],
       })
     })
+  })
+})
+
+describe('dialogs close the mobile left sidebar', () => {
+  const desktopWidth = window.innerWidth
+
+  function setViewportWidth(width: number) {
+    Object.defineProperty(window, 'innerWidth', {
+      value: width,
+      configurable: true,
+      writable: true,
+    })
+  }
+
+  beforeEach(() => {
+    useUIStore.setState({ leftSidebarVisible: true })
+  })
+
+  afterEach(() => {
+    setViewportWidth(desktopWidth)
+  })
+
+  it.each([
+    [
+      'project settings',
+      () => useProjectsStore.getState().openProjectSettings('p-1'),
+    ],
+    [
+      'add project dialog',
+      () => useProjectsStore.getState().setAddProjectDialogOpen(true),
+    ],
+    ['server dialog', () => useProjectsStore.getState().setServerDialog({})],
+  ])('closes it on mobile when opening the %s', (_, open) => {
+    setViewportWidth(390)
+
+    open()
+
+    expect(useUIStore.getState().leftSidebarVisible).toBe(false)
+  })
+
+  it('keeps it open on desktop', () => {
+    setViewportWidth(1280)
+
+    useProjectsStore.getState().openProjectSettings('p-1')
+
+    expect(useUIStore.getState().leftSidebarVisible).toBe(true)
+    expect(useProjectsStore.getState().projectSettingsDialogOpen).toBe(true)
   })
 })

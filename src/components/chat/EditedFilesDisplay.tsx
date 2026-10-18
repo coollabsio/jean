@@ -1,5 +1,6 @@
 import { memo, useMemo, useState } from 'react'
 import { diffLines } from 'diff'
+import { useQuery } from '@tanstack/react-query'
 import type { ToolCall, ChatMessage } from '@/types/chat'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -8,7 +9,9 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { ChevronRight } from '@/components/icons/reicon'
-import { getFilename } from '@/lib/path-utils'
+import { getFilename, joinPaths, normalizePath } from '@/lib/path-utils'
+import { checkpointQueryKeys, listAiCheckpoints } from '@/services/checkpoints'
+import type { AiCheckpoint } from '@/types/checkpoints'
 import { cn } from '@/lib/utils'
 import {
   Tooltip,
@@ -16,7 +19,7 @@ import {
   TooltipContent,
 } from '@/components/ui/tooltip'
 import { MessageDiffModal } from './MessageDiffModal'
-import type { EditTool } from './MessageDiffModal'
+import type { CheckpointFileDiff, EditTool } from './MessageDiffModal'
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null
@@ -164,6 +167,44 @@ function codexDiffToPatch(
   return `Index: ${filePath}\n===================================================================\n--- ${filePath}\n+++ ${filePath}\n${diff}`
 }
 
+interface CheckpointFile {
+  /** Absolute path, comparable with tool-call paths. */
+  filePath: string
+  /** Path relative to the checkpoint's worktree. */
+  path: string
+  additions: number
+  deletions: number
+}
+
+/**
+ * Files the turn's git checkpoint changed that no file tool call covers
+ * (e.g. edits made through Bash).
+ */
+export function getUncoveredCheckpointFiles(
+  checkpoint: AiCheckpoint | undefined,
+  toolFilePaths: string[]
+): CheckpointFile[] {
+  if (!checkpoint) return []
+  const covered = new Set(toolFilePaths.map(normalizePath))
+  return checkpoint.filesChanged.flatMap(file => {
+    const filePath = joinPaths(checkpoint.worktreePath, file.path)
+    if (
+      covered.has(normalizePath(filePath)) ||
+      covered.has(normalizePath(file.path))
+    ) {
+      return []
+    }
+    return [
+      {
+        filePath,
+        path: file.path,
+        additions: file.additions,
+        deletions: file.deletions,
+      },
+    ]
+  })
+}
+
 interface EditedFilesDisplayProps {
   toolCalls: ToolCall[] | undefined
   worktreePath?: string
@@ -176,6 +217,15 @@ interface EditedFilesDisplayProps {
    */
   getMessages?: () => ChatMessage[]
   messageIndex?: number
+  /** Remote Jean server that owns the files; undefined for the active backend. */
+  serverId?: string
+  worktreeId?: string
+  /**
+   * User message that started the turn, set only on the display that closes
+   * a finished turn. Adds files the turn changed without a file tool call
+   * (e.g. via Bash), from the turn's checkpoint in `worktreeId`.
+   */
+  turnUserMessageId?: string
 }
 
 export const EditedFilesDisplay = memo(function EditedFilesDisplay({
@@ -183,6 +233,9 @@ export const EditedFilesDisplay = memo(function EditedFilesDisplay({
   worktreePath,
   getMessages,
   messageIndex,
+  serverId,
+  worktreeId,
+  turnUserMessageId,
 }: EditedFilesDisplayProps) {
   const [isExpanded, setIsExpanded] = useState(false)
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null)
@@ -197,7 +250,7 @@ export const EditedFilesDisplay = memo(function EditedFilesDisplay({
     [toolCalls]
   )
 
-  const uniqueFilePaths = useMemo(
+  const toolFilePaths = useMemo(
     () =>
       Array.from(
         new Set([
@@ -206,6 +259,35 @@ export const EditedFilesDisplay = memo(function EditedFilesDisplay({
         ])
       ),
     [editTools, codexChanges]
+  )
+
+  const { data: checkpoint } = useQuery({
+    queryKey: checkpointQueryKeys.worktree(worktreeId ?? ''),
+    queryFn: () => {
+      if (!worktreeId) throw new Error('worktreeId is required')
+      return listAiCheckpoints(worktreeId)
+    },
+    enabled: !!worktreeId && !!turnUserMessageId,
+    staleTime: 10_000,
+    select: checkpoints =>
+      checkpoints.find(c => c.userMessageId === turnUserMessageId),
+    // The backend finalizes the checkpoint when the run ends; poll until then.
+    refetchInterval: query =>
+      query.state.data?.some(
+        c => c.userMessageId === turnUserMessageId && c.status === 'open'
+      )
+        ? 2000
+        : false,
+  })
+
+  const checkpointFiles = useMemo(
+    () => getUncoveredCheckpointFiles(checkpoint, toolFilePaths),
+    [checkpoint, toolFilePaths]
+  )
+
+  const uniqueFilePaths = useMemo(
+    () => [...toolFilePaths, ...checkpointFiles.map(file => file.filePath)],
+    [toolFilePaths, checkpointFiles]
   )
 
   // Stats are only shown in the expanded content, so skip the per-edit
@@ -233,8 +315,11 @@ export const EditedFilesDisplay = memo(function EditedFilesDisplay({
     for (const change of codexChanges) {
       addStats(change.path, computeUnifiedDiffStats(change.diff))
     }
+    for (const file of checkpointFiles) {
+      addStats(file.filePath, file)
+    }
     return map
-  }, [editTools, codexChanges, isExpanded])
+  }, [editTools, codexChanges, checkpointFiles, isExpanded])
 
   const selectedEdits = useMemo(
     () =>
@@ -253,6 +338,12 @@ export const EditedFilesDisplay = memo(function EditedFilesDisplay({
     })
     return patches.length > 0 ? patches.join('\n') : null
   }, [codexChanges, selectedFilePath])
+
+  const selectedCheckpointDiff = useMemo((): CheckpointFileDiff | undefined => {
+    const file = checkpointFiles.find(f => f.filePath === selectedFilePath)
+    if (!file || !checkpoint || !worktreeId) return undefined
+    return { worktreeId, checkpointId: checkpoint.id, path: file.path }
+  }, [checkpointFiles, checkpoint, worktreeId, selectedFilePath])
 
   // All Edit tool calls on selectedFilePath from messages AFTER this one.
   // Computed lazily — only once the user opens a diff — by pulling the
@@ -356,6 +447,8 @@ export const EditedFilesDisplay = memo(function EditedFilesDisplay({
           previousEdits={previousEdits}
           worktreePath={worktreePath}
           patch={selectedCodexPatch}
+          checkpointDiff={selectedCheckpointDiff}
+          serverId={serverId}
         />
       )}
     </Collapsible>

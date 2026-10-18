@@ -15,6 +15,7 @@ import { useKimiCliStatus, useKimiCliAuth } from '@/services/kimi-cli'
 import { useGhCliStatus, useGhCliAuth } from '@/services/gh-cli'
 import { useUIStore } from '@/store/ui-store'
 import { isNativeApp } from '@/lib/environment'
+import { useRemoteConnections } from '@/lib/remote-connections'
 import { Loader2 } from '@/components/icons/reicon'
 
 function handleCompleteSetup() {
@@ -28,6 +29,7 @@ function handleCompleteSetup() {
 export function SetupIncompleteBanner() {
   const onboardingDismissed = useUIStore(state => state.onboardingDismissed)
   const onboardingOpen = useUIStore(state => state.onboardingOpen)
+  const hasRemoteServer = useRemoteConnections().length > 0
 
   const claudeStatus = useClaudeCliStatus()
   const codexStatus = useCodexCliStatus()
@@ -62,6 +64,8 @@ export function SetupIncompleteBanner() {
   if (!isNativeApp()) return null
   // Only show after user has dismissed onboarding, and while it's not currently open
   if (!onboardingDismissed || onboardingOpen) return null
+  // Backends can live on a remote server; local tools are optional then.
+  if (hasRemoteServer) return null
 
   const isLoading =
     claudeStatus.isLoading ||

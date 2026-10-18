@@ -27,14 +27,12 @@ import {
 } from './FileMentionPopover'
 import { queryClient } from '@/lib/query-client'
 import { fileQueryKeys } from '@/services/files'
+import { logger } from '@/lib/logger'
+import { reportBulkInvestigateResults } from '@/components/worktree/bulkInvestigateUtils'
 import {
-  githubQueryKeys,
-  loadAdvisoryContext,
-  loadIssueContext,
-  loadPRContext,
-  loadSecurityContext,
-} from '@/services/github'
-import { linearQueryKeys, loadLinearIssueContext } from '@/services/linear'
+  investigateInNewSession,
+  loadContextMentionItem,
+} from './context-mention-investigation'
 import type { WorktreeFile } from '@/types/chat'
 import { SlashPopover, type SlashPopoverHandle } from './SlashPopover'
 import {
@@ -69,6 +67,7 @@ const TEXT_PASTE_THRESHOLD = 2000
 interface ChatInputProps {
   activeSessionId: string | undefined
   activeWorktreePath: string | undefined
+  activeWorktreeId?: string | null
   activeProjectId?: string | null
   isSending: boolean
   executionMode: ExecutionMode
@@ -96,6 +95,7 @@ interface ChatInputProps {
 export const ChatInput = memo(function ChatInput({
   activeSessionId,
   activeWorktreePath,
+  activeWorktreeId,
   activeProjectId,
   isSending,
   executionMode,
@@ -1080,58 +1080,13 @@ export const ChatInput = memo(function ChatInput({
     async (item: ContextMentionItem, investigate = false) => {
       if (!activeSessionId) return
 
-      const loadContext = async () => {
-        if (item.type === 'issue' && item.issue && activeWorktreePath) {
-          await loadIssueContext(
-            activeSessionId,
-            item.issue.number,
-            activeWorktreePath
-          )
-        } else if (item.type === 'pr' && item.pr && activeWorktreePath) {
-          await loadPRContext(
-            activeSessionId,
-            item.pr.number,
-            activeWorktreePath
-          )
-        } else if (
-          item.type === 'security' &&
-          item.securityAlert &&
-          activeWorktreePath
-        ) {
-          await loadSecurityContext(
-            activeSessionId,
-            item.securityAlert.number,
-            activeWorktreePath
-          )
-        } else if (
-          item.type === 'advisory' &&
-          item.advisory &&
-          activeWorktreePath
-        ) {
-          await loadAdvisoryContext(
-            activeSessionId,
-            item.advisory.ghsaId,
-            activeWorktreePath
-          )
-        } else if (
-          item.type === 'linear' &&
-          item.linearIssue &&
+      const loadContext = () =>
+        loadContextMentionItem(
+          activeSessionId,
+          item,
+          activeWorktreePath,
           activeProjectId
-        ) {
-          await loadLinearIssueContext(
-            activeSessionId,
-            activeProjectId,
-            item.linearIssue.id
-          )
-        } else {
-          throw new Error('Missing context information')
-        }
-
-        // Refresh in the background. Refetching every GitHub/Linear query can
-        // take many seconds, and the investigate send must not wait for it.
-        void queryClient.invalidateQueries({ queryKey: githubQueryKeys.all })
-        void queryClient.invalidateQueries({ queryKey: linearQueryKeys.all })
-      }
+        )
 
       // Replace the `#query` mention with `insertion`. Returns false when the
       // mention is no longer in the input.
@@ -1235,6 +1190,102 @@ export const ChatInput = memo(function ChatInput({
       investigateIssuePrompt,
       investigatePRPrompt,
       onSubmit,
+      resizeTextarea,
+    ]
+  )
+
+  const handleInvestigateInNewSession = useCallback(
+    async (items: ContextMentionItem[], separate: boolean) => {
+      if (!activeWorktreeId || !activeWorktreePath) return
+
+      // Drop the `#query` mention that opened the menu
+      const triggerIndex = hashTriggerIndex
+      if (triggerIndex !== null && inputRef.current && activeSessionId) {
+        const currentValue = valueRef.current
+        const mention = /^#[^\s]*/.exec(currentValue.slice(triggerIndex))
+        if (mention) {
+          const newValue =
+            currentValue.slice(0, triggerIndex) +
+            currentValue.slice(triggerIndex + mention[0].length)
+          inputRef.current.value = newValue
+          valueRef.current = newValue
+          useChatStore.getState().setInputDraft(activeSessionId, newValue)
+          resizeTextarea()
+          const isEmpty = !newValue.trim()
+          setShowHint(isEmpty)
+          onHasValueChangeRef.current?.(!isEmpty)
+        }
+      }
+      setContextMentionOpen(false)
+      setHashTriggerIndex(null)
+      setContextMentionQuery('')
+
+      const investigate = (batch: ContextMentionItem[], openSession: boolean) =>
+        investigateInNewSession({
+          items: batch,
+          worktreeId: activeWorktreeId,
+          worktreePath: activeWorktreePath,
+          projectId: activeProjectId,
+          issueTemplate: investigateIssuePrompt,
+          prTemplate: investigatePRPrompt,
+          openSession,
+        })
+
+      if (!separate) {
+        const toastId = toast.loading(
+          `Starting investigation of ${items.length} items in a new session...`
+        )
+        try {
+          await investigate(items, true)
+          toast.success(
+            `Investigating ${items.length} items in a new session`,
+            { id: toastId }
+          )
+        } catch (error) {
+          toast.error(`Failed to start investigation: ${error}`, {
+            id: toastId,
+          })
+        }
+        return
+      }
+
+      // One background session per item. Sequential, so concurrent
+      // create_session calls do not race on the worktree's session index.
+      const toastId = toast.loading(
+        `Starting ${items.length} investigations in new sessions...`
+      )
+      let succeeded = 0
+      for (const item of items) {
+        try {
+          await investigate([item], false)
+          succeeded += 1
+        } catch (error) {
+          logger.error('Context investigation failed', { item: item.id, error })
+        }
+      }
+      // Starting an investigation selects its session; stay where the user was
+      if (activeSessionId) {
+        useChatStore
+          .getState()
+          .setActiveSession(activeWorktreeId, activeSessionId)
+      }
+      reportBulkInvestigateResults(
+        toastId,
+        succeeded,
+        items.length - succeeded,
+        'item',
+        'items'
+      )
+    },
+    [
+      activeProjectId,
+      activeSessionId,
+      activeWorktreeId,
+      activeWorktreePath,
+      hashTriggerIndex,
+      inputRef,
+      investigateIssuePrompt,
+      investigatePRPrompt,
       resizeTextarea,
     ]
   )
@@ -1402,9 +1453,13 @@ export const ChatInput = memo(function ChatInput({
       <ContextMentionPopover
         projectPath={activeWorktreePath ?? null}
         projectId={activeProjectId ?? null}
+        sessionId={activeSessionId}
         open={contextMentionOpen}
         onOpenChange={setContextMentionOpen}
         onSelectContext={handleContextSelect}
+        onInvestigateInNewSession={
+          activeWorktreeId ? handleInvestigateInNewSession : undefined
+        }
         searchQuery={contextMentionQuery}
         anchorPosition={contextMentionAnchor}
         containerWidth={contextMentionAnchor?.containerWidth}

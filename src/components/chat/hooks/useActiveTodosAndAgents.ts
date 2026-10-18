@@ -188,6 +188,16 @@ export function extractCodexAgents(
   })
 }
 
+/** `claude-opus-5-5` / `claude-haiku-4-5-20251001` → `Opus 5.5` / `Haiku 4.5` */
+export function formatSubagentModel(model: string): string {
+  const match =
+    /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?(?:\[1m\])?$/.exec(model)
+  if (!match) return model
+  const [, family = '', major, minor] = match
+  const name = family.charAt(0).toUpperCase() + family.slice(1)
+  return `${name} ${major}${minor ? `.${minor}` : ''}`
+}
+
 /**
  * Extract Claude subagents from Task/Agent tool calls. The tool call stays in
  * the timeline; this only feeds the Subagents panel above the input.
@@ -227,7 +237,9 @@ export function extractClaudeAgents(
       id: tc.id,
       prompt: truncateAgentPrompt(description),
       status,
-      label: stringField(input, 'subagent_type', 'subagentType') ?? tc.name,
+      label: usage?.model
+        ? formatSubagentModel(usage.model)
+        : (stringField(input, 'subagent_type', 'subagentType') ?? tc.name),
       toolCount: Math.max(calls.length, usage?.tool_uses ?? 0),
       tokens: usage?.total_tokens,
       durationMs: usage?.duration_ms || undefined,

@@ -1,5 +1,6 @@
 import { memo, useCallback, useMemo } from 'react'
-import { Activity, Loader2 } from '@/components/icons/reicon'
+import { Activity } from '@/components/icons/reicon'
+import { WorkingWaveform } from '@/components/ui/status-indicator'
 import { toast } from 'sonner'
 import { Markdown } from '@/components/ui/markdown'
 import type {
@@ -35,6 +36,7 @@ import {
 import { ToolCallsDisplay } from './ToolCallsDisplay'
 import { PlanDisplay } from './PlanFileDisplay'
 import { EditedFilesDisplay } from './EditedFilesDisplay'
+import { parseServerResourceKey } from '@/lib/server-resource'
 import { ThinkingBlock } from './ThinkingBlock'
 import { SteeredPromptGroup } from './SteeredPromptGroup'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
@@ -49,7 +51,7 @@ function WorkingVisualRow() {
         <span className="font-medium shrink-0 flex-none whitespace-nowrap">
           Working…
         </span>
-        <Loader2 className="ml-auto h-3.5 w-3.5 shrink-0 animate-spin text-foreground" />
+        <WorkingWaveform className="ml-auto" />
       </div>
     </div>
   )
@@ -110,6 +112,7 @@ export const StreamingMessage = memo(function StreamingMessage({
   onCopySteeredText,
   hideEditedFiles = false,
 }: StreamingMessageProps) {
+  const ownerServerId = parseServerResourceKey(sessionId)?.serverId
   const displayBlocks = useMemo(
     () => restoreOmittedStreamingPrefix(streamingContent, contentBlocks),
     [streamingContent, contentBlocks]
@@ -494,7 +497,13 @@ export const StreamingMessage = memo(function StreamingMessage({
         )}
 
         {/* Show edited files during streaming */}
-        {!hideEditedFiles && <EditedFilesDisplay toolCalls={toolCalls} />}
+        {!hideEditedFiles && (
+          <EditedFilesDisplay
+            toolCalls={toolCalls}
+            worktreePath={worktreePath}
+            serverId={ownerServerId === 'local' ? undefined : ownerServerId}
+          />
+        )}
       </div>
     </MessageThreadContextMenu>
   )

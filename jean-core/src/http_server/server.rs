@@ -1,6 +1,6 @@
 use axum::{
-    body::Body,
-    extract::{ws::WebSocketUpgrade, Path as AxumPath, Query, State},
+    body::{Body, Bytes},
+    extract::{ws::WebSocketUpgrade, DefaultBodyLimit, Path as AxumPath, Query, State},
     http::{header, HeaderMap, HeaderValue, StatusCode, Uri},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -247,6 +247,10 @@ pub async fn start_server(
         .route("/ws", get(ws_handler))
         .route("/api/auth", get(auth_handler))
         .route("/api/commit-jobs", post(start_commit_job_handler))
+        .route(
+            "/api/pasted-files",
+            post(save_pasted_file_handler).layer(DefaultBodyLimit::max(crate::chat::MAX_FILE_SIZE)),
+        )
         .route("/api/init", get(init_handler))
         .route("/api/version", get(version_handler))
         .route("/api/files/{*filepath}", get(file_handler))
@@ -456,6 +460,32 @@ async fn start_commit_job_handler(
     {
         Ok(result) => (StatusCode::ACCEPTED, Json(result)).into_response(),
         Err(error) => (StatusCode::CONFLICT, error).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct SavePastedFileQuery {
+    token: Option<String>,
+    filename: String,
+}
+
+/// Save a raw file upload. Large attachments use this route instead of the
+/// WebSocket, because one base64 WS message over 16 MiB closes the socket.
+async fn save_pasted_file_handler(
+    headers: HeaderMap,
+    Query(params): Query<SavePastedFileQuery>,
+    State(state): State<AppState>,
+    body: Bytes,
+) -> Response {
+    if state.token_required
+        && !request_is_authorized(params.token.as_deref(), &headers, &state.token)
+    {
+        return (StatusCode::UNAUTHORIZED, "Invalid token").into_response();
+    }
+
+    match crate::chat::save_pasted_file_bytes(&state.app, &body, &params.filename) {
+        Ok(result) => Json(result).into_response(),
+        Err(error) => (StatusCode::BAD_REQUEST, error).into_response(),
     }
 }
 

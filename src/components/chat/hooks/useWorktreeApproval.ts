@@ -13,6 +13,7 @@ import {
   chatQueryKeys,
 } from '@/services/chat'
 import { invoke, listen } from '@/lib/transport'
+import { archiveOriginalPlanSession } from './plan-approval-state'
 import type {
   EffortLevel,
   Session,
@@ -515,36 +516,14 @@ export function useWorktreeApproval({
         backend,
       })
 
-      // Optionally close the original session
+      // Optionally archive the original session (keeps history restorable)
       if (preferences?.close_original_on_clear_context) {
-        const command =
-          preferences.removal_behavior === 'archive'
-            ? 'archive_session'
-            : 'close_session'
-
-        queryClient.setQueryData<WorktreeSessions>(
-          chatQueryKeys.sessions(worktreeId),
-          old => {
-            if (!old) return old
-            return {
-              ...old,
-              sessions: old.sessions.filter(s => s.id !== sessionId),
-            }
-          }
-        )
-
-        invoke(command, { worktreeId, worktreePath, sessionId })
-          .then(() =>
-            queryClient.invalidateQueries({
-              queryKey: chatQueryKeys.sessions(worktreeId),
-            })
-          )
-          .catch(err =>
-            console.error(
-              '[useWorktreeApproval] Failed to close original session:',
-              err
-            )
-          )
+        archiveOriginalPlanSession({
+          queryClient,
+          worktreeId,
+          worktreePath,
+          sessionId,
+        })
       }
     },
     [worktreeId, worktreePath, projectId, queryClient, preferences, sendMessage]

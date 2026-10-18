@@ -531,6 +531,41 @@ describe('computeSessionCardData', () => {
     })
   })
 
+  it('shows a code review tab as loading while its review job is running', () => {
+    const session = createBaseSession({
+      name: 'Code Review · Codex · gpt-5.6-sol',
+      is_reviewing: true,
+      review_results: {
+        reviews: [
+          { backend: 'codex', model: 'gpt-5.6-sol', status: 'running' },
+        ],
+      },
+    })
+
+    const card = computeSessionCardData(
+      session,
+      createBaseStoreState({ reviewingSessions: { [session.id]: true } })
+    )
+
+    expect(card.status).toBe('reviewing')
+  })
+
+  it('shows a code review tab as review ready when its review job completed', () => {
+    const session = createBaseSession({
+      name: 'Code Review · Codex · gpt-5.6-sol',
+      is_reviewing: false,
+      review_results: {
+        reviews: [
+          { backend: 'codex', model: 'gpt-5.6-sol', status: 'completed' },
+        ],
+      },
+    })
+
+    const card = computeSessionCardData(session, createBaseStoreState())
+
+    expect(card.status).toBe('review')
+  })
+
   it('ignores stale Zustand waiting flag when remote run completed normally', () => {
     const session: Session = {
       ...createBaseSession(),

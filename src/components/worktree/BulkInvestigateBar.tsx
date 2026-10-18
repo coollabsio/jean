@@ -1,10 +1,16 @@
 import { Loader2, Wand2 } from '@/components/icons/reicon'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 
 export interface BulkInvestigateBarProps {
   count: number
   isLoading?: boolean
   noun?: string
+  /** Replaces the default "Investigate N items in background" label */
+  actionLabel?: string
+  /** Optional second action shown before the main button */
+  secondaryActionLabel?: string
+  onSecondaryAction?: () => void
   onClear: () => void
   onInvestigate: () => void
 }
@@ -14,6 +20,9 @@ export function BulkInvestigateBar({
   count,
   isLoading = false,
   noun = 'items',
+  actionLabel,
+  secondaryActionLabel,
+  onSecondaryAction,
   onClear,
   onInvestigate,
 }: BulkInvestigateBarProps) {
@@ -32,9 +41,23 @@ export function BulkInvestigateBar({
           Clear
         </button>
       </div>
+      {secondaryActionLabel && onSecondaryAction && (
+        <Button
+          size="sm"
+          variant="outline"
+          className="w-full sm:w-auto sm:ml-auto"
+          disabled={isLoading}
+          onClick={onSecondaryAction}
+        >
+          {secondaryActionLabel}
+        </Button>
+      )}
       <Button
         size="sm"
-        className="w-full sm:w-auto sm:ml-auto"
+        className={cn(
+          'w-full sm:w-auto',
+          !(secondaryActionLabel && onSecondaryAction) && 'sm:ml-auto'
+        )}
         disabled={isLoading}
         onClick={onInvestigate}
       >
@@ -43,7 +66,9 @@ export function BulkInvestigateBar({
         ) : (
           <Wand2 className="h-4 w-4 text-current" />
         )}
-        {isLoading ? 'Starting…' : `Investigate ${count} ${noun} in background`}
+        {isLoading
+          ? 'Starting…'
+          : (actionLabel ?? `Investigate ${count} ${noun} in background`)}
       </Button>
     </div>
   )

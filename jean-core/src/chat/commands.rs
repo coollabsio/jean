@@ -64,14 +64,7 @@ const CODEX_DEFAULT_NOT_PLAN_MODE_PROMPT: &str = "\
 
 - Do NOT create git worktrees manually (`git worktree add`, Superpowers `using-git-worktrees`, or similar) unless the user explicitly asks for a new worktree.
 - If a new worktree is explicitly required, use Jean's worktree features through Jean MCP/tools, not raw git worktree commands.
-- If already in a Jean worktree or base/main workspace, continue in the current workspace.
-
-## Jean Run Environment
-
-- When you need to test a running app (UI, HTTP, browser, smoke, e2e), call Jean MCP `get_run_environments` first (pass this worktreeId when known).
-- If an environment is running, test against its `url`, port, and startup command. Do not guess localhost ports or start a second dev server when Jean already has one.
-- If nothing is running and verification needs a live server, say so and use the returned/startup command rather than inventing a different command or port.
-- In how-to-test notes, include the exact URL/port you used.";
+- If already in a Jean worktree or base/main workspace, continue in the current workspace.";
 const CODEX_DEFAULT_PLAN_MODE_PROMPT: &str = "\
 ## Plan Mode
 
@@ -431,14 +424,35 @@ fn default_execution_mode_for_worktree(
     }
 }
 
+/// Workflow policy for a new session: worktree/preference default, or Plan when
+/// the backend does not support that default.
+pub(crate) fn default_execution_policy(
+    app: &AppHandle,
+    worktree_id: &str,
+    backend: &Backend,
+    preferences_default: Option<String>,
+) -> String {
+    let policy = default_execution_mode_for_worktree(app, worktree_id, preferences_default)
+        .unwrap_or_else(|| "yolo".to_string());
+    if validate_execution_policy(&policy, backend).is_ok() {
+        policy
+    } else {
+        "plan".to_string()
+    }
+}
+
 /// Global system prompt for a session: server projects use the server prompt instead.
 fn resolve_session_global_system_prompt(
     app: &AppHandle,
     worktree_id: &str,
-    preferences_prompt: Option<&str>,
+    preferences: Option<&crate::AppPreferences>,
 ) -> String {
-    crate::projects::server_system_prompt(app, worktree_id)
-        .unwrap_or_else(|| resolve_global_system_prompt(preferences_prompt))
+    let prompt = crate::projects::server_system_prompt(app, worktree_id).unwrap_or_else(|| {
+        resolve_global_system_prompt(
+            preferences.and_then(|prefs| prefs.magic_prompts.global_system_prompt.as_deref()),
+        )
+    });
+    crate::apply_agent_browser_preference(prompt, preferences)
 }
 
 /// Resolve the model used for a send.
@@ -510,9 +524,7 @@ fn build_kimi_system_prompt(
     parts.push(resolve_session_global_system_prompt(
         app,
         worktree_id,
-        preferences
-            .as_ref()
-            .and_then(|prefs| prefs.magic_prompts.global_system_prompt.as_deref()),
+        preferences.as_ref(),
     ));
     if let Some(prompt) = parallel_prompt
         .map(str::trim)
@@ -1127,19 +1139,14 @@ pub async fn create_session(
             sessions.sessions.len() as u32,
             backend_enum.clone(),
         );
-        let default_policy = default_execution_mode_for_worktree(
+        let policy = default_execution_policy(
             &app,
             &worktree_id,
+            &backend_enum,
             preferences
                 .as_ref()
                 .map(|prefs| prefs.default_execution_mode.clone()),
-        )
-        .unwrap_or_else(|| "yolo".to_string());
-        let policy = if validate_execution_policy(&default_policy, &backend_enum).is_ok() {
-            default_policy
-        } else {
-            "plan".to_string()
-        };
+        );
         session.set_execution_policy(Some(policy));
         if session.selected_permission_mode.is_none() {
             session.selected_permission_mode = Some("yolo".to_string());
@@ -3553,6 +3560,14 @@ pub async fn send_chat_message(
 
     // Use passed parameter for parallel execution prompt (None = disabled)
     let parallel_execution_prompt = parallel_execution_prompt.filter(|p| !p.trim().is_empty());
+    // Agent sessions: append the agent prompt (role, tools, memory). Every backend receives this prompt.
+    let parallel_execution_prompt = match crate::agents::system_prompt_for(&app, &worktree_id) {
+        Some(agent_prompt) => Some(match parallel_execution_prompt {
+            Some(prompt) => format!("{prompt}\n\n{agent_prompt}"),
+            None => agent_prompt,
+        }),
+        None => parallel_execution_prompt,
+    };
 
     // Use passed parameter for Chrome browser integration (default false - beta)
     let chrome = chrome_enabled.unwrap_or(false);
@@ -3970,22 +3985,26 @@ pub async fn send_chat_message(
                     }
 
                     // Global system prompt from preferences (with default fallback)
-                    let preferences_global_prompt = crate::get_preferences_path(&thread_app)
+                    let preferences = crate::get_preferences_path(&thread_app)
                         .ok()
                         .and_then(|prefs_path| std::fs::read_to_string(&prefs_path).ok())
                         .and_then(|contents| {
                             serde_json::from_str::<crate::AppPreferences>(&contents).ok()
-                        })
-                        .and_then(|prefs| prefs.magic_prompts.global_system_prompt);
-                    system_prompt_parts.push(
+                        });
+                    let global_prompt =
                         crate::projects::server_system_prompt(&thread_app, &thread_worktree_id)
                             .unwrap_or_else(|| {
                                 resolve_codex_global_system_prompt(
-                                    preferences_global_prompt.as_deref(),
+                                    preferences.as_ref().and_then(|prefs| {
+                                        prefs.magic_prompts.global_system_prompt.as_deref()
+                                    }),
                                     thread_execution_mode.as_deref(),
                                 )
-                            }),
-                    );
+                            });
+                    system_prompt_parts.push(crate::apply_agent_browser_preference(
+                        global_prompt,
+                        preferences.as_ref(),
+                    ));
 
                     // Parallel execution prompt
                     if let Some(prompt) = &thread_parallel_prompt {
@@ -4264,8 +4283,8 @@ pub async fn send_chat_message(
                     }
                 };
 
-                // Read the instructions file content to pass inline via baseInstructions
-                let codex_base_instructions_content: Option<String> = codex_instructions_file
+                // Read the instructions file content to pass inline via developerInstructions
+                let codex_developer_instructions_content: Option<String> = codex_instructions_file
                     .and_then(|path| {
                         std::fs::read_to_string(&path)
                             .map_err(|e| {
@@ -4289,7 +4308,7 @@ pub async fn send_chat_message(
                     thread_codex_search,
                     &codex_add_dirs,
                     &thread_message,
-                    codex_base_instructions_content.as_deref(),
+                    codex_developer_instructions_content.as_deref(),
                     thread_codex_provider.as_ref(),
                 ) {
                     Ok(response) => Ok((
@@ -4373,9 +4392,7 @@ pub async fn send_chat_message(
                     system_prompt_parts.push(resolve_session_global_system_prompt(
                         &thread_app,
                         &thread_worktree_id,
-                        preferences
-                            .as_ref()
-                            .and_then(|prefs| prefs.magic_prompts.global_system_prompt.as_deref()),
+                        preferences.as_ref(),
                     ));
 
                     // Parallel execution prompt
@@ -4707,9 +4724,7 @@ pub async fn send_chat_message(
                     parts.push(resolve_session_global_system_prompt(
                         &thread_app,
                         &thread_worktree_id,
-                        preferences
-                            .as_ref()
-                            .and_then(|prefs| prefs.magic_prompts.global_system_prompt.as_deref()),
+                        preferences.as_ref(),
                     ));
 
                     if let Some(prompt) = &thread_parallel_prompt {
@@ -4876,9 +4891,7 @@ pub async fn send_chat_message(
                     parts.push(resolve_session_global_system_prompt(
                         &thread_app,
                         &thread_worktree_id,
-                        preferences
-                            .as_ref()
-                            .and_then(|prefs| prefs.magic_prompts.global_system_prompt.as_deref()),
+                        preferences.as_ref(),
                     ));
 
                     if let Some(prompt) = &thread_parallel_prompt {
@@ -5010,9 +5023,7 @@ pub async fn send_chat_message(
                     parts.push(resolve_session_global_system_prompt(
                         &thread_app,
                         &thread_worktree_id,
-                        preferences
-                            .as_ref()
-                            .and_then(|prefs| prefs.magic_prompts.global_system_prompt.as_deref()),
+                        preferences.as_ref(),
                     ));
 
                     if let Some(prompt) = &thread_parallel_prompt {
@@ -6724,7 +6735,7 @@ use super::types::{ReadTextResponse, SaveTextResponse};
 
 /// Maximum text file size in bytes (10MB)
 const MAX_TEXT_SIZE: usize = 10 * 1024 * 1024;
-const MAX_FILE_SIZE: usize = 50 * 1024 * 1024;
+pub const MAX_FILE_SIZE: usize = 50 * 1024 * 1024;
 
 /// Save an arbitrary uploaded file and return a path that agents can read.
 pub async fn save_pasted_file(
@@ -6735,6 +6746,16 @@ pub async fn save_pasted_file(
     let bytes = STANDARD
         .decode(&data)
         .map_err(|error| format!("Invalid base64 data: {error}"))?;
+    save_pasted_file_bytes(&app, &bytes, &filename)
+}
+
+/// Save raw uploaded file bytes. Web access uploads use this through
+/// `POST /api/pasted-files` so large files skip base64 and the WebSocket.
+pub fn save_pasted_file_bytes(
+    app: &AppHandle,
+    bytes: &[u8],
+    filename: &str,
+) -> Result<SaveTextResponse, String> {
     if bytes.len() > MAX_FILE_SIZE {
         return Err(format!(
             "File too large: {} bytes. Maximum size: {MAX_FILE_SIZE} bytes (50MB)",
@@ -6742,7 +6763,7 @@ pub async fn save_pasted_file(
         ));
     }
 
-    let original = std::path::Path::new(&filename)
+    let original = std::path::Path::new(filename)
         .file_name()
         .and_then(|name| name.to_str())
         .filter(|name| !name.is_empty())
@@ -6759,8 +6780,8 @@ pub async fn save_pasted_file(
         .take(160)
         .collect();
     let stored_name = format!("{}-{safe_name}", &Uuid::new_v4().to_string()[..8]);
-    let file_path = get_pastes_dir(&app)?.join(&stored_name);
-    crate::platform::write_file_atomically(&file_path, &bytes)?;
+    let file_path = get_pastes_dir(app)?.join(&stored_name);
+    crate::platform::write_file_atomically(&file_path, bytes)?;
 
     Ok(SaveTextResponse {
         id: Uuid::new_v4().to_string(),
@@ -7050,7 +7071,13 @@ pub async fn read_file_content(path: String) -> Result<String, String> {
     }
 
     // Read the file content
-    std::fs::read_to_string(&file_path).map_err(|e| format!("Failed to read file: {e}"))
+    std::fs::read_to_string(&file_path).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::InvalidData {
+            "Binary file cannot be previewed".to_string()
+        } else {
+            format!("Failed to read file: {e}")
+        }
+    })
 }
 
 /// Binary file payload for UI preview (images outside project asset scope, etc.).
@@ -7076,11 +7103,15 @@ fn mime_type_from_path(path: &std::path::Path) -> &'static str {
         Some("bmp") => "image/bmp",
         Some("ico") => "image/x-icon",
         Some("avif") => "image/avif",
+        Some("mp4" | "m4v") => "video/mp4",
+        Some("webm") => "video/webm",
+        Some("mov") => "video/quicktime",
+        Some("ogv") => "video/ogg",
         _ => "application/octet-stream",
     }
 }
 
-/// Read a file as base64 for binary preview (e.g. images under /tmp).
+/// Read a file as base64 for binary preview (e.g. images or videos under /tmp).
 ///
 /// Same size limit as `read_file_content`. Used when asset:// and
 /// /api/project-files cannot serve paths outside project roots.
@@ -11382,9 +11413,6 @@ mod tests {
         assert!(build_prompt.contains("Jean Worktree Policy"));
         assert!(build_prompt.contains("Do NOT create git worktrees manually"));
         assert!(build_prompt.contains("Jean MCP/tools"));
-        assert!(build_prompt.contains("Jean Run Environment"));
-        assert!(build_prompt.contains("get_run_environments"));
-        assert!(build_prompt.contains("test against its `url`, port, and startup command"));
         assert!(build_prompt.contains("VERY IMPORTANT: Keep Code Simple"));
         assert!(build_prompt.contains("Always implement the simplest maintainable solution"));
         assert!(build_prompt.contains("Clickable References"));
@@ -11395,8 +11423,6 @@ mod tests {
         assert!(!yolo_prompt.contains("<proposed_plan>"));
         assert!(!yolo_prompt.contains("CodexPlan"));
         assert!(yolo_prompt.contains("## Not Plan Mode"));
-        assert!(yolo_prompt.contains("Jean Run Environment"));
-        assert!(yolo_prompt.contains("get_run_environments"));
         assert!(yolo_prompt.contains("VERY IMPORTANT: Keep Code Simple"));
         assert!(yolo_prompt.contains("Clickable References"));
     }
@@ -11415,6 +11441,19 @@ mod tests {
             resolve_global_system_prompt(Some("  Custom global rule.  ")),
             "Custom global rule."
         );
+    }
+
+    #[test]
+    fn codex_default_prompt_has_run_environment_rules_once_in_every_mode() {
+        for mode in ["plan", "build", "yolo"] {
+            let prompt = resolve_codex_global_system_prompt(None, Some(mode));
+            assert_eq!(
+                prompt.matches("## Jean Run Environment").count(),
+                1,
+                "{mode}"
+            );
+            assert!(prompt.contains("start_run_environment"), "{mode}");
+        }
     }
 
     #[test]

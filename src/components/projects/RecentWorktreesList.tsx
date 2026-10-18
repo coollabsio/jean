@@ -247,7 +247,10 @@ export function RecentWorktreesList({
           },
         })
       )
-      if (isMobile) useUIStore.getState().setLeftSidebarVisible(false)
+      const ui = useUIStore.getState()
+      // Leave the Agents page so the project canvas can open the session
+      ui.setRailSection('workspace')
+      if (isMobile) ui.setLeftSidebarVisible(false)
     },
     [isMobile, queryClient, selectProject, selectWorktree]
   )
@@ -288,7 +291,7 @@ export function RecentWorktreesList({
       window.removeEventListener('open-recent-session-by-index', onOpenByIndex)
   }, [displayedRows, handleOpen])
 
-  if (query.isPending) {
+  if (query.isPending && projects.length > 0) {
     return (
       <div
         role="status"
@@ -331,7 +334,7 @@ export function RecentWorktreesList({
     (query.data?.failedWorktreeIds.length ?? 0)
   const hiddenCount = Math.max(0, (query.data?.total ?? rows.length) - limit)
   const footerButtonClass =
-    'flex h-8 items-center justify-center gap-1 rounded-md px-2 text-xs text-muted-foreground hover:bg-muted/50 hover:text-foreground'
+    'flex h-5 items-center justify-center gap-1 rounded-md px-2 text-xs text-muted-foreground hover:bg-muted/50 hover:text-foreground'
   const footerActions = (
     <>
       {hiddenCount > 0 && !snoozedBoundaryLoaded && (
@@ -375,9 +378,14 @@ export function RecentWorktreesList({
       data-testid="recent-worktrees-list"
     >
       <div className="min-h-0 flex-1 overflow-y-auto">
+        {displayedRows.length === 0 && (
+          <div className="px-3 py-6 text-center text-xs text-muted-foreground">
+            No recent sessions
+          </div>
+        )}
         <ul
           aria-label="Recent sessions"
-          className="@container flex flex-col gap-2 px-2 py-2"
+          className={`@container flex flex-col gap-2 px-2 pt-2 ${footerActionsContainer ? 'pb-8' : 'pb-2'}`}
         >
           {displayedRows.map((row, index) => {
             const isCurrent = row.session.id === selectedSessionId

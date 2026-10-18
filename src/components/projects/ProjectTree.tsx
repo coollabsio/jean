@@ -36,6 +36,7 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { cn } from '@/lib/utils'
+import { useIsTouchDevice } from '@/hooks/use-touch-device'
 import {
   isProjectTreeDragData,
   isProjectTreeDropTargetData,
@@ -47,6 +48,11 @@ import { DropIndicator } from '@/components/drag-and-drop/DropIndicator'
 import { groupProjectsByServer } from './project-server-sections'
 import { RemoteServerRefreshButton } from '@/components/remote/RemoteServerRefreshButton'
 import { haveSameProjectServer } from './project-tree-drag'
+import {
+  SECTION_HEADER_CLASS,
+  SECTION_LABEL_CLASS,
+  SECTION_TOGGLE_CLASS,
+} from './section-header'
 
 const MAX_NESTING_DEPTH = 3
 
@@ -163,10 +169,13 @@ function SortableItem({
   searchQuery,
 }: SortableItemProps) {
   const elementRef = useRef<HTMLDivElement | null>(null)
+  // draggable="true" makes mobile browsers lift the row on long-press, which
+  // fights the context menu; touch has no reorder gesture anyway.
+  const isTouchDevice = useIsTouchDevice()
 
   useEffect(() => {
     const element = elementRef.current
-    if (!element || item.offline || searchQuery) return
+    if (!element || item.offline || searchQuery || isTouchDevice) return
 
     return combine(
       draggable({
@@ -220,7 +229,7 @@ function SortableItem({
         },
       })
     )
-  }, [allProjects, item, searchQuery])
+  }, [allProjects, item, searchQuery, isTouchDevice])
 
   const style: React.CSSProperties = {
     opacity: activeId === item.id ? 0.35 : 1,
@@ -769,13 +778,11 @@ export function ProjectTree({
       {rootFolders.length > 0 && (
         <ContextMenu>
           <ContextMenuTrigger asChild>
-            <div className="group/header flex items-center justify-between pl-3 pr-2 pb-1 pt-2">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/50">
-                Folders
-              </span>
+            <div className={`group/header ${SECTION_HEADER_CLASS}`}>
+              <span className={SECTION_LABEL_CLASS}>Folders</span>
               <button
                 type="button"
-                className="flex size-4 shrink-0 items-center justify-center rounded opacity-50 hover:bg-accent-foreground/10 hover:opacity-100"
+                className={SECTION_TOGGLE_CLASS}
                 onClick={() => setFoldersSectionCollapsed(value => !value)}
                 aria-label={showFolders ? 'Hide folders' : 'Show folders'}
                 aria-expanded={showFolders}
@@ -832,19 +839,25 @@ export function ProjectTree({
 
         return (
           <div key={section.id}>
-            <div className="group/header flex items-center justify-between pl-3 pr-2 pb-1 pt-2">
+            <div className={`group/header ${SECTION_HEADER_CLASS}`}>
+              <span className={`min-w-0 truncate ${SECTION_LABEL_CLASS}`}>
+                {section.title}
+              </span>
               <div
-                className="flex items-center gap-1"
+                className="flex shrink-0 items-center gap-1"
                 data-testid="instance-title-actions"
               >
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/50">
-                  {section.title}
-                </span>
+                {groupByServer && section.id !== 'local' && (
+                  <RemoteServerRefreshButton
+                    serverId={section.id}
+                    serverName={section.title}
+                  />
+                )}
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
                       type="button"
-                      className="flex size-4 shrink-0 items-center justify-center rounded opacity-50 hover:bg-accent-foreground/10 hover:opacity-100"
+                      className={SECTION_TOGGLE_CLASS}
                       onClick={() =>
                         section.projects.forEach(item =>
                           setProjectExpanded(item.id, !areAllProjectsExpanded)
@@ -866,12 +879,6 @@ export function ProjectTree({
                   <TooltipContent>{actionLabel} all</TooltipContent>
                 </Tooltip>
               </div>
-              {groupByServer && section.id !== 'local' && (
-                <RemoteServerRefreshButton
-                  serverId={section.id}
-                  serverName={section.title}
-                />
-              )}
             </div>
             {section.projects.map(item => (
               <SortableItem

@@ -32,7 +32,7 @@ import {
 } from '@/services/projects'
 import { usePreferences } from '@/services/preferences'
 import { useProjectsStore } from '@/store/projects-store'
-import { useUIStore } from '@/store/ui-store'
+import { closeLeftSidebarOnMobile, useUIStore } from '@/store/ui-store'
 import { getEditorLabel, getTerminalLabel } from '@/types/preferences'
 import { getFileManagerName } from '@/lib/platform'
 import { canOpenInFinder } from '@/lib/environment'
@@ -104,6 +104,7 @@ export function ProjectContextMenu({
   }
 
   const handleNewBaseSession = () => {
+    closeLeftSidebarOnMobile()
     createBaseSession.mutate(project.id)
   }
 

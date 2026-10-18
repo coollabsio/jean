@@ -49,7 +49,10 @@ import type {
   WorktreeCreatedEvent,
   WorktreeCreateErrorEvent,
 } from '@/types/projects'
-import { clearPlanApprovalTransientState } from './plan-approval-state'
+import {
+  archiveOriginalPlanSession,
+  clearPlanApprovalTransientState,
+} from './plan-approval-state'
 import type { ApprovalModelOverride } from '../ApprovalModelSubmenu'
 
 const respondingCodexUserInputRequests = new Set<string>()
@@ -1411,43 +1414,15 @@ export function useMessageHandlers({
         backend: resolvedBackend,
       })
 
-      // Optionally close the original session immediately.
-      // cancel_process_if_running (used by close/archive) safely skips idle sessions,
-      // and with_sessions_mut uses a per-worktree mutex so there's no file-level race.
+      // Optionally archive the original session (keeps history restorable)
       if (prefs?.close_original_on_clear_context) {
-        const command =
-          prefs.removal_behavior === 'archive'
-            ? 'archive_session'
-            : 'close_session'
-
-        // Optimistically remove from UI immediately
-        queryClient.setQueryData<WorktreeSessions>(
-          chatQueryKeys.sessions(worktreeId),
-          old => {
-            if (!old) return old
-            return {
-              ...old,
-              sessions: old.sessions.filter(s => s.id !== sessionId),
-              active_session_id:
-                old.active_session_id === sessionId
-                  ? newSession.id
-                  : old.active_session_id,
-            }
-          }
-        )
-
-        invoke(command, { worktreeId, worktreePath, sessionId })
-          .then(() =>
-            queryClient.invalidateQueries({
-              queryKey: chatQueryKeys.sessions(worktreeId),
-            })
-          )
-          .catch(err =>
-            console.error(
-              '[useMessageHandlers] Failed to close original session:',
-              err
-            )
-          )
+        archiveOriginalPlanSession({
+          queryClient,
+          worktreeId,
+          worktreePath,
+          sessionId,
+          replacementSessionId: newSession.id,
+        })
       }
     },
     [
@@ -1654,43 +1629,15 @@ export function useMessageHandlers({
         backend: resolvedBackend,
       })
 
-      // Optionally close the original session immediately.
-      // cancel_process_if_running (used by close/archive) safely skips idle sessions,
-      // and with_sessions_mut uses a per-worktree mutex so there's no file-level race.
+      // Optionally archive the original session (keeps history restorable)
       if (prefs?.close_original_on_clear_context) {
-        const command =
-          prefs.removal_behavior === 'archive'
-            ? 'archive_session'
-            : 'close_session'
-
-        // Optimistically remove from UI immediately
-        queryClient.setQueryData<WorktreeSessions>(
-          chatQueryKeys.sessions(worktreeId),
-          old => {
-            if (!old) return old
-            return {
-              ...old,
-              sessions: old.sessions.filter(s => s.id !== sessionId),
-              active_session_id:
-                old.active_session_id === sessionId
-                  ? newSession.id
-                  : old.active_session_id,
-            }
-          }
-        )
-
-        invoke(command, { worktreeId, worktreePath, sessionId })
-          .then(() =>
-            queryClient.invalidateQueries({
-              queryKey: chatQueryKeys.sessions(worktreeId),
-            })
-          )
-          .catch(err =>
-            console.error(
-              '[useMessageHandlers] Failed to close original session:',
-              err
-            )
-          )
+        archiveOriginalPlanSession({
+          queryClient,
+          worktreeId,
+          worktreePath,
+          sessionId,
+          replacementSessionId: newSession.id,
+        })
       }
     },
     [
@@ -2005,36 +1952,14 @@ export function useMessageHandlers({
         backend: resolvedBackend,
       })
 
-      // Optionally close the original session
+      // Optionally archive the original session (keeps history restorable)
       if (prefs?.close_original_on_clear_context) {
-        const closeCommand =
-          prefs.removal_behavior === 'archive'
-            ? 'archive_session'
-            : 'close_session'
-
-        queryClient.setQueryData<WorktreeSessions>(
-          chatQueryKeys.sessions(worktreeId),
-          old => {
-            if (!old) return old
-            return {
-              ...old,
-              sessions: old.sessions.filter(s => s.id !== sessionId),
-            }
-          }
-        )
-
-        invoke(closeCommand, { worktreeId, worktreePath, sessionId })
-          .then(() =>
-            queryClient.invalidateQueries({
-              queryKey: chatQueryKeys.sessions(worktreeId),
-            })
-          )
-          .catch(err =>
-            console.error(
-              '[worktreeApproval] Failed to close original session:',
-              err
-            )
-          )
+        archiveOriginalPlanSession({
+          queryClient,
+          worktreeId,
+          worktreePath,
+          sessionId,
+        })
       }
     },
     [
@@ -2319,36 +2244,14 @@ export function useMessageHandlers({
         backend: resolvedBackend,
       })
 
-      // Optionally close the original session
+      // Optionally archive the original session (keeps history restorable)
       if (prefs?.close_original_on_clear_context) {
-        const closeCommand =
-          prefs.removal_behavior === 'archive'
-            ? 'archive_session'
-            : 'close_session'
-
-        queryClient.setQueryData<WorktreeSessions>(
-          chatQueryKeys.sessions(worktreeId),
-          old => {
-            if (!old) return old
-            return {
-              ...old,
-              sessions: old.sessions.filter(s => s.id !== sessionId),
-            }
-          }
-        )
-
-        invoke(closeCommand, { worktreeId, worktreePath, sessionId })
-          .then(() =>
-            queryClient.invalidateQueries({
-              queryKey: chatQueryKeys.sessions(worktreeId),
-            })
-          )
-          .catch(err =>
-            console.error(
-              '[streamingWorktreeApproval] Failed to close original session:',
-              err
-            )
-          )
+        archiveOriginalPlanSession({
+          queryClient,
+          worktreeId,
+          worktreePath,
+          sessionId,
+        })
       }
     },
     [

@@ -53,6 +53,7 @@ interface ManagedRemote {
   connection: RemoteConnection
   unsubscribe: () => void
   lastConnectedAt: number | null
+  wasConnected: boolean
   externallyManaged: boolean
   compatibility: 'unchecked' | 'legacy' | 'compatible' | 'incompatible'
   capabilities: ServerCapabilitiesEnvelope | null
@@ -92,6 +93,7 @@ export class ServerConnectionManager {
   private readonly subscribers = new Set<() => void>()
   private snapshot: ReadonlyMap<ServerId, ServerConnectionSnapshot> = new Map()
   private readonly listenerRefreshers = new Set<() => void>()
+  private readonly reconnectListeners = new Set<(serverId: ServerId) => void>()
 
   constructor(private readonly dependencies = defaultDependencies) {}
 
@@ -130,14 +132,23 @@ export class ServerConnectionManager {
         signature: this.signature(connection),
         connection,
         unsubscribe: () => undefined,
-        lastConnectedAt: null,
+        lastConnectedAt: adapter.connected ? Date.now() : null,
+        wasConnected: adapter.connected,
         externallyManaged,
         compatibility: 'unchecked',
         capabilities: null,
         probing: false,
       }
       managed.unsubscribe = adapter.subscribe(() => {
+        // Events sent while the socket was down (chat:done, cache:invalidate)
+        // are lost. Tell listeners so they can resync from the server.
+        const reconnected =
+          adapter.connected &&
+          !managed.wasConnected &&
+          managed.lastConnectedAt !== null
+        managed.wasConnected = adapter.connected
         if (adapter.connected) managed.lastConnectedAt = Date.now()
+        if (reconnected) this.notifyReconnect(connection.id)
         this.rebuildSnapshot()
         if (adapter.connected) void this.negotiate(connection.id, managed)
       })
@@ -216,6 +227,25 @@ export class ServerConnectionManager {
       this.listenerRefreshers.delete(refresh)
       for (const unlisten of unlisteners.values()) unlisten()
       unlisteners.clear()
+    }
+  }
+
+  /** Run after a remote socket reconnects. Events from the gap are lost. */
+  onRemoteReconnect(callback: (serverId: ServerId) => void): () => void {
+    this.reconnectListeners.add(callback)
+    return () => this.reconnectListeners.delete(callback)
+  }
+
+  private notifyReconnect(serverId: ServerId): void {
+    for (const callback of this.reconnectListeners) {
+      try {
+        callback(serverId)
+      } catch (error) {
+        console.error(
+          '[ServerConnectionManager] Reconnect listener failed:',
+          error
+        )
+      }
     }
   }
 

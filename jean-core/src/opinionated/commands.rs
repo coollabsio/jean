@@ -28,7 +28,12 @@ const SUPERPOWERS_GIT_WORKTREE_SKILL: &str = "using-git-worktrees";
 const SUPERPOWERS_REPO_URL: &str = "https://github.com/obra/superpowers";
 const SUPERPOWERS_ARCHIVE_URL: &str =
     "https://github.com/obra/superpowers/archive/refs/heads/main.zip";
-const PSTACK_REPO_URL: &str = "https://github.com/cursor/plugins";
+// Claude Code/Codex/Pi port of cursor/plugins pstack. The upstream skills use
+// Cursor-only tool names and paths, so Jean installs the port instead.
+const PSTACK_REPO_URL: &str = "https://github.com/michael-denyer/pstack-claude";
+const PSTACK_MARKETPLACE: &str = "michael-denyer/pstack-claude";
+// Claude and Codex both name the plugin `pstack` in the `pstack-claude` marketplace.
+const PSTACK_PLUGIN: &str = "pstack@pstack-claude";
 const RTK_RELEASE_LATEST_API: &str = "https://api.github.com/repos/rtk-ai/rtk/releases/latest";
 const RTK_CLI_DIR_NAME: &str = "rtk-cli";
 const RTK_BINARY_NAME: &str = if cfg!(windows) { "rtk.exe" } else { "rtk" };
@@ -905,6 +910,7 @@ fn claude_plugin_keys(plugin_id: &str) -> Vec<String> {
             "superpowers@superpowers-dev".to_string(),
         ],
         "caveman" => vec!["caveman@caveman".to_string()],
+        "pstack" => vec![PSTACK_PLUGIN.to_string()],
         _ => Vec::new(),
     }
 }
@@ -1014,24 +1020,24 @@ fn codex_plugin_key(plugin_id: &str) -> String {
     format!("{plugin_id}@openai-curated")
 }
 
-fn codex_plugin_registered(home: &Path, plugin_id: &str) -> bool {
+fn codex_plugin_registered(home: &Path, key: &str) -> bool {
     let config_path = home.join(".codex").join("config.toml");
     let Ok(contents) = std::fs::read_to_string(config_path) else {
         return false;
     };
     let Ok(doc) = contents.parse::<toml_edit::DocumentMut>() else {
-        return contents.contains(&format!("[plugins.\"{}\"]", codex_plugin_key(plugin_id)));
+        return contents.contains(&format!("[plugins.\"{key}\"]"));
     };
 
     doc.get("plugins")
         .and_then(|plugins| plugins.as_table())
-        .and_then(|plugins| plugins.get(&codex_plugin_key(plugin_id)))
+        .and_then(|plugins| plugins.get(key))
         .is_some()
 }
 
 fn remove_codex_plugin_registration(
     home: &Path,
-    plugin_id: &str,
+    key: &str,
     removed: &mut Vec<String>,
 ) -> Result<(), String> {
     let config_path = home.join(".codex").join("config.toml");
@@ -1045,11 +1051,10 @@ fn remove_codex_plugin_registration(
         .parse::<toml_edit::DocumentMut>()
         .map_err(|e| format!("Failed to parse Codex config {config_path:?}: {e}"))?;
 
-    let key = codex_plugin_key(plugin_id);
     let removed_entry = doc
         .get_mut("plugins")
         .and_then(|plugins| plugins.as_table_mut())
-        .and_then(|plugins| plugins.remove(&key))
+        .and_then(|plugins| plugins.remove(key))
         .is_some();
 
     if removed_entry {
@@ -1150,7 +1155,7 @@ fn uninstall_superpowers_from_home(home: &Path) -> Result<Vec<String>, String> {
         "superpowers",
         &mut removed,
     )?;
-    remove_codex_plugin_registration(home, "superpowers", &mut removed)?;
+    remove_codex_plugin_registration(home, &codex_plugin_key("superpowers"), &mut removed)?;
     remove_codex_plugin_cache(home, "superpowers", &mut removed)?;
     remove_matching_skill_dirs(
         &opencode_config_dir(home).join("skills"),
@@ -1292,18 +1297,19 @@ fn opinionated_backend_statuses(home: &Path, plugin_id: &str) -> Vec<BackendPlug
 }
 
 fn pstack_installed_for_backend(home: &Path, backend: &str) -> bool {
-    let global = skill_installed_marker(
+    // Claude uses the pstack-claude plugin. Loose poteto-mode skill copies in
+    // Claude dirs are the old Cursor-flavored install and do not count.
+    if backend == "claude" {
+        return plugin_installed_marker(home, "pstack");
+    }
+    if backend == "codex" && codex_plugin_registered(home, PSTACK_PLUGIN) {
+        return true;
+    }
+    skill_installed_marker(
         &jean_global_backend_skills_dir(home, backend),
         "poteto-mode",
-    );
-    let native = match backend {
-        "claude" => Some(home.join(".claude").join("skills")),
-        _ => backend_skills_dir(home, backend),
-    };
-    global
-        || native
-            .as_deref()
-            .is_some_and(|dir| skill_installed_marker(dir, "poteto-mode"))
+    ) || backend_skills_dir(home, backend)
+        .is_some_and(|dir| skill_installed_marker(&dir, "poteto-mode"))
 }
 
 fn caveman_installed_for_backend(home: &Path, backend: &str) -> bool {
@@ -1355,7 +1361,7 @@ fn superpowers_installed_for_backend(home: &Path, backend: &str) -> bool {
         "claude" => plugin_installed_marker(home, "superpowers") || global_installed,
         "codex" => {
             skill_installed_marker(&home.join(".codex").join("skills"), "superpowers")
-                || codex_plugin_registered(home, "superpowers")
+                || codex_plugin_registered(home, &codex_plugin_key("superpowers"))
                 || home
                     .join(".codex")
                     .join("plugins")
@@ -1531,7 +1537,7 @@ fn pstack_manifest_path(home: &Path) -> PathBuf {
 
 fn clone_pstack_skills_dir() -> Result<PathBuf, String> {
     let temp = std::env::temp_dir().join(format!("jean-pstack-{}", uuid::Uuid::new_v4()));
-    let repo = temp.join("plugins");
+    let repo = temp.join("pstack-claude");
     std::fs::create_dir_all(&temp)
         .map_err(|e| format!("Failed to create pstack temp dir {temp:?}: {e}"))?;
     let output = silent_command("git")
@@ -1550,7 +1556,7 @@ fn clone_pstack_skills_dir() -> Result<PathBuf, String> {
         return Err(command_failure_message("Failed to clone pstack", &output));
     }
     let sparse = silent_command("git")
-        .args(["sparse-checkout", "set", "pstack"])
+        .args(["sparse-checkout", "set", "plugins/pstack/skills"])
         .current_dir(&repo)
         .output()
         .map_err(|e| format!("Failed to configure the pstack sparse checkout: {e}"))?;
@@ -1560,7 +1566,7 @@ fn clone_pstack_skills_dir() -> Result<PathBuf, String> {
             &sparse,
         ));
     }
-    let skills = repo.join("pstack").join("skills");
+    let skills = repo.join("plugins").join("pstack").join("skills");
     if !dir_contains_skill(&skills) {
         return Err("pstack did not contain installable skills".to_string());
     }
@@ -2011,43 +2017,18 @@ async fn install_superpowers(app: &AppHandle) -> Result<String, String> {
     let mut installed = Vec::new();
     let mut warnings = Vec::new();
 
-    if detected_backends.contains(&"claude") {
-        let binary_path = crate::claude_cli::resolve_cli_binary(app);
-        let bin = binary_path.clone();
-        let add_result = tokio::task::spawn_blocking(move || {
-            silent_command(&bin)
-                .args(["plugin", "marketplace", "add", "obra/superpowers"])
-                .output()
-        })
-        .await
-        .map_err(|e| e.to_string())?;
-
-        match add_result {
-            Ok(output) if !output.status.success() => {
-                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                warnings.push(format!("Claude marketplace add failed: {stderr}"));
-            }
-            Err(e) => warnings.push(format!("Failed to run Claude CLI marketplace add: {e}")),
-            _ => {}
-        }
-
-        let bin = binary_path;
-        let install_result = tokio::task::spawn_blocking(move || {
-            silent_command(&bin)
-                .args(["plugin", "install", superpowers_claude_plugin_target()])
-                .output()
-        })
-        .await
-        .map_err(|e| e.to_string())?;
-
-        match install_result {
-            Ok(output) if output.status.success() => installed.push("claude"),
-            Ok(output) => {
-                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                warnings.push(format!("Claude plugin install failed: {stderr}"));
-            }
-            Err(e) => warnings.push(format!("Failed to run Claude CLI plugin install: {e}")),
-        }
+    if detected_backends.contains(&"claude")
+        && install_marketplace_plugin(
+            crate::claude_cli::resolve_cli_binary(app),
+            "Claude",
+            "obra/superpowers",
+            "install",
+            superpowers_claude_plugin_target(),
+            &mut warnings,
+        )
+        .await?
+    {
+        installed.push("claude");
     }
 
     let source_from_claude = home.clone();
@@ -2153,29 +2134,120 @@ async fn install_superpowers(app: &AppHandle) -> Result<String, String> {
     Ok(message)
 }
 
-async fn install_pstack(_app: &AppHandle) -> Result<String, String> {
+/// Runs `<cli> plugin marketplace add <marketplace>` then
+/// `<cli> plugin <install_verb> <plugin>`. Claude uses `install`, Codex `add`.
+async fn install_marketplace_plugin(
+    binary_path: PathBuf,
+    label: &'static str,
+    marketplace: &'static str,
+    install_verb: &'static str,
+    plugin: &'static str,
+    warnings: &mut Vec<String>,
+) -> Result<bool, String> {
+    let bin = binary_path.clone();
+    let add_result = tokio::task::spawn_blocking(move || {
+        silent_command(&bin)
+            .args(["plugin", "marketplace", "add", marketplace])
+            .output()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    match add_result {
+        Ok(output) if !output.status.success() => {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            warnings.push(format!("{label} marketplace add failed: {stderr}"));
+        }
+        Err(e) => warnings.push(format!("Failed to run {label} CLI marketplace add: {e}")),
+        _ => {}
+    }
+
+    let install_result = tokio::task::spawn_blocking(move || {
+        silent_command(&binary_path)
+            .args(["plugin", install_verb, plugin])
+            .output()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    match install_result {
+        Ok(output) if output.status.success() => Ok(true),
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            warnings.push(format!("{label} plugin install failed: {stderr}"));
+            Ok(false)
+        }
+        Err(e) => {
+            warnings.push(format!("Failed to run {label} CLI plugin install: {e}"));
+            Ok(false)
+        }
+    }
+}
+
+async fn install_pstack(app: &AppHandle) -> Result<String, String> {
     let home = dirs::home_dir().ok_or("Cannot determine home directory")?;
-    remove_legacy_pstack_setup_from_home(&home)?;
     let skills_dir = tokio::task::spawn_blocking(clone_pstack_skills_dir)
         .await
         .map_err(|e| e.to_string())??;
     let temp_root = skills_dir
         .ancestors()
-        .nth(3)
+        .nth(4)
         .map(Path::to_path_buf)
         .ok_or("Cannot determine the pstack temporary directory")?;
     let names = pstack_skill_names(&skills_dir)?;
     let mut installed = Vec::new();
     let mut warnings = Vec::new();
 
+    // Drop skills from an earlier install first: older installs copied the
+    // Cursor-flavored pack into Claude dirs, and the port may drop skills.
+    remove_pstack_skill_copies(&home, &pstack_manifest_skill_names(&home))?;
+
+    // Claude and Codex get the native plugin (skills, agents, routing hook).
+    // Codex falls back to a skills-only copy below if its plugin install fails;
+    // a successful plugin must not also get copies, or Codex lists each skill twice.
+    let detected = detected_jean_backends(app);
+    let mut native_plugin_backends = Vec::new();
+    if detected.contains(&"claude")
+        && install_marketplace_plugin(
+            crate::claude_cli::resolve_cli_binary(app),
+            "Claude",
+            PSTACK_MARKETPLACE,
+            "install",
+            PSTACK_PLUGIN,
+            &mut warnings,
+        )
+        .await?
+    {
+        installed.push("Claude");
+        native_plugin_backends.push("claude");
+    }
+    if let (true, Ok(codex)) = (
+        detected.contains(&"codex"),
+        crate::codex_cli::resolve_cli_binary(app),
+    ) {
+        if install_marketplace_plugin(
+            codex,
+            "Codex",
+            PSTACK_MARKETPLACE,
+            "add",
+            PSTACK_PLUGIN,
+            &mut warnings,
+        )
+        .await?
+        {
+            installed.push("Codex");
+            native_plugin_backends.push("codex");
+        }
+    }
+
     for (backend, label) in installable_jean_backends() {
+        if backend == "claude" || native_plugin_backends.contains(&backend) {
+            continue;
+        }
         let mut targets = vec![jean_global_backend_skills_dir(&home, backend)];
-        let native = if backend == "claude" {
-            Some(home.join(".claude").join("skills"))
-        } else {
-            backend_skills_dir(&home, backend)
-        };
-        if let Some(native) = native.filter(|path| !targets.contains(path)) {
+        if let Some(native) =
+            backend_skills_dir(&home, backend).filter(|path| !targets.contains(path))
+        {
             targets.push(native);
         }
 
@@ -2212,42 +2284,17 @@ async fn install_pstack(_app: &AppHandle) -> Result<String, String> {
     Ok(message)
 }
 
-fn remove_legacy_pstack_setup_from_home(home: &Path) -> Result<(), String> {
-    let manifest = pstack_manifest_path(home);
-    let was_installed_by_jean = std::fs::read_to_string(manifest)
-        .is_ok_and(|content| content.lines().any(|name| name == "setup-pstack"));
-    if !was_installed_by_jean {
-        return Ok(());
-    }
-
-    let mut removed = Vec::new();
-    for (backend, _) in installable_jean_backends() {
-        let global = jean_global_backend_skills_dir(home, backend);
-        remove_path_if_exists(&global.join("setup-pstack"), &mut removed)?;
-        let native = if backend == "claude" {
-            Some(home.join(".claude").join("skills"))
-        } else {
-            backend_skills_dir(home, backend)
-        };
-        if let Some(native) = native.filter(|path| path != &global) {
-            remove_path_if_exists(&native.join("setup-pstack"), &mut removed)?;
-        }
-    }
-    Ok(())
-}
-
-fn uninstall_pstack_from_home(home: &Path) -> Result<Vec<String>, String> {
-    let manifest = pstack_manifest_path(home);
-    let mut names = std::fs::read_to_string(&manifest)
-        .unwrap_or_else(|_| "poteto-mode".to_string())
+fn pstack_manifest_skill_names(home: &Path) -> Vec<String> {
+    std::fs::read_to_string(pstack_manifest_path(home))
+        .unwrap_or_default()
         .lines()
         .filter(|name| !name.is_empty())
         .map(str::to_string)
-        .collect::<Vec<_>>();
-    if !names.iter().any(|name| name == "poteto-mode") {
-        names.push("poteto-mode".to_string());
-    }
+        .collect()
+}
 
+/// Removes Jean's copied pstack skills from every backend dir, Claude included.
+fn remove_pstack_skill_copies(home: &Path, names: &[String]) -> Result<Vec<String>, String> {
     let mut removed = Vec::new();
     for (backend, _) in installable_jean_backends() {
         let mut roots = vec![jean_global_backend_skills_dir(home, backend)];
@@ -2260,20 +2307,60 @@ fn uninstall_pstack_from_home(home: &Path) -> Result<Vec<String>, String> {
             roots.push(native);
         }
         for root in roots {
-            for name in &names {
+            for name in names {
                 remove_path_if_exists(&root.join(name), &mut removed)?;
             }
         }
     }
-    remove_path_if_exists(&manifest, &mut removed)?;
     Ok(removed)
 }
 
-async fn uninstall_pstack(_app: &AppHandle) -> Result<String, String> {
+fn uninstall_pstack_from_home(home: &Path) -> Result<Vec<String>, String> {
+    let mut names = pstack_manifest_skill_names(home);
+    if !names.iter().any(|name| name == "poteto-mode") {
+        names.push("poteto-mode".to_string());
+    }
+
+    let mut removed = remove_pstack_skill_copies(home, &names)?;
+    remove_claude_plugin_registration(home, "pstack", &mut removed)?;
+    remove_claude_plugin_markers(home, "pstack", &mut removed)?;
+    // Fallback for when `codex plugin remove` could not run.
+    remove_codex_plugin_registration(home, PSTACK_PLUGIN, &mut removed)?;
+    remove_path_if_exists(
+        &home
+            .join(".codex")
+            .join("plugins")
+            .join("cache")
+            .join("pstack-claude")
+            .join("pstack"),
+        &mut removed,
+    )?;
+    remove_path_if_exists(&pstack_manifest_path(home), &mut removed)?;
+    Ok(removed)
+}
+
+async fn uninstall_pstack(app: &AppHandle) -> Result<String, String> {
     let home = dirs::home_dir().ok_or("Cannot determine home directory")?;
-    let removed = tokio::task::spawn_blocking(move || uninstall_pstack_from_home(&home))
-        .await
-        .map_err(|e| e.to_string())??;
+    let mut removed = Vec::new();
+    if codex_plugin_registered(&home, PSTACK_PLUGIN) {
+        if let Ok(codex) = crate::codex_cli::resolve_cli_binary(app) {
+            let output = tokio::task::spawn_blocking(move || {
+                silent_command(&codex)
+                    .args(["plugin", "remove", PSTACK_PLUGIN])
+                    .output()
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+            if output.is_ok_and(|output| output.status.success()) {
+                removed.push(format!("Codex plugin {PSTACK_PLUGIN}"));
+            }
+        }
+    }
+    removed.extend(
+        tokio::task::spawn_blocking(move || uninstall_pstack_from_home(&home))
+            .await
+            .map_err(|e| e.to_string())??,
+    );
     if removed.is_empty() {
         Ok("pstack was not installed".to_string())
     } else {
@@ -2350,19 +2437,80 @@ mod tests {
     }
 
     #[test]
-    fn reinstall_cleanup_removes_the_old_setup_pstack_skill() {
+    fn claude_pstack_status_requires_the_plugin_not_loose_skill_copies() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let setup = temp.path().join(".codex/skills/setup-pstack");
-        std::fs::create_dir_all(&setup).expect("create setup skill");
-        std::fs::write(setup.join("SKILL.md"), "# Setup pstack").expect("write setup skill");
-        let manifest = pstack_manifest_path(temp.path());
-        std::fs::create_dir_all(manifest.parent().expect("manifest parent"))
-            .expect("create manifest dir");
-        std::fs::write(&manifest, "poteto-mode\nsetup-pstack\n").expect("write manifest");
+        let loose = temp.path().join(".claude/skills/poteto-mode");
+        std::fs::create_dir_all(&loose).expect("create loose skill");
+        std::fs::write(loose.join("SKILL.md"), "# Poteto mode").expect("write loose skill");
 
-        remove_legacy_pstack_setup_from_home(temp.path()).expect("remove legacy setup skill");
+        assert!(!pstack_installed_for_backend(temp.path(), "claude"));
 
-        assert!(!setup.exists());
+        std::fs::create_dir_all(
+            temp.path()
+                .join(".claude/plugins/cache/pstack-claude/pstack"),
+        )
+        .expect("create plugin cache");
+
+        assert!(pstack_installed_for_backend(temp.path(), "claude"));
+    }
+
+    #[test]
+    fn uninstall_pstack_removes_only_the_pstack_claude_plugin() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let plugins = temp.path().join(".claude/plugins");
+        std::fs::create_dir_all(plugins.join("cache/pstack-claude/pstack/0.9.84"))
+            .expect("create pstack cache");
+        std::fs::create_dir_all(plugins.join("cache/claude-plugins-official/superpowers"))
+            .expect("create superpowers cache");
+        std::fs::write(
+            plugins.join("installed_plugins.json"),
+            r#"{"plugins":{"pstack@pstack-claude":[],"superpowers@claude-plugins-official":[]}}"#,
+        )
+        .expect("write installed plugins");
+        std::fs::write(
+            temp.path().join(".claude/settings.json"),
+            r#"{"enabledPlugins":{"pstack@pstack-claude":true,"superpowers@claude-plugins-official":true}}"#,
+        )
+        .expect("write settings");
+
+        uninstall_pstack_from_home(temp.path()).expect("uninstall pstack");
+
+        let installed =
+            std::fs::read_to_string(plugins.join("installed_plugins.json")).expect("read plugins");
+        let settings = std::fs::read_to_string(temp.path().join(".claude/settings.json"))
+            .expect("read settings");
+        assert!(!installed.contains("pstack@pstack-claude"));
+        assert!(installed.contains("superpowers@claude-plugins-official"));
+        assert!(!settings.contains("pstack@pstack-claude"));
+        assert!(settings.contains("superpowers@claude-plugins-official"));
+        assert!(!plugins.join("cache/pstack-claude").exists());
+        assert!(plugins
+            .join("cache/claude-plugins-official/superpowers")
+            .exists());
+        assert!(!pstack_installed_for_backend(temp.path(), "claude"));
+    }
+
+    #[test]
+    fn codex_pstack_plugin_counts_as_installed_and_uninstall_removes_it() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let codex = temp.path().join(".codex");
+        let cache = codex.join("plugins/cache/pstack-claude/pstack/0.9.84");
+        std::fs::create_dir_all(&cache).expect("create codex plugin cache");
+        std::fs::write(
+            codex.join("config.toml"),
+            "[marketplaces.pstack-claude]\nsource_type = \"git\"\n\n[plugins.\"pstack@pstack-claude\"]\nenabled = true\n\n[plugins.\"superpowers@openai-curated\"]\nenabled = true\n",
+        )
+        .expect("write codex config");
+
+        assert!(pstack_installed_for_backend(temp.path(), "codex"));
+
+        uninstall_pstack_from_home(temp.path()).expect("uninstall pstack");
+
+        let config = std::fs::read_to_string(codex.join("config.toml")).expect("read config");
+        assert!(!config.contains("pstack@pstack-claude"));
+        assert!(config.contains("superpowers@openai-curated"));
+        assert!(!cache.exists());
+        assert!(!pstack_installed_for_backend(temp.path(), "codex"));
     }
 
     #[test]

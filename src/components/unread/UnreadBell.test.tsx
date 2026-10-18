@@ -93,10 +93,12 @@ vi.mock('@/store/chat-store', () => ({
 }))
 
 const markWorktreeForAutoOpenSessionMock = vi.fn()
+const setRailSectionMock = vi.fn()
 vi.mock('@/store/ui-store', () => ({
   useUIStore: {
     getState: () => ({
       markWorktreeForAutoOpenSession: markWorktreeForAutoOpenSessionMock,
+      setRailSection: setRailSectionMock,
     }),
   },
 }))
@@ -341,6 +343,8 @@ describe('UnreadBell', () => {
       'worktree-1',
       'session-1'
     )
+    // Leaves the Agents page so the session opens in the Code view
+    expect(setRailSectionMock).toHaveBeenCalledWith('workspace')
   })
 
   it('shows a running Claude session instead of stale waiting state', async () => {

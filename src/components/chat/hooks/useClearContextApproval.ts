@@ -12,6 +12,7 @@ import {
   chatQueryKeys,
 } from '@/services/chat'
 import { invoke } from '@/lib/transport'
+import { archiveOriginalPlanSession } from './plan-approval-state'
 import type {
   EffortLevel,
   Session,
@@ -436,46 +437,15 @@ export function useClearContextApproval({
         backend,
       })
 
-      // Optionally close the original session immediately.
-      // cancel_process_if_running (used by close/archive commands) safely skips
-      // idle sessions, so no spurious chat:cancelled events are emitted.
-      // The with_sessions_mut mutex in storage.rs serializes concurrent writes,
-      // so there's no file-level race with send_chat_message.
+      // Optionally archive the original session (keeps history restorable)
       if (preferences?.close_original_on_clear_context) {
-        const command =
-          preferences.removal_behavior === 'archive'
-            ? 'archive_session'
-            : 'close_session'
-
-        // Optimistically remove from UI immediately so the user sees it gone at once
-        queryClient.setQueryData<WorktreeSessions>(
-          chatQueryKeys.sessions(worktreeId),
-          old => {
-            if (!old) return old
-            return {
-              ...old,
-              sessions: old.sessions.filter(s => s.id !== sessionId),
-              active_session_id:
-                old.active_session_id === sessionId
-                  ? newSession.id
-                  : old.active_session_id,
-            }
-          }
-        )
-
-        // Close in background, then sync with backend
-        invoke(command, { worktreeId, worktreePath, sessionId })
-          .then(() =>
-            queryClient.invalidateQueries({
-              queryKey: chatQueryKeys.sessions(worktreeId),
-            })
-          )
-          .catch(err =>
-            console.error(
-              '[useClearContextApproval] Failed to close original session:',
-              err
-            )
-          )
+        archiveOriginalPlanSession({
+          queryClient,
+          worktreeId,
+          worktreePath,
+          sessionId,
+          replacementSessionId: newSession.id,
+        })
       }
     },
     [

@@ -35,6 +35,7 @@ import type { ToolCall } from '@/types/chat'
 import type { StackableItem } from './tool-call-utils'
 import { Markdown } from '@/components/ui/markdown'
 import { cn } from '@/lib/utils'
+import { WorkingWaveform } from '@/components/ui/status-indicator'
 import { getFilename } from '@/lib/path-utils'
 import {
   Collapsible,
@@ -662,7 +663,7 @@ export const ToolCallInline = memo(function ToolCallInline({
             {isToolCallError(toolCall) ? <ToolErrorBadge /> : null}
             <span className="ml-auto flex min-w-0 flex-1 items-center justify-end">
               {isStreaming && isIncomplete ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-foreground" />
+                <WorkingWaveform />
               ) : (
                 <ChevronRight
                   className={cn(
@@ -771,11 +772,8 @@ export const TaskCallInline = memo(function TaskCallInline({
             </span>
           )}
           {isStreaming && isIncomplete ? (
-            <Loader2
-              className={cn(
-                subToolCalls.length === 0 && 'ml-auto',
-                'h-3.5 w-3.5 shrink-0 animate-spin text-foreground'
-              )}
+            <WorkingWaveform
+              className={cn(subToolCalls.length === 0 && 'ml-auto')}
             />
           ) : (
             <ChevronRight
@@ -984,7 +982,7 @@ export const StackedGroup = memo(function StackedGroup({
             {summary}
           </span>
           {isStreaming && isIncomplete ? (
-            <Loader2 className="ml-auto h-3.5 w-3.5 shrink-0 animate-spin text-foreground" />
+            <WorkingWaveform className="ml-auto" />
           ) : (
             <ChevronRight
               className={cn(
@@ -1898,7 +1896,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
                   ) : cancelled ? (
                     <XCircle className="h-3.5 w-3.5 shrink-0 text-warning" />
                   ) : active ? (
-                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
+                    <WorkingWaveform className="w-3.5 justify-center" />
                   ) : (
                     <Circle className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50" />
                   )}
@@ -2467,7 +2465,7 @@ function MonitorExpanded({
       <div>
         <div className="flex items-center justify-between text-[10px] uppercase tracking-wide text-muted-foreground">
           <span>Live events</span>
-          {isActive ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+          {isActive ? <WorkingWaveform /> : null}
         </div>
         {events.length === 0 ? (
           <div className="mt-1 text-[11px] italic text-muted-foreground">

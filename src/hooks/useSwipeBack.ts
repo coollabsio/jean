@@ -158,6 +158,34 @@ export function useSwipeBack({
     [progressDelta, threshold]
   )
 
+  /** Abort an in-progress gesture without firing, snapping content back. */
+  const cancelSwipe = useCallback(() => {
+    swipingRef.current = false
+    if (showVisualRef.current) {
+      setTransitionStyle('transform 200ms ease-out')
+      setTranslateX(0)
+      setTimeout(() => {
+        setIsSwiping(false)
+        setProgress(0)
+        setTransitionStyle('')
+      }, 200)
+    } else {
+      setIsSwiping(false)
+      setProgress(0)
+    }
+  }, [])
+
+  // iOS cancels touches it claims for system gestures (e.g. edge swipe);
+  // without this the gesture stays "swiping" and pins the drawer open.
+  const handleTouchCancel = useCallback(
+    (e: TouchEvent) => {
+      if (!swipingRef.current) return
+      e.stopPropagation()
+      cancelSwipe()
+    },
+    [cancelSwipe]
+  )
+
   const handleTouchEnd = useCallback(
     (e: TouchEvent) => {
       if (!swipingRef.current) return
@@ -211,21 +239,10 @@ export function useSwipeBack({
           firedRef.current = false
         }
       } else {
-        if (showVisualRef.current) {
-          setTransitionStyle('transform 200ms ease-out')
-          setTranslateX(0)
-          setTimeout(() => {
-            setIsSwiping(false)
-            setProgress(0)
-            setTransitionStyle('')
-          }, 200)
-        } else {
-          setIsSwiping(false)
-          setProgress(0)
-        }
+        cancelSwipe()
       }
     },
-    [threshold, progressDelta]
+    [threshold, progressDelta, cancelSwipe]
   )
 
   useEffect(() => {
@@ -242,14 +259,26 @@ export function useSwipeBack({
     el.addEventListener('touchstart', handleTouchStart, { passive: true })
     el.addEventListener('touchmove', handleTouchMove, { passive: false })
     el.addEventListener('touchend', handleTouchEnd, { passive: true })
+    el.addEventListener('touchcancel', handleTouchCancel, { passive: true })
 
     return () => {
       el.removeEventListener('touchstart', handleTouchStart)
       el.removeEventListener('touchmove', handleTouchMove)
       el.removeEventListener('touchend', handleTouchEnd)
+      el.removeEventListener('touchcancel', handleTouchCancel)
       el.style.touchAction = previousTouchAction
+      // Disabled (or re-bound) mid-gesture: the closing touchend never
+      // reaches us, so drop the gesture instead of leaving it stuck.
+      if (swipingRef.current) cancelSwipe()
     }
-  }, [enabled, handleTouchStart, handleTouchMove, handleTouchEnd])
+  }, [
+    enabled,
+    handleTouchStart,
+    handleTouchMove,
+    handleTouchEnd,
+    handleTouchCancel,
+    cancelSwipe,
+  ])
 
   return { containerRef, translateX, isSwiping, progress, transitionStyle }
 }

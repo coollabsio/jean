@@ -26,9 +26,13 @@ import {
 import { useIsMobile } from '@/hooks/use-mobile'
 import { cn } from '@/lib/utils'
 import { ItemSelectCheckbox } from './ItemSelectCheckbox'
+import { ContextLinkBadge } from './ContextLinkBadge'
+import type { ContextLinkMatch } from '@/hooks/useContextLinkUsage'
 import { isNewIssue } from '@/services/github'
+import { formatRelative } from '@/components/agents/AgentActivity'
 import type {
   GitHubIssue,
+  GitHubLabel,
   GitHubPullRequest,
   DependabotAlert,
   RepositoryAdvisory,
@@ -76,11 +80,79 @@ export function SessionTabBar({
   )
 }
 
+/** GitHub-style list row wrapper shared by issue and PR rows. */
+const githubRowClass = (
+  isSelected: boolean,
+  isChecked: boolean,
+  busy: boolean
+) =>
+  cn(
+    'group w-full flex items-start gap-2.5 px-4 py-2 text-left transition-colors border-b border-border/60 last:border-b-0',
+    'hover:bg-accent/60',
+    isSelected && 'bg-accent',
+    isChecked && !isSelected && 'bg-accent/50',
+    busy && 'opacity-50'
+  )
+
+function LabelPills({
+  labels,
+  onLabelClick,
+}: {
+  labels: GitHubLabel[]
+  onLabelClick?: (label: string) => void
+}) {
+  return labels.map(label => (
+    <button
+      type="button"
+      key={label.name}
+      tabIndex={-1}
+      onClick={e => {
+        e.stopPropagation()
+        onLabelClick?.(label.name)
+      }}
+      className="shrink-0 rounded-full px-2 py-px text-[11px] font-medium leading-4"
+      style={{
+        backgroundColor: `#${label.color}26`,
+        color: `#${label.color}`,
+        border: `1px solid #${label.color}66`,
+      }}
+    >
+      {label.name}
+    </button>
+  ))
+}
+
+/** "#123 opened 3d ago by octocat" */
+function OpenedMeta({
+  number,
+  createdAt,
+  author,
+}: {
+  number: number
+  createdAt: string
+  author?: string
+}) {
+  const time = Date.parse(createdAt)
+  return (
+    <>
+      #{number}
+      {!Number.isNaN(time) && ` opened ${formatRelative(time / 1000)}`}
+      {author && (
+        <>
+          {' by '}
+          <span className="text-foreground/70">{author}</span>
+        </>
+      )}
+    </>
+  )
+}
+
 export interface IssueItemProps {
   issue: GitHubIssue
   index: number
   isSelected: boolean
   isCreating: boolean
+  contextMatches?: ContextLinkMatch[]
   isChecked?: boolean
   onCheckedChange?: (checked: boolean) => void
   onMouseEnter: () => void
@@ -96,6 +168,7 @@ export function IssueItem({
   index,
   isSelected,
   isCreating,
+  contextMatches,
   isChecked = false,
   onCheckedChange,
   onMouseEnter,
@@ -103,18 +176,13 @@ export function IssueItem({
   onInvestigate,
   onInvestigateInNewSession,
   onPreview,
+  onLabelClick,
 }: IssueItemProps) {
   return (
     <div
       data-item-index={index}
       onMouseEnter={onMouseEnter}
-      className={cn(
-        'group w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors',
-        'hover:bg-accent',
-        isSelected && 'bg-accent',
-        isChecked && !isSelected && 'bg-accent/50',
-        isCreating && 'opacity-50'
-      )}
+      className={githubRowClass(isSelected, isChecked, isCreating)}
     >
       {onCheckedChange && (
         <ItemSelectCheckbox
@@ -137,27 +205,31 @@ export function IssueItem({
         />
       )}
       <div className="flex-1 min-w-0">
-        <button
-          type="button"
-          onClick={e => onClick(e.metaKey || e.ctrlKey)}
-          disabled={isCreating}
-          className="w-full min-w-0 text-left focus:outline-none disabled:cursor-not-allowed"
-        >
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-muted-foreground">
-              #{issue.number}
+        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+          <button
+            type="button"
+            onClick={e => onClick(e.metaKey || e.ctrlKey)}
+            disabled={isCreating}
+            className="min-w-0 text-left text-sm font-semibold leading-5 hover:text-primary focus:outline-none disabled:cursor-not-allowed"
+          >
+            {issue.title}
+          </button>
+          {isNewIssue(issue.created_at) && (
+            <span className="shrink-0 rounded-full bg-success/10 px-1.5 py-px text-[11px] font-medium text-success border border-success/20">
+              New
             </span>
-            <span className="text-[11px] font-medium truncate">
-              {issue.title}
-            </span>
-            {isNewIssue(issue.created_at) && (
-              <span className="shrink-0 rounded-full bg-success/10 px-1.5 py-0.5 text-[10px] font-medium text-success border border-success/20">
-                New
-              </span>
-            )}
-          </div>
-        </button>
+          )}
+          <LabelPills labels={issue.labels ?? []} onLabelClick={onLabelClick} />
+        </div>
+        <div className="mt-0.5 text-xs text-muted-foreground truncate">
+          <OpenedMeta
+            number={issue.number}
+            createdAt={issue.created_at}
+            author={issue.author?.login}
+          />
+        </div>
       </div>
+      <ContextLinkBadge matches={contextMatches} />
       <div className="shrink-0 flex items-center gap-1 self-center">
         <ItemActions
           label="Issue"
@@ -178,6 +250,7 @@ export interface PRItemProps {
   index: number
   isSelected: boolean
   isCreating: boolean
+  contextMatches?: ContextLinkMatch[]
   isStacking: boolean
   isChecked?: boolean
   onCheckedChange?: (checked: boolean) => void
@@ -194,6 +267,7 @@ export function PRItem({
   index,
   isSelected,
   isCreating,
+  contextMatches,
   isStacking,
   isChecked = false,
   onCheckedChange,
@@ -202,19 +276,14 @@ export function PRItem({
   onInvestigate,
   onStack,
   onPreview,
+  onLabelClick,
 }: PRItemProps) {
   const busy = isCreating || isStacking
   return (
     <div
       data-item-index={index}
       onMouseEnter={onMouseEnter}
-      className={cn(
-        'group w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors',
-        'hover:bg-accent',
-        isSelected && 'bg-accent',
-        isChecked && !isSelected && 'bg-accent/50',
-        busy && 'opacity-50'
-      )}
+      className={githubRowClass(isSelected, isChecked, busy)}
     >
       {onCheckedChange && (
         <ItemSelectCheckbox
@@ -230,34 +299,42 @@ export function PRItem({
         <GitPullRequest
           className={cn(
             'h-4 w-4 mt-0.5 flex-shrink-0',
-            pr.state === 'OPEN'
-              ? 'text-success'
-              : pr.state === 'MERGED'
-                ? 'text-purple-600 dark:text-purple-400'
-                : 'text-destructive'
+            pr.isDraft
+              ? 'text-muted-foreground'
+              : pr.state === 'OPEN'
+                ? 'text-success'
+                : pr.state === 'MERGED'
+                  ? 'text-purple-600 dark:text-purple-400'
+                  : 'text-destructive'
           )}
         />
       )}
       <div className="flex-1 min-w-0">
-        <button
-          type="button"
-          onClick={e => onClick(e.metaKey || e.ctrlKey)}
-          disabled={busy}
-          className="w-full min-w-0 text-left focus:outline-none disabled:cursor-not-allowed"
-        >
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-muted-foreground">
-              #{pr.number}
+        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+          <button
+            type="button"
+            onClick={e => onClick(e.metaKey || e.ctrlKey)}
+            disabled={busy}
+            className="min-w-0 text-left text-sm font-semibold leading-5 hover:text-primary focus:outline-none disabled:cursor-not-allowed"
+          >
+            {pr.title}
+          </button>
+          {pr.isDraft && (
+            <span className="shrink-0 rounded-full border border-border px-1.5 py-px text-[11px] font-medium text-muted-foreground">
+              Draft
             </span>
-            <span className="text-[11px] font-medium truncate">{pr.title}</span>
-            {pr.isDraft && (
-              <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                Draft
-              </span>
-            )}
-          </div>
-        </button>
+          )}
+          <LabelPills labels={pr.labels ?? []} onLabelClick={onLabelClick} />
+        </div>
+        <div className="mt-0.5 text-xs text-muted-foreground truncate">
+          <OpenedMeta
+            number={pr.number}
+            createdAt={pr.created_at}
+            author={pr.author?.login}
+          />
+        </div>
       </div>
+      <ContextLinkBadge matches={contextMatches} />
       <div className="shrink-0 flex items-center gap-1 self-center">
         <ItemActions
           label="PR"
@@ -476,6 +553,7 @@ export interface SecurityAlertItemProps {
   index: number
   isSelected: boolean
   isCreating: boolean
+  contextMatches?: ContextLinkMatch[]
   isChecked?: boolean
   onCheckedChange?: (checked: boolean) => void
   onMouseEnter: () => void
@@ -489,6 +567,7 @@ export function SecurityAlertItem({
   index,
   isSelected,
   isCreating,
+  contextMatches,
   isChecked = false,
   onCheckedChange,
   onMouseEnter,
@@ -559,6 +638,7 @@ export function SecurityAlertItem({
           </span>
         </div>
       </button>
+      <ContextLinkBadge matches={contextMatches} />
       <div className="shrink-0 flex items-center gap-1 self-center">
         <ItemActions
           label="Alert"
@@ -582,6 +662,7 @@ export interface AdvisoryItemProps {
   index: number
   isSelected: boolean
   isCreating: boolean
+  contextMatches?: ContextLinkMatch[]
   isChecked?: boolean
   onCheckedChange?: (checked: boolean) => void
   onMouseEnter: () => void
@@ -595,6 +676,7 @@ export function AdvisoryItem({
   index,
   isSelected,
   isCreating,
+  contextMatches,
   isChecked = false,
   onCheckedChange,
   onMouseEnter,
@@ -669,6 +751,7 @@ export function AdvisoryItem({
           </span>
         </div>
       </button>
+      <ContextLinkBadge matches={contextMatches} />
       <div className="shrink-0 flex items-center gap-1 self-center">
         <ItemActions
           label="Advisory"

@@ -15,6 +15,15 @@ export function hasPendingSessionApproval(session: Session): boolean {
   )
 }
 
+function hasRunningReview(session: Session): boolean {
+  const results = session.review_results
+  return (
+    !!results &&
+    'reviews' in results &&
+    results.reviews.some(entry => entry.status === 'running')
+  )
+}
+
 /** Check if a session counts as "unread" — has unseen activity */
 export function isUnreadSession(session: Session): boolean {
   if (session.archived_at) return false
@@ -26,11 +35,12 @@ export function isUnreadSession(session: Session): boolean {
   // queues so reconnect/remote clients still surface them (issue #626).
   const isWaiting =
     session.waiting_for_input || hasPendingSessionApproval(session)
-  const isReviewing = session.is_reviewing
-  const hasReviewResults = !!session.review_results
+  // A running review job is not finished yet; surface it when it ends.
+  const hasReviewActivity =
+    !hasRunningReview(session) &&
+    (session.is_reviewing || !!session.review_results)
 
-  if (!hasFinishedRun && !isWaiting && !isReviewing && !hasReviewResults)
-    return false
+  if (!hasFinishedRun && !isWaiting && !hasReviewActivity) return false
 
   if (!session.last_opened_at) return true
   return session.last_opened_at < session.updated_at

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { useUIStore } from './ui-store'
 
 describe('Command Code CLI update modal', () => {
@@ -334,5 +334,88 @@ describe('MCP login context', () => {
       })
     useUIStore.getState().openCliLoginModal('codex', '/cli', ['login'])
     expect(useUIStore.getState().cliLoginModalMcpContext).toBeNull()
+  })
+})
+
+describe('mobile left sidebar closes when a surface opens over it', () => {
+  const desktopWidth = window.innerWidth
+
+  function setViewportWidth(width: number) {
+    Object.defineProperty(window, 'innerWidth', {
+      value: width,
+      configurable: true,
+      writable: true,
+    })
+  }
+
+  beforeEach(() => {
+    useUIStore.setState({
+      leftSidebarVisible: true,
+      sessionChatModalOpen: false,
+      sessionChatModalWorktreeId: null,
+      newWorktreeModalOpen: false,
+      preferencesOpen: false,
+      preferencesPane: null,
+    })
+  })
+
+  afterEach(() => {
+    setViewportWidth(desktopWidth)
+  })
+
+  it.each([
+    [
+      'session chat modal',
+      () => useUIStore.getState().setSessionChatModalOpen(true, 'wt-1'),
+    ],
+    [
+      'new worktree modal',
+      () => useUIStore.getState().setNewWorktreeModalOpen(true),
+    ],
+    ['preferences', () => useUIStore.getState().setPreferencesOpen(true)],
+    [
+      'preferences pane',
+      () => useUIStore.getState().openPreferencesPane('general'),
+    ],
+    ['preferences toggle', () => useUIStore.getState().togglePreferences()],
+  ])('closes it on mobile when opening the %s', (_, open) => {
+    setViewportWidth(390)
+
+    open()
+
+    expect(useUIStore.getState().leftSidebarVisible).toBe(false)
+  })
+
+  it('keeps it open on desktop', () => {
+    setViewportWidth(1280)
+
+    useUIStore.getState().setSessionChatModalOpen(true, 'wt-1')
+    useUIStore.getState().setNewWorktreeModalOpen(true)
+    useUIStore.getState().openPreferencesPane('general')
+
+    expect(useUIStore.getState().leftSidebarVisible).toBe(true)
+    expect(useUIStore.getState().sessionChatModalOpen).toBe(true)
+    expect(useUIStore.getState().sessionChatModalWorktreeId).toBe('wt-1')
+  })
+
+  it('keeps it open on mobile when a surface closes', () => {
+    setViewportWidth(390)
+    useUIStore.setState({ sessionChatModalOpen: true })
+
+    useUIStore.getState().setSessionChatModalOpen(false)
+    useUIStore.getState().setNewWorktreeModalOpen(false)
+    useUIStore.getState().setPreferencesOpen(false)
+
+    expect(useUIStore.getState().leftSidebarVisible).toBe(true)
+  })
+
+  it('does not notify subscribers when reopening an already-open modal', () => {
+    setViewportWidth(1280)
+    useUIStore.getState().setSessionChatModalOpen(true, 'wt-1')
+    const before = useUIStore.getState()
+
+    useUIStore.getState().setSessionChatModalOpen(true, 'wt-1')
+
+    expect(useUIStore.getState()).toBe(before)
   })
 })

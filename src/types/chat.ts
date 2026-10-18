@@ -66,6 +66,31 @@ export type Backend =
 export type ExecutionMode = 'plan' | 'build' | 'yolo' | 'supervised' | 'auto'
 export type PermissionMode = Exclude<ExecutionMode, 'plan'>
 
+/**
+ * Full argument bundle passed to the `send_chat_message` mutation. Captured per
+ * session so a background re-send (e.g. auto-continue after a usage limit
+ * resets) can replay the exact send without the active-session UI.
+ */
+export interface SendMessageArgs {
+  sessionId: string
+  worktreeId: string
+  worktreePath: string
+  message: string
+  model?: string
+  executionMode?: ExecutionMode
+  thinkingLevel?: ThinkingLevel
+  effortLevel?: EffortLevel
+  parallelExecutionPrompt?: string
+  aiLanguage?: string
+  allowedTools?: string[]
+  mcpConfig?: string
+  chromeEnabled?: boolean
+  customProfileName?: string
+  backend?: string
+  /** When false, skip the end-of-turn recap instruction. */
+  includeRecap?: boolean
+}
+
 export function getSupportedPermissionModes(
   backend: Backend | undefined
 ): PermissionMode[] {
@@ -157,6 +182,8 @@ export interface SubagentUsage {
   total_tokens: number
   tool_uses: number
   duration_ms: number
+  /** Model the subagent runs on (e.g. `claude-opus-5-5`) */
+  model?: string
 }
 
 export interface PlanStep {
@@ -1331,7 +1358,7 @@ export interface SubAgent {
   status: 'in_progress' | 'completed' | 'errored' | 'interrupted'
   /** Completion message from agents_states */
   message?: string
-  /** Bold label before the prompt (e.g. Claude subagent_type) */
+  /** Bold label before the prompt (e.g. Claude subagent model or type) */
   label?: string
   /** Number of tool calls the agent made (Claude only) */
   toolCount?: number

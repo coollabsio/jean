@@ -2,6 +2,7 @@ import React from 'react'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { usePreferences, usePatchPreferences } from '@/services/preferences'
+import { useUIStore } from '@/store/ui-store'
 import { SettingsSection } from '../SettingsSection'
 
 const InlineField: React.FC<{
@@ -44,6 +45,25 @@ export const ExperimentalPane: React.FC = () => {
             checked={preferences?.debug_mode_enabled ?? false}
             onCheckedChange={checked => {
               patchPreferences.mutate({ debug_mode_enabled: checked })
+            }}
+          />
+        </InlineField>
+      </SettingsSection>
+
+      <SettingsSection
+        title="Agents"
+        anchorId="pref-experimental-section-agents"
+      >
+        <InlineField
+          label="Enable agents"
+          description="Show the Agents tab with Jean, the coordinator agent that manages all your projects"
+        >
+          <Switch
+            checked={preferences?.agents_enabled ?? false}
+            onCheckedChange={checked => {
+              patchPreferences.mutate({ agents_enabled: checked })
+              // Leave the Agents page when the feature is turned off
+              if (!checked) useUIStore.getState().setRailSection('workspace')
             }}
           />
         </InlineField>

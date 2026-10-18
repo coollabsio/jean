@@ -6,16 +6,18 @@ import {
   applyEdit,
   patchFromEdits,
   reconstructFileStates,
+  extractFilePatch,
   type EditTool,
 } from './MessageDiffModal'
 import { useState, type ReactNode } from 'react'
 import userEvent from '@testing-library/user-event'
-import { invoke } from '@/lib/transport'
+import { invoke, invokeForOptionalServer } from '@/lib/transport'
 
 let tauriAvailable = false
 let editorAvailable = false
 let mobile = false
 let mockFileContent: string | undefined = undefined
+let mockCheckpointRawPatch = ''
 
 vi.mock('@/hooks/use-theme', () => ({
   useTheme: () => ({ theme: 'light' }),
@@ -39,18 +41,28 @@ vi.mock('@/lib/environment', () => ({
   canOpenInEditor: () => editorAvailable,
 }))
 
-vi.mock('@/lib/transport', () => ({
-  invoke: vi.fn(async (cmd: string) => {
+vi.mock('@/lib/transport', () => {
+  const invoke = vi.fn(async (cmd: string, _args?: unknown) => {
     if (cmd === 'read_file_content') {
       if (mockFileContent === undefined) {
         throw new Error('file content not mocked')
       }
       return mockFileContent
     }
+    if (cmd === 'get_ai_checkpoint_diff') {
+      return { raw_patch: mockCheckpointRawPatch, files: [] }
+    }
     if (cmd === 'open_file_in_default_app') return undefined
     throw new Error(`unexpected invoke: ${cmd}`)
-  }),
-}))
+  })
+  return {
+    invoke,
+    invokeForOptionalServer: vi.fn(
+      (_serverId: string | undefined, cmd: string, args?: unknown) =>
+        invoke(cmd, args)
+    ),
+  }
+})
 
 vi.mock('@pierre/diffs/react', () => ({
   FileDiff: ({ fileDiff }: { fileDiff: unknown }) => {
@@ -198,6 +210,115 @@ describe('patchFromEdits', () => {
     expect(raw).toBeTruthy()
     expect(raw).toContain('-alpha')
     expect(raw).toContain('-beta')
+  })
+})
+
+describe('extractFilePatch', () => {
+  const raw = [
+    'diff --git a/deploy/nginx.conf b/deploy/nginx.conf',
+    '--- a/deploy/nginx.conf',
+    '+++ b/deploy/nginx.conf',
+    '@@ -1 +1 @@',
+    '-a',
+    '+b',
+    'diff --git a/nginx.conf b/nginx.conf',
+    '--- a/nginx.conf',
+    '+++ b/nginx.conf',
+    '@@ -1 +1 @@',
+    '-c',
+    '+d',
+    '',
+  ].join('\n')
+
+  it('returns only the section of the requested file', () => {
+    const section = extractFilePatch(raw, 'nginx.conf')
+    expect(section).toContain('+d')
+    expect(section).not.toContain('+b')
+    expect(extractFilePatch(raw, 'deploy/nginx.conf')).toContain('+b')
+  })
+
+  it('returns null when the file is not in the patch', () => {
+    expect(extractFilePatch(raw, 'missing.txt')).toBeNull()
+  })
+})
+
+describe('MessageDiffModal file source', () => {
+  beforeEach(() => {
+    vi.mocked(invoke).mockClear()
+    vi.mocked(invokeForOptionalServer).mockClear()
+    mockFileContent = undefined
+    mockCheckpointRawPatch = ''
+  })
+
+  it('reads the file from the server that owns it', async () => {
+    mockFileContent = 'const a = 2\n'
+    render(
+      <MessageDiffModal
+        isOpen
+        onClose={vi.fn()}
+        filePath="/repo/a.ts"
+        worktreePath="/repo"
+        edits={[
+          {
+            name: 'Edit',
+            input: {
+              file_path: '/repo/a.ts',
+              old_string: 'const a = 1',
+              new_string: 'const a = 2',
+            },
+          },
+        ]}
+        serverId="devserver"
+      />
+    )
+
+    expect(await screen.findByTestId('file-diff')).toBeInTheDocument()
+    expect(invokeForOptionalServer).toHaveBeenCalledWith(
+      'devserver',
+      'read_file_content',
+      { path: '/repo/a.ts' }
+    )
+  })
+
+  it('shows the turn checkpoint diff for a file changed without file tools', async () => {
+    mockCheckpointRawPatch = [
+      'diff --git a/other.ts b/other.ts',
+      '--- a/other.ts',
+      '+++ b/other.ts',
+      '@@ -1 +1 @@',
+      '-x',
+      '+y',
+      'diff --git a/deploy/nginx.conf b/deploy/nginx.conf',
+      '--- a/deploy/nginx.conf',
+      '+++ b/deploy/nginx.conf',
+      '@@ -1,1 +1,2 @@',
+      ' listen 80;',
+      '+return 301;',
+      '',
+    ].join('\n')
+    render(
+      <MessageDiffModal
+        isOpen
+        onClose={vi.fn()}
+        filePath="/repo/deploy/nginx.conf"
+        worktreePath="/repo"
+        edits={[]}
+        checkpointDiff={{
+          worktreeId: 'wt-1',
+          checkpointId: 'cp-1',
+          path: 'deploy/nginx.conf',
+        }}
+      />
+    )
+
+    const diff = await screen.findByTestId('file-diff')
+    expect(diff.textContent).toContain('return 301;')
+    expect(diff.textContent).not.toContain('other.ts')
+    expect(screen.getByText('+1')).toBeVisible()
+    expect(invoke).not.toHaveBeenCalledWith(
+      'read_file_content',
+      expect.anything()
+    )
   })
 })
 

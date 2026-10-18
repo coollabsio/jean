@@ -194,9 +194,16 @@ const AgentItem = memo(function AgentItem({
               isDone && 'text-muted-foreground/70'
             )}
           >
-            {agent.label && !isMobile && (
+            {agent.label && (
               <>
-                <span className="shrink-0 font-semibold">{agent.label}</span>
+                <span
+                  className={cn(
+                    'font-semibold',
+                    isMobile ? 'max-w-24 truncate' : 'shrink-0'
+                  )}
+                >
+                  {agent.label}
+                </span>
                 <span className="shrink-0 text-muted-foreground/60">›</span>
               </>
             )}

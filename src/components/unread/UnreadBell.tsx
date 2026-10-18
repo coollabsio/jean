@@ -385,9 +385,10 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
 
       // Queue auto-open via store so it survives lazy-mount + Suspense + remount.
       // ProjectCanvasView consumes pendingAutoOpenSessionIds in its own effect.
-      useUIStore
-        .getState()
-        .markWorktreeForAutoOpenSession(item.worktreeId, item.session.id)
+      const ui = useUIStore.getState()
+      ui.markWorktreeForAutoOpenSession(item.worktreeId, item.session.id)
+      // Leave the Agents page so the project canvas can open the session
+      ui.setRailSection('workspace')
 
       // Mark read AFTER auto-open is queued so unreadCount->0 unmount can't race
       // the modal-open path. Bell popover closes via the unreadCount===0 check.

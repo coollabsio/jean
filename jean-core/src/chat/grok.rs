@@ -4090,6 +4090,10 @@ fn spawn_grok_acp_connection(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     cmd.env("JEAN_SESSION_ID", jean_session_id);
+    cmd.env(
+        crate::agent_browser::SESSION_ENV,
+        crate::agent_browser::session_name(jean_session_id),
+    );
     cmd.env("JEAN_WORKTREE_ID", worktree_id);
     let (depth_key, depth_val) = super::jean_mcp::child_depth_env();
     cmd.env(depth_key, depth_val);

@@ -19,6 +19,7 @@ import { useAllBackendSkills } from '@/services/skills'
 import type { ClaudeSkill, ClaudeCommand, PendingSkill } from '@/types/chat'
 import type { CliBackend } from '@/types/preferences'
 import { cn } from '@/lib/utils'
+import { BOTTOM_UP_LIST_CLASS } from './mention-list'
 import { generateId } from '@/lib/uuid'
 import { fuzzySearchItems } from '@/lib/fuzzy-search'
 import { getBackendLabel } from '@/components/ui/backend-label'
@@ -206,11 +207,14 @@ export function SlashPopover({
 
   useImperativeHandle(handleRef, () => {
     return {
+      // List renders bottom-up: ArrowUp moves to the next (worse) match.
       moveUp: () => {
-        setSelectedIndex(i => Math.max(i - 1, 0))
+        setSelectedIndex(i =>
+          Math.min(i + 1, Math.max(0, filteredItems.length - 1))
+        )
       },
       moveDown: () => {
-        setSelectedIndex(i => Math.min(i + 1, filteredItems.length - 1))
+        setSelectedIndex(i => Math.max(i - 1, 0))
       },
       selectCurrent: () => {
         selectHighlighted()
@@ -271,7 +275,10 @@ export function SlashPopover({
         onCloseAutoFocus={e => e.preventDefault()}
       >
         <Command shouldFilter={false}>
-          <CommandList ref={listRef} className="max-h-[250px]">
+          <CommandList
+            ref={listRef}
+            className={cn('max-h-[250px]', BOTTOM_UP_LIST_CLASS)}
+          >
             {filteredItems.length === 0 ? (
               <CommandEmpty>
                 {triggerKind === 'skill'

@@ -1,9 +1,77 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@/test/test-utils'
-import { EditedFilesDisplay, getClaudeFileEdits } from './EditedFilesDisplay'
+import {
+  EditedFilesDisplay,
+  getClaudeFileEdits,
+  getUncoveredCheckpointFiles,
+} from './EditedFilesDisplay'
 import type { ChatMessage, ToolCall } from '@/types/chat'
+import type { AiCheckpoint } from '@/types/checkpoints'
 
 const diffModalMock = vi.hoisted(() => vi.fn())
+const checkpointsMock = vi.hoisted(() => ({ value: [] as unknown[] }))
+
+vi.mock('@/services/checkpoints', () => ({
+  checkpointQueryKeys: {
+    worktree: (worktreeId: string) => ['ai-checkpoints', worktreeId],
+  },
+  listAiCheckpoints: vi.fn(async () => checkpointsMock.value),
+}))
+
+function makeCheckpoint(overrides: Partial<AiCheckpoint> = {}): AiCheckpoint {
+  return {
+    id: 'cp-1',
+    worktreeId: 'wt-1',
+    sessionId: 's-1',
+    userMessageId: 'user-1',
+    userMessagePreview: 'fix nginx',
+    createdAt: 1,
+    startCommit: 'a',
+    endCommit: 'b',
+    worktreePath: '/repo',
+    status: 'finalized',
+    filesChanged: [
+      {
+        path: 'deploy/nginx.conf',
+        status: 'modified',
+        additions: 16,
+        deletions: 3,
+      },
+      { path: 'src/edited.ts', status: 'modified', additions: 1, deletions: 1 },
+    ],
+    totalAdditions: 17,
+    totalDeletions: 4,
+    ...overrides,
+  }
+}
+
+describe('getUncoveredCheckpointFiles', () => {
+  it('keeps only files no file tool call changed', () => {
+    expect(
+      getUncoveredCheckpointFiles(makeCheckpoint(), ['/repo/src/edited.ts'])
+    ).toEqual([
+      {
+        filePath: '/repo/deploy/nginx.conf',
+        path: 'deploy/nginx.conf',
+        additions: 16,
+        deletions: 3,
+      },
+    ])
+  })
+
+  it('treats relative tool paths as covered', () => {
+    expect(
+      getUncoveredCheckpointFiles(makeCheckpoint(), [
+        'deploy/nginx.conf',
+        'src/edited.ts',
+      ])
+    ).toEqual([])
+  })
+
+  it('returns nothing without a checkpoint', () => {
+    expect(getUncoveredCheckpointFiles(undefined, [])).toEqual([])
+  })
+})
 
 vi.mock('./MessageDiffModal', () => ({
   MessageDiffModal: (
@@ -17,6 +85,71 @@ vi.mock('./MessageDiffModal', () => ({
 describe('EditedFilesDisplay', () => {
   beforeEach(() => {
     diffModalMock.mockClear()
+    checkpointsMock.value = []
+  })
+
+  it('lists files the finished turn changed through Bash and opens their checkpoint diff', async () => {
+    checkpointsMock.value = [
+      makeCheckpoint({ id: 'other', userMessageId: 'user-0' }),
+      makeCheckpoint(),
+    ]
+    const toolCalls: ToolCall[] = [
+      {
+        id: 'edit-1',
+        name: 'Edit',
+        input: {
+          file_path: '/repo/src/edited.ts',
+          old_string: 'a',
+          new_string: 'b',
+        },
+      },
+      { id: 'bash-1', name: 'Bash', input: { command: 'sed -i ...' } },
+    ]
+
+    render(
+      <EditedFilesDisplay
+        toolCalls={toolCalls}
+        worktreePath="/repo"
+        worktreeId="wt-1"
+        turnUserMessageId="user-1"
+        serverId="devserver"
+      />
+    )
+
+    const trigger = await screen.findByRole('button', {
+      name: 'Edited 2 files',
+    })
+    fireEvent.click(trigger)
+    expect(screen.getByText('+16')).toBeVisible()
+    fireEvent.click(
+      screen.getByRole('button', { name: 'View changes to nginx.conf' })
+    )
+
+    expect(diffModalMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        filePath: '/repo/deploy/nginx.conf',
+        edits: [],
+        serverId: 'devserver',
+        checkpointDiff: {
+          worktreeId: 'wt-1',
+          checkpointId: 'cp-1',
+          path: 'deploy/nginx.conf',
+        },
+      })
+    )
+  })
+
+  it('does not add checkpoint files without a finished turn', () => {
+    checkpointsMock.value = [makeCheckpoint()]
+    render(
+      <EditedFilesDisplay
+        toolCalls={[{ id: 'bash-1', name: 'Bash', input: { command: 'x' } }]}
+        worktreeId="wt-1"
+      />
+    )
+    expect(
+      screen.queryByRole('button', { name: /Edited/ })
+    ).not.toBeInTheDocument()
   })
 
   it('renders Codex FileChange tool calls with file stats', () => {

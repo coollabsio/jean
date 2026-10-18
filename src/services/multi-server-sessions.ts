@@ -55,7 +55,7 @@ export async function loadUnreadSessionCountForServers(
   return counts.reduce((total, count) => total + count, 0)
 }
 
-function useSessionServerSources(): SessionServerSource[] {
+export function useSessionServerSources(): SessionServerSource[] {
   const native = isNativeApp()
   const connections = useRemoteConnections()
   const snapshots = useServerConnectionSnapshots()

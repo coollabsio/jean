@@ -1103,6 +1103,7 @@ async fn start_auto_fix_investigation(
         Some("auto_fix".to_string()),
         None,
         false,
+        None,
     )
     .await?;
 

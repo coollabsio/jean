@@ -1,5 +1,7 @@
 use super::coalesce::ChunkCoalescer;
-use super::run_log::{claude_subagent_usage, tool_result_content_to_string, tool_result_is_error};
+use super::run_log::{
+    apply_claude_subagent_usage, tool_result_content_to_string, tool_result_is_error,
+};
 use super::types::{
     is_claude_compaction_summary_text, CompactMetadata, ContentBlock, EffortLevel,
     PermissionDenial, PermissionDeniedEvent, SubagentUsage, ThinkingLevel, ToolCall, UsageData,
@@ -62,8 +64,7 @@ Always use ASD-STE100 Simplified Technical English when you talk to me.\n\
 - Do not re-run a passing check when the code it covers has not changed since.\n\
 - Write new tests only for behavior that can break silently: business logic, parsing/serialization, state transitions, persistence, and a regression test for each fixed bug.\n\
 - Do NOT write tests that only check DOM markup, CSS classes, snapshots, static text or prompt copy, constants, simple prop pass-through, library/framework behavior, or that only assert mocks were called. Verify UI changes in the running app instead.\n\
-- Before UI, HTTP, browser, or end-to-end verification, call Jean MCP `get_run_environments` and test against the returned url/port/command when a Run environment is available.\n\
-- For the current selected project, if there is no other browser testing method, use the Agent Browser when it is available.\n\
+- If a UI check needs a browser and no other browser tool is available, use the Agent Browser.\n\
 \n\
 ### 6. Demand Elegance (Balanced)\n\
 - For non-trivial changes: pause and ask \"is there a more elegant way?\"\n\
@@ -106,7 +107,7 @@ Always use ASD-STE100 Simplified Technical English when you talk to me.\n\
 ## Jean Run Environment\n\
 - When you need to test a running app (UI, HTTP, browser, smoke, e2e), call Jean MCP `get_run_environments` first (pass this worktreeId when known).\n\
 - If an environment is running, test against its `url`, port, and startup command. Do not guess localhost ports or start a second dev server when Jean already has one.\n\
-- If nothing is running and verification needs a live server, say so and use the returned/startup command rather than inventing a different command or port.\n\
+- If nothing is running and verification needs a live server, start it with Jean MCP `start_run_environment`. Do not start a dev server by hand. If no Run command is configured, say so; do not invent a command or port.\n\
 - In how-to-test notes, include the exact URL/port you used.\n\
 \n\
 ## Important!\n\
@@ -926,7 +927,8 @@ fn build_claude_args(
                             .unwrap_or(DEFAULT_GLOBAL_SYSTEM_PROMPT)
                             .to_string()
                     });
-                system_prompt_parts.push(prompt);
+                system_prompt_parts
+                    .push(crate::apply_agent_browser_preference(prompt, Some(&prefs)));
             }
         }
     }
@@ -1341,6 +1343,10 @@ fn build_claude_args(
 
     // Debug env vars
     env_vars.push(("JEAN_SESSION_ID".to_string(), session_id.to_string()));
+    env_vars.push((
+        crate::agent_browser::SESSION_ENV.to_string(),
+        crate::agent_browser::session_name(session_id),
+    ));
     env_vars.push(("JEAN_WORKTREE_ID".to_string(), worktree_id.to_string()));
     // Jean MCP recursion-depth chain. Always set so a Claude spawned by another
     // Jean-spawned Claude can be capped at the configured depth.
@@ -1892,20 +1898,15 @@ pub fn tail_claude_output(
                 flush_pending_chunks(app, session_id, worktree_id, &run_id, &mut chunk_coalescer);
             }
 
-            if let Some((tool_use_id, subagent_usage)) = claude_subagent_usage(&msg) {
-                if let Some(tc) = tool_calls.iter_mut().find(|t| t.id == tool_use_id) {
-                    if tc.subagent_usage.as_ref() != Some(&subagent_usage) {
-                        tc.subagent_usage = Some(subagent_usage.clone());
-                        let event = SubagentUsageEvent {
-                            session_id: session_id.to_string(),
-                            worktree_id: worktree_id.to_string(),
-                            tool_use_id,
-                            usage: subagent_usage,
-                        };
-                        if let Err(e) = app.emit_all("chat:subagent_usage", &event) {
-                            log::error!("Failed to emit subagent_usage: {e}");
-                        }
-                    }
+            if let Some((tool_use_id, usage)) = apply_claude_subagent_usage(&mut tool_calls, &msg) {
+                let event = SubagentUsageEvent {
+                    session_id: session_id.to_string(),
+                    worktree_id: worktree_id.to_string(),
+                    tool_use_id,
+                    usage,
+                };
+                if let Err(e) = app.emit_all("chat:subagent_usage", &event) {
+                    log::error!("Failed to emit subagent_usage: {e}");
                 }
             }
 
@@ -3436,8 +3437,10 @@ mod tests {
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("get_run_environments"));
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT
             .contains("test against its `url`, port, and startup command"));
-        assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("use the Agent Browser when it is available"));
-        assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("no other browser testing method"));
+        assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("start_run_environment"));
+        assert!(!DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("use the returned/startup command"));
+        assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT
+            .contains("no other browser tool is available, use the Agent Browser"));
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("VERY IMPORTANT: Keep Code Simple"));
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT
             .contains("Always implement the simplest maintainable solution"));

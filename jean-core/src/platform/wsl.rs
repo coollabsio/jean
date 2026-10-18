@@ -1041,6 +1041,11 @@ mod tests {
     #[cfg(not(windows))]
     #[test]
     fn test_wsl_aware_command_non_windows_ignores_enabled_config() {
+        if !crate::test_support::in_isolated_process(
+            "platform::wsl::tests::test_wsl_aware_command_non_windows_ignores_enabled_config",
+        ) {
+            return;
+        }
         init_wsl_config(true, "Ubuntu".to_string());
 
         let cwd = std::path::Path::new("/tmp");

@@ -4,6 +4,9 @@ export const MAX_IMAGE_SIZE = 10 * 1024 * 1024
 /** Maximum text-based attachment size in bytes (10MB) */
 export const MAX_TEXT_SIZE = 10 * 1024 * 1024
 
+/** Maximum other file attachment size in bytes (50MB, matches the backend) */
+export const MAX_FILE_SIZE = 50 * 1024 * 1024
+
 /** Allowed MIME types for raster image attachments */
 export const ALLOWED_IMAGE_TYPES = [
   'image/png',

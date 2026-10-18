@@ -142,7 +142,7 @@ const PLUGINS: PluginDefinition[] = [
     name: 'pstack',
     description:
       "Poteto's cross-backend engineering skill pack. Adds Poteto Mode, architecture and investigation workflows, TDD, concise writing, verification, and focused parallel work.",
-    githubUrl: 'https://github.com/cursor/plugins/tree/main/pstack',
+    githubUrl: 'https://github.com/michael-denyer/pstack-claude',
     scope: 'ai-backends',
     backends: [
       'Claude',
@@ -155,7 +155,7 @@ const PLUGINS: PluginDefinition[] = [
     ],
     usage: [
       {
-        note: 'Downloads the current pstack workflow skills from the Cursor plugins repository, then installs them into each backend path and Jean-global mirror. Jean omits the Cursor-only setup-pstack configuration skill.',
+        note: 'Uses the pstack-claude port of the Cursor pstack. Claude and Codex get the native pstack@pstack-claude plugin (skills, routing hook; Claude also gets subagents, Codex asks you to trust the hook via /hooks). Other backends, and Codex if its plugin install fails, get the skills copied into each backend path and Jean-global mirror, without setup-pstack.',
       },
       {
         label: 'Start rigorous engineering mode',

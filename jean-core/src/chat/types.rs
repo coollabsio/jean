@@ -399,6 +399,9 @@ pub struct SubagentUsage {
     pub total_tokens: u64,
     pub tool_uses: u64,
     pub duration_ms: u64,
+    /// Model the subagent runs on (e.g. `claude-opus-5-5`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 /// A permission denial when a tool requires approval
@@ -1170,6 +1173,23 @@ impl Default for SessionUnreadSummary {
     }
 }
 
+/// Review state counts as unread activity, but not while a review job is still
+/// running: the session must surface when the review finishes, not when it starts.
+fn has_review_unread_activity(
+    is_reviewing: bool,
+    review_results: Option<&serde_json::Value>,
+) -> bool {
+    let review_running = review_results
+        .and_then(|value| value.get("reviews"))
+        .and_then(|value| value.as_array())
+        .is_some_and(|reviews| {
+            reviews.iter().any(|entry| {
+                entry.get("status").and_then(|value| value.as_str()) == Some("running")
+            })
+        });
+    !review_running && (is_reviewing || review_results.is_some_and(|value| !value.is_null()))
+}
+
 impl SessionUnreadSummary {
     pub fn from_session(session: &Session) -> Self {
         let has_finished_run = matches!(
@@ -1190,11 +1210,10 @@ impl SessionUnreadSummary {
             has_unread_activity: has_finished_run
                 || session.waiting_for_input
                 || has_pending_approval
-                || session.is_reviewing
-                || session
-                    .review_results
-                    .as_ref()
-                    .is_some_and(|value| !value.is_null()),
+                || has_review_unread_activity(
+                    session.is_reviewing,
+                    session.review_results.as_ref(),
+                ),
         }
     }
 
@@ -1369,6 +1388,7 @@ impl SessionMetadata {
             .map(|run| run.ended_at.unwrap_or(run.started_at))
             .unwrap_or(self.created_at)
             .max(self.terminal_activity_at.unwrap_or(0))
+            .max(self.review_activity_at.unwrap_or(0))
     }
 
     /// Build the index-sized unread state without constructing a full Session.
@@ -1396,11 +1416,7 @@ impl SessionMetadata {
                 || self.waiting_for_input
                 || self.has_pending_plan_waiting()
                 || has_pending_approval
-                || self.is_reviewing
-                || self
-                    .review_results
-                    .as_ref()
-                    .is_some_and(|value| !value.is_null()),
+                || has_review_unread_activity(self.is_reviewing, self.review_results.as_ref()),
         }
     }
 
@@ -2030,6 +2046,10 @@ pub struct SessionMetadata {
     /// sessions have no Jean run entries, so this drives their freshness.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_activity_at: Option<u64>,
+    /// When a background review job last finished. Review jobs create no Jean
+    /// runs, so this drives their freshness and unread state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_activity_at: Option<u64>,
 
     /// Run history - each entry corresponds to one Claude CLI execution
     #[serde(default)]
@@ -2167,6 +2187,7 @@ impl SessionMetadata {
             terminal_command_args: vec![],
             terminal_label: None,
             terminal_activity_at: None,
+            review_activity_at: None,
             runs: vec![],
             scheduled_wakeup: None,
             version: 1,
@@ -2735,6 +2756,33 @@ mod tests {
         metadata.terminal_activity_at = Some(200);
 
         assert_eq!(metadata.to_session().updated_at, 200);
+    }
+
+    #[test]
+    fn review_job_is_unread_only_after_it_finishes() {
+        let mut metadata = SessionMetadata::new(
+            "session-1".to_string(),
+            "wt-1".to_string(),
+            "Code Review".to_string(),
+            0,
+        );
+        metadata.created_at = 100;
+        metadata.last_opened_at = Some(150);
+        metadata.is_reviewing = true;
+        metadata.review_results = Some(serde_json::json!({
+            "reviews": [{ "backend": "claude", "model": "opus", "status": "running" }]
+        }));
+        assert!(!metadata.to_unread_summary().has_unread_activity);
+
+        metadata.is_reviewing = false;
+        metadata.review_results = Some(serde_json::json!({
+            "reviews": [{ "backend": "claude", "model": "opus", "status": "completed" }]
+        }));
+        metadata.review_activity_at = Some(200);
+        let summary = metadata.to_unread_summary();
+        assert_eq!(summary.updated_at, 200);
+        assert!(summary.is_unread());
+        assert!(SessionUnreadSummary::from_session(&metadata.to_session()).is_unread());
     }
 
     #[test]
