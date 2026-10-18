@@ -175,10 +175,7 @@ export function AgentInbox({ agent }: { agent: AgentSummary }) {
         {isLoading ? (
           <AgentLoading label="Loading inbox…" />
         ) : unread.length === 0 && read.length === 0 ? (
-          <AgentEmpty
-            title="Nothing yet"
-            description="The agent sends results, questions, and errors here with notify_user."
-          />
+          <AgentEmpty title="No messages yet." />
         ) : unread.length > 0 ? (
           <AgentList>
             {unread.map(notification => (

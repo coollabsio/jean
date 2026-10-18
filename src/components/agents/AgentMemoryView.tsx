@@ -159,7 +159,10 @@ function MemoryRow({
             </div>
           </div>
         ) : (
-          <p className="whitespace-pre-wrap break-words text-sm text-foreground">
+          <p
+            className="whitespace-pre-wrap break-words text-sm text-foreground"
+            title={`Memory #${memory.id}`}
+          >
             {memory.content}
           </p>
         )}
@@ -180,9 +183,6 @@ function MemoryRow({
             <AgentBadge>Project {memory.projectId}</AgentBadge>
           )}
           {expired && <AgentBadge tone="danger">Expired</AgentBadge>}
-          <span className="text-[11px] text-muted-foreground/70">
-            #{memory.id}
-          </span>
         </div>
       </div>
       {!editing && (

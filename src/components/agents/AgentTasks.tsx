@@ -119,10 +119,7 @@ export function AgentTasks({
           title="Tasks"
           description="Routines, follow-ups, and agent requests run here, apart from your chat. Finished tasks are archived after 3 days."
         >
-          <AgentEmpty
-            title="No tasks"
-            description="Tasks appear when a routine runs, a subagent is spawned, or the agent follows up on work."
-          />
+          <AgentEmpty title="No tasks yet." />
         </AgentSection>
       ) : (
         <>

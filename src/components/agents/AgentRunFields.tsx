@@ -24,6 +24,7 @@ import {
   withDefaultReasoningOption,
   type AgentRunDraft,
 } from './agent-config'
+import { HelpTip } from './agent-ui'
 
 interface AgentRunFieldsProps {
   value: AgentRunDraft
@@ -83,7 +84,14 @@ export function AgentRunFields({
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-2">
         <div className="flex min-h-7 items-center justify-between gap-2">
-          <Label>{label}</Label>
+          <span className="flex items-center gap-1.5">
+            <Label>{label}</Label>
+            <HelpTip label="About backend and model">
+              {inherits
+                ? `Default uses the backend and model of ${inheritFrom}. Pick one to pin it.`
+                : 'Default model, effort, and thinking keep your saved choices for this backend.'}
+            </HelpTip>
+          </span>
           {!inherits && (
             <Button
               type="button"
@@ -161,29 +169,30 @@ export function AgentRunFields({
             />
           )}
         </div>
-        <p className="text-xs text-muted-foreground">
-          {value.backend === 'cursor'
-            ? 'Cursor has no Build mode, so wake-ups run in Yolo mode without approval prompts.'
-            : inherits
-              ? `Default uses the backend and model of ${inheritFrom}. Pick one to pin it.`
-              : 'Default model, effort, and thinking keep your saved choices for this backend.'}
-        </p>
+        {value.backend === 'cursor' && (
+          <p className="text-xs text-amber-700 dark:text-amber-400">
+            Cursor has no Build mode, so wake-ups run in Yolo mode without
+            approval prompts.
+          </p>
+        )}
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label>Skills</Label>
+        <span className="flex items-center gap-1.5">
+          <Label>Skills</Label>
+          <HelpTip label="About skills">
+            Selected skills are added to the agent prompt and to each wake-up,
+            the same way a skill attached in chat is. Jean lists the skills
+            already installed for each backend.
+          </HelpTip>
+        </span>
         {!local ? (
           <p className="text-xs text-muted-foreground">
-            Skills are listed only for agents on this machine.
-            {value.skills.length > 0
-              ? ` ${value.skills.length} saved skill${value.skills.length === 1 ? '' : 's'} stay selected.`
-              : ''}
+            Listed only for agents on this machine
+            {value.skills.length > 0 ? ` (${value.skills.length} saved)` : ''}.
           </p>
         ) : skills.length === 0 ? (
-          <p className="rounded-lg border border-dashed px-3 py-3 text-xs text-muted-foreground">
-            No skills discovered{value.backend ? ' for this backend' : ''}. Jean
-            lists the skills already installed for each backend.
-          </p>
+          <p className="text-xs text-muted-foreground">No skills installed.</p>
         ) : (
           <div className="max-h-48 divide-y divide-border/60 overflow-y-auto rounded-lg border">
             {skills.map(skill => {
@@ -221,10 +230,6 @@ export function AgentRunFields({
             })}
           </div>
         )}
-        <p className="text-xs text-muted-foreground">
-          Selected skills are added to the agent prompt and to each wake-up, the
-          same way a skill attached in chat is.
-        </p>
       </div>
     </div>
   )

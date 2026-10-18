@@ -276,7 +276,7 @@ function ScheduleRow({
             ? ` · last ran ${formatRelative(schedule.lastRunAt)}`
             : ''}
         </p>
-        <p className="mt-1 line-clamp-2 text-xs text-muted-foreground/80">
+        <p className="mt-1 truncate text-xs text-muted-foreground/80">
           {schedule.prompt}
         </p>
       </div>
@@ -400,11 +400,7 @@ export function AgentSchedules({ agent }: { agent: AgentSummary }) {
             ))}
           </AgentList>
         ) : form === null ? (
-          <AgentEmpty
-            title="No routines yet"
-            description="Run a prompt on a timer, a cron schedule, or when something happens in Jean, like a merged pull request."
-            action={newButton}
-          />
+          <AgentEmpty title="No routines yet." />
         ) : null}
       </AgentSection>
     </AgentTabBody>

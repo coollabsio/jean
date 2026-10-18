@@ -1,6 +1,12 @@
 import type { ReactNode } from 'react'
+import { Info } from '@/components/icons/reicon'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
 /** Scrolling body of an agent tab with one readable column. */
@@ -29,7 +35,33 @@ export function AgentTabBody({
   )
 }
 
-/** Section heading with an optional count, help text, and actions. */
+/** Info icon that shows help text on hover or focus instead of a paragraph. */
+export function HelpTip({
+  label,
+  children,
+}: {
+  label: string
+  children: ReactNode
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          className="inline-flex size-4 items-center justify-center rounded-full text-muted-foreground/70 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        >
+          <Info className="size-3.5" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-72 text-balance">
+        {children}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
+/** Section heading with an optional count, help tooltip, and actions. */
 export function AgentSection({
   title,
   count,
@@ -52,22 +84,22 @@ export function AgentSection({
       className={cn('flex flex-col gap-3', className)}
       data-testid={testId}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h3 className="flex items-center gap-2 text-sm font-medium text-foreground">
-            {title}
-            {count !== undefined && (
-              <Badge variant="muted" className="px-1.5 py-0 tabular-nums">
-                {count}
-              </Badge>
-            )}
-          </h3>
-          {description && (
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {description}
-            </p>
+      <div className="flex min-h-8 items-center justify-between gap-3">
+        <h3 className="flex min-w-0 items-center gap-2 text-sm font-medium text-foreground">
+          {title}
+          {count !== undefined && (
+            <Badge variant="muted" className="px-1.5 py-0 tabular-nums">
+              {count}
+            </Badge>
           )}
-        </div>
+          {description && (
+            <HelpTip
+              label={`About ${typeof title === 'string' ? title : 'this section'}`}
+            >
+              {description}
+            </HelpTip>
+          )}
+        </h3>
         {actions && (
           <div className="flex shrink-0 items-center gap-1.5">{actions}</div>
         )}
@@ -97,23 +129,18 @@ export function AgentList({
   )
 }
 
-/** Placeholder for an empty list. */
+/** One-line placeholder for an empty list. */
 export function AgentEmpty({
   title,
-  description,
   action,
 }: {
   title: ReactNode
-  description?: ReactNode
   action?: ReactNode
 }) {
   return (
-    <div className="flex flex-col items-center gap-1 rounded-lg border border-dashed px-4 py-6 text-center">
-      <p className="text-sm text-foreground">{title}</p>
-      {description && (
-        <p className="max-w-sm text-xs text-muted-foreground">{description}</p>
-      )}
-      {action && <div className="mt-2">{action}</div>}
+    <div className="flex items-center justify-center gap-3 rounded-lg border border-dashed px-4 py-4 text-center text-sm text-muted-foreground">
+      <span>{title}</span>
+      {action}
     </div>
   )
 }

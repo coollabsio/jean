@@ -24,6 +24,7 @@ import {
   AgentPanel,
   AgentSection,
   AgentTabBody,
+  HelpTip,
 } from './agent-ui'
 import {
   EMPTY_SUBAGENT_TYPE,
@@ -142,7 +143,15 @@ function TypeEditor({
             </NativeSelect>
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="subagent-tools">Tools</Label>
+            <span className="flex items-center gap-1.5">
+              <Label htmlFor="subagent-tools">Tools</Label>
+              <HelpTip label="About tools">
+                Read only limits the Jean tools to list, search, and notify. It
+                does not stop file edits or shell commands; use Plan for that.
+                Delete, push, and pull requests still need approval with all
+                tools.
+              </HelpTip>
+            </span>
             <NativeSelect
               id="subagent-tools"
               value={draft.toolMode}
@@ -158,11 +167,6 @@ function TypeEditor({
               ))}
             </NativeSelect>
           </div>
-          <p className="text-xs text-muted-foreground sm:col-span-2">
-            Read only limits the Jean tools to list, search, and notify. It does
-            not stop file edits or shell commands; use Plan for that. Delete,
-            push, and pull requests still need approval with all tools.
-          </p>
         </div>
         {attempted && error ? (
           <p className="text-xs text-destructive" role="alert">
@@ -382,21 +386,7 @@ export function AgentSubagentTypes({ agent }: { agent: AgentSummary }) {
             ))}
           </AgentList>
         ) : draft === null ? (
-          <AgentEmpty
-            title="No subagent types yet"
-            description="Create a type for work you hand off often, like drafting a changelog or investigating CI."
-            action={
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => setDraft(EMPTY_SUBAGENT_TYPE)}
-              >
-                <Plus />
-                New type
-              </Button>
-            }
-          />
+          <AgentEmpty title="No subagent types yet." />
         ) : null}
       </AgentSection>
     </AgentTabBody>

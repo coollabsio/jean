@@ -42,6 +42,7 @@ import {
   AgentNotice,
   AgentPanel,
   AgentSection,
+  HelpTip,
   SaveFooter,
 } from './agent-ui'
 
@@ -203,20 +204,11 @@ export function AgentConnectors({
               Could not list MCP servers: {String(servers.error)}
             </p>
           ) : !backend ? (
-            <AgentEmpty
-              title="No backend is pinned"
-              description="Pick a backend in Run configuration to list its MCP servers."
-            />
+            <AgentEmpty title="Pick a backend to list its MCP servers." />
           ) : !canDiscover ? (
-            <AgentEmpty
-              title="No MCP server list"
-              description="This backend has no MCP server list of its own. Jean does not show another CLI's servers here."
-            />
+            <AgentEmpty title="This backend has no MCP server list." />
           ) : servers.data && servers.data.length === 0 ? (
-            <AgentEmpty
-              title="No MCP servers found"
-              description="No MCP servers were discovered for this backend in the agent folder."
-            />
+            <AgentEmpty title="No MCP servers found." />
           ) : (
             <AgentList>
               {(servers.data ?? []).map(server => {
@@ -272,14 +264,14 @@ export function AgentConnectors({
         </div>
 
         <div className="flex flex-col gap-2 pt-2">
-          <h4 className="text-xs font-medium text-muted-foreground">
+          <h4 className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
             Jean tools
+            <HelpTip label="About Jean tools">
+              {tools === null
+                ? 'Every Jean tool is allowed, including tools added later. Turning one off saves an allowlist of the rest. Destructive tools still wait for your approval.'
+                : 'Only the tools left on can be called. Tools added later stay off until you allow them. claude_permission_prompt stays available so Claude can ask for permission.'}
+            </HelpTip>
           </h4>
-          <p className="text-xs text-muted-foreground">
-            {tools === null
-              ? 'Every Jean tool is allowed, including tools added later. Turning one off saves an allowlist of the rest. Destructive tools still wait for your approval.'
-              : 'Only the tools left on can be called. Tools added later stay off until you allow them. claude_permission_prompt stays available so Claude can ask for permission.'}
-          </p>
           {catalog.isLoading && <AgentLoading label="Loading Jean tools…" />}
           {catalog.isError && (
             <p className="text-xs text-destructive" role="alert">
