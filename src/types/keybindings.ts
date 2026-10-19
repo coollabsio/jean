@@ -207,7 +207,7 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
     action: 'close_session_or_worktree',
     label: 'Close session',
     description:
-      'Close the current session, or show project picker if last session',
+      'Close the current session, or the selected worktree when no session is open',
     default_shortcut: 'mod+w',
     category: 'chat',
   },

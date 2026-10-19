@@ -229,3 +229,13 @@ describe('eventToShortcutString', () => {
     expect(Object.fromEntries(definitions)).toEqual(DEFAULT_KEYBINDINGS)
   })
 })
+
+describe('close session keybinding description', () => {
+  it('describes the current close behavior instead of the old project picker', () => {
+    const definition = KEYBINDING_DEFINITIONS.find(
+      d => d.action === 'close_session_or_worktree'
+    )
+    expect(definition?.description).not.toMatch(/project picker/i)
+    expect(definition?.description).toMatch(/selected worktree/)
+  })
+})
