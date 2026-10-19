@@ -211,6 +211,10 @@ pub struct AppPreferences {
     pub font_weight: String, // Overall font weight: light, normal, medium
     #[serde(default = "default_keybindings")]
     pub keybindings: std::collections::HashMap<String, String>, // User-configurable keyboard shortcuts
+    /// One-shot keybinding migrations already applied. Client-local; kept here
+    /// so a preferences round-trip does not drop the marker.
+    #[serde(default)]
+    pub applied_keybinding_migrations: Vec<String>,
     #[serde(default = "default_archive_retention_days")]
     pub archive_retention_days: u32, // Days to keep archived items before auto-cleanup (0 = disabled)
     #[serde(default = "default_syntax_theme_dark")]
@@ -2778,6 +2782,7 @@ impl Default for AppPreferences {
             chat_font: default_chat_font(),
             font_weight: default_font_weight(),
             keybindings: default_keybindings(),
+            applied_keybinding_migrations: Vec::new(),
             archive_retention_days: default_archive_retention_days(),
             syntax_theme_dark: default_syntax_theme_dark(),
             syntax_theme_light: default_syntax_theme_light(),
@@ -3521,6 +3526,7 @@ const CLIENT_ONLY_PREFERENCE_KEYS: &[&str] = &[
     "chat_font",
     "font_weight",
     "keybindings",
+    "applied_keybinding_migrations",
     "syntax_theme_dark",
     "syntax_theme_light",
     "compact_chat_view_enabled",

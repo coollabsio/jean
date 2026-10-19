@@ -30,9 +30,15 @@ preferences pane.
 | `previous_worktree`         | `Cmd+Alt+Up`      | Switch to previous worktree             |
 | `cycle_execution_mode`      | `Shift+Tab`       | Cycle through Plan/Build/Yolo modes     |
 | `approve_plan`              | `Cmd+Enter`       | Approve plan or answer question         |
+| `approve_plan_yolo`         | `Cmd+Shift+Alt+Y` | Approve the current plan with Full access |
 | `restore_last_archived`     | `Cmd+Shift+Alt+T` | Restore most recently archived item     |
 
 **Note:** `Cmd` on Mac, `Ctrl` on Windows/Linux.
+
+Full access approval stays on `Y`, matching the other Full access chords
+(`Cmd+Shift+Y` clears context, `Cmd+Alt+Y` approves into a new worktree). The
+plain chord is `Cmd+Shift+Alt+Y` so `Cmd+Y` / `Ctrl+Y` stays redo in a focused
+text field on Windows and Linux. macOS redo remains `Cmd+Shift+Z`.
 
 `Cmd+Left`/`Cmd+Right` switch session tabs only when the focused text field is
 empty; otherwise they move the caret as usual.
@@ -211,6 +217,13 @@ function migrateKeybindings(
 ```
 
 **Key insight:** This pattern preserves user customizations while updating defaults. If a user explicitly chose `mod+1`, they keep it. If they were using the old default, they get the new one.
+
+`approve_plan_yolo` moved from `mod+y` to `mod+shift+alt+y` as a one-shot
+migration (`approve_plan_yolo_mod_y` in `applied_keybinding_migrations`). The
+first load rewrites a stored `mod+y` and records the id. A later save of
+`mod+y` is kept. Any other custom chord is left untouched. The repeating
+`MIGRATED_KEYBINDINGS` list is not used for this change, because a value on
+that list is rewritten on every load.
 
 ## Persistence
 

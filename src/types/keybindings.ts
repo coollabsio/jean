@@ -82,7 +82,9 @@ export const DEFAULT_KEYBINDINGS: KeybindingsMap = {
   new_worktree: 'mod+n',
   cycle_execution_mode: 'shift+tab',
   approve_plan: 'mod+enter',
-  approve_plan_yolo: 'mod+y',
+  // Full access stays on Y, with the clear-context (shift) and worktree (alt)
+  // variants. Bare mod+y is redo in text fields on Windows and Linux (#777).
+  approve_plan_yolo: 'mod+shift+alt+y',
   approve_plan_clear_context: 'mod+shift+y',
   approve_plan_clear_context_build: 'mod+shift+enter',
   approve_plan_worktree_build: 'mod+alt+enter',
@@ -230,7 +232,7 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
     action: 'approve_plan_yolo',
     label: 'Approve plan (Full access)',
     description: 'Approve the current plan with Full access',
-    default_shortcut: 'mod+y',
+    default_shortcut: 'mod+shift+alt+y',
     category: 'chat',
   },
   {

@@ -14,6 +14,8 @@ import {
   usePatchPreferences,
   useSavePreferences,
   preferencesQueryKeys,
+  applyOneShotKeybindingMigrations,
+  loadPreferencesForServer,
 } from './preferences'
 import { AppearancePane } from '@/components/preferences/panes/AppearancePane'
 import type { AppPreferences } from '@/types/preferences'
@@ -42,7 +44,11 @@ import {
   defaultPreferences,
 } from '@/types/preferences'
 import { DEFAULT_KEYBINDINGS } from '@/types/keybindings'
-import { clearClientPreferencesForTests } from '@/lib/client-preferences'
+import {
+  clearClientPreferencesForTests,
+  updateClientPreferences,
+} from '@/lib/client-preferences'
+import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import { SettingsTargetProvider } from '@/lib/settings-target'
 
 vi.mock('@/lib/transport', () => ({
@@ -313,6 +319,36 @@ describe('model option helpers', () => {
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).not.toContain(
       'GitHub Issue and Discussion Discovery'
     )
+  })
+})
+
+describe('applyOneShotKeybindingMigrations', () => {
+  it('rewrites only the old Full access default', () => {
+    const result = applyOneShotKeybindingMigrations(
+      {
+        ...DEFAULT_KEYBINDINGS,
+        approve_plan_yolo: 'mod+y',
+        toggle_zen_mode: 'mod+alt+z',
+      },
+      []
+    )
+
+    expect(result.keybindings.approve_plan_yolo).toBe('mod+shift+alt+y')
+    expect(result.keybindings.toggle_zen_mode).toBe('mod+alt+z')
+    expect(result.persist).toBe(true)
+  })
+
+  it('keeps mod+y after the migration id is recorded', () => {
+    const result = applyOneShotKeybindingMigrations(
+      {
+        ...DEFAULT_KEYBINDINGS,
+        approve_plan_yolo: 'mod+y',
+      },
+      ['approve_plan_yolo_mod_y']
+    )
+
+    expect(result.keybindings.approve_plan_yolo).toBe('mod+y')
+    expect(result.persist).toBe(false)
   })
 })
 
@@ -753,6 +789,49 @@ describe('preferences service', () => {
       )
       expect(Object.keys(result.current.data?.keybindings ?? {})).toHaveLength(
         Object.keys(DEFAULT_KEYBINDINGS).length
+      )
+    })
+
+    it('migrates a stored Full access mod+y once and then keeps an explicit mod+y', async () => {
+      const { invoke } = await import('@/lib/transport')
+      vi.mocked(invoke).mockResolvedValue({
+        keybindings: {
+          approve_plan_yolo: 'mod+y',
+          toggle_zen_mode: 'mod+alt+z',
+        },
+      })
+
+      const first = await loadPreferencesForServer(LOCAL_SERVER_ID)
+      expect(first.keybindings.approve_plan_yolo).toBe('mod+shift+alt+y')
+      expect(first.keybindings.toggle_zen_mode).toBe('mod+alt+z')
+      expect(first.applied_keybinding_migrations).toContain(
+        'approve_plan_yolo_mod_y'
+      )
+
+      updateClientPreferences({
+        keybindings: {
+          ...first.keybindings,
+          approve_plan_yolo: 'mod+y',
+        },
+      })
+
+      const second = await loadPreferencesForServer(LOCAL_SERVER_ID)
+      expect(second.keybindings.approve_plan_yolo).toBe('mod+y')
+      expect(second.keybindings.toggle_zen_mode).toBe('mod+alt+z')
+    })
+
+    it('leaves a custom Full access chord in place while recording the migration', async () => {
+      const { invoke } = await import('@/lib/transport')
+      vi.mocked(invoke).mockResolvedValue({
+        keybindings: {
+          approve_plan_yolo: 'mod+shift+l',
+        },
+      })
+
+      const loaded = await loadPreferencesForServer(LOCAL_SERVER_ID)
+      expect(loaded.keybindings.approve_plan_yolo).toBe('mod+shift+l')
+      expect(loaded.applied_keybinding_migrations).toContain(
+        'approve_plan_yolo_mod_y'
       )
     })
 

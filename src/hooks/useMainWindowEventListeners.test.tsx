@@ -1098,8 +1098,105 @@ describe('text editing shortcuts in editable fields', () => {
     const div = document.createElement('div')
     expect(shouldLetEditableHandleShortcut('mod+shift+z', input)).toBe(true)
     expect(shouldLetEditableHandleShortcut('mod+z', input)).toBe(true)
+    expect(shouldLetEditableHandleShortcut('mod+y', input)).toBe(true)
     expect(shouldLetEditableHandleShortcut('mod+shift+z', div)).toBe(false)
+    expect(shouldLetEditableHandleShortcut('mod+y', div)).toBe(false)
     expect(shouldLetEditableHandleShortcut('mod+l', input)).toBe(false)
+  })
+
+  function pressFullAccess(
+    target: HTMLElement,
+    shiftAlt = false
+  ): KeyboardEvent {
+    const event = new KeyboardEvent('keydown', {
+      key: 'y',
+      code: 'KeyY',
+      ctrlKey: true,
+      shiftKey: shiftAlt,
+      altKey: shiftAlt,
+      bubbles: true,
+      cancelable: true,
+    })
+    target.dispatchEvent(event)
+    return event
+  }
+
+  it('does not treat Ctrl+Y as Full access outside a text field', () => {
+    const onApprove = vi.fn()
+    window.addEventListener('approve-plan-yolo', onApprove)
+    const { unmount } = renderListeners()
+
+    const event = pressFullAccess(document.body)
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(onApprove).not.toHaveBeenCalled()
+    unmount()
+    window.removeEventListener('approve-plan-yolo', onApprove)
+  })
+
+  it('leaves a custom Ctrl+Y binding to a focused text field', () => {
+    const queryClient = new QueryClient()
+    queryClient.setQueryData(['preferences'], {
+      keybindings: {
+        ...DEFAULT_KEYBINDINGS,
+        approve_plan_yolo: 'mod+y',
+      },
+    })
+    const textarea = document.createElement('textarea')
+    document.body.appendChild(textarea)
+    textarea.focus()
+    const onApprove = vi.fn()
+    window.addEventListener('approve-plan-yolo', onApprove)
+    const { unmount } = renderHook(() => useMainWindowEventListeners(), {
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={queryClient}>
+          {children}
+        </QueryClientProvider>
+      ),
+    })
+
+    const outside = pressFullAccess(document.body)
+    expect(outside.defaultPrevented).toBe(true)
+    expect(onApprove).toHaveBeenCalledTimes(1)
+    onApprove.mockClear()
+
+    const event = pressFullAccess(textarea)
+    expect(event.defaultPrevented).toBe(false)
+    expect(onApprove).not.toHaveBeenCalled()
+    unmount()
+    window.removeEventListener('approve-plan-yolo', onApprove)
+  })
+
+  it('leaves Ctrl+Y to a focused text field instead of approving Full access', () => {
+    const textarea = document.createElement('textarea')
+    document.body.appendChild(textarea)
+    textarea.focus()
+    const onApprove = vi.fn()
+    window.addEventListener('approve-plan-yolo', onApprove)
+    const { unmount } = renderListeners()
+
+    const event = pressFullAccess(textarea)
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(onApprove).not.toHaveBeenCalled()
+    unmount()
+    window.removeEventListener('approve-plan-yolo', onApprove)
+  })
+
+  it('approves Full access from the shifted chord, including inside a text field', () => {
+    const textarea = document.createElement('textarea')
+    document.body.appendChild(textarea)
+    textarea.focus()
+    const onApprove = vi.fn()
+    window.addEventListener('approve-plan-yolo', onApprove)
+    const { unmount } = renderListeners()
+
+    const event = pressFullAccess(textarea, true)
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(onApprove).toHaveBeenCalledTimes(1)
+    unmount()
+    window.removeEventListener('approve-plan-yolo', onApprove)
   })
 })
 

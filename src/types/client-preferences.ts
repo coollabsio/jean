@@ -14,6 +14,7 @@ export const CLIENT_PREFERENCE_KEYS = [
   'chat_font',
   'font_weight',
   'keybindings',
+  'applied_keybinding_migrations',
   'syntax_theme_dark',
   'syntax_theme_light',
   'compact_chat_view_enabled',

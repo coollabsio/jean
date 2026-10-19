@@ -89,7 +89,11 @@ export function shouldLetPlanDialogHandleAction(
 }
 
 /** Native undo/redo chords, owned by focused text fields (issue #777). */
-const TEXT_EDITING_SHORTCUTS = new Set(['mod+z', 'mod+shift+z'])
+const TEXT_EDITING_SHORTCUTS = new Set([
+  'mod+z',
+  'mod+shift+z', // Redo on macOS
+  'mod+y', // Redo on Windows and Linux
+])
 
 export function shouldLetEditableHandleShortcut(
   shortcut: string,

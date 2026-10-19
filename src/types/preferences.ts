@@ -1325,6 +1325,8 @@ export interface AppPreferences {
   /** Overall text weight ladder: light | normal | medium (default normal) */
   font_weight?: FontWeight
   keybindings: KeybindingsMap // User-configurable keyboard shortcuts
+  /** One-shot keybinding migrations already applied for this client. */
+  applied_keybinding_migrations?: string[]
   archive_retention_days: number // Days to keep archived items (0 = never delete)
   syntax_theme_dark: SyntaxTheme // Syntax highlighting theme for dark mode
   syntax_theme_light: SyntaxTheme // Syntax highlighting theme for light mode
@@ -2500,6 +2502,7 @@ export const defaultPreferences: AppPreferences = {
   chat_font: 'geist',
   font_weight: FONT_WEIGHT_DEFAULT,
   keybindings: DEFAULT_KEYBINDINGS,
+  applied_keybinding_migrations: [],
   archive_retention_days: 7,
   syntax_theme_dark: 'vitesse-black',
   syntax_theme_light: 'github-light',

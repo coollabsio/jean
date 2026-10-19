@@ -53,6 +53,13 @@ function normalize(
   next.close_confirm_bypass_modifier = resolveCloseConfirmBypassModifier(
     next.close_confirm_bypass_modifier
   )
+  next.applied_keybinding_migrations = Array.isArray(
+    next.applied_keybinding_migrations
+  )
+    ? next.applied_keybinding_migrations.filter(
+        (id): id is string => typeof id === 'string'
+      )
+    : []
   return next
 }
 
