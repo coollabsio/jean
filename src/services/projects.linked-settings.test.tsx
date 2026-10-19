@@ -12,6 +12,7 @@ vi.mock('@/lib/transport', () => ({
 
 vi.mock('@/lib/environment', () => ({
   hasBackend: () => true,
+  hasBackendTransport: () => true,
   isNativeApp: () => isNativeApp(),
 }))
 

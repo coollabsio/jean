@@ -566,13 +566,7 @@ fn build_kimi_system_prompt(
             }
         }
     }
-    let gh_binary = crate::gh_cli::config::resolve_gh_binary(app);
-    if gh_binary != std::path::PathBuf::from("gh") {
-        parts.push(format!(
-            "When running GitHub CLI commands, use this binary: {}. Do not use bare `gh`.",
-            gh_binary.display()
-        ));
-    }
+    crate::gh_cli::config::append_gh_cli_system_prompt(&mut parts, app);
     if super::should_include_recap_instruction(app, include_recap) {
         parts.push(super::RECAP_INSTRUCTION.to_string());
     }
@@ -4085,15 +4079,11 @@ pub async fn send_chat_message(
                         }
                     }
 
-                    // Embedded binary path hints
-                    let gh_binary = crate::gh_cli::config::resolve_gh_binary(&thread_app);
-                    if gh_binary != std::path::PathBuf::from("gh") {
-                        system_prompt_parts.push(format!(
-                            "When running GitHub CLI commands, use the full path to the embedded binary: {}\n\
-                             Do NOT use bare `gh` — always use the full path above.",
-                            gh_binary.display()
-                        ));
-                    }
+                    // Embedded binary path hints (gh only when installed)
+                    crate::gh_cli::config::append_gh_cli_system_prompt(
+                        &mut system_prompt_parts,
+                        &thread_app,
+                    );
                     if let Ok(claude_binary) = crate::claude_cli::get_cli_binary_path(&thread_app) {
                         if claude_binary.exists() {
                             system_prompt_parts.push(format!(
@@ -4474,15 +4464,11 @@ pub async fn send_chat_message(
                         }
                     }
 
-                    // Embedded binary path hints
-                    let gh_binary = crate::gh_cli::config::resolve_gh_binary(&thread_app);
-                    if gh_binary != std::path::PathBuf::from("gh") {
-                        system_prompt_parts.push(format!(
-                            "When running GitHub CLI commands, use the full path to the embedded binary: {}\n\
-                             Do NOT use bare `gh` — always use the full path above.",
-                            gh_binary.display()
-                        ));
-                    }
+                    // Embedded binary path hints (gh only when installed)
+                    crate::gh_cli::config::append_gh_cli_system_prompt(
+                        &mut system_prompt_parts,
+                        &thread_app,
+                    );
                     if let Ok(claude_binary) = crate::claude_cli::get_cli_binary_path(&thread_app) {
                         if claude_binary.exists() {
                             system_prompt_parts.push(format!(
@@ -4803,14 +4789,7 @@ pub async fn send_chat_message(
                         }
                     }
 
-                    let gh_binary = crate::gh_cli::config::resolve_gh_binary(&thread_app);
-                    if gh_binary != std::path::PathBuf::from("gh") {
-                        parts.push(format!(
-                            "When running GitHub CLI commands, use the full path to the embedded binary: {}\n\
-                             Do NOT use bare `gh` — always use the full path above.",
-                            gh_binary.display()
-                        ));
-                    }
+                    crate::gh_cli::config::append_gh_cli_system_prompt(&mut parts, &thread_app);
                     if let Ok(claude_binary) = crate::claude_cli::get_cli_binary_path(&thread_app) {
                         if claude_binary.exists() {
                             parts.push(format!(
@@ -4977,14 +4956,7 @@ pub async fn send_chat_message(
                         }
                     }
 
-                    let gh_binary = crate::gh_cli::config::resolve_gh_binary(&thread_app);
-                    if gh_binary != std::path::PathBuf::from("gh") {
-                        parts.push(format!(
-                            "When running GitHub CLI commands, use the full path to the embedded binary: {}\n\
-                             Do NOT use bare `gh` — always use the full path above.",
-                            gh_binary.display()
-                        ));
-                    }
+                    crate::gh_cli::config::append_gh_cli_system_prompt(&mut parts, &thread_app);
                     if let Ok(claude_binary) = crate::claude_cli::get_cli_binary_path(&thread_app) {
                         if claude_binary.exists() {
                             parts.push(format!(
@@ -5109,14 +5081,7 @@ pub async fn send_chat_message(
                         }
                     }
 
-                    let gh_binary = crate::gh_cli::config::resolve_gh_binary(&thread_app);
-                    if gh_binary != std::path::PathBuf::from("gh") {
-                        parts.push(format!(
-                            "When running GitHub CLI commands, use the full path to the embedded binary: {}\n\
-                             Do NOT use bare `gh` — always use the full path above.",
-                            gh_binary.display()
-                        ));
-                    }
+                    crate::gh_cli::config::append_gh_cli_system_prompt(&mut parts, &thread_app);
                     if let Ok(claude_binary) = crate::claude_cli::get_cli_binary_path(&thread_app) {
                         if claude_binary.exists() {
                             parts.push(format!(

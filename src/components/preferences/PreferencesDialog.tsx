@@ -10,7 +10,7 @@ import {
   Puzzle,
   FlaskConical,
   Globe,
-  Github,
+  GitBranch,
   Rabbit,
   Sparkles,
   Terminal,
@@ -207,8 +207,8 @@ const navigationEntries: NavigationEntry[] = [
   {
     type: 'item',
     id: 'github',
-    name: 'GitHub CLI',
-    icon: Github,
+    name: 'Git Provider',
+    icon: GitBranch,
   },
   {
     type: 'item',
@@ -315,7 +315,7 @@ const paneIconMap: Record<PreferencePane, LucideIcon> = {
   kimi: KimiIcon,
   antigravity: AntigravityIcon,
   muse: MuseIcon,
-  github: Github,
+  github: GitBranch,
   coderabbit: Rabbit,
   opinionated: Sparkles,
   providers: Blocks,
@@ -355,7 +355,7 @@ const getPaneTitle = (pane: PreferencePane): string => {
     case 'muse':
       return 'Muse'
     case 'github':
-      return 'GitHub CLI'
+      return 'Git Provider'
     case 'coderabbit':
       return 'CodeRabbit CLI'
     case 'appearance':

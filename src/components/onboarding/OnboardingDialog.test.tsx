@@ -492,24 +492,22 @@ describe('OnboardingDialog', () => {
       )
     })
 
-    it('enables Finish only when GitHub CLI and one AI backend are ready', async () => {
+    it('enables Finish when an AI backend is ready even if GitHub CLI is not', async () => {
       setCli('claude', { installed: true, authenticated: true })
       setCli('gh', { installed: true, authenticated: false })
       const user = userEvent.setup()
       render(<OnboardingDialog />)
       await goToSetup(user)
 
+      expect(await screen.findByText('GitHub CLI is optional.')).toBeInTheDocument()
       const finish = await screen.findByRole('button', { name: 'Finish' })
-      expect(finish).toBeDisabled()
+      expect(finish).toBeEnabled()
 
-      // Sign in to GitHub CLI; the auth query then reports signed in.
-      await user.click(
-        screen.getByRole('button', { name: 'Complete GitHub CLI login' })
-      )
-      act(() => setCli('gh', { authenticated: true }))
-      await waitFor(() => expect(finish).toBeEnabled())
+      const ghRow = screen.getByTestId('setup-row-gh')
+      await user.click(within(ghRow).getByRole('button', { name: 'Skip' }))
+      expect(screen.queryByTestId('setup-row-gh')).not.toBeInTheDocument()
+
       await user.click(finish)
-
       expect(await screen.findByText("You're ready")).toBeInTheDocument()
     })
   })

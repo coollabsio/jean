@@ -1068,7 +1068,7 @@ function App() {
     enabled: nativeCli && !!ghStatus?.installed,
   })
 
-  // Show onboarding if GitHub CLI is not ready, or no AI backend is ready.
+  // Show onboarding if no AI backend is ready. GitHub CLI is optional.
   // Only in native app - pure web access uses the host's already-setup CLIs.
   useEffect(() => {
     if (!isNativeApp()) return

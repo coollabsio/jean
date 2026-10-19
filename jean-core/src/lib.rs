@@ -53,6 +53,7 @@ mod codex_cli;
 mod commandcode_cli;
 mod cursor_cli;
 mod gh_cli;
+mod glab_cli;
 mod grok_cli;
 pub mod http_server;
 pub mod jean_mcp_config;
@@ -413,6 +414,8 @@ pub struct AppPreferences {
     pub muse_cli_source: String, // Muse Code CLI source: "jean" (managed) or "path" (system PATH)
     #[serde(default = "default_cli_source")]
     pub gh_cli_source: String, // GitHub CLI source: "jean" (managed) or "path" (system PATH)
+    #[serde(default = "default_cli_source")]
+    pub glab_cli_source: String, // GitLab CLI source: "jean" (managed) or "path" (system PATH)
     #[serde(default)]
     pub wsl_mode_chosen: bool, // Whether WSL mode selection has been made (prevents re-asking)
     #[serde(default)]
@@ -2884,6 +2887,7 @@ impl Default for AppPreferences {
             antigravity_cli_source: default_cli_source(),
             muse_cli_source: default_cli_source(),
             gh_cli_source: default_cli_source(),
+            glab_cli_source: default_cli_source(),
             wsl_mode_chosen: false,
             wsl_enabled: false,
             wsl_distro: String::new(),

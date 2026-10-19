@@ -15,6 +15,7 @@ const ALLOWED_CLI_TYPES: &[&str] = &[
     "codex",
     "opencode",
     "gh",
+    "glab",
     "coderabbit",
     "pi",
     "commandcode",

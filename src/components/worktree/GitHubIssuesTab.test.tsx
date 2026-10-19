@@ -58,8 +58,8 @@ function renderTab(overrides: Partial<ComponentProps<typeof GitHubIssuesTab>> = 
       creatingFromNumber={null}
       isBulkInvestigating={false}
       searchInputRef={searchInputRef}
-      onGhLogin={vi.fn()}
-      isGhInstalled={true}
+      onLogin={vi.fn()}
+      isCliInstalled={true}
       {...overrides}
     />
   )
@@ -204,11 +204,59 @@ describe('GitHubIssuesTab multi-select', () => {
         creatingFromNumber={null}
         isBulkInvestigating
         searchInputRef={searchInputRef}
-        onGhLogin={vi.fn()}
-        isGhInstalled={true}
+        onLogin={vi.fn()}
+        isCliInstalled={true}
       />
     )
 
     expect(screen.getByRole('button', { name: /starting/i })).toBeDisabled()
+  })
+})
+
+describe('GitHubIssuesTab provider-aware auth errors', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  const authError = new Error('GitLab CLI not authenticated. Run glab auth login')
+
+  it('renders the GitLab auth error (not GitHub) for a gitlab provider', () => {
+    renderTab({ error: authError, provider: 'gitlab' })
+
+    expect(
+      screen.getByRole('button', { name: /sign in to gitlab/i })
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: /sign in to github/i })
+    ).toBeNull()
+  })
+
+  it('defers the auth-error branch until the provider is resolved', () => {
+    // provider still defaults to `github` while resolving; nothing auth-related
+    // should render yet.
+    renderTab({
+      error: authError,
+      provider: 'github',
+      providerResolved: false,
+    })
+
+    expect(
+      screen.queryByRole('button', { name: /sign in to github/i })
+    ).toBeNull()
+    expect(
+      screen.queryByRole('button', { name: /sign in to gitlab/i })
+    ).toBeNull()
+  })
+
+  it('shows the GitHub auth error once resolved to github', () => {
+    renderTab({
+      error: new Error('GitHub CLI not authenticated. Run gh auth login'),
+      provider: 'github',
+      providerResolved: true,
+    })
+
+    expect(
+      screen.getByRole('button', { name: /sign in to github/i })
+    ).toBeInTheDocument()
   })
 })

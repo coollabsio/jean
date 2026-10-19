@@ -117,6 +117,21 @@ describe('getStartupOnboardingAction', () => {
     ).toBe('none')
   })
 
+  it('treats a ready AI backend as enough when GitHub CLI is missing', () => {
+    expect(
+      getStartupOnboardingAction({
+        aiStatuses: [readyStatus],
+        aiAuth: [authenticated],
+        ghStatus: missingStatus,
+        ghAuth: undefined,
+        onboardingOpen: false,
+        onboardingDismissed: false,
+        onboardingManuallyTriggered: false,
+        requiresWslChoice: false,
+      })
+    ).toBe('ready')
+  })
+
   it('opens onboarding when setup is definitively incomplete', () => {
     expect(
       getStartupOnboardingAction({

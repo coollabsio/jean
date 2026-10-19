@@ -223,7 +223,7 @@ describe('PreferencesDialog', () => {
       'Kimi Code',
       'Antigravity CLIBeta',
       'MuseBeta',
-      'GitHub CLI',
+      'Git Provider',
       'CodeRabbit CLI',
       'Terminal',
       'Magic Prompts',

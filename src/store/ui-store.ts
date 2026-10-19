@@ -61,6 +61,7 @@ export interface NewSessionModeTarget {
 export type CliUpdateModalType =
   | 'claude'
   | 'gh'
+  | 'glab'
   | 'codex'
   | 'opencode'
   | 'pi'
@@ -90,6 +91,7 @@ export interface PendingServerUpdate {
 export type CliLoginModalType =
   | 'claude'
   | 'gh'
+  | 'glab'
   | 'codex'
   | 'opencode'
   | 'cursor'
