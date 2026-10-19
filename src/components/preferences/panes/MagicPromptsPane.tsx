@@ -48,7 +48,6 @@ import {
   getCatalogModelOptions,
   getCatalogDefaultModelOptions,
   getCatalogModelFastInfo,
-  getCatalogModelReasoning,
   useModelCatalog,
 } from '@/services/model-catalog'
 import {
@@ -64,7 +63,6 @@ import {
   GROK_MODEL_OPTIONS as GROK_FALLBACK_OPTIONS,
   KIMI_MODEL_OPTIONS as KIMI_FALLBACK_OPTIONS,
   ANTIGRAVITY_MODEL_OPTIONS as ANTIGRAVITY_FALLBACK_OPTIONS,
-  MUSE_EFFORT_LEVEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
 import {
   DEFAULT_INVESTIGATE_ISSUE_PROMPT,
@@ -111,7 +109,6 @@ import {
   type MagicPromptExecutionMode,
   type MagicCodeReviewConfig,
   type CliBackend,
-  type CustomCliProfile,
 } from '@/types/preferences'
 import { cn } from '@/lib/utils'
 import {
@@ -122,6 +119,7 @@ import {
   codeReviewConfigKey,
   resolveCodeReviewConfigs,
 } from '@/lib/code-review-configs'
+import { getMagicPromptModelReasoning } from './magic-prompt-reasoning'
 
 interface VariableInfo {
   name: string
@@ -612,62 +610,9 @@ const PROMPT_SECTIONS: PromptSection[] = [
 const PROMPT_CONFIGS = PROMPT_SECTIONS.flatMap(s => s.configs)
 const PROMPT_CONFIG_KEYS = new Set(PROMPT_CONFIGS.map(config => config.key))
 const MAGIC_PROMPT_HIGHLIGHT_DURATION_MS = 1800
-const BACKEND_EFFORT_FALLBACK = {
-  type: 'effort' as const,
-  default: 'high',
-  levels: [
-    { value: 'low', label: 'Low', description: 'Light' },
-    { value: 'medium', label: 'Medium', description: 'Moderate' },
-    { value: 'high', label: 'High', description: 'Deep' },
-    { value: 'xhigh', label: 'Extra high', description: 'Extra deep' },
-  ],
-}
-// Antigravity CLI only accepts --effort low|medium|high; Adaptive omits the flag.
-const ANTIGRAVITY_EFFORT_FALLBACK = {
-  type: 'effort' as const,
-  default: 'adaptive',
-  levels: [
-    {
-      value: 'adaptive',
-      label: 'Adaptive/Default',
-      description: 'Model default (no forced level)',
-    },
-    { value: 'low', label: 'Low', description: 'Light' },
-    { value: 'medium', label: 'Medium', description: 'Moderate' },
-    { value: 'high', label: 'High', description: 'Deep' },
-  ],
-}
-const MUSE_EFFORT_FALLBACK = {
-  type: 'effort' as const,
-  default: 'high',
-  levels: MUSE_EFFORT_LEVEL_OPTIONS,
-}
-
-function getMagicPromptModelReasoning(
-  catalog: Parameters<typeof getCatalogModelReasoning>[0],
-  backend: CliBackend,
-  model: string,
-  provider: string | null | undefined,
-  profiles: CustomCliProfile[]
-) {
-  const profile =
-    backend === 'claude' && provider
-      ? profiles.find(candidate => candidate.name === provider)
-      : undefined
-  // Custom providers can remap Claude aliases to arbitrary models. Without
-  // provider-specific catalog metadata, Anthropic effort levels are unsafe.
-  if (profile) return null
-  const reasoning = getCatalogModelReasoning(catalog, backend, model)
-  if (reasoning !== undefined) return reasoning
-  if (backend === 'antigravity') return ANTIGRAVITY_EFFORT_FALLBACK
-  if (backend === 'muse') return MUSE_EFFORT_FALLBACK
-  return ['opencode', 'pi', 'grok', 'kimi'].includes(backend)
-    ? BACKEND_EFFORT_FALLBACK
-    : undefined
-}
 
 function getMagicPromptReasoningDefaults(
-  catalog: Parameters<typeof getCatalogModelReasoning>[0],
+  catalog: Parameters<typeof getMagicPromptModelReasoning>[0],
   backend: CliBackend,
   models: MagicPromptModels
 ): MagicPromptReasoningEfforts {
@@ -687,7 +632,7 @@ function getMagicPromptReasoningDefaults(
 }
 
 function makeCodeReviewConfig(
-  catalog: Parameters<typeof getCatalogModelReasoning>[0],
+  catalog: Parameters<typeof getMagicPromptModelReasoning>[0],
   backend: CliBackend,
   model: MagicPromptModel
 ): MagicCodeReviewConfig {

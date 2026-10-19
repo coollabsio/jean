@@ -93,17 +93,26 @@ vi.mock('@/services/model-catalog', () => ({
     _catalog: unknown,
     backend: string,
     model: string
-  ) =>
-    (backend === 'claude' && model !== 'haiku') || backend === 'codex'
-      ? {
-          type: 'effort',
-          default: backend === 'codex' ? 'low' : 'high',
-          levels: [
-            { value: 'low', label: 'Low', description: 'Light' },
-            { value: 'high', label: 'High', description: 'Deep' },
-          ],
-        }
-      : undefined,
+  ) => {
+    const claudeCatalogModel = [
+      'claude-opus-5-5',
+      'claude-fable-5-1',
+      'claude-fable-5',
+      'claude-opus-5',
+      'claude-sonnet-5',
+    ].includes(model)
+    if (backend === 'codex' || (backend === 'claude' && claudeCatalogModel)) {
+      return {
+        type: 'effort',
+        default: backend === 'codex' ? 'low' : 'high',
+        levels: [
+          { value: 'low', label: 'Low', description: 'Light' },
+          { value: 'high', label: 'High', description: 'Deep' },
+        ],
+      }
+    }
+    return undefined
+  },
   getCatalogModelFastInfo: (
     _catalog: unknown,
     _backend: string,
@@ -487,19 +496,67 @@ describe('MagicPromptsPane', () => {
     )
   })
 
-  it('disables reasoning for a custom provider without thinking support', () => {
+  it('offers Claude effort levels for a custom provider model missing from the catalog', async () => {
     preferencesMock = {
       ...defaultPreferences,
       custom_cli_profiles: [
         {
-          name: 'No Thinking',
+          name: 'OpenRouter',
           settings_json: '{}',
           supports_thinking: false,
         },
       ],
       magic_prompt_providers: {
         ...defaultPreferences.magic_prompt_providers,
-        investigate_issue_provider: 'No Thinking',
+        investigate_issue_provider: 'OpenRouter',
+      },
+      magic_prompt_models: {
+        ...defaultPreferences.magic_prompt_models,
+        investigate_issue_model: 'opus',
+      },
+      magic_prompt_efforts: {
+        ...defaultPreferences.magic_prompt_efforts,
+        investigate_issue_effort: 'xhigh',
+      },
+    }
+    const user = userEvent.setup()
+    render(<MagicPromptsPane />)
+
+    const reasoning = screen.getByRole('combobox', { name: 'Reasoning level' })
+    expect(reasoning).toBeEnabled()
+    expect(reasoning).toHaveTextContent('xHigh')
+    expect(mutateMock).not.toHaveBeenCalled()
+
+    await user.click(reasoning)
+    expect(screen.getByRole('option', { name: 'Low' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Max' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('option', { name: 'Ultracode' })
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'Ultrathink' })).toBeNull()
+    expect(screen.queryByRole('option', { name: 'Think' })).toBeNull()
+  })
+
+  it('leaves a saved thinking value untouched when the picker offers effort', () => {
+    preferencesMock = {
+      ...defaultPreferences,
+      custom_cli_profiles: [
+        {
+          name: 'OpenRouter',
+          settings_json: '{}',
+        },
+      ],
+      magic_prompt_providers: {
+        ...defaultPreferences.magic_prompt_providers,
+        investigate_issue_provider: 'OpenRouter',
+      },
+      magic_prompt_models: {
+        ...defaultPreferences.magic_prompt_models,
+        investigate_issue_model: 'opus',
+      },
+      magic_prompt_efforts: {
+        ...defaultPreferences.magic_prompt_efforts,
+        investigate_issue_effort: 'ultrathink',
       },
     }
 
@@ -507,7 +564,8 @@ describe('MagicPromptsPane', () => {
 
     expect(
       screen.getByRole('combobox', { name: 'Reasoning level' })
-    ).toBeDisabled()
+    ).toHaveTextContent('High')
+    expect(mutateMock).not.toHaveBeenCalled()
   })
 
   it('offers backend-native effort levels when discovered models lack catalog metadata', async () => {
@@ -840,8 +898,8 @@ describe('MagicPromptsPane', () => {
         },
         {
           backend: 'claude',
-          model: 'claude-fable-5',
-          reasoning_effort: 'high',
+          model: 'opus',
+          reasoning_effort: 'ultrathink',
         },
       ],
     }
@@ -856,7 +914,7 @@ describe('MagicPromptsPane', () => {
       expect.objectContaining({
         magic_code_review_configs: [
           expect.objectContaining({ reasoning_effort: 'low' }),
-          expect.objectContaining({ reasoning_effort: null }),
+          expect.objectContaining({ reasoning_effort: 'high' }),
         ],
       })
     )
