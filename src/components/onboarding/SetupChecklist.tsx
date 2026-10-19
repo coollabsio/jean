@@ -1,5 +1,5 @@
 /**
- * One row per selected AI backend plus optional GitHub CLI.
+ * One row per selected AI backend plus optional GitHub and GitLab CLIs.
  *
  * - Missing managed CLIs install automatically, all in parallel.
  * - CLIs found on PATH switch to the PATH binary automatically.
@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Check, Github, Loader2 } from '@/components/icons/reicon'
+import { GitLabIcon } from '@/components/icons/GitLabIcon'
 import { getBackendIcon } from '@/components/ui/backend-label'
 import { getCursorInstallCommand } from '@/services/cursor-cli'
 import { cn } from '@/lib/utils'
@@ -66,7 +67,12 @@ export function SetupChecklist({
   cursorServerId,
 }: SetupChecklistProps) {
   const [ghSkipped, setGhSkipped] = useState(false)
-  const rows: CliType[] = ghSkipped ? [...backends] : [...backends, 'gh']
+  const [glabSkipped, setGlabSkipped] = useState(false)
+  const rows: CliType[] = [
+    ...backends,
+    ...(ghSkipped ? [] : (['gh'] as const)),
+    ...(glabSkipped ? [] : (['glab'] as const)),
+  ]
 
   // Auto actions already started during this checklist visit.
   const startedRef = useRef(new Set<string>())
@@ -285,9 +291,11 @@ export function SetupChecklist({
         const flow = flows[cli]
         const state = states[cli]
         const isActive = active === cli
-        const Icon = cli === 'gh' ? Github : getBackendIcon(cli)
+        const Icon =
+          cli === 'gh' ? Github : cli === 'glab' ? GitLabIcon : getBackendIcon(cli)
         const canSkip =
-          state !== 'ready' && (cli === 'gh' || backends.length > 1)
+          state !== 'ready' &&
+          (cli === 'gh' || cli === 'glab' || backends.length > 1)
         const waiting = interactive.includes(cli) && !isActive
         const cursorMissing = cli === 'cursor' && state === 'missing'
 
@@ -325,7 +333,7 @@ export function SetupChecklist({
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-medium">
                   {flow.label}
-                  {cli === 'gh' && (
+                  {(cli === 'gh' || cli === 'glab') && (
                     <span className="ml-1.5 text-xs font-normal text-muted-foreground">
                       optional
                     </span>
@@ -343,9 +351,11 @@ export function SetupChecklist({
               {canSkip && (
                 <button
                   type="button"
-                  onClick={() =>
-                    cli === 'gh' ? setGhSkipped(true) : onSkip(cli as AIBackend)
-                  }
+                  onClick={() => {
+                    if (cli === 'gh') setGhSkipped(true)
+                    else if (cli === 'glab') setGlabSkipped(true)
+                    else onSkip(cli as AIBackend)
+                  }}
                   className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
                 >
                   Skip

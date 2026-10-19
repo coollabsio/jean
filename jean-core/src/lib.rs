@@ -4986,6 +4986,11 @@ fn repair_managed_cli_links(context: &RuntimeContext, preferences: &AppPreferenc
                 preferences.gh_cli_source.as_str(),
                 format!("{home}/.local/share/jean/gh-cli/gh"),
             ),
+            (
+                "glab",
+                preferences.glab_cli_source.as_str(),
+                format!("{home}/.local/share/jean/glab-cli/glab"),
+            ),
         ];
         for (tool, source, managed_binary) in entries {
             if source == "jean" {
@@ -5094,6 +5099,13 @@ fn repair_managed_cli_links(context: &RuntimeContext, preferences: &AppPreferenc
             "gh",
             preferences.gh_cli_source.as_str(),
             app_data.join("gh-cli").join(executable("gh", "gh.exe")),
+        ),
+        (
+            "glab",
+            preferences.glab_cli_source.as_str(),
+            app_data
+                .join("glab-cli")
+                .join(executable("glab", "glab.exe")),
         ),
     ];
 

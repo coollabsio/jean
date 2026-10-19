@@ -68,22 +68,27 @@ pub fn resolve_glab_binary(app: &AppHandle) -> PathBuf {
         Err(_) => false,
     };
 
-    if use_path {
+    let path_binary = if use_path {
         let wsl = get_wsl_config();
         if wsl.enabled {
             // Resolve absolute Unix path so the session/status checks don't
             // depend on a non-login-shell PATH.
-            if let Some(unix_path) = crate::platform::wsl_which(
+            crate::platform::wsl_which(
                 &wsl.distro,
                 "glab",
                 get_wsl_glab_binary_path(&wsl.distro).ok().as_deref(),
-            ) {
-                return PathBuf::from(unix_path);
-            }
-        } else if let Some(path) = crate::platform::find_cli_in_host_path("glab", None) {
-            return path;
+            )
+            .map(PathBuf::from)
+        } else {
+            crate::platform::find_cli_in_host_path("glab", None)
         }
-        log::warn!("glab_cli_source is 'path' but could not find glab in PATH, falling back to Jean-managed binary");
+    } else {
+        None
+    };
+    if use_path && path_binary.is_none() {
+        log::warn!(
+            "glab_cli_source is 'path' but could not find glab in PATH, falling back to Jean-managed binary"
+        );
     }
 
     // In WSL mode the Jean-managed install (when it exists) lives inside
@@ -92,14 +97,83 @@ pub fn resolve_glab_binary(app: &AppHandle) -> PathBuf {
     // PATH". Until Jean-managed installs are supported in WSL for glab, this
     // path will not exist and the check correctly reports not-installed.
     let wsl = get_wsl_config();
-    if wsl.enabled {
-        return get_wsl_glab_binary_path(&wsl.distro)
+    let managed = if wsl.enabled {
+        get_wsl_glab_binary_path(&wsl.distro)
             .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from(GLAB_CLI_BINARY_NAME_UNIX));
-    }
+            .unwrap_or_else(|_| PathBuf::from(GLAB_CLI_BINARY_NAME_UNIX))
+    } else {
+        get_glab_cli_binary_path(app)
+            .unwrap_or_else(|_| PathBuf::from(GLAB_CLI_DIR_NAME).join(GLAB_CLI_BINARY_NAME))
+    };
+    prefer_path_binary(use_path, path_binary, managed)
+}
 
-    get_glab_cli_binary_path(app)
-        .unwrap_or_else(|_| PathBuf::from(GLAB_CLI_DIR_NAME).join(GLAB_CLI_BINARY_NAME))
+/// Choose the glab binary with the same order as [`crate::gh_cli::config::resolve_gh_binary`].
+///
+/// When the preference is PATH and a binary was found, use that path.
+/// Otherwise use the Jean-managed location (including the fallback when PATH
+/// mode is set but nothing was found).
+pub fn prefer_path_binary(
+    source_is_path: bool,
+    path_binary: Option<PathBuf>,
+    managed: PathBuf,
+) -> PathBuf {
+    if source_is_path {
+        path_binary.unwrap_or(managed)
+    } else {
+        managed
+    }
+}
+
+/// Resolve GitLab CLI only when the chosen binary is actually installed.
+///
+/// Mirrors [`crate::gh_cli::config::resolve_available_gh_binary`]: `None` when
+/// the preferred path does not exist (or is not executable in WSL).
+pub fn resolve_available_glab_binary(app: &AppHandle) -> Option<PathBuf> {
+    let path = resolve_glab_binary(app);
+    let wsl = get_wsl_config();
+    if wsl.enabled {
+        let tool = path.to_string_lossy();
+        let installed = if tool.starts_with('/') {
+            crate::platform::wsl_file_executable(&wsl.distro, &tool)
+        } else {
+            crate::platform::check_wsl_tool(&wsl.distro, &tool)
+        };
+        return installed.then_some(path);
+    }
+    path.exists().then_some(path)
+}
+
+/// System prompt when `glab` is installed at a full path.
+pub fn glab_path_instruction(path: &std::path::Path) -> String {
+    format!(
+        "When running GitLab CLI commands for GitLab remotes, use the full path to the binary: {}\n\
+         Do NOT use bare `glab` — always use the full path above.\n\
+         Use `glab` for issues, merge requests (`mr`), and CI. Do not use `gh` for GitLab remotes.",
+        path.display()
+    )
+}
+
+/// System prompt block injected when GitLab CLI is not available.
+pub const GLAB_CLI_UNAVAILABLE_NOTE: &str = "\
+## GitLab CLI\n\
+- GitLab CLI (`glab`) is not installed in this environment.\n\
+- Do NOT run `glab` or other GitLab CLI commands; they will fail.\n\
+- For GitLab repositories, use local git unless the user provides another way to access GitLab.";
+
+/// Append GitLab CLI guidance the same way GitHub CLI guidance is appended.
+///
+/// - Full path: tell the model to use that binary for GitLab remotes.
+/// - Bare `glab`: leave the prompt unchanged.
+/// - Missing: tell the model not to invoke `glab`.
+pub fn append_glab_cli_prompt(parts: &mut Vec<String>, binary: Option<&std::path::Path>) {
+    match binary {
+        Some(path) if path != std::path::Path::new("glab") => {
+            parts.push(glab_path_instruction(path));
+        }
+        Some(_) => {}
+        None => parts.push(GLAB_CLI_UNAVAILABLE_NOTE.to_string()),
+    }
 }
 
 /// Ensure the CLI directory exists, creating it if necessary
@@ -120,5 +194,49 @@ mod tests {
 
         assert!(resolved.ends_with(GLAB_CLI_BINARY_NAME));
         assert!(resolved.to_string_lossy().contains(GLAB_CLI_DIR_NAME));
+    }
+
+    #[test]
+    fn path_source_prefers_a_discovered_binary() {
+        let managed = PathBuf::from("glab-cli").join("glab");
+        let discovered = PathBuf::from("/usr/bin/glab");
+        assert_eq!(
+            prefer_path_binary(true, Some(discovered.clone()), managed.clone()),
+            discovered
+        );
+    }
+
+    #[test]
+    fn path_source_falls_back_to_jean_managed_when_nothing_is_on_path() {
+        let managed = PathBuf::from("glab-cli").join("glab");
+        assert_eq!(prefer_path_binary(true, None, managed.clone()), managed);
+    }
+
+    #[test]
+    fn jean_source_ignores_a_path_binary() {
+        let managed = PathBuf::from("glab-cli").join("glab");
+        let discovered = PathBuf::from("/usr/bin/glab");
+        assert_eq!(
+            prefer_path_binary(false, Some(discovered), managed.clone()),
+            managed
+        );
+    }
+
+    #[test]
+    fn prompt_uses_full_path_and_notes_when_missing() {
+        let mut parts = vec!["earlier".to_string()];
+        append_glab_cli_prompt(&mut parts, Some(std::path::Path::new("/opt/jean/glab")));
+        assert!(parts[1].contains("/opt/jean/glab"));
+        assert!(parts[1].contains("Do NOT use bare `glab`"));
+        assert!(parts[1].contains("GitLab"));
+
+        let mut bare = Vec::new();
+        append_glab_cli_prompt(&mut bare, Some(std::path::Path::new("glab")));
+        assert!(bare.is_empty());
+
+        let mut missing = Vec::new();
+        append_glab_cli_prompt(&mut missing, None);
+        assert!(missing[0].contains("not installed"));
+        assert!(missing[0].contains("Do NOT run `glab`"));
     }
 }

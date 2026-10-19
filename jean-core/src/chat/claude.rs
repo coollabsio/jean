@@ -888,6 +888,15 @@ fn build_claude_args(
             args.push("Bash(*gh-cli/gh*)".to_string());
         }
     }
+    if let Some(glab_binary) = crate::glab_cli::config::resolve_available_glab_binary(app) {
+        let glab_path_str = glab_binary.to_string_lossy();
+        args.push("--allowedTools".to_string());
+        args.push(format!("Bash(*{glab_path_str}*)"));
+        if !glab_path_str.contains("glab-cli/glab") {
+            args.push("--allowedTools".to_string());
+            args.push("Bash(*glab-cli/glab*)".to_string());
+        }
+    }
     args.push("--allowedTools".to_string());
     args.push("Bash(*claude-cli/claude*)".to_string());
 

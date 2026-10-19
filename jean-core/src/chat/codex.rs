@@ -3302,7 +3302,13 @@ fn handle_approval_request(
                     command.contains(&gh_str) || command.contains("gh-cli/gh")
                 })
                 .unwrap_or(false);
-            if gh_auto_approve || command.contains("claude-cli/claude") {
+            let glab_auto_approve = crate::glab_cli::config::resolve_available_glab_binary(app)
+                .map(|path| {
+                    let glab_str = path.to_string_lossy().into_owned();
+                    command.contains(&glab_str) || command.contains("glab-cli/glab")
+                })
+                .unwrap_or(false);
+            if gh_auto_approve || glab_auto_approve || command.contains("claude-cli/claude") {
                 log::trace!("Auto-accepting CLI command (rpc_id={rpc_id}): {command}");
                 if let Err(e) = super::codex_server::send_response(
                     rpc_id,

@@ -170,13 +170,14 @@ pub fn strip_github_discovery_section(prompt: &str) -> String {
     format!("{before}\n\n{after}")
 }
 
-/// Append GitHub CLI guidance based on whether `gh` is actually installed.
+/// Append GitHub and GitLab CLI guidance based on which binaries are installed.
 ///
-/// - When `gh` is installed at a full path: inject that path (same hint as
-///   before) and tell the model not to use it for GitLab remotes.
-/// - When the resolved binary is bare `gh`: leave the prompt unchanged.
+/// - When `gh` is installed at a full path: inject that path and tell the
+///   model not to use it for GitLab remotes.
+/// - When the resolved `gh` binary is bare `gh`: leave the GitHub section unchanged.
 /// - When `gh` is missing: strip leftover GitHub-discovery duties and tell the
 ///   model not to invoke `gh`.
+/// - `glab` gets the same full-path / bare-name / missing treatment.
 pub fn append_gh_cli_system_prompt(parts: &mut Vec<String>, app: &AppHandle) {
     match resolve_available_gh_binary(app) {
         Some(path) if path != PathBuf::from("gh") => {
@@ -195,6 +196,11 @@ pub fn append_gh_cli_system_prompt(parts: &mut Vec<String>, app: &AppHandle) {
             parts.push(GH_CLI_UNAVAILABLE_INSTRUCTION.to_string());
         }
     }
+
+    crate::glab_cli::config::append_glab_cli_prompt(
+        parts,
+        crate::glab_cli::config::resolve_available_glab_binary(app).as_deref(),
+    );
 }
 
 #[cfg(test)]

@@ -102,6 +102,34 @@ fn parse_glab_version(raw: &str) -> Option<String> {
         })
 }
 
+fn missing_glab_status() -> GlabCliStatus {
+    GlabCliStatus {
+        installed: false,
+        version: None,
+        path: None,
+    }
+}
+
+/// Status for a binary that exists. Version text is parsed when possible and
+/// otherwise kept as the trimmed command output.
+fn installed_glab_status(version_output: Option<&str>, path: String) -> GlabCliStatus {
+    let version = version_output.map(|raw| {
+        let trimmed = raw.trim();
+        parse_glab_version(trimmed).unwrap_or_else(|| trimmed.to_string())
+    });
+    GlabCliStatus {
+        installed: true,
+        version,
+        path: Some(path),
+    }
+}
+
+/// Official glab release asset URL for one version and platform.
+fn glab_release_asset_url(version: &str, platform: &str, archive_ext: &str) -> String {
+    let archive_name = format!("glab_{version}_{platform}.{archive_ext}");
+    format!("{GLAB_RELEASE_DOWNLOAD_BASE}/v{version}/downloads/{archive_name}")
+}
+
 /// Check if GitLab CLI is installed and get its status
 pub async fn check_glab_cli_installed(app: AppHandle) -> Result<GlabCliStatus, String> {
     log::trace!("Checking GitLab CLI installation status");
@@ -117,28 +145,15 @@ pub async fn check_glab_cli_installed(app: AppHandle) -> Result<GlabCliStatus, S
             crate::platform::check_wsl_tool(&wsl.distro, &tool)
         };
         if !installed {
-            return Ok(GlabCliStatus {
-                installed: false,
-                version: None,
-                path: None,
-            });
+            return Ok(missing_glab_status());
         }
-        let version = crate::platform::wsl_tool_version(&wsl.distro, &tool)
-            .and_then(|v| parse_glab_version(&v));
-        return Ok(GlabCliStatus {
-            installed: true,
-            version,
-            path: Some(tool),
-        });
+        let version_output = crate::platform::wsl_tool_version(&wsl.distro, &tool);
+        return Ok(installed_glab_status(version_output.as_deref(), tool));
     }
 
     if !binary_path.exists() {
         log::trace!("GitLab CLI not found at {:?}", binary_path);
-        return Ok(GlabCliStatus {
-            installed: false,
-            version: None,
-            path: None,
-        });
+        return Ok(missing_glab_status());
     }
 
     // Use the binary directly - shell wrapper causes PowerShell parsing issues on Windows
@@ -163,11 +178,10 @@ pub async fn check_glab_cli_installed(app: AppHandle) -> Result<GlabCliStatus, S
         }
     };
 
-    Ok(GlabCliStatus {
-        installed: true,
-        version,
-        path: Some(binary_path.to_string_lossy().to_string()),
-    })
+    Ok(installed_glab_status(
+        version.as_deref(),
+        binary_path.to_string_lossy().to_string(),
+    ))
 }
 
 /// Get available GitLab CLI versions from the GitLab releases API.
@@ -418,8 +432,7 @@ pub async fn install_glab_cli(app: AppHandle, version: Option<String>) -> Result
     log::trace!("Installing version {version} for platform {platform}");
 
     // Format: {base}/v{version}/downloads/glab_{version}_{platform}.{ext}
-    let archive_name = format!("glab_{version}_{platform}.{archive_ext}");
-    let download_url = format!("{GLAB_RELEASE_DOWNLOAD_BASE}/v{version}/downloads/{archive_name}");
+    let download_url = glab_release_asset_url(&version, platform, archive_ext);
     // Parity with the GitHub CLI installer: the asset is not checksum-verified.
     log::trace!("Downloading from: {download_url}");
 
@@ -466,6 +479,8 @@ pub async fn install_glab_cli(app: AppHandle, version: Option<String>) -> Result
         crate::platform::wsl_write_bytes(&wsl.distro, &unix_path, &binary_bytes)
             .map_err(|e| format!("Failed to write binary into WSL: {e}"))?;
         crate::platform::wsl_chmod_exec(&wsl.distro, &unix_path)?;
+        #[cfg(windows)]
+        crate::expose_managed_cli_in_wsl(&wsl.distro, "glab", &unix_path);
         emit_progress(&app, "complete", "Installation complete!", 100);
         log::trace!("GitLab CLI installed successfully at WSL:{unix_path}");
         return Ok(());
@@ -523,6 +538,7 @@ pub async fn install_glab_cli(app: AppHandle, version: Option<String>) -> Result
     emit_progress(&app, "complete", "Installation complete!", 100);
 
     log::trace!("GitLab CLI installed successfully at {:?}", binary_path);
+    crate::expose_managed_cli("glab", &binary_path);
     Ok(())
 }
 
@@ -801,5 +817,63 @@ mod tests {
             Some("1.22.0")
         );
         assert_eq!(parse_glab_version("no version here"), None);
+    }
+
+    #[test]
+    fn missing_status_reports_not_installed() {
+        let status = missing_glab_status();
+        assert!(!status.installed);
+        assert!(status.version.is_none());
+        assert!(status.path.is_none());
+    }
+
+    #[test]
+    fn installed_status_parses_version_and_keeps_path() {
+        let status = installed_glab_status(
+            Some("glab 1.107.0 (2026-07-07)\n"),
+            "/home/user/.local/share/jean/glab-cli/glab".to_string(),
+        );
+        assert!(status.installed);
+        assert_eq!(status.version.as_deref(), Some("1.107.0"));
+        assert_eq!(
+            status.path.as_deref(),
+            Some("/home/user/.local/share/jean/glab-cli/glab")
+        );
+    }
+
+    #[test]
+    fn release_asset_urls_match_official_glab_names() {
+        assert_eq!(
+            glab_release_asset_url("1.107.0", "linux_amd64", "tar.gz"),
+            "https://gitlab.com/gitlab-org/cli/-/releases/v1.107.0/downloads/glab_1.107.0_linux_amd64.tar.gz"
+        );
+        assert_eq!(
+            glab_release_asset_url("1.107.0", "linux_arm64", "tar.gz"),
+            "https://gitlab.com/gitlab-org/cli/-/releases/v1.107.0/downloads/glab_1.107.0_linux_arm64.tar.gz"
+        );
+        assert_eq!(
+            glab_release_asset_url("1.107.0", "darwin_arm64", "tar.gz"),
+            "https://gitlab.com/gitlab-org/cli/-/releases/v1.107.0/downloads/glab_1.107.0_darwin_arm64.tar.gz"
+        );
+        assert_eq!(
+            glab_release_asset_url("1.107.0", "darwin_amd64", "tar.gz"),
+            "https://gitlab.com/gitlab-org/cli/-/releases/v1.107.0/downloads/glab_1.107.0_darwin_amd64.tar.gz"
+        );
+        assert_eq!(
+            glab_release_asset_url("1.107.0", "windows_amd64", "zip"),
+            "https://gitlab.com/gitlab-org/cli/-/releases/v1.107.0/downloads/glab_1.107.0_windows_amd64.zip"
+        );
+        assert_eq!(
+            glab_release_asset_url("1.107.0", "windows_arm64", "zip"),
+            "https://gitlab.com/gitlab-org/cli/-/releases/v1.107.0/downloads/glab_1.107.0_windows_arm64.zip"
+        );
+    }
+
+    #[test]
+    fn current_platform_uses_an_official_asset_name() {
+        let (platform, ext) = get_glab_platform().expect("supported platform");
+        let url = glab_release_asset_url("1.107.0", platform, ext);
+        assert!(url.starts_with("https://gitlab.com/gitlab-org/cli/-/releases/v1.107.0/downloads/"));
+        assert!(url.ends_with(&format!("glab_1.107.0_{platform}.{ext}")));
     }
 }

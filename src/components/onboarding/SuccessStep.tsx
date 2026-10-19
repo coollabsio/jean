@@ -1,5 +1,6 @@
 import { Button } from '@/components/ui/button'
 import { FolderPlus, Github, Sparkles } from '@/components/icons/reicon'
+import { GitLabIcon } from '@/components/icons/GitLabIcon'
 import { getBackendIcon } from '@/components/ui/backend-label'
 import { cliLabel, type CliType } from './cli-setup-flows'
 
@@ -21,7 +22,8 @@ export function SuccessStep({
       {readyClis.length > 0 && (
         <ul className="flex flex-wrap gap-2" aria-label="Ready tools">
           {readyClis.map(cli => {
-            const Icon = cli === 'gh' ? Github : getBackendIcon(cli)
+            const Icon =
+              cli === 'gh' ? Github : cli === 'glab' ? GitLabIcon : getBackendIcon(cli)
             return (
               <li
                 key={cli}

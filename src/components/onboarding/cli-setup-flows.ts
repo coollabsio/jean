@@ -63,6 +63,11 @@ import {
   useGhCliSetup,
   useGhPathDetection,
 } from '@/services/gh-cli'
+import {
+  useGlabCliAuth,
+  useGlabCliSetup,
+  useGlabPathDetection,
+} from '@/services/glab-cli'
 import { usePatchPreferences, usePreferences } from '@/services/preferences'
 import type { AppPreferences } from '@/types/preferences'
 
@@ -77,7 +82,7 @@ export type AIBackend =
   | 'kimi'
   | 'antigravity'
   | 'muse'
-export type CliType = AIBackend | 'gh'
+export type CliType = AIBackend | 'gh' | 'glab'
 
 export const AI_BACKENDS: AIBackend[] = [
   'claude',
@@ -131,7 +136,9 @@ export interface CliFlow {
 }
 
 export function cliLabel(cli: CliType): string {
-  return cli === 'gh' ? 'GitHub CLI' : getBackendLabel(cli)
+  if (cli === 'gh') return 'GitHub CLI'
+  if (cli === 'glab') return 'GitLab CLI'
+  return getBackendLabel(cli)
 }
 
 // ---------------------------------------------------------------------------
@@ -198,6 +205,7 @@ const SOURCE_KEYS: Record<Exclude<CliType, 'cursor'>, SourceKey> = {
   antigravity: 'antigravity_cli_source',
   muse: 'muse_cli_source',
   gh: 'gh_cli_source',
+  glab: 'glab_cli_source',
 }
 
 const GH_LOGIN_ARGS = ['auth', 'login']
@@ -219,7 +227,7 @@ function isAuthenticated(cli: CliType, auth: AuthQuery): boolean {
 }
 
 function loginArgsFor(cli: CliType, status: StatusLike | undefined) {
-  if (cli === 'gh') return GH_LOGIN_ARGS
+  if (cli === 'gh' || cli === 'glab') return GH_LOGIN_ARGS
   return loginArgsForBackend(cli, status?.supports_auth_command ?? true)
 }
 
@@ -348,6 +356,7 @@ export function useCliSetupFlows(): Record<CliType, CliFlow> {
   const antigravitySetup = useAntigravityCliSetup()
   const museSetup = useMuseCliSetup()
   const ghSetup = useGhCliSetup()
+  const glabSetup = useGlabCliSetup()
 
   const claudePath = useClaudePathDetection()
   const codexPath = useCodexPathDetection()
@@ -360,6 +369,7 @@ export function useCliSetupFlows(): Record<CliType, CliFlow> {
   const antigravityPath = useAntigravityPathDetection()
   const musePath = useMusePathDetection()
   const ghPath = useGhPathDetection()
+  const glabPath = useGlabPathDetection()
 
   const claudeAuth = useClaudeCliAuth({
     enabled: !!claudeSetup.status?.installed,
@@ -382,6 +392,7 @@ export function useCliSetupFlows(): Record<CliType, CliFlow> {
   })
   const museAuth = useMuseCliAuth({ enabled: !!museSetup.status?.installed })
   const ghAuth = useGhCliAuth({ enabled: !!ghSetup.status?.installed })
+  const glabAuth = useGlabCliAuth({ enabled: !!glabSetup.status?.installed })
 
   const m = (
     cli: Exclude<CliType, 'cursor'>,
@@ -412,5 +423,6 @@ export function useCliSetupFlows(): Record<CliType, CliFlow> {
     ),
     muse: m('muse', museSetup, museAuth, musePath),
     gh: m('gh', ghSetup, ghAuth, ghPath),
+    glab: m('glab', glabSetup, glabAuth, glabPath),
   }
 }

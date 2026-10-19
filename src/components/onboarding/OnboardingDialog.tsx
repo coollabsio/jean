@@ -262,6 +262,7 @@ function OnboardingDialogContent({
   const allLoading = aiLoading || flows.gh.statusLoading || flows.gh.authLoading
   const readyBackends = AI_BACKENDS.filter(b => flows[b].ready)
   const ghReady = flows.gh.ready
+  const glabReady = flows.glab.ready
 
   const goToBackends = useCallback(
     (opts?: { replace?: boolean }) => {
@@ -548,8 +549,8 @@ function OnboardingDialogContent({
         return {
           title: 'Setting up',
           description: serverName
-            ? `On ${serverName}. GitHub CLI is optional.`
-            : 'GitHub CLI is optional.',
+            ? `On ${serverName}. GitHub CLI is optional. GitLab CLI is optional.`
+            : 'GitHub CLI is optional. GitLab CLI is optional.',
         }
       case 'complete':
         return {
@@ -585,6 +586,7 @@ function OnboardingDialogContent({
   const readyClis: CliType[] = [
     ...selectedBackends.filter(b => flows[b].ready),
     ...(ghReady ? (['gh'] as const) : []),
+    ...(glabReady ? (['glab'] as const) : []),
   ]
 
   const renderPrerequisites = () => {
