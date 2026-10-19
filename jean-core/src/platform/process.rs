@@ -514,6 +514,25 @@ fn collect_descendant_pids(root: u32) -> Vec<u32> {
     descendants
 }
 
+/// Whether any live descendant of `root` runs in a different session than
+/// `root` (i.e. some descendant called `setsid()`).
+#[cfg(unix)]
+pub fn has_descendant_in_other_session(root: u32) -> bool {
+    let root_sid = unsafe { libc::getsid(root as i32) };
+    if root_sid < 0 {
+        return false;
+    }
+    collect_descendant_pids(root).into_iter().any(|pid| {
+        let sid = unsafe { libc::getsid(pid as i32) };
+        sid >= 0 && sid != root_sid
+    })
+}
+
+#[cfg(windows)]
+pub fn has_descendant_in_other_session(_root: u32) -> bool {
+    false
+}
+
 /// Kill a process and all its children (process tree)
 /// - Unix: process-group SIGKILL plus PPID-walk of descendants (job-control
 ///   children often live in a different process group than the shell)
@@ -667,7 +686,9 @@ pub fn terminate_process(pid: u32) -> Result<(), String> {
 
 #[cfg(all(test, unix))]
 mod process_tree_tests {
-    use super::{collect_descendant_pids, kill_and_reap, kill_process_tree};
+    use super::{
+        collect_descendant_pids, has_descendant_in_other_session, kill_and_reap, kill_process_tree,
+    };
     use std::process::{Command, Stdio};
     use std::thread;
     use std::time::Duration;
@@ -722,6 +743,45 @@ mod process_tree_tests {
                 "descendant pid {pid} should be dead after tree kill"
             );
         }
+    }
+
+    #[test]
+    fn has_descendant_in_other_session_ignores_same_session_children() {
+        let mut child = Command::new("sh")
+            .args(["-c", "sleep 60 & wait"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn shell");
+        let root = child.id();
+        thread::sleep(Duration::from_millis(200));
+
+        let found = has_descendant_in_other_session(root);
+        let _ = kill_process_tree(root);
+        let _ = child.wait();
+
+        assert!(!found, "same-session child must not count");
+    }
+
+    #[test]
+    fn has_descendant_in_other_session_detects_setsid_child() {
+        let mut child = Command::new("sh")
+            .args([
+                "-c",
+                "perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' sleep 60 & wait",
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn shell");
+        let root = child.id();
+        thread::sleep(Duration::from_millis(300));
+
+        let found = has_descendant_in_other_session(root);
+        let _ = kill_process_tree(root);
+        let _ = child.wait();
+
+        assert!(found, "setsid child must count as another session");
     }
 
     #[test]

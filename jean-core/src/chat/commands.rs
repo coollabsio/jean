@@ -6259,7 +6259,9 @@ pub fn codex_goal_set(
     if let Some(tid) = thread_id {
         super::codex_server::ensure_running(&app)?;
         let params = codex_goal_set_params(&tid, trimmed);
-        super::codex_server::send_request("thread/goal/set", params)?;
+        let result = super::codex_server::send_request("thread/goal/set", params);
+        super::codex_server::release_usage();
+        result?;
     }
 
     persist_codex_goal(
@@ -6286,8 +6288,9 @@ pub fn codex_goal_get(
         let response = super::codex_server::send_request(
             "thread/goal/get",
             serde_json::json!({ "threadId": tid }),
-        )?;
-        extract_codex_goal_objective(&response)
+        );
+        super::codex_server::release_usage();
+        extract_codex_goal_objective(&response?)
     } else {
         super::storage::with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
             Ok(sessions
@@ -6317,10 +6320,12 @@ pub fn codex_goal_clear(
 
     if let Some(tid) = thread_id {
         super::codex_server::ensure_running(&app)?;
-        super::codex_server::send_request(
+        let result = super::codex_server::send_request(
             "thread/goal/clear",
             serde_json::json!({ "threadId": tid }),
-        )?;
+        );
+        super::codex_server::release_usage();
+        result?;
     }
 
     persist_codex_goal(&app, &worktree_id, &worktree_path, &session_id, None)?;
