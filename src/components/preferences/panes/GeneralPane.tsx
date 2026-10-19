@@ -154,7 +154,6 @@ import {
 import { withAdaptiveEffortOption } from '@/components/chat/toolbar/toolbar-options'
 import type { AppPreferences } from '@/types/preferences'
 import {
-  effortLevelOptions,
   codexReasoningOptions,
   codexModelVerbosityOptions,
   grokReasoningOptions,
@@ -195,8 +194,6 @@ import {
   KIMI_MODEL_OPTIONS,
   OPENCODE_MODEL_OPTIONS,
   PI_MODEL_OPTIONS,
-  KIMI_EFFORT_LEVEL_OPTIONS,
-  MUSE_EFFORT_LEVEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
 import {
   formatCursorModelLabel,
@@ -230,6 +227,7 @@ import { getPathUpdateAction } from '@/lib/cli-update'
 import { SettingsSection } from '../SettingsSection'
 import { BackendCliSourceSelect } from '../BackendCliSourceSelect'
 import { AiLanguageField } from './AiLanguageField'
+import { resolveOverrideReasoning } from './override-reasoning'
 import {
   resolveDefaultModelForBackend,
   resolvePiDefaultModel,
@@ -1213,48 +1211,22 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
       preferences,
       piModelOptions
     )
-  const buildReasoningRaw =
-    getCatalogModelReasoning(modelCatalog, effectiveBuildBackend, buildModel) ??
-    (['codex', 'opencode', 'pi', 'grok', 'kimi', 'muse'].includes(
-      effectiveBuildBackend
-    )
-      ? {
-          type: 'effort' as const,
-          default: 'high',
-          levels:
-            effectiveBuildBackend === 'codex'
-              ? codexReasoningOptions
-              : effectiveBuildBackend === 'kimi'
-                ? KIMI_EFFORT_LEVEL_OPTIONS
-                : effectiveBuildBackend === 'muse'
-                  ? MUSE_EFFORT_LEVEL_OPTIONS
-                  : effortLevelOptions,
-        }
-      : null)
+  const buildReasoningRaw = resolveOverrideReasoning(
+    modelCatalog,
+    effectiveBuildBackend,
+    buildModel
+  )
   const buildReasoning = buildReasoningRaw
     ? {
         ...buildReasoningRaw,
         levels: withAdaptiveEffortOption(buildReasoningRaw.levels, buildModel),
       }
     : null
-  const yoloReasoningRaw =
-    getCatalogModelReasoning(modelCatalog, effectiveYoloBackend, yoloModel) ??
-    (['codex', 'opencode', 'pi', 'grok', 'kimi', 'muse'].includes(
-      effectiveYoloBackend
-    )
-      ? {
-          type: 'effort' as const,
-          default: 'high',
-          levels:
-            effectiveYoloBackend === 'codex'
-              ? codexReasoningOptions
-              : effectiveYoloBackend === 'kimi'
-                ? KIMI_EFFORT_LEVEL_OPTIONS
-                : effectiveYoloBackend === 'muse'
-                  ? MUSE_EFFORT_LEVEL_OPTIONS
-                  : effortLevelOptions,
-        }
-      : null)
+  const yoloReasoningRaw = resolveOverrideReasoning(
+    modelCatalog,
+    effectiveYoloBackend,
+    yoloModel
+  )
   const yoloReasoning = yoloReasoningRaw
     ? {
         ...yoloReasoningRaw,
