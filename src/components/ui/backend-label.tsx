@@ -1,6 +1,6 @@
 import type { ForwardRefExoticComponent, RefAttributes } from 'react'
 import type { LucideProps } from '@/components/icons/reicon'
-import { Badge } from '@/components/ui/badge'
+import { BetaBadge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { ClaudeIcon } from '@/components/icons/ClaudeIcon'
 import { CodexIcon } from '@/components/icons/CodexIcon'
@@ -94,16 +94,7 @@ export function BackendLabel({
   return (
     <span className={cn('inline-flex items-center gap-1.5', className)}>
       <span>{label}</span>
-      <Badge
-        aria-hidden="true"
-        variant="outline"
-        className={cn(
-          'rounded-sm px-1.5 py-0 text-[10px] leading-4 uppercase tracking-wide bg-warning/10 text-warning border-warning/40',
-          badgeClassName
-        )}
-      >
-        Beta
-      </Badge>
+      <BetaBadge className={badgeClassName} />
     </span>
   )
 }

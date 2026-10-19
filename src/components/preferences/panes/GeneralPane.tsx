@@ -24,6 +24,7 @@ import { Switch } from '@/components/ui/switch'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Button } from '@/components/ui/button'
 import { BackendLabel } from '@/components/ui/backend-label'
+import { BetaBadge } from '@/components/ui/badge'
 import {
   Command,
   CommandEmpty,
@@ -2099,7 +2100,12 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
 
       {hasBackend() && scope === 'github' && (
         <SettingsSection
-          title="GitLab CLI"
+          title={
+            <span className="inline-flex items-center gap-1.5">
+              GitLab CLI
+              <BetaBadge />
+            </span>
+          }
           anchorId="pref-gitlab-section-cli"
           actions={
             glabStatus?.installed ? (

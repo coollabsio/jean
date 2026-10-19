@@ -15,6 +15,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { BetaBadge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -215,7 +216,12 @@ export function CloneProjectModal() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="github">GitHub</SelectItem>
-                  <SelectItem value="gitlab">GitLab</SelectItem>
+                  <SelectItem value="gitlab">
+                    <span className="inline-flex items-center gap-1.5">
+                      GitLab
+                      <BetaBadge />
+                    </span>
+                  </SelectItem>
                   <SelectItem value="custom">Custom</SelectItem>
                 </SelectContent>
               </Select>

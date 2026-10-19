@@ -535,6 +535,10 @@ describe('OnboardingDialog', () => {
 
       const glabRow = screen.getByTestId('setup-row-glab')
       expect(within(glabRow).getByText('optional')).toBeInTheDocument()
+      expect(within(glabRow).getByText('Beta')).toHaveClass('bg-warning/10')
+      expect(
+        within(screen.getByTestId('setup-row-gh')).queryByText('Beta')
+      ).toBeNull()
       await user.click(within(glabRow).getByRole('button', { name: 'Skip' }))
       expect(screen.queryByTestId('setup-row-glab')).not.toBeInTheDocument()
 

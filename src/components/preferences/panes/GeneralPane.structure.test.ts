@@ -211,6 +211,21 @@ describe('GeneralPane settings structure', () => {
     )
   })
 
+  it('marks the GitLab CLI settings section as beta', () => {
+    const source = readFileSync(
+      'src/components/preferences/panes/GeneralPane.tsx',
+      'utf8'
+    )
+    const anchor = source.indexOf('anchorId="pref-gitlab-section-cli"')
+    expect(anchor).toBeGreaterThan(-1)
+    const section = source.slice(anchor - 250, anchor)
+    expect(section).toContain('GitLab CLI')
+    expect(section).toContain('<BetaBadge />')
+    const githubCli = source.indexOf('title="GitHub CLI"')
+    expect(githubCli).toBeGreaterThan(-1)
+    expect(source.slice(githubCli, githubCli + 200)).not.toContain('<BetaBadge />')
+  })
+
   it('offers a browser sign-out only when running as web access', () => {
     const source = readFileSync(
       'src/components/preferences/panes/GeneralPane.tsx',

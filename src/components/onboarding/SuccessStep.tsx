@@ -1,5 +1,6 @@
 import { Button } from '@/components/ui/button'
 import { FolderPlus, Github, Sparkles } from '@/components/icons/reicon'
+import { BetaBadge } from '@/components/ui/badge'
 import { GitLabIcon } from '@/components/icons/GitLabIcon'
 import { getBackendIcon } from '@/components/ui/backend-label'
 import { cliLabel, type CliType } from './cli-setup-flows'
@@ -31,6 +32,7 @@ export function SuccessStep({
               >
                 <Icon className="size-3.5" />
                 {cliLabel(cli)}
+                {cli === 'glab' && <BetaBadge />}
               </li>
             )
           })}

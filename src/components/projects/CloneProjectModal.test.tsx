@@ -181,7 +181,12 @@ describe('CloneProjectModal', () => {
     )
 
     await userEvent.click(provider)
-    await userEvent.click(screen.getByRole('option', { name: 'GitLab' }))
+    const gitlab = screen.getByRole('option', { name: 'GitLab' })
+    expect(within(gitlab).getByText('Beta')).toHaveClass('bg-warning/10')
+    expect(
+      within(screen.getByRole('option', { name: 'GitHub' })).queryByText('Beta')
+    ).toBeNull()
+    await userEvent.click(gitlab)
     expect(provider).toHaveTextContent('GitLab')
 
     await userEvent.click(provider)

@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Check, Github, Loader2 } from '@/components/icons/reicon'
+import { BetaBadge } from '@/components/ui/badge'
 import { GitLabIcon } from '@/components/icons/GitLabIcon'
 import { getBackendIcon } from '@/components/ui/backend-label'
 import { getCursorInstallCommand } from '@/services/cursor-cli'
@@ -332,7 +333,10 @@ export function SetupChecklist({
               <Icon className="size-5 shrink-0" />
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-medium">
-                  {flow.label}
+                  <span className="inline-flex items-center gap-1.5">
+                    {flow.label}
+                    {cli === 'glab' && <BetaBadge />}
+                  </span>
                   {(cli === 'gh' || cli === 'glab') && (
                     <span className="ml-1.5 text-xs font-normal text-muted-foreground">
                       optional

@@ -24,6 +24,22 @@ const badgeVariants = cva(
   }
 )
 
+/** Small warning badge used for beta features (backends, WSL, GitLab). */
+function BetaBadge({ className }: { className?: string }) {
+  return (
+    <Badge
+      aria-hidden="true"
+      variant="outline"
+      className={cn(
+        'rounded-sm border-warning/40 bg-warning/10 px-1.5 py-0 text-[10px] leading-4 tracking-wide text-warning uppercase',
+        className
+      )}
+    >
+      Beta
+    </Badge>
+  )
+}
+
 function Badge({
   className,
   variant,
@@ -42,4 +58,4 @@ function Badge({
   )
 }
 
-export { Badge, badgeVariants }
+export { Badge, BetaBadge, badgeVariants }
