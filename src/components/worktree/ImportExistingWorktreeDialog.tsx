@@ -16,6 +16,7 @@ import { DirectoryBrowser } from '@/components/projects/DirectoryBrowser'
 import { shouldUseDirectoryBrowser } from '@/components/projects/project-dialog-routing'
 import { isLocalBackend, isNativeApp } from '@/lib/environment'
 import {
+  existingWorktreeImportBlock,
   IMPORT_EXISTING_WORKTREE_EVENT,
   type ImportExistingWorktreeDetail,
 } from '@/lib/import-existing-worktree'
@@ -28,7 +29,7 @@ import {
 } from '@/services/projects'
 import { useQueryClient } from '@tanstack/react-query'
 import { LOCAL_SERVER_ID } from '@/types/server-resource'
-import type { UnmanagedWorktree } from '@/types/projects'
+import type { BlockedImportPath, UnmanagedWorktree } from '@/types/projects'
 
 function errorText(error: unknown): string {
   if (error instanceof Error) return error.message
@@ -75,6 +76,7 @@ export function ImportExistingWorktreeDialog() {
   const [manualPath, setManualPath] = useState('')
   const [browserOpen, setBrowserOpen] = useState(false)
   const [importing, setImporting] = useState(false)
+  const [pathError, setPathError] = useState<string | null>(null)
 
   const native = isNativeApp()
   const serverId =
@@ -83,6 +85,7 @@ export function ImportExistingWorktreeDialog() {
 
   const { data, isLoading, isError, error, refetch, isFetching } =
     useUnmanagedWorktrees(projectId, open)
+  const blockedPaths: BlockedImportPath[] = data?.blockedPaths ?? []
 
   useEffect(() => {
     const handler = (event: Event) => {
@@ -92,6 +95,7 @@ export function ImportExistingWorktreeDialog() {
       setSelected(new Set())
       setManualRows([])
       setManualPath('')
+      setPathError(null)
       setBrowserOpen(false)
       setOpen(true)
     }
@@ -107,26 +111,40 @@ export function ImportExistingWorktreeDialog() {
   )
 
   const rows = useMemo(() => {
-    const discovered = data ?? []
+    const discovered = data?.worktrees ?? []
     const known = new Set(discovered.map(worktree => worktree.path))
     return [...discovered, ...manualRows.filter(row => !known.has(row.path))]
   }, [data, manualRows])
 
-  const addPath = useCallback((path: string) => {
-    const trimmed = path.trim()
-    if (!trimmed) return
-    setManualRows(current => {
-      if (current.some(row => row.path === trimmed)) return current
-      return [...current, manualRow(trimmed)]
-    })
-    setSelected(current => {
-      if (current.has(trimmed)) return current
-      const next = new Set(current)
-      next.add(trimmed)
-      return next
-    })
-    setManualPath('')
-  }, [])
+  const selectableRows = useMemo(
+    () => rows.filter(row => !row.prunable),
+    [rows]
+  )
+
+  const addPath = useCallback(
+    (path: string) => {
+      const trimmed = path.trim()
+      if (!trimmed) return
+      const blocked = existingWorktreeImportBlock(trimmed, blockedPaths)
+      if (blocked) {
+        setPathError(blocked)
+        return
+      }
+      setPathError(null)
+      setManualRows(current => {
+        if (current.some(row => row.path === trimmed)) return current
+        return [...current, manualRow(trimmed)]
+      })
+      setSelected(current => {
+        if (current.has(trimmed)) return current
+        const next = new Set(current)
+        next.add(trimmed)
+        return next
+      })
+      setManualPath('')
+    },
+    [blockedPaths]
+  )
 
   const toggle = useCallback((path: string, checked: boolean) => {
     setSelected(current => {
@@ -171,11 +189,21 @@ export function ImportExistingWorktreeDialog() {
 
   const handleImport = useCallback(async () => {
     if (!projectId || selected.size === 0 || importing) return
-    const paths = [...selected]
+    const paths = [...selected].filter(path => {
+      const row = rows.find(candidate => candidate.path === path)
+      return !row?.prunable
+    })
+    if (paths.length === 0) return
     setImporting(true)
     const failed = new Set<string>()
     try {
       for (const path of paths) {
+        const blocked = existingWorktreeImportBlock(path, blockedPaths)
+        if (blocked) {
+          failed.add(path)
+          setPathError(blocked)
+          continue
+        }
         try {
           await importWorktree.mutateAsync({ projectId, path })
         } catch {
@@ -192,10 +220,24 @@ export function ImportExistingWorktreeDialog() {
       queryKey: unmanagedWorktreesQueryKey(projectId),
     })
     if (failed.size === 0) setOpen(false)
-  }, [importWorktree, importing, projectId, queryClient, selected])
+  }, [
+    blockedPaths,
+    importWorktree,
+    importing,
+    projectId,
+    queryClient,
+    rows,
+    selected,
+  ])
 
   const allSelected =
-    rows.length > 0 && rows.every(row => selected.has(row.path))
+    selectableRows.length > 0 &&
+    selectableRows.every(row => selected.has(row.path))
+
+  const importPaths = [...selected].filter(path => {
+    const row = rows.find(candidate => candidate.path === path)
+    return !row?.prunable && !existingWorktreeImportBlock(path, blockedPaths)
+  })
 
   return (
     <>
@@ -243,33 +285,44 @@ export function ImportExistingWorktreeDialog() {
             ) : (
               rows.length > 0 && (
                 <div className="flex flex-col gap-2">
-                  <div className="flex justify-end">
-                    <button
-                      type="button"
-                      className="text-xs text-muted-foreground hover:text-foreground"
-                      onClick={() =>
-                        setSelected(
-                          allSelected
-                            ? new Set()
-                            : new Set(rows.map(row => row.path))
-                        )
-                      }
-                    >
-                      {allSelected ? 'Clear' : 'Select all'}
-                    </button>
-                  </div>
+                  {selectableRows.length > 0 && (
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        className="text-xs text-muted-foreground hover:text-foreground"
+                        onClick={() =>
+                          setSelected(
+                            allSelected
+                              ? new Set()
+                              : new Set(selectableRows.map(row => row.path))
+                          )
+                        }
+                      >
+                        {allSelected ? 'Clear' : 'Select all'}
+                      </button>
+                    </div>
+                  )}
                   <ul className="max-h-64 space-y-1 overflow-y-auto">
                     {rows.map(worktree => {
                       const checked = selected.has(worktree.path)
+                      const disabled = worktree.prunable
                       return (
                         <li key={worktree.path}>
-                          <label className="flex cursor-pointer items-start gap-3 rounded-md px-2 py-2 hover:bg-muted/50">
+                          <label
+                            className={`flex items-start gap-3 rounded-md px-2 py-2 ${
+                              disabled
+                                ? 'cursor-not-allowed opacity-60'
+                                : 'cursor-pointer hover:bg-muted/50'
+                            }`}
+                          >
                             <Checkbox
                               className="mt-0.5"
                               checked={checked}
-                              onCheckedChange={value =>
+                              disabled={disabled}
+                              onCheckedChange={value => {
+                                if (disabled) return
                                 toggle(worktree.path, value === true)
-                              }
+                              }}
                               aria-label={`Import ${worktree.path}`}
                             />
                             <span className="min-w-0 flex-1">
@@ -292,6 +345,15 @@ export function ImportExistingWorktreeDialog() {
               )
             )}
 
+            {pathError && (
+              <div
+                role="alert"
+                className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"
+              >
+                {pathError}
+              </div>
+            )}
+
             {!native && (
               <form
                 className="flex gap-2"
@@ -302,7 +364,10 @@ export function ImportExistingWorktreeDialog() {
               >
                 <Input
                   value={manualPath}
-                  onChange={event => setManualPath(event.target.value)}
+                  onChange={event => {
+                    setManualPath(event.target.value)
+                    setPathError(null)
+                  }}
                   placeholder="/path/to/existing/worktree"
                   aria-label="Worktree path"
                   disabled={importing}
@@ -342,10 +407,10 @@ export function ImportExistingWorktreeDialog() {
             <Button
               type="button"
               onClick={() => void handleImport()}
-              disabled={importing || selected.size === 0}
+              disabled={importing || importPaths.length === 0}
             >
               {importing && <Spinner />}
-              Import{selected.size > 0 ? ` (${selected.size})` : ''}
+              Import{importPaths.length > 0 ? ` (${importPaths.length})` : ''}
             </Button>
           </DialogFooter>
         </DialogContent>

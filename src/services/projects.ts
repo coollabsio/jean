@@ -21,13 +21,14 @@ import { logger } from '@/lib/logger'
 import { fileToBase64 } from '@/lib/file-base64'
 import { disposeAllWorktreeTerminals } from '@/lib/terminal-instances'
 import { toastActionLabel } from '@/lib/toast-action-label'
+import { parseUnmanagedWorktreeListing } from '@/lib/import-existing-worktree'
 import type {
   AutoFixStatus,
   AutoFixIssuePreview,
   Project,
   ProjectServer,
   Worktree,
-  UnmanagedWorktree,
+  UnmanagedWorktreeListing,
   DetectPrResponse,
   LinkWorktreePrResponse,
   WorktreeCreatingEvent,
@@ -2193,20 +2194,16 @@ export function useUnmanagedWorktrees(
 ) {
   return useQuery({
     queryKey: unmanagedWorktreesQueryKey(projectId ?? ''),
-    queryFn: async (): Promise<UnmanagedWorktree[]> => {
+    queryFn: async (): Promise<UnmanagedWorktreeListing> => {
       if (!isTauri() || !projectId) {
-        return []
+        return { worktrees: [], blockedPaths: [] }
       }
 
       logger.debug('Listing unmanaged worktrees', { projectId })
-      const worktrees = await invoke<UnmanagedWorktree[] | null>(
-        'list_unmanaged_worktrees',
-        { projectId }
-      )
-      if (!Array.isArray(worktrees)) {
-        throw new Error('Failed to list unmanaged worktrees')
-      }
-      return worktrees
+      const listing = await invoke<unknown>('list_unmanaged_worktrees', {
+        projectId,
+      })
+      return parseUnmanagedWorktreeListing(listing)
     },
     enabled: enabled && !!projectId,
   })

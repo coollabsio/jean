@@ -48,7 +48,11 @@ use super::types::{
     WorktreeDeletingEvent, WorktreeOrigin, WorktreePathExistsEvent,
     WorktreePermanentlyDeletedEvent, WorktreeSetupCompleteEvent, WorktreeUnarchivedEvent,
 };
-use super::unmanaged_worktrees::{list_unmanaged_from_repo, UnmanagedWorktree};
+use super::unmanaged_worktrees::{
+    blocked_import_paths, list_unmanaged_from_repo, main_checkout_path_from_porcelain,
+    read_worktree_list_porcelain, reserved_checkout_import_error, worktree_path_is_tracked,
+    UnmanagedWorktreeListing,
+};
 use crate::chat::types::{LabelData, Session, SessionMetadata, WorktreeSessions};
 use crate::claude_cli::resolve_cli_binary;
 use crate::coderabbit_cli::resolve_coderabbit_binary;
@@ -4766,9 +4770,6 @@ pub async fn import_worktree(
         return Err(format!("Path is not a git worktree or repository: {path}"));
     }
 
-    // Get the current branch name from git
-    let branch = git::get_current_branch(&path)?;
-
     // Extract the worktree name from the path (last component)
     let name = worktree_path
         .file_name()
@@ -4779,16 +4780,35 @@ pub async fn import_worktree(
     let mut data = load_projects_data(&app)?;
 
     // Verify project exists
-    let _ = data
+    let project = data
         .find_project(&project_id)
-        .ok_or_else(|| format!("Project not found: {project_id}"))?;
+        .ok_or_else(|| format!("Project not found: {project_id}"))?
+        .clone();
 
-    // Check if a worktree with this path already exists
-    if data.worktrees.iter().any(|w| w.path == path) {
+    let main_checkout = read_worktree_list_porcelain(&project.path)
+        .ok()
+        .and_then(|porcelain| main_checkout_path_from_porcelain(&porcelain));
+    let blocked = blocked_import_paths(&project.path, main_checkout.as_deref());
+    if let Some(error) = reserved_checkout_import_error(&path, &blocked) {
+        return Err(error);
+    }
+
+    // Any project, including archived worktrees. Path comparison matches the
+    // unmanaged list (canonical path, trailing separators).
+    let tracked_paths: Vec<String> = data
+        .worktrees
+        .iter()
+        .map(|worktree| worktree.path.clone())
+        .collect();
+    if worktree_path_is_tracked(&path, &tracked_paths) {
         return Err(format!(
             "A worktree with this path is already tracked: {path}"
         ));
     }
+
+    // Detached HEAD stores the short commit id. `get_current_branch` returns
+    // the literal "HEAD", which is not a branch name.
+    let branch = git::checkout_branch_label(&path)?;
 
     // Get max order for worktrees in this project
     let max_order = data
@@ -4862,13 +4882,15 @@ pub async fn import_worktree(
 
 /// List git worktrees for a project that Jean is not already tracking.
 ///
-/// Read-only. Nothing is imported. The main checkout is omitted, as are paths
-/// Jean already stores for this project. Archived worktrees stay excluded:
-/// Jean marks those with `archived_at` and keeps them in project storage.
+/// Read-only. Nothing is imported. The main checkout and the project path are
+/// omitted (and returned in `blocked_paths` so the dialog can reject them).
+/// Paths Jean stores for any project are omitted, including archived
+/// worktrees: `archived_at` marks those, and `list_worktrees` hides them from
+/// the canvas, but they must not be offered for import again.
 pub async fn list_unmanaged_worktrees(
     app: AppHandle,
     project_id: String,
-) -> Result<Vec<UnmanagedWorktree>, String> {
+) -> Result<UnmanagedWorktreeListing, String> {
     log::trace!("Listing unmanaged worktrees for project {project_id}");
 
     let data = load_projects_data(&app)?;
@@ -4881,13 +4903,9 @@ pub async fn list_unmanaged_worktrees(
     }
 
     let project_path = project.path.clone();
-    // Active and archived worktrees are both already tracked. `archived_at`
-    // is how Jean defines an archived worktree; list_worktrees hides them
-    // from the canvas, but they must not be offered for import again.
     let tracked_paths: Vec<String> = data
         .worktrees
         .iter()
-        .filter(|worktree| worktree.project_id == project_id)
         .map(|worktree| worktree.path.clone())
         .collect();
 
@@ -16277,5 +16295,308 @@ Body
 
         wt.base_branch = Some("  ".into());
         assert_eq!(resolve_worktree_status_base(&wt, "next"), "next");
+    }
+}
+
+#[cfg(test)]
+mod import_worktree_tests {
+    use super::{import_worktree, list_unmanaged_worktrees};
+    use crate::projects::storage::save_projects_data;
+    use crate::projects::types::{Project, ProjectsData, Worktree};
+    use crate::projects::unmanaged_worktrees::BlockedImportKind;
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+    use tauri::AppHandle;
+
+    fn block_on<F: std::future::Future>(future: F) -> F::Output {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime.block_on(future)
+    }
+
+    fn git(cwd: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .output()
+            .expect("run git");
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn init_repo(path: &Path) {
+        std::fs::create_dir_all(path).expect("repo dir");
+        git(path, &["init", "--initial-branch", "main"]);
+        git(path, &["config", "user.email", "test@example.com"]);
+        git(path, &["config", "user.name", "Test"]);
+        git(path, &["config", "commit.gpgsign", "false"]);
+        std::fs::write(path.join("README"), "hi\n").expect("readme");
+        git(path, &["add", "."]);
+        git(path, &["commit", "-m", "init"]);
+    }
+
+    fn short_head(path: &Path) -> String {
+        let output = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(path)
+            .output()
+            .expect("rev-parse");
+        assert!(output.status.success());
+        let oid = String::from_utf8_lossy(&output.stdout);
+        oid.trim()[..7].to_string()
+    }
+
+    fn test_app(root: &Path) -> AppHandle {
+        AppHandle::new(root.join("data"), root.join("resources")).expect("app")
+    }
+
+    fn project_json(id: &str, path: &Path) -> Project {
+        serde_json::from_value(serde_json::json!({
+            "id": id,
+            "name": id,
+            "path": path.to_string_lossy(),
+            "default_branch": "main",
+            "added_at": 1
+        }))
+        .expect("project")
+    }
+
+    fn worktree_json(id: &str, project_id: &str, path: &str, archived: bool) -> Worktree {
+        let mut value = serde_json::json!({
+            "id": id,
+            "project_id": project_id,
+            "name": id,
+            "path": path,
+            "branch": "stored",
+            "created_at": 1,
+            "setup_output": null,
+            "setup_script": null,
+            "order": 1
+        });
+        if archived {
+            value["archived_at"] = serde_json::json!(10);
+        }
+        serde_json::from_value(value).expect("worktree")
+    }
+
+    struct Fixture {
+        _root: tempfile::TempDir,
+        app: AppHandle,
+        repo: PathBuf,
+        feature: PathBuf,
+        detached: PathBuf,
+    }
+
+    fn fixture() -> Fixture {
+        let root = tempfile::tempdir().expect("tempdir");
+        let repo = root.path().join("repo");
+        let feature = root.path().join("feature");
+        let detached = root.path().join("detached");
+        init_repo(&repo);
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "feature",
+                feature.to_str().unwrap(),
+            ],
+        );
+        git(
+            &repo,
+            &["worktree", "add", "--detach", detached.to_str().unwrap()],
+        );
+        let app = test_app(root.path());
+        Fixture {
+            _root: root,
+            app,
+            repo,
+            feature,
+            detached,
+        }
+    }
+
+    fn save(app: &AppHandle, projects: Vec<Project>, worktrees: Vec<Worktree>) {
+        save_projects_data(
+            app,
+            &ProjectsData {
+                projects,
+                worktrees,
+            },
+        )
+        .expect("save projects");
+    }
+
+    #[test]
+    fn import_stores_branch_name_and_short_oid_for_detached_head() {
+        let fixture = fixture();
+        save(
+            &fixture.app,
+            vec![project_json("project-a", &fixture.repo)],
+            Vec::new(),
+        );
+
+        let imported = block_on(import_worktree(
+            fixture.app.clone(),
+            "project-a".to_string(),
+            fixture.feature.to_string_lossy().into_owned(),
+        ))
+        .expect("import feature");
+        assert_eq!(imported.branch, "feature");
+        assert_ne!(imported.branch, "HEAD");
+
+        let detached = block_on(import_worktree(
+            fixture.app.clone(),
+            "project-a".to_string(),
+            fixture.detached.to_string_lossy().into_owned(),
+        ))
+        .expect("import detached");
+        assert_eq!(detached.branch, short_head(&fixture.detached));
+        assert_ne!(detached.branch, "HEAD");
+    }
+
+    #[test]
+    fn import_rejects_project_checkout_main_checkout_and_tracked_paths() {
+        let fixture = fixture();
+        let tracked = format!("{}/", fixture.feature.to_string_lossy());
+        save(
+            &fixture.app,
+            vec![
+                project_json("project-a", &fixture.detached),
+                project_json("project-b", &fixture.repo),
+            ],
+            vec![worktree_json("other", "project-b", &tracked, true)],
+        );
+
+        let project_checkout = block_on(import_worktree(
+            fixture.app.clone(),
+            "project-a".to_string(),
+            fixture.detached.to_string_lossy().into_owned(),
+        ))
+        .expect_err("project checkout");
+        assert!(
+            project_checkout.starts_with("Cannot import the project checkout:"),
+            "{project_checkout}"
+        );
+
+        let main_checkout = block_on(import_worktree(
+            fixture.app.clone(),
+            "project-a".to_string(),
+            format!("{}/", fixture.repo.to_string_lossy()),
+        ))
+        .expect_err("main checkout");
+        assert!(
+            main_checkout.starts_with("Cannot import the repository's main checkout:"),
+            "{main_checkout}"
+        );
+
+        let tracked_import = block_on(import_worktree(
+            fixture.app.clone(),
+            "project-a".to_string(),
+            fixture.feature.to_string_lossy().into_owned(),
+        ))
+        .expect_err("tracked path");
+        assert!(
+            tracked_import.starts_with("A worktree with this path is already tracked:"),
+            "{tracked_import}"
+        );
+    }
+
+    #[test]
+    fn list_hides_paths_tracked_by_other_projects_and_reports_blocked_checkouts() {
+        let fixture = fixture();
+        let archived = root_join(&fixture, "archived");
+        git(
+            &fixture.repo,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "archived-feature",
+                archived.to_str().unwrap(),
+            ],
+        );
+        let free = root_join(&fixture, "free");
+        git(
+            &fixture.repo,
+            &["worktree", "add", "-b", "free", free.to_str().unwrap()],
+        );
+
+        save(
+            &fixture.app,
+            vec![
+                project_json("project-a", &fixture.repo),
+                project_json("project-b", &fixture.feature),
+            ],
+            vec![
+                worktree_json(
+                    "shared",
+                    "project-b",
+                    &fixture.feature.to_string_lossy(),
+                    false,
+                ),
+                worktree_json(
+                    "old",
+                    "project-b",
+                    &format!("{}/", archived.to_string_lossy()),
+                    true,
+                ),
+            ],
+        );
+
+        let listing = block_on(list_unmanaged_worktrees(
+            fixture.app.clone(),
+            "project-a".to_string(),
+        ))
+        .expect("list");
+
+        let paths: Vec<&str> = listing
+            .worktrees
+            .iter()
+            .map(|worktree| worktree.path.as_str())
+            .collect();
+        let same = |path: &str, expected: &Path| {
+            crate::projects::unmanaged_worktrees::comparable_worktree_path(path)
+                == crate::projects::unmanaged_worktrees::comparable_worktree_path(
+                    &expected.to_string_lossy(),
+                )
+        };
+        assert!(
+            paths.iter().any(|path| same(path, &free)),
+            "free worktree missing from {paths:?}"
+        );
+        assert!(
+            paths.iter().all(|path| !same(path, &fixture.feature)),
+            "other project's worktree was listed: {paths:?}"
+        );
+        assert!(
+            paths.iter().all(|path| !same(path, &archived)),
+            "archived worktree was listed: {paths:?}"
+        );
+        assert!(
+            paths.iter().all(|path| !same(path, &fixture.repo)),
+            "main checkout was listed: {paths:?}"
+        );
+        assert!(listing.worktrees.iter().any(|worktree| worktree.detached));
+        assert_eq!(listing.blocked_paths.len(), 1);
+        assert_eq!(listing.blocked_paths[0].kind, BlockedImportKind::Project);
+        assert_eq!(
+            crate::projects::unmanaged_worktrees::comparable_worktree_path(
+                &listing.blocked_paths[0].path
+            ),
+            crate::projects::unmanaged_worktrees::comparable_worktree_path(
+                &fixture.repo.to_string_lossy()
+            )
+        );
+    }
+
+    fn root_join(fixture: &Fixture, name: &str) -> PathBuf {
+        fixture.repo.parent().expect("parent").join(name)
     }
 }

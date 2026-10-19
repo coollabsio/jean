@@ -987,8 +987,16 @@ pub fn get_branch_status(info: &ActiveWorktreeInfo) -> Result<GitBranchStatus, S
         None => fetch_origin_branch(repo_path, base_branch),
     };
 
-    // Get current branch name
-    let current_branch = get_current_branch(repo_path)?;
+    // Symbolic name is "HEAD" when detached. The stored and displayed branch
+    // uses the short commit id instead, matching import_worktree. Unpushed
+    // lookups keep the symbolic name so an existing detached checkout still
+    // resolves origin/HEAD the same way.
+    let symbolic_branch = get_current_branch(repo_path)?;
+    let current_branch = if symbolic_branch == "HEAD" {
+        crate::projects::git::checkout_branch_label(repo_path).unwrap_or(symbolic_branch.clone())
+    } else {
+        symbolic_branch.clone()
+    };
 
     // Compare HEAD to <remote>/{base_branch}
     let origin_ref = base_ref(base_remote, base_branch);
@@ -1024,7 +1032,7 @@ pub fn get_branch_status(info: &ActiveWorktreeInfo) -> Result<GitBranchStatus, S
     // Prefers the remembered PR push target (supports fork PRs where @{upstream} points
     // at origin but commits live on a fork remote). Falls back to @{upstream}, then
     // origin/{current_branch}.
-    let unpushed_count = if current_branch != *base_branch {
+    let unpushed_count = if symbolic_branch != *base_branch {
         if let (Some(remote), Some(branch)) = (&info.pr_push_remote, &info.pr_push_branch) {
             if remote == "origin" {
                 let _ = fetch_origin_branch(repo_path, branch);
@@ -1044,16 +1052,17 @@ pub fn get_branch_status(info: &ActiveWorktreeInfo) -> Result<GitBranchStatus, S
                 // Fetch the remote for the upstream ref (e.g., "fork" from "fork/branch")
                 if let Some(remote) = upstream.split('/').next() {
                     if remote != "origin" {
-                        let _ = fetch_origin_branch_from_remote(repo_path, remote, &current_branch);
+                        let _ =
+                            fetch_origin_branch_from_remote(repo_path, remote, &symbolic_branch);
                     } else {
-                        let _ = fetch_origin_branch(repo_path, &current_branch);
+                        let _ = fetch_origin_branch(repo_path, &symbolic_branch);
                     }
                 }
                 count_commits_between(repo_path, upstream, "HEAD")
             } else {
-                // No upstream configured — try origin/{current_branch}
-                let _ = fetch_origin_branch(repo_path, &current_branch);
-                let origin_current_ref = format!("origin/{current_branch}");
+                // No upstream configured — try origin/{symbolic_branch}
+                let _ = fetch_origin_branch(repo_path, &symbolic_branch);
+                let origin_current_ref = format!("origin/{symbolic_branch}");
                 if ref_exists(repo_path, &origin_current_ref) {
                     count_commits_between(repo_path, &origin_current_ref, "HEAD")
                 } else {
@@ -1187,6 +1196,42 @@ mod tests {
 
         assert_eq!(status.worktree_ahead_count, 1);
         assert_eq!(status.unpushed_count, 1);
+    }
+
+    #[test]
+    fn detached_head_reports_the_short_commit_not_head() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo = temp.path();
+        run_test_git(repo, &["init", "--initial-branch", "main"]);
+        run_test_git(repo, &["config", "user.email", "test@example.com"]);
+        run_test_git(repo, &["config", "user.name", "Test"]);
+        std::fs::write(repo.join("file.txt"), "one\n").expect("write file");
+        run_test_git(repo, &["add", "."]);
+        run_test_git(repo, &["commit", "-m", "init"]);
+        run_test_git(repo, &["checkout", "--detach"]);
+
+        let head = wsl_aware_command("git", Some(repo))
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .expect("rev-parse");
+        assert!(head.status.success());
+        let oid = String::from_utf8_lossy(&head.stdout);
+        let short = &oid.trim()[..7];
+
+        let status = get_branch_status(&ActiveWorktreeInfo {
+            worktree_id: "detached".to_string(),
+            worktree_path: repo.to_string_lossy().into_owned(),
+            base_branch: "main".to_string(),
+            base_remote: None,
+            pr_number: None,
+            pr_url: None,
+            pr_push_remote: None,
+            pr_push_branch: None,
+        })
+        .expect("branch status");
+
+        assert_eq!(status.current_branch, short);
+        assert_ne!(status.current_branch, "HEAD");
     }
 
     #[test]

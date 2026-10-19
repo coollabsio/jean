@@ -212,4 +212,94 @@ describe('ImportExistingWorktreeDialog', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument()
     expect(screen.getByText(feature.path)).toBeInTheDocument()
   })
+
+  it('shows prunable worktrees but does not select them', async () => {
+    const user = userEvent.setup()
+    const gone: UnmanagedWorktree = {
+      path: '/repo/.worktrees/gone',
+      branch: 'gone',
+      head: '1234abcd',
+      headShort: '1234abc',
+      prunable: true,
+      locked: false,
+      detached: false,
+      bare: false,
+    }
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === 'list_unmanaged_worktrees') return [feature, gone]
+      if (command === 'import_worktree') {
+        return { id: 'imported-1', name: 'feature-login' }
+      }
+      return null
+    })
+
+    render(<ImportExistingWorktreeDialog />)
+    openDialog()
+
+    expect(await screen.findByText(gone.path)).toBeInTheDocument()
+    expect(screen.getByText('gone · 1234abc · prunable')).toBeInTheDocument()
+    const goneCheckbox = screen.getByRole('checkbox', {
+      name: `Import ${gone.path}`,
+    })
+    expect(goneCheckbox).toBeDisabled()
+
+    await user.click(screen.getByRole('button', { name: 'Select all' }))
+    expect(
+      screen.getByRole('checkbox', { name: `Import ${feature.path}` })
+    ).toBeChecked()
+    expect(goneCheckbox).not.toBeChecked()
+
+    await user.click(screen.getByRole('button', { name: 'Import (1)' }))
+    await waitFor(() => {
+      expect(mocks.invoke).toHaveBeenCalledWith('import_worktree', {
+        projectId: 'project-1',
+        path: feature.path,
+      })
+    })
+    expect(mocks.invoke).not.toHaveBeenCalledWith(
+      'import_worktree',
+      expect.objectContaining({ path: gone.path })
+    )
+  })
+
+  it('rejects the project checkout and the main checkout in the dialog', async () => {
+    const user = userEvent.setup()
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === 'list_unmanaged_worktrees') {
+        return {
+          worktrees: [feature],
+          blockedPaths: [
+            { path: '/repo/', kind: 'project' },
+            { path: '/repo-main', kind: 'main' },
+          ],
+        }
+      }
+      return null
+    })
+
+    render(<ImportExistingWorktreeDialog />)
+    openDialog()
+    await screen.findByText(feature.path)
+
+    const pathInput = screen.getByLabelText('Worktree path')
+    await user.type(pathInput, '/repo')
+    await user.click(screen.getByRole('button', { name: 'Add' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Cannot import the project checkout: /repo'
+    )
+    expect(
+      screen.queryByRole('checkbox', { name: 'Import /repo' })
+    ).not.toBeInTheDocument()
+
+    await user.clear(pathInput)
+    await user.type(pathInput, '/repo-main/')
+    await user.click(screen.getByRole('button', { name: 'Add' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "Cannot import the repository's main checkout: /repo-main/"
+    )
+    expect(mocks.invoke).not.toHaveBeenCalledWith(
+      'import_worktree',
+      expect.anything()
+    )
+  })
 })

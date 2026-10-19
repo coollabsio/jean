@@ -2,8 +2,10 @@
 //!
 //! Parsing is pure so tests can cover `git worktree list --porcelain` without
 //! spawning git. The command in `commands.rs` supplies the project path and
-//! the paths Jean already tracks for that project, including archived
-//! worktrees (`archived_at` is set).
+//! every path Jean already tracks for any project, including archived
+//! worktrees (`archived_at` is set). Path comparison uses
+//! [`comparable_worktree_path`], the same normalization `import_worktree` uses
+//! when it rejects a path that is already tracked.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -29,6 +31,34 @@ pub struct UnmanagedWorktree {
     pub bare: bool,
 }
 
+/// Why a path must not be imported.
+///
+/// `project` is the Jean project path. `main` is the repository's primary
+/// working tree when that directory is not the project path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BlockedImportKind {
+    Project,
+    Main,
+}
+
+/// A path the import dialog must not offer and `import_worktree` must reject.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockedImportPath {
+    pub path: String,
+    pub kind: BlockedImportKind,
+}
+
+/// Unmanaged worktrees plus the checkouts import is not allowed to adopt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnmanagedWorktreeListing {
+    pub worktrees: Vec<UnmanagedWorktree>,
+    /// Project checkout, and the repository main working tree when it differs.
+    pub blocked_paths: Vec<BlockedImportPath>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct GitWorktreeListEntry {
     path: String,
@@ -44,8 +74,17 @@ struct GitWorktreeListEntry {
 pub fn list_unmanaged_from_repo(
     project_path: &str,
     tracked_paths: &[String],
-) -> Result<Vec<UnmanagedWorktree>, String> {
-    let output = wsl_aware_command("git", Some(Path::new(project_path)))
+) -> Result<UnmanagedWorktreeListing, String> {
+    let stdout = read_worktree_list_porcelain(project_path)?;
+    Ok(unmanaged_listing_from_porcelain(
+        &stdout,
+        project_path,
+        tracked_paths,
+    ))
+}
+
+pub fn read_worktree_list_porcelain(repo_path: &str) -> Result<String, String> {
+    let output = wsl_aware_command("git", Some(Path::new(repo_path)))
         .args(["worktree", "list", "--porcelain"])
         .output()
         .map_err(|error| format!("Failed to run git worktree list: {error}"))?;
@@ -55,12 +94,7 @@ pub fn list_unmanaged_from_repo(
         return Err(format!("Failed to list worktrees: {}", stderr.trim()));
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    Ok(unmanaged_worktrees_from_porcelain(
-        &stdout,
-        project_path,
-        tracked_paths,
-    ))
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 /// Parse porcelain output and drop the main checkout plus already-tracked paths.
@@ -69,8 +103,81 @@ pub fn unmanaged_worktrees_from_porcelain(
     project_path: &str,
     tracked_paths: &[String],
 ) -> Vec<UnmanagedWorktree> {
+    unmanaged_listing_from_porcelain(porcelain, project_path, tracked_paths).worktrees
+}
+
+/// Parse porcelain output into importable worktrees and reserved checkouts.
+///
+/// `tracked_paths` is every worktree path Jean stores, for every project,
+/// including archived ones. Comparison uses [`comparable_worktree_path`].
+pub fn unmanaged_listing_from_porcelain(
+    porcelain: &str,
+    project_path: &str,
+    tracked_paths: &[String],
+) -> UnmanagedWorktreeListing {
     let entries = parse_worktree_list_porcelain(porcelain);
-    filter_unmanaged_worktrees(&entries, project_path, tracked_paths)
+    let main_checkout = entries.first().map(|entry| entry.path.as_str());
+    UnmanagedWorktreeListing {
+        worktrees: filter_unmanaged_worktrees(&entries, project_path, tracked_paths),
+        blocked_paths: blocked_import_paths(project_path, main_checkout),
+    }
+}
+
+/// Project path, plus the primary working tree when it is a different directory.
+pub fn blocked_import_paths(
+    project_path: &str,
+    main_checkout: Option<&str>,
+) -> Vec<BlockedImportPath> {
+    let mut blocked = Vec::new();
+    if !project_path.trim().is_empty() {
+        blocked.push(BlockedImportPath {
+            path: project_path.to_string(),
+            kind: BlockedImportKind::Project,
+        });
+    }
+    if let Some(main) = main_checkout.filter(|main| !main.trim().is_empty()) {
+        if comparable_worktree_path(main) != comparable_worktree_path(project_path) {
+            blocked.push(BlockedImportPath {
+                path: main.to_string(),
+                kind: BlockedImportKind::Main,
+            });
+        }
+    }
+    blocked
+}
+
+pub fn main_checkout_path_from_porcelain(porcelain: &str) -> Option<String> {
+    parse_worktree_list_porcelain(porcelain)
+        .into_iter()
+        .next()
+        .map(|entry| entry.path)
+}
+
+/// Error when `import_path` is the project checkout or the repo's main worktree.
+pub fn reserved_checkout_import_error(
+    import_path: &str,
+    blocked: &[BlockedImportPath],
+) -> Option<String> {
+    let key = comparable_worktree_path(import_path);
+    let hit = blocked
+        .iter()
+        .find(|blocked| comparable_worktree_path(&blocked.path) == key)?;
+    Some(match hit.kind {
+        BlockedImportKind::Project => {
+            format!("Cannot import the project checkout: {import_path}")
+        }
+        BlockedImportKind::Main => {
+            format!("Cannot import the repository's main checkout: {import_path}")
+        }
+    })
+}
+
+/// True when `path` matches a path Jean already tracks, under any project.
+pub fn worktree_path_is_tracked(path: &str, tracked_paths: &[String]) -> bool {
+    let key = comparable_worktree_path(path);
+    tracked_paths
+        .iter()
+        .any(|tracked| comparable_worktree_path(tracked) == key)
 }
 
 fn parse_worktree_list_porcelain(output: &str) -> Vec<GitWorktreeListEntry> {
@@ -244,7 +351,11 @@ fn strip_windows_verbatim_prefix(path: PathBuf) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{unmanaged_worktrees_from_porcelain, UnmanagedWorktree};
+    use super::{
+        blocked_import_paths, main_checkout_path_from_porcelain, reserved_checkout_import_error,
+        unmanaged_listing_from_porcelain, unmanaged_worktrees_from_porcelain,
+        worktree_path_is_tracked, BlockedImportKind, BlockedImportPath, UnmanagedWorktree,
+    };
 
     fn sample_porcelain() -> &'static str {
         "\
@@ -380,5 +491,132 @@ HEAD aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 branch refs/heads/main
 ";
         assert!(unmanaged_worktrees_from_porcelain(main_only, "/jean-test/repo", &[]).is_empty());
+    }
+
+    #[test]
+    fn excludes_paths_tracked_by_any_project_including_archived() {
+        let porcelain = "\
+worktree /jean-test/repo
+HEAD aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+branch refs/heads/main
+
+worktree /jean-test/other-project
+HEAD bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+branch refs/heads/shared
+
+worktree /jean-test/archived
+HEAD cccccccccccccccccccccccccccccccccccccccc
+branch refs/heads/old
+
+worktree /jean-test/free
+HEAD dddddddddddddddddddddddddddddddddddddddd
+branch refs/heads/free
+";
+        // Trailing slash matches import_worktree's comparable_worktree_path.
+        // Callers pass every project's paths, archived included.
+        let tracked = vec![
+            "/jean-test/other-project/".to_string(),
+            "/jean-test/archived".to_string(),
+        ];
+        let listing = unmanaged_listing_from_porcelain(porcelain, "/jean-test/repo", &tracked);
+        assert_eq!(
+            listing
+                .worktrees
+                .iter()
+                .map(|entry| entry.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["/jean-test/free"]
+        );
+        assert!(worktree_path_is_tracked(
+            "/jean-test/other-project",
+            &tracked
+        ));
+        assert!(worktree_path_is_tracked("/jean-test/archived/", &tracked));
+        assert!(!worktree_path_is_tracked("/jean-test/free", &tracked));
+    }
+
+    #[test]
+    fn prunable_entries_stay_in_the_list() {
+        let listed = listed(&[]);
+        let prunable = listed
+            .iter()
+            .find(|entry| entry.path == "/jean-test/prunable")
+            .expect("prunable worktree");
+        assert!(prunable.prunable);
+    }
+
+    #[test]
+    fn blocks_the_project_checkout_and_a_different_main_worktree() {
+        let porcelain = "\
+worktree /jean-test/repo
+HEAD aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+branch refs/heads/main
+
+worktree /jean-test/linked-project
+HEAD bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+branch refs/heads/linked
+
+worktree /jean-test/other
+HEAD cccccccccccccccccccccccccccccccccccccccc
+branch refs/heads/other
+";
+        let listing =
+            unmanaged_listing_from_porcelain(porcelain, "/jean-test/linked-project/", &[]);
+        assert_eq!(
+            listing
+                .worktrees
+                .iter()
+                .map(|entry| entry.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["/jean-test/other"]
+        );
+        assert_eq!(
+            listing.blocked_paths,
+            vec![
+                BlockedImportPath {
+                    path: "/jean-test/linked-project/".to_string(),
+                    kind: BlockedImportKind::Project,
+                },
+                BlockedImportPath {
+                    path: "/jean-test/repo".to_string(),
+                    kind: BlockedImportKind::Main,
+                },
+            ]
+        );
+        assert_eq!(
+            reserved_checkout_import_error("/jean-test/linked-project", &listing.blocked_paths)
+                .as_deref(),
+            Some("Cannot import the project checkout: /jean-test/linked-project")
+        );
+        assert_eq!(
+            reserved_checkout_import_error("/jean-test/repo/", &listing.blocked_paths).as_deref(),
+            Some("Cannot import the repository's main checkout: /jean-test/repo/")
+        );
+        assert!(
+            reserved_checkout_import_error("/jean-test/other", &listing.blocked_paths).is_none()
+        );
+    }
+
+    #[test]
+    fn same_main_and_project_path_is_only_the_project_checkout() {
+        let blocked = blocked_import_paths("/jean-test/repo/", Some("/jean-test/repo"));
+        assert_eq!(
+            blocked,
+            vec![BlockedImportPath {
+                path: "/jean-test/repo/".to_string(),
+                kind: BlockedImportKind::Project,
+            }]
+        );
+        assert_eq!(
+            main_checkout_path_from_porcelain(
+                "\
+worktree /jean-test/repo
+HEAD aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+branch refs/heads/main
+"
+            )
+            .as_deref(),
+            Some("/jean-test/repo")
+        );
     }
 }

@@ -220,6 +220,25 @@ export interface UnmanagedWorktree {
   bare: boolean
 }
 
+/** Why a path must not be imported. */
+export type BlockedImportKind = 'project' | 'main'
+
+/**
+ * A checkout `import_worktree` rejects.
+ * `project` is the Jean project path. `main` is the repository's primary
+ * working tree when that directory is not the project path.
+ */
+export interface BlockedImportPath {
+  path: string
+  kind: BlockedImportKind
+}
+
+/** `list_unmanaged_worktrees` payload. Older callers may still return an array. */
+export interface UnmanagedWorktreeListing {
+  worktrees: UnmanagedWorktree[]
+  blockedPaths: BlockedImportPath[]
+}
+
 /**
  * A git worktree created for a project
  */

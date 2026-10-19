@@ -563,6 +563,42 @@ pub fn get_current_branch(repo_path: &str) -> Result<String, String> {
     Ok(branch)
 }
 
+/// Branch name to store for a checkout.
+///
+/// Attached HEAD returns the branch. Detached HEAD returns the first 7
+/// characters of the commit id. `Worktree.branch` is a `String`, and the
+/// literal `HEAD` from `rev-parse --abbrev-ref` is not a branch name.
+pub fn checkout_branch_label(repo_path: &str) -> Result<String, String> {
+    let branch = get_current_branch(repo_path)?;
+    if branch != "HEAD" {
+        return Ok(branch);
+    }
+
+    let output = wsl_aware_command("git", Some(Path::new(repo_path)))
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .map_err(|error| format!("Failed to read HEAD: {error}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Failed to read detached HEAD: {}", stderr.trim()));
+    }
+
+    let oid = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if oid.is_empty() {
+        return Err("Failed to read detached HEAD".to_string());
+    }
+    Ok(short_commit_oid(&oid))
+}
+
+fn short_commit_oid(oid: &str) -> String {
+    let trimmed = oid.trim();
+    if trimmed.len() <= 7 {
+        trimmed.to_string()
+    } else {
+        trimmed[..7].to_string()
+    }
+}
+
 /// Check if a branch exists in a repository
 pub fn branch_exists(repo_path: &str, branch_name: &str) -> bool {
     wsl_aware_command("git", Some(Path::new(repo_path)))
