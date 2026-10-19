@@ -107,7 +107,8 @@ export const DEFAULT_KEYBINDINGS: KeybindingsMap = {
   open_command_palette: 'mod+k',
   search_chat: 'mod+f',
   toggle_zen_mode: 'mod+shift+z',
-  clear_session_context: 'mod+shift+k',
+  // Destructive (wipes the transcript in place), so unbound by default (#693).
+  clear_session_context: '',
 }
 
 // UI definitions for the settings pane
@@ -310,7 +311,7 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
     action: 'clear_session_context',
     label: 'Clear session context',
     description: 'Clear the current chat history and start with fresh context',
-    default_shortcut: 'mod+shift+k',
+    default_shortcut: '',
     category: 'chat',
   },
   {

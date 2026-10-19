@@ -631,6 +631,8 @@ describe('preferences service', () => {
         keybindings: {
           toggle_left_sidebar: 'mod+1', // Old default
           restore_last_archived: 'mod+alt+shift+t', // Broken modifier order
+          clear_session_context: 'mod+shift+k', // Old default, now unbound
+          toggle_zen_mode: 'mod+alt+z', // Custom binding
         },
         archive_retention_days: 30,
         syntax_theme_dark: 'vitesse-black',
@@ -741,6 +743,10 @@ describe('preferences service', () => {
       )
       expect(result.current.data?.keybindings?.restore_last_archived).toBe(
         'mod+shift+alt+t'
+      )
+      expect(result.current.data?.keybindings?.clear_session_context).toBe('')
+      expect(result.current.data?.keybindings?.toggle_zen_mode).toBe(
+        'mod+alt+z'
       )
       expect(result.current.data?.keybindings?.open_quick_menu).toBe(
         DEFAULT_KEYBINDINGS.open_quick_menu

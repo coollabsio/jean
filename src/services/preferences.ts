@@ -34,6 +34,7 @@ const MIGRATED_KEYBINDINGS: Partial<
   // Changed so Cmd+1-9 can open Recent sessions and Cmd+Arrow switches tabs.
   next_session: 'mod+alt+arrowright',
   previous_session: 'mod+alt+arrowleft',
+  clear_session_context: 'mod+shift+k', // Now unbound by default
 }
 
 // Migrate keybindings: if a stored value matches an old default, use the new default
@@ -48,7 +49,7 @@ function migrateKeybindings(
     if (oldDefaults.includes(stored[action])) {
       // User had the old default, update to new default
       const newDefault = DEFAULT_KEYBINDINGS[action]
-      if (newDefault) {
+      if (newDefault !== undefined) {
         migrated[action] = newDefault
       }
     }

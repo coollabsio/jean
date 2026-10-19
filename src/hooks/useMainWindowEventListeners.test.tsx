@@ -969,7 +969,9 @@ describe('close shortcut on the Agents page', () => {
   function renderListeners(queryClient: QueryClient) {
     return renderHook(() => useMainWindowEventListeners(), {
       wrapper: ({ children }) => (
-        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+        <QueryClientProvider client={queryClient}>
+          {children}
+        </QueryClientProvider>
       ),
     })
   }
@@ -1037,5 +1039,11 @@ describe('removed keybindings', () => {
         open_github_dashboard: 'mod+shift+d',
       })
     ).toBeNull()
+  })
+
+  it('never matches unbound actions', () => {
+    expect(DEFAULT_KEYBINDINGS.clear_session_context).toBe('')
+    expect(findKeybindingAction('mod+shift+k', DEFAULT_KEYBINDINGS)).toBeNull()
+    expect(findKeybindingAction('', DEFAULT_KEYBINDINGS)).toBeNull()
   })
 })

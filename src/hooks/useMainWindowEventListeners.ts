@@ -144,7 +144,11 @@ export function findKeybindingAction(
   keybindings: KeybindingsMap
 ): KeybindingAction | null {
   for (const [action, binding] of Object.entries(keybindings)) {
-    if (Object.hasOwn(DEFAULT_KEYBINDINGS, action) && binding === shortcut)
+    if (
+      binding &&
+      Object.hasOwn(DEFAULT_KEYBINDINGS, action) &&
+      binding === shortcut
+    )
       return action as KeybindingAction
   }
 
