@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@/test/test-utils'
+import { useUIStore } from '@/store/ui-store'
 import { FullScreenTerminalSurface } from './FullScreenTerminalSurface'
 
 vi.mock('./TerminalView', () => ({
@@ -21,6 +22,10 @@ vi.mock('./TerminalView', () => ({
 }))
 
 describe('FullScreenTerminalSurface', () => {
+  beforeEach(() => {
+    useUIStore.setState({ sessionPrimarySurface: {} })
+  })
+
   it('renders through TerminalView so the selected emulator is respected', () => {
     const { container } = render(
       <FullScreenTerminalSurface
@@ -68,5 +73,36 @@ describe('FullScreenTerminalSurface', () => {
     )
 
     expect(screen.queryByRole('button', { name: /chat/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Magic' })).toBeNull()
+  })
+
+  it('shows the Magic button for a native CLI session when asked', () => {
+    useUIStore.getState().setSessionPrimarySurface('session-1', 'terminal')
+    render(
+      <FullScreenTerminalSurface
+        worktreeId="worktree-1"
+        worktreePath="/tmp/worktree-1"
+        terminalId="terminal-1"
+        sessionId="session-1"
+        showMagicButton
+      />
+    )
+
+    expect(screen.getByRole('button', { name: 'Magic' })).toBeInTheDocument()
+  })
+
+  it('hides the Magic button for a chat session even when the slot is enabled', () => {
+    useUIStore.getState().setSessionPrimarySurface('session-1', 'chat')
+    render(
+      <FullScreenTerminalSurface
+        worktreeId="worktree-1"
+        worktreePath="/tmp/worktree-1"
+        terminalId="terminal-1"
+        sessionId="session-1"
+        showMagicButton
+      />
+    )
+
+    expect(screen.queryByRole('button', { name: 'Magic' })).toBeNull()
   })
 })

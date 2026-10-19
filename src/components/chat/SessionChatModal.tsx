@@ -78,6 +78,7 @@ import { ModalBrowserDrawer } from '@/components/browser/ModalBrowserDrawer'
 import { OpenInButton } from '@/components/open-in/OpenInButton'
 import { ScriptsButton } from '@/components/open-in/ScriptsButton'
 import { DevToolsDropdown } from './DevToolsDropdown'
+import { TerminalMagicButton } from './TerminalMagicButton'
 import { DEFAULT_KEYBINDINGS, formatShortcutDisplay } from '@/types/keybindings'
 import {
   createSessionCardDataCache,
@@ -1171,6 +1172,9 @@ export const SessionChatModal = memo(function SessionChatModal({
                   )}
                   {!zenMode && (
                     <>
+                      {currentSessionId && !project?.server && (
+                        <TerminalMagicButton sessionId={currentSessionId} />
+                      )}
                       {!isMobile && !project?.server && (
                         <>
                           <HeaderSurfaceToggle

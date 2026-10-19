@@ -197,6 +197,7 @@ import {
 import { useUIStore } from '@/store/ui-store'
 import { buildMcpConfigJson } from '@/services/mcp'
 import { CHECK_GITHUB_ISSUES_PROMPT } from '@/lib/github-discovery-prompt'
+import { routeCurrentSessionMagicPrompt } from '@/lib/magic-prompt-pty'
 import { buildCommentAndCloseIssuePrompt } from '@/lib/github-issue-close-prompt'
 import { buildCommitInSessionPrompt } from '@/lib/commit-in-session-prompt'
 import type { McpServerInfo } from '@/types/chat'
@@ -1761,6 +1762,14 @@ const ChatWindowContent = memo(function ChatWindowContent({
   )
 
   const handleCheckGitHubIssues = useCallback(() => {
+    if (
+      routeCurrentSessionMagicPrompt(
+        activeSessionId,
+        CHECK_GITHUB_ISSUES_PROMPT
+      ) !== 'chat'
+    ) {
+      return
+    }
     sendMessageNow({
       id: generateId(),
       message: CHECK_GITHUB_ISSUES_PROMPT,
@@ -1779,14 +1788,18 @@ const ChatWindowContent = memo(function ChatWindowContent({
       backend: selectedBackendRef.current,
       queuedAt: Date.now(),
     })
-  }, [getMcpConfig, sendMessageNow])
+  }, [activeSessionId, getMcpConfig, sendMessageNow])
 
   const handlePreReleaseReview = useCallback(() => {
+    const message =
+      preferences?.magic_prompts?.pre_release_review ??
+      DEFAULT_PRE_RELEASE_REVIEW_PROMPT
+    if (routeCurrentSessionMagicPrompt(activeSessionId, message) !== 'chat') {
+      return
+    }
     sendMessageNow({
       id: generateId(),
-      message:
-        preferences?.magic_prompts?.pre_release_review ??
-        DEFAULT_PRE_RELEASE_REVIEW_PROMPT,
+      message,
       pendingImages: [],
       pendingFiles: [],
       pendingSkills: [],
@@ -1803,6 +1816,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
       queuedAt: Date.now(),
     })
   }, [
+    activeSessionId,
     getMcpConfig,
     preferences?.magic_prompts?.pre_release_review,
     sendMessageNow,
@@ -1853,7 +1867,10 @@ const ChatWindowContent = memo(function ChatWindowContent({
 
   // Sends a magic prompt to this session with the selected backend/model/mode
   const sendMagicPrompt = useCallback(
-    (message: string) =>
+    (message: string) => {
+      if (routeCurrentSessionMagicPrompt(activeSessionId, message) !== 'chat') {
+        return
+      }
       sendMessageNow({
         id: generateId(),
         message,
@@ -1871,8 +1888,9 @@ const ChatWindowContent = memo(function ChatWindowContent({
         mcpConfig: getMcpConfig(),
         backend: selectedBackendRef.current,
         queuedAt: Date.now(),
-      }),
-    [getMcpConfig, sendMessageNow]
+      })
+    },
+    [activeSessionId, getMcpConfig, sendMessageNow]
   )
 
   const handleCommitInSession = useCallback(() => {
@@ -2631,6 +2649,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
             worktreePath={activeWorktreePath}
             sessionId={activeSessionId}
             terminalId={sessionTerminalId}
+            showMagicButton={!isModal && !zenMode && !project?.server}
           />
         ) : isTerminalAwaitingReconnect ? (
           <div className="flex min-h-0 flex-1 items-center justify-center p-6">

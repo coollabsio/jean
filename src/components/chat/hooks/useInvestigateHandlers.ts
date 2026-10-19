@@ -9,6 +9,7 @@ import { projectsQueryKeys } from '@/services/projects'
 import { buildMcpConfigJson } from '@/services/mcp'
 import { resolveBackend, supportsAdaptiveThinking } from '@/lib/model-utils'
 import { applyYoloInvestigationFixDirective } from '@/lib/investigation-prompt'
+import { routeCurrentSessionMagicPrompt } from '@/lib/magic-prompt-pty'
 import {
   DEFAULT_INVESTIGATE_ISSUE_PROMPT,
   DEFAULT_INVESTIGATE_PR_PROMPT,
@@ -439,6 +440,12 @@ export function useInvestigateHandlers({
       // When magic-prompt mode is yolo, append an unconditional fix directive
       // and strip any anti-fix wording from the template/custom prompt.
       prompt = applyYoloInvestigationFixDirective(prompt, investigateMode)
+
+      // Native CLI sessions have no chat composer. The prompt is already
+      // rendered the same way; write it into the open PTY instead of sendMessage.
+      if (routeCurrentSessionMagicPrompt(activeSessionId, prompt) !== 'chat') {
+        return
+      }
 
       const {
         addSendingSession,

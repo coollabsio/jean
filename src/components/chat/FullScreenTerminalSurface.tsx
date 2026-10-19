@@ -6,6 +6,7 @@ import { invoke, listen } from '@/lib/transport'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import { SingleTerminalView } from './TerminalView'
+import { TerminalMagicButton } from './TerminalMagicButton'
 
 interface FullScreenTerminalSurfaceProps {
   worktreeId: string
@@ -15,6 +16,8 @@ interface FullScreenTerminalSurfaceProps {
   isActive?: boolean
   className?: string
   showHeader?: boolean
+  /** Magic control for the main-window terminal. The session modal header has its own. */
+  showMagicButton?: boolean
 }
 
 export function FullScreenTerminalSurface({
@@ -25,6 +28,7 @@ export function FullScreenTerminalSurface({
   isActive = true,
   className,
   showHeader = false,
+  showMagicButton = false,
 }: FullScreenTerminalSurfaceProps) {
   useEffect(() => {
     if (!sessionId || !isActive) return
@@ -81,7 +85,7 @@ export function FullScreenTerminalSurface({
       data-terminal-root="true"
       data-terminal-surface="session"
       className={cn(
-        'flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background',
+        'relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background',
         className
       )}
     >
@@ -101,6 +105,11 @@ export function FullScreenTerminalSurface({
             <MessageSquare className="size-3.5" />
             Chat
           </Button>
+        </div>
+      )}
+      {showMagicButton && sessionId && (
+        <div className="pointer-events-auto absolute top-2 right-2 z-20">
+          <TerminalMagicButton sessionId={sessionId} />
         </div>
       )}
       <div className="min-h-0 flex-1 overflow-hidden">

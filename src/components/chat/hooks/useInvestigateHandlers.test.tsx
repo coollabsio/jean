@@ -2,7 +2,10 @@ import React, { type RefObject } from 'react'
 import { act, renderHook } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { toast } from 'sonner'
 import { useChatStore } from '@/store/chat-store'
+import { useTerminalStore } from '@/store/terminal-store'
+import { useUIStore } from '@/store/ui-store'
 import { invoke } from '@/lib/transport'
 import { defaultPreferences, type AppPreferences } from '@/types/preferences'
 import type {
@@ -120,6 +123,11 @@ describe('useInvestigateHandlers', () => {
       errors: {},
       lastSentMessages: {},
     })
+    useUIStore.setState({
+      sessionPrimarySurface: {},
+      sessionTerminalIds: {},
+    })
+    useTerminalStore.setState({ runningTerminals: new Set() })
   })
 
   it.each([
@@ -148,8 +156,58 @@ describe('useInvestigateHandlers', () => {
         }),
         expect.any(Object)
       )
+      expect(invoke).not.toHaveBeenCalledWith(
+        'terminal_write',
+        expect.anything()
+      )
     }
   )
+
+  it('writes the rendered investigate prompt into a running native CLI pty', async () => {
+    useUIStore.getState().setSessionPrimarySurface('base-session', 'terminal')
+    useUIStore.getState().setSessionTerminalId('base-session', 'term-1')
+    useTerminalStore.getState().setTerminalRunning('term-1', true)
+    vi.mocked(invoke).mockImplementation(async name =>
+      name === 'list_loaded_issue_contexts'
+        ? ([{ number: 42 }] as never)
+        : (undefined as never)
+    )
+    const { result, sendMessage } = renderHandlers()
+
+    await act(async () => {
+      await result.current.handleInvestigate('issue')
+    })
+
+    expect(sendMessage.mutate).not.toHaveBeenCalled()
+    expect(invoke).toHaveBeenCalledWith(
+      'terminal_write',
+      expect.objectContaining({
+        terminalId: 'term-1',
+        data: expect.stringContaining('#42'),
+      })
+    )
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it('toasts and does not write when the native CLI pty has exited', async () => {
+    useUIStore.getState().setSessionPrimarySurface('base-session', 'terminal')
+    useUIStore.getState().setSessionTerminalId('base-session', 'term-1')
+    useTerminalStore.getState().setTerminalRunning('term-1', false)
+    vi.mocked(invoke).mockImplementation(async name =>
+      name === 'list_loaded_issue_contexts'
+        ? ([{ number: 42 }] as never)
+        : (undefined as never)
+    )
+    const { result, sendMessage } = renderHandlers()
+
+    await act(async () => {
+      await result.current.handleInvestigate('issue')
+    })
+
+    expect(sendMessage.mutate).not.toHaveBeenCalled()
+    expect(invoke).not.toHaveBeenCalledWith('terminal_write', expect.anything())
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('exited'))
+  })
 
   it('uses the dedicated Sentry prompt and execution settings', async () => {
     vi.mocked(invoke).mockImplementation(async command => {
