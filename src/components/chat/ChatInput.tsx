@@ -21,7 +21,7 @@ import type {
   ExecutionMode,
 } from '@/types/chat'
 import type { AppPreferences, CliBackend } from '@/types/preferences'
-import { preferencesQueryKeys } from '@/services/preferences'
+import { preferencesQueryKeys, usePreferences } from '@/services/preferences'
 import {
   FileMentionPopover,
   type FileMentionPopoverHandle,
@@ -119,6 +119,7 @@ export const ChatInput = memo(function ChatInput({
   investigatePRPrompt,
 }: ChatInputProps) {
   const isMobile = useIsMobile()
+  const { data: preferences } = usePreferences()
   const zenMode = useUIStore(state => state.zenMode)
   const resizeTextarea = useAutoResize(inputRef)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -1415,6 +1416,7 @@ export const ChatInput = memo(function ChatInput({
       <Textarea
         ref={inputRef}
         data-chat-input
+        spellCheck={preferences?.spellcheck_enabled ?? true}
         placeholder={
           isSending
             ? executionMode === 'plan'

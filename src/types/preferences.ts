@@ -1366,6 +1366,8 @@ export interface AppPreferences {
   has_seen_jean_mcp_intro: boolean // Whether user has seen the Jean MCP server announcement
   /** One-time tip: soft text on 1× displays when zoom ≠ 100% (default false = not dismissed) */
   has_seen_external_display_zoom_tip?: boolean
+  show_full_file_path: boolean // Show full relative path in file mention badges instead of just filename
+  spellcheck_enabled: boolean // Enable spellcheck in the chat input
   chrome_enabled: boolean // Enable browser automation via Chrome extension
   /** @deprecated Client-local only (issue #622). Kept for one-time seed/migration. */
   zoom_level: number // Desktop zoom level percentage (50-200, default 100)
@@ -2541,6 +2543,8 @@ export const defaultPreferences: AppPreferences = {
   has_seen_jean_config_wizard: false, // Default: not seen
   has_seen_jean_mcp_intro: false, // Default: not seen
   has_seen_external_display_zoom_tip: false, // Default: show tip once on 1× + non-100% zoom
+  show_full_file_path: false, // Default: show filename only
+  spellcheck_enabled: true, // Default: enabled
   chrome_enabled: true, // Default: enabled
   zoom_level: ZOOM_LEVEL_DEFAULT,
   mobile_zoom_level: ZOOM_LEVEL_DEFAULT,

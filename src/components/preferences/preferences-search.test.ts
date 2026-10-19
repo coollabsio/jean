@@ -95,6 +95,21 @@ describe('preferences search index', () => {
     expect(searchPreferenceEntries('ghostty web')[0]?.pane).toBe('terminal')
   })
 
+  it('finds chat file-path and spellcheck settings', () => {
+    setTauriInternals(false)
+
+    expect(
+      searchPreferenceEntries('spellcheck').some(
+        entry => entry.id === 'general-chat'
+      )
+    ).toBe(true)
+    expect(
+      searchPreferenceEntries('full file paths').some(
+        entry => entry.id === 'general-chat'
+      )
+    ).toBe(true)
+  })
+
   it('returns relevant appearance hits for font queries', () => {
     setTauriInternals(false)
     const results = searchPreferenceEntries('appearance font')

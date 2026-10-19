@@ -220,6 +220,11 @@ describe('magic prompt preference resolvers', () => {
     expect(defaultPreferences.auto_recaps_enabled).toBe(true)
   })
 
+  it('shows filenames in mention badges and enables chat spellcheck by default', () => {
+    expect(defaultPreferences.show_full_file_path).toBe(false)
+    expect(defaultPreferences.spellcheck_enabled).toBe(true)
+  })
+
   it('always-on parallel prompting falls back to the default prompt', () => {
     expect(defaultPreferences).not.toHaveProperty(
       'parallel_execution_prompt_enabled'

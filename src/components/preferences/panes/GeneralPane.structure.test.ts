@@ -161,6 +161,24 @@ describe('GeneralPane settings structure', () => {
     )
   })
 
+  it('renders chat path and spellcheck toggles before auto-generate', () => {
+    const source = readFileSync(
+      'src/components/preferences/panes/GeneralPane.tsx',
+      'utf8'
+    )
+    const chatIndex = source.indexOf('title="Chat"')
+    const autoGenerateIndex = source.indexOf('title="Auto-generate"')
+    const section = source.slice(chatIndex, autoGenerateIndex)
+
+    expect(chatIndex).toBeGreaterThan(-1)
+    expect(chatIndex).toBeLessThan(autoGenerateIndex)
+    expect(section).toContain('anchorId="pref-general-section-chat"')
+    expect(section).toContain('show_full_file_path')
+    expect(section).toContain('spellcheck_enabled')
+    expect(section).toContain('Show full file paths')
+    expect(section).toContain('Spellcheck')
+  })
+
   it('renders the app version and build commit at the bottom of general settings', () => {
     const source = readFileSync(
       'src/components/preferences/panes/GeneralPane.tsx',

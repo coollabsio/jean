@@ -555,6 +555,23 @@ const sectionEntries: PreferenceSearchEntry[] = [
     fallbackAnchorId: 'pref-pane-general',
   },
   {
+    id: 'general-chat',
+    pane: 'general',
+    paneTitle: 'General',
+    type: 'section',
+    title: 'Chat',
+    sectionTitle: 'General',
+    keywords: [
+      'show full file paths',
+      'file mention',
+      'mention badge',
+      'spellcheck',
+      'spell check',
+    ],
+    anchorId: 'pref-general-section-chat',
+    fallbackAnchorId: 'pref-pane-general',
+  },
+  {
     id: 'general-auto-generate',
     pane: 'general',
     paneTitle: 'General',

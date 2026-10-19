@@ -297,6 +297,10 @@ pub struct AppPreferences {
     pub has_seen_jean_mcp_intro: bool, // Whether user has seen the Jean MCP server announcement
     #[serde(default)]
     pub has_seen_external_display_zoom_tip: bool, // Soft-text tip on 1× displays when zoom ≠ 100%
+    #[serde(default)]
+    pub show_full_file_path: bool, // Show full relative path in file mention badges
+    #[serde(default = "default_spellcheck_enabled")]
+    pub spellcheck_enabled: bool, // Enable spellcheck in the chat input
     #[serde(default = "default_chrome_enabled")]
     pub chrome_enabled: bool, // Enable browser automation via Chrome extension
     #[serde(default = "default_zoom_level")]
@@ -675,6 +679,10 @@ fn default_auto_recaps_enabled() -> bool {
 
 fn default_keep_ai_servers_warm() -> bool {
     true // Enabled by default to make follow-up requests start faster
+}
+
+fn default_spellcheck_enabled() -> bool {
+    true // Enabled by default
 }
 
 fn default_chrome_enabled() -> bool {
@@ -1243,6 +1251,21 @@ mod tests {
 
         let prefs: AppPreferences = serde_json::from_value(prefs_json).unwrap();
         assert!(!prefs.has_seen_external_display_zoom_tip);
+    }
+
+    #[test]
+    fn app_preferences_chat_display_defaults_for_existing_prefs() {
+        assert!(!AppPreferences::default().show_full_file_path);
+        assert!(AppPreferences::default().spellcheck_enabled);
+
+        let mut prefs_json = serde_json::to_value(AppPreferences::default()).unwrap();
+        let object = prefs_json.as_object_mut().unwrap();
+        object.remove("show_full_file_path");
+        object.remove("spellcheck_enabled");
+
+        let prefs: AppPreferences = serde_json::from_value(prefs_json).unwrap();
+        assert!(!prefs.show_full_file_path);
+        assert!(prefs.spellcheck_enabled);
     }
 
     #[test]
@@ -2826,6 +2849,8 @@ impl Default for AppPreferences {
             has_seen_jean_config_wizard: false,
             has_seen_jean_mcp_intro: false,
             has_seen_external_display_zoom_tip: false,
+            show_full_file_path: false,
+            spellcheck_enabled: default_spellcheck_enabled(),
             chrome_enabled: default_chrome_enabled(),
             zoom_level: default_zoom_level(),
             mobile_zoom_level: default_zoom_level(),
