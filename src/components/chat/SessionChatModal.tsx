@@ -51,13 +51,11 @@ import { useProjectsStore } from '@/store/projects-store'
 import {
   useSessions,
   useSession,
-  useCreateSession,
   useClearSessionHistory,
   useRenameSession,
   reconnectNativeCliSession,
   canReconnectSession,
 } from '@/services/chat'
-import { resolveBackendCliPath } from '@/services/cli-binary'
 import { usePreferences } from '@/services/preferences'
 import {
   hasCloseConfirmBypassModifier,
@@ -82,7 +80,6 @@ import { ScriptsButton } from '@/components/open-in/ScriptsButton'
 import { DevToolsDropdown } from './DevToolsDropdown'
 import { DEFAULT_KEYBINDINGS, formatShortcutDisplay } from '@/types/keybindings'
 import {
-  buildNativeClientSessionInput,
   createSessionCardDataCache,
   getResumeCommand,
   isActionableWaitingStatus,
@@ -105,6 +102,7 @@ import {
 import { WorktreeDropdownMenu } from '@/components/projects/WorktreeDropdownMenu'
 import { LabelModal } from './LabelModal'
 import { useSessionArchive } from './hooks/useSessionArchive'
+import { useOpenInNativeClient } from './hooks/useOpenInNativeClient'
 import { useIsMobile } from '@/hooks/use-mobile'
 import {
   isModOnlyHeld,
@@ -468,7 +466,6 @@ export const SessionChatModal = memo(function SessionChatModal({
 
   // Rename session state
   const renameSession = useRenameSession()
-  const createSession = useCreateSession()
   const clearSessionHistory = useClearSessionHistory()
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(
     null
@@ -782,38 +779,10 @@ export const SessionChatModal = memo(function SessionChatModal({
       window.removeEventListener('clear-session-context', handleClearContext)
   }, [handleClearContext, isOpen])
 
-  const handleOpenInNativeClient = useCallback(
-    (session: Session) => {
-      void (async () => {
-        // Prefer Jean-managed / resolved absolute path so bare names like
-        // `grok` work when the CLI is not on PATH (default jean install).
-        const resolvedCommand = await resolveBackendCliPath(session.backend)
-        const input = buildNativeClientSessionInput(
-          session,
-          worktreeId,
-          worktreePath,
-          { resolvedCommand }
-        )
-        if (!input) {
-          toast.error('No native resume command is available for this session')
-          return
-        }
-
-        createSession.mutate(input, {
-          onSuccess: nativeSession => {
-            useChatStore
-              .getState()
-              .setSelectedBackend(nativeSession.id, input.backend)
-            void reconnectNativeCliSession(nativeSession, worktreeId, {
-              openModal: false,
-              showToast: false,
-            }).then(() => toast.success('Opened in native client'))
-          },
-        })
-      })()
-    },
-    [createSession, worktreeId, worktreePath]
-  )
+  const {
+    openInNativeClient: handleOpenInNativeClient,
+    isPending: isOpeningInNativeClient,
+  } = useOpenInNativeClient(worktreeId, worktreePath)
 
   useEffect(() => {
     if (!isOpen) return
@@ -1414,7 +1383,7 @@ export const SessionChatModal = memo(function SessionChatModal({
                           {resumeCommand && (
                             <>
                               <ContextMenuItem
-                                disabled={createSession.isPending}
+                                disabled={isOpeningInNativeClient}
                                 onSelect={() =>
                                   handleOpenInNativeClient(session)
                                 }
