@@ -22,6 +22,7 @@ import {
 } from 'react'
 import { useQueries, useQueryClient } from '@tanstack/react-query'
 import { invoke } from '@/lib/transport'
+import { requestImportExistingWorktree } from '@/lib/import-existing-worktree'
 import { cn } from '@/lib/utils'
 import {
   canOpenInEditor,
@@ -34,6 +35,7 @@ import {
   MoreHorizontal,
   ArrowUpDown,
   Settings,
+  Download,
   Plus,
   FileJson,
   Activity,
@@ -3096,6 +3098,13 @@ export function ProjectCanvasView({
                     >
                       <Plus className="h-4 w-4" />
                       New Worktree
+                    </DropdownMenuItem>
+
+                    <DropdownMenuItem
+                      onSelect={() => requestImportExistingWorktree(projectId)}
+                    >
+                      <Download className="h-4 w-4" />
+                      Import Existing Worktree
                     </DropdownMenuItem>
 
                     <DropdownMenuItem

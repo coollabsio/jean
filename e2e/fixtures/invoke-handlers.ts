@@ -136,6 +136,38 @@ export const defaultResponses: Record<string, unknown> = {
 
   // Archives
   list_archived_worktrees: [],
+  list_unmanaged_worktrees: [
+    {
+      path: '/tmp/e2e-test-project/.worktrees/feature-login',
+      branch: 'feature/login',
+      head: 'a1b2c3d4e5f67890',
+      headShort: 'a1b2c3d',
+      prunable: false,
+      locked: false,
+      detached: false,
+      bare: false,
+    },
+    {
+      path: '/tmp/e2e-test-project/.worktrees/hotfix',
+      branch: null,
+      head: 'deadbeefcafebabe',
+      headShort: 'deadbee',
+      prunable: false,
+      locked: true,
+      detached: true,
+      bare: false,
+    },
+  ],
+  import_worktree: {
+    id: 'imported-worktree',
+    project_id: project.id,
+    name: 'feature-login',
+    path: '/tmp/e2e-test-project/.worktrees/feature-login',
+    branch: 'feature/login',
+    created_at: 3_000,
+    order: 2,
+    session_type: 'worktree',
+  },
   list_all_archived_sessions: [],
 
   // Branches

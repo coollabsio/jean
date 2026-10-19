@@ -27,6 +27,7 @@ import type {
   Project,
   ProjectServer,
   Worktree,
+  UnmanagedWorktree,
   DetectPrResponse,
   LinkWorktreePrResponse,
   WorktreeCreatingEvent,
@@ -2175,6 +2176,39 @@ export function useImportWorktree() {
       logger.error('Failed to import worktree', { error })
       toast.error('Failed to import worktree', { description: message })
     },
+  })
+}
+
+export function unmanagedWorktreesQueryKey(projectId: string) {
+  return [...projectsQueryKeys.all, 'unmanaged-worktrees', projectId] as const
+}
+
+/**
+ * Git worktrees for a project that Jean is not already tracking.
+ * Read-only. Import still goes through `useImportWorktree`.
+ */
+export function useUnmanagedWorktrees(
+  projectId: string | null,
+  enabled = true
+) {
+  return useQuery({
+    queryKey: unmanagedWorktreesQueryKey(projectId ?? ''),
+    queryFn: async (): Promise<UnmanagedWorktree[]> => {
+      if (!isTauri() || !projectId) {
+        return []
+      }
+
+      logger.debug('Listing unmanaged worktrees', { projectId })
+      const worktrees = await invoke<UnmanagedWorktree[] | null>(
+        'list_unmanaged_worktrees',
+        { projectId }
+      )
+      if (!Array.isArray(worktrees)) {
+        throw new Error('Failed to list unmanaged worktrees')
+      }
+      return worktrees
+    },
+    enabled: enabled && !!projectId,
   })
 }
 

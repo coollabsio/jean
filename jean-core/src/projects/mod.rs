@@ -14,6 +14,7 @@ pub mod sentry_issues;
 mod servers;
 pub mod storage;
 pub mod types;
+mod unmanaged_worktrees;
 
 // Re-export commands for registration in lib.rs
 pub use checkpoints::{

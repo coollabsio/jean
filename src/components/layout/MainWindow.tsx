@@ -19,6 +19,7 @@ import { SidebarWidthProvider } from './SidebarWidthContext'
 import { MainWindowContent } from './MainWindowContent'
 import { CommandPalette } from '@/components/command-palette/CommandPalette'
 import { BranchConflictDialog } from '@/components/worktree/BranchConflictDialog'
+import { ImportExistingWorktreeDialog } from '@/components/worktree/ImportExistingWorktreeDialog'
 import { TeardownOutputDialog } from '@/components/worktree/TeardownOutputDialog'
 import { WindowResizeHandles } from './WindowResizeHandles'
 
@@ -891,6 +892,7 @@ export function MainWindow() {
         </Suspense>
       )}
       <BranchConflictDialog />
+      <ImportExistingWorktreeDialog />
       <TeardownOutputDialog />
       <Toaster
         position="bottom-right"

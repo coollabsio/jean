@@ -203,6 +203,24 @@ export function isFolder(project: Project): boolean {
 }
 
 /**
+ * A git worktree that exists for a project but is not tracked by Jean.
+ * Command payload (`list_unmanaged_worktrees`), so fields are camelCase.
+ */
+export interface UnmanagedWorktree {
+  path: string
+  /** Branch name. Null for detached and bare checkouts. */
+  branch: string | null
+  /** Full HEAD oid, or empty when git did not print one. */
+  head: string
+  /** First 7 characters of `head`. */
+  headShort: string
+  prunable: boolean
+  locked: boolean
+  detached: boolean
+  bare: boolean
+}
+
+/**
  * A git worktree created for a project
  */
 export interface Worktree {

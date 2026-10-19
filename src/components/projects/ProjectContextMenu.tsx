@@ -5,6 +5,7 @@ import {
   Folder,
   FolderOpen,
   Home,
+  Download,
   Plus,
   Settings,
   Terminal,
@@ -36,6 +37,7 @@ import { closeLeftSidebarOnMobile, useUIStore } from '@/store/ui-store'
 import { getEditorLabel, getTerminalLabel } from '@/types/preferences'
 import { getFileManagerName } from '@/lib/platform'
 import { canOpenInFinder } from '@/lib/environment'
+import { requestImportExistingWorktree } from '@/lib/import-existing-worktree'
 
 interface ProjectContextMenuProps {
   project: Project
@@ -131,6 +133,13 @@ export function ProjectContextMenu({
         <ContextMenuItem onClick={handleNewWorktree}>
           <Plus className="mr-2 h-4 w-4" />
           New Worktree
+        </ContextMenuItem>
+
+        <ContextMenuItem
+          onClick={() => requestImportExistingWorktree(project.id)}
+        >
+          <Download className="mr-2 h-4 w-4" />
+          Import Existing Worktree
         </ContextMenuItem>
 
         <ContextMenuItem onClick={handleNewBaseSession}>

@@ -1893,6 +1893,11 @@ pub async fn dispatch_command(
             emit_cache_invalidation(app, &["projects"]);
             to_value(result)
         }
+        "list_unmanaged_worktrees" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let result = crate::projects::list_unmanaged_worktrees(app.clone(), project_id).await?;
+            to_value(result)
+        }
         "permanently_delete_worktree" => {
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
             crate::projects::permanently_delete_worktree(app.clone(), worktree_id).await?;

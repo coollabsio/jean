@@ -12,6 +12,8 @@ import {
   RotateCcw,
 } from '@/components/icons/reicon'
 import type { AppCommand } from './types'
+import { requestImportExistingWorktree } from '@/lib/import-existing-worktree'
+import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
 
 export const projectCommands: AppCommand[] = [
@@ -49,6 +51,24 @@ export const projectCommands: AppCommand[] = [
 
     execute: context => {
       context.openProjectSettings()
+    },
+  },
+
+  {
+    id: 'import-existing-worktree',
+    label: 'Import Existing Worktree',
+    description:
+      'Import git worktrees that already exist for the current project',
+    icon: Download,
+    group: 'projects',
+    keywords: ['import', 'worktree', 'existing', 'git', 'unmanaged'],
+
+    isAvailable: context => context.hasSelectedProject(),
+
+    execute: () => {
+      const projectId = useProjectsStore.getState().selectedProjectId
+      if (!projectId) return
+      requestImportExistingWorktree(projectId)
     },
   },
 

@@ -48,6 +48,7 @@ use super::types::{
     WorktreeDeletingEvent, WorktreeOrigin, WorktreePathExistsEvent,
     WorktreePermanentlyDeletedEvent, WorktreeSetupCompleteEvent, WorktreeUnarchivedEvent,
 };
+use super::unmanaged_worktrees::{list_unmanaged_from_repo, UnmanagedWorktree};
 use crate::chat::types::{LabelData, Session, SessionMetadata, WorktreeSessions};
 use crate::claude_cli::resolve_cli_binary;
 use crate::coderabbit_cli::resolve_coderabbit_binary;
@@ -4857,6 +4858,40 @@ pub async fn import_worktree(
 
     log::trace!("Successfully imported worktree: {}", worktree.id);
     Ok(worktree)
+}
+
+/// List git worktrees for a project that Jean is not already tracking.
+///
+/// Read-only. Nothing is imported. The main checkout is omitted, as are paths
+/// Jean already stores for this project. Archived worktrees stay excluded:
+/// Jean marks those with `archived_at` and keeps them in project storage.
+pub async fn list_unmanaged_worktrees(
+    app: AppHandle,
+    project_id: String,
+) -> Result<Vec<UnmanagedWorktree>, String> {
+    log::trace!("Listing unmanaged worktrees for project {project_id}");
+
+    let data = load_projects_data(&app)?;
+    let project = data
+        .find_project(&project_id)
+        .ok_or_else(|| format!("Project not found: {project_id}"))?;
+
+    if project.is_folder {
+        return Err("Folders do not have git worktrees to import".to_string());
+    }
+
+    let project_path = project.path.clone();
+    // Active and archived worktrees are both already tracked. `archived_at`
+    // is how Jean defines an archived worktree; list_worktrees hides them
+    // from the canvas, but they must not be offered for import again.
+    let tracked_paths: Vec<String> = data
+        .worktrees
+        .iter()
+        .filter(|worktree| worktree.project_id == project_id)
+        .map(|worktree| worktree.path.clone())
+        .collect();
+
+    list_unmanaged_from_repo(&project_path, &tracked_paths)
 }
 
 /// Permanently delete an archived worktree (removes git worktree/branch from disk)

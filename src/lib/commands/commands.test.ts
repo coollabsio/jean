@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import type { CommandContext, AppCommand } from './types'
+import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
 
 const { registerCommands, getAllCommands, executeCommand, clearRegistry } =
@@ -222,6 +223,34 @@ describe('Project Commands', () => {
     const commands = getAllCommands(mockContext)
     const addCmd = commands.find(c => c.id === 'add-project')
     expect(addCmd).toBeDefined()
+  })
+
+  it('opens import existing worktree for the selected project', async () => {
+    useProjectsStore.setState({ selectedProjectId: 'project-1' })
+    const listener = vi.fn()
+    window.addEventListener('import-existing-worktree', listener)
+    try {
+      const result = await executeCommand(
+        'import-existing-worktree',
+        mockContext
+      )
+      expect(result.success).toBe(true)
+      expect(listener).toHaveBeenCalledOnce()
+      const event = listener.mock.calls[0]?.[0] as CustomEvent | undefined
+      expect(event?.detail).toEqual({ projectId: 'project-1' })
+    } finally {
+      window.removeEventListener('import-existing-worktree', listener)
+    }
+  })
+
+  it('hides import existing worktree without a selected project', () => {
+    const commands = getAllCommands({
+      ...mockContext,
+      hasSelectedProject: () => false,
+    })
+    expect(
+      commands.find(command => command.id === 'import-existing-worktree')
+    ).toBeUndefined()
   })
   it('copy debug details command uses clipboard action', async () => {
     const result = await executeCommand('toggle-debug-mode', mockContext)
