@@ -5272,6 +5272,7 @@ pub async fn send_chat_message(
                     &thread_worktree_id,
                     thread_ai_language.as_deref(),
                     thread_parallel_prompt.as_deref(),
+                    thread_agent_prompt.as_deref(),
                     thread_include_recap,
                     devin_location == super::types::DevinLocation::Local,
                 );
