@@ -470,7 +470,8 @@ still updates `leftSidebarVisible`, converting the preview into the persistent,
 in-flow sidebar.
 
 The behavior is controlled by the persisted
-`sidebar_hover_open_enabled` preference, which defaults to `true`. Portaled
+`sidebar_hover_open_enabled` preference, which defaults to `false` for both
+new installs and existing preference files that omit the field. Portaled
 sidebar menus and active drag operations hold the preview open until the
 interaction finishes.
 

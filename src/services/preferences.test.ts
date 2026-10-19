@@ -1718,13 +1718,13 @@ describe('preferences service', () => {
       const switchEl = await screen.findByRole('switch', {
         name: 'Open sidebar from screen edge',
       })
-      expect(switchEl).toHaveAttribute('aria-checked', 'true')
+      expect(switchEl).toHaveAttribute('aria-checked', 'false')
 
       await user.click(switchEl)
 
       await waitFor(() => {
         expect(invoke).toHaveBeenCalledWith('patch_preferences', {
-          patch: { sidebar_hover_open_enabled: false },
+          patch: { sidebar_hover_open_enabled: true },
         })
       })
     })

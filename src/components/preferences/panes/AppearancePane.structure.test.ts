@@ -11,6 +11,8 @@ describe('AppearancePane settings structure', () => {
     expect(source).toContain('title="Sidebar"')
     expect(source).toContain('pref-appearance-section-sidebar')
     expect(source).toContain('sidebar_hover_open_enabled')
+    expect(source).toContain('sidebar_hover_open_enabled ?? false')
     expect(source).toContain('Open from screen edge')
+    expect(source).toContain('Off by default.')
   })
 })

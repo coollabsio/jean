@@ -672,7 +672,7 @@ fn default_compact_chat_view_enabled() -> bool {
 }
 
 fn default_sidebar_hover_open_enabled() -> bool {
-    true // Enabled by default
+    false // Opt-in for new and existing installs
 }
 
 fn default_auto_recaps_enabled() -> bool {
@@ -1005,14 +1005,14 @@ mod tests {
     }
 
     #[test]
-    fn sidebar_hover_open_defaults_on() {
+    fn sidebar_hover_open_defaults_off() {
         let prefs = AppPreferences::default();
 
-        assert!(prefs.sidebar_hover_open_enabled);
+        assert!(!prefs.sidebar_hover_open_enabled);
     }
 
     #[test]
-    fn sidebar_hover_open_defaults_on_for_existing_preferences() {
+    fn sidebar_hover_open_defaults_off_for_existing_preferences() {
         let mut value = serde_json::to_value(AppPreferences::default()).unwrap();
         value
             .as_object_mut()
@@ -1021,7 +1021,7 @@ mod tests {
 
         let prefs: AppPreferences = serde_json::from_value(value).unwrap();
 
-        assert!(prefs.sidebar_hover_open_enabled);
+        assert!(!prefs.sidebar_hover_open_enabled);
     }
 
     #[test]

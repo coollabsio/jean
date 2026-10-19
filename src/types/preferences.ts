@@ -2508,7 +2508,7 @@ export const defaultPreferences: AppPreferences = {
   syntax_theme_dark: 'vitesse-black',
   syntax_theme_light: 'github-light',
   compact_chat_view_enabled: true, // Default: enabled
-  sidebar_hover_open_enabled: true, // Default: enabled
+  sidebar_hover_open_enabled: false, // Default: off (opt-in)
   auto_recaps_enabled: true, // Default: enabled
   keep_ai_servers_warm: true, // Default: enabled for faster follow-up requests
   magic_prompts: DEFAULT_MAGIC_PROMPTS,

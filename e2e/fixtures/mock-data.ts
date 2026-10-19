@@ -68,6 +68,7 @@ export const mockPreferences = {
   remote_poll_interval: 60,
   keybindings: {},
   sidebar_width: 240,
+  sidebar_hover_open_enabled: false,
   session_sort: 'manual',
   zoom_level: 90,
   auto_pull_base_branch: false,

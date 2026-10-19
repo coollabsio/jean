@@ -632,7 +632,7 @@ export function MainWindow() {
             !isMobile &&
             isInitialized &&
             !leftSidebarVisible &&
-            (preferences?.sidebar_hover_open_enabled ?? true)
+            (preferences?.sidebar_hover_open_enabled ?? false)
           }
           width={leftSidebarSize}
         >

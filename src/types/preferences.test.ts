@@ -56,8 +56,8 @@ describe('magic prompt preference resolvers', () => {
     expect(defaultPreferences.font_weight).toBe('normal')
   })
 
-  it('opens the collapsed sidebar from the screen edge by default', () => {
-    expect(defaultPreferences.sidebar_hover_open_enabled).toBe(true)
+  it('keeps collapsed sidebar edge hover off by default', () => {
+    expect(defaultPreferences.sidebar_hover_open_enabled).toBe(false)
   })
 
   it('uses Jean-managed Command Code CLI by default', () => {

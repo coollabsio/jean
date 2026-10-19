@@ -650,11 +650,11 @@ export const AppearancePane: React.FC = () => {
         <div className="space-y-4">
           <InlineField
             label="Open from screen edge"
-            description="Temporarily reveal the collapsed sidebar when the pointer rests on the left edge"
+            description="Temporarily reveal the collapsed sidebar when the pointer rests on the left edge. Off by default."
           >
             <Switch
               aria-label="Open sidebar from screen edge"
-              checked={preferences?.sidebar_hover_open_enabled ?? true}
+              checked={preferences?.sidebar_hover_open_enabled ?? false}
               onCheckedChange={checked =>
                 patchPreferences.mutate({
                   sidebar_hover_open_enabled: checked,
