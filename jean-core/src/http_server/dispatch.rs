@@ -2763,6 +2763,14 @@ pub async fn dispatch_command(
             crate::devin_cli::install_devin_cli(app.clone(), version).await?;
             Ok(Value::Null)
         }
+        "uninstall_devin_cli" => {
+            crate::devin_cli::uninstall_devin_cli(app.clone()).await?;
+            Ok(Value::Null)
+        }
+        "update_devin_cli" => {
+            crate::devin_cli::update_devin_cli(app.clone()).await?;
+            Ok(Value::Null)
+        }
         "check_kimi_cli_installed" => {
             to_value(crate::kimi_cli::check_kimi_cli_installed(app.clone()).await?)
         }

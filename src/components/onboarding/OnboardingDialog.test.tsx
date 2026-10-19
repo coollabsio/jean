@@ -19,6 +19,7 @@ type CliKey =
   | 'commandcode'
   | 'grok'
   | 'kimi'
+  | 'devin'
   | 'antigravity'
   | 'muse'
   | 'gh'
@@ -41,6 +42,7 @@ const mocks = vi.hoisted(() => {
     'commandcode',
     'grok',
     'kimi',
+    'devin',
     'antigravity',
     'muse',
     'gh',

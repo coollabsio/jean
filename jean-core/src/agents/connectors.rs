@@ -49,7 +49,7 @@ pub enum McpConfigPlan {
 
 pub fn session_support(backend: &str) -> McpSessionSupport {
     match backend {
-        "claude" | "grok" => McpSessionSupport::PerSession,
+        "claude" | "grok" | "devin" => McpSessionSupport::PerSession,
         _ => McpSessionSupport::Unsupported,
     }
 }
@@ -95,6 +95,10 @@ pub fn support_reason(backend: &str) -> &'static str {
             "Muse sends only Jean MCP in session/start. Other servers come from \
              the CLI's settings.json."
         }
+        "devin" => {
+            "Devin local ACP sessions take mcpServers for this session. Cloud \
+             sessions do not receive local MCP servers."
+        }
         _ => "This backend has no per-session MCP config.",
     }
 }
@@ -112,6 +116,7 @@ pub fn backend_label(backend: &crate::chat::types::Backend) -> &'static str {
         Backend::Kimi => "kimi",
         Backend::Antigravity => "antigravity",
         Backend::Muse => "muse",
+        Backend::Devin => "devin",
     }
 }
 
@@ -120,7 +125,15 @@ pub fn backend_label(backend: &crate::chat::types::Backend) -> &'static str {
 pub fn has_own_mcp_discovery(backend: &str) -> bool {
     matches!(
         backend,
-        "claude" | "codex" | "opencode" | "cursor" | "grok" | "kimi" | "antigravity" | "muse"
+        "claude"
+            | "codex"
+            | "opencode"
+            | "cursor"
+            | "grok"
+            | "kimi"
+            | "antigravity"
+            | "muse"
+            | "devin"
     )
 }
 

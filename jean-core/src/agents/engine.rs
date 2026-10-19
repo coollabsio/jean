@@ -607,6 +607,7 @@ fn backend_id(backend: &Backend) -> &'static str {
         Backend::Kimi => "kimi",
         Backend::Antigravity => "antigravity",
         Backend::Muse => "muse",
+        Backend::Devin => "devin",
     }
 }
 

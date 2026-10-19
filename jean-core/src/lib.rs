@@ -857,7 +857,7 @@ fn default_grok_cli_source() -> String {
 }
 
 fn default_devin_cli_source() -> String {
-    "path".to_string()
+    default_cli_source()
 }
 
 fn default_codex_reasoning_effort() -> String {
@@ -5382,6 +5382,13 @@ fn repair_managed_cli_links(context: &RuntimeContext, preferences: &AppPreferenc
                 .join("node_modules")
                 .join(".bin")
                 .join(executable("kimi", "kimi.cmd")),
+        ),
+        (
+            "devin",
+            preferences.devin_cli_source.as_str(),
+            app_data
+                .join(devin_cli::config::CLI_DIR_NAME)
+                .join(devin_cli::config::MANAGED_CLI_BINARY_NAME),
         ),
         (
             "agy",

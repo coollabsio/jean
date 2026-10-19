@@ -2019,7 +2019,12 @@ fn plan_mode_content_waits_for_approval(
     // (`has_blocking_tool` path via inject_synthetic_plan on plan-like content).
     matches!(
         backend,
-        Backend::Claude | Backend::Codex | Backend::Opencode | Backend::Kimi | Backend::Muse | Backend::Devin
+        Backend::Claude
+            | Backend::Codex
+            | Backend::Opencode
+            | Backend::Kimi
+            | Backend::Muse
+            | Backend::Devin
     ) && execution_mode == Some("plan")
         && has_content
         && !has_plan_tool
@@ -5369,6 +5374,7 @@ pub async fn send_chat_message(
                     thread_parallel_prompt.as_deref(),
                     thread_agent_prompt.as_deref(),
                     thread_include_recap,
+                    true,
                 );
                 let effort = thread_effort_level
                     .as_ref()

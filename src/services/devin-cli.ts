@@ -2,15 +2,18 @@
  * Devin CLI management service.
  */
 
+import { useCallback, useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { invoke, invokeForOptionalServer } from '@/lib/transport'
+import { invoke, invokeForOptionalServer, listen } from '@/lib/transport'
 import { logger } from '@/lib/logger'
 import { toast } from 'sonner'
 import { hasBackendTransport } from '@/lib/environment'
+import { useOptionalSettingsTargetServerId } from '@/lib/settings-target'
 import type {
   DevinAuthStatus,
   DevinCliStatus,
   DevinInstallCommand,
+  DevinInstallProgress,
   DevinModelInfo,
   DevinReleaseInfo,
 } from '@/types/devin-cli'
@@ -132,17 +135,18 @@ export function useAvailableDevinModels(options?: { enabled?: boolean }) {
 }
 
 export function useAvailableDevinVersions(options?: { enabled?: boolean }) {
+  const serverId = useOptionalSettingsTargetServerId()
   return useQuery({
-    queryKey: devinCliQueryKeys.versions(),
+    queryKey: [...devinCliQueryKeys.versions(), serverId ?? 'local'],
     queryFn: async (): Promise<DevinReleaseInfo[]> => {
       if (!isTauri()) return fallbackDevinVersions
       try {
-        const versions = await invoke<
+        const versions = await invokeForOptionalServer<
           (DevinReleaseInfo & {
             tag_name?: string
             published_at?: string
           })[]
-        >('get_available_devin_versions')
+        >(serverId, 'get_available_devin_versions')
         return versions.map(v => ({
           version: v.version,
           tagName: v.tagName ?? v.tag_name ?? v.version,
@@ -163,9 +167,12 @@ export function useAvailableDevinVersions(options?: { enabled?: boolean }) {
 
 export function useInstallDevinCli() {
   const queryClient = useQueryClient()
+  const serverId = useOptionalSettingsTargetServerId()
   return useMutation({
     mutationFn: async (version?: string) => {
-      await invoke('install_devin_cli', { version: version ?? null })
+      await invokeForOptionalServer(serverId, 'install_devin_cli', {
+        version: version ?? null,
+      })
     },
     retry: false,
     onSuccess: () => {
@@ -181,23 +188,56 @@ export function useInstallDevinCli() {
   })
 }
 
+export function useDevinInstallProgress(): [
+  DevinInstallProgress | null,
+  () => void,
+] {
+  const [progress, setProgress] = useState<DevinInstallProgress | null>(null)
+  const resetProgress = useCallback(() => setProgress(null), [])
+
+  useEffect(() => {
+    if (!isTauri()) return
+    let unlistenFn: (() => void) | null = null
+    const setup = async () => {
+      unlistenFn = await listen<DevinInstallProgress>(
+        'devin-cli:install-progress',
+        event => setProgress(event.payload)
+      )
+    }
+    setup()
+    return () => {
+      if (unlistenFn) unlistenFn()
+    }
+  }, [])
+
+  return [progress, resetProgress]
+}
+
+function checkManualVersion(version: string, serverId?: string) {
+  return invokeForOptionalServer<boolean>(
+    serverId,
+    'check_devin_cli_version_exists',
+    { version }
+  )
+}
+
 export function useDevinCliSetup() {
+  const serverId = useOptionalSettingsTargetServerId()
   const status = useDevinCliStatus()
   const versions = useAvailableDevinVersions()
   const installMutation = useInstallDevinCli()
+  const [progress, resetProgress] = useDevinInstallProgress()
 
   const install = (
     version: string,
     options?: { onSuccess?: () => void; onError?: (error: Error) => void }
   ) => {
+    resetProgress()
     installMutation.mutate(version, {
       onSuccess: () => options?.onSuccess?.(),
       onError: error => options?.onError?.(error),
     })
   }
-
-  const checkManualVersion = (version: string) =>
-    invoke<boolean>('check_devin_cli_version_exists', { version })
 
   return {
     status: status.data,
@@ -209,9 +249,10 @@ export function useDevinCliSetup() {
     needsSetup: !status.isLoading && !status.data?.installed,
     isInstalling: installMutation.isPending,
     installError: installMutation.error,
-    progress: null,
+    progress,
     install,
-    checkManualVersion,
+    checkManualVersion: (version: string) =>
+      checkManualVersion(version, serverId),
     refetchStatus: status.refetch,
   }
 }

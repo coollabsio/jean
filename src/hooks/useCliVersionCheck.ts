@@ -57,6 +57,12 @@ import {
   useGrokPathDetection,
   grokCliQueryKeys,
 } from '@/services/grok-cli'
+import {
+  useDevinCliStatus,
+  useAvailableDevinVersions,
+  useDevinPathDetection,
+  devinCliQueryKeys,
+} from '@/services/devin-cli'
 import { useUIStore } from '@/store/ui-store'
 import { isNewerVersion } from '@/lib/version-utils'
 import { logger } from '@/lib/logger'
@@ -87,6 +93,7 @@ const JEAN_INSTALL_COMMANDS: Record<CliType, string> = {
   coderabbit: 'install_coderabbit_cli',
   commandcode: 'install_commandcode_cli',
   grok: 'install_grok_cli',
+  devin: 'install_devin_cli',
 }
 
 const CLI_QUERY_KEY_GETTERS: Record<CliType, () => readonly unknown[]> = {
@@ -98,6 +105,7 @@ const CLI_QUERY_KEY_GETTERS: Record<CliType, () => readonly unknown[]> = {
   coderabbit: () => coderabbitCliQueryKeys.all,
   commandcode: () => commandcodeCliQueryKeys.all,
   grok: () => grokCliQueryKeys.all,
+  devin: () => devinCliQueryKeys.all,
 }
 
 /**
@@ -169,6 +177,9 @@ export function useCliVersionCheck() {
   const { data: grokPathInfo } = useGrokPathDetection({
     enabled: shouldCheck,
   })
+  const { data: devinPathInfo } = useDevinPathDetection({
+    enabled: shouldCheck,
+  })
 
   // Defer version fetches (GitHub API) by 10s — they're only for update checks,
   // no reason to compete with startup-critical queries.
@@ -202,6 +213,9 @@ export function useCliVersionCheck() {
   const { data: grokStatus, isLoading: grokLoading } = useGrokCliStatus({
     enabled: shouldCheck && versionCheckReady,
   })
+  const { data: devinStatus, isLoading: devinLoading } = useDevinCliStatus({
+    enabled: shouldCheck && versionCheckReady,
+  })
   const { data: claudeVersions, isLoading: claudeVersionsLoading } =
     useAvailableCliVersions({ enabled: shouldCheck && versionCheckReady })
   const { data: ghVersions, isLoading: ghVersionsLoading } =
@@ -222,6 +236,10 @@ export function useCliVersionCheck() {
     })
   const { data: grokVersions, isLoading: grokVersionsLoading } =
     useAvailableGrokVersions({
+      enabled: shouldCheck && versionCheckReady,
+    })
+  const { data: devinVersions, isLoading: devinVersionsLoading } =
+    useAvailableDevinVersions({
       enabled: shouldCheck && versionCheckReady,
     })
 
@@ -245,6 +263,7 @@ export function useCliVersionCheck() {
       coderabbitLoading ||
       commandcodeLoading ||
       grokLoading ||
+      devinLoading ||
       claudeVersionsLoading ||
       ghVersionsLoading ||
       codexVersionsLoading ||
@@ -253,6 +272,7 @@ export function useCliVersionCheck() {
       coderabbitVersionsLoading ||
       commandcodeVersionsLoading ||
       grokVersionsLoading ||
+      devinVersionsLoading ||
       preferencesLoading
 
     if (!isLoading) {
@@ -307,6 +327,18 @@ export function useCliVersionCheck() {
           : undefined,
         preferences?.grok_cli_source
       )
+      const devin = resolveCliInfo(
+        devinStatus,
+        devinPathInfo
+          ? {
+              found: devinPathInfo.found,
+              version: devinPathInfo.version,
+              path: devinPathInfo.path,
+              package_manager: devinPathInfo.packageManager,
+            }
+          : undefined,
+        preferences?.devin_cli_source
+      )
 
       const checks: {
         type: CliUpdateInfo['type']
@@ -330,6 +362,11 @@ export function useCliVersionCheck() {
           type: 'grok',
           info: grok,
           versions: grokVersions,
+        },
+        {
+          type: 'devin',
+          info: devin,
+          versions: devinVersions,
         }
       )
 
@@ -425,6 +462,7 @@ export function useCliVersionCheck() {
     coderabbitStatus,
     commandcodeStatus,
     grokStatus,
+    devinStatus,
     claudePathInfo,
     ghPathInfo,
     codexPathInfo,
@@ -432,6 +470,7 @@ export function useCliVersionCheck() {
     piPathInfo,
     coderabbitPathInfo,
     grokPathInfo,
+    devinPathInfo,
     claudeVersions,
     ghVersions,
     codexVersions,
@@ -440,6 +479,7 @@ export function useCliVersionCheck() {
     coderabbitVersions,
     commandcodeVersions,
     grokVersions,
+    devinVersions,
     claudeLoading,
     ghLoading,
     codexLoading,
@@ -448,6 +488,7 @@ export function useCliVersionCheck() {
     coderabbitLoading,
     commandcodeLoading,
     grokLoading,
+    devinLoading,
     claudeVersionsLoading,
     ghVersionsLoading,
     codexVersionsLoading,
@@ -456,6 +497,7 @@ export function useCliVersionCheck() {
     coderabbitVersionsLoading,
     commandcodeVersionsLoading,
     grokVersionsLoading,
+    devinVersionsLoading,
     preferencesLoading,
     preferences?.auto_update_ai_backends,
     preferences?.claude_cli_source,
@@ -466,6 +508,7 @@ export function useCliVersionCheck() {
     preferences?.coderabbit_cli_source,
     preferences?.commandcode_cli_source,
     preferences?.grok_cli_source,
+    preferences?.devin_cli_source,
     queryClient,
   ])
 
@@ -487,6 +530,7 @@ export function useCliVersionCheck() {
           queryKey: commandcodeCliQueryKeys.all,
         })
         queryClient.invalidateQueries({ queryKey: grokCliQueryKeys.all })
+        queryClient.invalidateQueries({ queryKey: devinCliQueryKeys.all })
       },
       60 * 60 * 1000
     )

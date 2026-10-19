@@ -21,6 +21,7 @@ import { coderabbitCliQueryKeys } from '@/services/coderabbit-cli'
 import { commandcodeCliQueryKeys } from '@/services/commandcode-cli'
 import { grokCliQueryKeys } from '@/services/grok-cli'
 import { kimiCliQueryKeys } from '@/services/kimi-cli'
+import { devinCliQueryKeys } from '@/services/devin-cli'
 import { githubQueryKeys } from '@/services/github'
 import {
   ClaudeCliReinstallModal,
@@ -33,6 +34,7 @@ import {
   CommandCodeCliReinstallModal,
   GrokCliReinstallModal,
   KimiCliReinstallModal,
+  DevinCliReinstallModal,
 } from '@/components/preferences/CliReinstallModal'
 
 export function CliUpdateModal() {
@@ -66,6 +68,8 @@ export function CliUpdateModal() {
         queryClient.invalidateQueries({ queryKey: grokCliQueryKeys.all })
       } else if (cliUpdateModalType === 'kimi') {
         queryClient.invalidateQueries({ queryKey: kimiCliQueryKeys.all })
+      } else if (cliUpdateModalType === 'devin') {
+        queryClient.invalidateQueries({ queryKey: devinCliQueryKeys.all })
       }
 
       // Dismiss any lingering update toast for this CLI type
@@ -117,6 +121,10 @@ export function CliUpdateModal() {
       />
       <KimiCliReinstallModal
         open={cliUpdateModalOpen && cliUpdateModalType === 'kimi'}
+        onOpenChange={handleOpenChange}
+      />
+      <DevinCliReinstallModal
+        open={cliUpdateModalOpen && cliUpdateModalType === 'devin'}
         onOpenChange={handleOpenChange}
       />
     </>

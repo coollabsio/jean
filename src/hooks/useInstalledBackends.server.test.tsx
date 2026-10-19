@@ -46,7 +46,7 @@ describe('settings backend availability', () => {
     )
 
     await waitFor(() =>
-      expect(result.current.installedBackends).toHaveLength(10)
+      expect(result.current.installedBackends).toHaveLength(11)
     )
     serverId = 'remote-a'
     rerender()
@@ -61,7 +61,7 @@ describe('settings backend availability', () => {
     serverId = 'local'
     rerender()
     await waitFor(() =>
-      expect(result.current.installedBackends).toHaveLength(10)
+      expect(result.current.installedBackends).toHaveLength(11)
     )
     unmount()
     queryClient.clear()

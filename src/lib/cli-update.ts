@@ -15,6 +15,7 @@ export type CliType =
   | 'coderabbit'
   | 'commandcode'
   | 'grok'
+  | 'devin'
 
 /** Binary name used by the package manager (e.g. `brew upgrade <name>`). */
 export const CLI_BINARY_NAMES: Record<CliType, string> = {
@@ -26,6 +27,7 @@ export const CLI_BINARY_NAMES: Record<CliType, string> = {
   coderabbit: 'coderabbit',
   commandcode: 'command-code',
   grok: 'grok',
+  devin: 'devin',
 }
 
 /** npm package name for CLIs that ship as npm/bun globals. */
@@ -44,6 +46,8 @@ export const CLI_SELF_UPDATE_ARGS: Record<CliType, string[] | null> = {
   commandcode: ['update'],
   // https://www.npmjs.com/package/@xai-official/grok — `grok update`
   grok: ['update'],
+  // https://docs.devin.ai/cli — `devin update`
+  devin: ['update'],
   gh: null,
   codex: null,
 }
@@ -57,6 +61,7 @@ export const CLI_DISPLAY_NAMES: Record<CliType, string> = {
   coderabbit: 'CodeRabbit CLI',
   commandcode: 'Command Code CLI',
   grok: 'Grok CLI',
+  devin: 'Devin CLI',
 }
 
 /** Get [command, args] for updating a PATH-mode CLI, respecting package manager.

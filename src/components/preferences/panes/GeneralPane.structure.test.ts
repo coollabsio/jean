@@ -56,7 +56,7 @@ describe('GeneralPane settings structure', () => {
       'utf8'
     )
 
-    expect(source.match(/<BackendCliSourceSelect/g)).toHaveLength(7)
+    expect(source.match(/<BackendCliSourceSelect/g)).toHaveLength(8)
   })
 
   it('renders the Kimi auto-steer toggle inside Kimi settings', () => {
@@ -88,7 +88,7 @@ describe('GeneralPane settings structure', () => {
     expect(devinSection).toContain('devin_cli_source')
     expect(devinSection).toContain('selectedDevinModel')
     expect(devinSection).toContain('handleDevinLogin')
-    expect(devinSection).toContain('handleDevinInstallInstructions')
+    expect(devinSection).toContain('handleDevinInstall')
     expect(devinSection).toContain('pref-devin-section-cli')
     expect(devinSection).toContain('pref-devin-section-settings')
   })

@@ -121,7 +121,6 @@ import {
   kimiCliQueryKeys,
 } from '@/services/kimi-cli'
 import {
-  getDevinInstallCommand,
   useAvailableDevinModels,
   useDevinCliAuth,
   useDevinCliStatus,
@@ -397,6 +396,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     | 'commandcode'
     | 'grok'
     | 'kimi'
+    | 'devin'
     | null
   >(null)
   const [isDeletingCli, setIsDeletingCli] = useState(false)
@@ -983,6 +983,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
       },
       grok: { name: 'Grok CLI', cmd: 'uninstall_grok_cli' as const },
       kimi: { name: 'Kimi Code CLI', cmd: 'uninstall_kimi_cli' as const },
+      devin: { name: 'Devin CLI', cmd: 'uninstall_devin_cli' as const },
     }
     const { name, cmd } = labelMap[target]
     setIsDeletingCli(true)
@@ -1006,9 +1007,11 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                       ? 'grok_cli_source'
                       : target === 'kimi'
                         ? 'kimi_cli_source'
-                        : target === 'glab'
-                          ? 'glab_cli_source'
-                          : 'coderabbit_cli_source'
+                        : target === 'devin'
+                          ? 'devin_cli_source'
+                          : target === 'glab'
+                            ? 'glab_cli_source'
+                            : 'coderabbit_cli_source'
       await new Promise<void>((resolve, reject) => {
         patchPreferences.mutate(
           { [sourceKey]: 'path' } as Partial<AppPreferences>,
@@ -1035,9 +1038,11 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                       ? grokCliQueryKeys.all
                       : target === 'kimi'
                         ? kimiCliQueryKeys.all
-                        : target === 'glab'
-                          ? glabCliQueryKeys.all
-                          : coderabbitCliQueryKeys.all
+                        : target === 'devin'
+                          ? devinCliQueryKeys.all
+                          : target === 'glab'
+                            ? glabCliQueryKeys.all
+                            : coderabbitCliQueryKeys.all
       queryClient.invalidateQueries({ queryKey: queryKeys })
       const pathFound =
         target === 'claude'
@@ -1056,9 +1061,11 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                       ? grokPathDetection?.found
                       : target === 'kimi'
                         ? kimiPathDetection?.found
-                        : target === 'glab'
-                          ? glabPathDetection?.found
-                          : coderabbitPathDetection?.found
+                        : target === 'devin'
+                          ? devinPathDetection?.found
+                          : target === 'glab'
+                            ? glabPathDetection?.found
+                            : coderabbitPathDetection?.found
       if (pathFound) {
         toast.success(`Jean-managed ${name} removed. Using system PATH.`, {
           id: toastId,
@@ -1906,24 +1913,12 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     openCliLoginModal('devin', devinStatus.path, ['auth', 'login'])
   }, [devinStatus?.path, openCliLoginModal])
 
-  const handleDevinInstallInstructions = useCallback(async () => {
-    try {
-      const install = await getDevinInstallCommand()
-      const command =
-        install.command === 'sh' && install.args[0] === '-c'
-          ? (install.args[1] ?? install.command)
-          : [install.command, ...install.args].join(' ')
-      copyToClipboard(command)
-      toast.success('Devin CLI install command copied', {
-        description:
-          'Run it in a terminal, then restart Jean or refresh status.',
-      })
-    } catch (error) {
-      toast.error('Failed to load Devin install command', {
-        description: error instanceof Error ? error.message : String(error),
-      })
+  const handleDevinInstall = useCallback(() => {
+    if (preferences?.devin_cli_source !== 'jean') {
+      patchPreferences.mutate({ devin_cli_source: 'jean' })
     }
-  }, [])
+    openCliUpdateModal('devin')
+  }, [openCliUpdateModal, patchPreferences, preferences?.devin_cli_source])
 
   const handleCopyPath = useCallback((path: string | null | undefined) => {
     if (!path) return
@@ -3994,8 +3989,8 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   </Button>
                 )
               ) : (
-                <Button size="sm" onClick={handleDevinInstallInstructions}>
-                  Copy install command
+                <Button size="sm" onClick={handleDevinInstall}>
+                  Install
                 </Button>
               )
             }
@@ -4015,7 +4010,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   <Button
                     variant="outline"
                     className="w-full sm:w-40 justify-between"
-                    onClick={() => handleCopyPath(devinStatus.path)}
+                    onClick={handleDevinInstall}
                   >
                     {devinStatus.version ?? 'Installed'}
                   </Button>
@@ -4027,9 +4022,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={handleDevinInstallInstructions}
+                      onClick={handleDevinInstall}
                     >
-                      Copy install command
+                      Install now
                     </Button>
                   </div>
                 )}
@@ -4063,21 +4058,26 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   </Tooltip>
                 }
               >
-                <Select
-                  value={preferences?.devin_cli_source ?? 'path'}
+                <BackendCliSourceSelect
+                  value={preferences?.devin_cli_source ?? 'jean'}
                   onValueChange={handleDevinSourceChange}
-                >
-                  <SelectTrigger className="w-full sm:w-80">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="path">
-                      System PATH / official install
-                      {!devinPathDetection?.found && ' (not found)'}
-                    </SelectItem>
-                    <SelectItem value="jean">Jean-managed path</SelectItem>
-                  </SelectContent>
-                </Select>
+                  backendName="Devin CLI"
+                  path={devinPathDetection?.path}
+                  pathVersion={devinPathDetection?.version}
+                  pathFound={!!devinPathDetection?.found}
+                  action={
+                    preferences?.devin_cli_source === 'jean' &&
+                    devinStatus?.installed && (
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => setDeleteCliTarget('devin')}
+                      >
+                        Uninstall
+                      </Button>
+                    )
+                  }
+                />
               </InlineField>
             </div>
           </SettingsSection>
@@ -5359,7 +5359,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                           ? 'Grok CLI'
                           : deleteCliTarget === 'kimi'
                             ? 'Kimi Code CLI'
-                            : deleteCliTarget === 'pi'
+                            : deleteCliTarget === 'devin'
+                              ? 'Devin CLI'
+                              : deleteCliTarget === 'pi'
                               ? 'PI CLI'
                               : 'GitHub CLI'}
               ?
@@ -5383,9 +5385,11 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                                 ? grokPathDetection?.found
                                 : deleteCliTarget === 'kimi'
                                   ? kimiPathDetection?.found
-                                  : deleteCliTarget === 'pi'
-                                    ? piPathDetection?.found
-                                    : false
+                                  : deleteCliTarget === 'devin'
+                                    ? devinPathDetection?.found
+                                    : deleteCliTarget === 'pi'
+                                      ? piPathDetection?.found
+                                      : false
                 return pathFound
                   ? 'The Jean-managed binary will be removed and the source will switch to System PATH. You can reinstall it later from this page.'
                   : 'The Jean-managed binary will be removed. No System PATH version was detected, so this backend will be unavailable until you reinstall it.'

@@ -2624,7 +2624,7 @@ export const defaultPreferences: AppPreferences = {
   opencode_cli_source: 'jean', // Default: Jean-managed
   grok_cli_source: 'jean', // Default: Jean-managed
   kimi_cli_source: 'jean', // Default: Jean-managed
-  devin_cli_source: 'path', // Default: official Devin CLI install on PATH
+  devin_cli_source: 'jean', // Default: Jean-managed Devin CLI
   antigravity_cli_source: 'jean', // Default: Jean-managed
   muse_cli_source: 'jean', // Default: Jean-managed
   gh_cli_source: 'jean', // Default: Jean-managed

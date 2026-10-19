@@ -32,6 +32,7 @@ import { useCodeRabbitCliSetup } from '@/services/coderabbit-cli'
 import { useCommandCodeCliSetup } from '@/services/commandcode-cli'
 import { useGrokCliSetup } from '@/services/grok-cli'
 import { useKimiCliSetup } from '@/services/kimi-cli'
+import { useDevinCliSetup } from '@/services/devin-cli'
 import { logger } from '@/lib/logger'
 import { updateTargetLabel } from '@/lib/environment'
 import { useOptionalSettingsTargetServerId } from '@/lib/settings-target'
@@ -263,6 +264,25 @@ function KimiCliReinstallModalContent({ open, onOpenChange }: ModalProps) {
   )
 }
 
+export function DevinCliReinstallModal({ open, onOpenChange }: ModalProps) {
+  if (!open) return null
+  return (
+    <DevinCliReinstallModalContent open={open} onOpenChange={onOpenChange} />
+  )
+}
+
+function DevinCliReinstallModalContent({ open, onOpenChange }: ModalProps) {
+  const setup = useDevinCliSetup()
+  return (
+    <CliReinstallModalUI
+      setup={setup}
+      cliType="devin"
+      open={open}
+      onOpenChange={onOpenChange}
+    />
+  )
+}
+
 export function CommandCodeCliReinstallModal({
   open,
   onOpenChange,
@@ -307,6 +327,7 @@ interface CliReinstallModalUIProps {
     | 'commandcode'
     | 'grok'
     | 'kimi'
+    | 'devin'
   open: boolean
   onOpenChange: (open: boolean) => void
 }
@@ -334,9 +355,11 @@ function CliReinstallModalUI({
                   ? 'Grok CLI'
                   : cliType === 'kimi'
                     ? 'Kimi Code CLI'
-                    : cliType === 'glab'
-                      ? 'GitLab CLI'
-                      : 'GitHub CLI'
+                    : cliType === 'devin'
+                      ? 'Devin CLI'
+                      : cliType === 'glab'
+                        ? 'GitLab CLI'
+                        : 'GitHub CLI'
   const target = updateTargetLabel(useOptionalSettingsTargetServerId())
 
   // Store setup in ref for stable callback reference

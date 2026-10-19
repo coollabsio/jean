@@ -32,3 +32,9 @@ export interface DevinInstallCommand {
   args: string[]
   description: string
 }
+
+export interface DevinInstallProgress {
+  stage: string
+  message: string
+  percent: number
+}

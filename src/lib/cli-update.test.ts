@@ -34,6 +34,17 @@ describe('getPathUpdateAction', () => {
 })
 
 describe('resolveCliPathUpdateAction', () => {
+  it('resolves a PATH Devin CLI to devin update', () => {
+    expect(
+      resolveCliPathUpdateAction(
+        'devin',
+        '/usr/local/bin/devin',
+        'homebrew',
+        '3000.11.92'
+      )
+    ).toEqual(['/usr/local/bin/devin', ['update']])
+  })
+
   it('resolves a PATH Grok CLI to grok update', () => {
     expect(
       resolveCliPathUpdateAction(

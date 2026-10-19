@@ -91,6 +91,27 @@ local precedence and supports the older config file locations.
 JSON-dependent magic prompts remain disabled for Devin. No REST v3 management
 client or automatic cloud handoff is added by this integration.
 
+## CLI installation
+
+Jean installs the official Devin CLI the same way the upstream installers do,
+without piping `install.sh` or running the interactive `devin setup` wizard.
+
+The current manifest is `https://static.devin.ai/cli/current/manifest.json`.
+A requested version uses `https://static.devin.ai/cli/<version>/manifest.json`.
+Cognition does not publish a public version index, so the settings picker offers
+the current promoted build. A typed version is accepted when that versioned
+manifest exists for the host.
+
+Each platform entry has a `url` and `sha256`. Jean downloads the archive, checks
+the checksum, and extracts `bin/devin` (macOS/Linux) or `bin/devin.exe` (Windows)
+into the app-data `devin-cli` directory. Official builds cover macOS, Linux, and
+Windows on x64 and arm64. Other operating systems and architectures return an
+error. On Windows with WSL mode enabled, Jean installs the matching Linux binary
+inside the distro, same as the other native CLIs.
+
+PATH installs update with `devin update`. Jean-managed installs download the
+current manifest again. Login stays `devin auth login`.
+
 ## Verification
 
 Run the focused checks:

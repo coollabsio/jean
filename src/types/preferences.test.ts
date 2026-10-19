@@ -77,7 +77,7 @@ describe('magic prompt preference resolvers', () => {
   })
 
   it('uses the official PATH Devin CLI by default', () => {
-    expect(defaultPreferences.devin_cli_source).toBe('path')
+    expect(defaultPreferences.devin_cli_source).toBe('jean')
   })
 
   it('uses Jean-managed Antigravity CLI by default', () => {
