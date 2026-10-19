@@ -91,11 +91,10 @@ pub fn resolve_glab_binary(app: &AppHandle) -> PathBuf {
         );
     }
 
-    // In WSL mode the Jean-managed install (when it exists) lives inside
-    // the distro. Return the designated Unix path so `check_glab_cli_installed`
-    // can distinguish "Jean hasn't installed anything" from "system glab is on
-    // PATH". Until Jean-managed installs are supported in WSL for glab, this
-    // path will not exist and the check correctly reports not-installed.
+    // In WSL mode the Jean-managed install lives inside the distro.
+    // `install_glab_cli` writes the binary here. Return that Unix path so
+    // `check_glab_cli_installed` can distinguish "Jean hasn't installed
+    // anything" from "system glab is on PATH".
     let wsl = get_wsl_config();
     let managed = if wsl.enabled {
         get_wsl_glab_binary_path(&wsl.distro)

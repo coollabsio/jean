@@ -2957,7 +2957,8 @@ pub async fn dispatch_command(
             to_value(result)
         }
         "check_glab_cli_auth" => {
-            let result = crate::glab_cli::check_glab_cli_auth(app.clone()).await?;
+            let hostname: Option<String> = field_opt(&args, "hostname", "host")?;
+            let result = crate::glab_cli::check_glab_cli_auth(app.clone(), hostname).await?;
             to_value(result)
         }
         "get_available_glab_versions" => {

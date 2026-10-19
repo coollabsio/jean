@@ -423,14 +423,17 @@ fn wsl_gh_platform(distro: &str) -> Result<(&'static str, &'static str), String>
 pub async fn install_gh_cli(app: AppHandle, version: Option<String>) -> Result<(), String> {
     log::trace!("Installing GitHub CLI, version: {:?}", version);
 
-    // Check if any Claude processes are running - Claude may use gh for GitHub operations
+    // Agents may shell out to gh — don't swap the binary out from under a running session.
     let running_sessions = crate::chat::registry::get_running_sessions();
     if !running_sessions.is_empty() {
         let count = running_sessions.len();
         return Err(format!(
-            "Cannot install GitHub CLI while {} Claude {} running. Please stop all active sessions first.",
-            count,
-            if count == 1 { "session is" } else { "sessions are" }
+            "Cannot install GitHub CLI while {count} {} running. Please stop all active sessions first.",
+            if count == 1 {
+                "session is"
+            } else {
+                "sessions are"
+            }
         ));
     }
 

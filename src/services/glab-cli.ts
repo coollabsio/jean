@@ -136,10 +136,15 @@ export function useGlabCliAuth(options?: {
   staleTime?: number
   gcTime?: number
   refetchOnMount?: boolean | 'always'
+  /** Project or remote GitLab host. Omit to accept any configured host. */
+  hostname?: string | null
 }) {
   const serverId = useOptionalSettingsTargetServerId()
+  const hostname = options?.hostname?.trim() || null
   return useQuery({
-    queryKey: [...glabCliQueryKeys.auth(), serverId ?? 'local'],
+    queryKey: hostname
+      ? [...glabCliQueryKeys.auth(), serverId ?? 'local', hostname]
+      : [...glabCliQueryKeys.auth(), serverId ?? 'local'],
     queryFn: async (): Promise<GlabAuthStatus> => {
       if (!isTauri()) {
         return { authenticated: false, error: 'Not in Tauri context' }
@@ -148,7 +153,8 @@ export function useGlabCliAuth(options?: {
       try {
         return await invokeForOptionalServer<GlabAuthStatus>(
           serverId,
-          'check_glab_cli_auth'
+          'check_glab_cli_auth',
+          hostname ? { hostname } : {}
         )
       } catch (error) {
         logger.error('Failed to check GitLab CLI auth', { error })

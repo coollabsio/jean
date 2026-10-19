@@ -1,6 +1,7 @@
 //! Tauri commands for GitLab CLI management
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tauri::AppHandle;
 
 use super::config::{
@@ -124,10 +125,55 @@ fn installed_glab_status(version_output: Option<&str>, path: String) -> GlabCliS
     }
 }
 
+/// Official archive filename, shared by the download URL and checksums.txt.
+fn glab_archive_name(version: &str, platform: &str, archive_ext: &str) -> String {
+    format!("glab_{version}_{platform}.{archive_ext}")
+}
+
 /// Official glab release asset URL for one version and platform.
 fn glab_release_asset_url(version: &str, platform: &str, archive_ext: &str) -> String {
-    let archive_name = format!("glab_{version}_{platform}.{archive_ext}");
-    format!("{GLAB_RELEASE_DOWNLOAD_BASE}/v{version}/downloads/{archive_name}")
+    format!(
+        "{GLAB_RELEASE_DOWNLOAD_BASE}/v{version}/downloads/{}",
+        glab_archive_name(version, platform, archive_ext)
+    )
+}
+
+/// SHA256 manifest published next to the release archives.
+fn glab_checksums_url(version: &str) -> String {
+    format!("{GLAB_RELEASE_DOWNLOAD_BASE}/v{version}/downloads/checksums.txt")
+}
+
+/// Find the hex digest for `archive_name` in a `checksums.txt` body.
+///
+/// Accepts `sha256sum` lines (`<digest>  <name>` and `<digest> *<name>`).
+fn expected_glab_checksum<'a>(checksums: &'a str, archive_name: &str) -> Option<&'a str> {
+    checksums.lines().find_map(|line| {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            return None;
+        }
+        let mut parts = line.split_whitespace();
+        let checksum = parts.next()?;
+        let name = parts.next()?.trim_start_matches('*');
+        (name == archive_name).then_some(checksum)
+    })
+}
+
+/// Compare the archive bytes to the matching `checksums.txt` entry.
+fn verify_glab_archive_checksum(
+    archive: &[u8],
+    checksums: &str,
+    archive_name: &str,
+) -> Result<(), String> {
+    let expected = expected_glab_checksum(checksums, archive_name)
+        .ok_or_else(|| format!("GitLab CLI checksums.txt has no entry for {archive_name}"))?;
+    let actual = format!("{:x}", Sha256::digest(archive));
+    if !actual.eq_ignore_ascii_case(expected.trim()) {
+        return Err(format!(
+            "GitLab CLI checksum mismatch for {archive_name}: expected {expected}, got {actual}"
+        ));
+    }
+    Ok(())
 }
 
 /// Check if GitLab CLI is installed and get its status
@@ -409,9 +455,12 @@ pub async fn install_glab_cli(app: AppHandle, version: Option<String>) -> Result
     if !running_sessions.is_empty() {
         let count = running_sessions.len();
         return Err(format!(
-            "Cannot install GitLab CLI while {} Claude {} running. Please stop all active sessions first.",
-            count,
-            if count == 1 { "session is" } else { "sessions are" }
+            "Cannot install GitLab CLI while {count} {} running. Please stop all active sessions first.",
+            if count == 1 {
+                "session is"
+            } else {
+                "sessions are"
+            }
         ));
     }
 
@@ -431,9 +480,9 @@ pub async fn install_glab_cli(app: AppHandle, version: Option<String>) -> Result
     };
     log::trace!("Installing version {version} for platform {platform}");
 
-    // Format: {base}/v{version}/downloads/glab_{version}_{platform}.{ext}
+    let archive_name = glab_archive_name(&version, platform, archive_ext);
     let download_url = glab_release_asset_url(&version, platform, archive_ext);
-    // Parity with the GitHub CLI installer: the asset is not checksum-verified.
+    let checksums_url = glab_checksums_url(&version);
     log::trace!("Downloading from: {download_url}");
 
     emit_progress(&app, "downloading", "Downloading GitLab CLI...", 20);
@@ -463,6 +512,23 @@ pub async fn install_glab_cli(app: AppHandle, version: Option<String>) -> Result
 
     log::trace!("Downloaded {} bytes", archive_content.len());
 
+    let checksums_response = client
+        .get(&checksums_url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to download GitLab CLI checksums: {e}"))?;
+    if !checksums_response.status().is_success() {
+        return Err(format!(
+            "Failed to download GitLab CLI checksums: HTTP {}",
+            checksums_response.status()
+        ));
+    }
+    let checksums = checksums_response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read GitLab CLI checksums: {e}"))?;
+    verify_glab_archive_checksum(&archive_content, &checksums, &archive_name)?;
+
     emit_progress(&app, "extracting", "Extracting archive...", 40);
 
     let binary_bytes = if archive_ext == "zip" {
@@ -479,9 +545,20 @@ pub async fn install_glab_cli(app: AppHandle, version: Option<String>) -> Result
         crate::platform::wsl_write_bytes(&wsl.distro, &unix_path, &binary_bytes)
             .map_err(|e| format!("Failed to write binary into WSL: {e}"))?;
         crate::platform::wsl_chmod_exec(&wsl.distro, &unix_path)?;
+
+        emit_progress(&app, "verifying", "Verifying installation...", 80);
+        let Some(installed_version) = crate::platform::wsl_tool_version(&wsl.distro, &unix_path)
+        else {
+            return Err(
+                "GitLab CLI binary verification failed: could not run glab --version inside WSL"
+                    .to_string(),
+            );
+        };
+        log::trace!("Verified GitLab CLI version: {installed_version}");
+
+        emit_progress(&app, "complete", "Installation complete!", 100);
         #[cfg(windows)]
         crate::expose_managed_cli_in_wsl(&wsl.distro, "glab", &unix_path);
-        emit_progress(&app, "complete", "Installation complete!", 100);
         log::trace!("GitLab CLI installed successfully at WSL:{unix_path}");
         return Ok(());
     }
@@ -675,8 +752,95 @@ pub struct GlabAuthStatus {
     pub error: Option<String>,
 }
 
-/// Check if GitLab CLI is authenticated by running `glab auth status`
-pub async fn check_glab_cli_auth(app: AppHandle) -> Result<GlabAuthStatus, String> {
+/// Arguments for `glab auth status`.
+///
+/// A known project or remote host is passed as `--hostname`. An empty host is
+/// omitted so the caller can treat any configured instance as signed in.
+fn glab_auth_status_args(hostname: Option<&str>) -> Vec<String> {
+    let mut args = vec!["auth".to_string(), "status".to_string()];
+    if let Some(host) = hostname.map(str::trim).filter(|host| !host.is_empty()) {
+        args.push("--hostname".to_string());
+        args.push(host.to_string());
+    }
+    args
+}
+
+fn strip_ansi(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' {
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                for next in chars.by_ref() {
+                    if next.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        out.push(ch);
+    }
+    out
+}
+
+/// Hosts with a successful `Logged in to <host> as` line.
+///
+/// `glab auth status` prints that line only after the user API call succeeds.
+/// Checkmarks on protocol/token lines are not authentication.
+fn glab_logged_in_hosts(output: &str) -> Vec<String> {
+    let plain = strip_ansi(output);
+    let mut hosts = Vec::new();
+    for line in plain.lines() {
+        let lower = line.to_ascii_lowercase();
+        let Some(idx) = lower.find("logged in to ") else {
+            continue;
+        };
+        if lower[..idx].ends_with("not ") {
+            continue;
+        }
+        let rest = line[idx + "logged in to ".len()..].trim();
+        let Some(host) = rest.split_whitespace().next() else {
+            continue;
+        };
+        let host = host.trim_matches(|c: char| matches!(c, ',' | '.' | '(' | ')'));
+        if host.is_empty() || host.eq_ignore_ascii_case("as") {
+            continue;
+        }
+        hosts.push(host.to_string());
+    }
+    hosts
+}
+
+/// Whether `glab auth status` output means the user is signed in.
+///
+/// With a hostname, only that host counts. A targeted command that exits 0
+/// still counts when the success line cannot be parsed. With no hostname, any
+/// configured host that is logged in counts — `glab` exits 1 when another
+/// instance fails (`could not authenticate to one or more of the configured
+/// GitLab instances`).
+fn glab_auth_status_authenticated(exit_ok: bool, output: &str, hostname: Option<&str>) -> bool {
+    let hosts = glab_logged_in_hosts(output);
+    if let Some(host) = hostname.map(str::trim).filter(|host| !host.is_empty()) {
+        if hosts
+            .iter()
+            .any(|logged_in| logged_in.eq_ignore_ascii_case(host))
+        {
+            return true;
+        }
+        return exit_ok && hosts.is_empty();
+    }
+    !hosts.is_empty() || exit_ok
+}
+
+/// Check if GitLab CLI is authenticated by running `glab auth status`.
+///
+/// `hostname` is the project or remote GitLab host when one is known.
+pub async fn check_glab_cli_auth(
+    app: AppHandle,
+    hostname: Option<String>,
+) -> Result<GlabAuthStatus, String> {
     log::trace!("Checking GitLab CLI authentication status");
 
     let wsl = crate::platform::get_wsl_config();
@@ -703,32 +867,45 @@ pub async fn check_glab_cli_auth(app: AppHandle) -> Result<GlabAuthStatus, Strin
         }
     }
 
-    log::trace!("Running auth check: {:?} auth status", binary_path);
+    let hostname = hostname
+        .as_deref()
+        .map(str::trim)
+        .filter(|host| !host.is_empty());
+    let args = glab_auth_status_args(hostname);
+    log::trace!("Running auth check: {:?} {}", binary_path, args.join(" "));
 
     let binary_str = binary_path.to_string_lossy().to_string();
     let output = crate::platform::wsl_aware_command(&binary_str, None)
-        .args(["auth", "status"])
+        .args(&args)
         .output()
         .map_err(|e| format!("Failed to execute GitLab CLI: {e}"))?;
 
-    if output.status.success() {
-        // glab writes status to stderr; capture both for logging.
-        let combined = format!(
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
+    // glab writes status to stderr. A non-zero exit only means every checked
+    // host failed when no hostname was requested.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = format!("{stdout}{stderr}");
+    if glab_auth_status_authenticated(output.status.success(), &combined, hostname) {
         log::trace!("GitLab CLI auth check successful: {}", combined.trim());
         Ok(GlabAuthStatus {
             authenticated: true,
             error: None,
         })
     } else {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        log::warn!("GitLab CLI auth check failed: {}", stderr);
+        let stderr = stderr.trim();
+        let detail = if stderr.is_empty() {
+            stdout.trim()
+        } else {
+            stderr
+        };
+        log::warn!("GitLab CLI auth check failed: {detail}");
         Ok(GlabAuthStatus {
             authenticated: false,
-            error: Some(stderr),
+            error: Some(if detail.is_empty() {
+                "GitLab CLI is not authenticated".to_string()
+            } else {
+                detail.to_string()
+            }),
         })
     }
 }
@@ -875,5 +1052,134 @@ mod tests {
         let url = glab_release_asset_url("1.107.0", platform, ext);
         assert!(url.starts_with("https://gitlab.com/gitlab-org/cli/-/releases/v1.107.0/downloads/"));
         assert!(url.ends_with(&format!("glab_1.107.0_{platform}.{ext}")));
+        assert_eq!(
+            glab_checksums_url("1.107.0"),
+            "https://gitlab.com/gitlab-org/cli/-/releases/v1.107.0/downloads/checksums.txt"
+        );
+    }
+
+    #[test]
+    fn auth_status_args_include_hostname_only_when_known() {
+        assert_eq!(
+            glab_auth_status_args(None),
+            vec!["auth".to_string(), "status".to_string()]
+        );
+        assert_eq!(
+            glab_auth_status_args(Some("  ")),
+            vec!["auth".to_string(), "status".to_string()]
+        );
+        assert_eq!(
+            glab_auth_status_args(Some(" git.example.com ")),
+            vec![
+                "auth".to_string(),
+                "status".to_string(),
+                "--hostname".to_string(),
+                "git.example.com".to_string(),
+            ]
+        );
+    }
+
+    fn mixed_host_status() -> &'static str {
+        "\
+gitlab.com
+  x gitlab.com: API call failed: GET https://gitlab.com/api/v4/user: 401 {message: 401 Unauthorized}
+  ✓ Git operations for gitlab.com configured to use ssh protocol.
+  ✓ Token found: **************************
+git.example.com
+  \u{1b}[32m✓\u{1b}[0m Logged in to git.example.com as alice (keyring)
+  ✓ Git operations for git.example.com configured to use https protocol.
+x could not authenticate to one or more of the configured GitLab instances.
+"
+    }
+
+    #[test]
+    fn auth_status_treats_any_logged_in_host_as_signed_in() {
+        let output = mixed_host_status();
+        assert!(glab_auth_status_authenticated(false, output, None));
+        assert!(glab_auth_status_authenticated(
+            false,
+            output,
+            Some("git.example.com")
+        ));
+        assert!(glab_auth_status_authenticated(
+            false,
+            output,
+            Some("Git.Example.com")
+        ));
+        assert!(!glab_auth_status_authenticated(
+            false,
+            output,
+            Some("gitlab.com")
+        ));
+        assert_eq!(
+            glab_logged_in_hosts(output),
+            vec!["git.example.com".to_string()]
+        );
+    }
+
+    #[test]
+    fn auth_status_without_a_login_line_follows_the_exit_code() {
+        let failed = "\
+gitlab.com
+  x gitlab.com: API call failed: GET https://gitlab.com/api/v4/user: 401
+x could not authenticate to one or more of the configured GitLab instances.
+";
+        assert!(!glab_auth_status_authenticated(false, failed, None));
+        assert!(!glab_auth_status_authenticated(
+            false,
+            "not logged in to git.example.com",
+            None
+        ));
+        assert!(glab_auth_status_authenticated(
+            true,
+            "gitlab.com\n",
+            Some("gitlab.com")
+        ));
+        assert!(!glab_auth_status_authenticated(
+            false,
+            "",
+            Some("gitlab.com")
+        ));
+    }
+
+    #[test]
+    fn checksums_txt_selects_the_archive_line() {
+        let checksums = "\
+abc  glab_1.107.0_linux_arm64.tar.gz\n\
+eb42f56eb1a789cf4f22aa5960ff0ef60cf1e7fc1295327501f9f59030d5ae2c  glab_1.107.0_linux_amd64.tar.gz\n\
+def *glab_1.107.0_windows_amd64.zip\n";
+        assert_eq!(
+            expected_glab_checksum(checksums, "glab_1.107.0_linux_amd64.tar.gz"),
+            Some("eb42f56eb1a789cf4f22aa5960ff0ef60cf1e7fc1295327501f9f59030d5ae2c")
+        );
+        assert_eq!(
+            expected_glab_checksum(checksums, "glab_1.107.0_windows_amd64.zip"),
+            Some("def")
+        );
+        assert_eq!(
+            expected_glab_checksum(checksums, "glab_1.107.0_darwin_arm64.tar.gz"),
+            None
+        );
+    }
+
+    #[test]
+    fn checksum_mismatch_and_missing_entry_fail() {
+        let bytes = b"not-a-real-archive";
+        let actual = format!("{:x}", Sha256::digest(bytes));
+        let name = "glab_1.2.3_linux_amd64.tar.gz";
+
+        let mismatch =
+            verify_glab_archive_checksum(bytes, &format!("deadbeef  {name}\n"), name).unwrap_err();
+        assert!(mismatch.contains("checksum mismatch"), "{mismatch}");
+        assert!(mismatch.contains(name), "{mismatch}");
+        assert!(mismatch.contains("deadbeef"), "{mismatch}");
+        assert!(mismatch.contains(&actual), "{mismatch}");
+
+        let missing = verify_glab_archive_checksum(bytes, "abc  other.tar.gz\n", name).unwrap_err();
+        assert!(missing.contains("no entry"), "{missing}");
+        assert!(missing.contains(name), "{missing}");
+
+        let ok = format!("{actual}  {name}\n");
+        assert!(verify_glab_archive_checksum(bytes, &ok, name).is_ok());
     }
 }
