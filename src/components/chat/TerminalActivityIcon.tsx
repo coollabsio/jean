@@ -1,4 +1,4 @@
-import { Terminal } from 'lucide-react'
+import { Terminal } from '@/components/icons/reicon'
 import { cn } from '@/lib/utils'
 
 interface TerminalActivityIconProps {

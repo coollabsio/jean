@@ -107,9 +107,7 @@ describe('useWorktreeTerminalStatus', () => {
     )
 
     expect(screen.getByLabelText('1 active terminal')).toBeInTheDocument()
-    expect(container.querySelector('svg.lucide-terminal')).toHaveClass(
-      'text-amber-500'
-    )
+    expect(container.querySelector('svg')).toHaveClass('text-amber-500')
     expect(screen.queryByText('bun run dev')).toBeNull()
   })
 
