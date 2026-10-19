@@ -359,6 +359,8 @@ pub fn run() {
 
     #[cfg(target_os = "macos")]
     fix_macos_path();
+    #[cfg(target_os = "linux")]
+    jean_core::fix_linux_path();
     jean_core::add_fnm_node_to_path();
 
     // Must run before tauri::Builder creates the WebKitGTK webview.

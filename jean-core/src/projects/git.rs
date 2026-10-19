@@ -122,7 +122,7 @@ pub fn get_repo_identifier(repo_path: &str) -> Result<RepoIdentifier, String> {
 /// (`-l` flag) sources the user's shell profile (e.g. `.zprofile`, `.bash_profile`,
 /// `.profile`) which often includes PATH modifications for tools like bun, nvm,
 /// homebrew, etc. Jean also preloads the interactive login PATH into its own
-/// process env (`fix_macos_path` / `fix_headless_path`), which child scripts inherit.
+/// process env (`fix_macos_path` / `fix_linux_path`), which child scripts inherit.
 ///
 /// On Windows, PowerShell doesn't have a login mode concept.
 #[cfg(unix)]

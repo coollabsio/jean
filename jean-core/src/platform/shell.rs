@@ -38,16 +38,19 @@ pub fn get_default_shell() -> String {
     select_default_shell(inherited_shell.as_deref(), account_shell)
 }
 
-/// Load the user's interactive login-shell PATH for a Linux headless service.
+/// Load the user's interactive login-shell PATH on Linux.
 ///
-/// systemd services normally receive a minimal PATH and do not inherit entries
-/// added by shell startup files (for example `~/.bun/bin`). Browser terminals
-/// should behave like terminals opened by the same user.
+/// systemd services and desktop launchers start Jean with a minimal PATH that
+/// misses entries added by shell startup files (for example `~/.bun/bin`,
+/// mise, or nvm), so CLIs installed there are not found. Entries already on
+/// PATH (such as tools bundled in an AppImage) are kept after the login-shell
+/// entries.
 #[cfg(target_os = "linux")]
-pub fn fix_headless_path() {
+pub fn fix_linux_path() {
     let shell = get_default_shell();
     let output = std::process::Command::new(&shell)
         .args(["-l", "-i", "-c", "/usr/bin/printenv PATH"])
+        .stdin(std::process::Stdio::null())
         .output();
 
     match output {
@@ -62,7 +65,8 @@ pub fn fix_headless_path() {
                 .unwrap_or_default()
                 .trim();
             if !path.is_empty() {
-                std::env::set_var("PATH", path);
+                let current = std::env::var("PATH").ok();
+                std::env::set_var("PATH", merge_login_shell_path(path, current.as_deref()));
             }
         }
         Ok(output) => log::warn!(
@@ -71,6 +75,21 @@ pub fn fix_headless_path() {
         ),
         Err(error) => log::warn!("Could not start login shell {shell} to load PATH: {error}"),
     }
+}
+
+/// Login-shell PATH entries first, then current entries it does not contain.
+#[cfg(any(target_os = "linux", test))]
+fn merge_login_shell_path(login_path: &str, current_path: Option<&str>) -> String {
+    let mut entries: Vec<&str> = Vec::new();
+    for entry in login_path
+        .split(':')
+        .chain(current_path.unwrap_or_default().split(':'))
+    {
+        if !entry.is_empty() && !entries.contains(&entry) {
+            entries.push(entry);
+        }
+    }
+    entries.join(":")
 }
 
 /// Add fnm's default Node.js to PATH when the Windows app cannot find Node.
@@ -137,7 +156,24 @@ pub fn executable_exists(name: &str) -> bool {
 
 #[cfg(all(test, unix))]
 mod tests {
-    use super::{select_default_shell, shell_from_passwd};
+    use super::{merge_login_shell_path, select_default_shell, shell_from_passwd};
+
+    #[test]
+    fn login_shell_path_comes_first_and_keeps_current_entries() {
+        assert_eq!(
+            merge_login_shell_path(
+                "/home/u/.local/share/mise/shims:/usr/bin:/bin",
+                Some("/tmp/.mount_jean/usr/bin:/usr/bin:/bin")
+            ),
+            "/home/u/.local/share/mise/shims:/usr/bin:/bin:/tmp/.mount_jean/usr/bin"
+        );
+    }
+
+    #[test]
+    fn merge_drops_empty_and_duplicate_entries() {
+        assert_eq!(merge_login_shell_path("/a::/b:/a", None), "/a:/b");
+        assert_eq!(merge_login_shell_path("/a", Some("")), "/a");
+    }
 
     #[test]
     fn prefers_account_shell_over_launcher_shell() {

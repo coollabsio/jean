@@ -84,6 +84,8 @@ pub use projects::open_worktree_in_editor;
 
 // Process startup helper shared by the desktop and headless entry points.
 pub use platform::add_fnm_node_to_path;
+#[cfg(target_os = "linux")]
+pub use platform::fix_linux_path;
 pub use platform::raise_fd_limit;
 
 // Validation functions
@@ -5196,7 +5198,7 @@ pub async fn run_server() -> Result<(), String> {
     }
     async_runtime::set(tokio::runtime::Handle::current());
     #[cfg(target_os = "linux")]
-    platform::fix_headless_path();
+    platform::fix_linux_path();
     platform::add_fnm_node_to_path();
     let cli = parse_cli_args();
     // WSL headless auto-allows native open; explicit flag covers non-WSL local servers.
