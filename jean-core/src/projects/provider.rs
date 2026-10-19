@@ -149,8 +149,9 @@ pub fn extract_repo_path(remote_url: &str) -> Option<String> {
 
 /// Detect the provider + host from a raw git remote URL.
 ///
-/// Returns `None` for hosts we can't classify (e.g. a self-hosted GitLab on a
-/// custom domain) — those require an explicit `provider` block in `jean.json`.
+/// Returns `None` when the host contains neither `github` nor `gitlab`
+/// (for example `git.company.com`). [`resolve_git_provider`] then defaults
+/// to GitHub unless `jean.json` sets `provider.git`.
 pub fn detect_provider_from_url(remote_url: &str) -> Option<(GitProvider, String)> {
     let host = extract_host(remote_url)?;
     let lower = host.to_ascii_lowercase();
@@ -165,35 +166,6 @@ pub fn detect_provider_from_url(remote_url: &str) -> Option<(GitProvider, String
         return None;
     };
     Some((provider, host))
-}
-
-/// An actionable error when a repo's provider can't be resolved unambiguously.
-///
-/// Jean defaults to GitHub when a host can't be auto-classified, so a self-hosted
-/// GitLab on a custom domain (e.g. `git.company.com`, no "gitlab" in the name)
-/// silently runs `gh` and the user gets confusing GitHub errors. Returns `Some`
-/// only for that ambiguous case — an origin remote exists, its host is
-/// unclassifiable, and jean.json sets no explicit `provider.git` — so callers on
-/// the GitHub path can surface a pointer to the provider block instead.
-///
-/// Returns `None` (no error) when a provider is configured, the host is
-/// classifiable, or there's no origin remote at all (local-only worktree).
-pub fn unconfigured_provider_error(repo_path: &str) -> Option<String> {
-    let cfg = crate::projects::git::read_jean_config(repo_path).and_then(|c| c.provider);
-    if cfg.and_then(|c| c.git).is_some() {
-        return None;
-    }
-    let origin = get_origin_remote_url(repo_path)?;
-    if detect_provider_from_url(&origin).is_some() {
-        return None;
-    }
-    // Local-path / file:// origins have no host to classify — not an ambiguous
-    // provider, so don't propose a bogus `"host": "<path>"`.
-    let host = extract_host(&origin)?;
-    Some(format!(
-        "Could not determine the git host provider for '{host}'. Add a provider block to \
-         jean.json, e.g. \"provider\": {{ \"git\": \"gitlab\", \"host\": \"{host}\" }}."
-    ))
 }
 
 /// Raw `origin` remote URL (unnormalized), or `None` if unavailable.
@@ -215,7 +187,9 @@ fn get_origin_remote_url(repo_path: &str) -> Option<String> {
 
 /// Resolve the effective `(provider, host)` for a repository.
 ///
-/// Precedence: `jean.json` → origin-remote detection → default (GitHub).
+/// Precedence: `jean.json` `provider.git` → origin-remote detection → GitHub.
+/// A host with neither `github` nor `gitlab` in the name, and no `provider.git`,
+/// falls through to GitHub so `gh` is used exactly as it was before GitLab support.
 pub fn resolve_git_provider(repo_path: &str) -> (GitProvider, String) {
     let cfg = crate::projects::git::read_jean_config(repo_path).and_then(|c| c.provider);
     let origin = get_origin_remote_url(repo_path);
@@ -387,10 +361,45 @@ mod tests {
             detect_provider_from_url("https://gitlab.example.com/g/r.git"),
             Some((GitProvider::Gitlab, "gitlab.example.com".to_string()))
         );
-        // Unknown host → None (needs explicit jean.json).
+        // Unknown host is unclassified. resolve_git_provider then defaults to GitHub.
         assert_eq!(
             detect_provider_from_url("https://git.company.com/g/r.git"),
             None
         );
+    }
+
+    fn git_repo_with_origin(url: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path();
+        for args in [vec!["init"], vec!["remote", "add", "origin", url]] {
+            let status = crate::platform::silent_command("git")
+                .args(&args)
+                .current_dir(path)
+                .status()
+                .expect("git");
+            assert!(status.success(), "git {args:?} failed");
+        }
+        dir
+    }
+
+    #[test]
+    fn unknown_host_without_provider_git_falls_through_to_github() {
+        let dir = git_repo_with_origin("https://git.company.com/group/repo.git");
+        let (provider, host) = resolve_git_provider(dir.path().to_str().unwrap());
+        assert_eq!(provider, GitProvider::Github);
+        assert_eq!(host, "git.company.com");
+    }
+
+    #[test]
+    fn explicit_provider_git_overrides_unknown_host() {
+        let dir = git_repo_with_origin("https://git.company.com/group/repo.git");
+        std::fs::write(
+            dir.path().join("jean.json"),
+            r#"{"provider":{"git":"gitlab"}}"#,
+        )
+        .unwrap();
+        let (provider, host) = resolve_git_provider(dir.path().to_str().unwrap());
+        assert_eq!(provider, GitProvider::Gitlab);
+        assert_eq!(host, "git.company.com");
     }
 }

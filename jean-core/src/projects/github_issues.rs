@@ -6,7 +6,7 @@ use tauri::AppHandle;
 
 use super::git::get_repo_identifier;
 use crate::gh_cli::config::resolve_gh_binary;
-use crate::projects::provider::{resolve_git_provider, unconfigured_provider_error, GitProvider};
+use crate::projects::provider::{resolve_git_provider, GitProvider};
 
 /// True when the project resolves to the GitLab provider, so the GitHub
 /// commands below should delegate to [`super::gitlab_issues`].
@@ -135,10 +135,6 @@ pub async fn list_github_labels(
     if is_gitlab_project(&project_path) {
         return super::gitlab_issues::list_labels(&app, &project_path).await;
     }
-    if let Some(err) = unconfigured_provider_error(&project_path) {
-        return Err(err);
-    }
-
     let gh = resolve_gh_binary(&app);
     let output = gh_command(&gh, &project_path)
         .args(["label", "list", "--json", "name,color", "-L", "1000"])
@@ -217,11 +213,6 @@ pub async fn list_github_issues(
     if is_gitlab_project(&project_path) {
         return super::gitlab_issues::list_issues(&app, &project_path, state).await;
     }
-    // Don't silently run gh against an unclassifiable self-hosted host.
-    if let Some(err) = unconfigured_provider_error(&project_path) {
-        return Err(err);
-    }
-
     let gh = resolve_gh_binary(&app);
     let state_arg = state.unwrap_or_else(|| "open".to_string());
 
@@ -366,10 +357,6 @@ pub async fn search_github_issues(
     if is_gitlab_project(&project_path) {
         return super::gitlab_issues::search_issues(&app, &project_path, query).await;
     }
-    if let Some(err) = unconfigured_provider_error(&project_path) {
-        return Err(err);
-    }
-
     let gh = resolve_gh_binary(&app);
     let output = gh_command(&gh, &project_path)
         .args([
@@ -422,10 +409,6 @@ pub async fn get_github_issue_by_number(
     if is_gitlab_project(&project_path) {
         return super::gitlab_issues::get_issue_by_number(&app, &project_path, issue_number).await;
     }
-    if let Some(err) = unconfigured_provider_error(&project_path) {
-        return Err(err);
-    }
-
     let gh = resolve_gh_binary(&app);
     let output = gh_command(&gh, &project_path)
         .args([
@@ -469,10 +452,6 @@ pub async fn get_github_issue(
     if is_gitlab_project(&project_path) {
         return super::gitlab_issues::get_issue_detail(&app, &project_path, issue_number).await;
     }
-    if let Some(err) = unconfigured_provider_error(&project_path) {
-        return Err(err);
-    }
-
     let gh = resolve_gh_binary(&app);
     // Run gh issue view
     let output = gh_command(&gh, &project_path)
@@ -1831,11 +1810,6 @@ pub async fn list_github_prs(
     if is_gitlab_project(&project_path) {
         return super::gitlab_issues::list_mrs(&app, &project_path, state).await;
     }
-    // Don't silently run gh against an unclassifiable self-hosted host.
-    if let Some(err) = unconfigured_provider_error(&project_path) {
-        return Err(err);
-    }
-
     let gh = resolve_gh_binary(&app);
     let state_arg = state.unwrap_or_else(|| "open".to_string());
 
@@ -1890,10 +1864,6 @@ pub async fn search_github_prs(
     if is_gitlab_project(&project_path) {
         return super::gitlab_issues::search_mrs(&app, &project_path, query).await;
     }
-    if let Some(err) = unconfigured_provider_error(&project_path) {
-        return Err(err);
-    }
-
     let gh = resolve_gh_binary(&app);
     let output = gh_command(&gh, &project_path)
         .args([
@@ -1947,10 +1917,6 @@ pub async fn get_github_pr_by_number(
     if is_gitlab_project(&project_path) {
         return super::gitlab_issues::get_mr_by_number(&app, &project_path, pr_number).await;
     }
-    if let Some(err) = unconfigured_provider_error(&project_path) {
-        return Err(err);
-    }
-
     let gh = resolve_gh_binary(&app);
     let output = gh_command(&gh, &project_path)
         .args([
@@ -1995,10 +1961,6 @@ pub async fn get_github_pr(
     if is_gitlab_project(&project_path) {
         return super::gitlab_issues::get_mr_detail(&app, &project_path, pr_number).await;
     }
-    if let Some(err) = unconfigured_provider_error(&project_path) {
-        return Err(err);
-    }
-
     let gh = resolve_gh_binary(&app);
     // Run gh pr view
     let output = gh_command(&gh, &project_path)
