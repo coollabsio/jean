@@ -1029,7 +1029,8 @@ const magicPromptDefinitions: {
   {
     key: 'parallel_execution',
     title: 'Parallel Execution Prompt',
-    description: 'System prompt encouraging sub-agent parallelization.',
+    description:
+      'Sub-agent prompting for every chat session. Clear it to stop Task sub-agents.',
     keywords: ['parallel execution prompt', 'parallelization prompt'],
   },
   {

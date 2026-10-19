@@ -85,13 +85,6 @@ Jean may hand this plan to a zero-context agent in a new worktree. Status lines 
 - Include: goal/outcome, key decisions from the interview, concrete files/areas to touch, ordered implementation steps with enough approach detail, risks/edge cases, and how to verify.
 - Prefer a structured body (headings/bullets). Concise writing is good; incomplete handoff plans are not.
 - After answering questions, re-emit the full detailed body in a complete `<proposed_plan>` block — never end on explanation-only or checklist-only content.";
-const DEFAULT_PARALLEL_EXECUTION_PROMPT: &str = r#"In plan mode, structure plans so subagents can work simultaneously. In build/execute mode, use subagents in parallel for faster implementation.
-
-When launching multiple Task subagents, prefer sending them in a single message rather than sequentially. Group independent work items (e.g., editing separate files, researching unrelated questions) into parallel Task calls. Only sequence Tasks when one depends on another's output.
-
-Instruct each sub-agent to briefly outline its approach before implementing, so it can course-correct early without formal plan mode overhead.
-
-When specifying subagent_type for Task tool calls, always use the fully qualified name exactly as listed in the system prompt (e.g., "code-simplifier:code-simplifier", not just "code-simplifier"). If the agent type contains a colon, include the full namespace:name string."#;
 
 /// Sessions currently being drained by the backend queue processor.
 ///
@@ -188,6 +181,7 @@ fn is_codex_default_global_system_prompt(prompt: &str) -> bool {
     }
 
     trimmed == crate::default_global_system_prompt().trim()
+        || crate::is_legacy_global_system_prompt_with_subagent_strategy(trimmed)
         || trimmed == CODEX_DEFAULT_PLAN_MODE_PROMPT.trim()
         || trimmed == CODEX_DEFAULT_NOT_PLAN_MODE_PROMPT.trim()
         || (trimmed.contains("### 1. Plan Mode Default")
@@ -409,11 +403,7 @@ fn normalize_optional_string(value: Option<String>) -> Option<String> {
 }
 
 fn resolve_global_system_prompt(preferences_prompt: Option<&str>) -> String {
-    preferences_prompt
-        .map(str::trim)
-        .filter(|prompt| !prompt.is_empty())
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(crate::default_global_system_prompt)
+    crate::effective_global_system_prompt(preferences_prompt)
 }
 
 /// Default policy for sessions without a selection. Server projects start in
@@ -520,6 +510,7 @@ fn build_kimi_system_prompt(
     worktree_id: &str,
     ai_language: Option<&str>,
     parallel_prompt: Option<&str>,
+    agent_prompt: Option<&str>,
     include_recap: bool,
 ) -> Option<String> {
     let mut parts = Vec::new();
@@ -527,17 +518,12 @@ fn build_kimi_system_prompt(
         parts.push(format!("Respond to the user in {language}."));
     }
     let preferences = crate::load_preferences_sync(app).ok();
-    parts.push(resolve_session_global_system_prompt(
-        app,
-        worktree_id,
-        preferences.as_ref(),
-    ));
-    if let Some(prompt) = parallel_prompt
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        parts.push(prompt.to_string());
-    }
+    super::push_subagent_policy_before_global(
+        &mut parts,
+        parallel_prompt,
+        resolve_session_global_system_prompt(app, worktree_id, preferences.as_ref()),
+    );
+    super::push_trimmed_prompt(&mut parts, agent_prompt);
     if let Ok(data) = load_projects_data(app) {
         if let Some(worktree) = data.find_worktree(worktree_id) {
             if let Some(project) = data.find_project(&worktree.project_id) {
@@ -1387,14 +1373,13 @@ async fn queued_message_to_send_request(
                 })
         })
     });
-    let parallel_execution_prompt = json_string(queued, "parallelExecutionPrompt").or_else(|| {
-        Some(
-            prefs
-                .as_ref()
-                .and_then(|p| p.magic_prompts.parallel_execution.clone())
-                .unwrap_or_else(|| DEFAULT_PARALLEL_EXECUTION_PROMPT.to_string()),
-        )
-    });
+    let parallel_execution_prompt =
+        json_string(queued, "parallelExecutionPrompt").or_else(|| match prefs.as_ref() {
+            Some(prefs) => crate::resolve_stored_parallel_execution_prompt(
+                prefs.magic_prompts.parallel_execution.as_deref(),
+            ),
+            None => Some(crate::default_parallel_execution_prompt()),
+        });
     let ai_language = json_string(queued, "aiLanguage").or_else(|| {
         prefs
             .as_ref()
@@ -3579,21 +3564,19 @@ pub async fn send_chat_message(
     // is intentionally not stored as the visible user message in metadata.
     run_log::write_input_file(&app, &session_id, &run_id, &message_for_backend)?;
 
-    // Use passed parameter for parallel execution prompt (None = disabled)
-    let parallel_execution_prompt = parallel_execution_prompt.filter(|p| !p.trim().is_empty());
-    // Agent sessions: append the agent prompt (role, tools, memory). Every backend receives this prompt.
-    let parallel_execution_prompt = match crate::agents::system_prompt_for_run(
+    // Use passed parameter for parallel execution prompt (None = disabled).
+    // The agent prompt stays separate so turning fan-out off still injects the
+    // "do not spawn sub-agents" policy instead of treating the agent prompt as
+    // that policy.
+    let parallel_execution_prompt = crate::upgrade_legacy_parallel_execution_prompt(
+        parallel_execution_prompt.filter(|p| !p.trim().is_empty()),
+    );
+    let agent_system_prompt = crate::agents::system_prompt_for_run(
         &app,
         &worktree_id,
         Some(&session_id),
         Some(message.as_str()),
-    ) {
-        Some(agent_prompt) => Some(match parallel_execution_prompt {
-            Some(prompt) => format!("{prompt}\n\n{agent_prompt}"),
-            None => agent_prompt,
-        }),
-        None => parallel_execution_prompt,
-    };
+    );
 
     // Use passed parameter for Chrome browser integration (default false - beta)
     let chrome = chrome_enabled.unwrap_or(false);
@@ -3670,6 +3653,7 @@ pub async fn send_chat_message(
     let thread_effort_level = effort_level.clone();
     let thread_allowed_tools = allowed_tools_for_cli.clone();
     let thread_parallel_prompt = parallel_execution_prompt.clone();
+    let thread_agent_prompt = agent_system_prompt.clone();
     let thread_ai_language = ai_language.clone();
     let backend_name = crate::agents::connectors::backend_label(&effective_backend);
     let mcp_config = crate::agents::connectors::apply_agent_mcp_allowlist(
@@ -3791,6 +3775,7 @@ pub async fn send_chat_message(
                         thread_effort_level.as_ref(),
                         thread_allowed_tools.as_deref(),
                         thread_parallel_prompt.as_deref(),
+                        thread_agent_prompt.as_deref(),
                         thread_ai_language.as_deref(),
                         thread_mcp_config.as_deref(),
                         chrome,
@@ -4044,18 +4029,15 @@ pub async fn send_chat_message(
                                     thread_execution_mode.as_deref(),
                                 )
                             });
-                    system_prompt_parts.push(crate::apply_agent_browser_preference(
-                        global_prompt,
-                        preferences.as_ref(),
-                    ));
-
-                    // Parallel execution prompt
-                    if let Some(prompt) = &thread_parallel_prompt {
-                        let prompt = prompt.trim();
-                        if !prompt.is_empty() {
-                            system_prompt_parts.push(prompt.to_string());
-                        }
-                    }
+                    super::push_subagent_policy_before_global(
+                        &mut system_prompt_parts,
+                        thread_parallel_prompt.as_deref(),
+                        crate::apply_agent_browser_preference(global_prompt, preferences.as_ref()),
+                    );
+                    super::push_trimmed_prompt(
+                        &mut system_prompt_parts,
+                        thread_agent_prompt.as_deref(),
+                    );
 
                     // Per-project custom system prompt + linked project instructions
                     if let Ok(data) = load_projects_data(&thread_app) {
@@ -4431,20 +4413,21 @@ pub async fn send_chat_message(
                     }
 
                     // Global system prompt from preferences, with the shared default fallback.
+                    // Sub-agent policy comes first so a user-authored global prompt wins.
                     let preferences = crate::load_preferences_sync(&thread_app).ok();
-                    system_prompt_parts.push(resolve_session_global_system_prompt(
-                        &thread_app,
-                        &thread_worktree_id,
-                        preferences.as_ref(),
-                    ));
-
-                    // Parallel execution prompt
-                    if let Some(prompt) = &thread_parallel_prompt {
-                        let prompt = prompt.trim();
-                        if !prompt.is_empty() {
-                            system_prompt_parts.push(prompt.to_string());
-                        }
-                    }
+                    super::push_subagent_policy_before_global(
+                        &mut system_prompt_parts,
+                        thread_parallel_prompt.as_deref(),
+                        resolve_session_global_system_prompt(
+                            &thread_app,
+                            &thread_worktree_id,
+                            preferences.as_ref(),
+                        ),
+                    );
+                    super::push_trimmed_prompt(
+                        &mut system_prompt_parts,
+                        thread_agent_prompt.as_deref(),
+                    );
 
                     // Per-project custom system prompt + linked project instructions
                     if let Ok(data) = load_projects_data(&thread_app) {
@@ -4764,18 +4747,16 @@ pub async fn send_chat_message(
                     }
 
                     let preferences = crate::load_preferences_sync(&thread_app).ok();
-                    parts.push(resolve_session_global_system_prompt(
-                        &thread_app,
-                        &thread_worktree_id,
-                        preferences.as_ref(),
-                    ));
-
-                    if let Some(prompt) = &thread_parallel_prompt {
-                        let prompt = prompt.trim();
-                        if !prompt.is_empty() {
-                            parts.push(prompt.to_string());
-                        }
-                    }
+                    super::push_subagent_policy_before_global(
+                        &mut parts,
+                        thread_parallel_prompt.as_deref(),
+                        resolve_session_global_system_prompt(
+                            &thread_app,
+                            &thread_worktree_id,
+                            preferences.as_ref(),
+                        ),
+                    );
+                    super::push_trimmed_prompt(&mut parts, thread_agent_prompt.as_deref());
 
                     if let Ok(data) = load_projects_data(&thread_app) {
                         if let Some(worktree) = data.find_worktree(&thread_worktree_id) {
@@ -4931,18 +4912,16 @@ pub async fn send_chat_message(
                     }
 
                     let preferences = crate::load_preferences_sync(&thread_app).ok();
-                    parts.push(resolve_session_global_system_prompt(
-                        &thread_app,
-                        &thread_worktree_id,
-                        preferences.as_ref(),
-                    ));
-
-                    if let Some(prompt) = &thread_parallel_prompt {
-                        let prompt = prompt.trim();
-                        if !prompt.is_empty() {
-                            parts.push(prompt.to_string());
-                        }
-                    }
+                    super::push_subagent_policy_before_global(
+                        &mut parts,
+                        thread_parallel_prompt.as_deref(),
+                        resolve_session_global_system_prompt(
+                            &thread_app,
+                            &thread_worktree_id,
+                            preferences.as_ref(),
+                        ),
+                    );
+                    super::push_trimmed_prompt(&mut parts, thread_agent_prompt.as_deref());
 
                     if let Ok(data) = load_projects_data(&thread_app) {
                         if let Some(worktree) = data.find_worktree(&thread_worktree_id) {
@@ -5063,18 +5042,16 @@ pub async fn send_chat_message(
                     }
 
                     let preferences = crate::load_preferences_sync(&thread_app).ok();
-                    parts.push(resolve_session_global_system_prompt(
-                        &thread_app,
-                        &thread_worktree_id,
-                        preferences.as_ref(),
-                    ));
-
-                    if let Some(prompt) = &thread_parallel_prompt {
-                        let prompt = prompt.trim();
-                        if !prompt.is_empty() {
-                            parts.push(prompt.to_string());
-                        }
-                    }
+                    super::push_subagent_policy_before_global(
+                        &mut parts,
+                        thread_parallel_prompt.as_deref(),
+                        resolve_session_global_system_prompt(
+                            &thread_app,
+                            &thread_worktree_id,
+                            preferences.as_ref(),
+                        ),
+                    );
+                    super::push_trimmed_prompt(&mut parts, thread_agent_prompt.as_deref());
 
                     if let Ok(data) = load_projects_data(&thread_app) {
                         if let Some(worktree) = data.find_worktree(&thread_worktree_id) {
@@ -5213,6 +5190,7 @@ pub async fn send_chat_message(
                     &thread_worktree_id,
                     thread_ai_language.as_deref(),
                     thread_parallel_prompt.as_deref(),
+                    thread_agent_prompt.as_deref(),
                     thread_include_recap,
                 );
                 let effort = thread_effort_level
@@ -5255,6 +5233,7 @@ pub async fn send_chat_message(
                     &thread_worktree_id,
                     thread_ai_language.as_deref(),
                     thread_parallel_prompt.as_deref(),
+                    thread_agent_prompt.as_deref(),
                     thread_include_recap,
                 );
                 let effort = thread_effort_level
@@ -5299,6 +5278,7 @@ pub async fn send_chat_message(
                     &thread_worktree_id,
                     thread_ai_language.as_deref(),
                     thread_parallel_prompt.as_deref(),
+                    thread_agent_prompt.as_deref(),
                     thread_include_recap,
                 );
                 let effort = thread_effort_level
@@ -11835,12 +11815,12 @@ mod tests {
 ## Jean Worktree Policy";
 
         let yolo_prompt = resolve_codex_global_system_prompt(Some(legacy_default), Some("yolo"));
-        assert!(yolo_prompt.contains("### 4. Self-Improvement Loop"));
+        assert!(yolo_prompt.contains("### 3. Self-Improvement Loop"));
         assert!(!yolo_prompt.contains("Plan Mode Default"));
         assert!(yolo_prompt.contains("## Not Plan Mode"));
 
         let plan_prompt = resolve_codex_global_system_prompt(Some(legacy_default), Some("plan"));
-        assert!(plan_prompt.contains("### 4. Self-Improvement Loop"));
+        assert!(plan_prompt.contains("### 3. Self-Improvement Loop"));
         assert!(plan_prompt.contains("## Plan Mode"));
         assert!(plan_prompt.contains("<proposed_plan>"));
     }

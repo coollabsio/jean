@@ -13,7 +13,9 @@ import {
   DEFAULT_INVESTIGATE_PR_PROMPT,
   DEFAULT_INVESTIGATE_SECURITY_ALERT_PROMPT,
   DEFAULT_INVESTIGATE_SENTRY_ISSUE_PROMPT,
+  DEFAULT_GLOBAL_SYSTEM_PROMPT,
   DEFAULT_INVESTIGATE_WORKFLOW_RUN_PROMPT,
+  DEFAULT_PARALLEL_EXECUTION_PROMPT,
   defaultPreferences,
   GROK_DEFAULT_MAGIC_PROMPT_BACKENDS,
   GROK_DEFAULT_MAGIC_PROMPT_MODELS,
@@ -227,6 +229,23 @@ describe('magic prompt preference resolvers', () => {
     expect(defaultPreferences).not.toHaveProperty('codex_multi_agent_enabled')
     expect(defaultPreferences).not.toHaveProperty('codex_max_agent_threads')
     expect(defaultPreferences.magic_prompts.parallel_execution).toBeNull()
+    expect(DEFAULT_PARALLEL_EXECUTION_PROMPT).toContain(
+      '### Subagent Strategy to keep main context window clean'
+    )
+    expect(DEFAULT_PARALLEL_EXECUTION_PROMPT).toContain(
+      'throw more compute at it via subagents'
+    )
+    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).not.toContain('Subagent Strategy')
+    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
+      '### 3. Self-Improvement Loop'
+    )
+    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
+      '### 6. Autonomous Bug Fixing'
+    )
+    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).not.toContain(
+      '### 7. Autonomous Bug Fixing'
+    )
+    expect(defaultPreferences.compact_chat_view_enabled).toBe(true)
   })
 
   it('prefers explicit backend overrides', () => {

@@ -42,19 +42,14 @@ Always use ASD-STE100 Simplified Technical English when you talk to me.\n\
 - Skip only for trivial edits to code already read this session.\n\
 - Do NOT use Context7 — WebSearch only.\n\
 \n\
-### 3. Subagent Strategy to keep main context window clean\n\
-- Offload research, exploration, and parallel analysis to subagents\n\
-- For complex problems, throw more compute at it via subagents\n\
-- One task per subagent for focused execution\n\
-\n\
-### 4. Self-Improvement Loop\n\
+### 3. Self-Improvement Loop\n\
 - Only update '.ai/lessons.md' for general, project-wide learning that applies across features\n\
 - Do not add feature-specific, bug-fix-specific, or small/local lessons\n\
 - Remove narrow or specific entries when you detect them\n\
 - Review lessons at session start for relevant project\n\
 - Keep '.ai/lessons.md' concise by merging duplicate rules and removing obsolete entries\n\
 \n\
-### 5. Verification Before Done\n\
+### 4. Verification Before Done\n\
 - Never mark a task complete without proving it works\n\
 - Diff behavior between main and your changes when relevant\n\
 - Ask yourself: \"Would a staff engineer approve this?\"\n\
@@ -66,13 +61,13 @@ Always use ASD-STE100 Simplified Technical English when you talk to me.\n\
 - Do NOT write tests that only check DOM markup, CSS classes, snapshots, static text or prompt copy, constants, simple prop pass-through, library/framework behavior, or that only assert mocks were called. Verify UI changes in the running app instead.\n\
 - If a UI check needs a browser and no other browser tool is available, use the Agent Browser.\n\
 \n\
-### 6. Demand Elegance (Balanced)\n\
+### 5. Demand Elegance (Balanced)\n\
 - For non-trivial changes: pause and ask \"is there a more elegant way?\"\n\
 - If a fix feels hacky: \"Knowing everything I know now, implement the elegant solution\"\n\
 - Skip this for simple, obvious fixes - don't over-engineer\n\
 - Challenge your own work before presenting it\n\
 \n\
-### 7. Autonomous Bug Fixing\n\
+### 6. Autonomous Bug Fixing\n\
 - When given a bug report: just fix it. Don't ask for hand-holding\n\
 - Point at logs, errors, failing tests -> then resolve them\n\
 - Zero context switching required from the user\n\
@@ -91,7 +86,7 @@ Always use ASD-STE100 Simplified Technical English when you talk to me.\n\
 ## Core Principles\n\
 - **Simplicity First**: Make every change as simple as possible. Impact minimal code.\n\
 - **VERY IMPORTANT: Keep Code Simple**: Do not over-engineer. Always implement the simplest maintainable solution. Avoid extra abstractions, frameworks, configuration, or future-proofing unless clearly required.\n\
-- **Clickable References**: When output mentions issues, PRs, security advisories/alerts, Linear issues, or other external resources, include clickable links when available so users can open them directly.\n\
+- **Clickable References**: When output mentions issues, PRs, security advisories/alerts, Linear issues, Sentry issues, or other external resources, include clickable links when available so users can open them directly.\n\
 - **Tables for Findings**: When you report found issues, gaps, risks, or recommended fixes, present them in a Markdown table (for example: | # | Finding | Location | Impact | Recommended fix |) instead of long prose lists.\n\
 - **No Laziness**: Find root causes. No temporary fixes. Senior developer standards.\n\
 - **Minimal Impact**: Changes should only touch what's necessary. Avoid introducing bugs.\n\
@@ -677,6 +672,7 @@ fn build_claude_args(
     effort_level: Option<&EffortLevel>,
     allowed_tools: Option<&[String]>,
     parallel_execution_prompt: Option<&str>,
+    agent_system_prompt: Option<&str>,
     ai_language: Option<&str>,
     mcp_config: Option<&str>,
     chrome_enabled: bool,
@@ -911,39 +907,40 @@ fn build_claude_args(
         }
     }
 
-    // Global system prompt from preferences (like ~/.claude/CLAUDE.md)
-    // Falls back to DEFAULT_GLOBAL_SYSTEM_PROMPT when not set (null = use default)
-    if let Ok(prefs_path) = crate::get_preferences_path(app) {
-        if let Ok(contents) = std::fs::read_to_string(&prefs_path) {
-            if let Ok(prefs) = serde_json::from_str::<crate::AppPreferences>(&contents) {
-                let prompt = crate::projects::server_system_prompt(app, worktree_id)
-                    .unwrap_or_else(|| {
-                        prefs
-                            .magic_prompts
-                            .global_system_prompt
-                            .as_deref()
-                            .map(|s| s.trim())
-                            .filter(|s| !s.is_empty())
-                            .unwrap_or(DEFAULT_GLOBAL_SYSTEM_PROMPT)
-                            .to_string()
-                    });
-                system_prompt_parts
-                    .push(crate::apply_agent_browser_preference(prompt, Some(&prefs)));
-            }
-        }
-    }
+    // Sub-agent policy before the global prompt so a user-authored global
+    // prompt has the last word. An empty parallel prompt is fan-out off.
+    // The previous built-in default, which embedded the sub-agent section, is
+    // treated as "use the current default" so that section stays on the toggle.
+    debug_assert_eq!(
+        DEFAULT_GLOBAL_SYSTEM_PROMPT,
+        crate::default_global_system_prompt()
+    );
+    let global_prompt = crate::get_preferences_path(app)
+        .ok()
+        .and_then(|prefs_path| std::fs::read_to_string(prefs_path).ok())
+        .and_then(|contents| serde_json::from_str::<crate::AppPreferences>(&contents).ok())
+        .map(|prefs| {
+            let prompt =
+                crate::projects::server_system_prompt(app, worktree_id).unwrap_or_else(|| {
+                    crate::effective_global_system_prompt(
+                        prefs.magic_prompts.global_system_prompt.as_deref(),
+                    )
+                });
+            crate::apply_agent_browser_preference(prompt, Some(&prefs))
+        })
+        .unwrap_or_default();
+    super::push_subagent_policy_before_global(
+        &mut system_prompt_parts,
+        parallel_execution_prompt,
+        global_prompt,
+    );
 
     if let Some(mode_instruction) = execution_mode_instruction(execution_mode) {
         system_prompt_parts.push(mode_instruction.to_string());
     }
 
-    // Parallel execution prompt - encourages sub-agent parallelization
-    if let Some(prompt) = parallel_execution_prompt {
-        let prompt = prompt.trim();
-        if !prompt.is_empty() {
-            system_prompt_parts.push(prompt.to_string());
-        }
-    }
+    // Agent role prompt. Kept after the global prompt, separate from fan-out.
+    super::push_trimmed_prompt(&mut system_prompt_parts, agent_system_prompt);
 
     // Per-project custom system prompt + linked project instructions
     if let Ok(data) = load_projects_data(app) {
@@ -1526,6 +1523,7 @@ pub fn execute_claude_detached(
     effort_level: Option<&EffortLevel>,
     allowed_tools: Option<&[String]>,
     parallel_execution_prompt: Option<&str>,
+    agent_system_prompt: Option<&str>,
     ai_language: Option<&str>,
     mcp_config: Option<&str>,
     chrome_enabled: bool,
@@ -1571,6 +1569,7 @@ pub fn execute_claude_detached(
         effort_level,
         allowed_tools,
         parallel_execution_prompt,
+        agent_system_prompt,
         ai_language,
         mcp_config,
         chrome_enabled,
@@ -3630,6 +3629,15 @@ mod tests {
         assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT
             .contains("Remove narrow or specific entries when you detect them"));
         assert!(!DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("After ANY correction from the user"));
+        assert!(!DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("Subagent Strategy"));
+        assert!(!DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("throw more compute at it via subagents"));
+        assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("### 3. Self-Improvement Loop"));
+        assert!(DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("### 6. Autonomous Bug Fixing"));
+        assert!(!DEFAULT_GLOBAL_SYSTEM_PROMPT.contains("### 7. Autonomous Bug Fixing"));
+        assert_eq!(
+            DEFAULT_GLOBAL_SYSTEM_PROMPT,
+            crate::default_global_system_prompt()
+        );
     }
 
     #[test]

@@ -409,7 +409,7 @@ export const AppearancePane: React.FC = () => {
           >
             <Switch
               aria-label="Compact chat view"
-              checked={preferences?.compact_chat_view_enabled ?? false}
+              checked={preferences?.compact_chat_view_enabled ?? true}
               onCheckedChange={checked =>
                 patchPreferences.mutate({
                   compact_chat_view_enabled: checked,

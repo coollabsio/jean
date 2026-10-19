@@ -2344,13 +2344,8 @@ async fn start_autoinvestigating(
         .map_err(ToolError::internal)?;
     let selection = resolve_investigation_selection(app, &prefs, &ready_worktree, kind);
     let prompt = build_investigation_prompt(&prefs, &ready_worktree, kind);
-    let parallel_execution_prompt = Some(
-        prefs
-            .magic_prompts
-            .parallel_execution
-            .clone()
-            .filter(|p| !p.trim().is_empty())
-            .unwrap_or_else(crate::default_parallel_execution_prompt),
+    let parallel_execution_prompt = crate::resolve_stored_parallel_execution_prompt(
+        prefs.magic_prompts.parallel_execution.as_deref(),
     );
     let custom_profile_name = selection
         .provider

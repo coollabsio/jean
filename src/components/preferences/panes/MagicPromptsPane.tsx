@@ -550,7 +550,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
         key: 'parallel_execution',
         label: 'Parallel Execution',
         description:
-          'System prompt appended to every chat session. Encourages sub-agent parallelization.',
+          'Sub-agent prompting for every chat session. Clear this prompt to tell the model not to spawn Task sub-agents.',
         variables: [],
         defaultValue: DEFAULT_PARALLEL_EXECUTION_PROMPT,
       },

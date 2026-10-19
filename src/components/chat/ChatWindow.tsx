@@ -2506,7 +2506,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
   }, [messages])
 
   const compactView =
-    Boolean(preferences?.compact_chat_view_enabled) || Boolean(workingLabel)
+    (preferences?.compact_chat_view_enabled ?? true) || Boolean(workingLabel)
   const compactHistoryWindow = useMemo(
     () => getCurrentPromptWindow(messages),
     [messages]

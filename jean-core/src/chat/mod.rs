@@ -92,6 +92,42 @@ pub(crate) fn recap_instruction_enabled(include_recap: bool, auto_recaps_enabled
     include_recap && auto_recaps_enabled
 }
 
+/// Injected when the parallel-execution magic prompt is cleared. Omitting the
+/// fan-out prompt is not enough: the model still spawns Task sub-agents unless
+/// it is told not to.
+pub const NO_SUBAGENT_INSTRUCTION: &str = "### Sub-agent policy\n\
+- Do NOT spawn sub-agents (Task calls) unless the user explicitly asks for one. Handle research, exploration, and implementation inline in this turn.\n\
+- A task that has several parts, or is described as thorough or multi-angle, is still a single inline task — not a reason to fan out.";
+
+/// Fan-out text when parallel prompting is on, otherwise the explicit stop.
+/// A non-empty prompt is the user's (or the default) sub-agent policy.
+pub(crate) fn subagent_policy_text(parallel_execution_prompt: Option<&str>) -> String {
+    parallel_execution_prompt
+        .map(str::trim)
+        .filter(|prompt| !prompt.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| NO_SUBAGENT_INSTRUCTION.to_string())
+}
+
+pub(crate) fn push_trimmed_prompt(parts: &mut Vec<String>, prompt: Option<&str>) {
+    if let Some(prompt) = prompt.map(str::trim).filter(|prompt| !prompt.is_empty()) {
+        parts.push(prompt.to_string());
+    }
+}
+
+/// Sub-agent policy, then the global prompt. User-authored global text is later
+/// in the assembled instructions, so it has the last word.
+pub(crate) fn push_subagent_policy_before_global(
+    parts: &mut Vec<String>,
+    parallel_execution_prompt: Option<&str>,
+    global_prompt: String,
+) {
+    parts.push(subagent_policy_text(parallel_execution_prompt));
+    if !global_prompt.trim().is_empty() {
+        parts.push(global_prompt);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::RECAP_INSTRUCTION;
@@ -115,6 +151,48 @@ mod tests {
         assert!(!super::recap_instruction_enabled(false, false));
         assert!(!super::recap_instruction_enabled(true, false));
         assert!(super::recap_instruction_enabled(true, true));
+    }
+
+    #[test]
+    fn disabled_subagent_prompting_forbids_unrequested_task_calls() {
+        let policy = super::subagent_policy_text(None);
+        assert!(policy.contains("Do NOT spawn sub-agents"));
+        assert!(policy.contains("unless the user explicitly asks"));
+        assert_eq!(policy, super::subagent_policy_text(Some("  ")));
+        assert_eq!(policy, super::NO_SUBAGENT_INSTRUCTION);
+    }
+
+    #[test]
+    fn enabled_subagent_prompting_uses_the_parallel_prompt_verbatim() {
+        let prompt = "Use two Task agents for this research.";
+        assert_eq!(super::subagent_policy_text(Some(prompt)), prompt);
+        assert_eq!(
+            super::subagent_policy_text(Some("  Use two Task agents.  ")),
+            "Use two Task agents."
+        );
+    }
+
+    #[test]
+    fn subagent_policy_is_emitted_before_a_custom_global_prompt() {
+        let mut off = vec!["Respond to the user in French.".to_string()];
+        super::push_subagent_policy_before_global(
+            &mut off,
+            None,
+            "Custom rule: do spawn a Task agent for research.".to_string(),
+        );
+        let off_text = off.join("\n\n");
+        let policy = off_text.find("Do NOT spawn sub-agents").unwrap();
+        let custom = off_text.find("Custom rule: do spawn a Task agent").unwrap();
+        assert!(policy < custom);
+
+        let mut on = Vec::new();
+        super::push_subagent_policy_before_global(
+            &mut on,
+            Some("Fan out with Task agents."),
+            "Custom global prompt.".to_string(),
+        );
+        assert_eq!(on[0], "Fan out with Task agents.");
+        assert_eq!(on[1], "Custom global prompt.");
     }
 }
 

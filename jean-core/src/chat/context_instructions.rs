@@ -67,25 +67,30 @@ fn build_system_prompt_parts(
         parts.push(format!("Respond to the user in {lang}."));
     }
 
+    let parallel_prompt = prefs.as_ref().and_then(|prefs| {
+        crate::resolve_stored_parallel_execution_prompt(
+            prefs.magic_prompts.parallel_execution.as_deref(),
+        )
+    });
+    // No preferences file: keep the default fan-out prompt, matching chat sends.
+    let parallel_prompt = if prefs.is_none() {
+        Some(crate::default_parallel_execution_prompt())
+    } else {
+        parallel_prompt
+    };
     let global_prompt =
         crate::projects::server_system_prompt(app, worktree_id).unwrap_or_else(|| {
-            prefs
-                .as_ref()
-                .and_then(|prefs| {
-                    trimmed_non_empty(prefs.magic_prompts.global_system_prompt.as_deref())
-                })
-                .unwrap_or_else(crate::default_global_system_prompt)
+            crate::effective_global_system_prompt(
+                prefs
+                    .as_ref()
+                    .and_then(|prefs| prefs.magic_prompts.global_system_prompt.as_deref()),
+            )
         });
-    parts.push(crate::apply_agent_browser_preference(
-        global_prompt,
-        prefs.as_ref(),
-    ));
-
-    let parallel_prompt = prefs
-        .as_ref()
-        .and_then(|prefs| trimmed_non_empty(prefs.magic_prompts.parallel_execution.as_deref()))
-        .unwrap_or_else(crate::default_parallel_execution_prompt);
-    parts.push(parallel_prompt);
+    super::push_subagent_policy_before_global(
+        &mut parts,
+        parallel_prompt.as_deref(),
+        crate::apply_agent_browser_preference(global_prompt, prefs.as_ref()),
+    );
 
     if let Ok(data) = load_projects_data(app) {
         if let Some(worktree) = data.find_worktree(worktree_id) {

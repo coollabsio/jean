@@ -896,10 +896,13 @@ fn resolve_http_server_bind_host(prefs: &AppPreferences) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        default_global_system_prompt, default_model, parse_cli_args_from,
+        default_global_system_prompt, default_model, default_parallel_execution_prompt,
+        effective_global_system_prompt, is_legacy_global_system_prompt_with_subagent_strategy,
+        legacy_parallel_execution_prompt_before_subagent_strategy, parse_cli_args_from,
         resolve_headless_bind_host, resolve_headless_token_required, resolve_http_server_bind_host,
-        server_preferences_value, should_auto_select_cli_source, validate_headless_security,
-        AppPreferences,
+        resolve_stored_parallel_execution_prompt, server_preferences_value,
+        should_auto_select_cli_source, upgrade_legacy_parallel_execution_prompt,
+        validate_headless_security, AppPreferences, MagicPrompts,
     };
     use serde_json::json;
 
@@ -996,6 +999,126 @@ mod tests {
             .contains("Do not add feature-specific, bug-fix-specific, or small/local lessons"));
         assert!(prompt.contains("Remove narrow or specific entries when you detect them"));
         assert!(!prompt.contains("After ANY correction from the user"));
+        assert!(!prompt.contains("Subagent Strategy"));
+        assert!(!prompt.contains("throw more compute at it via subagents"));
+        assert!(prompt.contains("### 3. Self-Improvement Loop"));
+        assert!(prompt.contains("### 4. Verification Before Done"));
+        assert!(prompt.contains("### 5. Demand Elegance (Balanced)"));
+        assert!(prompt.contains("### 6. Autonomous Bug Fixing"));
+        assert!(!prompt.contains("### 7. Autonomous Bug Fixing"));
+    }
+
+    fn previous_global_system_prompt() -> String {
+        let bumped = default_global_system_prompt()
+            .replace(
+                "### 6. Autonomous Bug Fixing",
+                "### 7. Autonomous Bug Fixing",
+            )
+            .replace(
+                "### 5. Demand Elegance (Balanced)",
+                "### 6. Demand Elegance (Balanced)",
+            )
+            .replace(
+                "### 4. Verification Before Done",
+                "### 5. Verification Before Done",
+            )
+            .replace(
+                "### 3. Self-Improvement Loop",
+                "### 4. Self-Improvement Loop",
+            );
+        bumped.replacen(
+            "### 4. Self-Improvement Loop",
+            "### 3. Subagent Strategy to keep main context window clean\n\
+- Offload research, exploration, and parallel analysis to subagents\n\
+- For complex problems, throw more compute at it via subagents\n\
+- One task per subagent for focused execution\n\
+\n\
+### 4. Self-Improvement Loop",
+            1,
+        )
+    }
+
+    #[test]
+    fn subagent_strategy_lives_in_the_parallel_execution_prompt() {
+        let parallel = default_parallel_execution_prompt();
+        assert!(parallel.contains("### Subagent Strategy to keep main context window clean"));
+        assert!(parallel.contains("throw more compute at it via subagents"));
+        assert!(parallel
+            .contains("In plan mode, structure plans so subagents can work simultaneously."));
+        assert!(!default_global_system_prompt().contains("Subagent Strategy"));
+    }
+
+    #[test]
+    fn cleared_parallel_prompt_is_off_and_null_uses_the_default() {
+        assert!(resolve_stored_parallel_execution_prompt(None)
+            .unwrap()
+            .contains("Subagent Strategy"));
+        assert!(resolve_stored_parallel_execution_prompt(Some("")).is_none());
+        assert!(resolve_stored_parallel_execution_prompt(Some("  \n")).is_none());
+        assert_eq!(
+            resolve_stored_parallel_execution_prompt(Some("Custom parallel rule.")).as_deref(),
+            Some("Custom parallel rule.")
+        );
+        assert_eq!(
+            resolve_stored_parallel_execution_prompt(Some(
+                legacy_parallel_execution_prompt_before_subagent_strategy()
+            ))
+            .as_deref(),
+            Some(default_parallel_execution_prompt().as_str())
+        );
+        assert!(upgrade_legacy_parallel_execution_prompt(None).is_none());
+        assert_eq!(
+            upgrade_legacy_parallel_execution_prompt(Some("leave this".to_string())).as_deref(),
+            Some("leave this")
+        );
+    }
+
+    #[test]
+    fn legacy_default_global_prompt_migrates_and_custom_text_is_kept() {
+        let legacy = previous_global_system_prompt();
+        assert!(is_legacy_global_system_prompt_with_subagent_strategy(
+            &legacy
+        ));
+        assert_eq!(
+            effective_global_system_prompt(Some(&legacy)),
+            default_global_system_prompt()
+        );
+
+        let custom = format!("{legacy}\n\nExtra user rule: keep my wording.");
+        assert!(!is_legacy_global_system_prompt_with_subagent_strategy(
+            &custom
+        ));
+        assert_eq!(effective_global_system_prompt(Some(&custom)), custom.trim());
+        assert_eq!(
+            effective_global_system_prompt(Some("  My global prompt.  ")),
+            "My global prompt."
+        );
+
+        let mut prompts = MagicPrompts {
+            global_system_prompt: Some(legacy),
+            parallel_execution: Some(
+                legacy_parallel_execution_prompt_before_subagent_strategy().to_string(),
+            ),
+            ..MagicPrompts::default()
+        };
+        assert!(prompts.migrate_defaults());
+        assert!(prompts.global_system_prompt.is_none());
+        assert!(prompts.parallel_execution.is_none());
+
+        let mut custom_prompts = MagicPrompts {
+            global_system_prompt: Some("Custom global prompt with subagents.".to_string()),
+            parallel_execution: Some("Custom parallel prompt.".to_string()),
+            ..MagicPrompts::default()
+        };
+        assert!(!custom_prompts.migrate_defaults());
+        assert_eq!(
+            custom_prompts.global_system_prompt.as_deref(),
+            Some("Custom global prompt with subagents.")
+        );
+        assert_eq!(
+            custom_prompts.parallel_execution.as_deref(),
+            Some("Custom parallel prompt.")
+        );
     }
 
     #[test]
@@ -2156,7 +2279,10 @@ Address the following review comments from PR #{prNumber}
         .to_string()
 }
 
-pub(crate) fn default_parallel_execution_prompt() -> String {
+/// Previous parallel-execution default, before the sub-agent strategy section
+/// moved here from the global system prompt. Stored copies of this exact text
+/// are still "use the default", not a user customization.
+pub(crate) fn legacy_parallel_execution_prompt_before_subagent_strategy() -> &'static str {
     r#"In plan mode, structure plans so subagents can work simultaneously. In build/execute mode, use subagents in parallel for faster implementation.
 
 When launching multiple Task subagents, prefer sending them in a single message rather than sequentially. Group independent work items (e.g., editing separate files, researching unrelated questions) into parallel Task calls. Only sequence Tasks when one depends on another's output.
@@ -2164,7 +2290,44 @@ When launching multiple Task subagents, prefer sending them in a single message 
 Instruct each sub-agent to briefly outline its approach before implementing, so it can course-correct early without formal plan mode overhead.
 
 When specifying subagent_type for Task tool calls, always use the fully qualified name exactly as listed in the system prompt (e.g., "code-simplifier:code-simplifier", not just "code-simplifier"). If the agent type contains a colon, include the full namespace:name string."#
-        .to_string()
+}
+
+pub(crate) fn default_parallel_execution_prompt() -> String {
+    format!(
+        "{}\n\n{}",
+        r#"### Subagent Strategy to keep main context window clean
+- Offload research, exploration, and parallel analysis to subagents
+- For complex problems, throw more compute at it via subagents
+- One task per subagent for focused execution"#,
+        legacy_parallel_execution_prompt_before_subagent_strategy()
+    )
+}
+
+/// `None` uses the current default (fan-out on). Empty text means the user
+/// cleared the parallel-execution magic prompt (fan-out off).
+pub(crate) fn resolve_stored_parallel_execution_prompt(stored: Option<&str>) -> Option<String> {
+    let Some(stored) = stored else {
+        return Some(default_parallel_execution_prompt());
+    };
+    let trimmed = stored.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed == legacy_parallel_execution_prompt_before_subagent_strategy().trim() {
+        return Some(default_parallel_execution_prompt());
+    }
+    Some(trimmed.to_string())
+}
+
+/// Upgrade a prompt that was already resolved to text. `None` stays off.
+pub(crate) fn upgrade_legacy_parallel_execution_prompt(prompt: Option<String>) -> Option<String> {
+    prompt.map(|prompt| {
+        if prompt.trim() == legacy_parallel_execution_prompt_before_subagent_strategy().trim() {
+            default_parallel_execution_prompt()
+        } else {
+            prompt
+        }
+    })
 }
 
 /// Drop Agent Browser instructions from a system prompt when the integration
@@ -2208,19 +2371,14 @@ fn default_global_system_prompt() -> String {
 - Skip only for trivial edits to code already read this session.
 - Do NOT use Context7 — WebSearch only.
 
-### 3. Subagent Strategy to keep main context window clean
-- Offload research, exploration, and parallel analysis to subagents
-- For complex problems, throw more compute at it via subagents
-- One task per subagent for focused execution
-
-### 4. Self-Improvement Loop
+### 3. Self-Improvement Loop
 - Only update '.ai/lessons.md' for general, project-wide learning that applies across features
 - Do not add feature-specific, bug-fix-specific, or small/local lessons
 - Remove narrow or specific entries when you detect them
 - Review lessons at session start for relevant project
 - Keep '.ai/lessons.md' concise by merging duplicate rules and removing obsolete entries
 
-### 5. Verification Before Done
+### 4. Verification Before Done
 - Never mark a task complete without proving it works
 - Diff behavior between main and your changes when relevant
 - Ask yourself: "Would a staff engineer approve this?"
@@ -2232,13 +2390,13 @@ fn default_global_system_prompt() -> String {
 - Do NOT write tests that only check DOM markup, CSS classes, snapshots, static text or prompt copy, constants, simple prop pass-through, library/framework behavior, or that only assert mocks were called. Verify UI changes in the running app instead.
 - If a UI check needs a browser and no other browser tool is available, use the Agent Browser.
 
-### 6. Demand Elegance (Balanced)
+### 5. Demand Elegance (Balanced)
 - For non-trivial changes: pause and ask "is there a more elegant way?"
 - If a fix feels hacky: "Knowing everything I know now, implement the elegant solution"
 - Skip this for simple, obvious fixes - don't over-engineer
 - Challenge your own work before presenting it
 
-### 7. Autonomous Bug Fixing
+### 6. Autonomous Bug Fixing
 - When given a bug report: just fix it. Don't ask for hand-holding
 - Point at logs, errors, failing tests -> then resolve them
 - Zero context switching required from the user
@@ -2280,6 +2438,61 @@ fn default_global_system_prompt() -> String {
 
 - After each finished task, please write a few bullet points on how to test the changes."#
         .to_string()
+}
+
+const LEGACY_SUBAGENT_STRATEGY_SECTION: &str = "\
+### 3. Subagent Strategy to keep main context window clean
+- Offload research, exploration, and parallel analysis to subagents
+- For complex problems, throw more compute at it via subagents
+- One task per subagent for focused execution
+
+";
+
+/// True only when `prompt` is the previous built-in global prompt, whose
+/// sub-agent section now lives in the parallel-execution prompt. Any other
+/// text, including a customized prompt that still mentions sub-agents, is kept.
+pub(crate) fn is_legacy_global_system_prompt_with_subagent_strategy(prompt: &str) -> bool {
+    let normalized = prompt.replace("\r\n", "\n");
+    let Some(start) = normalized.find(LEGACY_SUBAGENT_STRATEGY_SECTION) else {
+        return false;
+    };
+    if normalized[start + LEGACY_SUBAGENT_STRATEGY_SECTION.len()..]
+        .contains("### 3. Subagent Strategy to keep main context window clean")
+    {
+        return false;
+    }
+    let mut stripped = String::new();
+    stripped.push_str(&normalized[..start]);
+    stripped.push_str(&normalized[start + LEGACY_SUBAGENT_STRATEGY_SECTION.len()..]);
+    let renumbered = stripped
+        .replace(
+            "### 7. Autonomous Bug Fixing",
+            "### 6. Autonomous Bug Fixing",
+        )
+        .replace(
+            "### 6. Demand Elegance (Balanced)",
+            "### 5. Demand Elegance (Balanced)",
+        )
+        .replace(
+            "### 5. Verification Before Done",
+            "### 4. Verification Before Done",
+        )
+        .replace(
+            "### 4. Self-Improvement Loop",
+            "### 3. Self-Improvement Loop",
+        );
+    renumbered.trim() == default_global_system_prompt().trim()
+}
+
+/// Stored `None`/empty/legacy-default text uses the current global prompt.
+/// Any other stored text is returned unchanged.
+pub(crate) fn effective_global_system_prompt(stored: Option<&str>) -> String {
+    match stored.map(str::trim).filter(|prompt| !prompt.is_empty()) {
+        Some(prompt) if !is_legacy_global_system_prompt_with_subagent_strategy(prompt) => {
+            prompt.to_string()
+        }
+        _ => default_global_system_prompt(),
+    }
 }
 
 pub(crate) fn default_provider_switch_handoff_prompt() -> String {
@@ -2689,7 +2902,9 @@ fn migrate_final_review_preferences(
 impl MagicPrompts {
     /// Migrate prompts that match the current default to None.
     /// This ensures users who never customized a prompt get auto-updated defaults.
-    fn migrate_defaults(&mut self) {
+    /// Returns true when a stored prompt was cleared.
+    fn migrate_defaults(&mut self) -> bool {
+        let mut changed = false;
         type DefaultEntry<'a> = (fn() -> String, &'a mut Option<String>);
         let defaults: [DefaultEntry; 19] = [
             (
@@ -2747,6 +2962,7 @@ impl MagicPrompts {
             if let Some(ref value) = field {
                 if value == &default_fn() {
                     *field = None;
+                    changed = true;
                 }
             }
         }
@@ -2757,8 +2973,25 @@ impl MagicPrompts {
                 .any(|legacy| value == legacy)
             {
                 self.commit_message = None;
+                changed = true;
             }
         }
+
+        if self
+            .global_system_prompt
+            .as_deref()
+            .is_some_and(is_legacy_global_system_prompt_with_subagent_strategy)
+        {
+            self.global_system_prompt = None;
+            changed = true;
+        }
+        if self.parallel_execution.as_deref().is_some_and(|value| {
+            value.trim() == legacy_parallel_execution_prompt_before_subagent_strategy().trim()
+        }) {
+            self.parallel_execution = None;
+            changed = true;
+        }
+        changed
     }
 }
 
@@ -3293,6 +3526,7 @@ pub fn load_preferences_sync(app: &AppHandle) -> Result<AppPreferences, String> 
     // Jean MCP is a required runtime service. Keep the legacy field for
     // preference-file compatibility, but never honor an old disabled value.
     preferences.jean_mcp_enabled = true;
+    preferences.magic_prompts.migrate_defaults();
     migrate_final_review_preferences(&mut preferences, &raw_preferences);
     maybe_auto_select_system_cli_preferences(app, &mut preferences, Some(&raw_preferences));
     Ok(preferences)
@@ -3331,11 +3565,11 @@ async fn load_preferences(app: AppHandle) -> Result<AppPreferences, String> {
 
     // Migrate magic prompts: convert prompts matching current defaults to None
     // so they auto-update when new defaults are shipped
-    preferences.magic_prompts.migrate_defaults();
+    let mut needs_resave = preferences.magic_prompts.migrate_defaults();
 
     // Migrate legacy default Claude model names to the 1M variants where
     // available so hidden non-1M defaults do not render blank in settings.
-    let mut needs_resave = migrate_final_review_preferences(&mut preferences, &raw_preferences);
+    needs_resave |= migrate_final_review_preferences(&mut preferences, &raw_preferences);
     if !preferences.jean_mcp_enabled {
         preferences.jean_mcp_enabled = true;
         needs_resave = true;

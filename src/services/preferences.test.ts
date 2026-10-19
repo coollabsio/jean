@@ -313,6 +313,10 @@ describe('model option helpers', () => {
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).not.toContain(
       'After ANY correction from the user'
     )
+    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).not.toContain('Subagent Strategy')
+    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
+      '### 3. Self-Improvement Loop'
+    )
   })
 
   it('does not require GitHub discovery in every chat', () => {
@@ -1604,6 +1608,28 @@ describe('preferences service', () => {
 
       clearClientZoomForTests()
     }, 15_000)
+  })
+
+  describe('AppearancePane compact chat view', () => {
+    it('shows the switch on before preferences load, matching the default', async () => {
+      const { invoke } = await import('@/lib/transport')
+      vi.mocked(invoke).mockImplementation(
+        () => new Promise(() => undefined) as Promise<never>
+      )
+
+      render(
+        createElement(
+          QueryClientProvider,
+          { client: queryClient },
+          createElement(AppearancePane)
+        )
+      )
+
+      const switchEl = await screen.findByRole('switch', {
+        name: 'Compact chat view',
+      })
+      expect(switchEl).toHaveAttribute('aria-checked', 'true')
+    })
   })
 
   describe('AppearancePane finished session animation', () => {
