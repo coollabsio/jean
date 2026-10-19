@@ -12,6 +12,7 @@ import {
   blurFocusedTerminalForShortcut,
   closeActiveTerminalTabForShortcut,
   findKeybindingAction,
+  shouldLetEditableHandleShortcut,
   getTerminalShortcutWorktreeId,
   hasBlockingOpenOverlay,
   handleRunEnvironmentStarted,
@@ -969,7 +970,9 @@ describe('close shortcut on the Agents page', () => {
   function renderListeners(queryClient: QueryClient) {
     return renderHook(() => useMainWindowEventListeners(), {
       wrapper: ({ children }) => (
-        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+        <QueryClientProvider client={queryClient}>
+          {children}
+        </QueryClientProvider>
       ),
     })
   }
@@ -1026,6 +1029,77 @@ describe('close shortcut on the Agents page', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
     unmount()
     window.removeEventListener('close-session-or-worktree', onClose)
+  })
+})
+
+describe('text editing shortcuts in editable fields', () => {
+  function pressRedo(target: HTMLElement): KeyboardEvent {
+    const event = new KeyboardEvent('keydown', {
+      key: 'Z',
+      code: 'KeyZ',
+      metaKey: true,
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    target.dispatchEvent(event)
+    return event
+  }
+
+  function renderListeners() {
+    const queryClient = new QueryClient()
+    return renderHook(() => useMainWindowEventListeners(), {
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={queryClient}>
+          {children}
+        </QueryClientProvider>
+      ),
+    })
+  }
+
+  beforeEach(() => {
+    document.body.innerHTML = ''
+    useUIStore.setState({
+      railSection: 'workspace',
+      zenMode: false,
+      sessionChatModalOpen: false,
+      commandPaletteOpen: false,
+      preferencesOpen: false,
+      magicModalOpen: false,
+    })
+  })
+
+  it('leaves redo to a focused textarea instead of toggling zen mode', () => {
+    const textarea = document.createElement('textarea')
+    document.body.appendChild(textarea)
+    textarea.focus()
+    const { unmount } = renderListeners()
+
+    const event = pressRedo(textarea)
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(useUIStore.getState().zenMode).toBe(false)
+    unmount()
+  })
+
+  it('still toggles zen mode outside editable fields', () => {
+    const { unmount } = renderListeners()
+
+    const event = pressRedo(document.body)
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(useUIStore.getState().zenMode).toBe(true)
+    unmount()
+  })
+
+  it('only claims undo/redo chords for editable targets', () => {
+    const input = document.createElement('input')
+    const div = document.createElement('div')
+    expect(shouldLetEditableHandleShortcut('mod+shift+z', input)).toBe(true)
+    expect(shouldLetEditableHandleShortcut('mod+z', input)).toBe(true)
+    expect(shouldLetEditableHandleShortcut('mod+shift+z', div)).toBe(false)
+    expect(shouldLetEditableHandleShortcut('mod+l', input)).toBe(false)
   })
 })
 

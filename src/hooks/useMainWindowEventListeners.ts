@@ -88,6 +88,21 @@ export function shouldLetPlanDialogHandleAction(
   return planDialogOpen && PLAN_DIALOG_APPROVAL_ACTIONS.has(action)
 }
 
+/** Native undo/redo chords, owned by focused text fields (issue #777). */
+const TEXT_EDITING_SHORTCUTS = new Set(['mod+z', 'mod+shift+z'])
+
+export function shouldLetEditableHandleShortcut(
+  shortcut: string,
+  target: EventTarget | null
+): boolean {
+  if (!TEXT_EDITING_SHORTCUTS.has(shortcut)) return false
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    (target instanceof HTMLElement && target.isContentEditable === true)
+  )
+}
+
 export function shouldLetChatInputHandleAction(
   action: KeybindingAction,
   target: EventTarget | null,
@@ -1045,6 +1060,13 @@ export function useMainWindowEventListeners() {
         keybindings,
         bypassModifierRef.current
       )
+
+      if (
+        matchedAction &&
+        shouldLetEditableHandleShortcut(shortcut, e.target)
+      ) {
+        return
+      }
 
       // Cmd/Ctrl+Enter is also the chat input's explicit steer shortcut. The
       // global approve-plan binding runs in capture phase, so it must yield or
