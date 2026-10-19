@@ -1847,6 +1847,32 @@ export function upsertTurnAssistantMessage(
 }
 
 /**
+ * Put a send the backend rejected back into the composer, unless the user
+ * already typed something newer. A submit with attachments restores the typed
+ * text and the attachment chips; the wire message would instead inline them
+ * as `[Image attached: ...]` refs.
+ */
+function restoreRejectedSend(sessionId: string, sentMessage: string) {
+  const store = useChatStore.getState()
+  const typed = store.lastSentMessages[sessionId]
+  const hasAttachments = !!store.lastSentAttachments[sessionId]
+  if (store.inputDrafts[sessionId]?.trim()) {
+    store.clearLastSentAttachments(sessionId)
+  } else if (
+    hasAttachments &&
+    typed !== undefined &&
+    sentMessage.startsWith(typed)
+  ) {
+    store.setInputDraft(sessionId, typed)
+    store.restoreAttachments(sessionId)
+  } else {
+    store.setInputDraft(sessionId, sentMessage)
+    store.clearLastSentAttachments(sessionId)
+  }
+  store.clearLastSentMessage(sessionId)
+}
+
+/**
  * Hook to send a message to Claude (session-based)
  */
 export function useSendMessage() {
@@ -2161,15 +2187,9 @@ export function useSendMessage() {
         logger.warn('Duplicate send rejected — another run is active', {
           sessionId,
         })
-        const {
-          inputDrafts,
-          setInputDraft,
-          removeSendingSession,
-          clearExecutingMode,
-        } = useChatStore.getState()
-        if (!inputDrafts[sessionId]?.trim()) {
-          setInputDraft(sessionId, variables.message)
-        }
+        const { removeSendingSession, clearExecutingMode } =
+          useChatStore.getState()
+        restoreRejectedSend(sessionId, variables.message)
         removeSendingSession(sessionId)
         clearExecutingMode(sessionId)
         // Drop the optimistic user message by refetching authoritative state
@@ -2241,12 +2261,8 @@ export function useSendMessage() {
       // Real errors with no streamed content — rollback to previous state
       setError(sessionId, errorMessage || 'Unknown error occurred')
 
-      // The composer is cleared before the async mutation starts. Restore the
-      // submitted text after a rejected send, but never replace newer typing.
-      const { inputDrafts, setInputDraft } = useChatStore.getState()
-      if (!inputDrafts[sessionId]) {
-        setInputDraft(sessionId, variables.message)
-      }
+      // The composer is cleared before the async mutation starts.
+      restoreRejectedSend(sessionId, variables.message)
 
       if (context?.previous) {
         queryClient.setQueryData(

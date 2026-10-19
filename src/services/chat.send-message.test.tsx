@@ -259,4 +259,84 @@ describe('useSendMessage completion', () => {
       ])
     }
   )
+
+  it('restores typed text and attachments after a rejected send', async () => {
+    const { hook } = setup([])
+    const image = { id: 'img-1', path: '/tmp/img.png', filename: 'img.png' }
+    const file = {
+      id: 'file-1',
+      relativePath: 'src/a.ts',
+      extension: 'ts',
+    }
+    useChatStore.setState({
+      inputDrafts: {},
+      pendingImages: {},
+      pendingFiles: {},
+      lastSentMessages: { 'session-1': 'check this' },
+      lastSentAttachments: {
+        'session-1': {
+          images: [image],
+          files: [file],
+          textFiles: [],
+          skills: [],
+        },
+      },
+    } as never)
+    mockInvoke.mockRejectedValue('Codex could not start: login required')
+
+    await act(async () => {
+      await expect(
+        hook.result.current.mutateAsync({
+          sessionId: 'session-1',
+          worktreeId: 'worktree-1',
+          worktreePath: '/tmp/worktree-1',
+          message:
+            'check this\n\n[File: src/a.ts - Use the Read tool to view this file]\n\n[Image attached: /tmp/img.png - Use the Read tool to view this image]',
+          backend: 'codex',
+        })
+      ).rejects.toBe('Codex could not start: login required')
+    })
+
+    const state = useChatStore.getState()
+    expect(state.inputDrafts['session-1']).toBe('check this')
+    expect(state.pendingImages['session-1']).toEqual([image])
+    expect(state.pendingFiles['session-1']).toEqual([file])
+    expect(state.lastSentAttachments['session-1']).toBeUndefined()
+    expect(state.lastSentMessages['session-1']).toBeUndefined()
+  })
+
+  it('keeps newer typing and drops stale attachments after a rejected send', async () => {
+    const { hook } = setup([])
+    useChatStore.setState({
+      inputDrafts: { 'session-1': 'newer draft' },
+      pendingImages: {},
+      lastSentMessages: { 'session-1': 'old' },
+      lastSentAttachments: {
+        'session-1': {
+          images: [{ id: 'img-1', path: '/tmp/img.png', filename: 'img.png' }],
+          files: [],
+          textFiles: [],
+          skills: [],
+        },
+      },
+    } as never)
+    mockInvoke.mockRejectedValue('boom')
+
+    await act(async () => {
+      await expect(
+        hook.result.current.mutateAsync({
+          sessionId: 'session-1',
+          worktreeId: 'worktree-1',
+          worktreePath: '/tmp/worktree-1',
+          message: 'old\n\n[Image attached: /tmp/img.png]',
+          backend: 'claude',
+        })
+      ).rejects.toBe('boom')
+    })
+
+    const state = useChatStore.getState()
+    expect(state.inputDrafts['session-1']).toBe('newer draft')
+    expect(state.pendingImages['session-1']).toBeUndefined()
+    expect(state.lastSentAttachments['session-1']).toBeUndefined()
+  })
 })
