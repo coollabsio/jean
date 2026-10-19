@@ -8,7 +8,15 @@ import {
   CommandList,
 } from '@/components/ui/command'
 import type { PreferencePane } from '@/store/ui-store'
+import { BackendLabel } from '@/components/ui/backend-label'
+import { backendOptions, type CliBackend } from '@/types/preferences'
 import type { PreferenceSearchEntry } from './preferences-search'
+
+function cliBackendForPane(pane: PreferencePane): CliBackend | null {
+  return backendOptions.some(option => option.value === pane)
+    ? (pane as CliBackend)
+    : null
+}
 
 interface SearchGroup {
   pane: PreferencePane
@@ -108,13 +116,21 @@ export const PreferencesSearchBar: React.FC<PreferencesSearchBarProps> = ({
             ) : (
               groupedResults.map(group => {
                 const Icon = paneIconMap[group.pane]
+                const backend = cliBackendForPane(group.pane)
                 return (
                   <CommandGroup
                     key={group.pane}
                     heading={
                       <span className="flex items-center gap-1.5">
                         {Icon && <Icon className="size-3" />}
-                        {group.title}
+                        {backend ? (
+                          <BackendLabel
+                            backend={backend}
+                            badgeClassName="text-[8px] leading-3"
+                          />
+                        ) : (
+                          group.title
+                        )}
                       </span>
                     }
                   >

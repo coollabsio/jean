@@ -82,6 +82,7 @@ describe('preferences search index', () => {
     expect(searchPreferenceEntries('muse model')[0]?.pane).toBe('muse')
     expect(searchPreferenceEntries('META_API_KEY')[0]?.pane).toBe('muse')
     expect(searchPreferenceEntries('devin login')[0]?.pane).toBe('devin')
+    expect(searchPreferenceEntries('devin beta')[0]?.pane).toBe('devin')
     expect(searchPreferenceEntries('github login')[0]?.pane).toBe('github')
     expect(searchPreferenceEntries('coderabbit login')[0]?.pane).toBe(
       'coderabbit'

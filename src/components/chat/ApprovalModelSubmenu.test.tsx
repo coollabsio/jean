@@ -40,9 +40,13 @@ if (typeof Element !== 'undefined') {
   Element.prototype.scrollIntoView = vi.fn()
 }
 
+const installedBackendsMock = vi.hoisted(() => ({
+  installedBackends: ['claude', 'codex', 'opencode', 'cursor'] as string[],
+}))
+
 vi.mock('@/hooks/useInstalledBackends', () => ({
   useInstalledBackends: () => ({
-    installedBackends: ['claude', 'codex', 'opencode', 'cursor'],
+    installedBackends: installedBackendsMock.installedBackends,
     isLoading: false,
   }),
 }))
@@ -90,6 +94,12 @@ function renderMenu(onSelect = vi.fn()) {
 }
 
 beforeEach(() => {
+  installedBackendsMock.installedBackends = [
+    'claude',
+    'codex',
+    'opencode',
+    'cursor',
+  ]
   preferencesMock.data = {
     default_provider: null,
     custom_cli_profiles: [],
@@ -223,6 +233,19 @@ describe('ApprovalModelSubmenu', () => {
     expect(screen.getByText('Codex')).toBeInTheDocument()
     expect(screen.getByText('OpenCode')).toBeInTheDocument()
     expect(screen.getByText('Cursor')).toBeInTheDocument()
+  })
+
+  it('marks Devin with a beta badge in the installed backend list', async () => {
+    installedBackendsMock.installedBackends = ['claude', 'devin']
+    const user = userEvent.setup()
+    renderMenu()
+
+    await user.hover(screen.getByRole('menuitem', { name: /other model/i }))
+    const devin = await screen.findByText('Devin')
+    expect(
+      within(devin.parentElement as HTMLElement).getByText('Beta')
+    ).toHaveClass('bg-warning/10')
+    expect(screen.queryByText('Claude (Beta)')).toBeNull()
   })
 
   it('filters the model list from a search input at the top', async () => {

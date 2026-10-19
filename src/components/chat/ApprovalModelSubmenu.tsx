@@ -23,6 +23,7 @@ import {
 } from '@/components/chat/toolbar/toolbar-options'
 import { Input } from '@/components/ui/input'
 import { buildBackendModelSections } from '@/components/chat/toolbar/useToolbarDerivedState'
+import { BackendLabel } from '@/components/ui/backend-label'
 import {
   formatCursorModelLabel,
   formatOpencodeModelLabel,
@@ -230,7 +231,7 @@ export function ApprovalModelSubmenu({
                   filteredSections.map(section => (
                     <section key={section.backend} className="py-1">
                       <h3 className="px-4 py-2 text-xs font-medium text-muted-foreground">
-                        {section.label}
+                        <BackendLabel backend={section.backend} />
                       </h3>
                       <div className="px-2">
                         {section.options.map(option => (
@@ -294,7 +295,9 @@ export function ApprovalModelSubmenu({
           filteredSections.map((section, sectionIndex) => (
             <div key={section.backend}>
               {sectionIndex > 0 && <DropdownMenuSeparator />}
-              <DropdownMenuLabel>{section.label}</DropdownMenuLabel>
+              <DropdownMenuLabel>
+                <BackendLabel backend={section.backend} />
+              </DropdownMenuLabel>
               {section.options.map(option => (
                 <DropdownMenuItem
                   key={`${section.backend}:${option.value}`}

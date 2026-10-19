@@ -236,14 +236,21 @@ describe('BackendModelPickerContent', () => {
     expect(onRequestClose).toHaveBeenCalled()
   })
 
-  it('shows the beta sidebar dot on Antigravity, not Cursor, Command Code, or Grok', () => {
+  it('shows the beta sidebar dot on Antigravity, Muse, and Devin, not Cursor, Command Code, or Grok', () => {
     render(
       <BackendModelPickerContent
         open
         selectedBackend="cursor"
         selectedModel="cursor/auto"
         selectedProvider={null}
-        installedBackends={['cursor', 'commandcode', 'grok', 'antigravity']}
+        installedBackends={[
+          'cursor',
+          'commandcode',
+          'grok',
+          'devin',
+          'antigravity',
+          'muse',
+        ]}
         customCliProfiles={[]}
         onModelChange={vi.fn()}
         onBackendModelChange={vi.fn()}
@@ -256,14 +263,18 @@ describe('BackendModelPickerContent', () => {
       name: 'Command Code',
     })
     const grokTab = screen.getByRole('tab', { name: 'Grok' })
+    const devinTab = screen.getByRole('tab', { name: 'Devin (Beta)' })
     const antigravityTab = screen.getByRole('tab', {
       name: 'Antigravity CLI (Beta)',
     })
+    const museTab = screen.getByRole('tab', { name: 'Muse (Beta)' })
 
     expect(cursorTab.querySelector('.bg-warning')).toBeNull()
     expect(commandCodeTab.querySelector('.bg-warning')).toBeNull()
     expect(grokTab.querySelector('.bg-warning')).toBeNull()
+    expect(devinTab.querySelector('.bg-warning')).not.toBeNull()
     expect(antigravityTab.querySelector('.bg-warning')).not.toBeNull()
+    expect(museTab.querySelector('.bg-warning')).not.toBeNull()
   })
 
   it('lists CLI-reported Antigravity models ahead of static fallbacks', () => {

@@ -27,6 +27,7 @@ import {
   useModelCatalog,
 } from '@/services/model-catalog'
 import { resolvePiDefaultModel } from '@/lib/session-defaults'
+import { getBackendPlainLabel } from '@/components/ui/backend-label'
 
 interface UseToolbarDerivedStateArgs {
   selectedBackend: CliBackend
@@ -113,57 +114,69 @@ export function buildBackendModelSections({
 
   for (const backend of installedBackends) {
     if (backend === 'claude') {
-      sections.push({ backend, label: 'Claude', options: claudeModelOptions })
+      sections.push({
+        backend,
+        label: getBackendPlainLabel(backend),
+        options: claudeModelOptions,
+      })
     } else if (backend === 'codex') {
-      sections.push({ backend, label: 'Codex', options: codexModelOptions })
+      sections.push({
+        backend,
+        label: getBackendPlainLabel(backend),
+        options: codexModelOptions,
+      })
     } else if (backend === 'opencode') {
       sections.push({
         backend,
-        label: 'OpenCode',
+        label: getBackendPlainLabel(backend),
         options: opencodeModelOptions,
       })
     } else if (backend === 'cursor') {
-      sections.push({ backend, label: 'Cursor', options: cursorModelOptions })
+      sections.push({
+        backend,
+        label: getBackendPlainLabel(backend),
+        options: cursorModelOptions,
+      })
     } else if (backend === 'pi') {
       sections.push({
         backend,
-        label: 'PI',
+        label: getBackendPlainLabel(backend),
         options: piModelOptions ?? PI_MODEL_OPTIONS,
       })
     } else if (backend === 'commandcode') {
       sections.push({
         backend,
-        label: 'Command Code',
+        label: getBackendPlainLabel(backend),
         options: commandcodeModelOptions ?? COMMANDCODE_MODEL_OPTIONS,
       })
     } else if (backend === 'grok') {
       sections.push({
         backend,
-        label: 'Grok',
+        label: getBackendPlainLabel(backend),
         options: grokModelOptions ?? GROK_MODEL_OPTIONS,
       })
     } else if (backend === 'kimi') {
       sections.push({
         backend,
-        label: 'Kimi Code',
+        label: getBackendPlainLabel(backend),
         options: kimiModelOptions ?? KIMI_MODEL_OPTIONS,
       })
     } else if (backend === 'devin') {
       sections.push({
         backend,
-        label: 'Devin',
+        label: getBackendPlainLabel(backend),
         options: devinModelOptions ?? DEVIN_MODEL_OPTIONS,
       })
     } else if (backend === 'antigravity') {
       sections.push({
         backend,
-        label: 'Antigravity CLI',
+        label: getBackendPlainLabel(backend),
         options: ANTIGRAVITY_MODEL_OPTIONS,
       })
     } else if (backend === 'muse') {
       sections.push({
         backend,
-        label: 'Muse',
+        label: getBackendPlainLabel(backend),
         options: museModelOptions ?? MUSE_MODEL_OPTIONS,
       })
     }

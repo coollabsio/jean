@@ -2,7 +2,7 @@ import { Button } from '@/components/ui/button'
 import { FolderPlus, Github, Sparkles } from '@/components/icons/reicon'
 import { BetaBadge } from '@/components/ui/badge'
 import { GitLabIcon } from '@/components/icons/GitLabIcon'
-import { getBackendIcon } from '@/components/ui/backend-label'
+import { BackendLabel, getBackendIcon } from '@/components/ui/backend-label'
 import { cliLabel, type CliType } from './cli-setup-flows'
 
 interface SuccessStepProps {
@@ -31,8 +31,17 @@ export function SuccessStep({
                 className="flex items-center gap-1.5 rounded-lg border bg-primary/5 px-2.5 py-1 text-xs"
               >
                 <Icon className="size-3.5" />
-                {cliLabel(cli)}
-                {cli === 'glab' && <BetaBadge />}
+                {cli === 'gh' || cli === 'glab' ? (
+                  <>
+                    {cliLabel(cli)}
+                    {cli === 'glab' && <BetaBadge />}
+                  </>
+                ) : (
+                  <BackendLabel
+                    backend={cli}
+                    badgeClassName="text-[8px] leading-3"
+                  />
+                )}
               </li>
             )
           })}

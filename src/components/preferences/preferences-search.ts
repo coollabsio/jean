@@ -83,7 +83,7 @@ const paneEntries: PreferenceSearchEntry[] = [
     paneTitle: 'Devin',
     type: 'pane',
     title: 'Devin Settings',
-    keywords: ['devin', 'devin cli', 'devin model', 'cognition'],
+    keywords: ['devin', 'devin cli', 'devin model', 'cognition', 'beta'],
     anchorId: 'pref-pane-devin',
   },
   {
@@ -482,7 +482,7 @@ const sectionEntries: PreferenceSearchEntry[] = [
     type: 'section',
     title: 'Devin CLI',
     sectionTitle: 'CLI source',
-    keywords: ['devin', 'install devin', 'devin login', 'devin source'],
+    keywords: ['devin', 'install devin', 'devin login', 'devin source', 'beta'],
     anchorId: 'pref-devin-section-cli',
     fallbackAnchorId: 'pref-pane-devin',
   },

@@ -12,7 +12,11 @@ import { Button } from '@/components/ui/button'
 import { Check, Github, Loader2 } from '@/components/icons/reicon'
 import { BetaBadge } from '@/components/ui/badge'
 import { GitLabIcon } from '@/components/icons/GitLabIcon'
-import { getBackendIcon } from '@/components/ui/backend-label'
+import {
+  BackendLabel,
+  getBackendIcon,
+  getBackendPlainLabel,
+} from '@/components/ui/backend-label'
 import { getCursorInstallCommand } from '@/services/cursor-cli'
 import { cn } from '@/lib/utils'
 import { AuthLoginState } from './CliSetupComponents'
@@ -294,6 +298,8 @@ export function SetupChecklist({
         const isActive = active === cli
         const Icon =
           cli === 'gh' ? Github : cli === 'glab' ? GitLabIcon : getBackendIcon(cli)
+        const rowLabel =
+          cli === 'gh' || cli === 'glab' ? flow.label : getBackendPlainLabel(cli)
         const canSkip =
           state !== 'ready' &&
           (cli === 'gh' || cli === 'glab' || backends.length > 1)
@@ -322,7 +328,7 @@ export function SetupChecklist({
         return (
           <li
             key={cli}
-            aria-label={flow.label}
+            aria-label={rowLabel}
             data-testid={`setup-row-${cli}`}
             className={cn(
               'rounded-lg border p-3 transition-colors',
@@ -333,10 +339,14 @@ export function SetupChecklist({
               <Icon className="size-5 shrink-0" />
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-medium">
-                  <span className="inline-flex items-center gap-1.5">
-                    {flow.label}
-                    {cli === 'glab' && <BetaBadge />}
-                  </span>
+                  {cli === 'gh' || cli === 'glab' ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      {flow.label}
+                      {cli === 'glab' && <BetaBadge />}
+                    </span>
+                  ) : (
+                    <BackendLabel backend={cli} />
+                  )}
                   {(cli === 'gh' || cli === 'glab') && (
                     <span className="ml-1.5 text-xs font-normal text-muted-foreground">
                       optional

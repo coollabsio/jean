@@ -262,7 +262,7 @@ describe('PreferencesDialog', () => {
       expect(within(button).queryByText('Beta')).toBeNull()
     }
 
-    for (const label of ['Antigravity CLI', 'Muse']) {
+    for (const label of ['Devin', 'Antigravity CLI', 'Muse']) {
       const button = within(navigationMenu).getByText(label).closest('button')
       if (!button) {
         throw new Error(`Expected ${label} navigation button to be rendered`)
@@ -315,6 +315,43 @@ describe('PreferencesDialog', () => {
     await user.click(museButton)
 
     expect(screen.getByText('Muse pane')).toBeInTheDocument()
+  })
+
+  it('marks the Devin settings pane, breadcrumb, and mobile option as beta', async () => {
+    const user = userEvent.setup()
+
+    render(<PreferencesDialog />)
+
+    const navigationMenu = screen
+      .getByRole('dialog')
+      .querySelector<HTMLElement>('[data-sidebar="menu"]')
+    if (!navigationMenu) {
+      throw new Error('Expected desktop navigation menu to be rendered')
+    }
+
+    const devinButton = within(navigationMenu)
+      .getByText('Devin')
+      .closest('button')
+    if (!devinButton) {
+      throw new Error('Expected Devin navigation button to be rendered')
+    }
+
+    await user.click(devinButton)
+
+    const pane = document.getElementById('pref-pane-devin')
+    if (!pane) {
+      throw new Error('Expected Devin pane to be rendered')
+    }
+    expect(within(pane).getByText('Devin')).toBeInTheDocument()
+    expect(within(pane).getByText('Beta')).toHaveClass('bg-warning/10')
+
+    const breadcrumb = screen.getByRole('navigation', { name: 'breadcrumb' })
+    expect(within(breadcrumb).getByText('Devin')).toBeInTheDocument()
+    expect(within(breadcrumb).getByText('Beta')).toHaveClass('bg-warning/10')
+
+    await user.click(screen.getByRole('combobox'))
+    const devinOption = screen.getByRole('option', { name: 'Devin' })
+    expect(within(devinOption).getByText('Beta')).toHaveClass('bg-warning/10')
   })
 
   it('shows Web Access but hides Keybindings in the mobile pane selector', async () => {

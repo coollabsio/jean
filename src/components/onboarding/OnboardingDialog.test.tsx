@@ -555,6 +555,31 @@ describe('OnboardingDialog', () => {
     })
   })
 
+  describe('Devin', () => {
+    it('marks Devin as beta in the picker, setup row, and ready list', async () => {
+      setCli('devin', { installed: true, authenticated: true })
+      const user = userEvent.setup()
+      render(<OnboardingDialog />)
+      await chooseLocal(user)
+
+      const devin = await screen.findByRole('checkbox', { name: /Devin/ })
+      expect(
+        within(devin.closest('label') as HTMLElement).getByText('Beta')
+      ).toHaveClass('bg-warning/10')
+
+      await user.click(screen.getByRole('button', { name: 'Continue' }))
+
+      const row = await screen.findByTestId('setup-row-devin')
+      expect(within(row).getByText('Devin')).toBeInTheDocument()
+      expect(within(row).getByText('Beta')).toHaveClass('bg-warning/10')
+      expect(row).toHaveAttribute('aria-label', 'Devin (Beta)')
+
+      await user.click(screen.getByRole('button', { name: 'Finish' }))
+      expect(await screen.findByText("You're ready")).toBeInTheDocument()
+      expect(screen.getByText('Beta')).toHaveClass('bg-warning/10')
+    })
+  })
+
   describe('Muse', () => {
     it('keeps Muse not ready while installed but signed out', async () => {
       setCli('muse', { installed: true })

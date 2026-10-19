@@ -450,6 +450,7 @@ export function GeneralPane({
                     'commandcode',
                     'grok',
                     'kimi',
+                    'devin',
                     'antigravity',
                     'muse',
                   ] as CliBackend[]
@@ -457,21 +458,7 @@ export function GeneralPane({
                   .filter(backend => installedBackendsSet.has(backend))
                   .map(backend => (
                     <SelectItem key={backend} value={backend}>
-                      {backend === 'cursor' ||
-                      backend === 'pi' ||
-                      backend === 'commandcode' ||
-                      backend === 'grok' ||
-                      backend === 'kimi' ||
-                      backend === 'antigravity' ||
-                      backend === 'muse' ? (
-                        <BackendLabel backend={backend} />
-                      ) : backend === 'claude' ? (
-                        'Claude'
-                      ) : backend === 'codex' ? (
-                        'Codex'
-                      ) : (
-                        'OpenCode'
-                      )}
+                      <BackendLabel backend={backend} />
                     </SelectItem>
                   ))}
               </SelectContent>

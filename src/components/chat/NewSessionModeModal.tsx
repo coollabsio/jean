@@ -38,7 +38,9 @@ import { useMuseCliStatus } from '@/services/muse-cli'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import {
+  BackendLabel,
   getBackendIcon,
+  getBackendLabel,
   getBackendPlainLabel,
 } from '@/components/ui/backend-label'
 import type { CliBackend } from '@/types/preferences'
@@ -463,12 +465,14 @@ export function NewSessionModeModal() {
                     <div className="grid grid-cols-2 gap-2">
                       {installedBackendChoices.map(choice => {
                         const Icon = getBackendIcon(choice.backend)
-                        const label = getBackendPlainLabel(choice.backend)
                         return (
                           <MobileBackendChoice
                             key={choice.backend}
                             icon={<Icon className="size-4" />}
-                            title={label}
+                            title={<BackendLabel backend={choice.backend} />}
+                            accessibleName={getBackendPlainLabel(
+                              choice.backend
+                            )}
                             disabled={createSession.isPending}
                             onClick={() =>
                               setMobileBackendActions(choice.backend)
@@ -483,13 +487,14 @@ export function NewSessionModeModal() {
                 {!isMobile &&
                   installedBackendChoices.map(choice => {
                     const Icon = getBackendIcon(choice.backend)
-                    const label = getBackendPlainLabel(choice.backend)
+                    const label = getBackendLabel(choice.backend)
                     const yoloArgs = YOLO_ARGS_BY_BACKEND[choice.backend]
                     return (
                       <NativeBackendChoice
                         key={choice.backend}
                         icon={<Icon className="size-4" />}
-                        title={label}
+                        title={<BackendLabel backend={choice.backend} />}
+                        accessibleName={getBackendPlainLabel(choice.backend)}
                         subtitle={`Open native ${label} in a terminal session`}
                         shortcut={choice.shortcut}
                         yoloAvailable={Boolean(yoloArgs)}
@@ -554,7 +559,7 @@ function MobileBackendActions({
   onNormal: () => void
   onYolo: () => void
 }) {
-  const label = getBackendPlainLabel(backend)
+  const label = getBackendLabel(backend)
   const yoloAvailable = Boolean(YOLO_ARGS_BY_BACKEND[backend])
 
   return (
@@ -568,7 +573,9 @@ function MobileBackendActions({
           <ArrowLeft className="size-3.5" />
           Back
         </button>
-        <DialogTitle className="text-base font-semibold">{label}</DialogTitle>
+        <DialogTitle className="text-base font-semibold">
+          <BackendLabel backend={backend} />
+        </DialogTitle>
         <DialogDescription className="text-xs leading-5">
           Choose how to start {label} for this worktree.
         </DialogDescription>
@@ -609,18 +616,20 @@ function MobileBackendActions({
 function MobileBackendChoice({
   icon,
   title,
+  accessibleName,
   disabled,
   onClick,
 }: {
   icon: React.ReactNode
-  title: string
+  title: React.ReactNode
+  accessibleName: string
   disabled?: boolean
   onClick: () => void
 }) {
   return (
     <button
       type="button"
-      aria-label={title}
+      aria-label={accessibleName}
       disabled={disabled}
       onClick={onClick}
       className={cn(
@@ -632,7 +641,7 @@ function MobileBackendChoice({
       <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-background text-muted-foreground">
         {icon}
       </span>
-      <span className="min-w-0 truncate text-sm font-medium">{title}</span>
+      <span className="min-w-0 text-sm font-medium">{title}</span>
     </button>
   )
 }
@@ -640,6 +649,7 @@ function MobileBackendChoice({
 function NativeBackendChoice({
   icon,
   title,
+  accessibleName,
   subtitle,
   shortcut,
   yoloAvailable,
@@ -648,7 +658,8 @@ function NativeBackendChoice({
   onYoloClick,
 }: {
   icon: React.ReactNode
-  title: string
+  title: React.ReactNode
+  accessibleName: string
   subtitle: string
   shortcut: string
   yoloAvailable: boolean
@@ -687,8 +698,8 @@ function NativeBackendChoice({
             type="button"
             disabled={disabled}
             onClick={onYoloClick}
-            title={`Start ${title} with Full access`}
-            aria-label={`Start ${title} with Full access`}
+            title={`Start ${accessibleName} with Full access`}
+            aria-label={`Start ${accessibleName} with Full access`}
             className={cn(
               'inline-flex h-8 items-center gap-1.5 rounded-md border border-border/70 bg-background px-2 text-xs font-medium text-muted-foreground transition-colors',
               'hover:border-border hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',

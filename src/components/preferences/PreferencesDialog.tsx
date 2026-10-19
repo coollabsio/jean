@@ -340,6 +340,19 @@ const paneIconMap: Record<PreferencePane, LucideIcon> = {
   'web-access': Globe,
 }
 
+function paneBackend(pane: PreferencePane): CliBackend | undefined {
+  for (const entry of navigationEntries) {
+    if (entry.type === 'item' && entry.id === pane) return entry.backend
+  }
+  return undefined
+}
+
+function PaneTitle({ pane }: { pane: PreferencePane }) {
+  const backend = paneBackend(pane)
+  if (backend) return <BackendLabel backend={backend} />
+  return getPaneTitle(pane)
+}
+
 const getPaneTitle = (pane: PreferencePane): string => {
   switch (pane) {
     case 'general':
@@ -937,7 +950,11 @@ export function PreferencesDialog() {
                         </SelectLabel>
                         {group.items.map(item => (
                           <SelectItem key={item.id} value={item.id}>
-                            {item.name}
+                            {item.backend ? (
+                              <BackendLabel backend={item.backend} />
+                            ) : (
+                              item.name
+                            )}
                           </SelectItem>
                         ))}
                       </SelectGroup>
@@ -964,7 +981,7 @@ export function PreferencesDialog() {
                     <BreadcrumbSeparator />
                     <BreadcrumbItem>
                       <BreadcrumbPage>
-                        {getPaneTitle(activePane)}
+                        <PaneTitle pane={activePane} />
                       </BreadcrumbPage>
                     </BreadcrumbItem>
                   </BreadcrumbList>
