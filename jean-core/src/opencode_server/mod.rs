@@ -5,7 +5,7 @@ use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Child, Stdio};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::AppHandle;
@@ -21,6 +21,13 @@ const DIAGNOSTIC_LINE_MAX: usize = 400;
 /// Number of active consumers (prompts) using the managed server.
 /// Server is shut down only when this drops to 0.
 static USAGE_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+/// Bumped on every `acquire`. An idle timer stands down when this changed
+/// after it was scheduled, so only the latest release can stop the server.
+static IDLE_EPOCH: AtomicUsize = AtomicUsize::new(0);
+
+/// Idle grace period before an unused managed server is stopped.
+static IDLE_TIMEOUT_MS: AtomicU64 = AtomicU64::new(600_000);
 
 /// Cached AppHandle so stop/release paths can access app data dir without param changes.
 static APP_HANDLE: once_cell::sync::OnceCell<AppHandle> = once_cell::sync::OnceCell::new();
@@ -394,15 +401,23 @@ pub fn ensure_running(app: &AppHandle) -> Result<String, String> {
 /// Increment usage count and ensure the server is running. Returns the base URL.
 /// Each `acquire` must be paired with a `release` when the caller is done.
 pub fn acquire(app: &AppHandle) -> Result<String, String> {
-    USAGE_COUNT.fetch_add(1, Ordering::SeqCst);
+    begin_usage();
     match ensure_running(app) {
         Ok(url) => Ok(url),
         Err(e) => {
-            // Roll back on failure so we don't leave a phantom user.
-            USAGE_COUNT.fetch_sub(1, Ordering::SeqCst);
+            // Roll back on failure so we don't leave a phantom user. Re-arm the
+            // idle timer: the epoch bump above disarmed any earlier one.
+            if USAGE_COUNT.fetch_sub(1, Ordering::SeqCst) == 1 {
+                schedule_idle_stop();
+            }
             Err(e)
         }
     }
+}
+
+fn begin_usage() {
+    IDLE_EPOCH.fetch_add(1, Ordering::SeqCst);
+    USAGE_COUNT.fetch_add(1, Ordering::SeqCst);
 }
 
 /// Decrement usage count. If this was the last user, schedule a delayed shutdown.
@@ -417,30 +432,54 @@ pub fn release() {
             .map(|preferences| preferences.keep_ai_servers_warm)
             .unwrap_or(true);
         if !keep_warm {
-            if let Err(e) = stop_managed_server_inner() {
-                log::warn!("Failed to stop managed OpenCode server on last release: {e}");
-            }
+            stop_if_idle(IDLE_EPOCH.load(Ordering::SeqCst));
             return;
         }
-        // Schedule delayed shutdown — if no one re-acquires within 10min, stop the server.
-        std::thread::spawn(|| {
-            std::thread::sleep(Duration::from_secs(600));
-            if USAGE_COUNT.load(Ordering::SeqCst) == 0 {
-                if let Err(e) = stop_managed_server_inner() {
-                    log::warn!("Failed to stop managed OpenCode server on last release: {e}");
-                }
-            }
-        });
+        schedule_idle_stop();
     }
+}
+
+/// Stop the server after the grace period unless it was acquired meanwhile.
+fn schedule_idle_stop() {
+    let epoch = IDLE_EPOCH.load(Ordering::SeqCst);
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(
+            IDLE_TIMEOUT_MS.load(Ordering::SeqCst),
+        ));
+        stop_if_idle(epoch);
+    });
+}
+
+/// Stop the managed server if nothing acquired it since `epoch`. Checked under
+/// the `OPENCODE_SERVER` lock (also taken by `ensure_running`), so a concurrent
+/// `acquire` either stands this down or respawns after the stop. Returns
+/// whether the server was stopped.
+fn stop_if_idle(epoch: usize) -> bool {
+    let mut guard = match OPENCODE_SERVER.lock() {
+        Ok(guard) => guard,
+        Err(e) => {
+            log::warn!("OpenCode server lock error: {e}");
+            return false;
+        }
+    };
+    if USAGE_COUNT.load(Ordering::SeqCst) != 0 || IDLE_EPOCH.load(Ordering::SeqCst) != epoch {
+        return false;
+    }
+    stop_managed_server_locked(&mut guard)
 }
 
 fn stop_managed_server_inner() -> Result<bool, String> {
     let mut guard = OPENCODE_SERVER
         .lock()
         .map_err(|e| format!("OpenCode server lock error: {e}"))?;
+    Ok(stop_managed_server_locked(&mut guard))
+}
 
+fn stop_managed_server_locked(
+    guard: &mut std::sync::MutexGuard<'_, Option<OpenCodeServerProcess>>,
+) -> bool {
     let Some(proc_info) = guard.as_mut() else {
-        return Ok(false);
+        return false;
     };
 
     let pid = proc_info.child.id();
@@ -448,9 +487,9 @@ fn stop_managed_server_inner() -> Result<bool, String> {
     // Fallback direct child kill in case tree-kill is unsupported/fails.
     let _ = proc_info.child.kill();
     let _ = proc_info.child.wait();
-    *guard = None;
+    **guard = None;
     remove_pid_file();
-    Ok(true)
+    true
 }
 
 /// Get the current server URL without incrementing the usage count.
@@ -629,6 +668,69 @@ mod tests {
             snapshot.iter().all(|l| !l.contains(&stale)),
             "stale marker must stay absent, got {snapshot:?}"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn idle_timer_is_superseded_by_later_usage() {
+        if !crate::test_support::in_isolated_process(
+            "opencode_server::tests::idle_timer_is_superseded_by_later_usage",
+        ) {
+            return;
+        }
+        let child = crate::platform::silent_command("sleep")
+            .arg("60")
+            .spawn()
+            .unwrap();
+        *OPENCODE_SERVER.lock().unwrap() = Some(OpenCodeServerProcess {
+            child,
+            port: DEFAULT_PORT,
+            hostname: DEFAULT_HOSTNAME.to_string(),
+        });
+        IDLE_TIMEOUT_MS.store(1_000, Ordering::SeqCst);
+        let running = || OPENCODE_SERVER.lock().unwrap().is_some();
+
+        begin_usage();
+        release(); // timer A due at ~1000ms
+        std::thread::sleep(Duration::from_millis(600));
+        begin_usage();
+        release(); // timer B due at ~1600ms
+
+        std::thread::sleep(Duration::from_millis(700)); // ~1300ms: past timer A only
+        assert!(running(), "stale timer must not stop the server");
+
+        std::thread::sleep(Duration::from_millis(1_000)); // ~2300ms: past timer B
+        assert!(!running(), "latest timer stops the idle server");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn idle_stop_stands_down_when_acquired_before_the_check() {
+        if !crate::test_support::in_isolated_process(
+            "opencode_server::tests::idle_stop_stands_down_when_acquired_before_the_check",
+        ) {
+            return;
+        }
+        let child = crate::platform::silent_command("sleep")
+            .arg("60")
+            .spawn()
+            .unwrap();
+        *OPENCODE_SERVER.lock().unwrap() = Some(OpenCodeServerProcess {
+            child,
+            port: DEFAULT_PORT,
+            hostname: DEFAULT_HOSTNAME.to_string(),
+        });
+        let epoch = IDLE_EPOCH.load(Ordering::SeqCst);
+
+        begin_usage();
+        assert!(!stop_if_idle(epoch), "in-use server must not be stopped");
+        USAGE_COUNT.fetch_sub(1, Ordering::SeqCst);
+        assert!(
+            !stop_if_idle(epoch),
+            "usage after the timer was armed supersedes it"
+        );
+        assert!(stop_if_idle(IDLE_EPOCH.load(Ordering::SeqCst)));
+        assert!(OPENCODE_SERVER.lock().unwrap().is_none());
     }
 }
 
