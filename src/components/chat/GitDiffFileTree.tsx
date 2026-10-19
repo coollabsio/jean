@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ChevronRight, Folder, FolderOpen } from 'lucide-react'
+import { ChevronRight, Folder, FolderOpen } from '@/components/icons/reicon'
 import { cn } from '@/lib/utils'
 import { buildFileTree, type TreeNode } from './git-diff-tree'
 
