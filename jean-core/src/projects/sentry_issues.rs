@@ -7,6 +7,8 @@ use super::github_issues::{
 use super::storage::{load_projects_data, save_projects_data};
 
 const SENTRY_BASE_URL: &str = "https://sentry.io";
+const SENTRY_ORG_MEMBERSHIP_DISABLED: &str =
+    "Sentry organization membership is disabled because the organization is over its member limit.";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -186,24 +188,37 @@ async fn sentry_get(
     let status = response.status();
     if !status.is_success() {
         let text = response.text().await.unwrap_or_default();
-        if status.as_u16() == 401 || status.as_u16() == 403 {
-            return Err(format!(
-                "Sentry auth token is invalid or missing the {required_scope} scope. Update it in Settings → Integrations."
-            ));
-        }
-        if status.as_u16() == 404 {
-            return Err(
-                "Sentry resource not found (organization, project, or issue). Check the slugs in project settings."
-                    .to_string(),
-            );
-        }
-        return Err(format!("Sentry API error ({status}): {text}"));
+        return Err(sentry_error_message(status, &text, required_scope));
     }
 
     response
         .json()
         .await
         .map_err(|e| format!("Failed to parse Sentry response: {e}"))
+}
+
+fn is_disabled_org_membership(status: u16, body: &str) -> bool {
+    if status != 401 && status != 403 {
+        return false;
+    }
+    let lower = body.to_lowercase();
+    lower.contains("member-disabled-over-limit") || lower.contains("organization over member limit")
+}
+
+fn sentry_error_message(status: reqwest::StatusCode, body: &str, required_scope: &str) -> String {
+    if is_disabled_org_membership(status.as_u16(), body) {
+        return SENTRY_ORG_MEMBERSHIP_DISABLED.to_string();
+    }
+    if status.as_u16() == 401 || status.as_u16() == 403 {
+        return format!(
+            "Sentry auth token is invalid or missing the {required_scope} scope. Update it in Settings → Integrations."
+        );
+    }
+    if status.as_u16() == 404 {
+        return "Sentry resource not found (organization, project, or issue). Check the slugs in project settings."
+            .to_string();
+    }
+    format!("Sentry API error ({status}): {body}")
 }
 
 fn sentry_api_url(segments: &[&str]) -> Result<reqwest::Url, String> {
@@ -429,7 +444,18 @@ async fn fetch_sentry_projects(auth_token: &str) -> Result<Vec<SentryProjectMapp
     for organization in organizations {
         let mut url = sentry_projects_url(&organization)?;
         url.query_pairs_mut().append_pair("limit", "100");
-        let projects_value = sentry_get(auth_token, url, "org:read").await?;
+        let projects_value = sentry_get(auth_token, url, "org:read")
+            .await
+            .map_err(|error| {
+                if error == SENTRY_ORG_MEMBERSHIP_DISABLED {
+                    format!(
+                        "Sentry organization '{}' is over its member limit, so its projects cannot be read.",
+                        organization.slug
+                    )
+                } else {
+                    error
+                }
+            })?;
         let projects: Vec<SentryProject> = serde_json::from_value(projects_value)
             .map_err(|e| format!("Unexpected Sentry projects response: {e}"))?;
         mappings.extend(projects.into_iter().map(|project| SentryProjectMapping {
@@ -673,6 +699,25 @@ pub async fn get_sentry_issue_context_contents(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn seat_limit_block_is_not_reported_as_a_missing_scope() {
+        let body = r#"{"detail":{"code":"member-disabled-over-limit","message":"Organization over member limit"}}"#;
+        let message = sentry_error_message(reqwest::StatusCode::UNAUTHORIZED, body, "org:read");
+        assert_eq!(message, SENTRY_ORG_MEMBERSHIP_DISABLED);
+        assert!(!message.contains("org:read"));
+        assert!(!message.to_lowercase().contains("missing the"));
+    }
+
+    #[test]
+    fn invalid_token_is_still_reported_as_an_auth_failure() {
+        let message = sentry_error_message(
+            reqwest::StatusCode::UNAUTHORIZED,
+            r#"{"detail":"Invalid token"}"#,
+            "org:read",
+        );
+        assert!(message.contains("missing the org:read scope"));
+    }
 
     #[test]
     fn parses_accessible_project_with_organization() {
