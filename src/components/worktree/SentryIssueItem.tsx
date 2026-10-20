@@ -14,6 +14,8 @@ interface SentryIssueItemProps {
   index: number
   isSelected: boolean
   isCreating: boolean
+  /** Shared issue-id column, in characters, so every row lines up. */
+  idColumnChars?: number
   isChecked?: boolean
   onCheckedChange?: (checked: boolean) => void
   onMouseEnter: () => void
@@ -37,12 +39,14 @@ export function SentryIssueItem({
   index,
   isSelected,
   isCreating,
+  idColumnChars,
   isChecked = false,
   onCheckedChange,
   onMouseEnter,
   onClick,
   onInvestigate,
 }: SentryIssueItemProps) {
+  const idColumn = Math.max(idColumnChars ?? issue.shortId.length, 1)
   return (
     <div
       data-item-index={index}
@@ -96,20 +100,29 @@ export function SentryIssueItem({
 
         <div
           data-testid="sentry-issue-desktop"
-          className="hidden min-w-0 gap-x-3 gap-y-1 sm:grid sm:grid-cols-[6.5rem_minmax(0,1fr)]"
+          className="hidden min-w-0 gap-x-3 gap-y-1 overflow-hidden font-mono text-xs sm:grid"
+          style={{
+            gridTemplateColumns: `minmax(0, ${idColumn}ch) minmax(0, 1fr)`,
+          }}
         >
-          <span className="shrink-0 whitespace-nowrap font-mono text-xs text-muted-foreground">
+          <span
+            className="min-w-0 truncate text-muted-foreground"
+            title={issue.shortId}
+          >
             {issue.shortId}
           </span>
-          <span className="min-w-0 truncate text-sm font-medium">
+          <span
+            className="min-w-0 truncate font-sans text-sm font-medium"
+            title={issue.title}
+          >
             {issue.title}
           </span>
-          <span className="whitespace-nowrap text-xs capitalize text-muted-foreground">
+          <span className="truncate font-sans text-xs capitalize text-muted-foreground">
             {issue.level}
           </span>
           <div
             data-testid="sentry-issue-metadata"
-            className="flex min-w-0 items-center gap-2 overflow-hidden text-xs text-muted-foreground"
+            className="flex min-w-0 items-center gap-2 overflow-hidden font-sans text-xs text-muted-foreground"
           >
             <span className="shrink-0 whitespace-nowrap tabular-nums">
               {issue.count} events
