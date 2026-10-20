@@ -102,6 +102,11 @@ export interface ProjectServer {
   local?: boolean
 }
 
+export interface SentryProjectLink {
+  organization_slug: string
+  project_slug: string
+}
+
 export interface Project {
   /** Client-only owning server for native multi-server views. */
   serverId?: string
@@ -151,8 +156,10 @@ export interface Project {
   sentry_auth_token?: string | null
   /** Sentry organization slug */
   sentry_organization_slug?: string | null
-  /** Sentry project slug */
+  /** Sentry project slug. Mirrors the first assigned project. */
   sentry_project_slug?: string | null
+  /** Sentry projects whose issues are shown together for this Jean project */
+  sentry_projects?: SentryProjectLink[]
   /** Sentry region API base URL (auto-resolved from the org) */
   sentry_base_url?: string | null
   /** IDs of linked projects for cross-project context sharing */
