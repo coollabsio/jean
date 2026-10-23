@@ -340,6 +340,8 @@ pub async fn dispatch_command(
                 field_opt(&args, "sentryOrganizationSlug", "sentry_organization_slug")?;
             let sentry_project_slug: Option<String> =
                 field_opt(&args, "sentryProjectSlug", "sentry_project_slug")?;
+            let sentry_projects: Option<Vec<crate::projects::types::SentryProjectLink>> =
+                field_opt(&args, "sentryProjects", "sentry_projects")?;
             let linked_project_ids: Option<Vec<String>> =
                 field_opt(&args, "linkedProjectIds", "linked_project_ids")?;
             let auto_fix_settings: Option<Option<crate::projects::types::ProjectAutoFixSettings>> =
@@ -360,6 +362,7 @@ pub async fn dispatch_command(
                 sentry_auth_token,
                 sentry_organization_slug,
                 sentry_project_slug,
+                sentry_projects,
                 linked_project_ids,
                 auto_fix_settings,
             )

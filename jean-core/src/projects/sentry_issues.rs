@@ -5,6 +5,7 @@ use super::github_issues::{
     get_github_contexts_dir, load_context_references, save_context_references, slugify_issue_title,
 };
 use super::storage::{load_projects_data, save_projects_data};
+use super::types::SentryProjectLink;
 
 const SENTRY_BASE_URL: &str = "https://sentry.io";
 
@@ -73,8 +74,7 @@ pub struct SentryIssueContext {
 
 struct SentryConfig {
     auth_token: String,
-    organization_slug: String,
-    sentry_project_slug: String,
+    links: Vec<SentryProjectLink>,
     project_name: String,
     base_url: String,
 }
@@ -109,18 +109,11 @@ async fn get_sentry_config(app: &AppHandle, project_id: &str) -> Result<SentryCo
         .find_project(project_id)
         .ok_or_else(|| format!("Project not found: {project_id}"))?;
 
-    let organization_slug = project
-        .sentry_organization_slug
-        .clone()
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| {
-            "No Sentry organization configured. Add it in project settings.".to_string()
-        })?;
-    let sentry_project_slug = project
-        .sentry_project_slug
-        .clone()
-        .filter(|value| !value.trim().is_empty())
+    let links = project.effective_sentry_links();
+    let first = links
+        .first()
         .ok_or_else(|| "No Sentry project configured. Add it in project settings.".to_string())?;
+    let organization_slug = first.organization_slug.clone();
     let project_name = project.name.clone();
     let stored_base_url = project
         .sentry_base_url
@@ -164,8 +157,7 @@ async fn get_sentry_config(app: &AppHandle, project_id: &str) -> Result<SentryCo
 
     Ok(SentryConfig {
         auth_token,
-        organization_slug,
-        sentry_project_slug,
+        links,
         project_name,
         base_url,
     })
@@ -461,32 +453,119 @@ pub async fn list_sentry_projects(
     fetch_sentry_projects(&auth_token).await
 }
 
+fn unresolved_issue_query(query: Option<String>) -> String {
+    match query.map(|value| value.trim().to_string()) {
+        Some(value) if !value.is_empty() => format!("is:unresolved {value}"),
+        _ => "is:unresolved".to_string(),
+    }
+}
+
+fn merge_sentry_issues(mut issues: Vec<SentryIssue>) -> Vec<SentryIssue> {
+    issues.sort_by(|left, right| {
+        right
+            .last_seen
+            .cmp(&left.last_seen)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    let mut seen = std::collections::HashSet::new();
+    issues.retain(|issue| seen.insert(issue.id.clone()));
+    issues
+}
+
+async fn region_hosts_for_orgs(
+    auth_token: &str,
+    organization_slugs: &[String],
+) -> std::collections::HashMap<String, String> {
+    let organizations = match sentry_api_url(&["organizations"]) {
+        Ok(url) => match sentry_get(auth_token, url, "org:read").await {
+            Ok(value) => {
+                serde_json::from_value::<Vec<SentryOrganization>>(value).unwrap_or_default()
+            }
+            Err(error) => {
+                log::warn!("Failed to resolve Sentry regions: {error}");
+                Vec::new()
+            }
+        },
+        Err(error) => {
+            log::warn!("Failed to build Sentry organizations URL: {error}");
+            Vec::new()
+        }
+    };
+    organization_slugs
+        .iter()
+        .map(|slug| {
+            let host = resolve_sentry_base_url(&organizations, slug)
+                .unwrap_or_else(|_| SENTRY_BASE_URL.to_string());
+            (slug.clone(), host)
+        })
+        .collect()
+}
+
+async fn fetch_linked_project_issues(
+    auth_token: &str,
+    base_url: &str,
+    link: &SentryProjectLink,
+    sentry_query: &str,
+) -> Result<Vec<SentryIssue>, String> {
+    let mut url = sentry_api_url_for_base(
+        base_url,
+        &[
+            "projects",
+            &link.organization_slug,
+            &link.project_slug,
+            "issues",
+        ],
+    )?;
+    url.query_pairs_mut()
+        .append_pair("query", sentry_query)
+        .append_pair("limit", "100")
+        .append_pair("sort", "date");
+    let value = sentry_get(auth_token, url, "event:read").await?;
+    serde_json::from_value(value).map_err(|e| format!("Unexpected Sentry issue response: {e}"))
+}
+
 pub async fn list_sentry_issues(
     app: AppHandle,
     project_id: String,
     query: Option<String>,
 ) -> Result<Vec<SentryIssue>, String> {
     let config = get_sentry_config(&app, &project_id).await?;
-    let mut url = sentry_api_url_for_base(
-        &config.base_url,
-        &[
-            "projects",
-            &config.organization_slug,
-            &config.sentry_project_slug,
-            "issues",
-        ],
-    )?;
-    let sentry_query = match query.map(|value| value.trim().to_string()) {
-        Some(value) if !value.is_empty() => format!("is:unresolved {value}"),
-        _ => "is:unresolved".to_string(),
-    };
-    url.query_pairs_mut()
-        .append_pair("query", &sentry_query)
-        .append_pair("limit", "100")
-        .append_pair("sort", "date");
+    let sentry_query = unresolved_issue_query(query);
+    let organization_slugs: Vec<String> = config
+        .links
+        .iter()
+        .map(|link| link.organization_slug.clone())
+        .collect();
+    let hosts = region_hosts_for_orgs(&config.auth_token, &organization_slugs).await;
 
-    let value = sentry_get(&config.auth_token, url, "event:read").await?;
-    serde_json::from_value(value).map_err(|e| format!("Unexpected Sentry issue response: {e}"))
+    let mut issues = Vec::new();
+    let mut first_error = None;
+    for link in &config.links {
+        let base_url = hosts
+            .get(&link.organization_slug)
+            .map(String::as_str)
+            .unwrap_or(config.base_url.as_str());
+        match fetch_linked_project_issues(&config.auth_token, base_url, link, &sentry_query).await {
+            Ok(batch) => issues.extend(batch),
+            Err(error) => {
+                log::warn!(
+                    "Failed to load Sentry issues for {}/{}: {error}",
+                    link.organization_slug,
+                    link.project_slug
+                );
+                if first_error.is_none() {
+                    first_error = Some(error);
+                }
+            }
+        }
+    }
+
+    if issues.is_empty() {
+        if let Some(error) = first_error {
+            return Err(error);
+        }
+    }
+    Ok(merge_sentry_issues(issues))
 }
 
 pub async fn get_sentry_issue(
@@ -495,17 +574,48 @@ pub async fn get_sentry_issue(
     issue_id: String,
 ) -> Result<SentryIssueContext, String> {
     let config = get_sentry_config(&app, &project_id).await?;
-    let issue_value = sentry_get(
-        &config.auth_token,
-        sentry_api_url_for_base(&config.base_url, &["issues", &issue_id])?,
-        "event:read",
-    )
-    .await?;
+    let organization_slugs: Vec<String> = config
+        .links
+        .iter()
+        .map(|link| link.organization_slug.clone())
+        .collect();
+    let hosts = region_hosts_for_orgs(&config.auth_token, &organization_slugs).await;
+    let mut base_urls = Vec::new();
+    for slug in &organization_slugs {
+        if let Some(host) = hosts.get(slug) {
+            if !base_urls.contains(host) {
+                base_urls.push(host.clone());
+            }
+        }
+    }
+    if base_urls.is_empty() {
+        base_urls.push(config.base_url.clone());
+    }
+
+    let mut last_error = None;
+    let mut loaded = None;
+    for base_url in &base_urls {
+        match sentry_get(
+            &config.auth_token,
+            sentry_api_url_for_base(base_url, &["issues", &issue_id])?,
+            "event:read",
+        )
+        .await
+        {
+            Ok(value) => {
+                loaded = Some((base_url.clone(), value));
+                break;
+            }
+            Err(error) => last_error = Some(error),
+        }
+    }
+    let (base_url, issue_value) = loaded
+        .ok_or_else(|| last_error.unwrap_or_else(|| "Sentry issue was not found.".to_string()))?;
     let issue: SentryIssue = serde_json::from_value(issue_value)
         .map_err(|e| format!("Unexpected Sentry issue response: {e}"))?;
     let latest_event = sentry_get(
         &config.auth_token,
-        sentry_api_url_for_base(&config.base_url, &["issues", &issue_id, "events", "latest"])?,
+        sentry_api_url_for_base(&base_url, &["issues", &issue_id, "events", "latest"])?,
         "event:read",
     )
     .await?;
@@ -673,6 +783,92 @@ pub async fn get_sentry_issue_context_contents(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn issue(id: &str, last_seen: &str) -> SentryIssue {
+        SentryIssue {
+            id: id.to_string(),
+            short_id: id.to_string(),
+            title: id.to_string(),
+            culprit: String::new(),
+            permalink: String::new(),
+            level: "error".to_string(),
+            status: "unresolved".to_string(),
+            count: "1".to_string(),
+            user_count: 0,
+            first_seen: last_seen.to_string(),
+            last_seen: last_seen.to_string(),
+            project: SentryProject {
+                id: "1".to_string(),
+                name: "app".to_string(),
+                slug: "app".to_string(),
+            },
+        }
+    }
+
+    fn jean_project(extra: serde_json::Value) -> crate::projects::types::Project {
+        let mut value = serde_json::json!({
+            "id": "project-1",
+            "name": "monorepo",
+            "path": "/tmp/monorepo",
+            "default_branch": "main",
+            "added_at": 0
+        });
+        if let (Some(object), Some(extra)) = (value.as_object_mut(), extra.as_object()) {
+            for (key, item) in extra {
+                object.insert(key.clone(), item.clone());
+            }
+        }
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn legacy_slug_pair_is_one_assigned_project() {
+        let project = jean_project(serde_json::json!({
+            "sentry_organization_slug": "acme",
+            "sentry_project_slug": "web"
+        }));
+        let links = project.effective_sentry_links();
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].organization_slug, "acme");
+        assert_eq!(links[0].project_slug, "web");
+    }
+
+    #[test]
+    fn stored_project_list_replaces_the_legacy_pair() {
+        let project = jean_project(serde_json::json!({
+            "sentry_organization_slug": "old",
+            "sentry_project_slug": "old-app",
+            "sentry_projects": [
+                {"organization_slug": "acme", "project_slug": "web"},
+                {"organization_slug": "acme", "project_slug": "api"},
+                {"organization_slug": "acme", "project_slug": "web"}
+            ]
+        }));
+        let links = project.effective_sentry_links();
+        assert_eq!(
+            links
+                .iter()
+                .map(|link| link.project_slug.as_str())
+                .collect::<Vec<_>>(),
+            vec!["web", "api"]
+        );
+    }
+
+    #[test]
+    fn merges_issues_from_several_projects_by_newest_first() {
+        let merged = merge_sentry_issues(vec![
+            issue("older", "2026-07-01T00:00:00Z"),
+            issue("newer", "2026-07-02T00:00:00Z"),
+            issue("newer", "2026-07-02T00:00:00Z"),
+        ]);
+        assert_eq!(
+            merged
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["newer", "older"]
+        );
+    }
 
     #[test]
     fn parses_accessible_project_with_organization() {

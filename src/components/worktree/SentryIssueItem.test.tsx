@@ -18,13 +18,14 @@ const issue: SentryIssue = {
   project: { id: '1', name: 'Coolify', slug: 'coolify' },
 }
 
-function renderIssue() {
+function renderIssue(idColumnChars = issue.shortId.length) {
   return render(
     <SentryIssueItem
       issue={issue}
       index={0}
       isSelected={false}
       isCreating={false}
+      idColumnChars={idColumnChars}
       onMouseEnter={vi.fn()}
       onClick={vi.fn()}
       onInvestigate={vi.fn()}
@@ -34,17 +35,20 @@ function renderIssue() {
 
 describe('SentryIssueItem', () => {
   it('keeps the desktop issue identity and details in stable columns', () => {
-    renderIssue()
+    renderIssue(24)
 
     const desktopLayout = screen.getByTestId('sentry-issue-desktop')
-    expect(desktopLayout).toHaveClass(
-      'hidden',
-      'sm:grid',
-      'sm:grid-cols-[6.5rem_minmax(0,1fr)]'
-    )
+    expect(desktopLayout).toHaveClass('hidden', 'sm:grid', 'overflow-hidden')
+    expect(desktopLayout).toHaveStyle({
+      gridTemplateColumns: 'minmax(0, 24ch) minmax(0, 1fr)',
+    })
     expect(within(desktopLayout).getByText('COOLIFY-BXB')).toHaveClass(
-      'shrink-0',
-      'whitespace-nowrap'
+      'min-w-0',
+      'truncate'
+    )
+    expect(within(desktopLayout).getByText(issue.title)).toHaveClass(
+      'min-w-0',
+      'truncate'
     )
     expect(
       within(desktopLayout).getByTestId('sentry-issue-metadata')

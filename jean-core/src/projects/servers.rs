@@ -214,6 +214,7 @@ async fn create_server_project(
         sentry_auth_token: None,
         sentry_organization_slug: None,
         sentry_project_slug: None,
+        sentry_projects: Vec::new(),
         sentry_base_url: None,
         linked_project_ids: Vec::new(),
         auto_fix_settings: None,

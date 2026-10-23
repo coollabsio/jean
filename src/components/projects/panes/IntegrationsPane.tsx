@@ -4,6 +4,7 @@ import { Loader2, RefreshCw, RotateCcw } from '@/components/icons/reicon'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -22,6 +23,26 @@ import {
   testSentryAuthToken,
   useSentryProjects,
 } from '@/services/sentry'
+import type { SentryProjectLink } from '@/types/projects'
+
+function assignedSentryProjects(project: {
+  sentry_projects?: SentryProjectLink[]
+  sentry_organization_slug?: string | null
+  sentry_project_slug?: string | null
+}): SentryProjectLink[] {
+  if (project.sentry_projects && project.sentry_projects.length > 0) {
+    return project.sentry_projects
+  }
+  if (project.sentry_organization_slug && project.sentry_project_slug) {
+    return [
+      {
+        organization_slug: project.sentry_organization_slug,
+        project_slug: project.sentry_project_slug,
+      },
+    ]
+  }
+  return []
+}
 
 const InlineField: React.FC<{
   label: string
@@ -119,12 +140,7 @@ export function IntegrationsPane({ projectId }: { projectId: string }) {
   const sentryAuthTokenChanged =
     localSentryAuthToken !== null &&
     localSentryAuthToken !== (project?.sentry_auth_token ?? '')
-  const selectedSentryProjectId =
-    sentryProjects.find(
-      sentryProject =>
-        sentryProject.organization.slug === project?.sentry_organization_slug &&
-        sentryProject.slug === project?.sentry_project_slug
-    )?.id ?? ''
+  const assignedLinks = project ? assignedSentryProjects(project) : []
 
   const handleSaveSentryAuthToken = useCallback(async () => {
     if (localSentryAuthToken === null) return
@@ -135,9 +151,7 @@ export function IntegrationsPane({ projectId }: { projectId: string }) {
     try {
       const accessibleProjects = await testSentryAuthToken(authToken)
       const onlyProject =
-        !project?.sentry_organization_slug &&
-        !project?.sentry_project_slug &&
-        accessibleProjects.length === 1
+        assignedLinks.length === 0 && accessibleProjects.length === 1
           ? accessibleProjects[0]
           : null
       updateSettings.mutate(
@@ -145,8 +159,12 @@ export function IntegrationsPane({ projectId }: { projectId: string }) {
           projectId,
           sentryAuthToken: authToken,
           ...(onlyProject && {
-            sentryOrganizationSlug: onlyProject.organization.slug,
-            sentryProjectSlug: onlyProject.slug,
+            sentryProjects: [
+              {
+                organization_slug: onlyProject.organization.slug,
+                project_slug: onlyProject.slug,
+              },
+            ],
           }),
         },
         {
@@ -169,9 +187,8 @@ export function IntegrationsPane({ projectId }: { projectId: string }) {
       setIsTestingSentry(false)
     }
   }, [
+    assignedLinks.length,
     localSentryAuthToken,
-    project?.sentry_organization_slug,
-    project?.sentry_project_slug,
     projectId,
     queryClient,
     updateSettings,
@@ -189,42 +206,42 @@ export function IntegrationsPane({ projectId }: { projectId: string }) {
     )
   }, [projectId, queryClient, updateSettings])
 
-  const handleSentryProjectChange = useCallback(
-    (sentryProjectId: string) => {
+  const handleSentryProjectToggle = useCallback(
+    (sentryProjectId: string, checked: boolean) => {
       const sentryProject = sentryProjects.find(
         candidate => candidate.id === sentryProjectId
       )
       if (!sentryProject) return
+      const link = {
+        organization_slug: sentryProject.organization.slug,
+        project_slug: sentryProject.slug,
+      }
+      const next = checked
+        ? [...assignedLinks, link]
+        : assignedLinks.filter(
+            assigned =>
+              assigned.organization_slug !== link.organization_slug ||
+              assigned.project_slug !== link.project_slug
+          )
       updateSettings.mutate(
-        {
-          projectId,
-          sentryOrganizationSlug: sentryProject.organization.slug,
-          sentryProjectSlug: sentryProject.slug,
-        },
+        { projectId, sentryProjects: next },
         {
           onSuccess: () =>
             queryClient.invalidateQueries({ queryKey: sentryQueryKeys.all }),
         }
       )
     },
-    [projectId, queryClient, sentryProjects, updateSettings]
+    [assignedLinks, projectId, queryClient, sentryProjects, updateSettings]
   )
 
   useEffect(() => {
-    const onlyProject = sentryProjects[0]
-    if (
-      sentryProjects.length === 1 &&
-      onlyProject &&
-      !project?.sentry_organization_slug &&
-      !project?.sentry_project_slug &&
-      !updateSettings.isPending
-    ) {
-      handleSentryProjectChange(onlyProject.id)
+    const onlyProject = sentryProjects.length === 1 ? sentryProjects[0] : null
+    if (onlyProject && assignedLinks.length === 0 && !updateSettings.isPending) {
+      handleSentryProjectToggle(onlyProject.id, true)
     }
   }, [
-    handleSentryProjectChange,
-    project?.sentry_organization_slug,
-    project?.sentry_project_slug,
+    assignedLinks.length,
+    handleSentryProjectToggle,
     sentryProjects,
     updateSettings.isPending,
   ])
@@ -363,41 +380,46 @@ export function IntegrationsPane({ projectId }: { projectId: string }) {
         </InlineField>
 
         <InlineField
-          label="Sentry Project"
-          description="Choose which accessible Sentry project belongs to this Jean project. The token itself is account-scoped, not project-scoped."
+          label="Sentry projects"
+          description="Choose the Sentry projects that belong to this Jean project. Issues from every selected project are shown together."
         >
           {hasSentryAccess ? (
             <>
-              <div className="flex items-center gap-2">
-                <Select
-                  value={selectedSentryProjectId}
-                  onValueChange={handleSentryProjectChange}
-                  disabled={
-                    sentryProjectsLoading ||
-                    updateSettings.isPending ||
-                    sentryProjects.length === 0
-                  }
-                >
-                  <SelectTrigger className="flex-1">
-                    <SelectValue
-                      placeholder={
-                        sentryProjectsLoading
-                          ? 'Loading Sentry projects...'
-                          : 'Select a Sentry project'
-                      }
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {sentryProjects.map(sentryProject => (
-                      <SelectItem
+              <div className="flex items-start gap-2">
+                <div className="flex-1 space-y-2">
+                  {sentryProjectsLoading && (
+                    <p className="text-xs text-muted-foreground">
+                      Loading Sentry projects...
+                    </p>
+                  )}
+                  {sentryProjects.map(sentryProject => {
+                    const checked = assignedLinks.some(
+                      link =>
+                        link.organization_slug ===
+                          sentryProject.organization.slug &&
+                        link.project_slug === sentryProject.slug
+                    )
+                    const label = `${sentryProject.organization.slug}/${sentryProject.slug}`
+                    return (
+                      <label
                         key={sentryProject.id}
-                        value={sentryProject.id}
+                        className="flex items-center gap-2 text-sm"
                       >
-                        {sentryProject.organization.slug}/{sentryProject.slug}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                        <Checkbox
+                          checked={checked}
+                          disabled={updateSettings.isPending}
+                          onCheckedChange={value =>
+                            handleSentryProjectToggle(
+                              sentryProject.id,
+                              value === true
+                            )
+                          }
+                        />
+                        <span>{label}</span>
+                      </label>
+                    )
+                  })}
+                </div>
                 <Button
                   variant="outline"
                   size="sm"

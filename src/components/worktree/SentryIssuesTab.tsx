@@ -1,5 +1,10 @@
 import { useCallback } from 'react'
-import { AlertCircle, Loader2, RefreshCw, Search } from '@/components/icons/reicon'
+import {
+  AlertCircle,
+  Loader2,
+  RefreshCw,
+  Search,
+} from '@/components/icons/reicon'
 import { isSentryAuthError } from '@/services/sentry'
 import { SentryAuthError } from '@/components/shared/SentryAuthError'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -52,6 +57,10 @@ export function SentryIssuesTab({
 }: SentryIssuesTabProps) {
   const multi = useMultiSelect(issues, getSentryKey)
   const errorMessage = error instanceof Error ? error.message : String(error)
+  const idColumnChars = issues.reduce(
+    (longest, issue) => Math.max(longest, issue.shortId.length),
+    1
+  )
 
   const handleBulkInvestigate = useCallback(async () => {
     if (!onBulkInvestigateIssues || multi.selectedItems.length < 1) return
@@ -130,6 +139,7 @@ export function SentryIssuesTab({
                 key={issue.id}
                 issue={issue}
                 index={index}
+                idColumnChars={idColumnChars}
                 isSelected={index === selectedIndex}
                 isCreating={creatingFromId === issue.id}
                 isChecked={multi.isChecked(issue.id)}
