@@ -38,6 +38,11 @@ describe('isSentryAuthError', () => {
     expect(
       isSentryAuthError('Sentry auth token is missing the org:read scope')
     ).toBe(true)
+    expect(
+      isSentryAuthError(
+        'Sentry organization membership is disabled because the organization is over its member limit.'
+      )
+    ).toBe(false)
     expect(isSentryAuthError(new Error('Network unavailable'))).toBe(false)
   })
 })
