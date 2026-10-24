@@ -45,6 +45,7 @@ const RATE_LIMITED_TOOLS: &[&str] = &[
     "move_session",
     "permanently_delete_worktree",
     "push_worktree",
+    "remove_project",
     "run_review",
     "send_chat_message",
     "set_session_model",
@@ -240,6 +241,7 @@ fn tool_registry_core() -> Value {
         {"name":"add_project","description":"Add an existing local git repository as a Jean project. Path must already be a git repo (use init_project for a new folder, or clone_project for a remote URL). Returns the created project (id, name, path, default_branch).","inputSchema":{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to an existing local git repository."},"parentId":{"type":"string","description":"Optional Jean folder/project parent id for nesting in the project list."}},"required":["path"],"additionalProperties":false}},
         {"name":"clone_project","description":"Clone a remote git repository to a local path and add it as a Jean project. Returns the created project.","inputSchema":{"type":"object","properties":{"url":{"type":"string","description":"Git remote URL to clone (https or ssh)."},"path":{"type":"string","description":"Absolute local path where the repo should be cloned."},"parentId":{"type":"string","description":"Optional Jean folder/project parent id for nesting in the project list."}},"required":["url","path"],"additionalProperties":false}},
         {"name":"init_project","description":"Create a new git repository at path (creating the directory if needed) and add it as a Jean project. Use add_project instead when the path is already a git repo. Returns the created project.","inputSchema":{"type":"object","properties":{"path":{"type":"string","description":"Absolute path for the new project directory."},"parentId":{"type":"string","description":"Optional Jean folder/project parent id for nesting in the project list."}},"required":["path"],"additionalProperties":false}},
+        {"name":"remove_project","description":"Remove a project from Jean (same as the UI \"Remove project\"). Repository files on disk are kept. Fails if the project has active (non-archived) worktrees; its archived worktrees and their sessions are removed from Jean. Does not remove folders. Needs user approval.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"}},"required":["projectId"],"additionalProperties":false}},
         {"name":"list_worktrees","description":"List all worktrees for a project.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"}},"required":["projectId"],"additionalProperties":false}},
         {"name":"get_worktree","description":"Get a single worktree by id (path, branch, status, etc.).","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"}},"required":["worktreeId"],"additionalProperties":false}},
         {"name":"get_project_context","description":"Get project-level context needed by orchestration agents: project settings, linked projects, default branch/backend, and worktree counts. Does not read arbitrary repo files.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"}},"required":["projectId"],"additionalProperties":false}},
@@ -680,6 +682,13 @@ async fn run_tool(
             } else {
                 Ok(result)
             }
+        }
+        "remove_project" => {
+            let project_id = require_str(&args, "projectId")?;
+            dispatch_command(app, "remove_project", json!({ "projectId": project_id }))
+                .await
+                .map_err(ToolError::internal)?;
+            Ok(json!({ "projectId": project_id, "removed": true }))
         }
         "delete_worktree" => {
             let worktree_id = require_str(&args, "worktreeId")?;
@@ -4368,6 +4377,19 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"F
             update_worktree_labels["inputSchema"]["required"],
             json!(["worktreeId", "action"])
         );
+    }
+
+    #[test]
+    fn remove_project_is_registered_rate_limited_and_needs_approval() {
+        let tools = tool_registry();
+        let remove = find_tool(&tools, "remove_project");
+        assert_eq!(remove["inputSchema"]["required"], json!(["projectId"]));
+        assert!(remove["description"]
+            .as_str()
+            .unwrap()
+            .contains("files on disk are kept"));
+        assert!(RATE_LIMITED_TOOLS.contains(&"remove_project"));
+        assert!(crate::agents::mcp::APPROVAL_TOOLS.contains(&"remove_project"));
     }
 
     #[test]

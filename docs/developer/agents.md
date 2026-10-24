@@ -290,7 +290,8 @@ a line opens the conversation dialog (`AgentMessageLink.tsx`). For
 task created after the send (`findRequestTask` in `agent-messages.ts`).
 
 **Approval gate:** `delete_worktree`, `permanently_delete_worktree`,
-`push_worktree`, `merge_pull_request` and `create_pull_request` called from an
+`push_worktree`, `merge_pull_request`, `create_pull_request` and
+`remove_project` called from an
 agent session are stored in `approvals` and not run. When the user approves,
 `jean_mcp_core::run_approved_tool` runs the same call, and the result goes to
 the agent as an event. The gate is in `call_tool`, so it works for every

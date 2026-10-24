@@ -1030,6 +1030,10 @@ pub async fn remove_project(app: AppHandle, project_id: String) -> Result<(), St
 
     let mut data = load_projects_data(&app)?;
 
+    if data.find_project(&project_id).is_some_and(|p| p.is_folder) {
+        return Err("Cannot remove: this is a folder, not a project.".to_string());
+    }
+
     // Check if project has active (non-archived) worktrees
     let has_active_worktrees = data
         .worktrees
@@ -15927,6 +15931,48 @@ mod tests {
         assert!(is_project_avatar_file(&first, "project-1"));
         assert!(is_project_avatar_file("project-1.png", "project-1"));
         assert!(!is_project_avatar_file(&first, "project-10"));
+    }
+
+    #[tokio::test]
+    async fn remove_project_keeps_files_on_disk_and_rejects_folders() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = temp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::write(repo.join("keep.txt"), "keep").unwrap();
+        let app = crate::RuntimeContext::new(temp.path().join("data"), temp.path().into()).unwrap();
+        let data: ProjectsData = serde_json::from_value(serde_json::json!({
+            "projects": [
+                {"id": "folder", "name": "Folder", "path": "", "default_branch": "",
+                 "added_at": 0, "is_folder": true},
+                {"id": "project", "name": "Test", "path": repo, "default_branch": "main",
+                 "added_at": 0, "parent_id": "folder"}
+            ],
+            "worktrees": []
+        }))
+        .unwrap();
+        save_projects_data(&app, &data).unwrap();
+
+        let err = remove_project(app.clone(), "folder".into())
+            .await
+            .unwrap_err();
+        assert!(err.contains("folder"));
+        assert!(load_projects_data(&app)
+            .unwrap()
+            .find_project("folder")
+            .is_some());
+
+        crate::http_server::dispatch::dispatch_command(
+            &app,
+            "remove_project",
+            serde_json::json!({"projectId": "project"}),
+        )
+        .await
+        .unwrap();
+        assert!(load_projects_data(&app)
+            .unwrap()
+            .find_project("project")
+            .is_none());
+        assert!(repo.join("keep.txt").exists());
     }
 
     #[tokio::test]

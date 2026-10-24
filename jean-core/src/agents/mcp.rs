@@ -14,6 +14,7 @@ pub const APPROVAL_TOOLS: &[&str] = &[
     "push_worktree",
     "merge_pull_request",
     "create_pull_request",
+    "remove_project",
 ];
 
 const AGENT_TOOLS: &[&str] = &[

@@ -71,6 +71,7 @@ export function describeApproval(approval: AgentApproval): string {
   const target =
     (args.worktreeId as string | undefined) ??
     (args.worktreePath as string | undefined) ??
+    (args.projectId as string | undefined) ??
     ''
   const labels: Record<string, string> = {
     delete_worktree: 'Delete worktree',
@@ -78,6 +79,7 @@ export function describeApproval(approval: AgentApproval): string {
     push_worktree: 'Push worktree',
     merge_pull_request: 'Merge pull request of worktree',
     create_pull_request: 'Create pull request for worktree',
+    remove_project: 'Remove project',
   }
   return `${labels[approval.tool] ?? approval.tool} ${target}`.trim()
 }
