@@ -9,6 +9,9 @@ import {
 
 const invokeMock = vi.hoisted(() => vi.fn())
 const listenMock = vi.hoisted(() => vi.fn())
+const resolveMock = vi.hoisted(() =>
+  vi.fn(async (url: string) => ({ url, note: null as string | null }))
+)
 
 vi.mock('@/lib/transport', () => ({
   invoke: invokeMock,
@@ -19,11 +22,41 @@ vi.mock('@/lib/environment', () => ({
   isNativeApp: () => true,
 }))
 
+vi.mock('@/lib/remote-preview', () => ({
+  resolveEmbeddedPreviewUrl: resolveMock,
+  watchRemotePreviewForwards: () => () => undefined,
+  isRemotePreviewError: (error: unknown) =>
+    error instanceof Error &&
+    (error as { remotePreview?: boolean }).remotePreview === true,
+  remotePreviewLoadError: (url: string, note?: string | null) =>
+    note ? `Could not load ${url}. ${note}` : null,
+}))
+
 describe('useBrowserTabActions grab integration', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     document.documentElement.className = ''
     invokeMock.mockResolvedValue(undefined)
+    resolveMock.mockReset()
+    resolveMock.mockImplementation(async (url: string) => ({
+      url,
+      note: null,
+    }))
+    useBrowserStore.setState({
+      tabs: {
+        wt: [
+          {
+            id: 'tab-1',
+            worktreeId: 'wt',
+            url: 'about:blank',
+            title: '',
+            isLoading: false,
+            error: null,
+          },
+        ],
+      },
+      activeTabIds: { wt: 'tab-1' },
+    })
   })
 
   it('invokes the native React Grab injection command for the active tab', async () => {
@@ -36,6 +69,41 @@ describe('useBrowserTabActions grab integration', () => {
       tabId: 'tab-1',
       theme: 'dark',
     })
+  })
+
+  it('navigates the webview to the remote preview URL', async () => {
+    resolveMock.mockResolvedValueOnce({
+      url: 'http://127.0.0.1:5173/app',
+      note: 'Remote preview via SSH forward: build.example port 5173 → 127.0.0.1:5173.',
+    })
+    const { result } = renderHook(() => useBrowserTabActions('tab-1'))
+
+    await result.current.navigate('http://localhost:5173/app')
+
+    expect(invokeMock).toHaveBeenCalledWith('browser_navigate', {
+      tabId: 'tab-1',
+      url: 'http://127.0.0.1:5173/app',
+    })
+    expect(useBrowserStore.getState().getTabs('wt')[0]?.previewNote).toContain(
+      'SSH forward'
+    )
+  })
+
+  it('shows the forward failure and does not open this computer', async () => {
+    const error = new Error(
+      'Port 3000 is already in use on this computer, so the remote preview forward could not start.'
+    )
+    Object.assign(error, { remotePreview: true })
+    resolveMock.mockRejectedValueOnce(error)
+    const { result } = renderHook(() => useBrowserTabActions('tab-1'))
+
+    await result.current.navigate('http://localhost:3000')
+
+    expect(invokeMock).not.toHaveBeenCalled()
+    expect(useBrowserStore.getState().getTabs('wt')[0]?.error).toContain(
+      'already in use'
+    )
+    expect(useBrowserStore.getState().getTabs('wt')[0]?.isLoading).toBe(false)
   })
 })
 
@@ -51,6 +119,7 @@ function resetBrowserStore(): void {
 
 describe('openBrowserTabFromNewWindow', () => {
   beforeEach(() => {
+    vi.clearAllMocks()
     resetBrowserStore()
   })
 
@@ -83,6 +152,23 @@ describe('openBrowserTabFromNewWindow', () => {
     expect(useBrowserStore.getState().modalOpen['worktree-1'] ?? false).toBe(
       false
     )
+  })
+
+  it('keeps a localhost popup url for the webview to preview-resolve', () => {
+    const sourceId = useBrowserStore
+      .getState()
+      .addTab('worktree-1', 'https://example.com')
+
+    const createdId = openBrowserTabFromNewWindow(
+      sourceId,
+      'http://localhost:3000/app'
+    )
+
+    const tabs = useBrowserStore.getState().getTabs('worktree-1')
+    expect(createdId).toBe(tabs[1]?.id)
+    expect(tabs[1]?.url).toBe('http://localhost:3000/app')
+    expect(resolveMock).not.toHaveBeenCalled()
+    expect(invokeMock).not.toHaveBeenCalled()
   })
 
   it('opens a blank tab for an empty new-window url', () => {

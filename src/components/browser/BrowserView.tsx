@@ -108,8 +108,10 @@ export const BrowserView = memo(function BrowserView({
               variant="outline"
               size="sm"
               onClick={() => {
+                const url = activeTab?.url
+                if (!activeTabId || !url) return
                 useBrowserStore.getState().setTabError(activeTabId, null)
-                void actions.reload()
+                void actions.navigate(url)
               }}
             >
               <RotateCw className="mr-1.5 h-3 w-3" />

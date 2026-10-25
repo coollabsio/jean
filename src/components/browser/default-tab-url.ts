@@ -121,6 +121,8 @@ export function resolvePortHost(
  * Prefers the first jean.json-configured port (`http://<host>:<port>`)
  * so the embedded browser auto-points at the worktree's dev server.
  * Falls back to about:blank when no port is configured.
+ * Remote desktop sessions rewrite loopback targets in
+ * `resolveEmbeddedPreviewUrl` when the webview opens.
  */
 export function resolvePortUrl(
   port: PortEntry,

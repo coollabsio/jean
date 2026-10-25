@@ -40,8 +40,27 @@ describe('BrowserToolbar grab control', () => {
   it('enables React Grab for the active tab when the Grab button is clicked', async () => {
     render(<BrowserToolbar worktreeId="worktree-1" />)
 
-    await userEvent.click(screen.getByRole('button', { name: 'Grab DOM element' }))
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Grab DOM element' })
+    )
 
     expect(actionsMock.enableGrab).toHaveBeenCalledTimes(1)
+  })
+
+  it('explains a remote preview forward in the toolbar', () => {
+    const tabId = useBrowserStore.getState().getTabs('worktree-1')[0]?.id
+    if (!tabId) {
+      throw new Error('expected a browser tab')
+    }
+    useBrowserStore.getState().updateTab(tabId, {
+      previewNote:
+        'Remote preview via SSH forward: build.example port 3000 → 127.0.0.1:3000.',
+    })
+
+    render(<BrowserToolbar worktreeId="worktree-1" />)
+
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Remote preview via SSH forward'
+    )
   })
 })

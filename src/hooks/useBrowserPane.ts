@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import { invoke, listen } from '@/lib/transport'
 import { isNativeApp } from '@/lib/environment'
+import {
+  isRemotePreviewError,
+  remotePreviewLoadError,
+  resolveEmbeddedPreviewUrl,
+  watchRemotePreviewForwards,
+} from '@/lib/remote-preview'
 import { isBlankTabUrl, useBrowserStore } from '@/store/browser-store'
 import type {
   BrowserClosedEvent,
@@ -18,8 +24,63 @@ import type {
 const LOAD_TIMEOUT_MS = 20_000
 const watchdogs = new Map<string, ReturnType<typeof setTimeout>>()
 
+export const BROWSER_ENSURE_WEBVIEW_EVENT = 'jean-browser-ensure-webview'
+
 const failureMessage = (url: string): string =>
   `Couldn't load ${url}. The site may be unreachable, the address may be wrong, or DNS lookup failed.`
+
+function errorText(error: unknown): string {
+  if (typeof error === 'string') return error
+  if (error instanceof Error && error.message) return error.message
+  return String(error)
+}
+
+export function failBrowserLoad(tabId: string, message: string | null): void {
+  clearWatchdog(tabId)
+  const store = useBrowserStore.getState()
+  store.setTabLoading(tabId, false)
+  store.setRequestedUrl(tabId, null)
+  if (message) store.setTabError(tabId, message)
+}
+
+async function commitPreview(
+  tabId: string,
+  url: string
+): Promise<string | null> {
+  try {
+    const preview = await resolveEmbeddedPreviewUrl(url)
+    useBrowserStore.getState().updateTab(tabId, { previewNote: preview.note })
+    return preview.url
+  } catch (error) {
+    const message = isRemotePreviewError(error)
+      ? error.message
+      : failureMessage(url)
+    failBrowserLoad(tabId, message)
+    useBrowserStore.getState().updateTab(tabId, { previewNote: null })
+    if (isRemotePreviewError(error)) {
+      console.warn(`[browser] remote preview failed for ${url}:`, error.message)
+    } else {
+      console.error(`[browser] preview ${url} failed:`, error)
+    }
+    return null
+  }
+}
+
+async function openWebview(tabId: string, url: string): Promise<void> {
+  try {
+    await invoke('browser_navigate', { tabId, url })
+  } catch (error) {
+    if (errorText(error).toLowerCase().includes('not found')) {
+      window.dispatchEvent(
+        new CustomEvent(BROWSER_ENSURE_WEBVIEW_EVENT, {
+          detail: { tabId, url },
+        })
+      )
+      return
+    }
+    throw error
+  }
+}
 
 const timeoutMessage = (url: string): string =>
   `Loading ${url} timed out after 20s. The server may be slow or unreachable.`
@@ -83,8 +144,12 @@ function armWatchdog(tabId: string, requestedUrl: string): void {
     tabId,
     setTimeout(() => {
       const s = useBrowserStore.getState()
+      const tab = findTab(s, tabId)
+      const message =
+        remotePreviewLoadError(requestedUrl, tab?.previewNote) ??
+        timeoutMessage(requestedUrl)
       s.setTabLoading(tabId, false)
-      s.setTabError(tabId, timeoutMessage(requestedUrl))
+      s.setTabError(tabId, message)
       s.setRequestedUrl(tabId, null)
       watchdogs.delete(tabId)
     }, LOAD_TIMEOUT_MS)
@@ -138,6 +203,7 @@ export function useBrowserEvents(): void {
   useEffect(() => {
     if (!isNativeApp()) return
 
+    const stopPreviewWatch = watchRemotePreviewForwards()
     const unlistenPromises: Promise<() => void>[] = []
 
     unlistenPromises.push(
@@ -178,7 +244,11 @@ export function useBrowserEvents(): void {
           // (Real provisional-load failures don't fire Finished at all;
           // the watchdog catches those.)
           if (isBlankTabUrl(loadedUrl)) {
-            s.setTabError(tabId, failureMessage(requestedUrl))
+            s.setTabError(
+              tabId,
+              remotePreviewLoadError(requestedUrl, tab.previewNote) ??
+                failureMessage(requestedUrl)
+            )
             s.setRequestedUrl(tabId, null)
             return
           }
@@ -252,6 +322,7 @@ export function useBrowserEvents(): void {
     )
 
     return () => {
+      stopPreviewWatch()
       for (const t of watchdogs.values()) clearTimeout(t)
       watchdogs.clear()
       for (const p of unlistenPromises) {
@@ -312,21 +383,25 @@ export function useBrowserTabActions(tabId: string | null): BrowserActions {
     async (url: string) => {
       if (!tabId || !isNativeApp()) return
       const s = useBrowserStore.getState()
-      // Optimistic UI: URL bar shows what user typed, even if load fails.
+      // Optimistic UI: URL bar shows what the user asked for while the
+      // remote preview forward is negotiated.
       s.setTabUrl(tabId, url)
-      s.setRequestedUrl(tabId, url)
       s.setTabError(tabId, null)
       s.setTabLoading(tabId, true)
-      armWatchdog(tabId, url)
+      const prepared = await commitPreview(tabId, url)
+      if (!prepared) return
+      s.setTabUrl(tabId, prepared)
+      s.setRequestedUrl(tabId, prepared)
+      armWatchdog(tabId, prepared)
       try {
-        await invoke('browser_navigate', { tabId, url })
+        await openWebview(tabId, prepared)
       } catch (err) {
-        clearWatchdog(tabId)
-        const s2 = useBrowserStore.getState()
-        s2.setTabLoading(tabId, false)
-        s2.setTabError(tabId, failureMessage(url))
-        s2.setRequestedUrl(tabId, null)
-        console.error(`[browser] navigate(${url}) failed:`, err)
+        const note = findTab(useBrowserStore.getState(), tabId)?.previewNote
+        failBrowserLoad(
+          tabId,
+          remotePreviewLoadError(prepared, note) ?? failureMessage(prepared)
+        )
+        console.error(`[browser] navigate(${prepared}) failed:`, err)
       }
     },
     [tabId]
@@ -355,22 +430,33 @@ export function useBrowserTabActions(tabId: string | null): BrowserActions {
     const s = useBrowserStore.getState()
     const tab = findTab(s, tabId)
     const currentUrl = tab?.url ?? ''
-    if (!isBlankTabUrl(currentUrl)) {
-      s.setRequestedUrl(tabId, currentUrl)
-      s.setTabError(tabId, null)
-      s.setTabLoading(tabId, true)
-      armWatchdog(tabId, currentUrl)
-    }
-    try {
-      await invoke('browser_reload', { tabId })
-    } catch (err) {
-      clearWatchdog(tabId)
-      const s2 = useBrowserStore.getState()
-      s2.setTabLoading(tabId, false)
-      if (!isBlankTabUrl(currentUrl)) {
-        s2.setTabError(tabId, failureMessage(currentUrl))
+    if (isBlankTabUrl(currentUrl)) {
+      try {
+        await invoke('browser_reload', { tabId })
+      } catch (err) {
+        console.error('[browser] reload failed:', err)
       }
-      s2.setRequestedUrl(tabId, null)
+      return
+    }
+    s.setTabError(tabId, null)
+    s.setTabLoading(tabId, true)
+    const prepared = await commitPreview(tabId, currentUrl)
+    if (!prepared) return
+    s.setRequestedUrl(tabId, prepared)
+    armWatchdog(tabId, prepared)
+    try {
+      if (prepared !== currentUrl) {
+        s.setTabUrl(tabId, prepared)
+        await openWebview(tabId, prepared)
+      } else {
+        await invoke('browser_reload', { tabId })
+      }
+    } catch (err) {
+      const note = findTab(useBrowserStore.getState(), tabId)?.previewNote
+      failBrowserLoad(
+        tabId,
+        remotePreviewLoadError(prepared, note) ?? failureMessage(prepared)
+      )
       console.error('[browser] reload failed:', err)
     }
   }, [tabId])
@@ -431,16 +517,34 @@ export const browserBackend = {
     tabId: string,
     url: string,
     bounds: { x: number; y: number; width: number; height: number }
-  ): Promise<void> {
-    if (!isNativeApp()) return
-    await invoke<string>('browser_create', {
-      tabId,
-      url,
-      x: bounds.x,
-      y: bounds.y,
-      width: bounds.width,
-      height: bounds.height,
-    })
+  ): Promise<boolean> {
+    if (!isNativeApp()) return false
+    const prepared = await commitPreview(tabId, url)
+    if (!prepared) return false
+    const store = useBrowserStore.getState()
+    store.setTabUrl(tabId, prepared)
+    store.setRequestedUrl(tabId, prepared)
+    store.setTabLoading(tabId, true)
+    armWatchdog(tabId, prepared)
+    try {
+      await invoke<string>('browser_create', {
+        tabId,
+        url: prepared,
+        x: bounds.x,
+        y: bounds.y,
+        width: bounds.width,
+        height: bounds.height,
+      })
+      return true
+    } catch (error) {
+      const note = findTab(useBrowserStore.getState(), tabId)?.previewNote
+      failBrowserLoad(
+        tabId,
+        remotePreviewLoadError(prepared, note) ?? failureMessage(prepared)
+      )
+      console.error(`[browser] create(${prepared}) failed:`, error)
+      return false
+    }
   },
   async setBounds(
     tabId: string,

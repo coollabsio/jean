@@ -17,6 +17,8 @@ export interface BrowserTab {
   requestedUrl?: string | null
   /** Last URL that successfully reached browser:loaded. Used to detect WKWebView fallback-to-previous on failed nav. */
   lastLoadedUrl?: string | null
+  /** Explains a remote-host preview rewrite. Cleared for ordinary URLs. */
+  previewNote?: string | null
 }
 
 // Rust → React event payloads (camelCase via serde rename_all)

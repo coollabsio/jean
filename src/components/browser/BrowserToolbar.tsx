@@ -289,6 +289,14 @@ export const BrowserToolbar = memo(function BrowserToolbar({
           </Button>
         )}
       </div>
+      {activeTab?.previewNote && (
+        <p
+          className="px-1 text-xs leading-snug text-muted-foreground"
+          role="status"
+        >
+          {activeTab.previewNote}
+        </p>
+      )}
       <div className="flex items-center gap-1 overflow-x-auto">
         {tabs.map(tab => (
           <TabPill
