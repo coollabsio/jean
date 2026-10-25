@@ -5728,16 +5728,18 @@ pub async fn send_chat_message(
             .unwrap_or(false);
     let has_resume_worthy_payload = has_assistant_payload || has_persisted_visible_codex_artifacts;
 
-    // Handle error_emitted: backend emitted chat:error during execution (e.g., Codex usage limit).
-    // With no output, treat like undo_send so the user message doesn't persist in history.
+    // Handle error_emitted: backend emitted chat:error during execution (e.g., Claude usage limit).
+    // With no output, keep the user request as a failed attempt so a later backend
+    // switch can include it. An explicit user cancel still falls through to
+    // undo-send and stays out of history.
     // After partial output (e.g. Claude API error / error_max_turns mid-turn), keep the
     // partial reply and resume id by finishing the run as cancelled-with-content below.
     if unified_response.error_emitted && has_assistant_payload {
         unified_response.cancelled = true;
     }
-    if unified_response.error_emitted && !has_assistant_payload {
-        if let Err(e) = run_log_writer.cancel(None, None) {
-            log::warn!("Failed to cancel run log after error: {e}");
+    if unified_response.error_emitted && !has_assistant_payload && !unified_response.cancelled {
+        if let Err(e) = run_log_writer.reject_without_output() {
+            log::warn!("Failed to record provider rejection: {e}");
         }
         log::info!("[SendChat] EXIT session={session_id} reason=error_emitted");
         trigger_backend_queue_drain(

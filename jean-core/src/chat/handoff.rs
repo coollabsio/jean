@@ -489,6 +489,7 @@ mod tests {
                 status: RunStatus::Completed,
                 assistant_message_id: Some("assistant-1".to_string()),
                 cancelled: false,
+                provider_rejected: false,
                 recovered: false,
                 claude_session_id: Some("claude-1".to_string()),
                 pid: None,
@@ -518,6 +519,7 @@ mod tests {
                 status: RunStatus::Completed,
                 assistant_message_id: Some("assistant-2".to_string()),
                 cancelled: false,
+                provider_rejected: false,
                 recovered: false,
                 claude_session_id: None,
                 pid: None,
@@ -594,6 +596,7 @@ mod tests {
             status: RunStatus::Completed,
             assistant_message_id: Some("assistant-1".to_string()),
             cancelled: false,
+            provider_rejected: false,
             recovered: false,
             claude_session_id: Some("claude-session".to_string()),
             pid: None,
@@ -657,6 +660,7 @@ mod tests {
             status: RunStatus::Completed,
             assistant_message_id: None,
             cancelled: false,
+            provider_rejected: false,
             recovered: false,
             claude_session_id: Some("claude-1".to_string()),
             pid: None,
@@ -686,6 +690,7 @@ mod tests {
             status: RunStatus::Completed,
             assistant_message_id: None,
             cancelled: false,
+            provider_rejected: false,
             recovered: false,
             claude_session_id: None,
             pid: None,
@@ -705,5 +710,107 @@ mod tests {
             latest_completed_custom_profile(&metadata),
             Some("OpenRouter".to_string())
         );
+    }
+
+    fn run_entry(
+        run_id: &str,
+        user_message: &str,
+        backend: Backend,
+        status: RunStatus,
+        provider_rejected: bool,
+    ) -> RunEntry {
+        let cancelled = status == RunStatus::Cancelled;
+        RunEntry {
+            run_id: run_id.to_string(),
+            user_message_id: format!("user-{run_id}"),
+            user_message: user_message.to_string(),
+            model: Some("claude-sonnet-4-6".to_string()),
+            execution_mode: None,
+            thinking_level: None,
+            effort_level: None,
+            backend: Some(backend),
+            custom_profile_name: None,
+            started_at: 1,
+            ended_at: Some(2),
+            status,
+            assistant_message_id: None,
+            cancelled,
+            provider_rejected,
+            recovered: false,
+            claude_session_id: None,
+            pid: None,
+            usage: None,
+            codex_thread_id: None,
+            codex_turn_id: None,
+            cursor_chat_id: None,
+            grok_session_id: None,
+            kimi_session_id: None,
+            devin_session_id: None,
+            antigravity_session_id: None,
+            muse_session_id: None,
+            checkpoint_id: None,
+        }
+    }
+
+    #[test]
+    fn api_origin_rejection_is_included_once_on_backend_switch() {
+        // MCP/API sessions have no composer to restore into. A provider rejection
+        // before any assistant output must still travel with the next backend,
+        // while an explicit undo-send from the same session must stay omitted.
+        let original = "Investigate why the checkout integration test fails.";
+        let withdrawn = "withdrawn draft that the user undid";
+        let continuation = "try now";
+
+        let temp = tempfile::tempdir().unwrap();
+        let app =
+            tauri::AppHandle::new(temp.path().to_path_buf(), temp.path().to_path_buf()).unwrap();
+        let mut metadata = SessionMetadata::new(
+            "api-session".to_string(),
+            "worktree-1".to_string(),
+            "MCP session".to_string(),
+            0,
+        );
+        metadata.backend = Backend::Claude;
+        metadata.runs.push(run_entry(
+            "run-undo",
+            withdrawn,
+            Backend::Claude,
+            RunStatus::Cancelled,
+            false,
+        ));
+        metadata.runs.push(run_entry(
+            "run-rejected",
+            original,
+            Backend::Claude,
+            RunStatus::Cancelled,
+            true,
+        ));
+        crate::chat::storage::save_metadata(&app, &metadata).unwrap();
+        let saved = crate::chat::storage::load_metadata(&app, "api-session")
+            .unwrap()
+            .unwrap();
+
+        assert!(saved.runs[1].provider_rejected);
+        assert!(!saved.runs[0].is_renderable_in_chat_history());
+        assert!(saved.runs[1].is_renderable_in_chat_history());
+        assert!(!saved.runs[1].renders_assistant_message());
+        assert_eq!(latest_completed_backend(&saved), Some(Backend::Claude));
+        assert!(should_inject_handoff(
+            Some(&Backend::Claude),
+            &Backend::Codex
+        ));
+
+        let history = build_handoff_history_text(&app, "api-session", Some(&saved));
+        let prompt = build_handoff_prompt(
+            &crate::default_provider_switch_handoff_prompt(),
+            &Backend::Claude,
+            &Backend::Codex,
+            &history,
+        );
+        let assembled = prepend_hidden_handoff(continuation, &prompt);
+
+        assert_eq!(assembled.matches(original).count(), 1, "{assembled}");
+        assert!(!assembled.contains(withdrawn), "{assembled}");
+        assert!(assembled.ends_with(continuation));
     }
 }
