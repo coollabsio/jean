@@ -3180,17 +3180,99 @@ fn sub_agent_activity_tool(item: &serde_json::Value) -> Option<(&'static str, se
         thread_id.to_string(),
         serde_json::json!({ "status": agent_status, "message": null }),
     );
-    let input = serde_json::json!({
+    // `prompt` stays the agent path so older readers keep working. `agent_path`
+    // is the explicit field; the UI names the agent from its last segment
+    // (`/root/reviewer` → reviewer) instead of showing the raw path.
+    let mut input = serde_json::json!({
         "id": item.get("id").cloned().unwrap_or(serde_json::Value::Null),
         "type": "sub_agent_activity",
         "kind": kind,
         "prompt": agent_path,
+        "agent_path": agent_path,
         "receiver_thread_ids": [thread_id],
         "agents_states": agents_states,
         "status": "completed",
     });
+    if let Some(obj) = input.as_object_mut() {
+        if let Some(model) = item
+            .get("model")
+            .filter(|value| value.as_str().is_some_and(|model| !model.trim().is_empty()))
+        {
+            obj.insert("model".to_string(), model.clone());
+        }
+        if let Some(effort) = item
+            .get("reasoning_effort")
+            .or_else(|| item.get("reasoningEffort"))
+            .filter(|value| !value.is_null())
+        {
+            obj.insert("reasoning_effort".to_string(), effort.clone());
+        }
+    }
 
     Some((tool_name, input))
+}
+
+fn codex_agent_status_is_unsettled(status: &str) -> bool {
+    matches!(status, "" | "running" | "pendingInit" | "pending_init")
+}
+
+/// Codex `subAgentActivity` has no completed kind, so a finished parent run is
+/// the terminal signal. Leave Running/Resumable logs alone — those agents may
+/// still be live. Cancelled and crashed runs become interrupted so a later
+/// prompt cannot paint them as still loading.
+fn settle_finished_codex_agents(tool_calls: &mut [ToolCall], run: &super::types::RunEntry) {
+    use super::types::RunStatus;
+
+    let terminal = match run.status {
+        RunStatus::Running | RunStatus::Resumable => return,
+        RunStatus::Cancelled | RunStatus::Crashed => "interrupted",
+        RunStatus::Completed if run.cancelled => "interrupted",
+        RunStatus::Completed => "completed",
+    };
+
+    for tool in tool_calls.iter_mut() {
+        let Some(input) = tool.input.as_object_mut() else {
+            continue;
+        };
+        let states_key = if input.contains_key("agents_states") {
+            "agents_states"
+        } else if input.contains_key("agentsStates") {
+            "agentsStates"
+        } else {
+            continue;
+        };
+        let Some(states) = input.get_mut(states_key) else {
+            continue;
+        };
+        let Some(states) = states.as_object_mut() else {
+            continue;
+        };
+        for state in states.values_mut() {
+            let Some(state) = state.as_object_mut() else {
+                continue;
+            };
+            let status = state
+                .get("status")
+                .and_then(|value| value.as_str())
+                .unwrap_or("");
+            if !codex_agent_status_is_unsettled(status) {
+                continue;
+            }
+            state.insert(
+                "status".to_string(),
+                serde_json::Value::String(terminal.to_string()),
+            );
+            if terminal == "interrupted" {
+                let message = state.get("message").and_then(|value| value.as_str());
+                if message.is_none() || message.is_some_and(str::is_empty) {
+                    state.insert(
+                        "message".to_string(),
+                        serde_json::json!("Interrupted before completion"),
+                    );
+                }
+            }
+        }
+    }
 }
 
 /// Whether Codex command/permission approvals should be auto-accepted for this session.
@@ -5150,6 +5232,8 @@ pub fn parse_codex_run_to_message(
         enrich_thin_codex_plan(&mut tool_calls, &mut content_blocks, &content);
     }
 
+    settle_finished_codex_agents(&mut tool_calls, run);
+
     Ok(ChatMessage {
         id: run
             .assistant_message_id
@@ -5911,7 +5995,69 @@ mod tests {
 
         assert_eq!(agent.input["receiver_thread_ids"][0], "agent-1");
         assert_eq!(agent.input["prompt"], "/root/reviewer");
+        assert_eq!(agent.input["agent_path"], "/root/reviewer");
+        // The parent run completed, so a still-running subagent is settled.
+        assert_eq!(
+            agent.input["agents_states"]["agent-1"]["status"],
+            "completed"
+        );
+    }
+
+    #[test]
+    fn parse_codex_run_keeps_subagents_running_while_the_parent_run_is_live() {
+        let mut run = test_run_entry();
+        run.status = crate::chat::types::RunStatus::Running;
+        let lines = vec![
+            r#"{"type":"item.completed","item":{"id":"call-1","type":"subAgentActivity","kind":"started","agentThreadId":"agent-1","agentPath":"/root/reviewer","model":"gpt-5.4","reasoningEffort":"high"}}"#.to_string(),
+        ];
+
+        let message = parse_codex_run_to_message(&lines, &run).expect("message");
+        let agent = message
+            .tool_calls
+            .iter()
+            .find(|tool| tool.name == "SpawnAgent")
+            .expect("spawned agent tool");
+
+        assert_eq!(agent.input["model"], "gpt-5.4");
+        assert_eq!(agent.input["reasoning_effort"], "high");
         assert_eq!(agent.input["agents_states"]["agent-1"]["status"], "running");
+    }
+
+    #[test]
+    fn parse_codex_run_interrupts_unfinished_subagents_when_cancelled() {
+        let mut run = test_run_entry();
+        run.status = crate::chat::types::RunStatus::Cancelled;
+        run.cancelled = true;
+        let lines = vec![
+            r#"{"type":"item.completed","item":{"id":"call-1","type":"subAgentActivity","kind":"started","agentThreadId":"agent-1","agentPath":"/root/reviewer"}}"#.to_string(),
+            r#"{"type":"item.started","item":{"id":"call-2","type":"collabAgentToolCall","tool":"spawnAgent","status":"completed","receiverThreadIds":["agent-2"],"prompt":"Keep this failure","agentsStates":{"agent-2":{"status":"errored","message":"boom"}}}}"#.to_string(),
+        ];
+
+        let message = parse_codex_run_to_message(&lines, &run).expect("message");
+        let started = message
+            .tool_calls
+            .iter()
+            .find(|tool| tool.id == "call-1")
+            .expect("started agent");
+        let failed = message
+            .tool_calls
+            .iter()
+            .find(|tool| tool.id == "call-2")
+            .expect("failed agent");
+
+        assert_eq!(
+            started.input["agents_states"]["agent-1"]["status"],
+            "interrupted"
+        );
+        assert_eq!(
+            started.input["agents_states"]["agent-1"]["message"],
+            "Interrupted before completion"
+        );
+        assert_eq!(
+            failed.input["agents_states"]["agent-2"]["status"],
+            "errored"
+        );
+        assert_eq!(failed.input["agents_states"]["agent-2"]["message"], "boom");
     }
 
     #[test]

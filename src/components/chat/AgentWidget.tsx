@@ -9,6 +9,7 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { TaskCallDetails } from './ToolCallInline'
+import { formatSubagentModel } from './hooks/useActiveTodosAndAgents'
 import { formatTokens } from '@/lib/session-debug'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useVisibilityAwareTicker } from '@/hooks/useVisibilityAwareTicker'
@@ -138,6 +139,7 @@ function AgentMeta({ agent, compact }: { agent: SubAgent; compact: boolean }) {
     ? (agent.durationMs ?? clientMs)
     : Math.max(clientMs ?? 0, agent.durationMs ?? 0) || undefined
   const meta = [
+    agent.model ? formatSubagentModel(agent.model) : null,
     !compact && agent.toolCount
       ? `${agent.toolCount} tool${agent.toolCount === 1 ? '' : 's'}`
       : null,
@@ -207,7 +209,9 @@ const AgentItem = memo(function AgentItem({
                 >
                   {agent.label}
                 </span>
-                <span className="shrink-0 text-muted-foreground/60">›</span>
+                {agent.prompt ? (
+                  <span className="shrink-0 text-muted-foreground/60">›</span>
+                ) : null}
               </>
             )}
             <span className="truncate text-muted-foreground">

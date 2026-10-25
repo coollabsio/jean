@@ -103,6 +103,95 @@ function truncateAgentPrompt(prompt: string): string {
   return prompt.length > 80 ? prompt.substring(0, 80) + '...' : prompt
 }
 
+/** Codex agent paths look like `/root/reviewer` or `/root/reviewer/helper`. */
+export function isCodexAgentPath(value: string): boolean {
+  const trimmed = value.trim()
+  if (!trimmed.startsWith('/')) return false
+  if (/\s/.test(trimmed)) return false
+  return trimmed.split('/').filter(Boolean).length >= 2
+}
+
+/** `/root/reviewer/helper` → `reviewer / helper`. */
+export function codexAgentCodename(path: string): string {
+  const parts = path.trim().split('/').filter(Boolean)
+  const named = parts[0] === 'root' ? parts.slice(1) : parts
+  if (named.length === 0) return path.trim()
+  return named.join(' / ')
+}
+
+function codexAgentPath(input: Record<string, unknown>): string | undefined {
+  const explicit = stringField(input, 'agent_path', 'agentPath')
+  if (explicit && isCodexAgentPath(explicit)) return explicit
+  const prompt = stringField(input, 'prompt', 'prompt')
+  if (prompt && isCodexAgentPath(prompt)) return prompt
+  return undefined
+}
+
+function codexTaskPrompt(input: Record<string, unknown>): string | undefined {
+  const prompt = stringField(input, 'prompt', 'prompt')
+  if (!prompt || isCodexAgentPath(prompt)) return undefined
+  return prompt
+}
+
+function codexModel(input: Record<string, unknown>): string | undefined {
+  const model = stringField(input, 'model', 'model')?.trim()
+  return model || undefined
+}
+
+/**
+ * One-line Codex subagent label for tool rows and the compact ticker.
+ * Uses the codename (not `/root/<codename>`) and the model when Codex sent one.
+ */
+export function codexSubagentDetail(
+  input: Record<string, unknown>
+): string | undefined {
+  const path = codexAgentPath(input)
+  const task = codexTaskPrompt(input)
+  const name = path ? codexAgentCodename(path) : undefined
+  const model = codexModel(input)
+  const modelLabel = model ? formatSubagentModel(model) : undefined
+  const primary = task ?? name
+  if (primary && modelLabel) {
+    return `${truncateAgentPrompt(primary)} · ${modelLabel}`
+  }
+  if (primary) return truncateAgentPrompt(primary)
+  return modelLabel ?? stringField(input, 'agent_id', 'agentId')
+}
+
+function describeCodexAgent(
+  existing: SubAgent | undefined,
+  input: Record<string, unknown>,
+  threadId: string
+): Pick<SubAgent, 'prompt' | 'fullPrompt' | 'label' | 'model'> {
+  const path = codexAgentPath(input)
+  const task = codexTaskPrompt(input)
+  const codename = path ? codexAgentCodename(path) : undefined
+  const previousTask =
+    existing?.fullPrompt && !isCodexAgentPath(existing.fullPrompt)
+      ? existing.fullPrompt
+      : undefined
+  const description = task ?? previousTask
+  const name =
+    codename ??
+    (existing?.label && !isCodexAgentPath(existing.label)
+      ? existing.label
+      : undefined)
+  const previousPrompt =
+    existing?.prompt &&
+    existing.prompt !== existing.id &&
+    !isCodexAgentPath(existing.prompt)
+      ? existing.prompt
+      : undefined
+  const prompt = description || name || previousPrompt || threadId
+
+  return {
+    label: description && name ? name : undefined,
+    prompt: truncateAgentPrompt(prompt),
+    fullPrompt: description,
+    model: codexModel(input) ?? existing?.model,
+  }
+}
+
 export function extractCodexAgents(
   toolCalls: ToolCall[],
   isSending: boolean,
@@ -135,13 +224,16 @@ export function extractCodexAgents(
     }
 
     if (tc.name === 'SpawnAgent') {
-      const prompt = stringField(input, 'prompt', 'prompt') ?? ''
       const threadId = receiverThreadIds[0] ?? tc.id
       const state = agentsStates[threadId]
+      const described = describeCodexAgent(
+        agents.get(threadId),
+        input,
+        threadId
+      )
       agents.set(threadId, {
         id: threadId,
-        prompt: truncateAgentPrompt(prompt),
-        fullPrompt: prompt,
+        ...described,
         status: normalizeCodexAgentStatus(state?.status, toolCallStatus),
         message: typeof state?.message === 'string' ? state.message : undefined,
       })
@@ -159,10 +251,11 @@ export function extractCodexAgents(
 
     for (const [threadId, state] of Object.entries(agentsStates)) {
       const existing = agents.get(threadId)
+      const described = describeCodexAgent(existing, input, threadId)
       agents.set(threadId, {
         ...existing,
+        ...described,
         id: existing?.id ?? threadId,
-        prompt: existing?.prompt ?? threadId,
         status: normalizeCodexAgentStatus(state.status, toolCallStatus),
         message:
           typeof state.message === 'string' ? state.message : existing?.message,
@@ -252,11 +345,80 @@ export function extractClaudeAgents(
   return agents
 }
 
+function mergeSubagent(prev: SubAgent, next: SubAgent): SubAgent {
+  const nextPromptIsWeak =
+    !next.prompt || next.prompt === next.id || isCodexAgentPath(next.prompt)
+  const prevPromptIsReal =
+    !!prev.prompt && prev.prompt !== prev.id && !isCodexAgentPath(prev.prompt)
+  const toolCount = Math.max(prev.toolCount ?? 0, next.toolCount ?? 0)
+  return {
+    ...prev,
+    ...next,
+    label:
+      next.label ??
+      prev.label ??
+      (!next.fullPrompt &&
+      prev.fullPrompt &&
+      next.prompt &&
+      next.prompt !== next.id &&
+      next.prompt !== prev.prompt
+        ? next.prompt
+        : undefined),
+    model: next.model ?? prev.model,
+    // A later path-only update (`/root/reviewer` → reviewer) must not replace
+    // the task the agent was actually given.
+    prompt: next.fullPrompt
+      ? next.prompt
+      : prev.fullPrompt
+        ? prev.prompt
+        : nextPromptIsWeak && prevPromptIsReal
+          ? prev.prompt
+          : next.prompt,
+    fullPrompt: next.fullPrompt ?? prev.fullPrompt,
+    message: next.message ?? prev.message,
+    toolCount: toolCount || undefined,
+    tokens: next.tokens ?? prev.tokens,
+    durationMs: next.durationMs ?? prev.durationMs,
+    report: next.report ?? prev.report,
+    toolCalls:
+      next.toolCalls && next.toolCalls.length > 0
+        ? next.toolCalls
+        : prev.toolCalls,
+    status: next.status,
+  }
+}
+
+function mergeSubagents(settled: SubAgent[], live: SubAgent[]): SubAgent[] {
+  const byId = new Map<string, SubAgent>()
+  for (const agent of settled) {
+    const prev = byId.get(agent.id)
+    byId.set(agent.id, prev ? mergeSubagent(prev, agent) : agent)
+  }
+  for (const agent of live) {
+    const prev = byId.get(agent.id)
+    byId.set(agent.id, prev ? mergeSubagent(prev, agent) : agent)
+  }
+  return Array.from(byId.values())
+}
+
+function agentsFromToolCalls(
+  toolCalls: ToolCall[],
+  isSending: boolean,
+  parentTurnCancelled: boolean
+): SubAgent[] {
+  return [
+    ...extractCodexAgents(toolCalls, isSending, parentTurnCancelled),
+    ...extractClaudeAgents(toolCalls, isSending, parentTurnCancelled),
+  ]
+}
+
 interface UseActiveTodosAndAgentsParams {
   activeSessionId: string | null | undefined
   isSending: boolean
   currentToolCalls: ToolCall[]
   lastAssistantMessage: ChatMessage | undefined
+  /** Full session transcript. Earlier turns stay visible with settled status. */
+  messages?: ChatMessage[]
 }
 
 /**
@@ -268,6 +430,7 @@ export function useActiveTodosAndAgents({
   isSending,
   currentToolCalls,
   lastAssistantMessage,
+  messages,
 }: UseActiveTodosAndAgentsParams) {
   // Track which message's todos were dismissed
   const [dismissedTodoMessageId, setDismissedTodoMessageId] = useState<
@@ -334,22 +497,43 @@ export function useActiveTodosAndAgents({
     null
   )
 
-  // Get active agents from Codex collab tool calls and Claude Task/Agent calls
+  // Finished turns settle here. A new prompt must not replay their persisted
+  // "running" state as a spinner, and cancel must not leave them loading.
+  const settledAgents = useMemo(() => {
+    if (!activeSessionId) {
+      return { agents: [] as SubAgent[], toolIds: new Set<string>() }
+    }
+
+    const history = messages
+      ? messages.filter(message => message.role === 'assistant')
+      : lastAssistantMessage
+        ? [lastAssistantMessage]
+        : []
+    const toolIds = new Set<string>()
+    const settled: SubAgent[] = []
+    for (const message of history) {
+      const toolCalls = message.tool_calls ?? []
+      for (const toolCall of toolCalls) toolIds.add(toolCall.id)
+      settled.push(
+        ...agentsFromToolCalls(toolCalls, false, message.cancelled === true)
+      )
+    }
+    return { agents: mergeSubagents(settled, []), toolIds }
+  }, [activeSessionId, lastAssistantMessage, messages])
+
+  // Get active agents from Codex collab tool calls and Claude Task/Agent calls.
+  // Only tool calls that are not already in a persisted turn can be in progress.
   const activeAgents = useMemo((): SubAgent[] => {
     if (!activeSessionId) return []
 
-    // A new turn starts with no tool calls. Do not reuse the previous turn's
-    // agents in that gap, or their persisted running state appears active again.
-    const toolCalls = isSending
-      ? currentToolCalls
-      : (lastAssistantMessage?.tool_calls ?? [])
-
-    const cancelled = lastAssistantMessage?.cancelled === true
-    return [
-      ...extractCodexAgents(toolCalls, isSending, cancelled),
-      ...extractClaudeAgents(toolCalls, isSending, cancelled),
-    ]
-  }, [activeSessionId, isSending, currentToolCalls, lastAssistantMessage])
+    const freshToolCalls = isSending
+      ? currentToolCalls.filter(
+          toolCall => !settledAgents.toolIds.has(toolCall.id)
+        )
+      : []
+    const live = agentsFromToolCalls(freshToolCalls, true, false)
+    return mergeSubagents(settledAgents.agents, live)
+  }, [activeSessionId, isSending, currentToolCalls, settledAgents])
 
   const agentKey = activeAgents.map(agent => agent.id).join('\n')
   // New agents change the key, so the panel shows again. Running agents keep it

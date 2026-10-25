@@ -1374,8 +1374,10 @@ export interface SubAgent {
   status: 'in_progress' | 'completed' | 'errored' | 'interrupted'
   /** Completion message from agents_states */
   message?: string
-  /** Bold label before the prompt (e.g. Claude subagent model or type) */
+  /** Bold label before the prompt (e.g. Claude subagent model or Codex codename) */
   label?: string
+  /** Model the agent runs on, when the backend reports one */
+  model?: string
   /** Number of tool calls the agent made (Claude only) */
   toolCount?: number
   /** Context tokens of the agent's latest API call (Claude only) */
