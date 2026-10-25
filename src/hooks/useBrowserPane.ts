@@ -7,6 +7,7 @@ import type {
   BrowserGrabContext,
   BrowserGrabContextEvent,
   BrowserNavEvent,
+  BrowserNewWindowEvent,
   BrowserPageLoadEvent,
   BrowserTab,
   BrowserTitleEvent,
@@ -99,6 +100,34 @@ function findTab(
     if (t) return t
   }
   return null
+}
+
+function isHttpUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Open a Jean tab in the same worktree pane as `sourceTabId`.
+ * Empty `url` is a blank tab. Returns the new tab id, or null when the
+ * source tab is gone or the URL is not http(s).
+ */
+export function openBrowserTabFromNewWindow(
+  sourceTabId: string,
+  url: string
+): string | null {
+  const state = useBrowserStore.getState()
+  const source = findTab(state, sourceTabId)
+  if (!source) return null
+
+  const target = url.trim()
+  if (!target) return state.addTab(source.worktreeId)
+  if (!isHttpUrl(target)) return null
+  return state.addTab(source.worktreeId, target)
 }
 
 /**
@@ -202,9 +231,15 @@ export function useBrowserEvents(): void {
     )
 
     unlistenPromises.push(
+      listen<BrowserNewWindowEvent>('browser:new-window', e => {
+        openBrowserTabFromNewWindow(e.payload.tabId, e.payload.url)
+      })
+    )
+
+    unlistenPromises.push(
       listen<BrowserClosedEvent>('browser:closed', e => {
-        // Backend confirms tab closed — store-side removal happened in caller already
-        // but if some other path closed it (e.g. window.open intercepted), clean up here.
+        // Backend confirms the child webview closed. The store usually already
+        // removed the tab; this catches a close that did not go through removeTab.
         const state = useBrowserStore.getState()
         for (const [wid, list] of Object.entries(state.tabs)) {
           if (list.some(t => t.id === e.payload.tabId)) {

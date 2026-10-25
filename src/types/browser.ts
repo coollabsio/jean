@@ -39,6 +39,12 @@ export interface BrowserClosedEvent {
   tabId: string
 }
 
+/** `window.open` / `target=_blank` from a child webview. Empty `url` is a blank tab. */
+export interface BrowserNewWindowEvent {
+  tabId: string
+  url: string
+}
+
 export interface BrowserGrabContext {
   url: string
   title: string

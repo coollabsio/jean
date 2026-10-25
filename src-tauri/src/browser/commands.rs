@@ -1,4 +1,4 @@
-use tauri::webview::{PageLoadEvent, WebviewBuilder};
+use tauri::webview::{NewWindowResponse, PageLoadEvent, WebviewBuilder};
 use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, Url, WebviewUrl};
 
 use super::registry::{
@@ -6,12 +6,13 @@ use super::registry::{
 };
 use super::types::{
     BrowserClosedEvent, BrowserGrabContext, BrowserGrabContextEvent, BrowserNavEvent,
-    BrowserPageLoadEvent, BrowserTitleEvent,
+    BrowserNewWindowEvent, BrowserPageLoadEvent, BrowserTitleEvent,
 };
 use crate::http_server::EmitExt;
 
 const MAIN_WINDOW: &str = "main";
 const REACT_GRAB_GLOBAL_JS: &str = include_str!("react_grab.global.js");
+const MAX_NEW_WINDOW_URL_LEN: usize = 16_384;
 const MAX_TEXT_LEN: usize = 10_000;
 const MAX_HTML_LEN: usize = 80_000;
 const MAX_STACK_LEN: usize = 30_000;
@@ -33,6 +34,54 @@ fn clean_optional(value: Option<String>, max_chars: usize) -> Option<String> {
     value
         .map(|v| truncate_chars(v.trim(), max_chars))
         .filter(|v| !v.is_empty())
+}
+
+/// Where a child-webview new-window request should land inside Jean.
+#[derive(Debug, PartialEq, Eq)]
+enum NewWindowTarget {
+    /// `window.open()` or `about:blank`.
+    Blank,
+    /// http(s) URL to load in a new tab.
+    Url(String),
+}
+
+/// `window.open`, `target=_blank`, and middle-click all arrive as the webview
+/// new-window request. http(s) opens that URL in a Jean tab. A blank request
+/// opens a blank Jean tab. `javascript:`, `file:`, `data:`, `blob:`, and other
+/// schemes are dropped, and the caller denies the OS window either way.
+fn new_window_target(raw: &str) -> Option<NewWindowTarget> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Some(NewWindowTarget::Blank);
+    }
+    if raw.len() > MAX_NEW_WINDOW_URL_LEN {
+        return None;
+    }
+    let Ok(url) = Url::parse(raw) else {
+        return None;
+    };
+    match url.scheme() {
+        "http" | "https" => Some(NewWindowTarget::Url(url.to_string())),
+        "about" if url.path() == "blank" => Some(NewWindowTarget::Blank),
+        _ => None,
+    }
+}
+
+fn new_window_event_url(target: NewWindowTarget) -> String {
+    match target {
+        NewWindowTarget::Blank => String::new(),
+        NewWindowTarget::Url(url) => url,
+    }
+}
+
+fn emit_browser_new_window(app: &AppHandle, tab_id: &str, target: NewWindowTarget) {
+    let _ = app.emit_all(
+        "browser:new-window",
+        &BrowserNewWindowEvent {
+            tab_id: tab_id.to_string(),
+            url: new_window_event_url(target),
+        },
+    );
 }
 
 fn sanitize_grab_context(mut context: BrowserGrabContext) -> BrowserGrabContext {
@@ -255,8 +304,22 @@ pub async fn browser_create(
 
     let app_for_load = app.clone();
     let tab_for_load = tab_id.clone();
-    let builder = WebviewBuilder::new(&label, WebviewUrl::External(parsed)).on_page_load(
-        move |webview, payload| {
+    let app_for_window = app.clone();
+    let tab_for_window = tab_id.clone();
+    let builder = WebviewBuilder::new(&label, WebviewUrl::External(parsed))
+        .on_new_window(move |url, _features| {
+            // Deny always: `NewWindowResponse::Create` would open a separate
+            // Tauri window. The pane adds a sibling tab from this event.
+            log::trace!(
+                "browser new-window tab_id={tab_for_window} url={}",
+                url.as_str()
+            );
+            if let Some(target) = new_window_target(url.as_str()) {
+                emit_browser_new_window(&app_for_window, &tab_for_window, target);
+            }
+            NewWindowResponse::Deny
+        })
+        .on_page_load(move |webview, payload| {
             let url_str = payload.url().to_string();
             let event_name = match payload.event() {
                 PageLoadEvent::Started => "browser:loading",
@@ -279,8 +342,7 @@ pub async fn browser_create(
             if matches!(payload.event(), PageLoadEvent::Finished) {
                 let _ = webview.eval(title_observer_script(&tab_for_load));
             }
-        },
-    );
+        });
 
     // Frontend sends PHYSICAL pixels (CSS px × devicePixelRatio).
     // Use PhysicalPosition/PhysicalSize so Tauri stores them as-is — bypassing
@@ -526,5 +588,62 @@ mod tests {
         assert!(!script.contains("https://cdn"));
         assert!(!script.contains("unpkg.com"));
         assert!(!script.contains("jsdelivr"));
+    }
+
+    #[test]
+    fn new_window_target_opens_http_and_blank_tabs_only() {
+        assert_eq!(
+            new_window_target("https://example.com/a?b=1#c"),
+            Some(NewWindowTarget::Url(
+                "https://example.com/a?b=1#c".to_string()
+            ))
+        );
+        assert_eq!(
+            new_window_target("  http://localhost:3000/x "),
+            Some(NewWindowTarget::Url("http://localhost:3000/x".to_string()))
+        );
+        assert_eq!(
+            new_window_target("https://user:pass@example.com/a"),
+            Some(NewWindowTarget::Url(
+                "https://user:pass@example.com/a".to_string()
+            ))
+        );
+        assert_eq!(new_window_target(""), Some(NewWindowTarget::Blank));
+        assert_eq!(new_window_target("   "), Some(NewWindowTarget::Blank));
+        assert_eq!(
+            new_window_target("about:blank"),
+            Some(NewWindowTarget::Blank)
+        );
+        assert_eq!(
+            new_window_target("about:blank#ignored"),
+            Some(NewWindowTarget::Blank)
+        );
+
+        assert_eq!(new_window_target("javascript:alert(1)"), None);
+        assert_eq!(new_window_target("file:///etc/passwd"), None);
+        assert_eq!(new_window_target("data:text/html,hi"), None);
+        assert_eq!(new_window_target("blob:https://example.com/uuid"), None);
+        assert_eq!(new_window_target("mailto:dev@example.com"), None);
+        assert_eq!(new_window_target("not a url"), None);
+        assert_eq!(
+            new_window_target(&format!(
+                "https://example.com/{}",
+                "a".repeat(MAX_NEW_WINDOW_URL_LEN)
+            )),
+            None
+        );
+    }
+
+    #[test]
+    fn new_window_event_serializes_camel_case() {
+        let json = serde_json::to_value(BrowserNewWindowEvent {
+            tab_id: "tab-1".to_string(),
+            url: "https://example.com/docs".to_string(),
+        })
+        .unwrap();
+
+        assert_eq!(json["tabId"], "tab-1");
+        assert_eq!(json["url"], "https://example.com/docs");
+        assert_eq!(new_window_event_url(NewWindowTarget::Blank), "");
     }
 }
