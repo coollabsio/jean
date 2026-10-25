@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef } from 'react'
 import { useClaudeCliStatus, useClaudeCliAuth } from '@/services/claude-cli'
 import { useCodexCliStatus, useCodexCliAuth } from '@/services/codex-cli'
 import {
@@ -260,7 +260,9 @@ export function useBackendAuthStatuses(options?: { enabled?: boolean }) {
     devin: [devin, devinAuth],
   } as const
   const authQueriesRef = useRef(authQueries)
-  authQueriesRef.current = authQueries
+  useLayoutEffect(() => {
+    authQueriesRef.current = authQueries
+  }, [authQueries])
 
   /**
    * Re-probe one backend's auth, bypassing the cached result. A cached `false`

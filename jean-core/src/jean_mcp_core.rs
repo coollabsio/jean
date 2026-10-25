@@ -3486,7 +3486,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"F
             return;
         }
         for force_new in [false, true] {
-            let (_temp, app) = session_send_app();
+            let (temp, app) = session_send_app();
             if force_new {
                 crate::chat::storage::save_empty_index(&app, "current-base").unwrap();
             }
@@ -3517,7 +3517,14 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"F
                 .unwrap();
             assert_eq!(
                 sent,
-                json!({ "sessionId": session_id, "status": "started" })
+                json!({
+                    "sessionId": session_id,
+                    "status": "started",
+                    "worktreeId": "current-base",
+                    "worktreePath": temp.path().to_string_lossy(),
+                    "sessionName": "Session 1",
+                    "worktreeName": "base",
+                })
             );
             assert_mcp_send_completed(&app, session_id, "hello world", "build").await;
         }

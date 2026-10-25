@@ -11,17 +11,38 @@ const typescriptSource = readFileSync(
   'utf8'
 )
 
-function rustPrompt(functionName: string): string {
+function rustRawString(functionName: string, returnType: string): string | null {
   const match = rustSource.match(
+    new RegExp(
+      `fn ${functionName}\\(\\) -> ${returnType} \\{\\s*r#"([\\s\\S]*?)"#`
+    )
+  )
+  return match?.[1] ?? null
+}
+
+function rustPrompt(functionName: string): string {
+  const direct = rustSource.match(
     new RegExp(
       `fn ${functionName}\\(\\) -> String \\{\\s*r#"([\\s\\S]*?)"#\\s*\\.to_string\\(\\)\\s*\\}`
     )
   )
+  if (direct) return direct[1] ?? ''
+
+  // Some defaults are the current text joined to a legacy raw string.
+  const composed = rustSource.match(
+    new RegExp(
+      `fn ${functionName}\\(\\) -> String \\{\\s*format!\\(\\s*"\\{\\}\\\\n\\\\n\\{\\}",\\s*r#"([\\s\\S]*?)"#,\\s*([A-Za-z0-9_]+)\\(\\)\\s*\\)`
+    )
+  )
+  const head = composed?.[1]
+  const tail = composed?.[2]
+    ? rustRawString(composed[2], "&'static str")
+    : null
   expect(
-    match,
+    head != null && tail != null,
     `${functionName} should be a Rust raw-string default`
-  ).not.toBeNull()
-  return match?.[1] ?? ''
+  ).toBe(true)
+  return `${head}\n\n${tail}`
 }
 
 describe('shared magic prompt defaults', () => {
