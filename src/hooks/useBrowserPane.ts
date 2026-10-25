@@ -346,8 +346,11 @@ export function useBrowserEvents(): void {
 // not blocking modals. Without exclusion, opening the browser as a floating
 // Sheet would suppress its own webview, and opening the terminal Sheet would
 // hide the browser webview behind it.
+// The port picker menu is portaled and can flip down over the child webview,
+// which paints above DOM. Mark that menu with data-browser-port-menu so the
+// page hides while it is open. Other menus stay out of this selector.
 const BLOCKING_SELECTOR =
-  '[role="dialog"][data-state="open"]:not([data-browser-host]):not([data-terminal-host]), [role="alertdialog"][data-state="open"]'
+  '[role="dialog"][data-state="open"]:not([data-browser-host]):not([data-terminal-host]), [role="alertdialog"][data-state="open"], [data-browser-port-menu][data-state="open"]'
 
 export function useAnyBlockingModalOpen(): boolean {
   const [isOpen, setIsOpen] = useState(false)
@@ -359,7 +362,7 @@ export function useAnyBlockingModalOpen(): boolean {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ['data-state', 'role'],
+      attributeFilter: ['data-state', 'role', 'data-browser-port-menu'],
     })
     return () => observer.disconnect()
   }, [])

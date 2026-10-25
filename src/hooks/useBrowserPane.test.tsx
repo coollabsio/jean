@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { renderHook } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { DEFAULT_NEW_TAB_URL, useBrowserStore } from '@/store/browser-store'
 import {
   openBrowserTabFromNewWindow,
+  useAnyBlockingModalOpen,
   useBrowserEvents,
   useBrowserTabActions,
 } from './useBrowserPane'
@@ -233,5 +234,41 @@ describe('useBrowserEvents new window', () => {
         .getTabs('worktree-1')
         .map(tab => tab.url)
     ).toEqual(['https://example.com', 'https://example.com/from-blank'])
+  })
+})
+
+describe('useAnyBlockingModalOpen port menu', () => {
+  it('hides the webview while the port picker menu is open', async () => {
+    const { result } = renderHook(() => useAnyBlockingModalOpen())
+    expect(result.current).toBe(false)
+
+    const menu = document.createElement('div')
+    menu.setAttribute('role', 'menu')
+    menu.setAttribute('data-state', 'open')
+    menu.setAttribute('data-browser-port-menu', '')
+    document.body.appendChild(menu)
+
+    await waitFor(() => {
+      expect(result.current).toBe(true)
+    })
+
+    menu.remove()
+    await waitFor(() => {
+      expect(result.current).toBe(false)
+    })
+  })
+
+  it('leaves unrelated menus alone', async () => {
+    const { result } = renderHook(() => useAnyBlockingModalOpen())
+    const menu = document.createElement('div')
+    menu.setAttribute('role', 'menu')
+    menu.setAttribute('data-state', 'open')
+    document.body.appendChild(menu)
+
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 20))
+    })
+    expect(result.current).toBe(false)
+    menu.remove()
   })
 })

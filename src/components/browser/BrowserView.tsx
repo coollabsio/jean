@@ -55,7 +55,8 @@ export const BrowserView = memo(function BrowserView({
   const effectiveVisible = isVisible && !blockingModalOpen && !activeError
   const actions = useBrowserTabActions(activeTabId || null)
 
-  // Resolve worktreePath → first jean.json port (used as default new-tab URL)
+  // First tab when the pane opens uses jean.json ports[0]. Extra tabs and
+  // the port picker live in the toolbar so later ports are selectable.
   const worktreePath = useChatStore(state => state.worktreePaths[worktreeId])
   const { data: ports, isFetched: portsFetched } = usePorts(
     worktreePath ?? null
@@ -95,7 +96,11 @@ export const BrowserView = memo(function BrowserView({
 
   return (
     <div className="flex h-full w-full min-w-0 flex-col">
-      <BrowserToolbar worktreeId={worktreeId} onClose={onClose} />
+      <BrowserToolbar
+        worktreeId={worktreeId}
+        onClose={onClose}
+        serverDefaultHost={serverDefaultHost}
+      />
       <div className="relative flex-1 overflow-hidden">
         {activeError && (
           <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-background p-6 text-center">
