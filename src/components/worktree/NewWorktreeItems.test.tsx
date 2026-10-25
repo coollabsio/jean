@@ -247,6 +247,23 @@ describe('BranchItem', () => {
     await user.click(screen.getByRole('button', { name: 'feature/existing' }))
     expect(onClick).toHaveBeenCalledWith(false)
   })
+
+  it('shows the remote when the same branch name exists on another remote', () => {
+    render(
+      <BranchItem
+        branch="main"
+        remote="upstream"
+        index={0}
+        isSelected={false}
+        isCreating={false}
+        onMouseEnter={vi.fn()}
+        onClick={vi.fn()}
+      />
+    )
+
+    expect(screen.getByRole('button', { name: 'main' })).toBeInTheDocument()
+    expect(screen.getByText('upstream')).toBeInTheDocument()
+  })
 })
 
 describe('existing worktree badge', () => {

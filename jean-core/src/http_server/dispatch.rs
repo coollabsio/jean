@@ -317,6 +317,11 @@ pub async fn dispatch_command(
             let result = crate::projects::get_project_branches(app.clone(), project_id).await?;
             to_value(result)
         }
+        "list_worktree_branches" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let result = crate::projects::list_worktree_branches(app.clone(), project_id).await?;
+            to_value(result)
+        }
         "update_project_settings" => {
             let project_id: String = field(&args, "projectId", "project_id")?;
             let name: Option<String> = from_field_opt(&args, "name")?;
@@ -845,8 +850,10 @@ pub async fn dispatch_command(
         "get_github_issue" => {
             let project_path: String = field(&args, "projectPath", "project_path")?;
             let issue_number: u32 = field(&args, "issueNumber", "issue_number")?;
+            let repo: Option<String> = from_field_opt(&args, "repo")?;
             let result =
-                crate::projects::get_github_issue(app.clone(), project_path, issue_number).await?;
+                crate::projects::get_github_issue(app.clone(), project_path, issue_number, repo)
+                    .await?;
             to_value(result)
         }
         "list_github_prs" => {
@@ -858,8 +865,9 @@ pub async fn dispatch_command(
         "get_github_pr" => {
             let project_path: String = field(&args, "projectPath", "project_path")?;
             let pr_number: u32 = field(&args, "prNumber", "pr_number")?;
+            let repo: Option<String> = from_field_opt(&args, "repo")?;
             let result =
-                crate::projects::get_github_pr(app.clone(), project_path, pr_number).await?;
+                crate::projects::get_github_pr(app.clone(), project_path, pr_number, repo).await?;
             to_value(result)
         }
         "get_pr_review_comments" => {
@@ -4005,11 +4013,30 @@ pub async fn dispatch_command(
             .await?;
             to_value(result)
         }
+        "list_github_issues_by_number" => {
+            let project_path: String = field(&args, "projectPath", "project_path")?;
+            let issue_number: u32 = field(&args, "issueNumber", "issue_number")?;
+            let result = crate::projects::list_github_issues_by_number(
+                app.clone(),
+                project_path,
+                issue_number,
+            )
+            .await?;
+            to_value(result)
+        }
         "get_github_pr_by_number" => {
             let project_path: String = field(&args, "projectPath", "project_path")?;
             let pr_number: u32 = field(&args, "prNumber", "pr_number")?;
             let result =
                 crate::projects::get_github_pr_by_number(app.clone(), project_path, pr_number)
+                    .await?;
+            to_value(result)
+        }
+        "list_github_prs_by_number" => {
+            let project_path: String = field(&args, "projectPath", "project_path")?;
+            let pr_number: u32 = field(&args, "prNumber", "pr_number")?;
+            let result =
+                crate::projects::list_github_prs_by_number(app.clone(), project_path, pr_number)
                     .await?;
             to_value(result)
         }

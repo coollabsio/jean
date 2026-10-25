@@ -23,12 +23,13 @@ use super::github_discussions::{
 };
 use super::github_issues::{
     add_advisory_reference, add_issue_reference, add_pr_reference, add_security_reference,
-    format_advisory_context_markdown, format_issue_context_markdown, format_pr_context_markdown,
-    format_security_context_markdown, generate_branch_name_from_advisory,
-    generate_branch_name_from_issue, generate_branch_name_from_security_alert,
-    get_github_contexts_dir, get_github_pr, get_github_pr_by_number, get_pr_diff,
-    get_session_context_content, get_session_context_numbers, AdvisoryContext, IssueContext,
-    PullRequestContext, SecurityAlertContext,
+    context_repo_key, format_advisory_context_markdown, format_issue_context_markdown,
+    format_pr_context_markdown, format_security_context_markdown,
+    generate_branch_name_from_advisory, generate_branch_name_from_issue,
+    generate_branch_name_from_security_alert, get_github_contexts_dir, get_github_pr,
+    get_github_pr_by_number, get_pr_diff, get_session_context_content, get_session_context_numbers,
+    remote_name_for_github_repo, AdvisoryContext, IssueContext, PullRequestContext,
+    SecurityAlertContext,
 };
 use super::linear_issues::{
     add_linear_reference, format_linear_issue_context_markdown,
@@ -2329,18 +2330,27 @@ pub async fn create_worktree(
                     "Background: Branch collision, manual fetch PR #{} into {local_branch_name}",
                     ctx.number
                 );
-                    git::fetch_pr_to_branch(&project_path, ctx.number, &local_branch_name).and_then(
-                        |_| {
-                            git::checkout_branch(&worktree_path_clone, &local_branch_name)?;
-                            Ok(local_branch_name)
-                        },
+                    let fetch_remote = ctx
+                        .repo
+                        .as_deref()
+                        .and_then(|repo| remote_name_for_github_repo(&project_path, repo));
+                    git::fetch_pr_to_branch(
+                        &project_path,
+                        ctx.number,
+                        &local_branch_name,
+                        fetch_remote.as_deref(),
                     )
+                    .and_then(|_| {
+                        git::checkout_branch(&worktree_path_clone, &local_branch_name)?;
+                        Ok(local_branch_name)
+                    })
                 } else {
                     git::gh_pr_checkout(
                         &worktree_path_clone,
                         ctx.number,
                         Some(&local_branch_name),
                         &resolve_gh_binary(&app_clone),
+                        ctx.repo.as_deref(),
                     )
                 };
 
@@ -2396,8 +2406,7 @@ pub async fn create_worktree(
                     "Background: Writing issue context file for issue #{}",
                     ctx.number
                 );
-                if let Ok(repo_id) = get_repo_identifier(&project_path) {
-                    let repo_key = repo_id.to_key();
+                if let Ok(repo_key) = context_repo_key(&project_path, ctx.repo.as_deref()) {
                     if let Ok(contexts_dir) = get_github_contexts_dir(&app_clone) {
                         if let Err(e) = std::fs::create_dir_all(&contexts_dir) {
                             log::warn!("Background: Failed to create git-context directory: {e}");
@@ -2432,8 +2441,7 @@ pub async fn create_worktree(
             // Write PR context file if provided (to shared git-context directory)
             if let Some(ctx) = &pr_context_clone {
                 log::trace!("Background: Writing PR context file for PR #{}", ctx.number);
-                if let Ok(repo_id) = get_repo_identifier(&project_path) {
-                    let repo_key = repo_id.to_key();
+                if let Ok(repo_key) = context_repo_key(&project_path, ctx.repo.as_deref()) {
                     if let Ok(contexts_dir) = get_github_contexts_dir(&app_clone) {
                         if let Err(e) = std::fs::create_dir_all(&contexts_dir) {
                             log::warn!("Background: Failed to create git-context directory: {e}");
@@ -2441,7 +2449,13 @@ pub async fn create_worktree(
                             // Fetch the diff if not already present
                             let ctx_with_diff = if ctx.diff.is_none() {
                                 log::debug!("Background: Fetching diff for PR #{}", ctx.number);
-                                let diff = get_pr_diff(&app_clone, &project_path, ctx.number).ok();
+                                let diff = get_pr_diff(
+                                    &app_clone,
+                                    &project_path,
+                                    ctx.number,
+                                    ctx.repo.as_deref(),
+                                )
+                                .ok();
                                 PullRequestContext {
                                     number: ctx.number,
                                     title: ctx.title.clone(),
@@ -2451,6 +2465,7 @@ pub async fn create_worktree(
                                     comments: ctx.comments.clone(),
                                     reviews: ctx.reviews.clone(),
                                     diff,
+                                    repo: ctx.repo.clone(),
                                 }
                             } else {
                                 ctx.clone()
@@ -3268,8 +3283,7 @@ pub async fn create_worktree_from_existing_branch(
                     "Background: Writing issue context file for issue #{}",
                     ctx.number
                 );
-                if let Ok(repo_id) = get_repo_identifier(&project_path) {
-                    let repo_key = repo_id.to_key();
+                if let Ok(repo_key) = context_repo_key(&project_path, ctx.repo.as_deref()) {
                     if let Ok(contexts_dir) = get_github_contexts_dir(&app_clone) {
                         if let Err(e) = std::fs::create_dir_all(&contexts_dir) {
                             log::warn!("Background: Failed to create git-context directory: {e}");
@@ -3301,8 +3315,7 @@ pub async fn create_worktree_from_existing_branch(
             // Write PR context file if provided
             if let Some(ctx) = &pr_context_clone {
                 log::trace!("Background: Writing PR context file for PR #{}", ctx.number);
-                if let Ok(repo_id) = get_repo_identifier(&project_path) {
-                    let repo_key = repo_id.to_key();
+                if let Ok(repo_key) = context_repo_key(&project_path, ctx.repo.as_deref()) {
                     if let Ok(contexts_dir) = get_github_contexts_dir(&app_clone) {
                         if let Err(e) = std::fs::create_dir_all(&contexts_dir) {
                             log::warn!("Background: Failed to create git-context directory: {e}");
@@ -3310,7 +3323,13 @@ pub async fn create_worktree_from_existing_branch(
                             // Fetch the diff if not already present
                             let ctx_with_diff = if ctx.diff.is_none() {
                                 log::debug!("Background: Fetching diff for PR #{}", ctx.number);
-                                let diff = get_pr_diff(&app_clone, &project_path, ctx.number).ok();
+                                let diff = get_pr_diff(
+                                    &app_clone,
+                                    &project_path,
+                                    ctx.number,
+                                    ctx.repo.as_deref(),
+                                )
+                                .ok();
                                 PullRequestContext {
                                     number: ctx.number,
                                     title: ctx.title.clone(),
@@ -3320,6 +3339,7 @@ pub async fn create_worktree_from_existing_branch(
                                     comments: ctx.comments.clone(),
                                     reviews: ctx.reviews.clone(),
                                     diff,
+                                    repo: ctx.repo.clone(),
                                 }
                             } else {
                                 ctx.clone()
@@ -3649,7 +3669,7 @@ pub async fn checkout_pr(
     log::info!("[checkout_pr] No archived worktree found for PR #{pr_number}, creating new");
 
     // Fetch PR details from GitHub (for context and worktree naming)
-    let pr_detail = get_github_pr(app.clone(), project.path.clone(), pr_number).await?;
+    let pr_detail = get_github_pr(app.clone(), project.path.clone(), pr_number, None).await?;
     // Persist the same PR link fields as create/link PR so magic actions
     // (Open/Merge/PR Comments/status polling) work immediately after checkout.
     let pr_url = if pr_detail.url.trim().is_empty() {
@@ -3916,7 +3936,7 @@ pub async fn checkout_pr(
             // Instead, manually fetch the PR into the alt branch name and switch to it.
             let actual_branch = if branch_collision {
                 log::trace!("Background: Branch collision detected, using manual fetch for PR #{pr_number} into {local_branch_name}");
-                match git::fetch_pr_to_branch(&project_path, pr_number, &local_branch_name)
+                match git::fetch_pr_to_branch(&project_path, pr_number, &local_branch_name, None)
                     .and_then(|_| {
                         git::checkout_branch(&worktree_path_clone, &local_branch_name)?;
                         Ok(local_branch_name.clone())
@@ -3957,6 +3977,7 @@ pub async fn checkout_pr(
                     pr_number,
                     Some(&local_branch_name),
                     &resolve_gh_binary(&app_clone),
+                    None,
                 ) {
                     Ok(branch) => {
                         log::trace!("Background: gh pr checkout succeeded, branch: {branch}");
@@ -4055,7 +4076,8 @@ pub async fn checkout_pr(
                                     submitted_at: r.submitted_at,
                                 })
                                 .collect(),
-                            diff: get_pr_diff(&app_clone, &project_path, pr_number).ok(),
+                            diff: get_pr_diff(&app_clone, &project_path, pr_number, None).ok(),
+                            repo: None,
                         };
 
                         let context_file =
@@ -6190,8 +6212,8 @@ pub async fn get_project_branches(
         .find_project(&project_id)
         .ok_or_else(|| format!("Project not found: {project_id}"))?;
 
-    // Fetch from origin to get latest branches (best effort)
-    let _ = git::fetch_origin(&project.path);
+    // Fetch every configured remote so non-origin branches are not stale.
+    let _ = git::fetch_all_remotes(&project.path);
 
     // Try to get remote branches first
     let remote_branches = git::get_remote_branches(&project.path)?;
@@ -6218,6 +6240,36 @@ pub async fn get_project_branches(
 
     let mut branches = local_branches;
     branches.sort();
+    Ok(branches)
+}
+
+/// Remote-tracking branches for the New Worktree dialog.
+///
+/// Fetches every configured remote, then returns each branch with its remote so
+/// the same name on `origin` and `upstream` stays distinct.
+pub async fn list_worktree_branches(
+    app: AppHandle,
+    project_id: String,
+) -> Result<Vec<git::RemoteBranch>, String> {
+    log::trace!("Listing worktree branches for project: {project_id}");
+
+    let data = load_projects_data(&app)?;
+    let project = data
+        .find_project(&project_id)
+        .ok_or_else(|| format!("Project not found: {project_id}"))?;
+
+    let _ = git::fetch_all_remotes(&project.path);
+    let mut branches = git::list_remote_branches(&project.path)?;
+    if branches.is_empty() {
+        branches = git::get_branches(&project.path)?
+            .into_iter()
+            .map(|name| git::RemoteBranch {
+                qualified: name.clone(),
+                remote: String::new(),
+                name,
+            })
+            .collect();
+    }
     Ok(branches)
 }
 

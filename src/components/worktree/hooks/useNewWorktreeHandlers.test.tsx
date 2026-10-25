@@ -30,7 +30,8 @@ describe('useNewWorktreeHandlers duplicate guard', () => {
   }
 
   function setup(
-    getMatches: (ref: { type: string; id: number | string }) => (typeof match)[]
+    getMatches: (ref: { type: string; id: number | string }) => (typeof match)[],
+    extra: Record<string, unknown> = {}
   ) {
     const createWorktree = { mutate: vi.fn(), mutateAsync: vi.fn() }
     const data = {
@@ -40,6 +41,7 @@ describe('useNewWorktreeHandlers duplicate guard', () => {
       baseSession: null,
       createWorktree,
       queryClient: { invalidateQueries: vi.fn() },
+      ...extra,
     } as unknown as Parameters<typeof useNewWorktreeHandlers>[0]
     const setters = {
       setActiveTab: vi.fn(),
@@ -100,5 +102,64 @@ describe('useNewWorktreeHandlers duplicate guard', () => {
       'Skipped 1 item that already has a worktree'
     )
     expect(openContextLinkMatch).not.toHaveBeenCalled()
+  })
+
+  it('creates a worktree for the same issue number on a non-primary remote', async () => {
+    const getMatches = vi.fn(() => [match])
+    const { result, createWorktree } = setup(getMatches, {
+      hasMultipleGitHubRemotes: true,
+      primaryGitHubRemote: 'origin',
+    })
+    vi.mocked(invoke).mockResolvedValue({
+      number: 42,
+      title: 'Fork issue',
+      body: 'from the fork',
+      comments: [],
+    } as never)
+
+    await act(async () => {
+      await result.current.handleSelectIssue({
+        number: 42,
+        title: 'Fork issue',
+        remote: 'fork',
+        repo: 'octocat/jean',
+      } as GitHubIssue)
+    })
+
+    expect(openContextLinkMatch).not.toHaveBeenCalled()
+    expect(invoke).toHaveBeenCalledWith('get_github_issue', {
+      projectPath: '/repo',
+      issueNumber: 42,
+      repo: 'octocat/jean',
+    })
+    expect(createWorktree.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: 'project-1',
+        issueContext: expect.objectContaining({
+          number: 42,
+          repo: 'octocat/jean',
+        }),
+      }),
+      undefined
+    )
+  })
+
+  it('still reuses an existing worktree for the primary remote', async () => {
+    const getMatches = vi.fn(() => [match])
+    const { result } = setup(getMatches, {
+      hasMultipleGitHubRemotes: true,
+      primaryGitHubRemote: 'origin',
+    })
+
+    await act(async () => {
+      await result.current.handleSelectIssue({
+        number: 42,
+        remote: 'origin',
+        repo: 'coollabsio/jean',
+      } as GitHubIssue)
+    })
+
+    expect(openContextLinkMatch).toHaveBeenCalledWith(match)
+    expect(invoke).not.toHaveBeenCalled()
   })
 })
