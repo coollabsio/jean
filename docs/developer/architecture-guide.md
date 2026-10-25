@@ -347,8 +347,8 @@ Additional systems (no dedicated docs yet):
   on an interrupt. The backing Jean `sessionId` must therefore be carried through
   terminal creation, native-session reconnect, frontend terminal persistence,
   `start_terminal`, and both native/WebSocket transports. Terminals opened in an
-  *external* OS terminal cannot be instrumented and stay idle. Only the CLI
-  Jean itself launches is instrumented; one the user starts *by hand* in that
+  _external_ OS terminal cannot be instrumented and stay idle. Only the CLI
+  Jean itself launches is instrumented; one the user starts _by hand_ in that
   terminal carries no hook and does not report.
 
   **Web-mode persistence.** In web access (Axum HTTP server + WebSocket),
@@ -503,7 +503,7 @@ interaction finishes.
 
 ### Canvas View
 
-**ProjectCanvasView** (`src/components/dashboard/ProjectCanvasView.tsx`) shows sessions across all worktrees in a project, grouped by worktree with section headers. Sessions are opened via `SessionChatModal` overlay.
+**ProjectCanvasView** (`src/components/dashboard/ProjectCanvasView.tsx`) lists the selected project's worktrees. Focusing a worktree — from the canvas row or the sidebar worktree row — opens `WorktreeSessionsBrowser` instead of the horizontal session tab strip. The browser reuses session card status, labels, and `useCanvasKeyboardNav`. A row shows the effective session status and, when live agent activity differs from that status, the agent status as well. Choosing a session opens `SessionChatModal`. Sidebar session rows and other explicit session actions still open that session directly.
 
 Shared infrastructure in `src/components/chat/`:
 

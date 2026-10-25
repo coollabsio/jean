@@ -1047,7 +1047,8 @@ export const SessionChatModal = memo(function SessionChatModal({
         key={worktreeId}
         ref={isTouch ? swipe.containerRef : undefined}
         className={cn(
-          'absolute inset-0 z-10 flex min-w-0 overflow-hidden bg-background pt-[3px]',
+          // Above the worktree sessions browser, which stays mounted at z-10.
+          'absolute inset-0 z-20 flex min-w-0 overflow-hidden bg-background pt-[3px]',
           !isMobile && 'pb-2',
           hasBottomDock ? 'flex-col' : 'flex-row'
         )}

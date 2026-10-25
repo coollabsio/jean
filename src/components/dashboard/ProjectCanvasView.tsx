@@ -164,6 +164,12 @@ import { usePlanApproval } from '@/components/chat/hooks/usePlanApproval'
 import { useClearContextApproval } from '@/components/chat/hooks/useClearContextApproval'
 import { useWorktreeApproval } from '@/components/chat/hooks/useWorktreeApproval'
 import { useCanvasKeyboardNav } from '@/components/chat/hooks/useCanvasKeyboardNav'
+import { WorktreeSessionsBrowser } from '@/components/dashboard/WorktreeSessionsBrowser'
+import {
+  BROWSE_WORKTREE_SESSIONS_EVENT,
+  EMPTY_SESSION_BROWSER_CARDS,
+  type BrowseWorktreeSessionsDetail,
+} from '@/components/dashboard/worktree-sessions-browser'
 import { useCanvasShortcutEvents } from '@/components/chat/hooks/useCanvasShortcutEvents'
 import {
   useArchiveWorktree,
@@ -706,7 +712,7 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
       tabIndex={onRowClick ? 0 : undefined}
       aria-label={
         onRowClick
-          ? `Open ${isBase ? 'Base Session' : worktree.name}`
+          ? `View sessions in ${isBase ? 'Base Session' : worktree.name}`
           : undefined
       }
     >
@@ -902,7 +908,7 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
             )}
             {onRowClick && (
               <span className="ml-auto hidden text-[11px] opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 sm:inline-flex">
-                Press Enter to open
+                Press Enter to view sessions
               </span>
             )}
           </div>
@@ -955,6 +961,10 @@ export function ProjectCanvasView({
   const openInEditor = useOpenWorktreeInEditor()
 
   const [searchQuery, setSearchQuery] = useState('')
+  const [sessionsBrowser, setSessionsBrowser] = useState<{
+    worktreeId: string
+    worktreePath: string
+  } | null>(null)
   const activeFilterTab = useProjectsStore(
     state =>
       (state.projectCanvasActiveFilters[projectId] ?? 'all') as CanvasFilterTab
@@ -1188,6 +1198,12 @@ export function ProjectCanvasView({
   const queryClient = useQueryClient()
   const sessionCardDataCache = useMemo(() => createSessionCardDataCache(), [])
   const stableSectionCards = useMemo(() => createStableSectionCardsCache(), [])
+  const browserSourceCards = useMemo(() => {
+    if (!sessionsBrowser) return EMPTY_SESSION_BROWSER_CARDS
+    const sessions =
+      sessionsByWorktreeId.get(sessionsBrowser.worktreeId)?.sessions ?? []
+    return sessions.map(session => sessionCardDataCache(session, storeState))
+  }, [sessionCardDataCache, sessionsBrowser, sessionsByWorktreeId, storeState])
 
   const markWorktreeLastUsed = useCallback(
     (worktreeId: string) => {
@@ -2100,7 +2116,8 @@ export function ProjectCanvasView({
   // of this project in the modal; otherwise only selects a card visually.
   // Prefers last opened per project, then persisted active session per worktree, falls back to first card
   useEffect(() => {
-    if (selectedIndex !== null || selectedWorktreeModal) return
+    if (selectedIndex !== null || selectedWorktreeModal || sessionsBrowser)
+      return
     if (flatCards.length === 0) return
 
     const { activeSessionIds, lastActiveWorktreeId, lastOpenedPerProject } =
@@ -2218,33 +2235,71 @@ export function ProjectCanvasView({
     flatCards,
     selectedIndex,
     selectedWorktreeModal,
+    sessionsBrowser,
     projectId,
     openWorktreeModal,
   ])
 
-  // Handle clicking on a worktree row - open modal
+  // Focusing a worktree opens its sessions browser. A session opens only
+  // after one is chosen from that browser or from an explicit session action.
   const handleWorktreeClick = useCallback(
     (worktreeId: string, worktreePath: string) => {
-      openWorktreeModal(worktreeId, worktreePath)
-
-      // Persist last-opened project context immediately on open so project switch
-      // restore does not depend on a subsequent tab change event.
-      const { activeSessionIds, setActiveSession, setLastOpenedForProject } =
-        useChatStore.getState()
-      const existingSessionId = activeSessionIds[worktreeId]
-      const firstSessionId =
-        sessionsByWorktreeIdRef.current.get(worktreeId)?.sessions[0]?.id
-      const targetSessionId = existingSessionId ?? firstSessionId
-
-      if (targetSessionId) {
-        if (!existingSessionId) {
-          setActiveSession(worktreeId, targetSessionId)
-        }
-        setLastOpenedForProject(projectId, worktreeId, targetSessionId)
-      }
+      markWorktreeLastUsed(worktreeId)
+      useProjectsStore.getState().selectWorktree(worktreeId)
+      useChatStore.getState().registerWorktreePath(worktreeId, worktreePath)
+      setIsMobileSearchOpen(false)
+      setSelectedWorktreeModal(null)
+      setSessionsBrowser(current =>
+        current?.worktreeId === worktreeId &&
+        current.worktreePath === worktreePath
+          ? current
+          : { worktreeId, worktreePath }
+      )
     },
-    [openWorktreeModal, projectId]
+    [markWorktreeLastUsed]
   )
+
+  const openBrowserSession = useCallback(
+    (sessionId: string) => {
+      if (!sessionsBrowser) return
+      useChatStore
+        .getState()
+        .setActiveSession(sessionsBrowser.worktreeId, sessionId)
+      openWorktreeModal(
+        sessionsBrowser.worktreeId,
+        sessionsBrowser.worktreePath
+      )
+    },
+    [openWorktreeModal, sessionsBrowser]
+  )
+
+  const createBrowserSession = useCallback(() => {
+    if (!sessionsBrowser) return
+    useUIStore.getState().openNewSessionModeModal({
+      worktreeId: sessionsBrowser.worktreeId,
+      worktreePath: sessionsBrowser.worktreePath,
+      origin: 'canvas',
+      intent: 'picker',
+    })
+  }, [sessionsBrowser])
+
+  const onBrowseWorktreeSessions = useEffectEvent((event: Event) => {
+    const detail = (event as CustomEvent<BrowseWorktreeSessionsDetail>).detail
+    if (!detail?.worktreeId || !detail.worktreePath) return
+    if (detail.projectId && detail.projectId !== projectId) return
+    const index = flatCards.findIndex(
+      card => card.worktreeId === detail.worktreeId && !card.isPending
+    )
+    if (index !== -1) handleSelectedIndexChange(index)
+    handleWorktreeClick(detail.worktreeId, detail.worktreePath)
+  })
+
+  useEffect(() => {
+    const handleBrowse = (event: Event) => onBrowseWorktreeSessions(event)
+    window.addEventListener(BROWSE_WORKTREE_SESSIONS_EVENT, handleBrowse)
+    return () =>
+      window.removeEventListener(BROWSE_WORKTREE_SESSIONS_EVENT, handleBrowse)
+  }, [])
 
   // Stable row-click handler for memoized section headers. Reads the latest
   // selection/open handlers through a ref so it never changes identity.
@@ -2454,7 +2509,8 @@ export function ProjectCanvasView({
   // Shortcut events for plan approval
   useCanvasShortcutEvents({
     selectedCard,
-    enabled: !selectedWorktreeModal && selectedIndex !== null,
+    enabled:
+      !selectedWorktreeModal && !sessionsBrowser && selectedIndex !== null,
     onPlanApproval: (card, updatedPlan) =>
       card.session.backend === 'cursor'
         ? handleClearContextApprovalBuild(card, updatedPlan)
@@ -2858,7 +2914,7 @@ export function ProjectCanvasView({
     onNavigateRight: handleNavigateFilterTabRight,
     onMoveUp: () => moveSelectedWorktreeByKeyboard(-1),
     onMoveDown: () => moveSelectedWorktreeByKeyboard(1),
-    enabled: !isModalOpen,
+    enabled: !isModalOpen && !sessionsBrowser,
     onSelectionChange: syncSelectionToStore,
   })
 
@@ -2867,6 +2923,11 @@ export function ProjectCanvasView({
     const handleCloseSessionOrWorktree = (e: Event) => {
       // If modal is open, SessionChatModal intercepts CMD+W — let it handle
       if (selectedWorktreeModal) return
+      if (sessionsBrowser) {
+        e.stopImmediatePropagation()
+        setSessionsBrowser(null)
+        return
+      }
 
       // Consume the event to prevent the legacy useCloseSessionOrWorktreeKeybinding fallback
       e.stopImmediatePropagation()
@@ -2907,6 +2968,7 @@ export function ProjectCanvasView({
       )
   }, [
     selectedWorktreeModal,
+    sessionsBrowser,
     selectedIndex,
     flatCards,
     worktreeSections,
@@ -2919,6 +2981,20 @@ export function ProjectCanvasView({
     const handleCreateNewSession = (e: Event) => {
       // Don't create if modal is already open
       if (selectedWorktreeModal) return
+
+      if (sessionsBrowser) {
+        e.stopImmediatePropagation()
+        const intent =
+          (e as CustomEvent<{ intent?: 'default' | 'picker' }>).detail
+            ?.intent ?? 'picker'
+        useUIStore.getState().openNewSessionModeModal({
+          worktreeId: sessionsBrowser.worktreeId,
+          worktreePath: sessionsBrowser.worktreePath,
+          origin: 'canvas',
+          intent,
+        })
+        return
+      }
 
       // Use selected card, or fallback to first card
       const item =
@@ -2945,7 +3021,7 @@ export function ProjectCanvasView({
       window.removeEventListener('create-new-session', handleCreateNewSession, {
         capture: true,
       })
-  }, [selectedWorktreeModal, selectedIndex, flatCards])
+  }, [selectedWorktreeModal, sessionsBrowser, selectedIndex, flatCards])
 
   // Listen for open-session-modal event (fired by ChatWindow when creating new session inside modal,
   // or by UnreadBell to open a session on the project canvas)
@@ -3024,6 +3100,14 @@ export function ProjectCanvasView({
     }
   }, [selectedWorktreeModal, projectId])
 
+  useEffect(() => {
+    if (!sessionsBrowser || worktreesLoading) return
+    const stillVisible = visibleWorktrees.some(
+      worktree => worktree.id === sessionsBrowser.worktreeId
+    )
+    if (!stillVisible) setSessionsBrowser(null)
+  }, [sessionsBrowser, visibleWorktrees, worktreesLoading])
+
   // Check if loading
   const isLoading =
     worktreesLoading ||
@@ -3049,6 +3133,16 @@ export function ProjectCanvasView({
   const activeFilterLabel =
     canvasFilterTabs.find(tab => tab.value === activeFilterTab)?.label ?? 'All'
   const hasAnyVisibleWorktrees = filterTabCounts.all > 0
+  const sessionsBrowserWorktree = sessionsBrowser
+    ? (visibleWorktrees.find(
+        worktree => worktree.id === sessionsBrowser.worktreeId
+      ) ?? null)
+    : null
+  const sessionsBrowserName = sessionsBrowserWorktree
+    ? isBaseSession(sessionsBrowserWorktree)
+      ? 'Base Session'
+      : sessionsBrowserWorktree.name
+    : 'Worktree'
 
   // Track global card index for refs
   let cardIndex = 0
@@ -3719,6 +3813,20 @@ export function ProjectCanvasView({
           )}
         </div>
       </div>
+
+      {sessionsBrowser && (
+        <div className="absolute inset-0 z-10 overflow-auto bg-background">
+          <WorktreeSessionsBrowser
+            worktreeName={sessionsBrowserName}
+            cards={browserSourceCards}
+            isLoading={!sessionsByWorktreeId.has(sessionsBrowser.worktreeId)}
+            keyboardEnabled={!isModalOpen}
+            onBack={() => setSessionsBrowser(null)}
+            onOpenSession={openBrowserSession}
+            onCreateSession={createBrowserSession}
+          />
+        </div>
+      )}
 
       {/* Worktree Label Modal */}
       <LabelModal

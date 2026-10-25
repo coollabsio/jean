@@ -42,6 +42,7 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from '@/components/ui/tooltip'
+import { dispatchBrowseWorktreeSessions } from '@/components/dashboard/worktree-sessions-browser'
 import { useSidebarWidth } from '@/components/layout/SidebarWidthContext'
 import { CollapsedCountBadge } from './CollapsedCountBadge'
 
@@ -578,32 +579,16 @@ export const WorktreeItem = memo(function WorktreeItem({
   const handleClick = useCallback(() => {
     selectProject(projectId)
     selectWorktree(worktree.id)
-    // Clear active worktree so MainWindowContent renders ProjectCanvasView
-    // (which hosts SessionChatModal with topbar + session tabs)
-    useChatStore.getState().clearActiveWorktree()
-
-    // Open session modal with the first active session
-    const sessions = sessionsData?.sessions ?? []
-    const activeSessions = sessions.filter(s => !s.archived_at)
-    const activeSessionId =
-      useChatStore.getState().activeSessionIds[worktree.id]
-    const targetSessionId = activeSessionId ?? activeSessions[0]?.id
-    if (targetSessionId) {
-      useChatStore.getState().setActiveSession(worktree.id, targetSessionId)
-    }
-    // Always open modal — SessionChatModal fetches sessions independently
-    // and falls back to first available session when no activeSessionId is set
-    setTimeout(() => {
-      window.dispatchEvent(
-        new CustomEvent('open-session-modal', {
-          detail: {
-            sessionId: targetSessionId ?? '',
-            worktreeId: worktree.id,
-            worktreePath: worktree.path,
-          },
-        })
-      )
-    }, 50)
+    // Clear active worktree so MainWindowContent renders ProjectCanvasView,
+    // which hosts the worktree sessions browser.
+    const chat = useChatStore.getState()
+    chat.clearActiveWorktree()
+    chat.registerWorktreePath(worktree.id, worktree.path)
+    dispatchBrowseWorktreeSessions({
+      projectId,
+      worktreeId: worktree.id,
+      worktreePath: worktree.path,
+    })
 
     // Close sidebar on mobile after navigation
     if (isMobile) {
@@ -614,7 +599,6 @@ export const WorktreeItem = memo(function WorktreeItem({
     projectId,
     worktree.id,
     worktree.path,
-    sessionsData?.sessions,
     selectProject,
     selectWorktree,
   ])
