@@ -31,6 +31,161 @@ describe('server command routing', () => {
     )
   })
 
+  it('leaves a raw id unscoped when the command has no path', () => {
+    clearServerResourcePaths()
+    registerServerResourcePath('remote', '/srv/project')
+
+    expect(resolveServerCommand({ sessionId: 'session-1' })).toBeNull()
+    expect(resolveServerCommand({ worktreeId: 'local-worktree' })).toBeNull()
+  })
+
+  it('resolves a shared path to the local server from a raw worktree id', () => {
+    clearServerResourcePaths()
+    registerServerResourcePath('local', '/srv/project')
+    registerServerResourcePath('remote', '/srv/project')
+
+    const expected = {
+      serverId: 'local',
+      args: {
+        worktreeId: 'local-worktree',
+        worktreePath: '/srv/project',
+        name: 'New session',
+      },
+    }
+    // create_session sends the id and the path together. Either property order
+    // has to select the local worktree instead of failing as ambiguous.
+    expect(
+      resolveServerCommand({
+        worktreeId: 'local-worktree',
+        worktreePath: '/srv/project',
+        name: 'New session',
+      })
+    ).toEqual(expected)
+    expect(
+      resolveServerCommand({
+        worktreePath: '/srv/project',
+        name: 'New session',
+        worktreeId: 'local-worktree',
+      })
+    ).toEqual(expected)
+  })
+
+  it('does not send a raw local id to the only registered remote path owner', () => {
+    clearServerResourcePaths()
+    registerServerResourcePath('remote', '/srv/project')
+
+    expect(() =>
+      resolveServerCommand({
+        worktreePath: '/srv/project',
+        worktreeId: 'local-worktree',
+      })
+    ).toThrow('another Jean server')
+  })
+
+  it('lets a scoped id select its server when the path is shared', () => {
+    clearServerResourcePaths()
+    registerServerResourcePath('server-a', '/srv/project')
+    registerServerResourcePath('server-b', '/srv/project')
+
+    const expected = {
+      serverId: 'server-b',
+      args: { worktreeId: 'worktree-1', worktreePath: '/srv/project' },
+    }
+    expect(
+      resolveServerCommand({
+        worktreePath: '/srv/project',
+        worktreeId: 'server-b:worktree-1',
+      })
+    ).toEqual(expected)
+    expect(
+      resolveServerCommand({
+        worktreeId: 'server-b:worktree-1',
+        worktreePath: '/srv/project',
+      })
+    ).toEqual(expected)
+    expect(
+      resolveServerCommand({
+        payload: { worktreePath: '/srv/project' },
+        worktreeId: 'server-b:worktree-1',
+      })
+    ).toEqual({
+      serverId: 'server-b',
+      args: {
+        payload: { worktreePath: '/srv/project' },
+        worktreeId: 'worktree-1',
+      },
+    })
+  })
+
+  it('keeps an explicit server when its ids were already stripped', () => {
+    clearServerResourcePaths()
+    registerServerResourcePath('local', '/srv/project')
+    registerServerResourcePath('server-a', '/srv/project')
+    registerServerResourcePath('server-b', '/srv/project')
+
+    expect(
+      resolveServerCommand(
+        {
+          worktreePath: '/srv/project',
+          worktreeId: 'worktree-1',
+          sessionId: 'server-b:session-1',
+        },
+        { explicitServerId: 'server-b' }
+      )
+    ).toEqual({
+      serverId: 'server-b',
+      args: {
+        worktreePath: '/srv/project',
+        worktreeId: 'worktree-1',
+        sessionId: 'session-1',
+      },
+    })
+    expect(
+      stripServerScope('server-b', {
+        worktreePath: '/srv/project',
+        worktreeId: 'worktree-1',
+        sessionId: 'server-b:session-1',
+      })
+    ).toEqual({
+      worktreePath: '/srv/project',
+      worktreeId: 'worktree-1',
+      sessionId: 'session-1',
+    })
+  })
+
+  it('rejects ids that name two servers even when a path matches one of them', () => {
+    clearServerResourcePaths()
+    registerServerResourcePath('remote', '/srv/project')
+
+    expect(() =>
+      resolveServerCommand({
+        worktreePath: '/srv/project',
+        worktreeId: 'local-worktree',
+        sessionId: 'remote:session-1',
+      })
+    ).toThrow('several Jean servers')
+  })
+
+  it('lets one unique path disambiguate another shared path', () => {
+    clearServerResourcePaths()
+    registerServerResourcePath('server-a', '/srv/project')
+    registerServerResourcePath('server-b', '/srv/project')
+    registerServerResourcePath('server-b', '/srv/project/feature')
+
+    expect(
+      resolveServerCommand({
+        repoPath: '/srv/project',
+        worktreePath: '/srv/project/feature',
+      })
+    ).toEqual({
+      serverId: 'server-b',
+      args: {
+        repoPath: '/srv/project',
+        worktreePath: '/srv/project/feature',
+      },
+    })
+  })
+
   it('adds server ownership to resource ids in events', () => {
     expect(
       decorateServerEvent('remote', {

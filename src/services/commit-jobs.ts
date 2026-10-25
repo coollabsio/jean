@@ -6,6 +6,7 @@ import type { CommitJob, StartCommitJobResponse } from '@/types/projects'
 export interface StartCommitJobArgs {
   [key: string]: unknown
   worktreePath: string
+  worktreeId?: string
   customPrompt?: string | null
   push: boolean
   remote?: string | null

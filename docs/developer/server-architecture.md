@@ -43,9 +43,16 @@ multi-server aggregation controls.
 
 Client-wide resource identity uses `(serverId, resourceId)`. The reserved
 local server ID is `local`; server persistence does not add this field to
-projects, worktrees, or sessions. Server capability responses publish API
-protocol range `1..=1` and versioned named capabilities. Missing protocol
-fields are read as the legacy protocol version 1.
+projects, worktrees, or sessions. Local resource ids stay raw. Remote ids use
+`serverId:resourceId`. Command routing collects those ids before it looks at
+`projectPath`, `worktreePath`, or `repoPath`, so a shared absolute path cannot
+depend on argument order. On ordinary `invoke`, a raw id combined with one of
+those paths means `local`. A raw id with no path stays unscoped. A call that
+already targets one server (`invokeForServer`) keeps that server when its ids
+have been stripped. A path alone still routes when exactly one server owns it,
+and fails when several do. Server capability responses publish API protocol
+range `1..=1` and versioned named capabilities. Missing protocol fields are
+read as the legacy protocol version 1.
 
 Server paths never initialize a graphical toolkit; they only spawn existing host
 tools when the gate above permits it.

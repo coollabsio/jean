@@ -1,5 +1,5 @@
 import { parseServerResourceKey, serverResourceKey } from './server-resource'
-import type { ServerId } from '@/types/server-resource'
+import { LOCAL_SERVER_ID, type ServerId } from '@/types/server-resource'
 
 const ROUTED_ARGUMENT_KEYS = new Set([
   'projectId',
@@ -63,38 +63,110 @@ export interface ResolvedServerCommand {
   args: Record<string, unknown>
 }
 
+export interface ResolveServerCommandOptions {
+  /**
+   * Server that already owns unscoped resource ids. `invokeForServer` strips
+   * scopes before the backend sees them, so a raw id in that call belongs to
+   * the supplied server. Ordinary `invoke` leaves this unset; a raw id then
+   * means the local server when the command also carries a repository path.
+   */
+  explicitServerId?: ServerId
+}
+
+/**
+ * Scoped ids name their server directly. Raw ids are not resolved here: they
+ * belong to an explicit server, or to the local server when the command also
+ * carries a repository path. An id with no path stays unscoped so a selected
+ * remote connection can still own that command.
+ */
+function scopedServerId(value: string): ServerId | null {
+  if (!value) return null
+  return parseServerResourceKey(value)?.serverId ?? null
+}
+
+/**
+ * Paths are applied only after every id has been collected, so property order
+ * cannot let a shared path reject a known owner. A unique path can still name
+ * the server when the command has no id.
+ */
+function resolvePathOwner(
+  serverId: ServerId | null,
+  paths: readonly string[]
+): ServerId | null {
+  const ownerSets: Set<ServerId>[] = []
+  for (const path of paths) {
+    const owners = pathOwners.get(path)
+    if (owners && owners.size > 0) ownerSets.push(owners)
+  }
+
+  if (serverId) {
+    for (const owners of ownerSets) {
+      if (!owners.has(serverId)) {
+        throw new Error('The resource path belongs to another Jean server')
+      }
+    }
+    return serverId
+  }
+
+  let uniqueOwner: ServerId | null = null
+  let sawAmbiguous = false
+  for (const owners of ownerSets) {
+    if (owners.size !== 1) {
+      sawAmbiguous = true
+      continue
+    }
+    const owner = [...owners][0]
+    if (!owner) continue
+    if (uniqueOwner && uniqueOwner !== owner) {
+      throw new Error('The resource path belongs to another Jean server')
+    }
+    uniqueOwner = owner
+  }
+
+  if (uniqueOwner) {
+    for (const owners of ownerSets) {
+      if (!owners.has(uniqueOwner)) {
+        throw new Error('The resource path belongs to another Jean server')
+      }
+    }
+    return uniqueOwner
+  }
+
+  if (sawAmbiguous) {
+    throw new Error('The resource path is ambiguous across Jean servers')
+  }
+  return null
+}
+
 export function resolveServerCommand(
-  args?: Record<string, unknown>
+  args?: Record<string, unknown>,
+  options?: ResolveServerCommandOptions
 ): ResolvedServerCommand | null {
   if (!args) return null
+  const explicitServerId = options?.explicitServerId
   let serverId: ServerId | null = null
+  let sawRawId = false
+  const paths: string[] = []
+
+  const claim = (owner: ServerId) => {
+    if (serverId && serverId !== owner) {
+      throw new Error(
+        'One command cannot use resources from several Jean servers'
+      )
+    }
+    serverId = owner
+  }
 
   const strip = (value: unknown, key?: string): unknown => {
     if (key && OPAQUE_ARGUMENT_KEYS.has(key)) return value
     if (typeof value === 'string' && key && ROUTED_ARGUMENT_KEYS.has(key)) {
-      const reference = parseServerResourceKey(value)
-      if (!reference) return value
-      if (serverId && serverId !== reference.serverId) {
-        throw new Error(
-          'One command cannot use resources from several Jean servers'
-        )
-      }
-      serverId = reference.serverId
-      return reference.resourceId
+      const owner = scopedServerId(value)
+      if (owner) claim(owner)
+      else if (value) sawRawId = true
+      return parseServerResourceKey(value)?.resourceId ?? value
     }
     if (typeof value === 'string' && key && PATH_ARGUMENT_KEYS.has(key)) {
-      const owners = pathOwners.get(value)
-      if (!owners || owners.size === 0) return value
-      if (serverId) {
-        if (!owners.has(serverId)) {
-          throw new Error('The resource path belongs to another Jean server')
-        }
-        return value
-      }
-      if (owners.size > 1) {
-        throw new Error('The resource path is ambiguous across Jean servers')
-      }
-      serverId = [...owners][0] ?? null
+      if (value) paths.push(value)
       return value
     }
     if (Array.isArray(value)) return value.map(item => strip(item, key))
@@ -110,7 +182,13 @@ export function resolveServerCommand(
   }
 
   const stripped = strip(args) as Record<string, unknown>
-  return serverId ? { serverId, args: stripped } : null
+  if (sawRawId) {
+    const rawOwner =
+      explicitServerId ?? (paths.length > 0 ? LOCAL_SERVER_ID : null)
+    if (rawOwner) claim(rawOwner)
+  }
+  const resolved = resolvePathOwner(serverId, paths)
+  return resolved ? { serverId: resolved, args: stripped } : null
 }
 
 /** Reduce scoped ids to the raw ids their owning server stores and matches. */
@@ -120,7 +198,7 @@ export function stripServerScope(
 ): Record<string, unknown> | undefined {
   if (!args) return args
   try {
-    const routed = resolveServerCommand(args)
+    const routed = resolveServerCommand(args, { explicitServerId: serverId })
     return routed?.serverId === serverId ? routed.args : args
   } catch {
     // Mixed or ambiguous ownership: send the arguments exactly as they arrived.
