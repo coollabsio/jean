@@ -4,6 +4,7 @@ import { RemoteConnectionsDialog } from './RemoteConnectionsDialog'
 
 const {
   addRemoteConnection,
+  addSshRemoteConnection,
   selectConnection,
   fetchRemoteServerInfo,
   getLocalJeanVersion,
@@ -16,6 +17,7 @@ const {
   remoteConnections,
 } = vi.hoisted(() => ({
   addRemoteConnection: vi.fn(() => ({ id: 'remote-1' })),
+  addSshRemoteConnection: vi.fn(() => ({ id: 'remote-1' })),
   selectConnection: vi.fn(),
   fetchRemoteServerInfo: vi.fn(async () => ({
     ok: true,
@@ -43,6 +45,7 @@ const {
 vi.mock('@/lib/remote-connections', () => ({
   LOCAL_CONNECTION_ID: 'local',
   addRemoteConnection,
+  addSshRemoteConnection,
   getActiveConnectionId: () => 'local',
   removeRemoteConnection: vi.fn(),
   markConnectionSwitch: vi.fn(),
@@ -268,14 +271,37 @@ describe('RemoteConnectionsDialog', () => {
 
   it('installs jean-server via SSH user and host in the native app', async () => {
     isNativeApp.mockReturnValue(true)
-    invoke.mockResolvedValue({
-      name: 'build-box',
-      url: 'http://192.168.1.50:3456',
-      token: 'tok-abc',
-      alreadyInstalled: false,
-      installMode: 'system',
-      ready: true,
-      log: 'ok',
+    invoke.mockImplementation(async (command: string) => {
+      if (command === 'list_ssh_tunnel_status') return []
+      if (command === 'preview_ssh_host_key') {
+        return {
+          host: '192.168.1.50',
+          canonicalHost: '192.168.1.50',
+          port: 22,
+          keyType: 'ssh-ed25519',
+          publicKey: 'AAAAC3NzaC1lZDI1NTE5AAAAIFake',
+          fingerprint: 'SHA256:abc',
+        }
+      }
+      if (command === 'trust_ssh_host_key') return null
+      if (command === 'install_remote_jean_server') {
+        return {
+          name: 'build-box',
+          url: 'http://192.168.1.50:3456',
+          token: '',
+          alreadyInstalled: false,
+          installMode: 'system',
+          ready: true,
+          log: 'ok',
+          transport: 'ssh',
+          localUrl: 'http://127.0.0.1:4567',
+          hostKeyFingerprint: 'SHA256:abc',
+          tokenStored: true,
+          profileId: 'profile-1',
+          pendingTunnel: false,
+        }
+      }
+      return null
     })
     const reloadApp = vi.fn()
 
@@ -301,6 +327,8 @@ describe('RemoteConnectionsDialog', () => {
       target: { value: '192.168.1.50' },
     })
     fireEvent.click(screen.getByRole('button', { name: /Install & Connect/i }))
+    expect(await screen.findByText(/SHA256:abc/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Trust and install/i }))
 
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith('install_remote_jean_server', {
@@ -310,18 +338,27 @@ describe('RemoteConnectionsDialog', () => {
         sshPort: 22,
         jeanPort: 3456,
         userInstall: null,
+        viaTunnel: true,
+        hostKeyFingerprint: 'SHA256:abc',
+        identityFile: null,
+        profileId: expect.any(String),
       })
     })
 
     await waitFor(() => {
-      expect(addRemoteConnection).toHaveBeenCalledWith({
-        name: 'build-box',
-        url: 'http://192.168.1.50:3456',
-        token: 'tok-abc',
-        sshUser: 'ubuntu',
-        sshHost: '192.168.1.50',
-        sshPort: 22,
-      })
+      expect(addSshRemoteConnection).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'profile-1',
+          name: 'build-box',
+          user: 'ubuntu',
+          host: '192.168.1.50',
+          sshPort: 22,
+          remotePort: 3456,
+          hostKeyFingerprint: 'SHA256:abc',
+          localPort: 4567,
+        })
+      )
+      expect(addRemoteConnection).not.toHaveBeenCalled()
       expect(selectConnection).not.toHaveBeenCalled()
       expect(reloadApp).not.toHaveBeenCalled()
     })

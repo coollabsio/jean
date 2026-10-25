@@ -19,6 +19,7 @@ import {
   getActiveRemoteConnection,
   getRemoteConnections,
 } from './remote-connections'
+import { getSshTransportEndpoint } from './ssh-tunnel-endpoint'
 import {
   prepareRemoteEditorOpenArgs,
   prepareRemoteTerminalOpenArgs,
@@ -145,6 +146,23 @@ export function convertProjectFileSrc(filePath: string): string {
   return `${base}/api/project-files/${encodeURIComponent(filePath)}${params}`
 }
 
+function remoteHttpEndpoint(
+  connection:
+    | {
+        id: string
+        url: string
+        token: string
+        transport?: string
+      }
+    | null
+    | undefined
+): { url: string; token: string } | null {
+  if (!connection) return null
+  if (connection.transport === 'ssh') return getSshTransportEndpoint(connection.id)
+  if (!connection.url) return null
+  return { url: connection.url, token: connection.token }
+}
+
 /** Build an authenticated file URL for a project owned by a specific server. */
 export function convertServerProjectFileSrc(
   serverId: string | undefined,
@@ -153,10 +171,11 @@ export function convertServerProjectFileSrc(
   if (!serverId || serverId === 'local') return convertProjectFileSrc(filePath)
 
   const connection = getRemoteConnections().find(item => item.id === serverId)
-  if (!connection) return filePath
-  const base = connection.url.replace(/\/+$/, '')
-  const token = connection.token
-    ? `?token=${encodeURIComponent(connection.token)}`
+  const endpoint = remoteHttpEndpoint(connection)
+  if (!endpoint) return filePath
+  const base = endpoint.url.replace(/\/+$/, '')
+  const token = endpoint.token
+    ? `?token=${encodeURIComponent(endpoint.token)}`
     : ''
   return `${base}/api/project-files/${encodeURIComponent(filePath)}${token}`
 }
@@ -169,10 +188,11 @@ export function convertServerFileSrc(
   if (!serverId || serverId === 'local') return convertFileSrc(filePath)
 
   const connection = getRemoteConnections().find(item => item.id === serverId)
-  if (!connection) return filePath
-  const base = connection.url.replace(/\/+$/, '')
-  const token = connection.token
-    ? `?token=${encodeURIComponent(connection.token)}`
+  const endpoint = remoteHttpEndpoint(connection)
+  if (!endpoint) return filePath
+  const base = endpoint.url.replace(/\/+$/, '')
+  const token = endpoint.token
+    ? `?token=${encodeURIComponent(endpoint.token)}`
     : ''
   const encodedPath = /^[/\\]|^[A-Za-z]:[/\\]/.test(filePath)
     ? encodeURIComponent(filePath)
@@ -221,6 +241,15 @@ const DESKTOP_ONLY_COMMANDS = new Set([
   'install_remote_jean_server',
   'list_ssh_config_hosts',
   'test_ssh_connection',
+  'preview_ssh_host_key',
+  'trust_ssh_host_key',
+  'test_ssh_tunnel_auth',
+  'start_ssh_tunnel',
+  'stop_ssh_tunnel',
+  'list_ssh_tunnel_status',
+  'store_ssh_profile_secret',
+  'delete_ssh_profile_secret',
+  'load_ssh_profile_secrets',
   'browser_create',
   'browser_navigate',
   'browser_back',
@@ -253,6 +282,15 @@ const LOCAL_SHELL_COMMANDS = new Set([
   'install_remote_jean_server',
   'list_ssh_config_hosts',
   'test_ssh_connection',
+  'preview_ssh_host_key',
+  'trust_ssh_host_key',
+  'test_ssh_tunnel_auth',
+  'start_ssh_tunnel',
+  'stop_ssh_tunnel',
+  'list_ssh_tunnel_status',
+  'store_ssh_profile_secret',
+  'delete_ssh_profile_secret',
+  'load_ssh_profile_secrets',
   'browser_create',
   'browser_navigate',
   'browser_back',
@@ -417,7 +455,7 @@ async function resolveUploadTarget(
   const remote = serverId
     ? getRemoteConnections().find(connection => connection.id === serverId)
     : getActiveRemoteConnection()
-  return remote ? { url: remote.url, token: remote.token } : null
+  return remoteHttpEndpoint(remote)
 }
 
 /** Invoke through the active transport unless a specific server owns the request. */

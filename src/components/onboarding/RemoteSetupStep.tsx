@@ -41,15 +41,36 @@ import { isNativeApp } from '@/lib/environment'
 import { cn } from '@/lib/utils'
 import {
   addRemoteConnection,
+  addSshRemoteConnection,
   parseOptionalSshPort,
   parseRemoteConnectionInput,
 } from '@/lib/remote-connections'
+import { generateId } from '@/lib/uuid'
 import {
   fetchRemoteServerInfo,
   warnRemoteVersionMismatch,
 } from '@/lib/remote-version'
 import { invoke, listenLocal } from '@/lib/transport'
 import type { InstallRemoteResult } from '@/components/remote/RemoteConnectionsDialog'
+
+interface SshHostKeyPreview {
+  host: string
+  canonicalHost: string
+  port: number
+  keyType: string
+  publicKey: string
+  fingerprint: string
+}
+
+function localPortFromUrl(url: string | null | undefined): number | undefined {
+  if (!url) return undefined
+  try {
+    const port = Number(new URL(url).port)
+    return Number.isInteger(port) && port > 0 ? port : undefined
+  } catch {
+    return undefined
+  }
+}
 import { InlineError, errorSummary } from './InlineError'
 
 const EMPTY_URL_FORM = {
@@ -137,6 +158,9 @@ export function RemoteSetupStep({ onComplete }: RemoteSetupStepProps) {
   const [error, setError] = useState<StepError | null>(null)
   const [connecting, setConnecting] = useState(false)
   const [installing, setInstalling] = useState(false)
+  const [pendingHostKey, setPendingHostKey] = useState<SshHostKeyPreview | null>(
+    null
+  )
   const [progress, setProgress] = useState<InstallProgress | null>(null)
   const [testState, setTestState] = useState<TestState>({ status: 'idle' })
 
@@ -279,12 +303,54 @@ export function RemoteSetupStep({ onComplete }: RemoteSetupStepProps) {
     setInstalling(true)
     setProgress({
       step: 'ssh',
-      message: 'Starting remote install…',
+      message: 'Reading the SSH host key…',
       reached: ['ssh'],
       failed: false,
     })
 
     try {
+      const preview = await invoke<SshHostKeyPreview>('preview_ssh_host_key', {
+        user,
+        host,
+        sshPort,
+      })
+      if (!preview?.fingerprint) {
+        throw new Error('Could not read an SSH host key for this server.')
+      }
+      setPendingHostKey(preview)
+      setInstalling(false)
+      setProgress(null)
+    } catch (installError) {
+      setError(toStepError(installError, 'install'))
+      setInstalling(false)
+      setProgress(current => current && { ...current, failed: true })
+    }
+  }
+
+  const handleTrustInstall = async () => {
+    if (!pendingHostKey) return
+    const target = readSshTarget(message => setError({ message }))
+    if (!target) return
+    const { user, host, sshPort } = target
+    const jeanPort = Number(installForm.jeanPort || '3456')
+    const profileId = generateId()
+    setError(null)
+    setInstalling(true)
+    setProgress({
+      step: 'ssh',
+      message: 'Installing jean-server on 127.0.0.1…',
+      reached: ['ssh'],
+      failed: false,
+    })
+    try {
+      await invoke('trust_ssh_host_key', {
+        host: pendingHostKey.host,
+        canonicalHost: pendingHostKey.canonicalHost,
+        port: pendingHostKey.port,
+        keyType: pendingHostKey.keyType,
+        publicKey: pendingHostKey.publicKey,
+        fingerprint: pendingHostKey.fingerprint,
+      })
       const result = await invoke<InstallRemoteResult>(
         'install_remote_jean_server',
         {
@@ -294,20 +360,24 @@ export function RemoteSetupStep({ onComplete }: RemoteSetupStepProps) {
           sshPort,
           jeanPort,
           userInstall: null,
+          viaTunnel: true,
+          hostKeyFingerprint: pendingHostKey.fingerprint,
+          profileId,
         }
       )
-
-      if (!result.ready) {
-        throw new Error('Remote jean-server did not report ready.')
+      if (!result.ready || !result.profileId) {
+        throw new Error(result.log || 'The SSH tunnel did not become ready.')
       }
-
-      const connection = addRemoteConnection({
+      const connection = addSshRemoteConnection({
+        id: result.profileId,
         name: result.name,
-        url: result.url,
-        token: result.token,
-        sshUser: user,
-        sshHost: host,
+        user,
+        host,
         sshPort,
+        remotePort: jeanPort,
+        hostKeyFingerprint:
+          result.hostKeyFingerprint || pendingHostKey.fingerprint,
+        localPort: localPortFromUrl(result.localUrl),
       })
       onComplete(connection.id)
     } catch (installError) {
@@ -346,7 +416,8 @@ export function RemoteSetupStep({ onComplete }: RemoteSetupStepProps) {
     />
   )
   const retryHandlers: Record<RetryAction, () => void> = {
-    install: () => void handleInstallSubmit(),
+    install: () =>
+      void (pendingHostKey ? handleTrustInstall() : handleInstallSubmit()),
     test: () => void handleTestSsh(),
     url: () => void handleUrlSubmit(),
   }
@@ -360,6 +431,46 @@ export function RemoteSetupStep({ onComplete }: RemoteSetupStepProps) {
     />
   )
   const errorMessage = error && renderError(error)
+
+  if (addMode === 'install' && native && pendingHostKey && !installing && !progress) {
+    return (
+      <div className="space-y-4">
+        {tabs}
+        <div className="space-y-2">
+          <p className="text-sm">
+            Confirm this SSH host key before installing. Jean will bind
+            jean-server to 127.0.0.1 and open a tunnel.
+          </p>
+          <p className="break-all rounded-md border bg-muted/40 px-3 py-2 font-mono text-xs">
+            {pendingHostKey.keyType} {pendingHostKey.fingerprint}
+          </p>
+        </div>
+        {errorMessage}
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="lg"
+            onClick={() => {
+              setPendingHostKey(null)
+              setError(null)
+            }}
+          >
+            Back
+          </Button>
+          <Button
+            type="button"
+            className="flex-1"
+            size="lg"
+            onClick={() => void handleTrustInstall()}
+          >
+            <HardDriveDownload className="mr-2 size-4" />
+            Trust and install
+          </Button>
+        </div>
+      </div>
+    )
+  }
 
   if (addMode === 'install' && native) {
     const setField =

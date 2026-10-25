@@ -7,6 +7,7 @@ import {
 } from 'react'
 import {
   HardDriveDownload,
+  KeyRound,
   Link2,
   Loader2,
   Pencil,
@@ -32,16 +33,20 @@ import { isNativeApp } from '@/lib/environment'
 import { cn } from '@/lib/utils'
 import {
   addRemoteConnection,
+  addSshRemoteConnection,
   parseOptionalSshPort,
   parseRemoteConnectionInput,
   removeRemoteConnection,
   setRemoteConnectionEnabled,
   setLocalDashboardEnabled,
   updateRemoteConnection,
+  updateSshRemoteConnection,
   useRemoteConnections,
   useLocalDashboardEnabled,
   type RemoteConnection,
 } from '@/lib/remote-connections'
+import { getSshTransportEndpoint } from '@/lib/ssh-tunnel-endpoint'
+import { generateId } from '@/lib/uuid'
 import { DISMISS_TRANSIENT_UI_EVENT } from '@/lib/dismiss-transient-ui'
 import {
   checkRemoteVersionCompatibility,
@@ -66,9 +71,29 @@ const EMPTY_INSTALL_FORM = {
   host: '',
   sshPort: '22',
   jeanPort: '3456',
+  identityFile: '',
 }
 
-type AddMode = 'url' | 'install'
+const EMPTY_TUNNEL_FORM = {
+  name: '',
+  user: '',
+  host: '',
+  sshPort: '22',
+  jeanPort: '3456',
+  token: '',
+  identityFile: '',
+}
+
+type AddMode = 'url' | 'install' | 'tunnel'
+
+interface SshHostKeyPreview {
+  host: string
+  canonicalHost: string
+  port: number
+  keyType: string
+  publicKey: string
+  fingerprint: string
+}
 type EditorMode = null | 'new' | string
 
 export interface InstallRemoteResult {
@@ -79,6 +104,22 @@ export interface InstallRemoteResult {
   installMode: string
   ready: boolean
   log: string
+  transport?: string
+  localUrl?: string | null
+  hostKeyFingerprint?: string | null
+  tokenStored?: boolean
+  profileId?: string | null
+  pendingTunnel?: boolean
+}
+
+function localPortFromUrl(url: string | null | undefined): number | undefined {
+  if (!url) return undefined
+  try {
+    const port = Number(new URL(url).port)
+    return Number.isInteger(port) && port > 0 ? port : undefined
+  } catch {
+    return undefined
+  }
 }
 
 type VersionState =
@@ -119,6 +160,11 @@ export function RemoteConnectionsDialog({
   const [versions, setVersions] = useState<Record<string, VersionState>>({})
   const [installing, setInstalling] = useState(false)
   const [progress, setProgress] = useState<string | null>(null)
+  const [tunnelForm, setTunnelForm] = useState(EMPTY_TUNNEL_FORM)
+  const [pendingHostKey, setPendingHostKey] = useState<SshHostKeyPreview | null>(
+    null
+  )
+  const [tunnelStatus, setTunnelStatus] = useState<Record<string, string>>({})
 
   const connectionIds = connections.map(connection => connection.id).join('|')
 
@@ -147,10 +193,20 @@ export function RemoteConnectionsDialog({
     const results = await Promise.all(
       items.map(async connection => {
         try {
-          const info = await fetchRemoteServerInfo(
-            connection.url,
-            connection.token
-          )
+          const endpoint =
+            connection.transport === 'ssh'
+              ? getSshTransportEndpoint(connection.id)
+              : { url: connection.url, token: connection.token }
+          if (!endpoint) {
+            return [
+              connection.id,
+              {
+                status: 'error' as const,
+                message: 'SSH tunnel is not connected',
+              },
+            ] as const
+          }
+          const info = await fetchRemoteServerInfo(endpoint.url, endpoint.token)
           return [
             connection.id,
             {
@@ -242,11 +298,51 @@ export function RemoteConnectionsDialog({
     }
   }, [open, installing, native])
 
+  useEffect(() => {
+    if (!open || !native) return
+    let disposed = false
+    let unlisten: (() => void) | undefined
+    void listenLocal<{ profileId: string; status: string }>(
+      'ssh-tunnel:status',
+      event => {
+        if (disposed) return
+        setTunnelStatus(current => ({
+          ...current,
+          [event.payload.profileId]: event.payload.status,
+        }))
+      }
+    ).then(fn => {
+      if (disposed) fn()
+      else unlisten = fn
+    })
+    void (async () => {
+      try {
+        const listed = await invoke<{ profileId: string; status: string }[]>(
+          'list_ssh_tunnel_status'
+        )
+        if (disposed || !Array.isArray(listed)) return
+        setTunnelStatus(current => {
+          const next = { ...current }
+          for (const status of listed) next[status.profileId] = status.status
+          return next
+        })
+      } catch {
+        // The desktop command is absent in web access and unit tests.
+      }
+    })()
+    return () => {
+      disposed = true
+      unlisten?.()
+    }
+  }, [open, native])
+
   const beginAdd = () => {
     setEditingId('new')
     setAddMode(native ? 'install' : 'url')
     setForm(EMPTY_URL_FORM)
     setInstallForm(EMPTY_INSTALL_FORM)
+    setTunnelForm(EMPTY_TUNNEL_FORM)
+    setPendingHostKey(null)
     setError(null)
     setProgress(null)
     setInstalling(false)
@@ -254,6 +350,23 @@ export function RemoteConnectionsDialog({
 
   const beginEdit = (connection: RemoteConnection) => {
     setEditingId(connection.id)
+    setPendingHostKey(null)
+    setError(null)
+    setProgress(null)
+    setInstalling(false)
+    if (connection.transport === 'ssh' && connection.sshTunnel) {
+      setAddMode('tunnel')
+      setTunnelForm({
+        name: connection.name,
+        user: connection.sshTunnel.user,
+        host: connection.sshTunnel.host,
+        sshPort: String(connection.sshTunnel.port ?? 22),
+        jeanPort: String(connection.sshTunnel.remotePort ?? 3456),
+        token: '',
+        identityFile: connection.sshTunnel.identityFile ?? '',
+      })
+      return
+    }
     setAddMode('url')
     setForm({
       name: connection.name,
@@ -329,6 +442,42 @@ export function RemoteConnectionsDialog({
     }
   }
 
+  const readSshPorts = (sshPortRaw: string, jeanPortRaw: string) => {
+    const sshPort = Number(sshPortRaw || '22')
+    const jeanPort = Number(jeanPortRaw || '3456')
+    if (
+      !Number.isInteger(sshPort) ||
+      sshPort < 1 ||
+      sshPort > 65535 ||
+      !Number.isInteger(jeanPort) ||
+      jeanPort < 1 ||
+      jeanPort > 65535
+    ) {
+      throw new Error('SSH and Jean ports must be integers between 1 and 65535.')
+    }
+    return { sshPort, jeanPort }
+  }
+
+  const previewHostKey = async (
+    user: string,
+    host: string,
+    sshPort: number
+  ) => {
+    setInstalling(true)
+    setProgress('Reading the SSH host key…')
+    const preview = await invoke<SshHostKeyPreview>('preview_ssh_host_key', {
+      user,
+      host,
+      sshPort,
+    })
+    if (!preview?.fingerprint) {
+      throw new Error('Could not read an SSH host key for this server.')
+    }
+    setPendingHostKey(preview)
+    setProgress(null)
+    setInstalling(false)
+  }
+
   const handleInstallSubmit = async (event: FormEvent) => {
     event.preventDefault()
     if (!native) {
@@ -343,25 +492,42 @@ export function RemoteConnectionsDialog({
       return
     }
 
-    const sshPort = Number(installForm.sshPort || '22')
-    const jeanPort = Number(installForm.jeanPort || '3456')
-    if (
-      !Number.isInteger(sshPort) ||
-      sshPort < 1 ||
-      sshPort > 65535 ||
-      !Number.isInteger(jeanPort) ||
-      jeanPort < 1 ||
-      jeanPort > 65535
-    ) {
-      setError('SSH and Jean ports must be integers between 1 and 65535.')
-      return
+    setError(null)
+    try {
+      const { sshPort } = readSshPorts(installForm.sshPort, installForm.jeanPort)
+      await previewHostKey(user, host, sshPort)
+    } catch (installError) {
+      setError(
+        installError instanceof Error
+          ? installError.message
+          : String(installError)
+      )
+      setInstalling(false)
+      setProgress(null)
     }
+  }
 
+  const handleTrustInstall = async () => {
+    if (!pendingHostKey) return
+    const user = installForm.user.trim()
+    const host = installForm.host.trim()
+    const { sshPort, jeanPort } = readSshPorts(
+      installForm.sshPort,
+      installForm.jeanPort
+    )
+    const profileId = generateId()
     setError(null)
     setInstalling(true)
-    setProgress('Starting remote install…')
-
+    setProgress('Installing jean-server on 127.0.0.1…')
     try {
+      await invoke('trust_ssh_host_key', {
+        host: pendingHostKey.host,
+        canonicalHost: pendingHostKey.canonicalHost,
+        port: pendingHostKey.port,
+        keyType: pendingHostKey.keyType,
+        publicKey: pendingHostKey.publicKey,
+        fingerprint: pendingHostKey.fingerprint,
+      })
       const result = await invoke<InstallRemoteResult>(
         'install_remote_jean_server',
         {
@@ -371,22 +537,31 @@ export function RemoteConnectionsDialog({
           sshPort,
           jeanPort,
           userInstall: null,
+          viaTunnel: true,
+          hostKeyFingerprint: pendingHostKey.fingerprint,
+          identityFile: installForm.identityFile.trim() || null,
+          profileId,
         }
       )
-
-      if (!result.ready) {
-        throw new Error('Remote jean-server did not report ready.')
+      if (!result.ready || !result.profileId) {
+        throw new Error(
+          result.log || 'The SSH tunnel did not become ready.'
+        )
       }
-
-      addRemoteConnection({
+      addSshRemoteConnection({
+        id: result.profileId,
         name: result.name,
-        url: result.url,
-        token: result.token,
-        sshUser: user,
-        sshHost: host,
+        user,
+        host,
         sshPort,
+        identityFile: installForm.identityFile.trim() || undefined,
+        remotePort: jeanPort,
+        hostKeyFingerprint:
+          result.hostKeyFingerprint || pendingHostKey.fingerprint,
+        localPort: localPortFromUrl(result.localUrl),
       })
       setEditingId(null)
+      setPendingHostKey(null)
       setInstalling(false)
       setProgress(null)
     } catch (installError) {
@@ -400,12 +575,147 @@ export function RemoteConnectionsDialog({
     }
   }
 
+  const handleTunnelSubmit = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!native) {
+      setError('SSH tunnels are only available in the native Jean app.')
+      return
+    }
+    const user = tunnelForm.user.trim()
+    const host = tunnelForm.host.trim()
+    const token = tunnelForm.token.trim()
+    if (!user || !host) {
+      setError('SSH user and host/IP are required.')
+      return
+    }
+    if (editingId === 'new' && !token) {
+      setError('Access token is required.')
+      return
+    }
+    setError(null)
+    try {
+      const { sshPort } = readSshPorts(tunnelForm.sshPort, tunnelForm.jeanPort)
+      await previewHostKey(user, host, sshPort)
+    } catch (tunnelError) {
+      setError(
+        tunnelError instanceof Error ? tunnelError.message : String(tunnelError)
+      )
+      setInstalling(false)
+      setProgress(null)
+    }
+  }
+
+  const handleTrustTunnel = async () => {
+    if (!pendingHostKey) return
+    const user = tunnelForm.user.trim()
+    const host = tunnelForm.host.trim()
+    const { sshPort, jeanPort } = readSshPorts(
+      tunnelForm.sshPort,
+      tunnelForm.jeanPort
+    )
+    const profileId = editingId && editingId !== 'new' ? editingId : generateId()
+    const token = tunnelForm.token.trim()
+    setError(null)
+    setInstalling(true)
+    setProgress('Opening the SSH tunnel…')
+    try {
+      await invoke('trust_ssh_host_key', {
+        host: pendingHostKey.host,
+        canonicalHost: pendingHostKey.canonicalHost,
+        port: pendingHostKey.port,
+        keyType: pendingHostKey.keyType,
+        publicKey: pendingHostKey.publicKey,
+        fingerprint: pendingHostKey.fingerprint,
+      })
+      if (token) {
+        await invoke('store_ssh_profile_secret', { profileId, token })
+      }
+      const input = {
+        id: profileId,
+        name: tunnelForm.name,
+        token: token || undefined,
+        user,
+        host,
+        sshPort,
+        identityFile: tunnelForm.identityFile.trim() || undefined,
+        remotePort: jeanPort,
+        hostKeyFingerprint: pendingHostKey.fingerprint,
+      }
+      if (editingId && editingId !== 'new') {
+        updateSshRemoteConnection(profileId, input)
+      } else {
+        addSshRemoteConnection(input)
+      }
+      await invoke('start_ssh_tunnel', {
+        profileId,
+        user,
+        host,
+        sshPort,
+        identityFile: tunnelForm.identityFile.trim() || null,
+        remoteHost: '127.0.0.1',
+        remotePort: jeanPort,
+        localPort: null,
+        hostKeyFingerprint: pendingHostKey.fingerprint,
+      })
+      setEditingId(null)
+      setPendingHostKey(null)
+      setInstalling(false)
+      setProgress(null)
+    } catch (tunnelError) {
+      setError(
+        tunnelError instanceof Error ? tunnelError.message : String(tunnelError)
+      )
+      setInstalling(false)
+      setProgress(null)
+    }
+  }
+
+  const browseIdentityFile = async (
+    target: 'install' | 'tunnel'
+  ) => {
+    const { open } = await import('@tauri-apps/plugin-dialog')
+    const selected = await open({
+      multiple: false,
+      title: 'SSH identity file',
+    })
+    if (typeof selected !== 'string') return
+    if (target === 'install') {
+      setInstallForm(current => ({ ...current, identityFile: selected }))
+    } else {
+      setTunnelForm(current => ({ ...current, identityFile: selected }))
+    }
+  }
+
   const handleDelete = (id: string) => {
     removeRemoteConnection(id)
   }
 
+  const retryTunnel = async (connection: RemoteConnection) => {
+    if (!connection.sshTunnel) return
+    const tunnel = connection.sshTunnel
+    setError(null)
+    try {
+      await invoke('start_ssh_tunnel', {
+        profileId: connection.id,
+        user: tunnel.user,
+        host: tunnel.host,
+        sshPort: tunnel.port ?? 22,
+        identityFile: tunnel.identityFile ?? null,
+        remoteHost: tunnel.remoteHost ?? '127.0.0.1',
+        remotePort: tunnel.remotePort ?? 3456,
+        localPort: tunnel.localPort ?? null,
+        hostKeyFingerprint: tunnel.hostKeyFingerprint,
+      })
+    } catch (retryError) {
+      setError(
+        retryError instanceof Error ? retryError.message : String(retryError)
+      )
+    }
+  }
+
   const isNew = editingId === 'new'
-  const showInstallForm = isNew && addMode === 'install'
+  const showInstallForm = isNew && addMode === 'install' && native
+  const showTunnelForm = Boolean(editingId) && addMode === 'tunnel' && native
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -433,6 +743,21 @@ export function RemoteConnectionsDialog({
 
         {editingId ? (
           showInstallForm ? (
+            pendingHostKey ? (
+              <HostKeyConfirm
+                preview={pendingHostKey}
+                busy={installing}
+                progress={progress}
+                error={error}
+                confirmLabel="Trust and install"
+                onCancel={() => {
+                  if (installing) return
+                  setPendingHostKey(null)
+                  setError(null)
+                }}
+                onConfirm={() => void handleTrustInstall()}
+              />
+            ) : (
             <form className="space-y-4" onSubmit={handleInstallSubmit}>
               {native && (
                 <AddModeTabs
@@ -531,10 +856,37 @@ export function RemoteConnectionsDialog({
                   />
                 </div>
               </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="remote-install-identity">
+                  Identity file (optional)
+                </Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="remote-install-identity"
+                    value={installForm.identityFile}
+                    onChange={event =>
+                      setInstallForm(current => ({
+                        ...current,
+                        identityFile: event.target.value,
+                      }))
+                    }
+                    placeholder="SSH agent or default keys"
+                    disabled={installing}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={installing}
+                    onClick={() => void browseIdentityFile('install')}
+                  >
+                    Browse
+                  </Button>
+                </div>
+              </div>
               <p className="text-xs text-muted-foreground">
-                Requires SSH key auth to the host (no password prompt). Jean
-                installs via the official installer, checks health/ready/auth,
-                then adds the connection when everything is green.
+                Key or agent auth only. Jean installs jean-server on 127.0.0.1
+                and opens an SSH tunnel. You confirm the host key before
+                anything is saved. Password login is not supported.
               </p>
               {progress && (
                 <div className="flex items-start gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
@@ -571,6 +923,210 @@ export function RemoteConnectionsDialog({
                 </Button>
               </DialogFooter>
             </form>
+            )
+          ) : showTunnelForm ? (
+            pendingHostKey ? (
+              <HostKeyConfirm
+                preview={pendingHostKey}
+                busy={installing}
+                progress={progress}
+                error={error}
+                confirmLabel="Trust and connect"
+                onCancel={() => {
+                  if (installing) return
+                  setPendingHostKey(null)
+                  setError(null)
+                }}
+                onConfirm={() => void handleTrustTunnel()}
+              />
+            ) : (
+              <form className="space-y-4" onSubmit={handleTunnelSubmit}>
+                {isNew && (
+                  <AddModeTabs
+                    mode={addMode}
+                    onChange={mode => {
+                      if (installing) return
+                      setAddMode(mode)
+                      setPendingHostKey(null)
+                      setError(null)
+                    }}
+                    disabled={installing}
+                  />
+                )}
+                <div className="space-y-1.5">
+                  <Label htmlFor="ssh-tunnel-name">Name</Label>
+                  <Input
+                    id="ssh-tunnel-name"
+                    value={tunnelForm.name}
+                    onChange={event =>
+                      setTunnelForm(current => ({
+                        ...current,
+                        name: event.target.value,
+                      }))
+                    }
+                    placeholder="Build server"
+                    disabled={installing}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="ssh-tunnel-user">SSH user</Label>
+                    <Input
+                      id="ssh-tunnel-user"
+                      value={tunnelForm.user}
+                      onChange={event =>
+                        setTunnelForm(current => ({
+                          ...current,
+                          user: event.target.value,
+                        }))
+                      }
+                      placeholder="ubuntu"
+                      required
+                      disabled={installing}
+                      autoComplete="username"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="ssh-tunnel-host">Host / IP</Label>
+                    <Input
+                      id="ssh-tunnel-host"
+                      value={tunnelForm.host}
+                      onChange={event =>
+                        setTunnelForm(current => ({
+                          ...current,
+                          host: event.target.value,
+                        }))
+                      }
+                      placeholder="192.168.1.50"
+                      required
+                      disabled={installing}
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="ssh-tunnel-ssh-port">SSH port</Label>
+                    <Input
+                      id="ssh-tunnel-ssh-port"
+                      type="number"
+                      min={1}
+                      max={65535}
+                      value={tunnelForm.sshPort}
+                      onChange={event =>
+                        setTunnelForm(current => ({
+                          ...current,
+                          sshPort: event.target.value,
+                        }))
+                      }
+                      disabled={installing}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="ssh-tunnel-jean-port">Jean port</Label>
+                    <Input
+                      id="ssh-tunnel-jean-port"
+                      type="number"
+                      min={1}
+                      max={65535}
+                      value={tunnelForm.jeanPort}
+                      onChange={event =>
+                        setTunnelForm(current => ({
+                          ...current,
+                          jeanPort: event.target.value,
+                        }))
+                      }
+                      disabled={installing}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="ssh-tunnel-token">Access token</Label>
+                  <Input
+                    id="ssh-tunnel-token"
+                    type="password"
+                    value={tunnelForm.token}
+                    onChange={event =>
+                      setTunnelForm(current => ({
+                        ...current,
+                        token: event.target.value,
+                      }))
+                    }
+                    placeholder={
+                      isNew
+                        ? 'Token from the remote jean-server'
+                        : 'Leave blank to keep the stored token'
+                    }
+                    disabled={installing}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="ssh-tunnel-identity">
+                    Identity file (optional)
+                  </Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="ssh-tunnel-identity"
+                      value={tunnelForm.identityFile}
+                      onChange={event =>
+                        setTunnelForm(current => ({
+                          ...current,
+                          identityFile: event.target.value,
+                        }))
+                      }
+                      placeholder="SSH agent or default keys"
+                      disabled={installing}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={installing}
+                      onClick={() => void browseIdentityFile('tunnel')}
+                    >
+                      Browse
+                    </Button>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Connects to a loopback-only jean-server through `ssh -N`. The
+                  desktop talks to 127.0.0.1. The token stays in the OS secret
+                  store.
+                </p>
+                {progress && (
+                  <div className="flex items-start gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
+                    <Spinner className="mt-0.5 size-3.5 shrink-0" />
+                    <span>{progress}</span>
+                  </div>
+                )}
+                {error && (
+                  <p className="whitespace-pre-wrap text-sm text-destructive">
+                    {error}
+                  </p>
+                )}
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setEditingId(null)}
+                    disabled={installing}
+                  >
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={installing}>
+                    {installing ? (
+                      <>
+                        <Spinner className="mr-2 size-4" />
+                        Connecting…
+                      </>
+                    ) : (
+                      <>
+                        <KeyRound className="mr-2 size-4" />
+                        {isNew ? 'Connect' : 'Save'}
+                      </>
+                    )}
+                  </Button>
+                </DialogFooter>
+              </form>
+            )
           ) : (
             <form className="space-y-4" onSubmit={handleUrlSubmit}>
               {isNew && native && (
@@ -736,7 +1292,13 @@ export function RemoteConnectionsDialog({
                 <ConnectionRow
                   key={connection.id}
                   name={connection.name}
-                  detail={connection.url}
+                  detail={connectionDetail(connection, tunnelStatus[connection.id])}
+                  onRetry={
+                    connection.transport === 'ssh' &&
+                    tunnelStatus[connection.id] === 'failed'
+                      ? () => void retryTunnel(connection)
+                      : undefined
+                  }
                   versionLabel={versionLabel}
                   versionWarning={mismatch}
                   onEdit={() => beginEdit(connection)}
@@ -774,8 +1336,81 @@ const ADD_MODE_TABS: {
   icon: typeof HardDriveDownload
 }[] = [
   { id: 'install', label: 'Install via SSH', icon: HardDriveDownload },
+  { id: 'tunnel', label: 'SSH tunnel', icon: KeyRound },
   { id: 'url', label: 'Existing URL', icon: Link2 },
 ]
+
+function connectionDetail(
+  connection: RemoteConnection,
+  status?: string
+): string {
+  if (connection.transport !== 'ssh' || !connection.sshTunnel) {
+    return connection.url
+  }
+  const endpoint = `${connection.sshTunnel.user}@${connection.sshTunnel.host}`
+  if (status === 'ready') return `${endpoint} · tunnel ready`
+  if (status === 'reconnecting') return `${endpoint} · reconnecting`
+  if (status === 'failed') return `${endpoint} · tunnel failed`
+  if (status === 'connecting') return `${endpoint} · connecting`
+  return `${endpoint} · SSH tunnel`
+}
+
+function HostKeyConfirm({
+  preview,
+  busy,
+  progress,
+  error,
+  confirmLabel,
+  onCancel,
+  onConfirm,
+}: {
+  preview: SshHostKeyPreview
+  busy: boolean
+  progress: string | null
+  error: string | null
+  confirmLabel: string
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <p className="text-sm">
+          Confirm this SSH host key for {preview.host}
+          {preview.canonicalHost !== preview.host
+            ? ` (${preview.canonicalHost})`
+            : ''}
+          .
+        </p>
+        <p className="break-all rounded-md border bg-muted/40 px-3 py-2 font-mono text-xs">
+          {preview.keyType} {preview.fingerprint}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Jean pins this key and refuses to connect if it changes. Password
+          login stays disabled.
+        </p>
+      </div>
+      {progress && (
+        <div className="flex items-start gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
+          <Spinner className="mt-0.5 size-3.5 shrink-0" />
+          <span>{progress}</span>
+        </div>
+      )}
+      {error && (
+        <p className="whitespace-pre-wrap text-sm text-destructive">{error}</p>
+      )}
+      <DialogFooter>
+        <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
+          Back
+        </Button>
+        <Button type="button" onClick={onConfirm} disabled={busy}>
+          {busy ? <Spinner className="mr-2 size-4" /> : null}
+          {confirmLabel}
+        </Button>
+      </DialogFooter>
+    </div>
+  )
+}
 
 function AddModeTabs({
   mode,
@@ -827,6 +1462,7 @@ function ConnectionRow({
   versionWarning,
   onEdit,
   onDelete,
+  onRetry,
   enabled,
   onEnabledChange,
 }: {
@@ -836,6 +1472,7 @@ function ConnectionRow({
   versionWarning?: boolean
   onEdit?: () => void
   onDelete?: () => void
+  onRetry?: () => void
   enabled?: boolean
   onEnabledChange?: (enabled: boolean) => void
 }) {
@@ -866,6 +1503,17 @@ function ConnectionRow({
         </span>
         {hasActions && (
           <div className="flex shrink-0 items-center gap-0.5">
+            {onRetry && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={onRetry}
+              >
+                Retry
+              </Button>
+            )}
             {onEdit && (
               <Button
                 type="button"

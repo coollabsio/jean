@@ -407,14 +407,19 @@ In the desktop app, click the server icon in the title bar and choose **Add
 remote**. You can either:
 
 1. **Install via SSH** (native app only) — enter an SSH user and host/IP
-   (optional name, SSH port, Jean port). Jean connects with key-based SSH
-   (`BatchMode`, no password prompt), runs the official
-   `install-jean-server.sh` installer on the remote Linux host (system install
-   with passwordless `sudo -n` when available, otherwise `--user-install`),
-   waits until `/healthz`, `/readyz`, and `/api/auth` succeed from this client,
-   then saves the remote and switches to it.
-2. **Existing URL** — paste a full Web Access URL (including `?token=...`) or
-   enter the server URL and token separately.
+   (optional name, SSH port, Jean port, identity file). Jean shows the server
+   host key and waits for you to trust it. It then connects with key or agent
+   auth (`BatchMode`, no password prompt), runs the official
+   `install-jean-server.sh` installer bound to `127.0.0.1`, and opens a
+   Jean-managed `ssh -N` local forward. The desktop talks to
+   `http://127.0.0.1:<local-port>`. The access token is stored in the OS
+   credential store, not in the connection profile.
+2. **SSH tunnel** (native app only) — same local forward for a jean-server
+   that is already listening on the remote loopback. Paste the access token
+   once; Jean stores it in the OS credential store.
+3. **Existing URL** — paste a full Web Access URL (including `?token=...`) or
+   enter the server URL and token separately. Direct URL profiles are
+   unchanged, including their tokens in local storage.
 
 Selecting the remote switches the entire Jean backend while keeping the desktop
 app's bundled React UI and local native shell capabilities. Commands and events
@@ -423,13 +428,21 @@ same dialog to return to the desktop app's local backend.
 
 **SSH install requirements:**
 
-- OpenSSH client on the machine running Jean
-- Key-based SSH access to `user@host` (password auth is not supported)
+- OpenSSH client (`ssh` and `ssh-keyscan`) on the machine running Jean
+- Key or agent auth to `user@host` (password auth is not supported)
 - Remote host is Linux (amd64/arm64) with `curl` and `tar`
-- Port `3456` (or the Jean port you chose) reachable from this client; the
-  installer binds `0.0.0.0` so LAN/Tailscale IPs work
+- SSH port reachable from this client. The installer binds `127.0.0.1`, so
+  the Jean port does not need to be reachable on the network
 - Passwordless sudo for a system install, or a working user systemd session for
   `--user-install`
+
+The tunnel reconnects with a bounded backoff, stops when the profile is
+removed or Jean exits, and comes back on the next launch. A host-key or
+authentication failure stops until you review it. Web Access and mobile keep
+using direct URLs; they do not open SSH tunnels.
+
+This transport does not add ntfy, webhooks, or any other server-owned
+notification provider.
 
 Native Jean client origins are allowed automatically. HTTP and HTTPS server
 URLs are both supported; keep token authentication enabled on remote servers.

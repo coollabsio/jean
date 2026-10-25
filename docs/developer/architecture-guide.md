@@ -361,6 +361,12 @@ Additional systems (no dedicated docs yet):
   must use a composite `(serverId, resourceId)` identity; raw server resource
   IDs are not globally unique.
 
+  **SSH tunnel profiles.** A remote profile is either a direct Web Access URL
+  or a desktop-managed `ssh -N` local forward to a loopback-only jean-server.
+  The supervisor lives in `src-tauri/src/ssh_tunnel/` and is not dispatched
+  through jean-core or MCP. See `docs/developer/ssh-tunnel.md`. Notifications
+  such as ntfy are not part of this transport.
+
   When an established WebSocket disconnects, the frontend reloads the page
   instead of repairing stale in-memory state. The normal
   HTTP bootstrap then restores current persisted state, while backend-owned

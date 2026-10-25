@@ -416,16 +416,28 @@ pub async fn stop_http_server(runtime: State<'_, CoreRuntime>) -> Result<(), Str
 
 /// Install jean-server on a remote Linux host over SSH, verify readiness, and
 /// return connection details for the remote connections dialog.
+///
+/// `via_tunnel` binds the remote server to loopback and opens a Jean-managed
+/// local forward. The access token is stored outside the webview and cleared
+/// from the result before it is returned.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn install_remote_jean_server(
     app: AppHandle,
+    tunnels: State<'_, crate::ssh_tunnel::SshTunnelSupervisor>,
     name: Option<String>,
     user: String,
     host: String,
     ssh_port: Option<u16>,
     jean_port: Option<u16>,
     user_install: Option<bool>,
+    via_tunnel: Option<bool>,
+    host_key_fingerprint: Option<String>,
+    identity_file: Option<String>,
+    profile_id: Option<String>,
 ) -> Result<crate::remote_install::InstallRemoteResult, String> {
+    let tunnels = (*tunnels).clone();
+    let known_hosts_file = tunnels.known_hosts_path().to_string_lossy().into_owned();
     let input = crate::remote_install::InstallRemoteInput {
         name,
         user,
@@ -433,12 +445,132 @@ pub async fn install_remote_jean_server(
         ssh_port,
         jean_port,
         user_install,
+        via_tunnel,
+        force_install: None,
+        host_key_fingerprint,
+        identity_file,
+        known_hosts_file: Some(known_hosts_file),
+        profile_id,
     };
-    tokio::task::spawn_blocking(move || {
-        crate::remote_install::install_remote_jean_server(app, input)
-    })
-    .await
-    .map_err(|error| format!("Remote install task failed: {error}"))?
+    tokio::task::spawn_blocking(move || finish_remote_install(app, &tunnels, input))
+        .await
+        .map_err(|error| format!("Remote install task failed: {error}"))?
+}
+
+fn finish_remote_install(
+    app: AppHandle,
+    tunnels: &crate::ssh_tunnel::SshTunnelSupervisor,
+    input: crate::remote_install::InstallRemoteInput,
+) -> Result<crate::remote_install::InstallRemoteResult, String> {
+    if input.via_tunnel.unwrap_or(false)
+        && input
+            .host_key_fingerprint
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_none()
+    {
+        return Err("Trust the SSH host key before installing over a tunnel.".to_string());
+    }
+    let result = crate::remote_install::install_remote_jean_server(app.clone(), input.clone())?;
+    if !result.pending_tunnel {
+        return Ok(result);
+    }
+    complete_tunnel_install(app, tunnels, input, result, true)
+}
+
+fn complete_tunnel_install(
+    app: AppHandle,
+    tunnels: &crate::ssh_tunnel::SshTunnelSupervisor,
+    input: crate::remote_install::InstallRemoteInput,
+    mut result: crate::remote_install::InstallRemoteResult,
+    allow_reinstall: bool,
+) -> Result<crate::remote_install::InstallRemoteResult, String> {
+    let token = std::mem::take(&mut result.token);
+    let profile_id = match input.profile_id.clone().filter(|id| !id.trim().is_empty()) {
+        Some(id) => id,
+        None => new_ssh_profile_id(),
+    };
+    let fingerprint = input
+        .host_key_fingerprint
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "Trust the SSH host key before installing over a tunnel.".to_string())?;
+    if let Err(error) = tunnels.store_secret(&profile_id, &token) {
+        drop(token);
+        return Err(error);
+    }
+    drop(token);
+
+    let spec = crate::ssh_tunnel::normalize_spec(&crate::ssh_tunnel::StartSshTunnelInput {
+        profile_id: profile_id.clone(),
+        user: input.user.clone(),
+        host: input.host.clone(),
+        ssh_port: input.ssh_port,
+        identity_file: input.identity_file.clone(),
+        remote_host: Some("127.0.0.1".to_string()),
+        remote_port: input.jean_port,
+        local_port: None,
+        host_key_fingerprint: fingerprint.clone(),
+    })?;
+    match crate::ssh_tunnel::start_tunnel_and_wait(tunnels, spec) {
+        Ok(status) => {
+            result.token.clear();
+            result.local_url = status.local_url;
+            result.ready = status.status == "ready";
+            result.token_stored = true;
+            result.profile_id = Some(profile_id);
+            result.host_key_fingerprint = Some(fingerprint);
+            result.pending_tunnel = false;
+            Ok(result)
+        }
+        Err(error) => {
+            let should_reinstall = allow_reinstall
+                && result.already_installed
+                && !input.force_install.unwrap_or(false)
+                && !tunnel_install_error_is_fatal(&error);
+            if !should_reinstall {
+                let _ = tunnels.stop(&profile_id);
+                let _ = tunnels.delete_secret(&profile_id);
+                return Err(error);
+            }
+            let _ = tunnels.stop(&profile_id);
+            let mut again = input.clone();
+            again.force_install = Some(true);
+            again.profile_id = Some(profile_id);
+            match crate::remote_install::install_remote_jean_server(app.clone(), again.clone()) {
+                Ok(reinstalled) => complete_tunnel_install(app, tunnels, again, reinstalled, false),
+                Err(install_error) => {
+                    let id = again.profile_id.as_deref().unwrap_or_default();
+                    let _ = tunnels.delete_secret(id);
+                    Err(install_error)
+                }
+            }
+        }
+    }
+}
+
+fn tunnel_install_error_is_fatal(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    lower.contains("host key")
+        || lower.contains("not trusted")
+        || lower.contains("authentication")
+        || lower.contains("permission denied")
+        || lower.contains("password login")
+        || lower.contains("not installed")
+        || lower.contains("access token")
+}
+
+fn new_ssh_profile_id() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+    static COUNTER: AtomicU64 = AtomicU64::new(1);
+    let tick = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    format!("ssh-{nanos:x}-{tick:x}")
 }
 
 /// List concrete host aliases from the local `~/.ssh/config`.

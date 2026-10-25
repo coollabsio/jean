@@ -9,6 +9,7 @@ mod desktop_commands;
 mod http_server;
 mod platform;
 mod remote_install;
+mod ssh_tunnel;
 
 pub(crate) struct CoreRuntime(pub jean_core::RuntimeContext);
 
@@ -273,6 +274,12 @@ fn install_linux_file_drop(app: &tauri::App) {
     }
 }
 
+fn shutdown_ssh_tunnels(app: &tauri::AppHandle) {
+    if let Some(tunnels) = app.try_state::<ssh_tunnel::SshTunnelSupervisor>() {
+        tunnels.shutdown();
+    }
+}
+
 fn setup_runtime(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let core = initialize_core(app).map_err(std::io::Error::other)?;
     allow_project_assets(app.handle(), &core);
@@ -333,6 +340,16 @@ fn setup_runtime(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
     // Recover from WebView2 process death on Windows (issue #575 — blank /
     // "invisible" window after the browser process exits). No-op elsewhere.
     platform::install_process_failed_recovery(app);
+
+    let tunnel_dir = core
+        .path()
+        .app_data_dir()
+        .map_err(std::io::Error::other)?
+        .join("ssh-tunnel");
+    app.manage(ssh_tunnel::SshTunnelSupervisor::new(
+        app.handle().clone(),
+        tunnel_dir,
+    ));
 
     Ok(())
 }
@@ -426,6 +443,15 @@ pub fn run() {
             desktop_commands::install_remote_jean_server,
             desktop_commands::list_ssh_config_hosts,
             desktop_commands::test_ssh_connection,
+            ssh_tunnel::preview_ssh_host_key,
+            ssh_tunnel::trust_ssh_host_key,
+            ssh_tunnel::test_ssh_tunnel_auth,
+            ssh_tunnel::start_ssh_tunnel,
+            ssh_tunnel::stop_ssh_tunnel,
+            ssh_tunnel::list_ssh_tunnel_status,
+            ssh_tunnel::store_ssh_profile_secret,
+            ssh_tunnel::delete_ssh_profile_secret,
+            ssh_tunnel::load_ssh_profile_secrets,
             browser::browser_create,
             browser::browser_navigate,
             browser::browser_back,
@@ -446,7 +472,10 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error building Tauri application")
         .run(|app, event| match event {
-            tauri::RunEvent::Exit => jean_core::shutdown_runtime(),
+            tauri::RunEvent::Exit => {
+                shutdown_ssh_tunnels(app);
+                jean_core::shutdown_runtime();
+            }
             tauri::RunEvent::ExitRequested { api, .. } => {
                 if jean_core::has_nonsurvivable_running_sessions() {
                     api.prevent_exit();
@@ -454,6 +483,7 @@ pub fn run() {
                         let _ = window.hide();
                     }
                 } else {
+                    shutdown_ssh_tunnels(app);
                     jean_core::shutdown_runtime();
                 }
             }
