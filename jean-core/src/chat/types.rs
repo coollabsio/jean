@@ -1913,6 +1913,12 @@ pub struct RunEntry {
     /// Whether the run was cancelled by the user
     #[serde(default)]
     pub cancelled: bool,
+    /// Provider rejected the turn before any assistant output (usage limit,
+    /// auth, API error). The user request stays in history and provider-switch
+    /// handoff. Explicit user cancel/undo-send leaves this false so withdrawn
+    /// text is not reintroduced.
+    #[serde(default)]
+    pub provider_rejected: bool,
     /// Whether this run was recovered from a crash
     #[serde(default)]
     pub recovered: bool,
@@ -1963,11 +1969,15 @@ impl RunEntry {
     /// Whether this run should appear as user/assistant messages in the visible chat timeline.
     ///
     /// Cancelled runs remain in metadata and JSONL for diagnostics. Instant
-    /// cancellations with no assistant id are hidden; cancellations after the
-    /// backend started are shown as the user prompt plus whatever partial
-    /// assistant/tool output had already streamed, marked as cancelled.
+    /// user cancellations with no assistant id are hidden. A provider rejection
+    /// before any assistant output stays visible as the user request so a later
+    /// turn can recover it. Cancellations after the backend started are shown
+    /// as the user prompt plus whatever partial assistant/tool output had
+    /// already streamed, marked as cancelled.
     pub fn is_renderable_in_chat_history(&self) -> bool {
-        self.status != RunStatus::Cancelled || self.assistant_message_id.is_some()
+        self.provider_rejected
+            || self.status != RunStatus::Cancelled
+            || self.assistant_message_id.is_some()
     }
 
     /// Number of visible chat messages contributed by this run.
@@ -3153,6 +3163,7 @@ mod tests {
             status: RunStatus::Completed,
             assistant_message_id: Some("assistant-1".to_string()),
             cancelled: false,
+            provider_rejected: false,
             recovered: false,
             claude_session_id: None,
             pid: None,
@@ -3200,6 +3211,7 @@ mod tests {
             status: RunStatus::Running,
             assistant_message_id: None,
             cancelled: false,
+            provider_rejected: false,
             recovered: false,
             claude_session_id: None,
             pid: Some(12345),
@@ -3236,6 +3248,7 @@ mod tests {
             status: RunStatus::Cancelled,
             assistant_message_id: Some("assistant-cancelled".to_string()),
             cancelled: true,
+            provider_rejected: false,
             recovered: false,
             claude_session_id: None,
             pid: None,
@@ -3272,9 +3285,18 @@ mod tests {
         run.assistant_message_id = None;
         run.status = RunStatus::Cancelled;
         run.cancelled = true;
+        run.provider_rejected = false;
         assert!(!run.is_renderable_in_chat_history());
         assert!(!run.renders_assistant_message());
         assert_eq!(run.rendered_message_count(), 0);
+
+        // Provider rejection before output keeps the user request, with no
+        // fabricated assistant reply.
+        run.provider_rejected = true;
+        assert!(run.is_renderable_in_chat_history());
+        assert!(!run.renders_assistant_message());
+        assert_eq!(run.rendered_message_count(), 1);
+        run.provider_rejected = false;
 
         run.assistant_message_id = Some("assistant-cancelled".to_string());
         run.status = RunStatus::Completed;
@@ -3282,6 +3304,23 @@ mod tests {
 
         assert!(run.is_renderable_in_chat_history());
         assert_eq!(run.rendered_message_count(), 2);
+    }
+
+    #[test]
+    fn older_cancelled_runs_without_provider_rejected_stay_hidden() {
+        let run: RunEntry = serde_json::from_value(serde_json::json!({
+            "run_id": "run-old",
+            "user_message_id": "user-old",
+            "user_message": "withdrawn before this field existed",
+            "started_at": 1,
+            "status": "cancelled",
+            "cancelled": true
+        }))
+        .unwrap();
+
+        assert!(!run.provider_rejected);
+        assert!(!run.is_renderable_in_chat_history());
+        assert_eq!(run.rendered_message_count(), 0);
     }
 
     #[test]
@@ -3307,6 +3346,7 @@ mod tests {
             status: RunStatus::Cancelled,
             assistant_message_id: Some("assistant-cancelled".to_string()),
             cancelled: true,
+            provider_rejected: false,
             recovered: false,
             claude_session_id: None,
             pid: None,
@@ -3336,6 +3376,7 @@ mod tests {
             status: RunStatus::Completed,
             assistant_message_id: Some("assistant-completed".to_string()),
             cancelled: false,
+            provider_rejected: false,
             recovered: false,
             claude_session_id: None,
             pid: None,
@@ -3383,6 +3424,7 @@ mod tests {
             status: RunStatus::Completed,
             assistant_message_id: None,
             cancelled: false,
+            provider_rejected: false,
             recovered: false,
             claude_session_id: None,
             pid: None,
@@ -3416,6 +3458,7 @@ mod tests {
             status: RunStatus::Completed,
             assistant_message_id: None,
             cancelled: false,
+            provider_rejected: false,
             recovered: false,
             claude_session_id: Some("claude-sess-abc".to_string()),
             pid: None,

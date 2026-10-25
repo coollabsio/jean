@@ -118,10 +118,31 @@ impl RunLogWriter {
 
     /// Mark the run as cancelled and update the metadata.
     /// If a `claude_session_id` is provided, persist it so the next run can resume context.
+    ///
+    /// This is the undo-send path: a cancelled run with no assistant id is hidden
+    /// from history. Provider rejections use [`Self::reject_without_output`].
     pub fn cancel(
         &mut self,
         assistant_message_id: Option<&str>,
         claude_session_id: Option<&str>,
+    ) -> Result<(), String> {
+        self.finish_cancelled(assistant_message_id, claude_session_id, false)
+    }
+
+    /// Persist a provider rejection that produced no assistant output.
+    ///
+    /// The user request stays on the run and remains visible in history and
+    /// provider-switch handoff. Explicit cancel/undo-send must keep using
+    /// [`Self::cancel`] so withdrawn text is not put back into context.
+    pub fn reject_without_output(&mut self) -> Result<(), String> {
+        self.finish_cancelled(None, None, true)
+    }
+
+    fn finish_cancelled(
+        &mut self,
+        assistant_message_id: Option<&str>,
+        claude_session_id: Option<&str>,
+        provider_rejected: bool,
     ) -> Result<(), String> {
         let now = now_timestamp();
         let run_id = self.run_id.clone();
@@ -141,6 +162,7 @@ impl RunLogWriter {
                     run.status = RunStatus::Cancelled;
                     run.ended_at = Some(now);
                     run.cancelled = true;
+                    run.provider_rejected = provider_rejected;
                     run.assistant_message_id = asst_id;
                     run.claude_session_id = claude_sid.clone();
                 }
@@ -547,6 +569,7 @@ pub fn start_run(
         status: RunStatus::Running,
         assistant_message_id: None,
         cancelled: false,
+        provider_rejected: false,
         recovered: false,
         claude_session_id: None,
         pid: None,   // Set later via set_pid() after spawning detached process
@@ -1946,6 +1969,7 @@ mod tests {
             status: RunStatus::Completed,
             assistant_message_id: Some("assistant-123".to_string()),
             cancelled: false,
+            provider_rejected: false,
             recovered: false,
             claude_session_id: None,
             pid: None,
@@ -3083,6 +3107,7 @@ Move services between instances without downtime.
             status: RunStatus::Cancelled,
             assistant_message_id: Some("assistant-compact".to_string()),
             cancelled: true,
+            provider_rejected: false,
             recovered: false,
             claude_session_id: None,
             pid: None,
