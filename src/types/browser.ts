@@ -57,7 +57,12 @@ export interface BrowserGrabContextEvent {
   context: BrowserGrabContext
 }
 
-/** Bounds passed to browser_create / browser_set_bounds (logical pixels). */
+/**
+ * Bounds passed to `browser_create` / `browser_set_bounds`, in physical pixels
+ * (CSS pixels × `devicePixelRatio`). `BrowserTabContent` measures the
+ * placeholder that way, and Rust applies `PhysicalPosition` / `PhysicalSize`
+ * without a second `scale_factor()` conversion.
+ */
 export interface BrowserBounds {
   x: number
   y: number
