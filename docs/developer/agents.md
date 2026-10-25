@@ -158,8 +158,9 @@ run. Leave it unset in normal use.
 - When the agent has a backend, model, effort, or thinking level, the wake
   passes those on `send_chat_message`. Selected skills are appended to the
   wake message with the chat skill marker.
-- New chat and task sessions get the default execution mode saved once
-  (`ensure_session_mode`). Sessions without metadata otherwise load as Plan.
+- New chat and task sessions get an implement execution mode saved once
+  (`ensure_session_mode`). Plan is not that default. Old session JSON without
+  a saved mode still loads as Plan so those sessions are not escalated.
 - At startup, active delegations are checked once, so runs that ended while
   Jean was closed are still reported.
 

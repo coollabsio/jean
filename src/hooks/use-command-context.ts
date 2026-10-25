@@ -546,9 +546,9 @@ export function useCommandContext(
   const getCurrentExecutionMode = useCallback((): ExecutionMode => {
     const { activeWorktreeId, getActiveSession, getExecutionMode } =
       useChatStore.getState()
-    if (!activeWorktreeId) return 'plan'
+    if (!activeWorktreeId) return 'yolo'
     const sessionId = getActiveSession(activeWorktreeId)
-    if (!sessionId) return 'plan'
+    if (!sessionId) return 'yolo'
     return getExecutionMode(sessionId)
   }, [])
 

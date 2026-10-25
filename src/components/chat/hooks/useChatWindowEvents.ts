@@ -185,14 +185,14 @@ export function useChatWindowEvents({
     return () => window.removeEventListener('create-new-session', handler)
   }, [activeWorktreeId, activeWorktreePath, isModal])
 
-  // SHIFT+TAB: Cycle execution mode
+  // SHIFT+TAB: Toggle Plan mode (only dispatched while the composer is focused)
   useEffect(() => {
     if (!activeSessionId) return
     const handler = () => {
       const store = useChatStore.getState()
       store.cycleExecutionMode(activeSessionId)
       const mode =
-        useChatStore.getState().executionModes[activeSessionId] ?? 'plan'
+        useChatStore.getState().executionModes[activeSessionId] ?? 'build'
       // Broadcast to other clients (native ↔ web access)
       invoke('broadcast_session_setting', {
         sessionId: activeSessionId,

@@ -220,8 +220,9 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
   },
   {
     action: 'cycle_execution_mode',
-    label: 'Cycle execution mode',
-    description: 'Cycle through Plan, Build, and Full access modes',
+    label: 'Toggle Plan mode',
+    description:
+      'Toggle Plan mode while the composer is focused. Does not change the permission used after approval.',
     default_shortcut: 'shift+tab',
     category: 'chat',
   },

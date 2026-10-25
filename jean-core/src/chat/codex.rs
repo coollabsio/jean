@@ -797,7 +797,7 @@ pub fn build_thread_start_params(
     // Codex reads MCP config from TOML files directly, so we can't detect
     // whether MCP servers are configured — but setting mcp_elicitations=false
     // is a no-op when no MCP servers exist, so it's safe to use in build mode.
-    match execution_mode.unwrap_or("plan") {
+    match execution_mode.unwrap_or("build") {
         "build" | "auto" => {
             params["approvalPolicy"] = serde_json::json!({
                 "granular": {
@@ -891,7 +891,7 @@ fn build_collaboration_mode_params(
     model: Option<&str>,
 ) -> Option<serde_json::Value> {
     let model = model.map(|m| split_fast_model(m).0)?;
-    let collab_mode = match execution_mode.unwrap_or("plan") {
+    let collab_mode = match execution_mode.unwrap_or("build") {
         "plan" => "plan",
         // build / yolo / anything else: leave Plan collaboration mode so the
         // model is no longer bound by plan-only developer instructions.
@@ -942,7 +942,7 @@ pub fn build_turn_start_params(
     // overrides the thread-level `sandbox`, so using workspaceWrite here would
     // accidentally re-sandbox yolo turns and break tools such as Playwright on
     // macOS (issue #328 / PR #362).
-    let mode = execution_mode.unwrap_or("plan");
+    let mode = execution_mode.unwrap_or("build");
     params["approvalsReviewer"] = serde_json::json!(if mode == "auto" {
         "auto_review"
     } else {
@@ -1075,9 +1075,9 @@ pub fn execute_codex_via_server(
 ) -> Result<CodexResponse, String> {
     use super::codex_server;
 
-    let is_plan_mode = execution_mode.unwrap_or("plan") == "plan";
-    let is_build_mode = execution_mode.unwrap_or("plan") == "build";
-    let is_yolo_mode = execution_mode.unwrap_or("plan") == "yolo";
+    let is_plan_mode = execution_mode.unwrap_or("build") == "plan";
+    let is_build_mode = execution_mode.unwrap_or("build") == "build";
+    let is_yolo_mode = execution_mode.unwrap_or("build") == "yolo";
     let model_verbosity = resolve_model_verbosity(app);
 
     // Mid-turn Approve (yolo) and pure yolo turns both auto-accept residual

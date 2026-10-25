@@ -33,6 +33,7 @@ import { generateId } from '@/lib/uuid'
 import {
   ArrowDown,
   ArrowUp,
+  ClipboardList,
   GitBranch,
   GitMerge,
   Layers,
@@ -3466,6 +3467,23 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                   : { paddingBottom: 'var(--safe-area-bottom)' }
                             }
                           >
+                            {executionMode === 'plan' && (
+                              <div
+                                className={cn(
+                                  'flex items-start gap-2 border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-amber-800 dark:text-amber-200',
+                                  pillComposer && 'rounded-t-[20px] px-3 py-1.5'
+                                )}
+                                role="status"
+                              >
+                                <ClipboardList className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                                <span>
+                                  <span className="font-medium">Plan mode.</span>{' '}
+                                  Jean will explore and propose a plan. It will
+                                  not change code until you approve, or until
+                                  you switch modes.
+                                </span>
+                              </div>
+                            )}
                             {/* Pending file preview (@ mentions) */}
                             <FilePreview
                               files={currentPendingFiles}

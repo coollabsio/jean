@@ -60,6 +60,30 @@ const claudeCommand: ClaudeCommand = {
   description: 'Deploy app',
 }
 
+describe('SlashPopover workflow commands', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    useAllBackendSkillsMock.mockReturnValue([])
+  })
+
+  it('shows /plan and /build for every backend', async () => {
+    const { SlashPopover } = await import('./SlashPopover')
+
+    render(
+      <SlashPopover
+        {...baseProps}
+        searchQuery=""
+        sessionBackend="antigravity"
+      />
+    )
+
+    expect(screen.getByText('/plan')).toBeInTheDocument()
+    expect(screen.getByText('/build')).toBeInTheDocument()
+    expect(screen.getByText('Jean')).toBeInTheDocument()
+    expect(screen.queryByText('/goal')).not.toBeInTheDocument()
+  })
+})
+
 describe('SlashPopover /goal built-in', () => {
   beforeEach(() => {
     vi.clearAllMocks()

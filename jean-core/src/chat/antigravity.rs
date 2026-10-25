@@ -94,7 +94,7 @@ fn antigravity_model(model: Option<&str>) -> Option<&str> {
 }
 
 fn mode_args(mode: Option<&str>) -> &'static [&'static str] {
-    match mode.unwrap_or("plan") {
+    match mode.unwrap_or("build") {
         "yolo" => &["--mode", "accept-edits", "--dangerously-skip-permissions"],
         "build" => &[
             "--mode",

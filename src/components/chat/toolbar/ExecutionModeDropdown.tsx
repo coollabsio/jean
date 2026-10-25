@@ -1,4 +1,5 @@
 import {
+  ClipboardList,
   Hammer,
   Shield,
   Sparkles,
@@ -7,8 +8,10 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useChatStore } from '@/store/chat-store'
@@ -81,9 +84,15 @@ export function ExecutionModeDropdown({
   const supported = getSupportedPermissionModes(backend).filter(
     mode => !availableModes || availableModes.includes(mode)
   )
+  const planAvailable = !availableModes || availableModes.includes('plan')
   const isLegacy = permission === 'build' && !supported.includes('build')
   const active = PERMISSIONS[permission]
-  const PermissionIcon = active.icon
+  const PermissionIcon = isPlan ? ClipboardList : active.icon
+  const triggerLabel = isPlan
+    ? 'Plan'
+    : isLegacy
+      ? 'Legacy Build'
+      : active.label
 
   return (
     <div className={cn('flex items-center shrink-0', className)}>
@@ -91,14 +100,24 @@ export function ExecutionModeDropdown({
         <DropdownMenuTrigger asChild>
           <button
             type="button"
-            aria-label={`Permissions: ${isLegacy ? 'Legacy Build' : active.label}`}
+            aria-label={
+              isPlan ? 'Workflow: Plan' : `Permissions: ${triggerLabel}`
+            }
             disabled={disabled}
-            className="flex h-8 items-center gap-1.5 px-2 text-xs font-medium text-muted-foreground hover:bg-muted/80 disabled:opacity-50"
+            className={cn(
+              'flex h-8 items-center gap-1.5 px-2 text-xs font-medium hover:bg-muted/80 disabled:opacity-50',
+              isPlan
+                ? 'text-amber-700 dark:text-amber-300'
+                : 'text-muted-foreground'
+            )}
           >
             <PermissionIcon
-              className={cn('h-3.5 w-3.5', permission === 'yolo' && 'text-red-500')}
+              className={cn(
+                'h-3.5 w-3.5',
+                !isPlan && permission === 'yolo' && 'text-red-500'
+              )}
             />
-            <span>{isLegacy ? 'Legacy Build' : active.label}</span>
+            <span>{triggerLabel}</span>
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
@@ -107,14 +126,39 @@ export function ExecutionModeDropdown({
           className="w-80 max-w-[calc(100vw-1rem)]"
         >
           <DropdownMenuRadioGroup
-            value={permission}
+            value={isPlan ? 'plan' : permission}
             onValueChange={value => {
+              if (value === 'plan') {
+                onSetExecutionMode('plan')
+                return
+              }
               const next = value as PermissionMode
               if (sessionId)
                 useChatStore.getState().setPermissionMode(sessionId, next)
               onSetExecutionMode(next)
             }}
           >
+            {planAvailable && (
+              <DropdownMenuRadioItem
+                value="plan"
+                className="items-start pl-2 [&>span]:hidden dark:data-[state=checked]:bg-yellow-400 dark:data-[state=checked]:text-zinc-950 dark:data-[state=checked]:[&_svg]:text-zinc-950 dark:data-[state=checked]:[&_.text-muted-foreground]:text-zinc-800"
+              >
+                <ClipboardList className="mr-2 mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-300" />
+                <div>
+                  <div>Plan</div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    Explore and propose a plan. No code changes until you
+                    approve.
+                  </div>
+                </div>
+              </DropdownMenuRadioItem>
+            )}
+            {planAvailable && supported.length > 0 && <DropdownMenuSeparator />}
+            {planAvailable && supported.length > 0 && (
+              <DropdownMenuLabel className="text-xs text-muted-foreground">
+                Permissions
+              </DropdownMenuLabel>
+            )}
             {supported.map(mode => {
               const meta = PERMISSIONS[mode]
               const Icon = meta.icon

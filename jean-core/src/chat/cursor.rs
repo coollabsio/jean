@@ -814,7 +814,10 @@ fn find_existing_plan_tool_id(tool_calls: &[ToolCall], plan: &str) -> Option<Str
 fn effective_execution_mode(execution_mode: Option<&str>) -> &'static str {
     match execution_mode {
         Some("plan") => "plan",
-        Some("build") | Some("yolo") => "yolo",
+        // Missing mode implements. Cursor has no Build flag, so Build and
+        // Full access share the yolo CLI path. Unsupported policies stay
+        // read-only instead of escalating.
+        None | Some("build") | Some("yolo") => "yolo",
         _ => "plan",
     }
 }
@@ -1362,6 +1365,9 @@ mod tests {
     #[test]
     fn build_mode_falls_back_to_yolo() {
         assert_eq!(effective_execution_mode(Some("build")), "yolo");
+        assert_eq!(effective_execution_mode(None), "yolo");
+        assert_eq!(effective_execution_mode(Some("plan")), "plan");
+        assert_eq!(effective_execution_mode(Some("supervised")), "plan");
     }
 
     #[test]

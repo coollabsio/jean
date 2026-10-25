@@ -17,6 +17,7 @@ import {
   hasBlockingOpenOverlay,
   handleRunEnvironmentStarted,
   isAgentsViewActive,
+  isChatComposerTarget,
   isPlainSessionTerminalFocused,
   resolveShortcutWithBypass,
   shouldAllowKeybindingThroughOpenOverlay,
@@ -36,6 +37,18 @@ import type {
   Session,
   WorktreeSessions,
 } from '@/types/chat'
+
+describe('isChatComposerTarget', () => {
+  it('matches the composer and ignores other fields', () => {
+    const composer = document.createElement('textarea')
+    composer.setAttribute('data-chat-input', '')
+    const other = document.createElement('textarea')
+
+    expect(isChatComposerTarget(composer)).toBe(true)
+    expect(isChatComposerTarget(other)).toBe(false)
+    expect(isChatComposerTarget(null)).toBe(false)
+  })
+})
 
 describe('shouldLetChatInputHandleAction', () => {
   it('lets Cmd/Ctrl+Enter reach the chat input when no plan dialog is open', () => {

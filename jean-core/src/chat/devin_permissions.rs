@@ -115,7 +115,8 @@ pub(crate) fn request_permission(
     if cancelled.load(Ordering::Acquire) {
         return Ok(cancelled_outcome());
     }
-    if matches!(execution_mode, None | Some("plan")) {
+    // Missing mode implements as Build and asks. Only explicit Plan rejects.
+    if execution_mode == Some("plan") {
         return Ok(selected_outcome(request, "reject_once"));
     }
     if execution_mode == Some("yolo") || auto_approve.load(Ordering::Acquire) {

@@ -843,7 +843,7 @@ export default function useStreamingEvents({
           setDeniedMessageContext(session_id, {
             message: originalMessage,
             model: selectedModels[session_id],
-            executionMode: executionModes[session_id] ?? 'plan',
+            executionMode: executionModes[session_id] ?? 'build',
             thinkingLevel: thinkingLevels[session_id] ?? 'off',
           })
         }

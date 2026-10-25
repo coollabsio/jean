@@ -635,7 +635,7 @@ export const ChatInput = memo(function ChatInput({
       }
 
       // TAB toggles Claude/Codex backend when available.
-      // Keep Shift+Tab for global "cycle execution mode" keybinding.
+      // Shift+Tab toggles Plan mode while this composer is focused.
       if (
         e.key === 'Tab' &&
         !e.shiftKey &&
@@ -1356,11 +1356,19 @@ export const ChatInput = memo(function ChatInput({
   // Handle command selection from / mention popover (executes immediately)
   const handleCommandSelect = useCallback(
     (command: ClaudeCommand) => {
-      // Built-in `/goal` is not a command-template. Insert "/goal "
-      // literal so the user types an objective; submit handling either
-      // intercepts it for Codex or passes it through to native backends.
-      if (command.path === '<built-in:goal>') {
-        const literal = '/goal '
+      // Built-in workflow commands are not command templates. Insert the
+      // slash literal so submit handling switches mode and starts the turn.
+      if (
+        command.path === '<built-in:goal>' ||
+        command.path === '<built-in:plan>' ||
+        command.path === '<built-in:build>'
+      ) {
+        const literal =
+          command.path === '<built-in:plan>'
+            ? '/plan '
+            : command.path === '<built-in:build>'
+              ? '/build '
+              : '/goal '
         if (inputRef.current) {
           inputRef.current.value = literal
           inputRef.current.setSelectionRange(literal.length, literal.length)

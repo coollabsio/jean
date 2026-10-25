@@ -1,6 +1,10 @@
 # Workflow and permission policies
 
-The chat toolbar shows only the permission selector. Selecting a permission leaves any existing Plan mode. Full access is the default for new sessions. Existing preferences are not rewritten.
+Plan mode is a first-class, opt-in workflow on the same execution-mode control as permissions. It is not the default and it is not hidden as a legacy or Beta setting.
+
+New sessions start in the saved permission policy. That default is Full access (`yolo`) unless the user changed it. A saved default of Plan is rewritten to Build on preferences load, so new sessions are never created in Plan. Enter Plan only by choosing it in the composer mode menu, with Shift+Tab while the composer is focused, or with `/plan`. `/plan` with no extra text starts a planning turn; `/plan <task>` plans that task. `/build` with no extra text leaves Plan and restores the permission that was active before planning (Build when none was remembered) without sending a turn. `/build <task>` leaves Plan and implements that task. Approving a plan still switches to the retained permission, or to Full access when the user picks that approval. Rejecting or refining a plan stays in Plan. Switching the mode menu to a permission also leaves Plan.
+
+The composer shows a Plan banner and the mode trigger reads "Plan" while that session is in Plan mode. Missing execution mode on a backend launch implements as Build (Full access on Cursor, which has no Build flag). Explicit Plan still uses each backend's native plan mechanism. Unsupported restricted policies still do not escalate to Full access when switching backends; that fallback remains Plan.
 
 ## Wire compatibility
 
@@ -18,7 +22,7 @@ Keep `selected_execution_mode` and each run's `execution_mode` compatible with p
 
 Old session JSON without `selected_execution_mode` loads as Plan. Session creation captures the current default explicitly. This prevents the new default from escalating old sessions.
 
-Shift+Tab toggles Plan/Build without cycling permissions. Plan approval uses the retained permission choice. The explicit legacy Yolo approval remains a Full access override.
+Shift+Tab toggles Plan and the retained permission while the composer is focused. It does not cycle permissions and it does not fire from the rest of the window. Plan approval uses the retained permission choice. The explicit Full access approval remains a Full access override.
 
 ## Capabilities
 

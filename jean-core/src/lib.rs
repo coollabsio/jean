@@ -735,6 +735,16 @@ fn default_execution_mode() -> String {
     "yolo".to_string()
 }
 
+/// Plan is opt-in per session. A saved "always plan" preference would put
+/// every new session into Plan, so rewrite it to Build on load.
+fn migrate_plan_default_execution_mode(preferences: &mut AppPreferences) -> bool {
+    if preferences.default_execution_mode == "plan" {
+        preferences.default_execution_mode = "build".to_string();
+        return true;
+    }
+    false
+}
+
 fn default_backend() -> String {
     "claude".to_string()
 }
@@ -3822,6 +3832,7 @@ pub fn load_preferences_sync(app: &AppHandle) -> Result<AppPreferences, String> 
     // preference-file compatibility, but never honor an old disabled value.
     preferences.jean_mcp_enabled = true;
     preferences.magic_prompts.migrate_defaults();
+    migrate_plan_default_execution_mode(&mut preferences);
     migrate_final_review_preferences(&mut preferences, &raw_preferences);
     maybe_auto_select_system_cli_preferences(app, &mut preferences, Some(&raw_preferences));
     Ok(preferences)
@@ -3880,6 +3891,7 @@ async fn load_preferences(app: AppHandle) -> Result<AppPreferences, String> {
         }
         Ok(_) => {}
     }
+    needs_resave |= migrate_plan_default_execution_mode(&mut preferences);
     if let Some(new_model) = migrate_default_claude_model(&preferences.selected_model) {
         preferences.selected_model = new_model.to_string();
         needs_resave = true;

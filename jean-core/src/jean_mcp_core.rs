@@ -3285,8 +3285,9 @@ mod tests {
     async fn mcp_recovered_empty_session_uses_new_session_execution_policy() {
         for (backend, default_policy, expected_policy) in [
             ("claude", "build", "build"),
+            ("claude", "plan", "build"),
             ("codex", "supervised", "supervised"),
-            ("cursor", "build", "plan"),
+            ("cursor", "build", "yolo"),
         ] {
             for force_new in [false, true] {
                 let (_temp, app) = session_lookup_app();
@@ -3321,11 +3322,7 @@ mod tests {
                 );
                 assert_eq!(
                     metadata.selected_permission_mode.as_deref(),
-                    Some(if expected_policy == "plan" {
-                        "yolo"
-                    } else {
-                        expected_policy
-                    })
+                    Some(expected_policy)
                 );
                 assert_eq!(created["selected_execution_mode"], expected_policy);
             }

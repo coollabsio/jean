@@ -1599,7 +1599,7 @@ fn build_grok_args(
     grok_session_id: Option<&str>,
     working_dir: &str,
 ) -> Vec<String> {
-    let effective_mode = execution_mode.unwrap_or("plan");
+    let effective_mode = execution_mode.unwrap_or("build");
     let mut args = vec![
         "--no-auto-update".to_string(),
         "-p".to_string(),
@@ -3596,7 +3596,7 @@ fn selected_permission_option(params: &Value, allow: bool) -> Option<String> {
 }
 
 fn is_plan_execution_mode(execution_mode: Option<&str>) -> bool {
-    matches!(execution_mode, Some("plan") | None)
+    execution_mode == Some("plan")
 }
 
 /// Whether a Grok tool name mutates the workspace / plan state (blocked in plan mode).
@@ -3927,7 +3927,7 @@ fn handle_acp_client_request(
 }
 
 fn grok_execution_mode_instruction(execution_mode: Option<&str>) -> Option<&'static str> {
-    match execution_mode.unwrap_or("plan") {
+    match execution_mode.unwrap_or("build") {
         "build" | "supervised" | "auto" => Some(
             "You are in BUILD MODE. Start implementing immediately. \
              This instruction supersedes any earlier plan-mode state or instructions. \
