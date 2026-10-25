@@ -722,10 +722,16 @@ pub async fn list_projects(app: AppHandle) -> Result<Vec<ProjectListItem>, Strin
                 has_base_session |= worktree.session_type == SessionType::Base;
             }
 
+            let origin_url = if project.is_folder || project.server.is_some() {
+                None
+            } else {
+                git::origin_remote_url(&project.path)
+            };
             ProjectListItem {
                 project,
                 worktree_count,
                 has_base_session,
+                origin_url,
             }
         })
         .collect())

@@ -509,6 +509,48 @@ pub fn configured_branch_remote(repo_path: &str, branch: &str) -> Option<String>
     }
 }
 
+/// Fetch URLs for every remote (`git remote -v`), origin first.
+///
+/// Push URLs are ignored. A missing git directory or a failed command yields
+/// an empty list so project listing can stay best-effort.
+pub fn list_remote_urls(repo_path: &str) -> Vec<String> {
+    let output = match wsl_aware_command("git", Some(Path::new(repo_path)))
+        .args(["remote", "-v"])
+        .output()
+    {
+        Ok(output) if output.status.success() => output,
+        _ => return Vec::new(),
+    };
+
+    let mut origin = Vec::new();
+    let mut rest = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let mut parts = line.split_whitespace();
+        let Some(name) = parts.next() else { continue };
+        let Some(url) = parts.next() else { continue };
+        let direction = parts.next().unwrap_or("");
+        if direction.contains("push") {
+            continue;
+        }
+        if !seen.insert(url.to_string()) {
+            continue;
+        }
+        if name == "origin" {
+            origin.push(url.to_string());
+        } else {
+            rest.push(url.to_string());
+        }
+    }
+    origin.append(&mut rest);
+    origin
+}
+
+/// `origin` fetch URL, or the first remote when origin is unset.
+pub fn origin_remote_url(repo_path: &str) -> Option<String> {
+    list_remote_urls(repo_path).into_iter().next()
+}
+
 /// Get all git remotes for a repository (not filtered to GitHub)
 pub fn get_git_remotes(repo_path: &str) -> Result<Vec<GitRemote>, String> {
     let output = wsl_aware_command("git", Some(Path::new(repo_path)))
