@@ -90,29 +90,34 @@ impl RepoIdentifier {
     }
 }
 
-/// Extract repository owner and name from a git repository's GitHub remote
+/// Extract repository owner and name from a git repository's origin remote.
+///
+/// GitHub remotes stay `owner` / `repo`. GitLab remotes keep nested groups in
+/// `owner` (`group/subgroup`) and the project name in `repo`, so context-file
+/// keys and rebuilt web URLs still round-trip.
 ///
 /// Returns an error if:
 /// - The repository has no origin remote
-/// - The remote URL is not a GitHub URL
+/// - The remote URL is neither a GitHub nor a GitLab URL
 pub fn get_repo_identifier(repo_path: &str) -> Result<RepoIdentifier, String> {
-    let github_url = get_github_url(repo_path)?;
+    let web_url = get_github_url(repo_path)?;
+    repo_identifier_from_web_url(&web_url)
+        .ok_or_else(|| format!("Could not parse owner/repo from repository URL: {web_url}"))
+}
 
-    // Parse owner/repo from URL: https://github.com/owner/repo
-    let url_without_prefix = github_url
-        .strip_prefix("https://github.com/")
-        .ok_or_else(|| format!("Invalid GitHub URL format: {github_url}"))?;
-
-    let parts: Vec<&str> = url_without_prefix.split('/').collect();
-    if parts.len() < 2 {
-        return Err(format!(
-            "Could not parse owner/repo from GitHub URL: {github_url}"
-        ));
+/// Split a normalized forge web URL into owner + repo.
+///
+/// The last path segment is the repository. Everything before it is the owner,
+/// which is a single GitHub user/org or a GitLab group path.
+fn repo_identifier_from_web_url(web_url: &str) -> Option<RepoIdentifier> {
+    let path = crate::projects::provider::extract_repo_path(web_url)?;
+    let (owner, repo) = path.rsplit_once('/')?;
+    if owner.is_empty() || repo.is_empty() {
+        return None;
     }
-
-    Ok(RepoIdentifier {
-        owner: parts[0].to_string(),
-        repo: parts[1].to_string(),
+    Some(RepoIdentifier {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
     })
 }
 
@@ -532,23 +537,69 @@ pub struct GitHubRemote {
     pub url: String,
 }
 
-/// Convert a raw git remote URL to a GitHub HTTPS URL, if possible
-fn normalize_github_url(remote_url: &str) -> Option<String> {
-    if remote_url.starts_with("git@github.com:") {
-        Some(
-            remote_url
-                .replace("git@github.com:", "https://github.com/")
-                .trim_end_matches(".git")
-                .to_string(),
-        )
-    } else if remote_url.starts_with("https://github.com/") {
-        Some(remote_url.trim_end_matches(".git").to_string())
-    } else {
-        None
-    }
+/// True when a host should use GitLab's `/-/` web paths (`/-/tree`, `/-/issues`,
+/// `/-/merge_requests`) rather than GitHub's (`/tree`, `/issues`, `/pull`).
+fn host_uses_gitlab_web_paths(host: &str) -> bool {
+    let lower = host.to_ascii_lowercase();
+    lower == "gitlab.com" || lower.contains("gitlab")
 }
 
-/// Get the GitHub URL for a specific remote
+/// Convert a raw git remote into an HTTPS (or preserved HTTP) web base URL.
+///
+/// Accepts `github.com` and any GitLab host (name contains `gitlab`, or
+/// `treat_as_gitlab` for a self-hosted instance configured in `jean.json`).
+/// Other hosts stay rejected so Bitbucket and unknown forges keep today's
+/// behavior.
+fn forge_web_base_url(remote_url: &str, treat_as_gitlab: bool) -> Option<String> {
+    let host = crate::projects::provider::extract_host(remote_url)?;
+    let path = crate::projects::provider::extract_repo_path(remote_url)?;
+    let lower = host.to_ascii_lowercase();
+    let is_github_com = lower == "github.com";
+    let is_gitlab =
+        host_uses_gitlab_web_paths(&host) || (treat_as_gitlab && !lower.contains("github"));
+    if !is_github_com && !is_gitlab {
+        return None;
+    }
+
+    if let Some((scheme, after_scheme)) = remote_url
+        .strip_prefix("https://")
+        .map(|rest| ("https", rest))
+        .or_else(|| {
+            remote_url
+                .strip_prefix("http://")
+                .map(|rest| ("http", rest))
+        })
+    {
+        let authority = after_scheme.split('/').next()?;
+        let authority = authority.rsplit('@').next()?;
+        if authority.is_empty() {
+            return None;
+        }
+        return Some(format!("{scheme}://{authority}/{path}"));
+    }
+
+    Some(format!("https://{lower}/{path}"))
+}
+
+/// Branch page for a normalized forge web URL.
+///
+/// GitLab inserts `/-/` before `tree`. `gitlab_paths` covers self-hosted
+/// GitLab whose hostname does not contain `gitlab`.
+pub fn branch_web_url(repo_web_url: &str, branch: &str, gitlab_paths: bool) -> String {
+    let base = repo_web_url.trim_end_matches('/');
+    let gitlab = gitlab_paths
+        || crate::projects::provider::extract_host(repo_web_url)
+            .is_some_and(|host| host_uses_gitlab_web_paths(&host));
+    let segment = if gitlab { "/-/tree/" } else { "/tree/" };
+    format!("{base}{segment}{branch}")
+}
+
+fn project_uses_gitlab(repo_path: &str) -> bool {
+    crate::projects::provider::resolve_git_provider(repo_path).0
+        == crate::projects::provider::GitProvider::Gitlab
+}
+
+/// Get the GitHub or GitLab web URL for a specific remote.
 pub fn get_github_url_for_remote(repo_path: &str, remote: &str) -> Result<String, String> {
     let output = wsl_aware_command("git", Some(Path::new(repo_path)))
         .args(["remote", "get-url", remote])
@@ -562,8 +613,8 @@ pub fn get_github_url_for_remote(repo_path: &str, remote: &str) -> Result<String
 
     let remote_url = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
-    normalize_github_url(&remote_url)
-        .ok_or_else(|| format!("Remote URL is not a GitHub repository: {remote_url}"))
+    forge_web_base_url(&remote_url, project_uses_gitlab(repo_path))
+        .ok_or_else(|| format!("Remote URL is not a GitHub or GitLab repository: {remote_url}"))
 }
 
 /// Get the GitHub URL for a repository (uses "origin" remote)
@@ -590,6 +641,7 @@ pub fn get_github_remotes(repo_path: &str) -> Result<Vec<GitHubRemote>, String> 
         .collect();
 
     let mut result = Vec::new();
+    let treat_as_gitlab = project_uses_gitlab(repo_path);
 
     for name in remote_names {
         if let Ok(url_out) = wsl_aware_command("git", Some(Path::new(repo_path)))
@@ -598,7 +650,7 @@ pub fn get_github_remotes(repo_path: &str) -> Result<Vec<GitHubRemote>, String> 
         {
             if url_out.status.success() {
                 let raw = String::from_utf8_lossy(&url_out.stdout).trim().to_string();
-                if let Some(url) = normalize_github_url(&raw) {
+                if let Some(url) = forge_web_base_url(&raw, treat_as_gitlab) {
                     result.push(GitHubRemote { name, url });
                 }
             }
@@ -3844,5 +3896,124 @@ Resolving deltas: 100% (3/3), done.\n";
         assert_eq!(updates.len(), 1);
         assert_eq!(updates[0].percent, Some(45));
         assert!(updates[0].line.contains("Receiving objects"));
+    }
+}
+
+#[cfg(test)]
+mod forge_web_url_tests {
+    use super::*;
+
+    fn git_repo_with_origin(url: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("temp dir");
+        for args in [vec!["init"], vec!["remote", "add", "origin", url]] {
+            let status = silent_command("git")
+                .args(&args)
+                .current_dir(dir.path())
+                .status()
+                .expect("git");
+            assert!(status.success(), "git {args:?}");
+        }
+        dir
+    }
+
+    #[test]
+    fn forge_web_base_url_keeps_github_com() {
+        assert_eq!(
+            forge_web_base_url("https://github.com/owner/repo.git", false).as_deref(),
+            Some("https://github.com/owner/repo")
+        );
+        assert_eq!(
+            forge_web_base_url("git@github.com:owner/repo.git", false).as_deref(),
+            Some("https://github.com/owner/repo")
+        );
+    }
+
+    #[test]
+    fn forge_web_base_url_accepts_gitlab_and_rejects_other_hosts() {
+        assert_eq!(
+            forge_web_base_url("git@gitlab.com:group/sub/repo.git", false).as_deref(),
+            Some("https://gitlab.com/group/sub/repo")
+        );
+        assert_eq!(
+            forge_web_base_url("https://gitlab.example.com:8443/group/repo.git", false).as_deref(),
+            Some("https://gitlab.example.com:8443/group/repo")
+        );
+        assert_eq!(
+            forge_web_base_url("https://git.company.com/team/app.git", false).as_deref(),
+            None
+        );
+        assert_eq!(
+            forge_web_base_url("https://git.company.com/team/app.git", true).as_deref(),
+            Some("https://git.company.com/team/app")
+        );
+        assert_eq!(
+            forge_web_base_url("https://bitbucket.org/team/app.git", false).as_deref(),
+            None
+        );
+        assert_eq!(
+            forge_web_base_url("https://github.acme.com/owner/repo.git", false).as_deref(),
+            None
+        );
+    }
+
+    #[test]
+    fn branch_web_url_uses_gitlab_tree_path() {
+        assert_eq!(
+            branch_web_url("https://github.com/owner/repo", "feature/one", false),
+            "https://github.com/owner/repo/tree/feature/one"
+        );
+        assert_eq!(
+            branch_web_url("https://gitlab.com/group/sub/repo", "feature/one", false),
+            "https://gitlab.com/group/sub/repo/-/tree/feature/one"
+        );
+        assert_eq!(
+            branch_web_url("https://git.company.com/team/app", "main", true),
+            "https://git.company.com/team/app/-/tree/main"
+        );
+    }
+
+    #[test]
+    fn repo_identifier_keeps_nested_gitlab_groups() {
+        let id = repo_identifier_from_web_url("https://gitlab.com/group/sub/repo").unwrap();
+        assert_eq!(id.owner, "group/sub");
+        assert_eq!(id.repo, "repo");
+        assert_eq!(id.to_key(), "group/sub-repo");
+
+        let github = repo_identifier_from_web_url("https://github.com/owner/repo").unwrap();
+        assert_eq!(github.owner, "owner");
+        assert_eq!(github.repo, "repo");
+    }
+
+    #[test]
+    fn gitlab_origin_resolves_web_url_and_identifier() {
+        let dir = git_repo_with_origin("git@gitlab.com:group/sub/repo.git");
+        let path = dir.path().to_str().unwrap();
+
+        assert_eq!(
+            get_github_url(path).unwrap(),
+            "https://gitlab.com/group/sub/repo"
+        );
+        let id = get_repo_identifier(path).unwrap();
+        assert_eq!(id.owner, "group/sub");
+        assert_eq!(id.repo, "repo");
+    }
+
+    #[test]
+    fn self_hosted_gitlab_jean_json_resolves_web_url() {
+        let dir = git_repo_with_origin("ssh://git@git.company.com/team/app.git");
+        std::fs::write(
+            dir.path().join("jean.json"),
+            r#"{"provider":{"git":"gitlab","host":"git.company.com"}}"#,
+        )
+        .unwrap();
+        let path = dir.path().to_str().unwrap();
+
+        assert_eq!(
+            get_github_url(path).unwrap(),
+            "https://git.company.com/team/app"
+        );
+        let id = get_repo_identifier(path).unwrap();
+        assert_eq!(id.owner, "team");
+        assert_eq!(id.repo, "app");
     }
 }

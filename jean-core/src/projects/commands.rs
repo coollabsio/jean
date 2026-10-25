@@ -5768,9 +5768,10 @@ pub async fn get_github_remotes(repo_path: String) -> Result<Vec<git::GitHubRemo
 
 /// Get the GitHub URL for a branch (for frontend to open)
 pub async fn get_github_branch_url(repo_path: String, branch: String) -> Result<String, String> {
-    log::trace!("Getting GitHub branch URL: {branch} in {repo_path}");
-    let github_url = git::get_github_url(&repo_path)?;
-    Ok(format!("{github_url}/tree/{branch}"))
+    log::trace!("Getting branch URL: {branch} in {repo_path}");
+    let web_url = git::get_github_url(&repo_path)?;
+    let gitlab = resolve_git_provider(&repo_path).0 == GitProvider::Gitlab;
+    Ok(git::branch_web_url(&web_url, &branch, gitlab))
 }
 
 /// Get the GitHub URL for a repository (for frontend to open)
@@ -5781,12 +5782,13 @@ pub async fn get_github_repo_url(repo_path: String) -> Result<String, String> {
 
 /// Open a branch on GitHub in the browser (native only)
 pub async fn open_branch_on_github(repo_path: String, branch: String) -> Result<(), String> {
-    log::trace!("Opening branch on GitHub: {branch} in {repo_path}");
+    log::trace!("Opening branch in the browser: {branch} in {repo_path}");
 
-    let github_url = git::get_github_url(&repo_path)?;
-    let url = format!("{github_url}/tree/{branch}");
+    let web_url = git::get_github_url(&repo_path)?;
+    let gitlab = resolve_git_provider(&repo_path).0 == GitProvider::Gitlab;
+    let url = git::branch_web_url(&web_url, &branch, gitlab);
 
-    log::trace!("Opening GitHub branch URL: {url}");
+    log::trace!("Opening branch URL: {url}");
     crate::platform::open_url_in_browser(&url)
 }
 
