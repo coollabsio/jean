@@ -74,6 +74,7 @@ export const defaultResponses: Record<string, unknown> = {
   save_preferences: null,
 
   // UI State
+  get_native_client_id: '11111111-1111-4111-8111-111111111111',
   load_ui_state: uiState,
   save_ui_state: null,
   get_pinned_recent_session_ids: [],

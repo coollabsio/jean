@@ -72,6 +72,7 @@ mod prerequisites;
 mod projects;
 mod server_update;
 mod terminal;
+mod ui_client_state;
 mod version;
 
 pub use prerequisites::*;
@@ -3292,11 +3293,14 @@ impl Default for AppPreferences {
     }
 }
 
-// UI State data structure
-// Contains ephemeral UI state that should be restored on app restart
+// UI navigation snapshot restored when a client reconnects.
+//
+// Each client has its own file under `ui-clients/<client-id>.json`. The shared
+// `ui-state.json` keeps pinned recent sessions and pinned canvas labels only.
+// The installation's native client claims a pre-existing shared snapshot once.
 //
 // NOTE: Durable session-specific state is stored in Session files. Lightweight
-// unsent input drafts stay here so textareas survive full UI reloads.
+// unsent input drafts stay in the client snapshot so textareas survive reloads.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UIState {
     /// Last opened worktree ID (to restore active worktree)
@@ -4121,17 +4125,20 @@ async fn delete_cli_profile(name: String) -> Result<(), String> {
     Ok(())
 }
 
-fn get_ui_state_path(app: &AppHandle) -> Result<PathBuf, String> {
+fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let app_data_dir = app
         .path()
         .app_data_dir()
         .map_err(|e| format!("Failed to get app data directory: {e}"))?;
 
-    // Ensure the directory exists
     std::fs::create_dir_all(&app_data_dir)
         .map_err(|e| format!("Failed to create app data directory: {e}"))?;
 
-    Ok(app_data_dir.join("ui-state.json"))
+    Ok(app_data_dir)
+}
+
+fn get_ui_state_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(ui_client_state::shared_ui_state_path(&app_data_dir(app)?))
 }
 
 /// Serializes read-modify-write cycles on `ui-state.json` within this process.
@@ -4177,25 +4184,6 @@ fn write_ui_state_file(path: &Path, ui_state: &UIState) -> Result<(), String> {
     })
 }
 
-/// Writes a full UI state snapshot but keeps the pinned recent sessions that are on disk.
-///
-/// Pins change only through `set_recent_session_pinned`, so concurrent clients
-/// (native desktop, Web Access) cannot overwrite each other's pins with a stale
-/// full-state save. If the existing file cannot be parsed, the incoming pins are
-/// kept so the rewrite does not silently drop them.
-fn write_ui_state_keeping_pins(path: &Path, mut ui_state: UIState) -> Result<(), String> {
-    let _guard = lock_ui_state_writes();
-
-    match read_ui_state_file(path) {
-        Ok(existing) => ui_state.pinned_recent_session_ids = existing.pinned_recent_session_ids,
-        Err(e) => log::warn!(
-            "Keeping incoming pinned recent sessions, existing UI state is unreadable: {e}"
-        ),
-    }
-
-    write_ui_state_file(path, &ui_state)
-}
-
 /// Adds (appended at the end, no duplicates) or removes one pinned recent session.
 /// Returns the resulting pins and whether the file changed. A corrupt file is
 /// reported as an error and left untouched.
@@ -4236,21 +4224,51 @@ fn emit_ui_state_invalidation(app: &AppHandle) {
     }
 }
 
-async fn load_ui_state(app: AppHandle) -> Result<UIState, String> {
-    log::trace!("Loading UI state from disk");
-    let state_path = get_ui_state_path(&app)?;
-    let ui_state = read_ui_state_file(&state_path)?;
-    log::trace!("Successfully loaded UI state");
+async fn get_native_client_id(app: AppHandle) -> Result<String, String> {
+    let dir = app_data_dir(&app)?;
+    ui_client_state::ensure_native_ui_client(&dir)
+}
+
+async fn load_ui_state(app: AppHandle, client_id: String) -> Result<UIState, String> {
+    log::trace!("Loading UI state for client {client_id}");
+    let dir = app_data_dir(&app)?;
+    let ui_state = ui_client_state::load_client_ui_state(&dir, &client_id)?;
+    log::trace!("Successfully loaded UI state for client {client_id}");
     Ok(ui_state)
 }
 
-async fn save_ui_state(app: AppHandle, ui_state: UIState) -> Result<(), String> {
-    log::trace!("Saving UI state to disk: {ui_state:?}");
-    let state_path = get_ui_state_path(&app)?;
+/// Init payload for a browser that did not send a client id, or sent one we
+/// cannot use. Navigation stays empty so this request cannot inherit another
+/// client's place in the app. Shared pins and labels still apply.
+async fn load_ui_state_for_init(
+    app: AppHandle,
+    client_id: Option<String>,
+) -> Result<UIState, String> {
+    let Some(client_id) = client_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+    else {
+        let dir = app_data_dir(&app)?;
+        return ui_client_state::load_shared_navigation_defaults(&dir);
+    };
 
-    write_ui_state_keeping_pins(&state_path, ui_state)?;
+    match load_ui_state(app.clone(), client_id.to_string()).await {
+        Ok(ui_state) => Ok(ui_state),
+        Err(error) if error == ui_client_state::INVALID_CLIENT_ID => {
+            log::warn!("Ignoring invalid UI client id while building /api/init");
+            let dir = app_data_dir(&app)?;
+            ui_client_state::load_shared_navigation_defaults(&dir)
+        }
+        Err(error) => Err(error),
+    }
+}
 
-    log::trace!("Saved UI state to {state_path:?}");
+async fn save_ui_state(app: AppHandle, client_id: String, ui_state: UIState) -> Result<(), String> {
+    log::trace!("Saving UI state for client {client_id}");
+    let dir = app_data_dir(&app)?;
+    ui_client_state::save_client_ui_state(&dir, &client_id, ui_state)?;
+    log::trace!("Saved UI state for client {client_id}");
     emit_ui_state_invalidation(&app);
     Ok(())
 }
@@ -4284,9 +4302,7 @@ async fn set_recent_session_pinned(
 
 #[cfg(test)]
 mod ui_state_pin_tests {
-    use super::{
-        read_ui_state_file, set_pinned_session_in_file, write_ui_state_keeping_pins, UIState,
-    };
+    use super::{read_ui_state_file, set_pinned_session_in_file, UIState};
 
     fn pins(ids: &[&str]) -> Vec<String> {
         ids.iter().map(|id| id.to_string()).collect()
@@ -4294,73 +4310,6 @@ mod ui_state_pin_tests {
 
     fn write_state(path: &std::path::Path, ui_state: &UIState) {
         std::fs::write(path, serde_json::to_string_pretty(ui_state).unwrap()).unwrap();
-    }
-
-    #[test]
-    fn save_keeps_pins_on_disk_and_ignores_incoming_pins() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("ui-state.json");
-        write_state(
-            &path,
-            &UIState {
-                pinned_recent_session_ids: pins(&["pinned-by-other-client"]),
-                ..UIState::default()
-            },
-        );
-
-        let incoming = UIState {
-            active_worktree_id: Some("worktree-1".to_string()),
-            seen_failed_workflow_run_ids: vec![42],
-            agent_updates_seen_at: [("agent-1".to_string(), 1_700_000_000)].into(),
-            pinned_recent_session_ids: pins(&["stale-pin"]),
-            ..UIState::default()
-        };
-        write_ui_state_keeping_pins(&path, incoming).unwrap();
-
-        let saved = read_ui_state_file(&path).unwrap();
-        assert_eq!(
-            saved.pinned_recent_session_ids,
-            pins(&["pinned-by-other-client"])
-        );
-        assert_eq!(saved.active_worktree_id.as_deref(), Some("worktree-1"));
-        assert_eq!(saved.seen_failed_workflow_run_ids, vec![42]);
-        assert_eq!(
-            saved.agent_updates_seen_at.get("agent-1"),
-            Some(&1_700_000_000)
-        );
-    }
-
-    #[test]
-    fn save_without_existing_file_writes_empty_pins() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("ui-state.json");
-
-        let incoming = UIState {
-            active_worktree_id: Some("worktree-1".to_string()),
-            pinned_recent_session_ids: pins(&["stale-pin"]),
-            ..UIState::default()
-        };
-        write_ui_state_keeping_pins(&path, incoming).unwrap();
-
-        let saved = read_ui_state_file(&path).unwrap();
-        assert!(saved.pinned_recent_session_ids.is_empty());
-        assert_eq!(saved.active_worktree_id.as_deref(), Some("worktree-1"));
-    }
-
-    #[test]
-    fn save_over_corrupt_file_keeps_incoming_pins() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("ui-state.json");
-        std::fs::write(&path, "{ not json").unwrap();
-
-        let incoming = UIState {
-            pinned_recent_session_ids: pins(&["incoming-pin"]),
-            ..UIState::default()
-        };
-        write_ui_state_keeping_pins(&path, incoming).unwrap();
-
-        let saved = read_ui_state_file(&path).unwrap();
-        assert_eq!(saved.pinned_recent_session_ids, pins(&["incoming-pin"]));
     }
 
     #[test]
@@ -5221,6 +5170,12 @@ pub fn build_tokio_runtime() -> std::io::Result<tokio::runtime::Runtime> {
 
 /// Initialize the shared runtime used by both transport adapters.
 pub fn initialize_runtime(context: &RuntimeContext) -> Result<(), String> {
+    if let Ok(dir) = context.path().app_data_dir() {
+        if let Err(error) = ui_client_state::ensure_native_ui_client(&dir) {
+            log::warn!("Failed to isolate legacy UI state for this installation: {error}");
+        }
+    }
+
     let (broadcaster, _) = http_server::WsBroadcaster::new();
     context.manage(broadcaster);
     context.manage(std::sync::Arc::new(tokio::sync::Mutex::new(

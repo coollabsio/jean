@@ -1,5 +1,6 @@
-// Types that match the Rust UIState struct
-// Contains ephemeral UI state that should be restored on app restart
+// Types that match the Rust UIState struct.
+// The server stores one navigation snapshot per client. Pins and pinned
+// canvas labels stay in the shared UI state file.
 // Note: Field names use snake_case to match Rust struct exactly
 //
 // Durable session state (answered_questions, submitted_answers, fixed_findings,

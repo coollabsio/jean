@@ -495,11 +495,12 @@ The app persists UI state (sidebar sizes, active worktree, expanded folders) acr
 │  - Converts Sets to arrays for JSON serialization               │
 │  - Debounces saves to avoid excessive writes                    │
 └───────────────────────────┬─────────────────────────────────────┘
-                            │ invoke('save_ui_state')
+                            │ invoke('save_ui_state', { clientId })
                             ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                 Tauri Backend (Rust)                             │
-│  ui-state.json in app data directory                            │
+│  ui-clients/<client-id>.json  navigation for this client        │
+│  ui-state.json                shared pins and canvas labels     │
 └─────────────────────────────────────────────────────────────────┘
 ```
 

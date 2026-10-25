@@ -1950,12 +1950,8 @@ async fn run_tool(
                 .cloned()
                 .ok_or_else(|| ToolError::internal("Started Run environment was not found"))?;
 
-            let mut ui_state = crate::load_ui_state(app.clone()).await.unwrap_or_default();
-            register_run_in_ui_state(&mut ui_state, &worktree_id, &terminal_id, &command);
-            if let Err(error) = crate::save_ui_state(app.clone(), ui_state).await {
-                log::warn!("Failed to persist MCP-started Run environment UI state: {error}");
-            }
-
+            // Panel layout is per client. Connected UIs record the terminal from
+            // this event; the live PTY registry is what other clients can see.
             app.emit_all(
                 "run-environment:started",
                 &json!({

@@ -158,13 +158,16 @@ pub async fn dispatch_command(
             crate::set_window_vibrancy(app.clone(), enabled).await?;
             Ok(Value::Null)
         }
+        "get_native_client_id" => to_value(crate::get_native_client_id(app.clone()).await?),
         "load_ui_state" => {
-            let result = crate::load_ui_state(app.clone()).await?;
+            let client_id: String = field(&args, "clientId", "client_id")?;
+            let result = crate::load_ui_state(app.clone(), client_id).await?;
             to_value(result)
         }
         "save_ui_state" => {
             let ui_state = field(&args, "uiState", "ui_state")?;
-            crate::save_ui_state(app.clone(), ui_state).await?;
+            let client_id: String = field(&args, "clientId", "client_id")?;
+            crate::save_ui_state(app.clone(), client_id, ui_state).await?;
             Ok(Value::Null)
         }
         "get_pinned_recent_session_ids" => {

@@ -271,6 +271,9 @@ const DESKTOP_ONLY_COMMANDS = new Set([
 // These commands belong to the local desktop shell even when its application
 // content is connected to a remote Jean backend.
 const LOCAL_SHELL_COMMANDS = new Set([
+  // This installation's UI client id must stay on the desktop, even while the
+  // window is connected to a remote Jean server.
+  'get_native_client_id',
   'set_window_vibrancy',
   'send_native_notification',
   'read_clipboard_image',
@@ -611,10 +614,14 @@ let initialDataResolved = false
  * Build the /api/init URL with the given query params.
  * Centralizes token and selected_project encoding.
  */
-function buildInitUrl(opts: { selectedProjectId?: string | null }): string {
+function buildInitUrl(opts: {
+  selectedProjectId?: string | null
+  clientId: string
+}): string {
   const token = getWebBackendToken()
   const params = new URLSearchParams()
   if (token) params.set('token', token)
+  if (opts.clientId) params.set('client_id', opts.clientId)
   if (opts.selectedProjectId) {
     params.set('selected_project', opts.selectedProjectId)
   }
@@ -632,7 +639,8 @@ function buildInitUrl(opts: { selectedProjectId?: string | null }): string {
  *
  * @param selectedProjectId - Browser's currently-selected project id.
  *   Sent so the server scopes the init payload to just that project's
- *   worktrees/sessions. Falls back to `ui_state.json` on disk when absent.
+ *   worktrees/sessions. When absent, the server uses this client's saved
+ *   project, not another client's navigation snapshot.
  */
 export async function preloadInitialData(
   selectedProjectId?: string | null
@@ -646,7 +654,9 @@ export async function preloadInitialData(
 
   initialDataPromise = (async () => {
     try {
-      const url = buildInitUrl({ selectedProjectId })
+      const { getClientId } = await import('./client-session')
+      const clientId = await getClientId()
+      const url = buildInitUrl({ selectedProjectId, clientId })
       const response = await fetchBackend(url)
       if (!response.ok) {
         return null

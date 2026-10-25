@@ -187,13 +187,23 @@ layout, and browser/terminal layout. Pinned recent sessions and pinned canvas
 label filters are shared through server UI state instead. Resource-keyed values
 must use scoped server resource IDs. `useClientViewStatePersistence()` migrates the legacy
 server UI-state values on first load and then makes the client record
-authoritative. Keep session data, running terminal metadata, drafts, and other
-operational state in the backend persistence paths.
+authoritative.
+
+Navigation state is also per client, but it lives on the server so a desktop
+window, a browser profile, and a remote Jean client each restore their own
+place. The snapshot is `ui-clients/<client-id>.json` and holds the active
+project, worktree, and chat, input drafts, open terminal and browser tabs, and
+the last location. The desktop installation claims the legacy `ui-state.json`
+navigation once at startup; other clients start empty and do not inherit it.
+Projects, worktrees, chat sessions and messages, agent processes, server
+preferences, and providers stay shared. Live terminal processes stay in the
+server registry. `ui-state.json` keeps only the shared pins and pinned canvas
+labels.
 
 Each server owns the pins of its own recent sessions. Pins change only through
-`set_recent_session_pinned` (one ID per call); `save_ui_state` keeps the pins
-that are on disk, so a full save from one client cannot drop another client's
-pin. Native Jean reads each remote server's pins with
+`set_recent_session_pinned` (one ID per call). A full `save_ui_state` writes
+that client's navigation file and does not replace the shared pins. Native Jean
+reads each remote server's pins with
 `get_pinned_recent_session_ids` and merges them with its local pins
 (`src/services/recent-session-pins.ts`). An "Unknown command" answer marks an
 older server; native Jean then keeps that server's pins in its local UI state
