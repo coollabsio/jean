@@ -7,6 +7,11 @@ import {
 } from '@/components/chat/message-content-utils'
 import { formatLocalTime } from '@/components/chat/time-utils'
 import { Button } from '@/components/ui/button'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { Markdown } from '@/components/ui/markdown'
 import {
   Sheet,
@@ -129,12 +134,16 @@ export function AgentUpdatesButton({
                   update.timestamp > seenAt && 'bg-amber-500/5'
                 )}
               >
-                <p
-                  className="mb-1 text-[11px] text-muted-foreground tabular-nums"
-                  title={formatLocalTime(update.timestamp)}
-                >
-                  {formatRelative(update.timestamp)}
-                </p>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <p className="mb-1 text-[11px] text-muted-foreground tabular-nums">
+                      {formatRelative(update.timestamp)}
+                    </p>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {formatLocalTime(update.timestamp)}
+                  </TooltipContent>
+                </Tooltip>
                 <Markdown className="text-sm">{update.content}</Markdown>
               </li>
             ))}

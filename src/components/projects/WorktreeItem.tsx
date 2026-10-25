@@ -235,16 +235,20 @@ const WorktreeSessionList = memo(function WorktreeSessionList({
                       label={config.label}
                       className="h-1.5 w-1.5 shrink-0"
                     />
-                    <span
-                      className="flex min-w-0 items-center gap-1.5 truncate text-xs"
-                      title={`${config.label}: ${card.session.name || 'Untitled'}`}
-                    >
-                      <span className="truncate">
-                        {isGeneratingName
-                          ? 'Generating…'
-                          : card.session.name || 'Untitled'}
-                      </span>
-                    </span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="flex min-w-0 items-center gap-1.5 truncate text-xs">
+                          <span className="truncate">
+                            {isGeneratingName
+                              ? 'Generating…'
+                              : card.session.name || 'Untitled'}
+                          </span>
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-72">
+                        {`${config.label}: ${card.session.name || 'Untitled'}`}
+                      </TooltipContent>
+                    </Tooltip>
                   </button>
                 </SidebarSessionContextMenu>
               )

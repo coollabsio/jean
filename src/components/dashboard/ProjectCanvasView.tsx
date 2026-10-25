@@ -57,6 +57,11 @@ import {
 } from '@/components/icons/reicon'
 import { Button } from '@/components/ui/button'
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
@@ -3501,24 +3506,28 @@ export function ProjectCanvasView({
                           {count} {count === 1 ? 'worktree' : 'worktrees'}
                         </span>
                       </button>
-                      <button
-                        type="button"
-                        aria-label={`Configure ${tab.label}`}
-                        title={`Configure ${tab.label}`}
-                        className={cn(
-                          'mx-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors',
-                          isActive
-                            ? 'text-primary hover:bg-primary/15'
-                            : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                        )}
-                        onClick={() =>
-                          useProjectsStore
-                            .getState()
-                            .openProjectSettings(projectId, settingsPane)
-                        }
-                      >
-                        <Settings className="h-3.5 w-3.5" />
-                      </button>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            aria-label={`Configure ${tab.label}`}
+                            className={cn(
+                              'mx-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors',
+                              isActive
+                                ? 'text-primary hover:bg-primary/15'
+                                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                            )}
+                            onClick={() =>
+                              useProjectsStore
+                                .getState()
+                                .openProjectSettings(projectId, settingsPane)
+                            }
+                          >
+                            <Settings className="h-3.5 w-3.5" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent>{`Configure ${tab.label}`}</TooltipContent>
+                      </Tooltip>
                     </div>
                   )
                 }
@@ -3555,19 +3564,23 @@ export function ProjectCanvasView({
                       </span>
                     </button>
                     {settingsPane && (
-                      <button
-                        type="button"
-                        aria-label={`Configure ${tab.label}`}
-                        title={`Configure ${tab.label}`}
-                        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-transparent text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
-                        onClick={() =>
-                          useProjectsStore
-                            .getState()
-                            .openProjectSettings(projectId, settingsPane)
-                        }
-                      >
-                        <Settings className="h-3.5 w-3.5" />
-                      </button>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            aria-label={`Configure ${tab.label}`}
+                            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-transparent text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+                            onClick={() =>
+                              useProjectsStore
+                                .getState()
+                                .openProjectSettings(projectId, settingsPane)
+                            }
+                          >
+                            <Settings className="h-3.5 w-3.5" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent>{`Configure ${tab.label}`}</TooltipContent>
+                      </Tooltip>
                     )}
                   </div>
                 )

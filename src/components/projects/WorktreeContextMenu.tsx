@@ -27,6 +27,11 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { getEditorLabel, getTerminalLabel } from '@/types/preferences'
 import {
   canOpenInEditor,
@@ -163,13 +168,20 @@ export function WorktreeContextMenu({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => handleDelete(true)}
-              variant="outline"
-              title="Delete without running the teardown script. Resources it manages may need manual cleanup."
-            >
-              Delete Without Teardown
-            </AlertDialogAction>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <AlertDialogAction
+                  onClick={() => handleDelete(true)}
+                  variant="outline"
+                >
+                  Delete Without Teardown
+                </AlertDialogAction>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-72">
+                Delete without running the teardown script. Resources it manages
+                may need manual cleanup.
+              </TooltipContent>
+            </Tooltip>
             <AlertDialogAction
               autoFocus
               onClick={() => handleDelete()}

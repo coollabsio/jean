@@ -21,6 +21,11 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Markdown } from '@/components/ui/markdown'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { openExternal } from '@/lib/platform'
 import {
@@ -647,15 +652,20 @@ export function IssuePreviewModal({
               </span>
             </span>
             {headerUrl && (
-              <button
-                type="button"
-                onClick={() => void openExternal(headerUrl)}
-                className="inline-flex items-center gap-1 text-xs font-normal text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
-                title="Open on GitHub"
-              >
-                <ExternalLink className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Open on GitHub</span>
-              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => void openExternal(headerUrl)}
+                    className="inline-flex items-center gap-1 text-xs font-normal text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
+                    aria-label="Open on GitHub"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    <span className="hidden sm:inline">Open on GitHub</span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>Open on GitHub</TooltipContent>
+              </Tooltip>
             )}
           </DialogTitle>
         </DialogHeader>

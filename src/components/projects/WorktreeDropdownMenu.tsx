@@ -41,6 +41,11 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Button } from '@/components/ui/button'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import type { Project, Worktree } from '@/types/projects'
 import { getEditorLabel, getTerminalLabel } from '@/types/preferences'
 import { ghCliQueryKeys, useGhCliAuth } from '@/services/gh-cli'
@@ -542,13 +547,20 @@ export function WorktreeDropdownMenu({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => handleDelete(true)}
-              variant="outline"
-              title="Delete without running the teardown script. Resources it manages may need manual cleanup."
-            >
-              Delete Without Teardown
-            </AlertDialogAction>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <AlertDialogAction
+                  onClick={() => handleDelete(true)}
+                  variant="outline"
+                >
+                  Delete Without Teardown
+                </AlertDialogAction>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-72">
+                Delete without running the teardown script. Resources it manages
+                may need manual cleanup.
+              </TooltipContent>
+            </Tooltip>
             <AlertDialogAction
               autoFocus
               onClick={() => handleDelete()}

@@ -1195,32 +1195,45 @@ export function SessionGroup({
               )}
               onMouseEnter={() => setSelectedIndex(flatIndex)}
             >
-              <button
-                type="button"
-                className={cn(
-                  'flex flex-1 items-start gap-3 min-w-0 text-left focus:outline-none',
-                  isDisabled && 'cursor-not-allowed'
-                )}
-                onClick={() => onSessionClick(sessionWithContext)}
-                disabled={isDisabled}
-                title="Inject session as MCP context pointer"
-              >
-                {isGenerating ? (
-                  <Loader2 className="h-4 w-4 mt-0.5 animate-spin text-muted-foreground flex-shrink-0" />
-                ) : (
-                  <MessageSquare className="h-4 w-4 mt-0.5 text-muted-foreground flex-shrink-0" />
-                )}
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium truncate">
-                    {session.name}
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-0.5">
-                    {hasMessages
-                      ? `${session.messages.length} messages · inject pointer`
-                      : 'No messages'}
-                  </div>
-                </div>
-              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    className={cn(
+                      'flex min-w-0 flex-1',
+                      isDisabled && 'cursor-not-allowed'
+                    )}
+                  >
+                    <button
+                      type="button"
+                      className={cn(
+                        'flex w-full items-start gap-3 min-w-0 text-left focus:outline-none',
+                        isDisabled && 'pointer-events-none cursor-not-allowed'
+                      )}
+                      onClick={() => onSessionClick(sessionWithContext)}
+                      disabled={isDisabled}
+                    >
+                      {isGenerating ? (
+                        <Loader2 className="h-4 w-4 mt-0.5 animate-spin text-muted-foreground flex-shrink-0" />
+                      ) : (
+                        <MessageSquare className="h-4 w-4 mt-0.5 text-muted-foreground flex-shrink-0" />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium truncate">
+                          {session.name}
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          {hasMessages
+                            ? `${session.messages.length} messages · inject pointer`
+                            : 'No messages'}
+                        </div>
+                      </div>
+                    </button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  Inject session as MCP context pointer
+                </TooltipContent>
+              </Tooltip>
               {onGenerateSessionContext && hasMessages && (
                 <Tooltip>
                   <TooltipTrigger asChild>

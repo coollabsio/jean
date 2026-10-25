@@ -18,6 +18,11 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { ChatSearchBar } from './ChatSearchBar'
 import { Button } from '@/components/ui/button'
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import {
   AlertDialog,
   AlertDialogContent,
   AlertDialogHeader,
@@ -3337,18 +3342,24 @@ const ChatWindowContent = memo(function ChatWindowContent({
                               !zenMode &&
                               !isCompactHistoryExpanded &&
                               compactHistoryWindow.hiddenPromptCount > 0 && (
-                                <button
-                                  type="button"
-                                  onClick={handleShowHiddenCompactPrompts}
-                                  aria-label={`Show ${compactHistoryWindow.hiddenPromptCount} earlier prompts`}
-                                  title="Show earlier prompts"
-                                  className="flex h-6 items-center gap-1 rounded-t-md border border-b-0 border-border bg-card px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                                >
-                                  <ArrowUp className="h-3.5 w-3.5" />
-                                  <span>
-                                    {compactHistoryWindow.hiddenPromptCount}
-                                  </span>
-                                </button>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      type="button"
+                                      onClick={handleShowHiddenCompactPrompts}
+                                      aria-label={`Show ${compactHistoryWindow.hiddenPromptCount} earlier prompts`}
+                                      className="flex h-6 items-center gap-1 rounded-t-md border border-b-0 border-border bg-card px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                    >
+                                      <ArrowUp className="h-3.5 w-3.5" />
+                                      <span>
+                                        {compactHistoryWindow.hiddenPromptCount}
+                                      </span>
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    Show earlier prompts
+                                  </TooltipContent>
+                                </Tooltip>
                               )}
                             <PinnedTablesButton
                               sessionId={activeSessionId}
@@ -3383,25 +3394,31 @@ const ChatWindowContent = memo(function ChatWindowContent({
                               onScrollToBottom={scrollToBottom}
                             />
                             {!isAtBottom && messages.length > 0 && (
-                              <button
-                                type="button"
-                                onClick={() => scrollToBottom(true)}
-                                aria-label="Scroll to bottom"
-                                title="Scroll to bottom"
-                                className="relative flex h-6 items-center gap-1 rounded-t-md border border-b-0 border-border bg-card px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                              >
-                                <ArrowDown className="h-3.5 w-3.5" />
-                                <span>Bottom</span>
-                                {isSending && (
-                                  <span
-                                    aria-hidden="true"
-                                    className="absolute -top-0.5 -right-0.5 flex h-2 w-2"
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    type="button"
+                                    onClick={() => scrollToBottom(true)}
+                                    aria-label="Scroll to bottom"
+                                    className="relative flex h-6 items-center gap-1 rounded-t-md border border-b-0 border-border bg-card px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                                   >
-                                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
-                                    <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
-                                  </span>
-                                )}
-                              </button>
+                                    <ArrowDown className="h-3.5 w-3.5" />
+                                    <span>Bottom</span>
+                                    {isSending && (
+                                      <span
+                                        aria-hidden="true"
+                                        className="absolute -top-0.5 -right-0.5 flex h-2 w-2"
+                                      >
+                                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
+                                        <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
+                                      </span>
+                                    )}
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  Scroll to bottom
+                                </TooltipContent>
+                              </Tooltip>
                             )}
                           </div>
                           {/* Subagents panel - separate section above the chat input */}

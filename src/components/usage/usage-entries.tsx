@@ -18,6 +18,11 @@ import {
   useGrokUsage,
 } from '@/services/grok-cli'
 import { DropdownMenuItem } from '@/components/ui/dropdown-menu'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { useNow } from '@/hooks/useNow'
 import { useUIStore } from '@/store/ui-store'
 import {
@@ -163,16 +168,20 @@ export function UsageEntryWindows({
           <span className="text-right font-medium text-foreground">
             {Math.round(usage.usedPercent)}%
           </span>
-          <span
-            className="text-right"
-            title={
-              usage.resetsAt
-                ? `Resets ${new Date(toEpochMs(usage.resetsAt)).toLocaleString()}`
-                : undefined
-            }
-          >
-            {usage.resetsAt ? resetText(usage.resetsAt, nowMs) : ''}
-          </span>
+          {usage.resetsAt ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="text-right">
+                  {resetText(usage.resetsAt, nowMs)}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                {`Resets ${new Date(toEpochMs(usage.resetsAt)).toLocaleString()}`}
+              </TooltipContent>
+            </Tooltip>
+          ) : (
+            <span className="text-right" />
+          )}
         </div>
       ))}
     </div>

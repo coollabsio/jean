@@ -3,6 +3,11 @@ import { invoke } from '@/lib/transport'
 import { openExternal } from '@/lib/platform'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { Badge } from '@/components/ui/badge'
 import {
   ExternalLink,
@@ -344,12 +349,29 @@ function PluginCard({ plugin }: { plugin: PluginDefinition }) {
                 </Button>
               )}
             </>
+          ) : installUnsupported && status?.unsupported_reason ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex w-full cursor-not-allowed sm:w-auto">
+                  <Button
+                    size="sm"
+                    onClick={handleInstall}
+                    disabled
+                    className="pointer-events-none w-full sm:w-auto"
+                  >
+                    Unsupported
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-72">
+                {status.unsupported_reason}
+              </TooltipContent>
+            </Tooltip>
           ) : (
             <Button
               size="sm"
               onClick={handleInstall}
               disabled={installing || uninstalling || installUnsupported}
-              title={status?.unsupported_reason}
               className="w-full sm:w-auto"
             >
               {installUnsupported ? null : installing ? (

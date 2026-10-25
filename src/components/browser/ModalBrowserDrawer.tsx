@@ -7,6 +7,11 @@ import {
   PanelRightDashed,
 } from '@/components/icons/reicon'
 import { Button } from '@/components/ui/button'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { ModalCloseButton } from '@/components/ui/modal-close-button'
 import { cn } from '@/lib/utils'
@@ -122,49 +127,74 @@ export const ModalBrowserDrawer = memo(function ModalBrowserDrawer({
         </div>
         <div className="flex items-center gap-1">
           <div className="flex items-center rounded-md border bg-muted/30 p-0.5">
-            <Button
-              variant="ghost"
-              size="sm"
-              className={cn(
-                'h-7 w-7 p-0',
-                dockMode === 'floating' && 'bg-muted'
-              )}
-              onClick={() => handleSetDockMode('floating')}
-              aria-label="Float browser"
-              title="Float browser"
-            >
-              <PanelRightDashed className="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className={cn('h-7 w-7 p-0', dockMode === 'left' && 'bg-muted')}
-              onClick={() => handleSetDockMode('left')}
-              aria-label="Dock browser left"
-              title="Dock browser left"
-            >
-              <PanelLeft className="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className={cn('h-7 w-7 p-0', dockMode === 'right' && 'bg-muted')}
-              onClick={() => handleSetDockMode('right')}
-              aria-label="Dock browser right"
-              title="Dock browser right"
-            >
-              <PanelRight className="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className={cn('h-7 w-7 p-0', dockMode === 'bottom' && 'bg-muted')}
-              onClick={() => handleSetDockMode('bottom')}
-              aria-label="Dock browser bottom"
-              title="Dock browser bottom"
-            >
-              <PanelBottom className="h-3.5 w-3.5" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={cn(
+                    'h-7 w-7 p-0',
+                    dockMode === 'floating' && 'bg-muted'
+                  )}
+                  onClick={() => handleSetDockMode('floating')}
+                  aria-label="Float browser"
+                >
+                  <PanelRightDashed className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Float browser</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={cn(
+                    'h-7 w-7 p-0',
+                    dockMode === 'left' && 'bg-muted'
+                  )}
+                  onClick={() => handleSetDockMode('left')}
+                  aria-label="Dock browser left"
+                >
+                  <PanelLeft className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Dock browser left</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={cn(
+                    'h-7 w-7 p-0',
+                    dockMode === 'right' && 'bg-muted'
+                  )}
+                  onClick={() => handleSetDockMode('right')}
+                  aria-label="Dock browser right"
+                >
+                  <PanelRight className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Dock browser right</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={cn(
+                    'h-7 w-7 p-0',
+                    dockMode === 'bottom' && 'bg-muted'
+                  )}
+                  onClick={() => handleSetDockMode('bottom')}
+                  aria-label="Dock browser bottom"
+                >
+                  <PanelBottom className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Dock browser bottom</TooltipContent>
+            </Tooltip>
           </div>
           <ModalCloseButton size="sm" onClick={handleClose} />
         </div>

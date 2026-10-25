@@ -1,6 +1,11 @@
 import React, { useCallback } from 'react'
 import { Loader2, RefreshCw } from '@/components/icons/reicon'
 import { Button } from '@/components/ui/button'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { ClaudeIcon } from '@/components/icons/ClaudeIcon'
 import { CodexIcon } from '@/components/icons/CodexIcon'
 import { GrokIcon } from '@/components/icons/GrokIcon'
@@ -148,16 +153,20 @@ const UsageRow: React.FC<{
         />
       </div>
       {resetsAt ? (
-        <p
-          className="text-[11px] tabular-nums text-muted-foreground"
-          title={`Resets ${new Date(toEpochMs(resetsAt)).toLocaleString()}`}
-        >
-          Resets in {formatResetCountdown(resetsAt, nowMs)}
-          <span className="mx-1.5 text-border" aria-hidden>
-            ·
-          </span>
-          {formatResetAt(resetsAt, nowMs)}
-        </p>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <p className="text-[11px] tabular-nums text-muted-foreground">
+              Resets in {formatResetCountdown(resetsAt, nowMs)}
+              <span className="mx-1.5 text-border" aria-hidden>
+                ·
+              </span>
+              {formatResetAt(resetsAt, nowMs)}
+            </p>
+          </TooltipTrigger>
+          <TooltipContent>
+            {`Resets ${new Date(toEpochMs(resetsAt)).toLocaleString()}`}
+          </TooltipContent>
+        </Tooltip>
       ) : null}
     </div>
   )
@@ -537,16 +546,20 @@ export const UsagePane: React.FC = () => {
           {isRefreshing ? (
             'Refreshing…'
           ) : latestFetchedAt > 0 ? (
-            <span
-              title={new Date(latestFetchedAt * 1000).toLocaleString()}
-              className="tabular-nums"
-            >
-              Updated{' '}
-              {formatCompactDuration(
-                Math.max(0, nowMs - toEpochMs(latestFetchedAt))
-              )}{' '}
-              ago
-            </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="tabular-nums">
+                  Updated{' '}
+                  {formatCompactDuration(
+                    Math.max(0, nowMs - toEpochMs(latestFetchedAt))
+                  )}{' '}
+                  ago
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                {new Date(latestFetchedAt * 1000).toLocaleString()}
+              </TooltipContent>
+            </Tooltip>
           ) : (
             'Up to date'
           )}
