@@ -813,4 +813,121 @@ mod tests {
         assert!(!assembled.contains(withdrawn), "{assembled}");
         assert!(assembled.ends_with(continuation));
     }
+
+    fn start_turn(
+        app: &tauri::AppHandle,
+        session_id: &str,
+        user_message_id: &str,
+        user_message: &str,
+    ) -> crate::chat::run_log::RunLogWriter {
+        crate::chat::run_log::start_run(
+            app,
+            session_id,
+            "worktree-1",
+            "API session",
+            0,
+            user_message_id,
+            user_message,
+            Some("claude-opus-4-8"),
+            Some("build"),
+            None,
+            None,
+            Some(Backend::Claude),
+            None,
+        )
+        .unwrap()
+    }
+
+    /// Same assembly `send_chat_message` uses when the session backend changes.
+    fn backend_switch_prompt(
+        app: &tauri::AppHandle,
+        session_id: &str,
+        continuation: &str,
+    ) -> String {
+        let metadata = crate::chat::storage::load_metadata(app, session_id)
+            .unwrap()
+            .unwrap();
+        let previous = latest_completed_backend(&metadata).expect("previous backend");
+        assert!(should_inject_handoff(Some(&previous), &Backend::Codex));
+        let history = build_handoff_history_text(app, session_id, Some(&metadata));
+        if history.trim().is_empty() {
+            return continuation.to_string();
+        }
+        let handoff = build_handoff_prompt(
+            &crate::default_provider_switch_handoff_prompt(),
+            &previous,
+            &Backend::Codex,
+            &history,
+        );
+        prepend_hidden_handoff(continuation, &handoff)
+    }
+
+    #[test]
+    fn api_origin_reject_then_backend_switch_includes_original_request_once() {
+        let temp = tempfile::tempdir().unwrap();
+        let app =
+            tauri::AppHandle::new(temp.path().to_path_buf(), temp.path().to_path_buf()).unwrap();
+        let original = "Investigate why the checkout integration test fails.";
+        let continuation = "try now";
+
+        // API/MCP sessions persist the request only in run metadata. There is
+        // no composer draft to restore after the provider rejects the turn.
+        let session_id = "api-rejected-session";
+        let mut writer = start_turn(&app, session_id, "user-original", original);
+        writer.reject_without_output().unwrap();
+
+        let metadata = crate::chat::storage::load_metadata(&app, session_id)
+            .unwrap()
+            .unwrap();
+        let run = metadata.runs.last().unwrap();
+        assert!(run.provider_rejected);
+        assert!(run.assistant_message_id.is_none());
+        assert_eq!(run.status, RunStatus::Cancelled);
+        assert!(run.is_renderable_in_chat_history());
+        assert!(!run.renders_assistant_message());
+        assert_eq!(run.rendered_message_count(), 1);
+
+        let loaded =
+            crate::chat::run_log::load_session_messages_window(&app, session_id, None, None)
+                .unwrap();
+        assert_eq!(loaded.messages.len(), 1);
+        assert_eq!(loaded.messages[0].role, MessageRole::User);
+        assert_eq!(loaded.messages[0].content, original);
+
+        let fallback = format_handoff_history_from_runs(&metadata.runs, HANDOFF_HISTORY_MAX_CHARS);
+        assert_eq!(fallback.matches(original).count(), 1);
+
+        let prompt = backend_switch_prompt(&app, session_id, continuation);
+        assert_eq!(prompt.matches(original).count(), 1);
+        assert_eq!(prompt.matches(continuation).count(), 1);
+        assert!(prompt.contains("<jean_provider_switch_handoff>"));
+        assert!(prompt.ends_with(continuation));
+
+        // Older cancelled runs without the flag stay withdrawn.
+        let legacy = r#"{"run_id":"r","user_message_id":"u","user_message":"old undone prompt","started_at":1,"status":"cancelled","cancelled":true}"#;
+        let legacy_run: RunEntry = serde_json::from_str(legacy).unwrap();
+        assert!(!legacy_run.provider_rejected);
+        assert!(!legacy_run.is_renderable_in_chat_history());
+    }
+
+    #[test]
+    fn explicit_undo_send_is_not_reintroduced_on_backend_switch() {
+        let temp = tempfile::tempdir().unwrap();
+        let app =
+            tauri::AppHandle::new(temp.path().to_path_buf(), temp.path().to_path_buf()).unwrap();
+        let withdrawn = "withdrawn prompt the user undid";
+        let session_id = "undo-session";
+        let mut writer = start_turn(&app, session_id, "user-undo", withdrawn);
+        writer.cancel(None, None).unwrap();
+
+        let metadata = crate::chat::storage::load_metadata(&app, session_id)
+            .unwrap()
+            .unwrap();
+        assert!(!metadata.runs[0].provider_rejected);
+        assert!(!metadata.runs[0].is_renderable_in_chat_history());
+
+        let prompt = backend_switch_prompt(&app, session_id, "try now");
+        assert_eq!(prompt, "try now");
+        assert!(!prompt.contains(withdrawn));
+    }
 }

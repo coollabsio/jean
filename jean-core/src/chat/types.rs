@@ -1975,9 +1975,10 @@ impl RunEntry {
     /// as the user prompt plus whatever partial assistant/tool output had
     /// already streamed, marked as cancelled.
     pub fn is_renderable_in_chat_history(&self) -> bool {
-        self.provider_rejected
-            || self.status != RunStatus::Cancelled
-            || self.assistant_message_id.is_some()
+        if self.provider_rejected {
+            return !self.user_message.trim().is_empty();
+        }
+        self.status != RunStatus::Cancelled || self.assistant_message_id.is_some()
     }
 
     /// Number of visible chat messages contributed by this run.
@@ -3281,7 +3282,7 @@ mod tests {
         assert!(run.renders_assistant_message());
         assert_eq!(run.rendered_message_count(), 2);
 
-        // Instant cancel (no assistant id) stays fully hidden.
+        // Instant user cancel (no assistant id) stays fully hidden.
         run.assistant_message_id = None;
         run.status = RunStatus::Cancelled;
         run.cancelled = true;

@@ -5729,9 +5729,9 @@ pub async fn send_chat_message(
     let has_resume_worthy_payload = has_assistant_payload || has_persisted_visible_codex_artifacts;
 
     // Handle error_emitted: backend emitted chat:error during execution (e.g., Claude usage limit).
-    // With no output, keep the user request as a failed attempt so a later backend
-    // switch can include it. An explicit user cancel still falls through to
-    // undo-send and stays out of history.
+    // With no output, keep the user request as a failed attempt. API/MCP sessions cannot
+    // recover it from the composer, and a later backend switch must still see it.
+    // An explicit user cancel still falls through to undo-send and stays out of history.
     // After partial output (e.g. Claude API error / error_max_turns mid-turn), keep the
     // partial reply and resume id by finishing the run as cancelled-with-content below.
     if unified_response.error_emitted && has_assistant_payload {
@@ -9479,9 +9479,13 @@ pub async fn resume_session(
                 let resume_sid = Some(response.session_id.as_str()).filter(|id| !id.is_empty());
                 let finish = if completed {
                     writer.complete(&assistant_message_id, resume_sid, response.usage.clone())
+                } else if response.error_emitted && !has_payload && !response.cancelled {
+                    // Same as send: a provider rejection before output keeps the
+                    // user request. User cancel still goes through cancel().
+                    writer.reject_without_output()
                 } else {
-                    // Process died, user cancelled, or the turn failed: the run did
-                    // not complete. Keep partial output and its resume id.
+                    // Process died or the user cancelled. Keep partial output
+                    // and its resume id when the backend already started.
                     writer.cancel(
                         has_payload.then_some(assistant_message_id.as_str()),
                         resume_sid.filter(|_| has_payload),

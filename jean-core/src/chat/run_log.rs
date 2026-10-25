@@ -132,8 +132,10 @@ impl RunLogWriter {
     /// Persist a provider rejection that produced no assistant output.
     ///
     /// The user request stays on the run and remains visible in history and
-    /// provider-switch handoff. Explicit cancel/undo-send must keep using
-    /// [`Self::cancel`] so withdrawn text is not put back into context.
+    /// provider-switch handoff. API/MCP sessions have no composer to restore
+    /// into, so this is what a later backend switch reads. Explicit
+    /// cancel/undo-send must keep using [`Self::cancel`] so withdrawn text is
+    /// not put back into context.
     pub fn reject_without_output(&mut self) -> Result<(), String> {
         self.finish_cancelled(None, None, true)
     }
@@ -191,7 +193,11 @@ impl RunLogWriter {
             }
         }
 
-        log::trace!("Run cancelled: {}", self.run_id);
+        if provider_rejected {
+            log::trace!("Run rejected before output: {}", self.run_id);
+        } else {
+            log::trace!("Run cancelled: {}", self.run_id);
+        }
         Ok(())
     }
 
