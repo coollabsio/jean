@@ -1316,7 +1316,7 @@ export interface AppPreferences {
   selected_model: ClaudeModel // Claude model ID passed to --model flag
   thinking_level: ThinkingLevel // Thinking level: 'off' | 'think' | 'megathink' | 'ultrathink'
   default_effort_level: EffortLevel // Effort level for Opus adaptive thinking: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultracode'
-  terminal: TerminalApp // Terminal app: 'terminal' | 'warp' | 'ghostty' | 'iterm2' | 'powershell' | 'windows-terminal'
+  terminal: TerminalApp // Terminal app: 'terminal' | 'warp' | 'ghostty' | 'kitty' | 'iterm2' | 'powershell' | 'windows-terminal'
   terminal_renderer?: TerminalRenderer // Embedded terminal renderer: 'xterm' or 'ghostty-web' (experimental)
   terminal_font?: TerminalFont // Embedded terminal font
   terminal_font_size?: number // Embedded terminal font size in pixels
@@ -2175,6 +2175,7 @@ export type TerminalApp =
   | 'terminal'
   | 'warp'
   | 'ghostty'
+  | 'kitty'
   | 'iterm2'
   | 'powershell'
   | 'windows-terminal'
@@ -2193,6 +2194,7 @@ const allTerminalOptions: {
   { value: 'terminal', label: 'Terminal', platforms: ['mac', 'linux'] },
   { value: 'warp', label: 'Warp', platforms: ['mac', 'windows'] },
   { value: 'ghostty', label: 'Ghostty', platforms: ['mac', 'linux'] },
+  { value: 'kitty', label: 'Kitty', platforms: ['linux'] },
   { value: 'iterm2', label: 'iTerm2', platforms: ['mac'] },
   { value: 'powershell', label: 'PowerShell', platforms: ['windows'] },
   {

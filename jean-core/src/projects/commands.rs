@@ -5241,6 +5241,162 @@ fn format_open_error(app_name: &str, error: &std::io::Error) -> String {
     }
 }
 
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+fn spawn_external_terminal(
+    program: &str,
+    args: &[String],
+    current_dir: Option<&str>,
+) -> Result<(), std::io::Error> {
+    let mut command = std::process::Command::new(program);
+    command.args(args);
+    if let Some(dir) = current_dir {
+        command.current_dir(dir);
+    }
+    command.spawn().map(|_| ())
+}
+
+/// PowerShell single-quoted strings escape `'` by doubling it.
+#[cfg(any(windows, test))]
+fn powershell_set_location_command(worktree_path: &str) -> String {
+    let escaped = worktree_path.replace('\'', "''");
+    format!("Set-Location -LiteralPath '{escaped}'")
+}
+
+#[cfg(any(windows, test))]
+#[derive(Debug, PartialEq, Eq)]
+struct WindowsExternalTerminalLaunch {
+    program: String,
+    args: Vec<String>,
+    current_dir: Option<String>,
+}
+
+/// Launch plan for the Windows "Open in terminal" preference.
+///
+/// PowerShell is the default. Windows Terminal and Warp are explicit choices.
+/// `warp_program` is the resolved Warp executable when the caller found one.
+#[cfg(any(windows, test))]
+fn windows_external_terminal_launch(
+    terminal: &str,
+    worktree_path: &str,
+    warp_program: Option<&str>,
+) -> Result<WindowsExternalTerminalLaunch, String> {
+    match terminal {
+        "warp" => {
+            let Some(program) = warp_program.filter(|program| !program.is_empty()) else {
+                return Err(
+                    "Warp not found. Install Warp or choose PowerShell or Windows Terminal."
+                        .to_string(),
+                );
+            };
+            Ok(WindowsExternalTerminalLaunch {
+                program: program.to_string(),
+                args: Vec::new(),
+                current_dir: Some(worktree_path.to_string()),
+            })
+        }
+        "windows-terminal" => Ok(WindowsExternalTerminalLaunch {
+            program: "wt".to_string(),
+            args: vec!["-d".to_string(), worktree_path.to_string()],
+            current_dir: None,
+        }),
+        _ => Ok(WindowsExternalTerminalLaunch {
+            program: "powershell.exe".to_string(),
+            args: vec![
+                "-NoExit".to_string(),
+                "-Command".to_string(),
+                powershell_set_location_command(worktree_path),
+            ],
+            current_dir: None,
+        }),
+    }
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn posix_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+#[cfg(any(target_os = "linux", test))]
+#[derive(Debug, PartialEq, Eq)]
+struct LinuxExternalTerminalCandidate {
+    program: &'static str,
+    args: Vec<String>,
+    current_dir: Option<String>,
+}
+
+/// Terminals to try on Linux, preferred app first.
+///
+/// The saved choice (`kitty`, `ghostty`) is tried before the generic list.
+/// `x-terminal-emulator` is the Debian/Ubuntu alternative and is missing on
+/// Arch, Fedora, and many other desktops, so the rest of the list still runs.
+#[cfg(any(target_os = "linux", test))]
+fn linux_external_terminal_candidates(
+    terminal: &str,
+    worktree_path: &str,
+) -> Vec<LinuxExternalTerminalCandidate> {
+    let path = worktree_path.to_string();
+    let quoted = posix_single_quote(worktree_path);
+    let mut candidates = vec![
+        LinuxExternalTerminalCandidate {
+            program: "x-terminal-emulator",
+            args: Vec::new(),
+            current_dir: Some(path.clone()),
+        },
+        LinuxExternalTerminalCandidate {
+            program: "gnome-terminal",
+            args: vec!["--working-directory".into(), path.clone()],
+            current_dir: None,
+        },
+        LinuxExternalTerminalCandidate {
+            program: "konsole",
+            args: vec!["--workdir".into(), path.clone()],
+            current_dir: None,
+        },
+        LinuxExternalTerminalCandidate {
+            program: "alacritty",
+            args: vec!["--working-directory".into(), path.clone()],
+            current_dir: None,
+        },
+        LinuxExternalTerminalCandidate {
+            program: "kitty",
+            args: vec!["--directory".into(), path.clone()],
+            current_dir: None,
+        },
+        LinuxExternalTerminalCandidate {
+            program: "ghostty",
+            args: Vec::new(),
+            current_dir: Some(path.clone()),
+        },
+        LinuxExternalTerminalCandidate {
+            program: "xterm",
+            args: vec![
+                "-e".into(),
+                "bash".into(),
+                "-c".into(),
+                format!("cd {quoted}; exec bash"),
+            ],
+            current_dir: None,
+        },
+    ];
+
+    let preferred = match terminal {
+        "kitty" => Some("kitty"),
+        "ghostty" => Some("ghostty"),
+        _ => None,
+    };
+    if let Some(program) = preferred {
+        if let Some(index) = candidates
+            .iter()
+            .position(|candidate| candidate.program == program)
+        {
+            let candidate = candidates.remove(index);
+            candidates.insert(0, candidate);
+        }
+    }
+
+    candidates
+}
+
 /// Open a worktree path in the configured terminal app
 pub async fn open_worktree_in_terminal(
     worktree_path: String,
@@ -5317,88 +5473,64 @@ pub async fn open_worktree_in_terminal(
 
     #[cfg(target_os = "linux")]
     {
-        // Try common Linux terminal emulators in order of preference
-        // Use owned Strings to avoid borrowing temporaries.
-        let terminals: Vec<(&str, Vec<String>)> = vec![
-            (
-                "gnome-terminal",
-                vec!["--working-directory".into(), worktree_path.clone()],
-            ),
-            ("konsole", vec!["--workdir".into(), worktree_path.clone()]),
-            (
-                "alacritty",
-                vec!["--working-directory".into(), worktree_path.clone()],
-            ),
-            ("kitty", vec!["--directory".into(), worktree_path.clone()]),
-            (
-                "xterm",
-                vec![
-                    "-e".into(),
-                    "bash".into(),
-                    "-c".into(),
-                    format!("cd '{}'; exec bash", worktree_path),
-                ],
-            ),
-        ];
-
+        // Honor Kitty/Ghostty when selected, then fall back through the
+        // terminals a desktop session is likely to have. `x-terminal-emulator`
+        // covers Debian alternatives; it is absent on Arch and Fedora.
+        let candidates = linux_external_terminal_candidates(&terminal_app, &worktree_path);
         let mut opened = false;
-        for (term, args) in terminals {
-            if crate::platform::executable_exists(term) {
-                match std::process::Command::new(term).args(args).spawn() {
-                    Ok(_) => {
-                        log::trace!("Opened terminal with {term}");
-                        opened = true;
-                        break;
-                    }
-                    Err(e) => {
-                        log::trace!("Failed to open {term}: {e}");
-                    }
+        for candidate in &candidates {
+            if !crate::platform::executable_exists(candidate.program) {
+                continue;
+            }
+            match spawn_external_terminal(
+                candidate.program,
+                &candidate.args,
+                candidate.current_dir.as_deref(),
+            ) {
+                Ok(()) => {
+                    log::trace!("Opened terminal with {}", candidate.program);
+                    opened = true;
+                    break;
+                }
+                Err(e) => {
+                    log::trace!("Failed to open {}: {e}", candidate.program);
                 }
             }
         }
 
         if !opened {
-            return Err("No supported terminal emulator found. Install gnome-terminal, konsole, alacritty, kitty, or xterm.".to_string());
+            return Err("No supported terminal emulator found. Install x-terminal-emulator, gnome-terminal, konsole, alacritty, kitty, ghostty, or xterm.".to_string());
         }
     }
 
     #[cfg(target_os = "windows")]
     {
-        let result = match terminal_app.as_str() {
-            "warp" => {
-                // Try known install path first, then fall back to PATH
-                let local = std::env::var("LOCALAPPDATA").unwrap_or_default();
-                let known_path = format!("{local}\\Programs\\Warp\\warp.exe");
-                let warp_exe = if std::path::Path::new(&known_path).exists() {
-                    known_path
-                } else if crate::platform::executable_exists("warp") {
-                    "warp".to_string()
-                } else {
-                    return Err(format!("Warp not found. Checked: {known_path} and PATH"));
-                };
-                log::trace!("Using Warp at: {warp_exe}");
-                std::process::Command::new(&warp_exe)
-                    .current_dir(&worktree_path)
-                    .spawn()
+        let warp_program = if terminal_app == "warp" {
+            let local = std::env::var("LOCALAPPDATA").unwrap_or_default();
+            let known_path = format!("{local}\\Programs\\Warp\\warp.exe");
+            if std::path::Path::new(&known_path).exists() {
+                Some(known_path)
+            } else if crate::platform::executable_exists("warp") {
+                Some("warp".to_string())
+            } else {
+                return Err(format!("Warp not found. Checked: {known_path} and PATH"));
             }
-            "windows-terminal" => std::process::Command::new("wt")
-                .args(["-d", &worktree_path])
-                .spawn(),
-            _ => {
-                // Default: PowerShell
-                std::process::Command::new("powershell")
-                    .args([
-                        "-NoExit",
-                        "-Command",
-                        &format!("Set-Location '{worktree_path}'"),
-                    ])
-                    .spawn()
-            }
+        } else {
+            None
         };
-
-        match result {
-            Ok(_) => log::trace!("Opened {terminal_app} in {worktree_path}"),
-            Err(e) => return Err(format!("Failed to open {terminal_app}: {e}")),
+        let plan = windows_external_terminal_launch(
+            &terminal_app,
+            &worktree_path,
+            warp_program.as_deref(),
+        )?;
+        log::trace!(
+            "Opening {terminal_app} via {} in {worktree_path}",
+            plan.program
+        );
+        if let Err(e) =
+            spawn_external_terminal(&plan.program, &plan.args, plan.current_dir.as_deref())
+        {
+            return Err(format!("Failed to open {terminal_app}: {e}"));
         }
     }
 
@@ -15286,6 +15418,103 @@ mod tests {
                 args: vec!["/home/user/project".to_string()],
                 current_dir: None,
             }
+        );
+    }
+
+    #[test]
+    fn windows_terminal_preference_opens_powershell_by_default() {
+        let path = r"C:\Users\O'Brien\repo";
+        for terminal in ["powershell", "terminal", ""] {
+            let plan =
+                windows_external_terminal_launch(terminal, path, None).expect("powershell plan");
+            assert_eq!(plan.program, "powershell.exe");
+            assert_eq!(
+                plan.args,
+                vec![
+                    "-NoExit".to_string(),
+                    "-Command".to_string(),
+                    "Set-Location -LiteralPath 'C:\\Users\\O''Brien\\repo'".to_string(),
+                ]
+            );
+            assert_eq!(plan.current_dir, None);
+        }
+    }
+
+    #[test]
+    fn windows_terminal_preference_can_select_windows_terminal_or_warp() {
+        let path = r"C:\work\repo";
+        let wt = windows_external_terminal_launch("windows-terminal", path, None)
+            .expect("windows terminal plan");
+        assert_eq!(wt.program, "wt");
+        assert_eq!(wt.args, vec!["-d".to_string(), path.to_string()]);
+
+        let warp = windows_external_terminal_launch("warp", path, Some(r"C:\Warp\warp.exe"))
+            .expect("warp plan");
+        assert_eq!(warp.program, r"C:\Warp\warp.exe");
+        assert_eq!(warp.current_dir.as_deref(), Some(path));
+
+        let missing = windows_external_terminal_launch("warp", path, None);
+        assert!(missing.is_err());
+    }
+
+    #[test]
+    fn linux_terminal_candidates_try_a_fallback_chain() {
+        let candidates = linux_external_terminal_candidates("terminal", "/home/user/project");
+        let programs: Vec<_> = candidates
+            .iter()
+            .map(|candidate| candidate.program)
+            .collect();
+        assert_eq!(
+            programs,
+            vec![
+                "x-terminal-emulator",
+                "gnome-terminal",
+                "konsole",
+                "alacritty",
+                "kitty",
+                "ghostty",
+                "xterm",
+            ]
+        );
+        assert_eq!(
+            candidates[1].args,
+            vec![
+                "--working-directory".to_string(),
+                "/home/user/project".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn linux_terminal_candidates_prefer_kitty_and_quote_paths() {
+        let candidates = linux_external_terminal_candidates("kitty", "/home/user/o'brien/project");
+        assert_eq!(candidates[0].program, "kitty");
+        assert_eq!(
+            candidates[0].args,
+            vec![
+                "--directory".to_string(),
+                "/home/user/o'brien/project".to_string()
+            ]
+        );
+        let xterm = candidates
+            .iter()
+            .find(|candidate| candidate.program == "xterm")
+            .expect("xterm candidate");
+        assert_eq!(
+            xterm.args,
+            vec![
+                "-e".to_string(),
+                "bash".to_string(),
+                "-c".to_string(),
+                "cd '/home/user/o'\\''brien/project'; exec bash".to_string(),
+            ]
+        );
+
+        let ghostty = linux_external_terminal_candidates("ghostty", "/home/user/project");
+        assert_eq!(ghostty[0].program, "ghostty");
+        assert_eq!(
+            ghostty[0].current_dir.as_deref(),
+            Some("/home/user/project")
         );
     }
 

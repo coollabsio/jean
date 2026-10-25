@@ -11,6 +11,7 @@ async fn core_command(runtime: &CoreRuntime, command: &str, args: Value) -> Resu
     jean_core::http_server::dispatch::dispatch_command(&runtime.0, command, args).await
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn spawn(command: &str, args: &[String]) -> Result<(), String> {
     Command::new(command)
         .args(args)
@@ -197,18 +198,8 @@ pub async fn open_file_in_default_app(
 
 #[tauri::command]
 pub async fn open_worktree_in_finder(worktree_path: String) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        spawn("open", &[worktree_path])
-    }
-    #[cfg(target_os = "windows")]
-    {
-        spawn("explorer", &[worktree_path])
-    }
-    #[cfg(target_os = "linux")]
-    {
-        spawn("xdg-open", &[worktree_path])
-    }
+    // Shared launcher opens Explorer when the Linux build is running under WSL.
+    jean_core::open_worktree_in_finder(worktree_path).await
 }
 
 #[tauri::command]
@@ -264,6 +255,13 @@ pub async fn open_worktree_in_terminal(
         ));
         args
     });
+
+    // Local Windows and Linux opens use the shared terminal launcher.
+    // Remote SSH launches stay in this function.
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    if ssh_args.is_none() {
+        return jean_core::open_worktree_in_terminal(worktree_path.clone(), terminal.clone()).await;
+    }
 
     #[cfg(target_os = "windows")]
     let _ = terminal;
