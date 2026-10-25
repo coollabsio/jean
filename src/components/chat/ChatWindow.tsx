@@ -49,6 +49,7 @@ import {
   useSetSessionEffortLevel,
   useSetSessionBackend,
   useSetSessionProvider,
+  useSetSessionProviderAccount,
   useCreateSession,
   useLoadOlderMessages,
   chatQueryKeys,
@@ -805,6 +806,9 @@ const ChatWindowContent = memo(function ChatWindowContent({
   const setSessionEffortLevel = useStableMutation(useSetSessionEffortLevel())
   const setSessionBackend = useStableMutation(useSetSessionBackend())
   const setSessionProvider = useStableMutation(useSetSessionProvider())
+  const setSessionProviderAccount = useStableMutation(
+    useSetSessionProviderAccount()
+  )
 
   // Fetch worktree data for PR link display
   const { data: worktree } = useWorktree(activeWorktreeId ?? null)
@@ -1020,6 +1024,15 @@ const ChatWindowContent = memo(function ChatWindowContent({
     selectedProvider !== '__anthropic__' &&
     selectedProvider !== '__default__'
   )
+  const zustandProviderAccount = useChatStore(state =>
+    deferredSessionId
+      ? state.selectedProviderAccounts[deferredSessionId]
+      : undefined
+  )
+  const selectedProviderAccountId =
+    zustandProviderAccount !== undefined
+      ? zustandProviderAccount
+      : (session?.provider_account_id ?? null)
 
   // Per-session model selection, falls back to preferences default (backend-aware)
   const selectedModel = resolveSelectedModelForBackend(
@@ -2074,6 +2087,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
     handleToolbarBackendModelChange,
     handleTabBackendSwitch,
     handleToolbarProviderChange,
+    handleToolbarProviderAccountChange,
     handleToolbarThinkingLevelChange,
     handleToolbarEffortLevelChange,
     handleToggleMcpServer,
@@ -2099,6 +2113,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
     setSessionModel,
     setSessionBackend,
     setSessionProvider,
+    setSessionProviderAccount,
     setSessionThinkingLevel,
     setSessionEffortLevel,
     setExecutionMode,
@@ -3771,6 +3786,15 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                     onModelChange={handleToolbarModelChange}
                                     onProviderChange={
                                       handleToolbarProviderChange
+                                    }
+                                    providerAccounts={
+                                      preferences?.provider_accounts ?? []
+                                    }
+                                    selectedProviderAccountId={
+                                      selectedProviderAccountId
+                                    }
+                                    onProviderAccountChange={
+                                      handleToolbarProviderAccountChange
                                     }
                                     customCliProfiles={
                                       preferences?.custom_cli_profiles ??

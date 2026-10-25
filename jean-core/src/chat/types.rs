@@ -886,6 +886,9 @@ pub struct Session {
     /// Selected provider (custom CLI profile name) for this session
     #[serde(default)]
     pub selected_provider: Option<String>,
+    /// Named provider account for this session (None = the CLI's own login)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_account_id: Option<String>,
     /// Selected workflow/permission policy for this session
     #[serde(
         default = "legacy_execution_mode",
@@ -1209,6 +1212,7 @@ impl Session {
             selected_thinking_level: None,
             selected_effort_level: None,
             selected_provider: None,
+            provider_account_id: None,
             selected_execution_mode: Some("yolo".to_string()),
             selected_permission_mode: Some("yolo".to_string()),
             session_naming_completed: false,
@@ -1586,6 +1590,7 @@ impl SessionMetadata {
             selected_thinking_level: self.selected_thinking_level.clone(),
             selected_effort_level: self.selected_effort_level.clone(),
             selected_provider: self.selected_provider.clone(),
+            provider_account_id: self.provider_account_id.clone(),
             selected_execution_mode: self.selected_execution_mode.clone(),
             selected_permission_mode: self.selected_permission_mode.clone(),
             session_naming_completed: self.session_naming_completed,
@@ -1661,6 +1666,7 @@ impl SessionMetadata {
         self.selected_thinking_level = session.selected_thinking_level.clone();
         self.selected_effort_level = session.selected_effort_level.clone();
         self.selected_provider = session.selected_provider.clone();
+        self.provider_account_id = session.provider_account_id.clone();
         self.selected_execution_mode = session.selected_execution_mode.clone();
         self.selected_permission_mode = session.selected_permission_mode.clone();
         self.session_naming_completed = session.session_naming_completed;
@@ -2081,6 +2087,9 @@ pub struct SessionMetadata {
     /// Selected provider (custom CLI profile name) for this session
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_provider: Option<String>,
+    /// Named provider account for this session (None = the CLI's own login)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_account_id: Option<String>,
     /// Selected workflow/permission policy for this session
     #[serde(
         default = "legacy_execution_mode",
@@ -2317,6 +2326,7 @@ impl SessionMetadata {
             selected_thinking_level: None,
             selected_effort_level: None,
             selected_provider: None,
+            provider_account_id: None,
             selected_execution_mode: None,
             selected_permission_mode: None,
             session_naming_completed: false,
