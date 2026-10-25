@@ -42,6 +42,9 @@ import { useProjectsStore, type SidebarTab } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { ProjectTree } from './ProjectTree'
+import { SearchFieldContextMenu } from './SearchFieldContextMenu'
+import { SidebarEmptySpaceMenu } from './SidebarEmptySpaceMenu'
+import { suppressSidebarChromeContextMenu } from './sidebar-context-menu'
 import { RecentWorktreesList } from './RecentWorktreesList'
 import { ServersList } from './servers/ServersList'
 import { SidebarTabRail } from './SidebarTabRail'
@@ -206,7 +209,10 @@ export function ProjectsSidebar() {
   }, [selectedProjectId])
 
   return (
-    <div className="flex h-full">
+    <div
+      className="flex h-full"
+      onContextMenu={suppressSidebarChromeContextMenu}
+    >
       {isMobile && (
         <SidebarTabRail className="border-r border-border/40">
           <button
@@ -244,19 +250,21 @@ export function ProjectsSidebar() {
         {/* Content */}
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {activeTab === 'projects' ? (
-            <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+            <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
               <div className="border-b border-border/40 pb-2">
                 <div className="flex gap-1 px-3">
                   <div className="relative min-w-0 flex-1">
                     <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      type="search"
-                      value={searchQuery}
-                      onChange={event => setSearchQuery(event.target.value)}
-                      placeholder="Search…"
-                      aria-label="Search projects, worktrees and servers"
-                      className="h-8 border-transparent bg-transparent pl-7 pr-2 text-xs shadow-none focus-visible:border-transparent dark:bg-transparent"
-                    />
+                    <SearchFieldContextMenu>
+                      <Input
+                        type="search"
+                        value={searchQuery}
+                        onChange={event => setSearchQuery(event.target.value)}
+                        placeholder="Search…"
+                        aria-label="Search projects, worktrees and servers"
+                        className="h-8 border-transparent bg-transparent pl-7 pr-2 text-xs shadow-none focus-visible:border-transparent dark:bg-transparent"
+                      />
+                    </SearchFieldContextMenu>
                   </div>
                   <DropdownMenu>
                     <Tooltip>
@@ -420,17 +428,23 @@ export function ProjectsSidebar() {
                   )}
                 </div>
               ) : (
-                <>
+                <div className="flex flex-1 flex-col">
                   <ServersList
                     servers={serverProjects}
                     searchQuery={searchQuery}
                   />
                   {!projects.some(project => !isServerProject(project)) ? (
-                    <div className="flex items-center justify-center px-2 py-6">
-                      <span className="truncate text-sm text-muted-foreground/50">
-                        No projects found
-                      </span>
-                    </div>
+                    <SidebarEmptySpaceMenu
+                      offerNewFolder={false}
+                      onNewProject={handleNewProject}
+                      onNewFolder={handleNewFolder}
+                    >
+                      <div className="flex flex-1 items-center justify-center px-2 py-6">
+                        <span className="truncate text-sm text-muted-foreground/50">
+                          No projects found
+                        </span>
+                      </div>
+                    </SidebarEmptySpaceMenu>
                   ) : (
                     <ProjectTree
                       projects={treeProjects}
@@ -438,9 +452,11 @@ export function ProjectsSidebar() {
                         showServerFilter && serverFilter === ALL_SERVERS
                       }
                       searchQuery={searchQuery}
+                      onNewProject={handleNewProject}
+                      onNewFolder={handleNewFolder}
                     />
                   )}
-                </>
+                </div>
               )}
             </div>
           ) : (
