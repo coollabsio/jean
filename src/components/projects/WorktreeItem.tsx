@@ -852,6 +852,11 @@ export const WorktreeItem = memo(function WorktreeItem({
               )}
             >
               <span className="truncate">{worktree.name}</span>
+              {worktree.serverName && (
+                <span className="shrink-0 text-[10px] text-muted-foreground">
+                  {worktree.serverName}
+                </span>
+              )}
               {/* Chevron for expand/collapse sessions */}
               <button
                 type="button"
