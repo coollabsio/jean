@@ -12,5 +12,9 @@ export function filterProjectsByServer(
   serverId: string
 ): Project[] {
   if (serverId === ALL_SERVERS) return projects
-  return projects.filter(project => projectServerId(project) === serverId)
+  return projects.filter(
+    project =>
+      projectServerId(project) === serverId ||
+      project.hostCheckouts?.some(checkout => checkout.serverId === serverId)
+  )
 }

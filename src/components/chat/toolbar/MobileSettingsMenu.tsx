@@ -122,7 +122,12 @@ import { resolveStackedOnPr } from '@/components/chat/worktree-branch-badge'
 import { chatQueryKeys } from '@/services/chat'
 import { getResumeCommand } from '@/components/chat/session-card-utils'
 import type { ModelReasoningCapability } from '@/services/model-catalog'
-import { resolvePortUrl } from '@/components/browser/default-tab-url'
+import {
+  resolvePortHost,
+  resolvePortUrl,
+} from '@/components/browser/default-tab-url'
+import { usePreferences } from '@/services/preferences'
+import { LOCAL_SERVER_ID } from '@/types/server-resource'
 
 /** Stable defaults so omit/undefined doesn't allocate a new [] each render. */
 const EMPTY_CODEX_PROVIDERS: CodexProviderProfile[] = []
@@ -379,6 +384,13 @@ export function MobileSettingsMenu({
     ? projects?.find(p => p.id === worktree.project_id)
     : null
   const { data: ports = [] } = usePorts(worktree?.path ?? null)
+  const ownerServerId = worktree?.serverId
+  const preferenceServerId =
+    ownerServerId && ownerServerId !== LOCAL_SERVER_ID
+      ? ownerServerId
+      : undefined
+  const { data: serverPreferences } = usePreferences(preferenceServerId)
+  const serverDefaultHost = serverPreferences?.browser_default_host
   const { data: openPRs } = useGitHubPRs(project?.path ?? null, 'open', {
     enabled: menuOpen && !!project?.path,
     ownerId: project?.id,
@@ -921,8 +933,8 @@ export function MobileSettingsMenu({
                 </DropdownMenuItem>
               )}
               {ports.map(port => {
-                const host = port.host?.trim() || 'localhost'
-                const url = resolvePortUrl(port)
+                const host = resolvePortHost(port, serverDefaultHost)
+                const url = resolvePortUrl(port, serverDefaultHost)
                 const label = port.label?.trim()
                   ? `${port.label} (${host}:${port.port})`
                   : `${host}:${port.port}`

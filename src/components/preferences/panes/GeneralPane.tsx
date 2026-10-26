@@ -246,6 +246,7 @@ import { getPathUpdateAction } from '@/lib/cli-update'
 import { SettingsSection } from '../SettingsSection'
 import { BackendCliSourceSelect } from '../BackendCliSourceSelect'
 import { AiLanguageField } from './AiLanguageField'
+import { BrowserDefaultHostField } from './BrowserDefaultHostField'
 import { resolveOverrideReasoning } from './override-reasoning'
 import {
   resolveDefaultModelForBackend,
@@ -5049,6 +5050,15 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   }}
                 />
               </InlineField>
+            </div>
+          </SettingsSection>
+
+          <SettingsSection
+            title="Browser"
+            anchorId="pref-general-section-browser"
+          >
+            <div className="space-y-4">
+              <BrowserDefaultHostField preferences={preferences} />
             </div>
           </SettingsSection>
 
