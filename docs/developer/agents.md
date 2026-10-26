@@ -316,11 +316,28 @@ runs as a task of the target agent) with `reply_to_agent` and
 sender's session) is recorded, so the answer returns to the session that asked.
 `MAX_AGENT_HOPS` limits chains.
 
+## Agent templates
+
+Predefined roles live in `jean-core/src/agents/templates.yaml`. That file is
+the catalog. It is not copied into `agents.db` on startup, and a template is
+not a built-in agent. Only `jean` is built-in.
+
+`list_agent_templates` returns the catalog. `install_agent_template` creates
+one custom agent through `create_for_actor` (the same path as `create_agent`)
+and copies the template's default schedules. The new row has `builtin` false,
+so the user can edit and delete it. Skill hints are short names shown before
+install. They are not file paths and they are not saved as skills. Install
+leaves `mcp_servers` and `jean_tools` unset, so Jean MCP stays available.
+
+The New agent dialog has Blank and From template. From template calls
+`install_agent_template` on the server selected in the dialog.
+
 ## Commands
 
 Registered in `http_server/dispatch.rs` (`AGENT_COMMANDS`, served by
 `dispatch_agents_command`), so native IPC and web access both work:
-`list_agents`, `get_agent_details`, `create_agent`, `update_agent`,
+`list_agents`, `get_agent_details`, `create_agent`, `list_agent_templates`,
+`install_agent_template`, `update_agent`,
 `delete_agent`, `decide_agent_approval`, `create_agent_schedule`,
 `update_agent_schedule`, `cancel_agent_schedule`,
 `save/search/update/delete/supersede/export_agent_memory`, `save/search_agent_journal`, `mark_agent_notifications_read`,

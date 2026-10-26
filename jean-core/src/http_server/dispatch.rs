@@ -4310,6 +4310,8 @@ const AGENT_COMMANDS: &[&str] = &[
     "list_agents",
     "get_agent_details",
     "create_agent",
+    "list_agent_templates",
+    "install_agent_template",
     "update_agent",
     "delete_agent",
     "decide_agent_approval",
@@ -4381,6 +4383,11 @@ async fn dispatch_agents_command(
                     )
                     .await?,
                 )
+            }
+            "list_agent_templates" => to_value(crate::agents::commands::list_agent_templates()?),
+            "install_agent_template" => {
+                let template_id: String = field(args, "templateId", "template_id")?;
+                to_value(crate::agents::commands::install_agent_template(app, &template_id).await?)
             }
             "update_agent" => {
                 let agent_id: String = field(args, "agentId", "agent_id")?;
