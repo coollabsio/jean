@@ -340,3 +340,37 @@ describe('dialogs close the mobile left sidebar', () => {
     expect(useProjectsStore.getState().projectSettingsDialogOpen).toBe(true)
   })
 })
+
+describe('bulk sidebar expansion', () => {
+  beforeEach(() => {
+    useProjectsStore.setState({
+      expandedProjectIds: new Set(['keep-project']),
+      expandedWorktreeIds: new Set(['keep-worktree']),
+      expandedFolderIds: new Set(['keep-folder']),
+    })
+  })
+
+  it('adds and removes ids without clearing unrelated rows', () => {
+    const { setProjectsExpanded, setWorktreesExpanded, setFoldersExpanded } =
+      useProjectsStore.getState()
+
+    setProjectsExpanded(['project-1'], true)
+    setProjectsExpanded(['project-1'], true)
+    expect([...useProjectsStore.getState().expandedProjectIds]).toEqual([
+      'keep-project',
+      'project-1',
+    ])
+
+    setWorktreesExpanded(['wt-1', 'wt-2'], true)
+    setWorktreesExpanded(['wt-1'], false)
+    expect([...useProjectsStore.getState().expandedWorktreeIds].sort()).toEqual(
+      ['keep-worktree', 'wt-2']
+    )
+
+    setFoldersExpanded(['folder-1'], true)
+    setFoldersExpanded(['keep-folder'], false)
+    expect([...useProjectsStore.getState().expandedFolderIds]).toEqual([
+      'folder-1',
+    ])
+  })
+})

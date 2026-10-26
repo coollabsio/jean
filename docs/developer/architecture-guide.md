@@ -533,7 +533,7 @@ interaction finishes.
 
 ### Canvas View
 
-**ProjectCanvasView** (`src/components/dashboard/ProjectCanvasView.tsx`) shows sessions across all worktrees in a project, grouped by worktree with section headers. Sessions are opened via `SessionChatModal` overlay.
+**ProjectCanvasView** (`src/components/dashboard/ProjectCanvasView.tsx`) lists the selected project's worktrees. Focusing a worktree — from the canvas row or the sidebar worktree row — opens `WorktreeSessionsBrowser` instead of the horizontal session tab strip. The browser reuses session card status, labels, and `useCanvasKeyboardNav`. A row shows the effective session status and, when live agent activity differs from that status, the agent status as well. Choosing a session opens `SessionChatModal`. Sidebar session rows and other explicit session actions still open that session directly.
 
 Shared infrastructure in `src/components/chat/`:
 

@@ -18,10 +18,17 @@ import {
   type Instruction,
 } from '@atlaskit/pragmatic-drag-and-drop-hitbox/list-item'
 import { ChevronDown, ChevronUp } from '@/components/icons/reicon'
+import { SectionHeaderContextMenu } from './SectionHeaderContextMenu'
+import { SidebarEmptySpaceMenu } from './SidebarEmptySpaceMenu'
+import { isContextMenuNearElement } from './sidebar-context-menu'
 import { isFolder, type Project } from '@/types/projects'
 import { ProjectTreeItem } from './ProjectTreeItem'
 import { FolderTreeItem } from './FolderTreeItem'
-import { useReorderItems, useMoveItem } from '@/services/projects'
+import {
+  useCreateFolder,
+  useReorderItems,
+  useMoveItem,
+} from '@/services/projects'
 import { useProjectsStore } from '@/store/projects-store'
 import { Separator } from '@/components/ui/separator'
 import {
@@ -29,12 +36,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger,
-} from '@/components/ui/context-menu'
 import { cn } from '@/lib/utils'
 import { useIsTouchDevice } from '@/hooks/use-touch-device'
 import {
@@ -77,6 +78,8 @@ interface ProjectTreeProps {
   projects: Project[]
   groupByServer?: boolean
   searchQuery?: string
+  onNewProject?: () => void
+  onNewFolder?: () => void
 }
 
 function canMoveIntoFolder({
@@ -388,20 +391,33 @@ export function ProjectTree({
   projects,
   groupByServer = false,
   searchQuery = '',
+  onNewProject,
+  onNewFolder,
 }: ProjectTreeProps) {
   const reorderItems = useReorderItems()
   const moveItem = useMoveItem()
+  const createFolder = useCreateFolder()
   const expandFolder = useProjectsStore(state => state.expandFolder)
   const expandedFolderIds = useProjectsStore(state => state.expandedFolderIds)
   const expandedProjectIds = useProjectsStore(state => state.expandedProjectIds)
   const expandAllFolders = useProjectsStore(state => state.expandAllFolders)
   const collapseAllFolders = useProjectsStore(state => state.collapseAllFolders)
-  const setProjectExpanded = useProjectsStore(state => state.setProjectExpanded)
+  const setProjectsExpanded = useProjectsStore(
+    state => state.setProjectsExpanded
+  )
+  const setAddProjectDialogOpen = useProjectsStore(
+    state => state.setAddProjectDialogOpen
+  )
   const [activeId, setActiveId] = useState<string | null>(null)
   const [overFolderId, setOverFolderId] = useState<string | null>(null)
   const [isOverRoot, setIsOverRoot] = useState(false)
   const [insertBeforeId, setInsertBeforeId] = useState<string | null>(null)
   const [foldersSectionCollapsed, setFoldersSectionCollapsed] = useState(false)
+  const [collapsedProjectSectionIds, setCollapsedProjectSectionIds] = useState(
+    () => new Set<string>()
+  )
+  const [offerNewFolder, setOfferNewFolder] = useState(false)
+  const foldersSectionRef = useRef<HTMLDivElement>(null)
   const latestDropTargetRef = useRef<{
     targetId: string | null
     instruction: Instruction | null
@@ -434,6 +450,38 @@ export function ProjectTree({
     [projects]
   )
   const showFolders = !foldersSectionCollapsed || Boolean(searchQuery)
+  const searching = Boolean(searchQuery)
+  const handleNewProject = useCallback(() => {
+    if (onNewProject) {
+      onNewProject()
+      return
+    }
+    setAddProjectDialogOpen(true)
+  }, [onNewProject, setAddProjectDialogOpen])
+  const handleNewFolder = useCallback(() => {
+    if (onNewFolder) {
+      onNewFolder()
+      return
+    }
+    createFolder.mutate({ name: 'New Folder' })
+  }, [createFolder, onNewFolder])
+  const handleTreeContextMenu = useCallback((event: React.MouseEvent) => {
+    setOfferNewFolder(
+      isContextMenuNearElement(event, foldersSectionRef.current)
+    )
+  }, [])
+  const setProjectSectionCollapsed = useCallback(
+    (sectionId: string, collapsed: boolean) => {
+      setCollapsedProjectSectionIds(current => {
+        if (current.has(sectionId) === collapsed) return current
+        const next = new Set(current)
+        if (collapsed) next.add(sectionId)
+        else next.delete(sectionId)
+        return next
+      })
+    },
+    []
+  )
   const clearDragState = useCallback(() => {
     setActiveId(null)
     setOverFolderId(null)
@@ -769,140 +817,166 @@ export function ProjectTree({
   }, [expandFolder, expandedFolderIds, overFolderId])
 
   return (
-    <div
-      className="py-1"
-      onDragOver={handleNativeTreeDragOver}
-      onDrop={handleNativeTreeDrop}
-      onDragEnd={handleNativeTreeDragEnd}
+    <SidebarEmptySpaceMenu
+      offerNewFolder={offerNewFolder}
+      onNewProject={handleNewProject}
+      onNewFolder={handleNewFolder}
+      onContextMenu={handleTreeContextMenu}
     >
-      {rootFolders.length > 0 && (
-        <ContextMenu>
-          <ContextMenuTrigger asChild>
-            <div className={`group/header ${SECTION_HEADER_CLASS}`}>
-              <span className={SECTION_LABEL_CLASS}>Folders</span>
-              <button
-                type="button"
-                className={SECTION_TOGGLE_CLASS}
-                onClick={() => setFoldersSectionCollapsed(value => !value)}
-                aria-label={showFolders ? 'Hide folders' : 'Show folders'}
-                aria-expanded={showFolders}
-                disabled={Boolean(searchQuery)}
-              >
-                {showFolders ? (
-                  <ChevronUp className="size-3.5" />
-                ) : (
-                  <ChevronDown className="size-3.5" />
-                )}
-              </button>
-            </div>
-          </ContextMenuTrigger>
-          <ContextMenuContent>
-            <ContextMenuItem
-              onClick={() => {
+      <div
+        data-testid="project-tree"
+        className="flex flex-1 flex-col py-1"
+        onDragOver={handleNativeTreeDragOver}
+        onDrop={handleNativeTreeDrop}
+        onDragEnd={handleNativeTreeDragEnd}
+      >
+        {rootFolders.length > 0 && (
+          <div ref={foldersSectionRef}>
+            <SectionHeaderContextMenu
+              categoryDisabled={searching}
+              onExpandAll={() => {
                 setFoldersSectionCollapsed(false)
                 expandAllFolders(allFolderIds)
               }}
+              onCollapseAll={collapseAllFolders}
+              onExpandCategory={() => setFoldersSectionCollapsed(false)}
+              onCollapseCategory={() => setFoldersSectionCollapsed(true)}
             >
-              Expand all folders
-            </ContextMenuItem>
-            <ContextMenuItem onClick={collapseAllFolders}>
-              Collapse all folders
-            </ContextMenuItem>
-          </ContextMenuContent>
-        </ContextMenu>
-      )}
-      {showFolders &&
-        rootFolders.map(item => (
-          <SortableItem
-            key={item.id}
-            item={item}
-            allProjects={projects}
-            depth={0}
-            isOverFolder={overFolderId === item.id}
-            expandedFolderIds={expandedFolderIds}
-            overFolderId={overFolderId}
-            insertBeforeId={insertBeforeId}
-            activeId={activeId}
-            searchQuery={searchQuery}
-          />
-        ))}
-      {hasBothTypes && (
-        <div className="px-3 py-2">
-          <Separator />
-        </div>
-      )}
-      {projectSections.map(section => {
-        const areAllProjectsExpanded = section.projects.every(item =>
-          expandedProjectIds.has(item.id)
-        )
-        const actionLabel = areAllProjectsExpanded ? 'Collapse' : 'Expand'
-
-        return (
-          <div key={section.id}>
-            <div className={`group/header ${SECTION_HEADER_CLASS}`}>
-              <span className={`min-w-0 truncate ${SECTION_LABEL_CLASS}`}>
-                {section.title}
-              </span>
-              <div
-                className="flex shrink-0 items-center gap-1"
-                data-testid="instance-title-actions"
-              >
-                {groupByServer && section.id !== 'local' && (
-                  <RemoteServerRefreshButton
-                    serverId={section.id}
-                    serverName={section.title}
-                  />
-                )}
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      className={SECTION_TOGGLE_CLASS}
-                      onClick={() =>
-                        section.projects.forEach(item =>
-                          setProjectExpanded(item.id, !areAllProjectsExpanded)
-                        )
-                      }
-                      aria-label={
-                        section.title === 'Projects'
-                          ? `${actionLabel} all projects`
-                          : `${actionLabel} all projects on ${section.title}`
-                      }
-                    >
-                      {areAllProjectsExpanded ? (
-                        <ChevronUp className="size-3.5" />
-                      ) : (
-                        <ChevronDown className="size-3.5" />
-                      )}
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>{actionLabel} all</TooltipContent>
-                </Tooltip>
+              <div className={`group/header ${SECTION_HEADER_CLASS}`}>
+                <span className={SECTION_LABEL_CLASS}>Folders</span>
+                <button
+                  type="button"
+                  className={SECTION_TOGGLE_CLASS}
+                  onClick={() => setFoldersSectionCollapsed(value => !value)}
+                  aria-label={showFolders ? 'Hide folders' : 'Show folders'}
+                  aria-expanded={showFolders}
+                  disabled={searching}
+                >
+                  {showFolders ? (
+                    <ChevronUp className="size-3.5" />
+                  ) : (
+                    <ChevronDown className="size-3.5" />
+                  )}
+                </button>
               </div>
-            </div>
-            {section.projects.map(item => (
-              <SortableItem
-                key={item.id}
-                item={item}
-                allProjects={projects}
-                depth={0}
-                isOverFolder={false}
-                expandedFolderIds={expandedFolderIds}
-                overFolderId={overFolderId}
-                insertBeforeId={insertBeforeId}
-                activeId={activeId}
-                searchQuery={searchQuery}
-              />
-            ))}
+            </SectionHeaderContextMenu>
+            {showFolders &&
+              rootFolders.map(item => (
+                <SortableItem
+                  key={item.id}
+                  item={item}
+                  allProjects={projects}
+                  depth={0}
+                  isOverFolder={overFolderId === item.id}
+                  expandedFolderIds={expandedFolderIds}
+                  overFolderId={overFolderId}
+                  insertBeforeId={insertBeforeId}
+                  activeId={activeId}
+                  searchQuery={searchQuery}
+                />
+              ))}
           </div>
-        )
-      })}
-
-      {/* Root drop zone - visible when dragging an item that's inside a folder */}
-      {activeId &&
-        projects.find(p => p.id === activeId)?.parent_id !== undefined && (
-          <RootDropZone isOver={isOverRoot} />
         )}
-    </div>
+        {hasBothTypes && (
+          <div className="px-3 py-2">
+            <Separator />
+          </div>
+        )}
+        {projectSections.map(section => {
+          const sectionProjectIds = section.projects.map(item => item.id)
+          const areAllProjectsExpanded = section.projects.every(item =>
+            expandedProjectIds.has(item.id)
+          )
+          const actionLabel = areAllProjectsExpanded ? 'Collapse' : 'Expand'
+          const showSection =
+            searching || !collapsedProjectSectionIds.has(section.id)
+
+          return (
+            <div key={section.id}>
+              <SectionHeaderContextMenu
+                categoryDisabled={searching}
+                onExpandAll={() => {
+                  setProjectSectionCollapsed(section.id, false)
+                  setProjectsExpanded(sectionProjectIds, true)
+                }}
+                onCollapseAll={() =>
+                  setProjectsExpanded(sectionProjectIds, false)
+                }
+                onExpandCategory={() =>
+                  setProjectSectionCollapsed(section.id, false)
+                }
+                onCollapseCategory={() =>
+                  setProjectSectionCollapsed(section.id, true)
+                }
+              >
+                <div className={`group/header ${SECTION_HEADER_CLASS}`}>
+                  <span className={`min-w-0 truncate ${SECTION_LABEL_CLASS}`}>
+                    {section.title}
+                  </span>
+                  <div
+                    className="flex shrink-0 items-center gap-1"
+                    data-testid="instance-title-actions"
+                  >
+                    {groupByServer && section.id !== 'local' && (
+                      <RemoteServerRefreshButton
+                        serverId={section.id}
+                        serverName={section.title}
+                      />
+                    )}
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          className={SECTION_TOGGLE_CLASS}
+                          onClick={() =>
+                            setProjectsExpanded(
+                              sectionProjectIds,
+                              !areAllProjectsExpanded
+                            )
+                          }
+                          aria-label={
+                            section.title === 'Projects'
+                              ? `${actionLabel} all projects`
+                              : `${actionLabel} all projects on ${section.title}`
+                          }
+                        >
+                          {areAllProjectsExpanded ? (
+                            <ChevronUp className="size-3.5" />
+                          ) : (
+                            <ChevronDown className="size-3.5" />
+                          )}
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>{actionLabel} all</TooltipContent>
+                    </Tooltip>
+                  </div>
+                </div>
+              </SectionHeaderContextMenu>
+              {showSection &&
+                section.projects.map(item => (
+                  <SortableItem
+                    key={item.id}
+                    item={item}
+                    allProjects={projects}
+                    depth={0}
+                    isOverFolder={false}
+                    expandedFolderIds={expandedFolderIds}
+                    overFolderId={overFolderId}
+                    insertBeforeId={insertBeforeId}
+                    activeId={activeId}
+                    searchQuery={searchQuery}
+                  />
+                ))}
+            </div>
+          )
+        })}
+
+        {/* Root drop zone - visible when dragging an item that's inside a folder */}
+        {activeId &&
+          projects.find(p => p.id === activeId)?.parent_id !== undefined && (
+            <RootDropZone isOver={isOverRoot} />
+          )}
+      </div>
+    </SidebarEmptySpaceMenu>
   )
 }

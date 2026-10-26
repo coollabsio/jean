@@ -30,6 +30,7 @@ vi.mock('@/services/chat', () => ({
 }))
 vi.mock('@/services/projects', () => ({
   useRenameWorktree: () => ({ mutate: vi.fn() }),
+  useWorktrees: () => ({ data: [] }),
 }))
 vi.mock('@/components/chat/hooks/useCanvasStoreState', () => ({
   useCanvasStoreState: () => ({}),

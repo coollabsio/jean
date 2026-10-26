@@ -1,13 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import userEvent from '@testing-library/user-event'
-import { render, screen } from '@/test/test-utils'
+import { fireEvent, render, screen } from '@/test/test-utils'
 import type { Project } from '@/types/projects'
 import { useProjectsStore } from '@/store/projects-store'
 import { ProjectTree } from './ProjectTree'
 
+const mocks = vi.hoisted(() => ({
+  createFolder: vi.fn(),
+}))
+
 vi.mock('@/services/projects', () => ({
   useReorderItems: () => ({ mutate: vi.fn() }),
   useMoveItem: () => ({ mutate: vi.fn() }),
+  useCreateFolder: () => ({ mutate: mocks.createFolder, isPending: false }),
 }))
 vi.mock('./FolderTreeItem', () => ({
   FolderTreeItem: ({
@@ -51,7 +56,12 @@ const projects: Project[] = [
 
 describe('ProjectTree Folders section', () => {
   beforeEach(() => {
-    useProjectsStore.setState({ expandedFolderIds: new Set() })
+    mocks.createFolder.mockReset()
+    useProjectsStore.setState({
+      expandedFolderIds: new Set(),
+      expandedProjectIds: new Set(),
+      addProjectDialogOpen: false,
+    })
   })
 
   it('hides only the Folders section and preserves individual folder state', async () => {
@@ -76,9 +86,7 @@ describe('ProjectTree Folders section', () => {
       keys: '[MouseRight]',
       target: screen.getByText('Folders'),
     })
-    await user.click(
-      screen.getByRole('menuitem', { name: 'Expand all folders' })
-    )
+    await user.click(screen.getByRole('menuitem', { name: 'Expand all' }))
     expect(useProjectsStore.getState().expandedFolderIds.has('folder-1')).toBe(
       true
     )
@@ -88,9 +96,7 @@ describe('ProjectTree Folders section', () => {
       keys: '[MouseRight]',
       target: screen.getByText('Folders'),
     })
-    await user.click(
-      screen.getByRole('menuitem', { name: 'Collapse all folders' })
-    )
+    await user.click(screen.getByRole('menuitem', { name: 'Collapse all' }))
     expect(useProjectsStore.getState().expandedFolderIds.size).toBe(0)
   })
 
@@ -102,5 +108,60 @@ describe('ProjectTree Folders section', () => {
     rerender(<ProjectTree projects={projects} searchQuery="My folder" />)
     expect(screen.getByText('My folder')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Hide folders' })).toBeDisabled()
+  })
+
+  it('expands, collapses, and hides the Projects category from its header', async () => {
+    const user = userEvent.setup()
+    render(<ProjectTree projects={projects} />)
+
+    await user.pointer({
+      keys: '[MouseRight]',
+      target: screen.getByText('Projects'),
+    })
+    await user.click(screen.getByRole('menuitem', { name: 'Expand all' }))
+    expect(
+      useProjectsStore.getState().expandedProjectIds.has('project-1')
+    ).toBe(true)
+
+    await user.pointer({
+      keys: '[MouseRight]',
+      target: screen.getByText('Projects'),
+    })
+    await user.click(
+      screen.getByRole('menuitem', { name: 'Collapse category' })
+    )
+    expect(screen.queryByText('Standalone project')).not.toBeInTheDocument()
+
+    await user.pointer({
+      keys: '[MouseRight]',
+      target: screen.getByText('Projects'),
+    })
+    await user.click(screen.getByRole('menuitem', { name: 'Expand category' }))
+    expect(screen.getByText('Standalone project')).toBeInTheDocument()
+  })
+
+  it('offers New project in empty space, and New folder near Folders', async () => {
+    const user = userEvent.setup()
+    render(
+      <ProjectTree
+        projects={projects}
+        onNewFolder={() => mocks.createFolder()}
+      />
+    )
+
+    fireEvent.contextMenu(screen.getByTestId('project-tree'), { clientY: 400 })
+    expect(
+      screen.getByRole('menuitem', { name: 'New project' })
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('menuitem', { name: 'New folder' })
+    ).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('menuitem', { name: 'New project' }))
+    expect(useProjectsStore.getState().addProjectDialogOpen).toBe(true)
+
+    fireEvent.contextMenu(screen.getByTestId('project-tree'), { clientY: 0 })
+    await user.click(screen.getByRole('menuitem', { name: 'New folder' }))
+    expect(mocks.createFolder).toHaveBeenCalled()
   })
 })
