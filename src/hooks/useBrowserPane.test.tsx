@@ -1,16 +1,36 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { renderHook } from '@testing-library/react'
-import { useBrowserTabActions } from './useBrowserPane'
+import { act, renderHook, waitFor } from '@testing-library/react'
+import { DEFAULT_NEW_TAB_URL, useBrowserStore } from '@/store/browser-store'
+import {
+  openBrowserTabFromNewWindow,
+  useAnyBlockingModalOpen,
+  useBrowserEvents,
+  useBrowserTabActions,
+} from './useBrowserPane'
 
 const invokeMock = vi.hoisted(() => vi.fn())
+const listenMock = vi.hoisted(() => vi.fn())
+const resolveMock = vi.hoisted(() =>
+  vi.fn(async (url: string) => ({ url, note: null as string | null }))
+)
 
 vi.mock('@/lib/transport', () => ({
   invoke: invokeMock,
-  listen: vi.fn(),
+  listen: listenMock,
 }))
 
 vi.mock('@/lib/environment', () => ({
   isNativeApp: () => true,
+}))
+
+vi.mock('@/lib/remote-preview', () => ({
+  resolveEmbeddedPreviewUrl: resolveMock,
+  watchRemotePreviewForwards: () => () => undefined,
+  isRemotePreviewError: (error: unknown) =>
+    error instanceof Error &&
+    (error as { remotePreview?: boolean }).remotePreview === true,
+  remotePreviewLoadError: (url: string, note?: string | null) =>
+    note ? `Could not load ${url}. ${note}` : null,
 }))
 
 describe('useBrowserTabActions grab integration', () => {
@@ -18,6 +38,26 @@ describe('useBrowserTabActions grab integration', () => {
     vi.clearAllMocks()
     document.documentElement.className = ''
     invokeMock.mockResolvedValue(undefined)
+    resolveMock.mockReset()
+    resolveMock.mockImplementation(async (url: string) => ({
+      url,
+      note: null,
+    }))
+    useBrowserStore.setState({
+      tabs: {
+        wt: [
+          {
+            id: 'tab-1',
+            worktreeId: 'wt',
+            url: 'about:blank',
+            title: '',
+            isLoading: false,
+            error: null,
+          },
+        ],
+      },
+      activeTabIds: { wt: 'tab-1' },
+    })
   })
 
   it('invokes the native React Grab injection command for the active tab', async () => {
@@ -30,5 +70,205 @@ describe('useBrowserTabActions grab integration', () => {
       tabId: 'tab-1',
       theme: 'dark',
     })
+  })
+
+  it('navigates the webview to the remote preview URL', async () => {
+    resolveMock.mockResolvedValueOnce({
+      url: 'http://127.0.0.1:5173/app',
+      note: 'Remote preview via SSH forward: build.example port 5173 → 127.0.0.1:5173.',
+    })
+    const { result } = renderHook(() => useBrowserTabActions('tab-1'))
+
+    await result.current.navigate('http://localhost:5173/app')
+
+    expect(invokeMock).toHaveBeenCalledWith('browser_navigate', {
+      tabId: 'tab-1',
+      url: 'http://127.0.0.1:5173/app',
+    })
+    expect(useBrowserStore.getState().getTabs('wt')[0]?.previewNote).toContain(
+      'SSH forward'
+    )
+  })
+
+  it('shows the forward failure and does not open this computer', async () => {
+    const error = new Error(
+      'Port 3000 is already in use on this computer, so the remote preview forward could not start.'
+    )
+    Object.assign(error, { remotePreview: true })
+    resolveMock.mockRejectedValueOnce(error)
+    const { result } = renderHook(() => useBrowserTabActions('tab-1'))
+
+    await result.current.navigate('http://localhost:3000')
+
+    expect(invokeMock).not.toHaveBeenCalled()
+    expect(useBrowserStore.getState().getTabs('wt')[0]?.error).toContain(
+      'already in use'
+    )
+    expect(useBrowserStore.getState().getTabs('wt')[0]?.isLoading).toBe(false)
+  })
+})
+
+function resetBrowserStore(): void {
+  useBrowserStore.setState({
+    tabs: {},
+    activeTabIds: {},
+    sidePaneOpen: {},
+    modalOpen: {},
+    bottomPanelOpen: {},
+  })
+}
+
+describe('openBrowserTabFromNewWindow', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetBrowserStore()
+  })
+
+  it('opens an http(s) url as a new tab in the source worktree pane', () => {
+    const sourceId = useBrowserStore
+      .getState()
+      .addTab('worktree-1', 'https://example.com')
+    useBrowserStore.getState().addTab('worktree-2', 'https://other.example')
+    useBrowserStore.getState().setBottomPanelOpen('worktree-1', true)
+
+    const createdId = openBrowserTabFromNewWindow(
+      sourceId,
+      'https://example.com/docs'
+    )
+
+    const tabs = useBrowserStore.getState().getTabs('worktree-1')
+    expect(createdId).toBe(tabs[1]?.id)
+    expect(tabs.map(tab => tab.url)).toEqual([
+      'https://example.com',
+      'https://example.com/docs',
+    ])
+    expect(useBrowserStore.getState().activeTabIds['worktree-1']).toBe(
+      createdId
+    )
+    expect(useBrowserStore.getState().getTabs('worktree-2')).toHaveLength(1)
+    expect(useBrowserStore.getState().bottomPanelOpen['worktree-1']).toBe(true)
+    expect(useBrowserStore.getState().sidePaneOpen['worktree-1'] ?? false).toBe(
+      false
+    )
+    expect(useBrowserStore.getState().modalOpen['worktree-1'] ?? false).toBe(
+      false
+    )
+  })
+
+  it('keeps a localhost popup url for the webview to preview-resolve', () => {
+    const sourceId = useBrowserStore
+      .getState()
+      .addTab('worktree-1', 'https://example.com')
+
+    const createdId = openBrowserTabFromNewWindow(
+      sourceId,
+      'http://localhost:3000/app'
+    )
+
+    const tabs = useBrowserStore.getState().getTabs('worktree-1')
+    expect(createdId).toBe(tabs[1]?.id)
+    expect(tabs[1]?.url).toBe('http://localhost:3000/app')
+    expect(resolveMock).not.toHaveBeenCalled()
+    expect(invokeMock).not.toHaveBeenCalled()
+  })
+
+  it('opens a blank tab for an empty new-window url', () => {
+    const sourceId = useBrowserStore
+      .getState()
+      .addTab('worktree-1', 'https://example.com')
+
+    const createdId = openBrowserTabFromNewWindow(sourceId, '   ')
+
+    const tabs = useBrowserStore.getState().getTabs('worktree-1')
+    expect(tabs).toHaveLength(2)
+    expect(tabs[1]?.id).toBe(createdId)
+    expect(tabs[1]?.url).toBe(DEFAULT_NEW_TAB_URL)
+  })
+
+  it('ignores an unknown source tab and non-http urls', () => {
+    const sourceId = useBrowserStore
+      .getState()
+      .addTab('worktree-1', 'https://example.com')
+
+    expect(
+      openBrowserTabFromNewWindow('missing-tab', 'https://example.com/next')
+    ).toBeNull()
+    expect(
+      openBrowserTabFromNewWindow(sourceId, 'javascript:alert(1)')
+    ).toBeNull()
+    expect(openBrowserTabFromNewWindow(sourceId, 'file:///tmp/x')).toBeNull()
+    expect(useBrowserStore.getState().getTabs('worktree-1')).toHaveLength(1)
+  })
+})
+
+describe('useBrowserEvents new window', () => {
+  const handlers = new Map<string, (event: { payload: unknown }) => void>()
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetBrowserStore()
+    handlers.clear()
+    listenMock.mockImplementation(
+      async (event: string, handler: (event: { payload: unknown }) => void) => {
+        handlers.set(event, handler)
+        return () => undefined
+      }
+    )
+  })
+
+  it('creates a Jean tab when browser:new-window fires', () => {
+    const sourceId = useBrowserStore
+      .getState()
+      .addTab('worktree-1', 'https://example.com')
+    renderHook(() => useBrowserEvents())
+
+    const handler = handlers.get('browser:new-window')
+    expect(handler).toBeTypeOf('function')
+    handler?.({
+      payload: { tabId: sourceId, url: 'https://example.com/from-blank' },
+    })
+
+    expect(
+      useBrowserStore
+        .getState()
+        .getTabs('worktree-1')
+        .map(tab => tab.url)
+    ).toEqual(['https://example.com', 'https://example.com/from-blank'])
+  })
+})
+
+describe('useAnyBlockingModalOpen port menu', () => {
+  it('hides the webview while the port picker menu is open', async () => {
+    const { result } = renderHook(() => useAnyBlockingModalOpen())
+    expect(result.current).toBe(false)
+
+    const menu = document.createElement('div')
+    menu.setAttribute('role', 'menu')
+    menu.setAttribute('data-state', 'open')
+    menu.setAttribute('data-browser-port-menu', '')
+    document.body.appendChild(menu)
+
+    await waitFor(() => {
+      expect(result.current).toBe(true)
+    })
+
+    menu.remove()
+    await waitFor(() => {
+      expect(result.current).toBe(false)
+    })
+  })
+
+  it('leaves unrelated menus alone', async () => {
+    const { result } = renderHook(() => useAnyBlockingModalOpen())
+    const menu = document.createElement('div')
+    menu.setAttribute('role', 'menu')
+    menu.setAttribute('data-state', 'open')
+    document.body.appendChild(menu)
+
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 20))
+    })
+    expect(result.current).toBe(false)
+    menu.remove()
   })
 })

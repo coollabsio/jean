@@ -17,6 +17,26 @@ agent-browser restore key `jean` (`AGENT_BROWSER_RESTORE`).
 - Manual fallback: `npm install -g agent-browser && agent-browser install`
 - Design: `docs/developer/server-agent-browser.md`
 
+## Browser preview hostname
+
+Dev-server previews follow the Jean server you are attached to. Settings →
+General → **Default preview hostname** is stored with that server's preferences.
+
+New browser tabs and Open port buttons build `http://<host>:<port>` in this
+order:
+
+1. `ports[].host` in the project's `jean.json`, when that port sets one
+2. Otherwise the server's default preview hostname
+3. Otherwise `localhost`
+
+A desktop window, a Web Access browser, and any other client attached to that
+jean-server all use the same value. Leave the setting blank to keep
+`localhost`. A hostname that is not loopback (`localhost`, `127.0.0.1`, `::1`)
+is opened as written. Loopback names stay loopback so a remote preview can
+still be forwarded to the machine where the dev server is running.
+
+This setting does not change Jean MCP. Jean MCP stays enabled.
+
 ## Host prerequisites
 
 Jean checks shared host prerequisites instead of treating them as a Grok-only

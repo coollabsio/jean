@@ -17,6 +17,8 @@ const windowMock = vi.hoisted(() => ({
 
 vi.mock('@/hooks/useBrowserPane', () => ({
   browserBackend: browserBackendMock,
+  failBrowserLoad: vi.fn(),
+  BROWSER_ENSURE_WEBVIEW_EVENT: 'jean-browser-ensure-webview',
 }))
 
 vi.mock('@tauri-apps/api/window', () => ({
@@ -66,9 +68,13 @@ describe('BrowserTabContent', () => {
 
   it('cleans up a scale listener that finishes registering after unmount', async () => {
     let finishRegistration: ((listener: () => void) => void) | undefined
-    const listener = vi.fn().mockRejectedValue(
-      new Error("undefined is not an object (evaluating 'listeners[eventId].handlerId')")
-    )
+    const listener = vi
+      .fn()
+      .mockRejectedValue(
+        new Error(
+          "undefined is not an object (evaluating 'listeners[eventId].handlerId')"
+        )
+      )
     windowMock.onScaleChanged.mockReturnValue(
       new Promise(resolve => {
         finishRegistration = resolve

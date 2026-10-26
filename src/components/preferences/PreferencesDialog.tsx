@@ -25,7 +25,8 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb'
-import { SettingsPage, SettingsBackButton } from './SettingsPage'
+import { SettingsBackButton } from './SettingsPage'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { ModalCloseButton } from '@/components/ui/modal-close-button'
 import {
   Select,
@@ -797,359 +798,379 @@ export function PreferencesDialog() {
 
   return (
     <SettingsTargetProvider serverId={settingsServerId}>
-      <SettingsPage
-        open={preferencesOpen}
-        onOpenChange={handleOpenChange}
-        onEscapeKeyDown={handleDialogEscape}
-        title="Settings"
-      >
-        <SidebarProvider className="!min-h-0 !h-full items-stretch overflow-hidden">
-          <Sidebar
-            collapsible="none"
-            className="hidden md:flex border-r border-border"
-          >
-            <div
-              className="flex h-14 shrink-0 items-center px-4 text-sm font-semibold"
-              data-tauri-drag-region
-              data-settings-title
+      <Dialog open={preferencesOpen} onOpenChange={handleOpenChange}>
+        <DialogContent
+          showCloseButton={false}
+          aria-describedby={undefined}
+          aria-modal={true}
+          onEscapeKeyDown={handleDialogEscape}
+          className="flex h-[94dvh] max-h-[94dvh] w-[96vw] max-w-[96vw] flex-col gap-0 overflow-hidden p-0 sm:h-[94dvh] sm:max-h-[94dvh] sm:w-[96vw] sm:max-w-[96vw]"
+        >
+          <DialogTitle className="sr-only">Settings</DialogTitle>
+          <SidebarProvider className="!min-h-0 !h-full flex-1 items-stretch overflow-hidden">
+            <Sidebar
+              collapsible="none"
+              className="hidden md:flex border-r border-border"
             >
-              Jean{' '}
-              <span className="ml-2 font-normal text-muted-foreground">
-                Settings
-              </span>
-            </div>
-            <div className="px-3 pb-3">
-              <PreferencesSearchBar
-                variant="desktop"
-                searchValue={searchValue}
-                onSearchValueChange={setSearchValue}
-                searchOpen={searchOpen}
-                onSearchOpenChange={setSearchOpen}
-                selectedId={effectiveSearchSelection}
-                onSelectedIdChange={setSearchSelection}
-                isSearching={isSearching}
-                searchResults={searchResults}
-                groupedResults={groupedResults}
-                paneIconMap={paneIconMap}
-                onResultSelect={handleSearchResultSelect}
-                inputRef={searchInputRef}
-                containerRef={searchContainerRef}
-              />
-            </div>
-            {showServerTarget && (
-              <div className="px-3 pb-1 pt-3">
-                <Select
-                  value={settingsServerId}
-                  onValueChange={handleSettingsServerChange}
-                >
-                  <SelectTrigger
-                    size="sm"
-                    aria-label="Settings server"
-                    className="w-full rounded-lg border-border/50 bg-muted/50 px-2 text-xs text-muted-foreground shadow-none hover:bg-muted/80 hover:text-foreground"
-                  >
-                    <Server className="size-3.5" />
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent align="start">
-                    <SelectItem value={LOCAL_SERVER_ID}>Local</SelectItem>
-                    {remoteConnections.map(connection => {
-                      const status = serverSnapshots.get(connection.id)?.status
-                      const statusLabel =
-                        status && status !== 'online'
-                          ? ` (${status.replace('-', ' ')})`
-                          : ''
-                      return (
-                        <SelectItem key={connection.id} value={connection.id}>
-                          {connection.name}
-                          {statusLabel}
-                        </SelectItem>
-                      )
-                    })}
-                  </SelectContent>
-                </Select>
+              <div className="flex h-14 shrink-0 items-center px-4 text-sm font-semibold">
+                Jean{' '}
+                <span className="ml-2 font-normal text-muted-foreground">
+                  Settings
+                </span>
               </div>
-            )}
-            <SidebarContent>
-              <SidebarGroup>
-                <SidebarGroupContent>
-                  <SidebarMenu>
-                    {navigationEntries.map((entry, index) => {
-                      if (entry.type === 'section') {
-                        const isFirst = index === 0
-                        return (
-                          <li
-                            key={entry.id}
-                            className={isFirst ? 'pt-0' : 'pt-1'}
-                          >
-                            {!isFirst && (
-                              <SidebarSeparator className="mx-0 mb-1" />
-                            )}
-                            <SidebarGroupLabel className="h-7 px-2 text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/50">
-                              {entry.label}
-                            </SidebarGroupLabel>
-                          </li>
-                        )
-                      }
-
-                      return (
-                        <SidebarMenuItem key={entry.id}>
-                          <SidebarMenuButton
-                            asChild
-                            isActive={activePane === entry.id}
-                          >
-                            <button
-                              type="button"
-                              onClick={() => handlePaneSelect(entry.id)}
-                              className="w-full"
-                            >
-                              <entry.icon
-                                className={
-                                  entry.id === 'kimi'
-                                    ? 'translate-x-0.5'
-                                    : undefined
-                                }
-                              />
-                              {entry.backend ? (
-                                <BackendLabel backend={entry.backend} />
-                              ) : (
-                                <span>{entry.name}</span>
-                              )}
-                            </button>
-                          </SidebarMenuButton>
-                        </SidebarMenuItem>
-                      )
-                    })}
-                  </SidebarMenu>
-                </SidebarGroupContent>
-              </SidebarGroup>
-            </SidebarContent>
-            <div className="shrink-0 border-t border-border p-2">
-              <SettingsBackButton onClick={() => handleOpenChange(false)} />
-            </div>
-          </Sidebar>
-
-          <main className="flex flex-1 flex-col overflow-hidden">
-            <header
-              data-tauri-drag-region
-              className="flex h-14 shrink-0 items-center gap-2"
-            >
-              <div className="flex flex-1 items-center gap-2 px-4">
-                {/* Mobile pane selector */}
-                <Select
-                  value={activePane}
-                  onValueChange={v => handlePaneSelect(v as PreferencePane)}
-                >
-                  <SelectTrigger className="md:hidden w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {getMobileNavigationGroups().map(group => (
-                      <SelectGroup key={group.id}>
-                        <SelectLabel className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                          {group.label}
-                        </SelectLabel>
-                        {group.items.map(item => (
-                          <SelectItem key={item.id} value={item.id}>
-                            {item.backend ? (
-                              <BackendLabel backend={item.backend} />
-                            ) : (
-                              item.name
-                            )}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <ModalCloseButton
-                  size="lg"
-                  className="md:hidden"
-                  onClick={() => handleOpenChange(false)}
+              <div className="px-3 pb-3">
+                <PreferencesSearchBar
+                  variant="desktop"
+                  searchValue={searchValue}
+                  onSearchValueChange={setSearchValue}
+                  searchOpen={searchOpen}
+                  onSearchOpenChange={setSearchOpen}
+                  selectedId={effectiveSearchSelection}
+                  onSelectedIdChange={setSearchSelection}
+                  isSearching={isSearching}
+                  searchResults={searchResults}
+                  groupedResults={groupedResults}
+                  paneIconMap={paneIconMap}
+                  onResultSelect={handleSearchResultSelect}
+                  inputRef={searchInputRef}
+                  containerRef={searchContainerRef}
                 />
-                <Breadcrumb className="hidden md:block">
-                  <BreadcrumbList>
-                    <BreadcrumbItem>
-                      <BreadcrumbLink asChild>
-                        <button
-                          type="button"
-                          onClick={() => handleOpenChange(false)}
-                        >
-                          Settings
-                        </button>
-                      </BreadcrumbLink>
-                    </BreadcrumbItem>
-                    <BreadcrumbSeparator />
-                    <BreadcrumbItem>
-                      <BreadcrumbPage>
-                        <PaneTitle pane={activePane} />
-                      </BreadcrumbPage>
-                    </BreadcrumbItem>
-                  </BreadcrumbList>
-                </Breadcrumb>
+              </div>
+              {showServerTarget && (
+                <div className="px-3 pb-1 pt-3">
+                  <Select
+                    value={settingsServerId}
+                    onValueChange={handleSettingsServerChange}
+                  >
+                    <SelectTrigger
+                      size="sm"
+                      aria-label="Settings server"
+                      className="w-full rounded-lg border-border/50 bg-muted/50 px-2 text-xs text-muted-foreground shadow-none hover:bg-muted/80 hover:text-foreground"
+                    >
+                      <Server className="size-3.5" />
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent align="start">
+                      <SelectItem value={LOCAL_SERVER_ID}>Local</SelectItem>
+                      {remoteConnections.map(connection => {
+                        const status = serverSnapshots.get(
+                          connection.id
+                        )?.status
+                        const statusLabel =
+                          status && status !== 'online'
+                            ? ` (${status.replace('-', ' ')})`
+                            : ''
+                        return (
+                          <SelectItem key={connection.id} value={connection.id}>
+                            {connection.name}
+                            {statusLabel}
+                          </SelectItem>
+                        )
+                      })}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              <SidebarContent>
+                <SidebarGroup>
+                  <SidebarGroupContent>
+                    <SidebarMenu>
+                      {navigationEntries.map((entry, index) => {
+                        if (entry.type === 'section') {
+                          const isFirst = index === 0
+                          return (
+                            <li
+                              key={entry.id}
+                              className={isFirst ? 'pt-0' : 'pt-1'}
+                            >
+                              {!isFirst && (
+                                <SidebarSeparator className="mx-0 mb-1" />
+                              )}
+                              <SidebarGroupLabel className="h-7 px-2 text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/50">
+                                {entry.label}
+                              </SidebarGroupLabel>
+                            </li>
+                          )
+                        }
 
-                <div className="ml-auto hidden md:flex items-center gap-2">
+                        return (
+                          <SidebarMenuItem key={entry.id}>
+                            <SidebarMenuButton
+                              asChild
+                              isActive={activePane === entry.id}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => handlePaneSelect(entry.id)}
+                                className="w-full"
+                              >
+                                <entry.icon
+                                  className={
+                                    entry.id === 'kimi'
+                                      ? 'translate-x-0.5'
+                                      : undefined
+                                  }
+                                />
+                                {entry.backend ? (
+                                  <BackendLabel backend={entry.backend} />
+                                ) : (
+                                  <span>{entry.name}</span>
+                                )}
+                              </button>
+                            </SidebarMenuButton>
+                          </SidebarMenuItem>
+                        )
+                      })}
+                    </SidebarMenu>
+                  </SidebarGroupContent>
+                </SidebarGroup>
+              </SidebarContent>
+              <div className="shrink-0 border-t border-border p-2">
+                <SettingsBackButton onClick={() => handleOpenChange(false)} />
+              </div>
+            </Sidebar>
+
+            <main className="flex flex-1 flex-col overflow-hidden">
+              <header className="flex h-14 shrink-0 items-center gap-2">
+                <div className="flex flex-1 items-center gap-2 px-4">
+                  {/* Mobile pane selector */}
+                  <Select
+                    value={activePane}
+                    onValueChange={v => handlePaneSelect(v as PreferencePane)}
+                  >
+                    <SelectTrigger className="md:hidden w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {getMobileNavigationGroups().map(group => (
+                        <SelectGroup key={group.id}>
+                          <SelectLabel className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                            {group.label}
+                          </SelectLabel>
+                          {group.items.map(item => (
+                            <SelectItem key={item.id} value={item.id}>
+                              {item.backend ? (
+                                <BackendLabel backend={item.backend} />
+                              ) : (
+                                item.name
+                              )}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <ModalCloseButton
-                    className="relative z-10 shrink-0"
+                    size="lg"
+                    className="md:hidden"
                     onClick={() => handleOpenChange(false)}
                   />
+                  <Breadcrumb className="hidden md:block">
+                    <BreadcrumbList>
+                      <BreadcrumbItem>
+                        <BreadcrumbLink asChild>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenChange(false)}
+                          >
+                            Settings
+                          </button>
+                        </BreadcrumbLink>
+                      </BreadcrumbItem>
+                      <BreadcrumbSeparator />
+                      <BreadcrumbItem>
+                        <BreadcrumbPage>
+                          <PaneTitle pane={activePane} />
+                        </BreadcrumbPage>
+                      </BreadcrumbItem>
+                    </BreadcrumbList>
+                  </Breadcrumb>
+
+                  <div className="ml-auto hidden md:flex items-center gap-2">
+                    <ModalCloseButton
+                      className="relative z-10 shrink-0"
+                      onClick={() => handleOpenChange(false)}
+                    />
+                  </div>
                 </div>
+              </header>
+
+              <div
+                ref={scrollContainerRef}
+                className="flex min-w-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto px-4 py-6 sm:px-8 lg:px-12 lg:py-10 min-h-0 [&>div[id^=pref-pane]]:mx-auto [&>div[id^=pref-pane]]:w-full [&>div[id^=pref-pane]]:max-w-4xl"
+              >
+                <PreferencesSearchBar
+                  variant="mobile"
+                  searchValue={searchValue}
+                  onSearchValueChange={setSearchValue}
+                  searchOpen={searchOpen}
+                  onSearchOpenChange={setSearchOpen}
+                  selectedId={effectiveSearchSelection}
+                  onSelectedIdChange={setSearchSelection}
+                  isSearching={isSearching}
+                  searchResults={searchResults}
+                  groupedResults={groupedResults}
+                  paneIconMap={paneIconMap}
+                  onResultSelect={handleSearchResultSelect}
+                  containerRef={mobileSearchContainerRef}
+                />
+
+                {activePane === 'general' && (
+                  <div id="pref-pane-general" className="min-w-0 max-w-full">
+                    <GeneralPane />
+                  </div>
+                )}
+                {activePane === 'claude' && (
+                  <div id="pref-pane-claude" className="min-w-0 max-w-full">
+                    <ClaudePane />
+                  </div>
+                )}
+                {activePane === 'codex' && (
+                  <div id="pref-pane-codex" className="min-w-0 max-w-full">
+                    <CodexPane />
+                  </div>
+                )}
+                {activePane === 'opencode' && (
+                  <div id="pref-pane-opencode" className="min-w-0 max-w-full">
+                    <OpenCodePane />
+                  </div>
+                )}
+                {activePane === 'cursor' && (
+                  <div id="pref-pane-cursor" className="min-w-0 max-w-full">
+                    <CursorPane />
+                  </div>
+                )}
+                {activePane === 'pi' && (
+                  <div id="pref-pane-pi" className="min-w-0 max-w-full">
+                    <PiPane />
+                  </div>
+                )}
+                {activePane === 'commandcode' && (
+                  <div
+                    id="pref-pane-commandcode"
+                    className="min-w-0 max-w-full"
+                  >
+                    <CommandCodePane />
+                  </div>
+                )}
+                {activePane === 'grok' && (
+                  <div id="pref-pane-grok">
+                    <GrokPane />
+                  </div>
+                )}
+                {activePane === 'kimi' && (
+                  <div id="pref-pane-kimi" className="min-w-0 max-w-full">
+                    <KimiPane />
+                  </div>
+                )}
+                {activePane === 'devin' && (
+                  <div id="pref-pane-devin" className="min-w-0 max-w-full">
+                    <DevinPane />
+                  </div>
+                )}
+                {activePane === 'antigravity' && (
+                  <div
+                    id="pref-pane-antigravity"
+                    className="min-w-0 max-w-full"
+                  >
+                    <AntigravityPane />
+                  </div>
+                )}
+                {activePane === 'muse' && (
+                  <div id="pref-pane-muse" className="min-w-0 max-w-full">
+                    <MusePane />
+                  </div>
+                )}
+                {activePane === 'github' && (
+                  <div id="pref-pane-github" className="min-w-0 max-w-full">
+                    <GitHubPane />
+                  </div>
+                )}
+                {activePane === 'coderabbit' && (
+                  <div id="pref-pane-coderabbit" className="min-w-0 max-w-full">
+                    <CodeRabbitPane />
+                  </div>
+                )}
+                {activePane === 'appearance' && (
+                  <div id="pref-pane-appearance" className="min-w-0 max-w-full">
+                    <AppearancePane />
+                  </div>
+                )}
+                {activePane === 'keybindings' && (
+                  <div
+                    id="pref-pane-keybindings"
+                    className="min-w-0 max-w-full"
+                  >
+                    <KeybindingsPane searchTargetAction={searchTargetAction} />
+                  </div>
+                )}
+                {activePane === 'terminal' && (
+                  <div id="pref-pane-terminal" className="min-w-0 max-w-full">
+                    <TerminalPane />
+                  </div>
+                )}
+                {activePane === 'magic-prompts' && (
+                  <div
+                    id="pref-pane-magic-prompts"
+                    className="min-w-0 max-w-full"
+                  >
+                    <MagicPromptsPane
+                      searchTargetPromptKey={searchTargetPromptKey}
+                    />
+                  </div>
+                )}
+                {activePane === 'mcp-servers' && (
+                  <div
+                    id="pref-pane-mcp-servers"
+                    className="min-w-0 max-w-full"
+                  >
+                    <McpServersPane />
+                  </div>
+                )}
+                {activePane === 'providers' && (
+                  <div id="pref-pane-providers" className="min-w-0 max-w-full">
+                    <ProvidersPane />
+                  </div>
+                )}
+                {activePane === 'usage' && (
+                  <div id="pref-pane-usage" className="min-w-0 max-w-full">
+                    <UsagePane />
+                  </div>
+                )}
+                {activePane === 'integrations' && (
+                  <div
+                    id="pref-pane-integrations"
+                    className="min-w-0 max-w-full"
+                  >
+                    <IntegrationsPane />
+                  </div>
+                )}
+                {activePane === 'experimental' && (
+                  <div
+                    id="pref-pane-experimental"
+                    className="min-w-0 max-w-full"
+                  >
+                    <ExperimentalPane />
+                  </div>
+                )}
+                {activePane === 'opinionated' && (
+                  <div
+                    id="pref-pane-opinionated"
+                    className="min-w-0 max-w-full"
+                  >
+                    <OpinionatedPane />
+                  </div>
+                )}
+                {activePane === 'web-access' && (
+                  <div id="pref-pane-web-access" className="min-w-0 max-w-full">
+                    <WebAccessPane />
+                  </div>
+                )}
               </div>
-            </header>
-
-            <div
-              ref={scrollContainerRef}
-              className="flex min-w-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto px-4 py-6 sm:px-8 lg:px-12 lg:py-10 min-h-0 [&>div[id^=pref-pane]]:mx-auto [&>div[id^=pref-pane]]:w-full [&>div[id^=pref-pane]]:max-w-4xl"
-            >
-              <PreferencesSearchBar
-                variant="mobile"
-                searchValue={searchValue}
-                onSearchValueChange={setSearchValue}
-                searchOpen={searchOpen}
-                onSearchOpenChange={setSearchOpen}
-                selectedId={effectiveSearchSelection}
-                onSelectedIdChange={setSearchSelection}
-                isSearching={isSearching}
-                searchResults={searchResults}
-                groupedResults={groupedResults}
-                paneIconMap={paneIconMap}
-                onResultSelect={handleSearchResultSelect}
-                containerRef={mobileSearchContainerRef}
-              />
-
-              {activePane === 'general' && (
-                <div id="pref-pane-general" className="min-w-0 max-w-full">
-                  <GeneralPane />
-                </div>
-              )}
-              {activePane === 'claude' && (
-                <div id="pref-pane-claude" className="min-w-0 max-w-full">
-                  <ClaudePane />
-                </div>
-              )}
-              {activePane === 'codex' && (
-                <div id="pref-pane-codex" className="min-w-0 max-w-full">
-                  <CodexPane />
-                </div>
-              )}
-              {activePane === 'opencode' && (
-                <div id="pref-pane-opencode" className="min-w-0 max-w-full">
-                  <OpenCodePane />
-                </div>
-              )}
-              {activePane === 'cursor' && (
-                <div id="pref-pane-cursor" className="min-w-0 max-w-full">
-                  <CursorPane />
-                </div>
-              )}
-              {activePane === 'pi' && (
-                <div id="pref-pane-pi" className="min-w-0 max-w-full">
-                  <PiPane />
-                </div>
-              )}
-              {activePane === 'commandcode' && (
-                <div id="pref-pane-commandcode" className="min-w-0 max-w-full">
-                  <CommandCodePane />
-                </div>
-              )}
-              {activePane === 'grok' && (
-                <div id="pref-pane-grok">
-                  <GrokPane />
-                </div>
-              )}
-              {activePane === 'kimi' && (
-                <div id="pref-pane-kimi" className="min-w-0 max-w-full">
-                  <KimiPane />
-                </div>
-              )}
-              {activePane === 'devin' && (
-                <div id="pref-pane-devin" className="min-w-0 max-w-full">
-                  <DevinPane />
-                </div>
-              )}
-              {activePane === 'antigravity' && (
-                <div id="pref-pane-antigravity" className="min-w-0 max-w-full">
-                  <AntigravityPane />
-                </div>
-              )}
-              {activePane === 'muse' && (
-                <div id="pref-pane-muse" className="min-w-0 max-w-full">
-                  <MusePane />
-                </div>
-              )}
-              {activePane === 'github' && (
-                <div id="pref-pane-github" className="min-w-0 max-w-full">
-                  <GitHubPane />
-                </div>
-              )}
-              {activePane === 'coderabbit' && (
-                <div id="pref-pane-coderabbit" className="min-w-0 max-w-full">
-                  <CodeRabbitPane />
-                </div>
-              )}
-              {activePane === 'appearance' && (
-                <div id="pref-pane-appearance" className="min-w-0 max-w-full">
-                  <AppearancePane />
-                </div>
-              )}
-              {activePane === 'keybindings' && (
-                <div id="pref-pane-keybindings" className="min-w-0 max-w-full">
-                  <KeybindingsPane searchTargetAction={searchTargetAction} />
-                </div>
-              )}
-              {activePane === 'terminal' && (
-                <div id="pref-pane-terminal" className="min-w-0 max-w-full">
-                  <TerminalPane />
-                </div>
-              )}
-              {activePane === 'magic-prompts' && (
-                <div
-                  id="pref-pane-magic-prompts"
-                  className="min-w-0 max-w-full"
-                >
-                  <MagicPromptsPane
-                    searchTargetPromptKey={searchTargetPromptKey}
-                  />
-                </div>
-              )}
-              {activePane === 'mcp-servers' && (
-                <div id="pref-pane-mcp-servers" className="min-w-0 max-w-full">
-                  <McpServersPane />
-                </div>
-              )}
-              {activePane === 'providers' && (
-                <div id="pref-pane-providers" className="min-w-0 max-w-full">
-                  <ProvidersPane />
-                </div>
-              )}
-              {activePane === 'usage' && (
-                <div id="pref-pane-usage" className="min-w-0 max-w-full">
-                  <UsagePane />
-                </div>
-              )}
-              {activePane === 'integrations' && (
-                <div id="pref-pane-integrations" className="min-w-0 max-w-full">
-                  <IntegrationsPane />
-                </div>
-              )}
-              {activePane === 'experimental' && (
-                <div id="pref-pane-experimental" className="min-w-0 max-w-full">
-                  <ExperimentalPane />
-                </div>
-              )}
-              {activePane === 'opinionated' && (
-                <div id="pref-pane-opinionated" className="min-w-0 max-w-full">
-                  <OpinionatedPane />
-                </div>
-              )}
-              {activePane === 'web-access' && (
-                <div id="pref-pane-web-access" className="min-w-0 max-w-full">
-                  <WebAccessPane />
-                </div>
-              )}
-            </div>
-          </main>
-        </SidebarProvider>
-      </SettingsPage>
+            </main>
+          </SidebarProvider>
+        </DialogContent>
+      </Dialog>
     </SettingsTargetProvider>
   )
 }

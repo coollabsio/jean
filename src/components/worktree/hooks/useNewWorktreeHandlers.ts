@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { invoke } from '@/lib/transport'
 import { toast } from 'sonner'
 import { useUIStore, type InvestigationOverride } from '@/store/ui-store'
@@ -29,6 +29,7 @@ import {
   type ContextLinkRef,
 } from '@/hooks/useContextLinkUsage'
 import type { GetContextLinkMatches } from '../ContextLinkBadge'
+import { isStartOnHostCancelled } from '@/lib/start-on-host'
 
 type Data = ReturnType<typeof useNewWorktreeData>
 
@@ -43,7 +44,11 @@ export function useNewWorktreeHandlers(
   data: Data,
   setters: Setters,
   investigationOverride?: InvestigationOverride,
-  getMatches?: GetContextLinkMatches
+  getMatches?: GetContextLinkMatches,
+  startOnHost?: {
+    run: () => Promise<{ projectId: string }>
+    hostId: string
+  }
 ) {
   const {
     queryClient,
@@ -51,10 +56,119 @@ export function useNewWorktreeHandlers(
     selectedProject,
     hasBaseSession,
     baseSession,
-    createWorktree,
-    createBaseSession,
-    createWorktreeFromBranch,
+    createWorktree: createWorktreeRaw,
+    createBaseSession: createBaseSessionRaw,
+    createWorktreeFromBranch: createWorktreeFromBranchRaw,
   } = data
+
+  const ensureInflight = useRef(new Map<string, Promise<string>>())
+  const ensureRun = startOnHost?.run
+  const hostKey = startOnHost?.hostId ?? ''
+  const ensureProjectId = useCallback(() => {
+    if (!ensureRun) {
+      if (!selectedProjectId) {
+        return Promise.reject(new Error('No project selected'))
+      }
+      return Promise.resolve(selectedProjectId)
+    }
+    const existing = ensureInflight.current.get(hostKey)
+    if (existing) return existing
+    const pending = ensureRun()
+      .then(result => result.projectId)
+      .catch(error => {
+        ensureInflight.current.delete(hostKey)
+        throw error
+      })
+    ensureInflight.current.set(hostKey, pending)
+    return pending
+  }, [ensureRun, hostKey, selectedProjectId])
+
+  const createWorktree = useMemo(() => {
+    if (!createWorktreeRaw) return createWorktreeRaw
+    return {
+      ...createWorktreeRaw,
+      mutate: (
+        vars: Parameters<typeof createWorktreeRaw.mutate>[0],
+        opts?: Parameters<typeof createWorktreeRaw.mutate>[1]
+      ) => {
+        void ensureProjectId()
+          .then(projectId => {
+            if (selectedProjectId) {
+              useProjectsStore.getState().expandProject(selectedProjectId)
+            }
+            createWorktreeRaw.mutate({ ...vars, projectId }, opts)
+          })
+          .catch(error => {
+            if (isStartOnHostCancelled(error)) return
+            opts?.onError?.(error as never, vars, undefined, undefined as never)
+            const message =
+              error instanceof Error ? error.message : String(error)
+            toast.error(message)
+          })
+      },
+      mutateAsync: async (
+        vars: Parameters<typeof createWorktreeRaw.mutateAsync>[0]
+      ) => {
+        const projectId = await ensureProjectId()
+        if (selectedProjectId) {
+          useProjectsStore.getState().expandProject(selectedProjectId)
+        }
+        return createWorktreeRaw.mutateAsync({ ...vars, projectId })
+      },
+    }
+  }, [createWorktreeRaw, ensureProjectId, selectedProjectId])
+
+  const createBaseSession = useMemo(() => {
+    if (!createBaseSessionRaw) return createBaseSessionRaw
+    return {
+      ...createBaseSessionRaw,
+      mutate: (
+        _projectId: string,
+        opts?: { onError?: (error: unknown) => void }
+      ) => {
+        void ensureProjectId()
+          .then(resolvedId => {
+            if (selectedProjectId) {
+              useProjectsStore.getState().expandProject(selectedProjectId)
+            }
+            createBaseSessionRaw.mutate(resolvedId, opts)
+          })
+          .catch(error => {
+            if (isStartOnHostCancelled(error)) return
+            opts?.onError?.(error)
+            const message =
+              error instanceof Error ? error.message : String(error)
+            toast.error(message)
+          })
+      },
+    }
+  }, [createBaseSessionRaw, ensureProjectId, selectedProjectId])
+
+  const createWorktreeFromBranch = useMemo(() => {
+    if (!createWorktreeFromBranchRaw) return createWorktreeFromBranchRaw
+    return {
+      ...createWorktreeFromBranchRaw,
+      mutate: (
+        vars: Parameters<typeof createWorktreeFromBranchRaw.mutate>[0],
+        opts?: Parameters<typeof createWorktreeFromBranchRaw.mutate>[1]
+      ) => {
+        void ensureProjectId()
+          .then(projectId => {
+            if (selectedProjectId) {
+              useProjectsStore.getState().expandProject(selectedProjectId)
+            }
+            createWorktreeFromBranchRaw.mutate({ ...vars, projectId }, opts)
+          })
+          .catch(error => {
+            if (isStartOnHostCancelled(error)) return
+            opts?.onError?.(error as never, vars, undefined, undefined as never)
+            const message =
+              error instanceof Error ? error.message : String(error)
+            toast.error(message)
+          })
+      },
+    }
+  }, [createWorktreeFromBranchRaw, ensureProjectId, selectedProjectId])
 
   const {
     setActiveTab,
@@ -224,7 +338,11 @@ export function useNewWorktreeHandlers(
       return
     }
 
-    if (hasBaseSession && baseSession) {
+    const targetIsCurrent =
+      !startOnHost ||
+      startOnHost.hostId === (selectedProject?.serverId ?? 'local')
+
+    if (targetIsCurrent && hasBaseSession && baseSession) {
       const { selectWorktree } = useProjectsStore.getState()
       selectWorktree(baseSession.id)
       useChatStore
@@ -251,10 +369,12 @@ export function useNewWorktreeHandlers(
     handleOpenChange(false)
   }, [
     selectedProjectId,
+    selectedProject,
     hasBaseSession,
     baseSession,
     createBaseSession,
     handleOpenChange,
+    startOnHost,
   ])
 
   const handleSelectBranch = useCallback(

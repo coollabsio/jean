@@ -4,6 +4,10 @@
 //! is `ssh -N -L 127.0.0.1:<local>:127.0.0.1:<jean-port>`. Password auth is out
 //! of scope. Tokens stay in the OS credential store on macOS and Windows, and
 //! in a user-only app-data file on Linux.
+//!
+//! The embedded browser runs on the desktop. While a profile tunnel is ready,
+//! preview forwards open additional `ssh -N -L` sessions to the remote host's
+//! loopback so `localhost` ports from jean.json reach that host.
 
 mod args;
 mod hostkey;
@@ -11,8 +15,8 @@ mod secrets;
 mod supervisor;
 
 pub use supervisor::{
-    normalize_spec, HostKeyPreview, LoadedSshSecret, SshTunnelSupervisor, StartSshTunnelInput,
-    TrustHostKeyInput, TunnelSpec, TunnelStatusPayload,
+    normalize_spec, HostKeyPreview, LoadedSshSecret, PreviewForwardPayload, SshTunnelSupervisor,
+    StartSshTunnelInput, TrustHostKeyInput, TunnelSpec, TunnelStatusPayload,
 };
 
 pub(crate) use args::redact;
@@ -173,6 +177,35 @@ pub async fn delete_ssh_profile_secret(
     tokio::task::spawn_blocking(move || tunnels.delete_secret(&profile_id))
         .await
         .map_err(|error| format!("SSH token task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn ensure_ssh_preview_forward(
+    tunnels: State<'_, SshTunnelSupervisor>,
+    profile_id: String,
+    remote_port: u16,
+) -> Result<PreviewForwardPayload, String> {
+    let tunnels = (*tunnels).clone();
+    tokio::task::spawn_blocking(move || tunnels.ensure_preview_forward(&profile_id, remote_port))
+        .await
+        .map_err(|error| format!("SSH preview forward task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn release_ssh_preview_forwards(
+    tunnels: State<'_, SshTunnelSupervisor>,
+    keep_profile_id: Option<String>,
+) -> Result<(), String> {
+    let tunnels = (*tunnels).clone();
+    tokio::task::spawn_blocking(move || {
+        if let Some(profile_id) = keep_profile_id.as_deref() {
+            secrets::validate_profile_id(profile_id)?;
+        }
+        tunnels.release_preview_forwards(keep_profile_id.as_deref());
+        Ok(())
+    })
+    .await
+    .map_err(|error| format!("SSH preview forward task failed: {error}"))?
 }
 
 #[tauri::command]
