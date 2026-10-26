@@ -328,8 +328,8 @@ function JeanConfigWizardContent() {
               Add port
             </Button>
             <p className="text-xs text-muted-foreground">
-              Open configured ports in browser via CMD+O. Host defaults to
-              localhost.
+              Open configured ports in the browser with CMD+O. Leave host blank
+              to use this server&apos;s default preview hostname, or localhost.
             </p>
           </div>
         </div>

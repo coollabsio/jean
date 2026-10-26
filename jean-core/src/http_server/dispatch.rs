@@ -3727,6 +3727,43 @@ pub async fn dispatch_command(
             emit_cache_invalidation(app, &["projects"]);
             to_value(result)
         }
+        "list_clone_urls" => {
+            let repo_path: String = field(&args, "repoPath", "repo_path")?;
+            to_value(crate::projects::list_clone_urls(repo_path).await?)
+        }
+        "ensure_project_present" => {
+            let clone_urls: Vec<String> = field(&args, "cloneUrls", "clone_urls")?;
+            let name: String = from_field(&args, "name")?;
+            let operation_id: String =
+                field_opt(&args, "operationId", "operation_id")?.unwrap_or_default();
+            let result = crate::projects::ensure_project_present(
+                app.clone(),
+                clone_urls,
+                name,
+                operation_id,
+            )
+            .await?;
+            emit_cache_invalidation(app, &["projects"]);
+            to_value(result)
+        }
+        "list_project_env_files" => {
+            let project_path: String = field(&args, "projectPath", "project_path")?;
+            to_value(crate::projects::list_project_env_files(project_path)?)
+        }
+        "read_project_env_files" => {
+            let project_path: String = field(&args, "projectPath", "project_path")?;
+            let names: Vec<String> = from_field(&args, "names")?;
+            to_value(crate::projects::read_project_env_files(
+                project_path,
+                names,
+            )?)
+        }
+        "write_project_env_files" => {
+            let project_path: String = field(&args, "projectPath", "project_path")?;
+            let files: Vec<crate::projects::EnvFileContents> = from_field(&args, "files")?;
+            crate::projects::write_project_env_files(project_path, files)?;
+            Ok(Value::Null)
+        }
         "open_branch_on_github" => {
             Err("Opening a browser is only available in the desktop app".to_string())
         }
@@ -4310,6 +4347,8 @@ const AGENT_COMMANDS: &[&str] = &[
     "list_agents",
     "get_agent_details",
     "create_agent",
+    "list_agent_templates",
+    "install_agent_template",
     "update_agent",
     "delete_agent",
     "decide_agent_approval",
@@ -4381,6 +4420,11 @@ async fn dispatch_agents_command(
                     )
                     .await?,
                 )
+            }
+            "list_agent_templates" => to_value(crate::agents::commands::list_agent_templates()?),
+            "install_agent_template" => {
+                let template_id: String = field(args, "templateId", "template_id")?;
+                to_value(crate::agents::commands::install_agent_template(app, &template_id).await?)
             }
             "update_agent" => {
                 let agent_id: String = field(args, "agentId", "agent_id")?;

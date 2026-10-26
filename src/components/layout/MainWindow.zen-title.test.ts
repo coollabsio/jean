@@ -9,8 +9,14 @@ describe('MainWindow title', () => {
       'utf8'
     )
 
-    expect(source).toContain('if (isMobile) return project.name')
+    const title = readFileSync(
+      join(process.cwd(), 'src/components/layout/window-title.tsx'),
+      'utf8'
+    )
+
+    expect(title).toContain('if (isMobile) return projectName')
     expect(source).not.toContain('if (isMobile || zenMode)')
+    expect(title).not.toContain('zenMode')
     expect(source).toContain('hideTitle={!isMobile}')
   })
 })

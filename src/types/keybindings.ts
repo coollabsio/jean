@@ -301,7 +301,8 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
   {
     action: 'toggle_browser',
     label: 'Toggle browser',
-    description: 'Show or hide the embedded browser side pane',
+    description:
+      'Show or hide the embedded browser (side pane, bottom panel, or session drawer)',
     default_shortcut: 'mod+shift+backquote',
     category: 'navigation',
   },

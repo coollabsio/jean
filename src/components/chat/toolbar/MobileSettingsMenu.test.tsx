@@ -14,7 +14,7 @@ interface PortInfo {
   host?: string | null
 }
 
-const { usePortsMock, useWorktreeMock } = vi.hoisted(() => {
+const { usePortsMock, useWorktreeMock, preferenceState } = vi.hoisted(() => {
   const usePortsMock = vi.fn(() => ({ data: [] as PortInfo[] }))
   const useWorktreeMock = vi.fn(() => ({
     data: {
@@ -23,9 +23,14 @@ const { usePortsMock, useWorktreeMock } = vi.hoisted(() => {
       branch: 'feature',
       project_id: 'project-1',
       base_branch: 'main',
+      serverId: undefined as string | undefined,
     },
   }))
-  return { usePortsMock, useWorktreeMock }
+  const preferenceState = {
+    host: null as string | null,
+    seenServerId: undefined as string | undefined,
+  }
+  return { usePortsMock, useWorktreeMock, preferenceState }
 })
 
 vi.mock('@/services/projects', async importOriginal => {
@@ -42,6 +47,16 @@ vi.mock('@/services/projects', async importOriginal => {
   }
 })
 
+vi.mock('@/services/preferences', () => ({
+  usePreferences: (serverId?: string) => {
+    preferenceState.seenServerId = serverId
+    return {
+      data: { browser_default_host: preferenceState.host },
+      isFetched: true,
+    }
+  },
+}))
+
 vi.mock('@/services/github', async importOriginal => {
   const actual = await importOriginal<typeof GitHubService>()
   return {
@@ -51,6 +66,8 @@ vi.mock('@/services/github', async importOriginal => {
 })
 
 beforeEach(() => {
+  preferenceState.host = null
+  preferenceState.seenServerId = undefined
   usePortsMock.mockReturnValue({ data: [] })
   useWorktreeMock.mockReturnValue({
     data: {
@@ -59,6 +76,7 @@ beforeEach(() => {
       branch: 'feature',
       project_id: 'project-1',
       base_branch: 'main',
+      serverId: undefined,
     },
   })
   useTerminalStore.setState({
@@ -499,6 +517,45 @@ describe('MobileSettingsMenu', () => {
 
     expect(screen.queryByText('Open')).not.toBeInTheDocument()
     expect(screen.queryByText('GitHub')).not.toBeInTheDocument()
+  })
+
+  it('opens a port on the remote server hostname when jean.json has no host', async () => {
+    const user = userEvent.setup()
+    const openSpy = vi
+      .spyOn(platform, 'openExternal')
+      .mockImplementation(() => {
+        return undefined as unknown as ReturnType<typeof platform.openExternal>
+      })
+    preferenceState.host = 'dev.example.com'
+    useWorktreeMock.mockReturnValue({
+      data: {
+        id: 'worktree-1',
+        path: '/repo/worktree',
+        branch: 'feature',
+        project_id: 'project-1',
+        base_branch: 'main',
+        serverId: 'remote-1',
+      },
+    })
+    usePortsMock.mockReturnValue({
+      data: [
+        { port: 3000, label: 'API', host: null },
+        { port: 1420, label: 'App', host: '10.0.0.8' },
+      ],
+    })
+
+    render(<MobileSettingsMenu {...baseProps} worktreeId="worktree-1" />)
+
+    await user.click(screen.getByRole('button', { name: /settings/i }))
+
+    expect(screen.getByText('API (dev.example.com:3000)')).toBeInTheDocument()
+    expect(screen.getByText('App (10.0.0.8:1420)')).toBeInTheDocument()
+    expect(preferenceState.seenServerId).toBe('remote-1')
+
+    await user.click(screen.getByText('API (dev.example.com:3000)'))
+    expect(openSpy).toHaveBeenCalledWith('http://dev.example.com:3000')
+
+    openSpy.mockRestore()
   })
 
   it('hides reasoning control for Command Code in mobile settings', async () => {
