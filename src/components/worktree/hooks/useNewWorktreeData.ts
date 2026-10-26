@@ -6,8 +6,9 @@ import {
   useGitHubPRs,
   useSearchGitHubIssues,
   useSearchGitHubPRs,
-  useGetGitHubIssueByNumber,
-  useGetGitHubPRByNumber,
+  useListGitHubIssuesByNumber,
+  useListGitHubPRsByNumber,
+  prependExactMatches,
   useDependabotAlerts,
   useRepositoryAdvisories,
   useGitHubDiscussions,
@@ -34,12 +35,19 @@ import {
   useWorktrees,
   useCreateWorktree,
   useCreateBaseSession,
-  useProjectBranches,
+  useWorktreeBranches,
   useCreateWorktreeFromExistingBranch,
   useJeanConfig,
   useProjectRemotes,
 } from '@/services/projects'
 import { isBaseSession } from '@/types/projects'
+import {
+  distinctGitHubRepos,
+  filterWorktreeBranches,
+  primaryGitHubRemote,
+  worktreeBaseBranchOption,
+  worktreeBranchRemoteCount,
+} from '@/lib/remote-worktree-sources'
 
 export function useNewWorktreeData(
   searchQuery: string,
@@ -102,49 +110,70 @@ export function useNewWorktreeData(
     debouncedSearchQuery
   )
 
-  // Exact number lookups (finds any issue/PR regardless of age or state)
-  const { data: exactIssue } = useGetGitHubIssueByNumber(
+  // Exact number lookups across every linked GitHub repository.
+  const { data: exactIssues } = useListGitHubIssuesByNumber(
     selectedProject?.path ?? null,
     debouncedSearchQuery
   )
-  const { data: exactPR } = useGetGitHubPRByNumber(
+  const { data: exactPRs } = useListGitHubPRsByNumber(
     selectedProject?.path ?? null,
     debouncedSearchQuery
   )
 
-  // Filtered issues
+  // Filtered issues. A numeric query returns every repository's match.
   const filteredIssues = useMemo(() => {
     if (parseItemNumber(searchQuery) !== null) {
-      return exactIssue ? [exactIssue] : []
+      return exactIssues ?? []
     }
     const stateFilteredSearch = includeClosed
       ? searchedIssues
       : searchedIssues?.filter(i => i.state === 'OPEN')
-    return prependExactMatch(
+    return prependExactMatches(
       mergeWithSearchResults(
         filterIssues(issues ?? [], searchQuery),
         stateFilteredSearch
       ),
-      exactIssue
+      exactIssues
     )
-  }, [issues, searchQuery, searchedIssues, exactIssue, includeClosed])
+  }, [issues, searchQuery, searchedIssues, exactIssues, includeClosed])
 
   // Filtered PRs
   const filteredPRs = useMemo(() => {
     if (parseItemNumber(searchQuery) !== null) {
-      return exactPR ? [exactPR] : []
+      return exactPRs ?? []
     }
     const stateFilteredSearch = includeClosed
       ? searchedPRs
       : searchedPRs?.filter(p => p.state === 'OPEN')
-    return prependExactMatch(
+    return prependExactMatches(
       mergeWithSearchResults(
         filterPRs(prs ?? [], searchQuery),
         stateFilteredSearch
       ),
-      exactPR
+      exactPRs
     )
-  }, [prs, searchQuery, searchedPRs, exactPR, includeClosed])
+  }, [prs, searchQuery, searchedPRs, exactPRs, includeClosed])
+
+  const githubSourceItems = useMemo(
+    () => [...(issues ?? []), ...(prs ?? [])],
+    [issues, prs]
+  )
+  const primaryGitHubRemoteName = useMemo(
+    () => primaryGitHubRemote(githubSourceItems),
+    [githubSourceItems]
+  )
+  const hasMultipleGitHubRemotes = useMemo(() => {
+    const remotes = new Set(
+      githubSourceItems
+        .map(item => item.remote?.trim())
+        .filter((remote): remote is string => Boolean(remote))
+    )
+    return remotes.size > 1
+  }, [githubSourceItems])
+  const showGitHubSource = useMemo(
+    () => distinctGitHubRepos(githubSourceItems).length > 1,
+    [githubSourceItems]
+  )
 
   // GitHub discussions
   const discussionState = includeClosed ? 'all' : 'open'
@@ -191,23 +220,42 @@ export function useNewWorktreeData(
     includeClosed,
   ])
 
-  // Branches
+  // Branches from every configured remote. The dialog keeps same-named
+  // branches distinct; the quick-action picker still uses short origin names.
   const {
-    data: branches,
+    data: remoteBranches,
     isLoading: isLoadingBranches,
     isFetching: isRefetchingBranches,
     error: branchesError,
     refetch: refetchBranches,
-  } = useProjectBranches(selectedProjectId)
+  } = useWorktreeBranches(selectedProjectId)
 
-  const filteredBranches = useMemo(() => {
-    if (!branches) return []
-    const baseBranch = selectedProject?.default_branch
-    const filtered = branches.filter(b => b !== baseBranch)
-    if (!searchQuery) return filtered
-    const q = searchQuery.toLowerCase()
-    return filtered.filter(b => b.toLowerCase().includes(q))
-  }, [branches, searchQuery, selectedProject?.default_branch])
+  const branches = useMemo(() => {
+    const seen = new Set<string>()
+    const names: string[] = []
+    for (const branch of remoteBranches ?? []) {
+      const option = worktreeBaseBranchOption(branch)
+      if (!option || seen.has(option)) continue
+      seen.add(option)
+      names.push(option)
+    }
+    return names
+  }, [remoteBranches])
+
+  const branchRemoteCount = useMemo(
+    () => worktreeBranchRemoteCount(remoteBranches ?? []),
+    [remoteBranches]
+  )
+
+  const filteredBranches = useMemo(
+    () =>
+      filterWorktreeBranches(
+        remoteBranches ?? [],
+        selectedProject?.default_branch,
+        searchQuery
+      ),
+    [remoteBranches, searchQuery, selectedProject?.default_branch]
+  )
 
   // Git remotes that have the default branch (drives the per-remote quick
   // actions when a project tracks more than one, e.g. upstream plus a fork)
@@ -312,6 +360,9 @@ export function useNewWorktreeData(
 
     // Issues
     filteredIssues,
+    hasMultipleGitHubRemotes,
+    primaryGitHubRemote: primaryGitHubRemoteName,
+    showGitHubSource,
     isLoadingIssues,
     isRefetchingIssues,
     isSearchingIssues,
@@ -341,8 +392,9 @@ export function useNewWorktreeData(
     remotes,
 
     // Branches
-    branches: branches ?? [],
+    branches,
     filteredBranches,
+    branchRemoteCount,
     isLoadingBranches,
     isRefetchingBranches,
     branchesError,

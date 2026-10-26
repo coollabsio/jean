@@ -41,9 +41,16 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Button } from '@/components/ui/button'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import type { Project, Worktree } from '@/types/projects'
 import { getEditorLabel, getTerminalLabel } from '@/types/preferences'
 import { ghCliQueryKeys, useGhCliAuth } from '@/services/gh-cli'
+import { useGlabCliAuth } from '@/services/glab-cli'
+import { providerLabels, useProjectGitProvider } from '@/services/git-provider'
 import {
   useDependabotAlerts,
   useGitHubIssues,
@@ -157,26 +164,39 @@ export function WorktreeDropdownMenu({
     'local',
   ])
   const isGitHubAuthenticated = authData?.authenticated ?? false
+  const { data: gitProviderInfo } = useProjectGitProvider(
+    isServer ? null : projectPath
+  )
+  const gitProvider = gitProviderInfo?.provider ?? 'github'
+  const isGitlab = gitProvider === 'gitlab'
+  const forgeLabels = providerLabels(gitProvider)
+  const { data: glabAuth } = useGlabCliAuth({
+    enabled: !isServer && isGitlab,
+    hostname: isGitlab ? gitProviderInfo?.host : null,
+  })
+  const forgeAuthenticated = isGitlab
+    ? (glabAuth?.authenticated ?? false)
+    : isGitHubAuthenticated
   const { data: issueResult } = useGitHubIssues(projectPath, 'open', {
-    enabled: !isServer && (isGitHubAuthenticated || projectId.includes(':')),
+    enabled: !isServer && (forgeAuthenticated || projectId.includes(':')),
     staleTime: BADGE_STALE_TIME,
     ownerId: projectId,
   })
   const { data: prs } = useGitHubPRs(projectPath, 'open', {
-    enabled: !isServer && (isGitHubAuthenticated || projectId.includes(':')),
+    enabled: !isServer && (forgeAuthenticated || projectId.includes(':')),
     staleTime: BADGE_STALE_TIME,
     ownerId: projectId,
   })
   const { data: alerts } = useDependabotAlerts(projectPath, 'open', {
-    enabled: !isServer && isGitHubAuthenticated,
+    enabled: !isServer && isGitHubAuthenticated && !isGitlab,
     staleTime: BADGE_STALE_TIME,
   })
   const { data: advisories } = useRepositoryAdvisories(projectPath, undefined, {
-    enabled: !isServer && isGitHubAuthenticated,
+    enabled: !isServer && isGitHubAuthenticated && !isGitlab,
     staleTime: BADGE_STALE_TIME,
   })
   const { data: workflowRuns } = useWorkflowRuns(projectPath, undefined, {
-    enabled: !isServer && isGitHubAuthenticated,
+    enabled: !isServer && isGitHubAuthenticated && !isGitlab,
     staleTime: BADGE_STALE_TIME,
   })
   const seenFailedWorkflowRunIds = useUIStore(
@@ -430,23 +450,27 @@ export function WorktreeDropdownMenu({
 
               <DropdownMenuItem onClick={handleOpenPRs}>
                 <GitPullRequestArrow className="mr-2 h-4 w-4 text-info" />
-                {prCount > 0 ? `${prCount} Pull Requests` : 'Pull Requests'}
+                {prCount > 0
+                  ? `${prCount} ${forgeLabels.pullRequest}s`
+                  : `${forgeLabels.pullRequest}s`}
               </DropdownMenuItem>
 
-              <DropdownMenuItem onClick={handleOpenWorkflowRuns}>
-                {failedWorkflowCount > 0 ? (
-                  <AlertCircle className="mr-2 h-4 w-4 text-destructive" />
-                ) : (
-                  <Activity className="mr-2 h-4 w-4" />
-                )}
-                {failedWorkflowCount > 0
-                  ? `${failedWorkflowCount} Failed Workflows`
-                  : workflowRunCount > 0
-                    ? `${workflowRunCount} Workflows`
-                    : 'Workflows'}
-              </DropdownMenuItem>
+              {!isGitlab && (
+                <DropdownMenuItem onClick={handleOpenWorkflowRuns}>
+                  {failedWorkflowCount > 0 ? (
+                    <AlertCircle className="mr-2 h-4 w-4 text-destructive" />
+                  ) : (
+                    <Activity className="mr-2 h-4 w-4" />
+                  )}
+                  {failedWorkflowCount > 0
+                    ? `${failedWorkflowCount} Failed Workflows`
+                    : workflowRunCount > 0
+                      ? `${workflowRunCount} Workflows`
+                      : 'Workflows'}
+                </DropdownMenuItem>
+              )}
 
-              {(showMobileGitHubItems || securityCount > 0) && (
+              {!isGitlab && (showMobileGitHubItems || securityCount > 0) && (
                 <DropdownMenuItem onClick={handleOpenSecurity}>
                   <ShieldAlert className="mr-2 h-4 w-4 text-warning" />
                   {securityCount > 0 ? `${securityCount} Security` : 'Security'}
@@ -542,13 +566,20 @@ export function WorktreeDropdownMenu({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => handleDelete(true)}
-              variant="outline"
-              title="Delete without running the teardown script. Resources it manages may need manual cleanup."
-            >
-              Delete Without Teardown
-            </AlertDialogAction>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <AlertDialogAction
+                  onClick={() => handleDelete(true)}
+                  variant="outline"
+                >
+                  Delete Without Teardown
+                </AlertDialogAction>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-72">
+                Delete without running the teardown script. Resources it manages
+                may need manual cleanup.
+              </TooltipContent>
+            </Tooltip>
             <AlertDialogAction
               autoFocus
               onClick={() => handleDelete()}

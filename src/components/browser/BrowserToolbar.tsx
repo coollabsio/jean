@@ -27,6 +27,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { isBlankTabUrl, useBrowserStore } from '@/store/browser-store'
@@ -429,17 +434,21 @@ export const BrowserToolbar = memo(function BrowserToolbar({
             <RotateCw className="h-4 w-4" />
           </Button>
         )}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7"
-          onClick={handleEnableGrab}
-          disabled={!activeTab || isBlankTabUrl(activeTab.url)}
-          aria-label="Grab DOM element"
-          title="Grab DOM element"
-        >
-          <MousePointer2 className="h-4 w-4" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={handleEnableGrab}
+              disabled={!activeTab || isBlankTabUrl(activeTab.url)}
+              aria-label="Grab DOM element"
+            >
+              <MousePointer2 className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Grab DOM element</TooltipContent>
+        </Tooltip>
         <form className="min-w-0 flex-1" onSubmit={handleSubmit}>
           <Input
             ref={inputRef}

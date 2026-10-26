@@ -23,6 +23,11 @@ import {
 } from '@/components/icons/reicon'
 import { Button } from '@/components/ui/button'
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
@@ -158,9 +163,8 @@ export function RemoteSetupStep({ onComplete }: RemoteSetupStepProps) {
   const [error, setError] = useState<StepError | null>(null)
   const [connecting, setConnecting] = useState(false)
   const [installing, setInstalling] = useState(false)
-  const [pendingHostKey, setPendingHostKey] = useState<SshHostKeyPreview | null>(
-    null
-  )
+  const [pendingHostKey, setPendingHostKey] =
+    useState<SshHostKeyPreview | null>(null)
   const [progress, setProgress] = useState<InstallProgress | null>(null)
   const [testState, setTestState] = useState<TestState>({ status: 'idle' })
 
@@ -432,7 +436,13 @@ export function RemoteSetupStep({ onComplete }: RemoteSetupStepProps) {
   )
   const errorMessage = error && renderError(error)
 
-  if (addMode === 'install' && native && pendingHostKey && !installing && !progress) {
+  if (
+    addMode === 'install' &&
+    native &&
+    pendingHostKey &&
+    !installing &&
+    !progress
+  ) {
     return (
       <div className="space-y-4">
         {tabs}
@@ -734,30 +744,36 @@ function SshHostPicker({
         </Select>
       ) : (
         <div className="flex flex-wrap gap-1.5">
-          {hosts.map(host => (
-            <button
-              key={host.alias}
-              type="button"
-              disabled={disabled}
-              onClick={() => onPick(host)}
-              aria-pressed={selected === host.alias}
-              title={
-                host.hostName
-                  ? `${host.user ? `${host.user}@` : ''}${host.hostName}`
-                  : undefined
-              }
-              className={cn(
-                'rounded-full border px-2.5 py-0.5 text-xs transition-colors',
-                'hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                'disabled:pointer-events-none disabled:opacity-50',
-                selected === host.alias
-                  ? 'border-primary bg-primary/10 text-foreground'
-                  : 'text-muted-foreground'
-              )}
-            >
-              {host.alias}
-            </button>
-          ))}
+          {hosts.map(host => {
+            const endpoint = host.hostName
+              ? `${host.user ? `${host.user}@` : ''}${host.hostName}`
+              : null
+            const button = (
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => onPick(host)}
+                aria-pressed={selected === host.alias}
+                className={cn(
+                  'rounded-full border px-2.5 py-0.5 text-xs transition-colors',
+                  'hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  'disabled:pointer-events-none disabled:opacity-50',
+                  selected === host.alias
+                    ? 'border-primary bg-primary/10 text-foreground'
+                    : 'text-muted-foreground'
+                )}
+              >
+                {host.alias}
+              </button>
+            )
+            if (!endpoint) return <span key={host.alias}>{button}</span>
+            return (
+              <Tooltip key={host.alias}>
+                <TooltipTrigger asChild>{button}</TooltipTrigger>
+                <TooltipContent>{endpoint}</TooltipContent>
+              </Tooltip>
+            )
+          })}
         </div>
       )}
     </div>

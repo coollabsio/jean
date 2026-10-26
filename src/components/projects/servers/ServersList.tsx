@@ -19,6 +19,11 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { useIsMobile } from '@/hooks/use-mobile'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { openServerProject, useRemoveServerProject } from '@/services/projects'
 import { useProjectsStore } from '@/store/projects-store'
@@ -144,15 +149,21 @@ export function ServersList({ servers, searchQuery }: ServersListProps) {
                       )}
                     >
                       {!project.server?.local && (
-                        <button
-                          type="button"
-                          className={iconButtonClass}
-                          onClick={() => setSettingUp(project)}
-                          aria-label={`Set up restricted user on ${project.name}`}
-                          title="Set up restricted user"
-                        >
-                          <Shield className="size-3" />
-                        </button>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              className={iconButtonClass}
+                              onClick={() => setSettingUp(project)}
+                              aria-label={`Set up restricted user on ${project.name}`}
+                            >
+                              <Shield className="size-3" />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            Set up restricted user
+                          </TooltipContent>
+                        </Tooltip>
                       )}
                       <button
                         type="button"

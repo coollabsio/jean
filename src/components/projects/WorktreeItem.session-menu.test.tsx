@@ -40,6 +40,12 @@ vi.mock('@/services/chat', () => ({
 }))
 vi.mock('@/services/projects', () => ({
   useRenameWorktree: () => ({ mutate: vi.fn() }),
+  useWorktrees: () => ({
+    data: [
+      { id: 'wt-1', origin: 'manual' },
+      { id: 'wt-2', origin: 'manual' },
+    ],
+  }),
 }))
 vi.mock('@/components/chat/hooks/useCanvasStoreState', () => ({
   useCanvasStoreState: () => ({}),
@@ -168,6 +174,38 @@ describe('WorktreeItem session context menu', () => {
     await user.click(screen.getByRole('menuitem', { name: 'Archive Session' }))
 
     expect(mocks.archive).toHaveBeenCalledWith('s2')
+  })
+
+  it('expands every project worktree from a status header', async () => {
+    const user = userEvent.setup()
+    renderExpanded()
+
+    fireEvent.contextMenu(screen.getByText('Idle'))
+    await user.click(screen.getByRole('menuitem', { name: 'Expand all' }))
+
+    expect([...useProjectsStore.getState().expandedWorktreeIds].sort()).toEqual(
+      ['wt-1', 'wt-2']
+    )
+  })
+
+  it('collapses every project worktree when they are already expanded', async () => {
+    const user = userEvent.setup()
+    useProjectsStore.setState({
+      expandedWorktreeIds: new Set(['wt-1', 'wt-2']),
+    })
+    render(
+      <WorktreeItem
+        worktree={worktree}
+        projectId="project-1"
+        projectPath="/tmp/project"
+        defaultBranch="main"
+      />
+    )
+
+    fireEvent.contextMenu(screen.getByText('Idle'))
+    await user.click(screen.getByRole('menuitem', { name: 'Collapse all' }))
+
+    expect(useProjectsStore.getState().expandedWorktreeIds.size).toBe(0)
   })
 
   it('opens the label modal for the clicked session', async () => {

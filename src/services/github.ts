@@ -78,8 +78,8 @@ export const githubQueryKeys = {
     [...githubQueryKeys.all, 'labels', projectPath] as const,
   issues: (projectPath: string, state: string) =>
     [...githubQueryKeys.all, 'issues', projectPath, state] as const,
-  issue: (projectPath: string, issueNumber: number) =>
-    [...githubQueryKeys.all, 'issue', projectPath, issueNumber] as const,
+  issue: (projectPath: string, issueNumber: number, repo?: string) =>
+    [...githubQueryKeys.all, 'issue', projectPath, issueNumber, repo ?? ''] as const,
   loadedContexts: (sessionId: string, worktreeId?: string | null) =>
     worktreeId
       ? ([
@@ -91,8 +91,8 @@ export const githubQueryKeys = {
       : ([...githubQueryKeys.all, 'loaded-contexts', sessionId] as const),
   prs: (projectPath: string, state: string) =>
     [...githubQueryKeys.all, 'prs', projectPath, state] as const,
-  pr: (projectPath: string, prNumber: number) =>
-    [...githubQueryKeys.all, 'pr', projectPath, prNumber] as const,
+  pr: (projectPath: string, prNumber: number, repo?: string) =>
+    [...githubQueryKeys.all, 'pr', projectPath, prNumber, repo ?? ''] as const,
   loadedPrContexts: (sessionId: string, worktreeId?: string | null) =>
     worktreeId
       ? ([
@@ -266,10 +266,15 @@ export function useGitHubIssues(
  */
 export function useGitHubIssue(
   projectPath: string | null,
-  issueNumber: number | null
+  issueNumber: number | null,
+  repo?: string | null
 ) {
   return useQuery({
-    queryKey: githubQueryKeys.issue(projectPath ?? '', issueNumber ?? 0),
+    queryKey: githubQueryKeys.issue(
+      projectPath ?? '',
+      issueNumber ?? 0,
+      repo ?? undefined
+    ),
     queryFn: async (): Promise<GitHubIssueDetail> => {
       if (!isTauri() || !projectPath || !issueNumber) {
         throw new Error('Missing required parameters')
@@ -279,10 +284,12 @@ export function useGitHubIssue(
         logger.debug('Fetching GitHub issue details', {
           projectPath,
           issueNumber,
+          repo,
         })
         const issue = await invoke<GitHubIssueDetail>('get_github_issue', {
           projectPath,
           issueNumber,
+          ...(repo ? { repo } : {}),
         })
         logger.info('GitHub issue loaded', {
           number: issue.number,
@@ -387,6 +394,13 @@ export function filterIssues(
 
     // Match by label name
     if (issue.labels.some(l => l.name.toLowerCase().includes(lowerQuery))) {
+      return true
+    }
+
+    if (issue.repo?.toLowerCase().includes(lowerQuery)) {
+      return true
+    }
+    if (issue.remote?.toLowerCase().includes(lowerQuery)) {
       return true
     }
 
@@ -565,20 +579,30 @@ export function useGitHubPRs(
  */
 export function useGitHubPR(
   projectPath: string | null,
-  prNumber: number | null
+  prNumber: number | null,
+  repo?: string | null
 ) {
   return useQuery({
-    queryKey: githubQueryKeys.pr(projectPath ?? '', prNumber ?? 0),
+    queryKey: githubQueryKeys.pr(
+      projectPath ?? '',
+      prNumber ?? 0,
+      repo ?? undefined
+    ),
     queryFn: async (): Promise<GitHubPullRequestDetail> => {
       if (!isTauri() || !projectPath || !prNumber) {
         throw new Error('Missing required parameters')
       }
 
       try {
-        logger.debug('Fetching GitHub PR details', { projectPath, prNumber })
+        logger.debug('Fetching GitHub PR details', {
+          projectPath,
+          prNumber,
+          repo,
+        })
         const pr = await invoke<GitHubPullRequestDetail>('get_github_pr', {
           projectPath,
           prNumber,
+          ...(repo ? { repo } : {}),
         })
         logger.info('GitHub PR loaded', { number: pr.number, title: pr.title })
         return pr
@@ -753,6 +777,13 @@ export function filterPRs(
       return true
     }
 
+    if (pr.repo?.toLowerCase().includes(lowerQuery)) {
+      return true
+    }
+    if (pr.remote?.toLowerCase().includes(lowerQuery)) {
+      return true
+    }
+
     return false
   })
 }
@@ -798,19 +829,31 @@ export function useSearchGitHubPRs(projectPath: string | null, query: string) {
   })
 }
 
+interface NumberedGitHubItem {
+  number: number
+  repo?: string | null
+}
+
+/** Keeps issue/PR #12 on two repositories distinct. */
+export function githubItemKey(item: NumberedGitHubItem): string {
+  const repo = item.repo?.trim()
+  return repo ? `${repo}#${item.number}` : `#${item.number}`
+}
+
 /**
- * Merge local-filtered results with remote search results, deduplicating by number.
- * Local results appear first, remote-only results are appended.
+ * Merge local-filtered results with remote search results.
+ * Items are distinct by repository and number, so the same number on two
+ * remotes is kept. Local results appear first.
  */
-export function mergeWithSearchResults<T extends { number: number }>(
+export function mergeWithSearchResults<T extends NumberedGitHubItem>(
   localResults: T[],
   searchResults: T[] | undefined
 ): T[] {
   if (!searchResults?.length) return localResults
 
-  const localNumbers = new Set(localResults.map(item => item.number))
+  const localKeys = new Set(localResults.map(githubItemKey))
   const remoteOnly = searchResults.filter(
-    item => !localNumbers.has(item.number)
+    item => !localKeys.has(githubItemKey(item))
   )
 
   if (remoteOnly.length === 0) return localResults
@@ -829,21 +872,66 @@ export function parseItemNumber(query: string): number | null {
 }
 
 /**
- * Prepend an exact-match item to an array, deduplicating by number.
+ * Prepend exact-match items, deduplicating by repository and number.
  */
-export function prependExactMatch<T extends { number: number }>(
+export function prependExactMatches<T extends NumberedGitHubItem>(
+  items: T[],
+  exactMatches: T[] | undefined | null
+): T[] {
+  if (!exactMatches?.length) return items
+  const exactKeys = new Set(exactMatches.map(githubItemKey))
+  return [
+    ...exactMatches,
+    ...items.filter(item => !exactKeys.has(githubItemKey(item))),
+  ]
+}
+
+/**
+ * Prepend an exact-match item to an array, deduplicating by repository and number.
+ */
+export function prependExactMatch<T extends NumberedGitHubItem>(
   items: T[],
   exactMatch: T | undefined | null
 ): T[] {
-  if (!exactMatch) return items
-  const filtered = items.filter(item => item.number !== exactMatch.number)
-  return [exactMatch, ...filtered]
+  return prependExactMatches(items, exactMatch ? [exactMatch] : [])
 }
 
 /**
  * Hook to fetch a single GitHub issue by exact number.
  * Returns the same GitHubIssue type as list_github_issues.
  */
+/**
+ * Exact-number lookup across every linked GitHub repository.
+ * The same number on two remotes is returned as two issues.
+ */
+export function useListGitHubIssuesByNumber(
+  projectPath: string | null,
+  query: string
+) {
+  const itemNumber = parseItemNumber(query)
+  return useQuery({
+    queryKey: [
+      ...githubQueryKeys.issueByNumber(projectPath ?? '', itemNumber ?? 0),
+      'all-remotes',
+    ],
+    queryFn: async (): Promise<GitHubIssue[]> => {
+      if (!isTauri() || !projectPath || !itemNumber) return []
+      try {
+        return await invoke<GitHubIssue[]>('list_github_issues_by_number', {
+          projectPath,
+          issueNumber: itemNumber,
+        })
+      } catch {
+        return []
+      }
+    },
+    enabled: !!projectPath && itemNumber !== null,
+    staleTime: 1000 * 30,
+    gcTime: 1000 * 60 * 5,
+    retry: 0,
+  })
+}
+
 export function useGetGitHubIssueByNumber(
   projectPath: string | null,
   query: string
@@ -873,6 +961,38 @@ export function useGetGitHubIssueByNumber(
  * Hook to fetch a single GitHub PR by exact number.
  * Returns the same GitHubPullRequest type as list_github_prs.
  */
+/**
+ * Exact-number lookup across every linked GitHub repository.
+ * The same number on two remotes is returned as two pull requests.
+ */
+export function useListGitHubPRsByNumber(
+  projectPath: string | null,
+  query: string
+) {
+  const itemNumber = parseItemNumber(query)
+  return useQuery({
+    queryKey: [
+      ...githubQueryKeys.prByNumber(projectPath ?? '', itemNumber ?? 0),
+      'all-remotes',
+    ],
+    queryFn: async (): Promise<GitHubPullRequest[]> => {
+      if (!isTauri() || !projectPath || !itemNumber) return []
+      try {
+        return await invoke<GitHubPullRequest[]>('list_github_prs_by_number', {
+          projectPath,
+          prNumber: itemNumber,
+        })
+      } catch {
+        return []
+      }
+    },
+    enabled: !!projectPath && itemNumber !== null,
+    staleTime: 1000 * 30,
+    gcTime: 1000 * 60 * 5,
+    retry: 0,
+  })
+}
+
 export function useGetGitHubPRByNumber(
   projectPath: string | null,
   query: string

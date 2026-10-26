@@ -75,47 +75,54 @@ function AgentRow({
   onSelect: (agentId: string) => void
 }) {
   const dot = agentRowDot(agent)
+  const tooltip = [agent.name, agentStatusLabel(agent)]
+    .filter(Boolean)
+    .join(' · ')
   return (
     <li>
-      <button
-        type="button"
-        aria-current={isSelected ? 'page' : undefined}
-        title={[agent.name, agentStatusLabel(agent)].filter(Boolean).join(' · ')}
-        aria-label={agent.name}
-        className={cn(
-          'relative flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 @max-[13rem]/agents:justify-center @max-[13rem]/agents:px-0',
-          isSelected ? 'bg-accent text-foreground' : 'hover:bg-accent/50'
-        )}
-        onClick={() => onSelect(agent.id)}
-        data-testid={`agent-row-${agent.id}`}
-      >
-        <span className="relative shrink-0">
-          <AgentIcon icon={agent.icon} className="size-9" />
-          {agent.status === 'working' && (
-            <span
-              className="absolute -bottom-0.5 -right-0.5 size-3 rounded-full bg-green-500 ring-2 ring-sidebar dark:ring-[#0b0b0b]"
-              aria-label="Working"
-            />
-          )}
-        </span>
-        <span className="min-w-0 flex-1 @max-[13rem]/agents:hidden">
-          <span className="block truncate text-sm font-medium text-foreground">
-            {agent.name}
-          </span>
-          <span className="block truncate text-xs text-muted-foreground">
-            {agentSubtitle(agent)}
-          </span>
-        </span>
-        {dot && (
-          <span
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-current={isSelected ? 'page' : undefined}
+            aria-label={agent.name}
             className={cn(
-              'size-2 shrink-0 rounded-full @max-[13rem]/agents:absolute @max-[13rem]/agents:top-1.5 @max-[13rem]/agents:right-1.5',
-              dot === 'unread' ? 'bg-blue-500' : 'bg-amber-500'
+              'relative flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 @max-[13rem]/agents:justify-center @max-[13rem]/agents:px-0',
+              isSelected ? 'bg-accent text-foreground' : 'hover:bg-accent/50'
             )}
-            aria-label={dot === 'unread' ? 'Unread messages' : 'Needs you'}
-          />
-        )}
-      </button>
+            onClick={() => onSelect(agent.id)}
+            data-testid={`agent-row-${agent.id}`}
+          >
+            <span className="relative shrink-0">
+              <AgentIcon icon={agent.icon} className="size-9" />
+              {agent.status === 'working' && (
+                <span
+                  className="absolute -bottom-0.5 -right-0.5 size-3 rounded-full bg-green-500 ring-2 ring-sidebar dark:ring-[#0b0b0b]"
+                  aria-label="Working"
+                />
+              )}
+            </span>
+            <span className="min-w-0 flex-1 @max-[13rem]/agents:hidden">
+              <span className="block truncate text-sm font-medium text-foreground">
+                {agent.name}
+              </span>
+              <span className="block truncate text-xs text-muted-foreground">
+                {agentSubtitle(agent)}
+              </span>
+            </span>
+            {dot && (
+              <span
+                className={cn(
+                  'size-2 shrink-0 rounded-full @max-[13rem]/agents:absolute @max-[13rem]/agents:top-1.5 @max-[13rem]/agents:right-1.5',
+                  dot === 'unread' ? 'bg-blue-500' : 'bg-amber-500'
+                )}
+                aria-label={dot === 'unread' ? 'Unread messages' : 'Needs you'}
+              />
+            )}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>{tooltip}</TooltipContent>
+      </Tooltip>
     </li>
   )
 }

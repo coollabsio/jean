@@ -21,6 +21,11 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Kbd } from '@/components/ui/kbd'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { invoke } from '@/lib/transport'
 import { toast } from 'sonner'
@@ -793,21 +798,30 @@ function NativeBackendChoice({
       </button>
       <span className="flex shrink-0 items-center gap-1.5">
         {yoloAvailable && (
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={onYoloClick}
-            title={`Start ${accessibleName} with Full access`}
-            aria-label={`Start ${accessibleName} with Full access`}
-            className={cn(
-              'inline-flex h-8 items-center gap-1.5 rounded-md border border-border/70 bg-background px-2 text-xs font-medium text-muted-foreground transition-colors',
-              'hover:border-border hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              disabled && 'cursor-not-allowed opacity-50 hover:bg-background'
-            )}
-          >
-            <Zap className="size-3.5 text-destructive" />
-            Full access
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex">
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={onYoloClick}
+                  aria-label={`Start ${accessibleName} with Full access`}
+                  className={cn(
+                    'inline-flex h-8 items-center gap-1.5 rounded-md border border-border/70 bg-background px-2 text-xs font-medium text-muted-foreground transition-colors',
+                    'hover:border-border hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                    disabled &&
+                      'pointer-events-none cursor-not-allowed opacity-50 hover:bg-background'
+                  )}
+                >
+                  <Zap className="size-3.5 text-destructive" />
+                  Full access
+                </button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>
+              {`Start ${accessibleName} with Full access`}
+            </TooltipContent>
+          </Tooltip>
         )}
         <Kbd className="h-7 min-w-7 shrink-0 text-[10px]">{shortcut}</Kbd>
       </span>

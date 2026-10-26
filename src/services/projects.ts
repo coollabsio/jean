@@ -919,6 +919,7 @@ export function useCreateWorktree() {
         number: number
         title: string
         body?: string
+        repo?: string
         comments: {
           body: string
           author: { login: string }
@@ -930,6 +931,7 @@ export function useCreateWorktree() {
         number: number
         title: string
         body?: string
+        repo?: string
         headRefName: string
         baseRefName: string
         comments: {
@@ -1124,6 +1126,7 @@ export function useCreateWorktreeFromExistingBranch() {
         number: number
         title: string
         body?: string
+        repo?: string
         comments: {
           body: string
           author: { login: string }
@@ -1134,6 +1137,7 @@ export function useCreateWorktreeFromExistingBranch() {
         number: number
         title: string
         body?: string
+        repo?: string
         headRefName: string
         baseRefName: string
         comments: {
@@ -3174,6 +3178,43 @@ export async function updateWorktreeCachedStatus(
  * Hook to fetch available branches for a project
  * Fetches from origin first, then returns remote branches (or local if no remote)
  */
+export interface RemoteBranchRef {
+  remote: string
+  name: string
+  qualified: string
+}
+
+/**
+ * Remote-tracking branches for the New Worktree dialog.
+ * Fetches every configured remote and keeps same-named branches distinct.
+ */
+export function useWorktreeBranches(projectId: string | null) {
+  return useQuery({
+    queryKey: [
+      ...projectsQueryKeys.detail(projectId ?? ''),
+      'remote-branches',
+    ] as const,
+    queryFn: async (): Promise<RemoteBranchRef[]> => {
+      if (!isTauri() || !projectId) {
+        return []
+      }
+
+      try {
+        logger.debug('Fetching remote branches for project', { projectId })
+        return await invoke<RemoteBranchRef[]>('list_worktree_branches', {
+          projectId,
+        })
+      } catch (error) {
+        logger.error('Failed to load remote branches', { error, projectId })
+        throw error
+      }
+    },
+    enabled: !!projectId,
+    staleTime: 1000 * 30,
+    gcTime: 1000 * 60 * 5,
+  })
+}
+
 export function useProjectBranches(projectId: string | null) {
   return useQuery({
     queryKey: [

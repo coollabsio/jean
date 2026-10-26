@@ -1362,7 +1362,7 @@ describe('tool error indicator', () => {
 })
 
 describe('summarizeToolCall', () => {
-  it('labels Codex sub-agent activity with the agent path', () => {
+  it('labels Codex sub-agent activity with the codename and model', () => {
     expect(
       summarizeToolCall({
         id: 'sa1',
@@ -1371,10 +1371,22 @@ describe('summarizeToolCall', () => {
           type: 'sub_agent_activity',
           kind: 'started',
           prompt: '/root/demo_one',
+          agent_path: '/root/demo_one',
           receiver_thread_ids: ['t1'],
         },
       })
-    ).toEqual({ label: 'Spawn Agent', detail: '/root/demo_one' })
+    ).toEqual({ label: 'Spawn Agent', detail: 'demo_one' })
+    expect(
+      summarizeToolCall({
+        id: 'sa2',
+        name: 'SpawnAgent',
+        input: {
+          type: 'sub_agent_activity',
+          prompt: '/root/demo_one',
+          model: 'gpt-5.4',
+        },
+      })
+    ).toEqual({ label: 'Spawn Agent', detail: 'demo_one · gpt-5.4' })
   })
 
   it('uses the same friendly labels as the tool rows', () => {

@@ -15,6 +15,7 @@ export type SessionSettingKey =
   | 'executionMode'
   | 'permissionMode'
   | 'provider'
+  | 'providerAccount'
   | 'waitingForInput'
 
 /** Sentinels / empty mean "use backend default" (Anthropic / OpenAI). */
@@ -70,6 +71,11 @@ export function applySessionSettingToSession(
       return {
         ...session,
         selected_provider: normalizeProviderSettingValue(value),
+      }
+    case 'providerAccount':
+      return {
+        ...session,
+        provider_account_id: value === '' ? null : value,
       }
     case 'waitingForInput':
       // Handled in Zustand (useStreamingEvents), not session metadata

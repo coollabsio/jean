@@ -2,6 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Check, Copy } from '@/components/icons/reicon'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { copyToClipboard } from '@/lib/clipboard'
 import { cn } from '@/lib/utils'
 
@@ -67,21 +72,25 @@ export function FilePathCopyRow({
   }, [filePath])
 
   const button = (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon-sm"
-      className="shrink-0"
-      onClick={handleCopy}
-      title="Copy file path"
-      aria-label="Copy file path"
-    >
-      {copied ? (
-        <Check className="size-3 text-success" />
-      ) : (
-        <Copy className="size-3 text-muted-foreground" />
-      )}
-    </Button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="shrink-0"
+          onClick={handleCopy}
+          aria-label="Copy file path"
+        >
+          {copied ? (
+            <Check className="size-3 text-success" />
+          ) : (
+            <Copy className="size-3 text-muted-foreground" />
+          )}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Copy file path</TooltipContent>
+    </Tooltip>
   )
 
   if (iconOnly) return button

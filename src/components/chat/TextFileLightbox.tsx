@@ -10,6 +10,11 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { Markdown } from '@/components/ui/markdown'
 import type { ReadTextResponse } from '@/types/chat'
 import { getFilename } from '@/lib/path-utils'
@@ -133,15 +138,19 @@ export function TextFileLightbox({
           </ScrollArea>
           {content && (
             <div className="flex items-center gap-1 pt-2 border-t border-border/50">
-              <button
-                type="button"
-                onClick={handleCopy}
-                className="px-3 py-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5 text-xs"
-                title="Copy to clipboard"
-              >
-                <Copy className="h-3.5 w-3.5" />
-                Copy
-              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={handleCopy}
+                    className="px-3 py-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5 text-xs"
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                    Copy
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>Copy to clipboard</TooltipContent>
+              </Tooltip>
             </div>
           )}
         </DialogContent>
