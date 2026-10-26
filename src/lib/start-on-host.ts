@@ -66,12 +66,70 @@ export interface StartProjectInput {
   hostCheckouts?: ProjectHostCheckout[]
 }
 
+export interface HostProgress {
+  phase: 'prepare' | 'clone' | 'copy'
+  message: string
+  /** 0–100 when known. `null` means the bar stays indeterminate. */
+  percent: number | null
+}
+
+export interface EnsureProgressEvent {
+  operationId: string
+  phase: string
+  percent?: number | null
+  message: string
+}
+
+export type StartPromptPhase =
+  | 'idle'
+  | 'preparing'
+  | 'confirm-env'
+  | 'copying'
+  | 'error'
+
+/**
+ * Map a `project:ensure-progress` event onto the dialog.
+ * Events for another start, or that arrive after the user is confirming env
+ * copy, are ignored.
+ */
+export function progressUpdateFromEvent(
+  event: EnsureProgressEvent,
+  operationId: string,
+  currentPhase: StartPromptPhase
+): {
+  phase: 'preparing' | 'copying'
+  message: string
+  percent: number | null
+} | null {
+  if (!operationId || event.operationId !== operationId) return null
+  if (
+    currentPhase === 'idle' ||
+    currentPhase === 'error' ||
+    currentPhase === 'confirm-env'
+  ) {
+    return null
+  }
+  if (event.phase === 'clone' && currentPhase === 'copying') return null
+  const percent =
+    typeof event.percent === 'number' &&
+    event.percent >= 0 &&
+    event.percent <= 100
+      ? event.percent
+      : null
+  return {
+    phase: event.phase === 'copy' ? 'copying' : 'preparing',
+    message: event.message,
+    percent,
+  }
+}
+
 export interface StartProjectOnHostInput {
   project: StartProjectInput
   targetServerId: string
   targetServerName: string
   targetOnline: boolean
   targetError?: string | null
+  operationId: string
 }
 
 export interface StartProjectOnHostResult {
@@ -93,7 +151,7 @@ export interface StartProjectOnHostDeps {
     args?: Record<string, unknown>
   ) => Promise<unknown>
   confirmEnvCopy: (offer: EnvCopyOffer) => Promise<'copy' | 'skip' | 'cancel'>
-  onProgress?: (message: string) => void
+  onProgress?: (progress: HostProgress) => void
   isCancelled?: () => boolean
 }
 
@@ -160,16 +218,20 @@ export async function startProjectOnHost(
   let status: 'present' | 'cloned'
 
   if (existing) {
-    deps.onProgress?.(
-      `Using the checkout already on ${input.targetServerName}…`
-    )
+    deps.onProgress?.({
+      phase: 'prepare',
+      message: `Using the checkout already on ${input.targetServerName}…`,
+      percent: null,
+    })
     projectId = existing.projectId
     projectPath = existing.path
     status = 'present'
   } else {
-    deps.onProgress?.(
-      `Cloning ${input.project.name} onto ${input.targetServerName}…`
-    )
+    deps.onProgress?.({
+      phase: 'clone',
+      message: `Cloning ${input.project.name} onto ${input.targetServerName}…`,
+      percent: null,
+    })
     const cloneUrls = asStringArray(
       await deps.invoke(sourceServerId, 'list_clone_urls', {
         repoPath: input.project.path,
@@ -184,7 +246,11 @@ export async function startProjectOnHost(
     const ensured = (await deps.invoke(
       input.targetServerId,
       'ensure_project_present',
-      { cloneUrls, name: input.project.name }
+      {
+        cloneUrls,
+        name: input.project.name,
+        operationId: input.operationId,
+      }
     )) as EnsureProjectResponse
     throwIfCancelled(deps.isCancelled)
     if (!ensured?.project?.id || !ensured.project.path) {
@@ -201,9 +267,11 @@ export async function startProjectOnHost(
     checkout => checkout.serverId !== input.targetServerId && !checkout.offline
   )
   if (sources.length > 0) {
-    deps.onProgress?.(
-      `Looking for env files to copy onto ${input.targetServerName}…`
-    )
+    deps.onProgress?.({
+      phase: 'prepare',
+      message: `Looking for env files to copy onto ${input.targetServerName}…`,
+      percent: null,
+    })
     let targetFiles: string[] = []
     try {
       targetFiles = asStringArray(
@@ -241,20 +309,32 @@ export async function startProjectOnHost(
       throwIfCancelled(deps.isCancelled)
       if (decision === 'cancel') throw new StartOnHostCancelled()
       if (decision === 'copy') {
-        deps.onProgress?.(
-          `Copying ${offer.files.join(', ')} to ${input.targetServerName}…`
-        )
-        const files = await deps.invoke(
-          offer.sourceServerId,
-          'read_project_env_files',
-          { projectPath: offer.sourceProjectPath, names: offer.files }
-        )
-        throwIfCancelled(deps.isCancelled)
-        await deps.invoke(input.targetServerId, 'write_project_env_files', {
-          projectPath,
-          files,
-        })
-        throwIfCancelled(deps.isCancelled)
+        const names = offer.files
+        for (let index = 0; index < names.length; index += 1) {
+          const name = names[index] ?? ''
+          const total = names.length
+          deps.onProgress?.({
+            phase: 'copy',
+            message: `Copying ${name} (${index + 1}/${total})`,
+            percent: Math.round((index / total) * 100),
+          })
+          const files = await deps.invoke(
+            offer.sourceServerId,
+            'read_project_env_files',
+            { projectPath: offer.sourceProjectPath, names: [name] }
+          )
+          throwIfCancelled(deps.isCancelled)
+          await deps.invoke(input.targetServerId, 'write_project_env_files', {
+            projectPath,
+            files,
+          })
+          throwIfCancelled(deps.isCancelled)
+          deps.onProgress?.({
+            phase: 'copy',
+            message: `Copied ${name} (${index + 1}/${total})`,
+            percent: Math.round(((index + 1) / total) * 100),
+          })
+        }
       }
     }
   }

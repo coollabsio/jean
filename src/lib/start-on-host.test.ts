@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   envFilesToOffer,
+  progressUpdateFromEvent,
   startProjectOnHost,
   StartOnHostCancelled,
 } from './start-on-host'
@@ -57,6 +58,7 @@ describe('startProjectOnHost', () => {
         targetServerId: 'remote-a',
         targetServerName: 'Build box',
         targetOnline: true,
+        operationId: 'op-1',
       },
       client
     )
@@ -69,11 +71,14 @@ describe('startProjectOnHost', () => {
     expect(invoke).toHaveBeenCalledWith('remote-a', 'ensure_project_present', {
       cloneUrls: ['https://github.com/coollabsio/jean.git'],
       name: 'jean',
+      operationId: 'op-1',
     })
     expect(client.confirmEnvCopy).not.toHaveBeenCalled()
-    expect(client.onProgress).toHaveBeenCalledWith(
-      'Cloning jean onto Build box…'
-    )
+    expect(client.onProgress).toHaveBeenCalledWith({
+      phase: 'clone',
+      message: 'Cloning jean onto Build box…',
+      percent: null,
+    })
   })
 
   it('skips clone when the target host already has the checkout', async () => {
@@ -99,6 +104,7 @@ describe('startProjectOnHost', () => {
         targetServerId: 'remote-a',
         targetServerName: 'Build box',
         targetOnline: true,
+        operationId: 'op-1',
       },
       deps(invoke)
     )
@@ -131,10 +137,8 @@ describe('startProjectOnHost', () => {
           return ['.env', '.env.local']
         }
         if (command === 'read_project_env_files') {
-          return [
-            { name: '.env', contents: 'TOKEN=1' },
-            { name: '.env.local', contents: 'LOCAL=1' },
-          ]
+          const names = args?.names as string[]
+          return names.map(name => ({ name, contents: `${name}=1` }))
         }
         if (command === 'write_project_env_files') return null
         throw new Error(
@@ -143,6 +147,7 @@ describe('startProjectOnHost', () => {
       }
     )
     const confirmEnvCopy = vi.fn(async () => 'copy' as const)
+    const onProgress = vi.fn()
 
     await startProjectOnHost(
       {
@@ -161,8 +166,9 @@ describe('startProjectOnHost', () => {
         targetServerId: 'remote-a',
         targetServerName: 'Build box',
         targetOnline: true,
+        operationId: 'op-1',
       },
-      { invoke, confirmEnvCopy }
+      { invoke, confirmEnvCopy, onProgress }
     )
 
     expect(confirmEnvCopy).toHaveBeenCalledWith(
@@ -174,8 +180,18 @@ describe('startProjectOnHost', () => {
     )
     expect(invoke).toHaveBeenCalledWith('local', 'read_project_env_files', {
       projectPath: '/repos/jean',
-      names: ['.env', '.env.local'],
+      names: ['.env'],
     })
+    expect(invoke).toHaveBeenCalledWith('local', 'read_project_env_files', {
+      projectPath: '/repos/jean',
+      names: ['.env.local'],
+    })
+    const copyUpdates = onProgress.mock.calls
+      .map(call => call[0])
+      .filter(update => update.phase === 'copy')
+    expect(copyUpdates.map(update => update.percent)).toEqual([0, 50, 50, 100])
+    expect(copyUpdates[0]?.message).toContain('Copying .env (1/2)')
+    expect(copyUpdates[3]?.message).toContain('Copied .env.local (2/2)')
     expect(invoke).toHaveBeenCalledWith(
       'remote-a',
       'write_project_env_files',
@@ -209,6 +225,7 @@ describe('startProjectOnHost', () => {
         targetServerId: 'remote-a',
         targetServerName: 'Build box',
         targetOnline: true,
+        operationId: 'op-1',
       },
       { invoke, confirmEnvCopy }
     )
@@ -228,6 +245,7 @@ describe('startProjectOnHost', () => {
           targetServerName: 'Build box',
           targetOnline: false,
           targetError: 'Connection refused',
+          operationId: 'op-1',
         },
         deps(invoke)
       )
@@ -261,10 +279,75 @@ describe('startProjectOnHost', () => {
           targetServerId: 'remote-a',
           targetServerName: 'Build box',
           targetOnline: true,
+          operationId: 'op-1',
         },
         { invoke, confirmEnvCopy: async () => 'cancel' }
       )
     ).rejects.toBeInstanceOf(StartOnHostCancelled)
+  })
+})
+
+describe('progressUpdateFromEvent', () => {
+  it('keeps git percent for the active clone and drops other starts', () => {
+    expect(
+      progressUpdateFromEvent(
+        {
+          operationId: 'op-1',
+          phase: 'clone',
+          percent: 45,
+          message: 'Receiving objects:  45% (5/10)',
+        },
+        'op-1',
+        'preparing'
+      )
+    ).toEqual({
+      phase: 'preparing',
+      message: 'Receiving objects:  45% (5/10)',
+      percent: 45,
+    })
+
+    expect(
+      progressUpdateFromEvent(
+        {
+          operationId: 'other',
+          phase: 'clone',
+          percent: 10,
+          message: 'Receiving objects:  10%',
+        },
+        'op-1',
+        'preparing'
+      )
+    ).toBeNull()
+  })
+
+  it('stays indeterminate when git has not printed a percent', () => {
+    expect(
+      progressUpdateFromEvent(
+        {
+          operationId: 'op-1',
+          phase: 'clone',
+          percent: null,
+          message: "Cloning into 'jean'...",
+        },
+        'op-1',
+        'preparing'
+      )?.percent
+    ).toBeNull()
+  })
+
+  it('ignores clone lines once env copy has started', () => {
+    expect(
+      progressUpdateFromEvent(
+        {
+          operationId: 'op-1',
+          phase: 'clone',
+          percent: 100,
+          message: 'Resolving deltas: 100%',
+        },
+        'op-1',
+        'copying'
+      )
+    ).toBeNull()
   })
 })
 

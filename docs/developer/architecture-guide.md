@@ -382,9 +382,16 @@ Additional systems (no dedicated docs yet):
   that share a normalized git remote URL collapse to one row; each host
   checkout is attached as `hostCheckouts`. `ensure_project_present` on the
   target Jean reuses a checkout whose remotes match, or clones into
-  `~/jean/checkouts/<name>`. Env files (`.env`, `.env.local`, and the
-  development/production variants) are copied only after an explicit confirm.
-  There is no continuous file sync.
+  `~/jean/checkouts/<name>`. The clone runs with `git clone --progress`.
+  The target Jean emits `project:ensure-progress` on the existing event
+  channel (`emit_all`, so a remote desktop hears it on that host's socket).
+  The dialog shows git's status line. When the line contains a percent, the
+  bar is a weighted overall of counting, receiving objects, and resolving
+  deltas so it does not reset between phases. A line with no percent keeps an
+  indeterminate bar. Env files (`.env`, `.env.local`, and the
+  development/production variants) are copied only after an explicit confirm,
+  one file at a time, with the bar advancing per file. There is no continuous
+  file sync.
 
   When an established WebSocket disconnects, the frontend reloads the page
   instead of repairing stale in-memory state. The normal

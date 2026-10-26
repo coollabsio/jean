@@ -3697,8 +3697,15 @@ pub async fn dispatch_command(
         "ensure_project_present" => {
             let clone_urls: Vec<String> = field(&args, "cloneUrls", "clone_urls")?;
             let name: String = from_field(&args, "name")?;
-            let result =
-                crate::projects::ensure_project_present(app.clone(), clone_urls, name).await?;
+            let operation_id: String =
+                field_opt(&args, "operationId", "operation_id")?.unwrap_or_default();
+            let result = crate::projects::ensure_project_present(
+                app.clone(),
+                clone_urls,
+                name,
+                operation_id,
+            )
+            .await?;
             emit_cache_invalidation(app, &["projects"]);
             to_value(result)
         }

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import userEvent from '@testing-library/user-event'
 import { render, screen } from '@/test/test-utils'
-import { StartOnHostPicker } from './StartOnHost'
+import { HostProgressBar, StartOnHostPicker } from './StartOnHost'
 import type * as EnvironmentModule from '@/lib/environment'
 
 const connections = vi.hoisted(() => ({
@@ -43,6 +43,31 @@ vi.mock('@/lib/server-connections', () => ({
       ],
     ]),
 }))
+
+describe('HostProgressBar', () => {
+  it('shows git percent on a determinate bar', () => {
+    render(
+      <HostProgressBar percent={45} message="Receiving objects:  45% (5/10)" />
+    )
+    const bar = screen.getByRole('progressbar')
+    expect(bar).toHaveAttribute('aria-valuenow', '45')
+    expect(bar).toHaveAttribute(
+      'aria-valuetext',
+      'Receiving objects:  45% (5/10)'
+    )
+    expect(screen.getByText(/Receiving objects:\s+45%/)).toBeInTheDocument()
+  })
+
+  it('stays indeterminate when git has not printed a percent', () => {
+    render(<HostProgressBar percent={null} message="Cloning into 'jean'..." />)
+    const bar = screen.getByRole('progressbar')
+    expect(bar).not.toHaveAttribute('aria-valuenow')
+    expect(
+      bar.querySelector('.animate-start-on-host-indeterminate')
+    ).toBeTruthy()
+    expect(screen.getByText("Cloning into 'jean'...")).toBeInTheDocument()
+  })
+})
 
 describe('StartOnHostPicker', () => {
   beforeEach(() => {

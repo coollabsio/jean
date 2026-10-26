@@ -1,5 +1,4 @@
 import { useCallback, useState, useSyncExternalStore } from 'react'
-import { Loader2 } from '@/components/icons/reicon'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -21,10 +20,12 @@ import { useRemoteConnections } from '@/lib/remote-connections'
 import { useServerConnectionSnapshots } from '@/lib/server-connections'
 import {
   isStartOnHostCancelled,
+  progressUpdateFromEvent,
   startProjectOnHost,
+  type EnsureProgressEvent,
   type EnvCopyOffer,
 } from '@/lib/start-on-host'
-import { invokeForServer } from '@/lib/transport'
+import { invokeForServer, listen } from '@/lib/transport'
 import type { Project } from '@/types/projects'
 import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import { useQueryClient } from '@tanstack/react-query'
@@ -37,6 +38,8 @@ interface PromptState {
   message: string | null
   error: string | null
   offer: EnvCopyOffer | null
+  /** 0–100 when known. `null` draws an indeterminate bar. */
+  percent: number | null
 }
 
 const idlePrompt: PromptState = {
@@ -44,6 +47,7 @@ const idlePrompt: PromptState = {
   message: null,
   error: null,
   offer: null,
+  percent: null,
 }
 
 let promptState: PromptState = idlePrompt
@@ -180,9 +184,30 @@ export function useStartOnHost(
       message: `Preparing ${project.name} on ${targetServerName}…`,
       error: null,
       offer: null,
+      percent: null,
     })
 
+    const operationId = globalThis.crypto.randomUUID()
+    let unlisten: (() => void) | null = null
     try {
+      unlisten = await listen<EnsureProgressEvent>(
+        'project:ensure-progress',
+        event => {
+          const update = progressUpdateFromEvent(
+            event.payload,
+            operationId,
+            promptState.phase
+          )
+          if (!update) return
+          setPrompt({
+            phase: update.phase,
+            message: update.message,
+            percent: update.percent,
+            error: null,
+            offer: promptState.offer,
+          })
+        }
+      )
       const result = await startProjectOnHost(
         {
           project,
@@ -190,14 +215,16 @@ export function useStartOnHost(
           targetServerName,
           targetOnline,
           targetError: snapshot?.error,
+          operationId,
         },
         {
           invoke: (serverId, command, args) =>
             invokeForServer(serverId, command, args),
-          onProgress: message =>
+          onProgress: progress =>
             setPrompt({
-              phase: message.startsWith('Copying ') ? 'copying' : 'preparing',
-              message,
+              phase: progress.phase === 'copy' ? 'copying' : 'preparing',
+              message: progress.message,
+              percent: progress.percent,
               error: null,
               offer: promptState.offer,
             }),
@@ -209,6 +236,7 @@ export function useStartOnHost(
                 message: null,
                 error: null,
                 offer,
+                percent: null,
               })
             }),
           isCancelled: () => startCancelled,
@@ -225,8 +253,16 @@ export function useStartOnHost(
         throw error
       }
       const message = error instanceof Error ? error.message : String(error)
-      setPrompt({ phase: 'error', message: null, error: message, offer: null })
+      setPrompt({
+        phase: 'error',
+        message: null,
+        error: message,
+        offer: null,
+        percent: null,
+      })
       throw error
+    } finally {
+      unlisten?.()
     }
   }, [hostId, project, queryClient, snapshots])
 
@@ -236,6 +272,39 @@ export function useStartOnHost(
     phase: prompt.phase,
     run,
   }
+}
+
+export function HostProgressBar({
+  percent,
+  message,
+}: {
+  percent: number | null
+  message: string
+}) {
+  const determinate = percent != null
+  return (
+    <div className="space-y-2">
+      <div
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={determinate ? percent : undefined}
+        aria-valuetext={message}
+        aria-label="Start progress"
+        className="bg-secondary relative h-2 w-full overflow-hidden rounded-full"
+      >
+        <div
+          className={
+            determinate
+              ? 'bg-primary h-full rounded-full transition-[width] duration-150'
+              : 'bg-primary absolute inset-y-0 w-1/3 rounded-full animate-start-on-host-indeterminate'
+          }
+          style={determinate ? { width: `${percent}%` } : undefined}
+        />
+      </div>
+      <p className="text-sm text-muted-foreground">{message}</p>
+    </div>
+  )
 }
 
 export function StartOnHostPrompt() {
@@ -261,7 +330,9 @@ export function StartOnHostPrompt() {
           <DialogDescription>
             {state.phase === 'confirm-env' && state.offer
               ? `${state.offer.sourceServerName} has ${state.offer.files.join(', ')}. Copy them onto the host you are starting on? These files can contain secrets. Jean copies them only for this start and does not keep syncing.`
-              : (state.error ?? state.message ?? 'Preparing the checkout…')}
+              : state.phase === 'error'
+                ? (state.error ?? 'Could not prepare the checkout.')
+                : 'Preparing the checkout on the host you picked. This stays open until it is ready.'}
           </DialogDescription>
         </DialogHeader>
         {state.phase === 'confirm-env' && state.offer && (
@@ -272,10 +343,10 @@ export function StartOnHostPrompt() {
           </ul>
         )}
         {(state.phase === 'preparing' || state.phase === 'copying') && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" />
-            {state.message}
-          </div>
+          <HostProgressBar
+            percent={state.percent}
+            message={state.message ?? 'Preparing the checkout…'}
+          />
         )}
         <DialogFooter>
           {state.phase === 'confirm-env' ? (

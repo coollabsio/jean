@@ -137,8 +137,10 @@ The desktop app can work with any number of Jean servers at the same time:
 
 When you create a worktree or session, **Start on** lists Local and each
 connected remote. If that host does not have the checkout yet, Jean clones it
-from the project's git remotes, then asks before copying env files such as
-`.env` and `.env.local`. Nothing is synced after that. The host is where the
+from the project's git remotes and shows git's clone progress (a percent bar
+when git prints one, otherwise a moving bar and the latest git line). It then
+asks before copying env files such as `.env` and `.env.local`, and the copy
+advances file by file. Nothing is synced after that. The host is where the
 new worktree or session runs. Uncheck **Include in combined dashboard** to
 hide a server without removing it.
 

@@ -979,8 +979,15 @@ pub async fn clone_project(
 
     // Clone the repository
     git::clone_repo(&url, &path)?;
+    register_cloned_project(app, path, parent_id)
+}
 
-    // Get repository name and default branch from the cloned repo
+/// Register a checkout that has already been cloned onto this host.
+pub(crate) fn register_cloned_project(
+    app: AppHandle,
+    path: String,
+    parent_id: Option<String>,
+) -> Result<Project, String> {
     let name = git::get_repo_name(&path)?;
     let default_branch = git::get_current_branch(&path).unwrap_or_else(|_| "main".to_string());
 

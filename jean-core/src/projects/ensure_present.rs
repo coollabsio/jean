@@ -9,14 +9,16 @@ use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
-use super::commands::{add_project, clone_project};
-use super::git;
+use super::commands::{add_project, register_cloned_project};
+use super::git::{self, GitCloneProgress};
 use super::storage::{get_worktrees_base_dir, sanitize_directory_name};
 use super::types::Project;
+use crate::http_server::EmitExt;
 
 /// Env files Jean will offer to copy. Names outside this list are refused.
 pub const ENV_FILE_NAMES: &[&str] = &[
@@ -200,6 +202,7 @@ pub async fn ensure_project_present(
     app: AppHandle,
     clone_urls: Vec<String>,
     name: String,
+    operation_id: String,
 ) -> Result<EnsureProjectPresentResult, String> {
     let data = super::storage::load_projects_data(&app)?;
     let checkouts = data
@@ -234,11 +237,102 @@ pub async fn ensure_project_present(
             })
         }
         EnsurePlan::Clone { url, destination } => {
-            let project = clone_project(app, url, destination, None).await?;
+            emit_ensure_progress(&app, &operation_id, None, "Cloning…");
+            let app_for_progress = app.clone();
+            let operation_id_for_progress = operation_id.clone();
+            let url_for_clone = url;
+            let destination_for_clone = destination.clone();
+            let cloned = tokio::task::spawn_blocking(move || {
+                let mut gate = CloneProgressGate::new();
+                let result = git::clone_repo_with_progress(
+                    &url_for_clone,
+                    &destination_for_clone,
+                    |progress| {
+                        if gate.accept(&progress) {
+                            emit_ensure_progress(
+                                &app_for_progress,
+                                &operation_id_for_progress,
+                                progress.overall_percent,
+                                &progress.line,
+                            );
+                        }
+                    },
+                );
+                if let Some(progress) = gate.held.take() {
+                    emit_ensure_progress(
+                        &app_for_progress,
+                        &operation_id_for_progress,
+                        progress.overall_percent,
+                        &progress.line,
+                    );
+                }
+                result
+            })
+            .await
+            .map_err(|error| format!("Clone task failed: {error}"))?;
+            cloned?;
+            let project = register_cloned_project(app, destination, None)?;
             Ok(EnsureProjectPresentResult {
                 status: "cloned".to_string(),
                 project,
             })
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EnsureProgressEvent {
+    operation_id: String,
+    phase: &'static str,
+    percent: Option<u8>,
+    message: String,
+}
+
+fn emit_ensure_progress(app: &AppHandle, operation_id: &str, percent: Option<u8>, message: &str) {
+    if operation_id.is_empty() {
+        return;
+    }
+    let _ = app.emit_all(
+        "project:ensure-progress",
+        &EnsureProgressEvent {
+            operation_id: operation_id.to_string(),
+            phase: "clone",
+            percent,
+            message: message.to_string(),
+        },
+    );
+}
+
+/// Keep git status lines from flooding the websocket. Percent changes emit
+/// immediately. Repeated lines at the same percent wait 100ms, and the newest
+/// held line is emitted when the clone returns.
+struct CloneProgressGate {
+    last_emit: Instant,
+    last_percent: Option<Option<u8>>,
+    held: Option<GitCloneProgress>,
+}
+
+impl CloneProgressGate {
+    fn new() -> Self {
+        Self {
+            last_emit: Instant::now() - Duration::from_secs(1),
+            last_percent: None,
+            held: None,
+        }
+    }
+
+    fn accept(&mut self, progress: &GitCloneProgress) -> bool {
+        let percent_changed = self.last_percent != Some(progress.overall_percent);
+        let due = self.last_emit.elapsed() >= Duration::from_millis(100);
+        if percent_changed || due {
+            self.last_emit = Instant::now();
+            self.last_percent = Some(progress.overall_percent);
+            self.held = None;
+            true
+        } else {
+            self.held = Some(progress.clone());
+            false
         }
     }
 }
@@ -354,6 +448,31 @@ mod tests {
         fs::write(dir.join("README.md"), "hello").unwrap();
         git(dir, &["add", "README.md"]);
         git(dir, &["commit", "-m", "init"]);
+    }
+
+    #[test]
+    fn progress_gate_emits_percent_changes_and_holds_repeats() {
+        let mut gate = CloneProgressGate::new();
+        let first = GitCloneProgress {
+            percent: Some(10),
+            overall_percent: Some(25),
+            line: "Receiving objects: 10%".to_string(),
+        };
+        let repeat = GitCloneProgress {
+            percent: Some(10),
+            overall_percent: Some(25),
+            line: "Receiving objects: 10%, 2 MiB".to_string(),
+        };
+        let next = GitCloneProgress {
+            percent: Some(11),
+            overall_percent: Some(26),
+            line: "Receiving objects: 11%".to_string(),
+        };
+        assert!(gate.accept(&first));
+        assert!(!gate.accept(&repeat));
+        assert!(gate.held.as_ref().unwrap().line.contains("2 MiB"));
+        assert!(gate.accept(&next));
+        assert!(gate.held.is_none());
     }
 
     #[test]
