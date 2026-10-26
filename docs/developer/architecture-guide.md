@@ -180,6 +180,13 @@ partitions updates: client keys never cross the backend transport, while server
 keys continue to use backend persistence. New code can use
 `useClientPreferences()` directly.
 
+`browser_default_host` is one of those server settings (Settings → General →
+Browser). New browser tabs and port open buttons use a jean.json `ports[].host`
+when that port sets one, then this hostname, then `localhost`. A client viewing
+a worktree on a remote Jean server reads that server's value. Loopback names
+stay loopback so remote preview forwarding can still apply; any other hostname
+is used as written. Jean MCP stays mandatory and is not part of this setting.
+
 Project and worktree display state uses the same ownership rule through the
 versioned `jean-client-view-state-v1` browser storage record. This includes
 canvas sorting and active filters, tree expansion, dashboard favorites, sidebar
