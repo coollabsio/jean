@@ -585,6 +585,23 @@ export function switchActiveTerminalTabByIndexForShortcut(
 }
 
 /**
+ * View → Toggle Browser and the `toggle_browser` shortcut.
+ * Session chat cycles closed → modal drawer → bottom panel → closed.
+ * The main window cycles closed → side pane → bottom panel → closed.
+ */
+export function toggleBrowserKeybinding(): void {
+  const uiState = useUIStore.getState()
+  const chatState = useChatStore.getState()
+  const worktreeId = uiState.sessionChatModalOpen
+    ? (uiState.sessionChatModalWorktreeId ?? chatState.activeWorktreeId)
+    : chatState.activeWorktreeId
+  if (!worktreeId) return
+  useBrowserStore
+    .getState()
+    .toggleBrowserSurface(worktreeId, uiState.sessionChatModalOpen)
+}
+
+/**
  * Main window event listeners - handles global keyboard shortcuts and other app-level events
  *
  * This hook provides a centralized place for all global event listeners, keeping
@@ -906,16 +923,7 @@ function executeKeybindingAction(
     }
     case 'toggle_browser': {
       logger.debug('Keybinding: toggle_browser')
-      const uiState = useUIStore.getState()
-      const chatState = useChatStore.getState()
-      if (uiState.sessionChatModalOpen) {
-        const wid =
-          uiState.sessionChatModalWorktreeId ?? chatState.activeWorktreeId
-        if (wid) useBrowserStore.getState().toggleModal(wid)
-      } else {
-        const wid = chatState.activeWorktreeId
-        if (wid) useBrowserStore.getState().toggleSidePane(wid)
-      }
+      toggleBrowserKeybinding()
       break
     }
     case 'open_provider_dropdown':

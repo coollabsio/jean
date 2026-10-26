@@ -190,6 +190,50 @@ pub fn decide_after_failure(class: FailureClass, attempt: u32) -> AfterFailure {
     }
 }
 
+/// User-facing error for a browser preview forward. Unlike the jean-server
+/// tunnel, a failed preview does not reconnect on its own.
+pub fn preview_forward_failure(class: FailureClass, detail: &str, port: u16) -> String {
+    let detail = sanitize_detail(detail);
+    let prefix = match class {
+        FailureClass::HostKey => format!(
+            "Could not forward remote port {port}. SSH host key verification failed. Review the server fingerprint and trust the new key before retrying."
+        ),
+        FailureClass::Auth => format!(
+            "Could not forward remote port {port}. SSH key authentication failed. Password login is not supported."
+        ),
+        FailureClass::MissingBinary => {
+            "ssh is not installed on this computer. Install the OpenSSH client and try again."
+                .to_string()
+        }
+        FailureClass::Retryable => {
+            format!("Could not forward remote port {port}. The SSH forward did not open.")
+        }
+    };
+    if detail.is_empty() || matches!(class, FailureClass::MissingBinary) {
+        prefix
+    } else if matches!(class, FailureClass::Retryable) {
+        format!("Could not forward remote port {port}. {detail}")
+    } else {
+        format!("{prefix} {detail}")
+    }
+}
+
+/// Preview forwards always target the SSH server's own loopback, on the same
+/// local port the remote service uses, so the embedded browser does not open
+/// this computer's server by accident.
+pub fn preview_forward_spec(base: &ForwardSpec, remote_port: u16) -> ForwardSpec {
+    ForwardSpec {
+        user: base.user.clone(),
+        host: base.host.clone(),
+        ssh_port: base.ssh_port,
+        identity_file: base.identity_file.clone(),
+        remote_host: DEFAULT_REMOTE_HOST.to_string(),
+        remote_port,
+        local_port: remote_port,
+        known_hosts_file: base.known_hosts_file.clone(),
+    }
+}
+
 pub fn failure_message(class: FailureClass, detail: &str) -> String {
     let detail = sanitize_detail(detail);
     match class {
@@ -363,6 +407,25 @@ mod tests {
             classify_health_failure("api/auth rejected token: {\"ok\":false}"),
             FailureClass::Auth
         );
+    }
+
+    #[test]
+    fn preview_forward_uses_the_remote_loopback_on_the_same_port() {
+        let mut base = spec();
+        base.remote_host = "10.0.0.4".into();
+        base.remote_port = 3456;
+        base.local_port = 41000;
+        let preview = preview_forward_spec(&base, 5173);
+        let joined = build_forward_args(&preview).join(" ");
+        assert!(joined.contains("-L 127.0.0.1:5173:127.0.0.1:5173"));
+        assert!(joined.contains("ubuntu@build.example"));
+        assert!(!joined.contains("3456"));
+        assert!(!joined.contains("41000"));
+        assert!(!joined.contains("10.0.0.4"));
+        let message = preview_forward_failure(FailureClass::Retryable, "Connection refused", 5173);
+        assert!(message.contains("5173"));
+        assert!(message.contains("Connection refused"));
+        assert!(!message.contains("Reconnecting"));
     }
 
     #[test]

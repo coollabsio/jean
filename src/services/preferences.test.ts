@@ -497,6 +497,23 @@ describe('preferences service', () => {
       )
     })
 
+    it('uses the attached server browser hostname', async () => {
+      const { invokeForServer } = await import('@/lib/transport')
+      vi.mocked(invokeForServer).mockResolvedValueOnce({
+        schemaVersion: 1,
+        revision: 'revision-1',
+        preferences: { browser_default_host: 'dev.example.com' },
+      })
+
+      const { result } = renderHook(() => usePreferences(), {
+        wrapper: createServerWrapper(queryClient, 'dev-server'),
+      })
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true))
+      expect(result.current.data?.browser_default_host).toBe('dev.example.com')
+      expect(result.current.data?.jean_mcp_enabled).toBe(true)
+    })
+
     it('loads preferences from backend', async () => {
       const { invoke } = await import('@/lib/transport')
       const mockPreferences: AppPreferences = {
@@ -640,6 +657,7 @@ describe('preferences service', () => {
       expect(result.current.data?.theme).toBe('system')
       expect(result.current.data?.selected_model).toBe('claude-opus-5-5')
       expect(result.current.data?.jean_mcp_enabled).toBe(true)
+      expect(result.current.data?.browser_default_host).toBeNull()
     })
 
     it('reports backend errors instead of overwriting cached preferences', async () => {

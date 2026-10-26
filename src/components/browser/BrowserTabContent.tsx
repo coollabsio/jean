@@ -1,6 +1,10 @@
 import { memo, useEffect, useLayoutEffect, useRef } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { browserBackend } from '@/hooks/useBrowserPane'
+import {
+  BROWSER_ENSURE_WEBVIEW_EVENT,
+  browserBackend,
+  failBrowserLoad,
+} from '@/hooks/useBrowserPane'
 import { useBrowserStore } from '@/store/browser-store'
 import { isNativeApp } from '@/lib/environment'
 
@@ -183,11 +187,13 @@ export const BrowserTabContent = memo(function BrowserTabContent({
       if (cancelled) return
       lastBoundsRef.current = bounds
       try {
+        let opened = exists
         if (exists) {
           await browserBackend.setBounds(tabId, bounds)
         } else if (initialUrl) {
-          await browserBackend.create(tabId, initialUrl, bounds)
+          opened = await browserBackend.create(tabId, initialUrl, bounds)
         }
+        if (cancelled || !opened) return
         initializedRef.current = true
         if (isActive) {
           await browserBackend.setVisible(tabId, true)
@@ -250,6 +256,51 @@ export const BrowserTabContent = memo(function BrowserTabContent({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive, tabId])
+
+  // A preview forward can succeed before the child webview exists (the first
+  // open failed, or navigation raced tab creation). Create it from here,
+  // where the placeholder bounds are known.
+  useEffect(() => {
+    const onEnsure = (event: Event) => {
+      const detail = (event as CustomEvent<{ tabId?: string; url?: string }>)
+        .detail
+      if (!detail || detail.tabId !== tabId || !detail.url) return
+      const bounds = measure()
+      if (!bounds) {
+        failBrowserLoad(
+          tabId,
+          'The browser pane is not on screen, so the preview could not open.'
+        )
+        return
+      }
+      void browserBackend
+        .create(tabId, detail.url, bounds)
+        .then(opened => {
+          if (!opened) {
+            failBrowserLoad(tabId, null)
+            return
+          }
+          initializedRef.current = true
+          lastBoundsRef.current = bounds
+          if (isActiveRef.current) {
+            return browserBackend.setVisible(tabId, true)
+          }
+          return undefined
+        })
+        .catch(error => {
+          console.error(`[browser] create failed for tab ${tabId}:`, error)
+          failBrowserLoad(
+            tabId,
+            `Couldn't open the embedded browser for ${detail.url}.`
+          )
+        })
+    }
+    window.addEventListener(BROWSER_ENSURE_WEBVIEW_EVENT, onEnsure)
+    return () =>
+      window.removeEventListener(BROWSER_ENSURE_WEBVIEW_EVENT, onEnsure)
+    // measure is stable for this tab's placeholder.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabId])
 
   // On unmount: park off-screen + hide (keeps webview alive in Rust for re-mount)
   useEffect(() => {

@@ -14,11 +14,8 @@ import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useRemotePicker } from '@/hooks/useRemotePicker'
-import {
-  useAppDataDir,
-  useUpdateProjectSettings,
-  useWorktrees,
-} from '@/services/projects'
+import { useAppDataDir, useUpdateProjectSettings } from '@/services/projects'
+import { useIdentityWorktrees } from '@/services/identity-worktrees'
 import {
   useFetchWorktreesStatus,
   useGitStatus,
@@ -58,12 +55,8 @@ export function ProjectTreeItem({
     (Boolean(searchQuery) ||
       isProjectExpanded ||
       selectedProjectId === project.id)
-  const { data: loadedWorktrees, isLoading: worktreesLoading } = useWorktrees(
-    project.id,
-    {
-      enabled: shouldLoadWorktrees,
-    }
-  )
+  const { data: loadedWorktrees, isLoading: worktreesLoading } =
+    useIdentityWorktrees(project, shouldLoadWorktrees)
   const worktrees = useMemo(
     () =>
       (loadedWorktrees ?? []).filter(

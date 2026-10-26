@@ -158,7 +158,8 @@ function remoteHttpEndpoint(
     | undefined
 ): { url: string; token: string } | null {
   if (!connection) return null
-  if (connection.transport === 'ssh') return getSshTransportEndpoint(connection.id)
+  if (connection.transport === 'ssh')
+    return getSshTransportEndpoint(connection.id)
   if (!connection.url) return null
   return { url: connection.url, token: connection.token }
 }
@@ -250,6 +251,8 @@ const DESKTOP_ONLY_COMMANDS = new Set([
   'store_ssh_profile_secret',
   'delete_ssh_profile_secret',
   'load_ssh_profile_secrets',
+  'ensure_ssh_preview_forward',
+  'release_ssh_preview_forwards',
   'browser_create',
   'browser_navigate',
   'browser_back',
@@ -294,6 +297,8 @@ const LOCAL_SHELL_COMMANDS = new Set([
   'store_ssh_profile_secret',
   'delete_ssh_profile_secret',
   'load_ssh_profile_secrets',
+  'ensure_ssh_preview_forward',
+  'release_ssh_preview_forwards',
   'browser_create',
   'browser_navigate',
   'browser_back',
