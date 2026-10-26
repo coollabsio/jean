@@ -1185,6 +1185,18 @@ pub async fn create_session(
                 .as_ref()
                 .and_then(|prefs| default_model_for_backend(&backend_enum, prefs));
         }
+        session.provider_account_id = preferences.as_ref().and_then(|prefs| {
+            let backend_name = match &backend_enum {
+                Backend::Codex => "codex",
+                Backend::Claude => "claude",
+                _ => return None,
+            };
+            crate::provider_accounts::default_account_id_for(
+                &prefs.provider_accounts,
+                &prefs.default_provider_accounts,
+                backend_name,
+            )
+        });
         let session_id = session.id.clone();
 
         sessions.sessions.push(session.clone());
@@ -6357,6 +6369,7 @@ pub async fn set_session_backend(
 ) -> Result<(), String> {
     log::trace!("Setting backend for session {session_id}: {backend}");
 
+    let preferences = crate::load_preferences_sync(&app).ok();
     with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
         if let Some(session) = sessions.find_session_mut(&session_id) {
             session.backend = match backend.as_str() {
@@ -6372,6 +6385,13 @@ pub async fn set_session_backend(
                 "muse" => super::types::Backend::Muse,
                 _ => super::types::Backend::Claude,
             };
+            session.provider_account_id = preferences.as_ref().and_then(|prefs| {
+                crate::provider_accounts::default_account_id_for(
+                    &prefs.provider_accounts,
+                    &prefs.default_provider_accounts,
+                    &backend,
+                )
+            });
             log::trace!("Backend selection saved");
             Ok(())
         } else {
@@ -6409,7 +6429,7 @@ pub fn codex_goal_set(
     let thread_id = codex_thread_id_for_session(&app, &worktree_id, &worktree_path, &session_id)?;
 
     if let Some(tid) = thread_id {
-        super::codex_server::ensure_running(&app)?;
+        super::codex_server::ensure_running_for_session(&app, &session_id)?;
         let params = codex_goal_set_params(&tid, trimmed);
         let result = super::codex_server::send_request("thread/goal/set", params);
         super::codex_server::release_usage();
@@ -6436,7 +6456,7 @@ pub fn codex_goal_get(
     let thread_id = codex_thread_id_for_session(&app, &worktree_id, &worktree_path, &session_id)?;
 
     let goal = if let Some(tid) = thread_id {
-        super::codex_server::ensure_running(&app)?;
+        super::codex_server::ensure_running_for_session(&app, &session_id)?;
         let response = super::codex_server::send_request(
             "thread/goal/get",
             serde_json::json!({ "threadId": tid }),
@@ -6471,7 +6491,7 @@ pub fn codex_goal_clear(
     let thread_id = codex_thread_id_for_session(&app, &worktree_id, &worktree_path, &session_id)?;
 
     if let Some(tid) = thread_id {
-        super::codex_server::ensure_running(&app)?;
+        super::codex_server::ensure_running_for_session(&app, &session_id)?;
         let result = super::codex_server::send_request(
             "thread/goal/clear",
             serde_json::json!({ "threadId": tid }),

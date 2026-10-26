@@ -343,6 +343,8 @@ export interface Session {
   selected_effort_level?: EffortLevel
   /** Selected provider (custom CLI profile name) for this session */
   selected_provider?: string
+  /** Named provider account for this session. Absent means the CLI's own login. */
+  provider_account_id?: string | null
   /** Selected workflow/permission policy for this session */
   selected_execution_mode?: ExecutionMode
   /** Build permission choice, retained while planning. */
@@ -1374,8 +1376,10 @@ export interface SubAgent {
   status: 'in_progress' | 'completed' | 'errored' | 'interrupted'
   /** Completion message from agents_states */
   message?: string
-  /** Bold label before the prompt (e.g. Claude subagent model or type) */
+  /** Bold label before the prompt (e.g. Claude subagent model or Codex codename) */
   label?: string
+  /** Model the agent runs on, when the backend reports one */
+  model?: string
   /** Number of tool calls the agent made (Claude only) */
   toolCount?: number
   /** Context tokens of the agent's latest API call (Claude only) */

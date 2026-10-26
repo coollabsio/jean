@@ -231,6 +231,27 @@ catalog/defaults; the React UI retains bundled fallbacks for older servers.
 Duplicate pairs are rejected while running. Job progress emits
 `review-job:updated`.
 
+### Provider accounts
+
+Claude and Codex can keep more than one login. `provider_accounts` on
+`AppPreferences` stores `{ id, backend, label }`. Each account's auth files
+live under `{app_data}/provider-accounts/{backend}/{id}`. A session's
+`provider_account_id` selects one of them. An empty selection uses the CLI's
+own login (`~/.claude` or `~/.codex`).
+
+New Claude and Codex sessions copy `default_provider_accounts[backend]` when
+that id still belongs to the backend. The chat toolbar can change the account
+for the open session. Claude turns set `CLAUDE_CONFIG_DIR`. Codex turns set
+`CODEX_HOME` on the shared app-server and restart that server only when it is
+idle.
+
+Sign-in still writes the CLI's own home. `capture_provider_account_auth`
+copies that login into the account directory (`auth.json` or
+`.credentials.json`, plus optional config). The other commands are
+`create_provider_account`, `delete_provider_account`, and
+`set_session_provider_account`. Jean MCP stays enabled on every preference
+load and save.
+
 ### Command-Centric Design
 
 All user actions flow through a centralized command system:
@@ -533,7 +554,7 @@ interaction finishes.
 
 ### Canvas View
 
-**ProjectCanvasView** (`src/components/dashboard/ProjectCanvasView.tsx`) shows sessions across all worktrees in a project, grouped by worktree with section headers. Sessions are opened via `SessionChatModal` overlay.
+**ProjectCanvasView** (`src/components/dashboard/ProjectCanvasView.tsx`) lists the selected project's worktrees. Focusing a worktree — from the canvas row or the sidebar worktree row — opens `WorktreeSessionsBrowser` instead of the horizontal session tab strip. The browser reuses session card status, labels, and `useCanvasKeyboardNav`. A row shows the effective session status and, when live agent activity differs from that status, the agent status as well. Choosing a session opens `SessionChatModal`. Sidebar session rows and other explicit session actions still open that session directly.
 
 Shared infrastructure in `src/components/chat/`:
 

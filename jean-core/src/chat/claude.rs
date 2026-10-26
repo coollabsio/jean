@@ -1581,8 +1581,11 @@ pub fn execute_claude_detached(
         return Err(error_msg);
     }
 
+    let account_home =
+        crate::provider_accounts::account_config_home_for_session(app, "claude", session_id)?;
+
     // Build args
-    let (args, env_vars) = build_claude_args(
+    let (args, mut env_vars) = build_claude_args(
         app,
         session_id,
         worktree_id,
@@ -1601,6 +1604,10 @@ pub fn execute_claude_detached(
         include_recap,
         working_dir,
     );
+    if let Some(home) = account_home {
+        let (key, value) = crate::provider_accounts::config_env("claude", &home)?;
+        env_vars.push((key.to_string(), value));
+    }
 
     // Log the full Claude CLI command for debugging
     log::debug!(

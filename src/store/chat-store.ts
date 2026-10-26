@@ -180,6 +180,9 @@ interface ChatUIState {
   // Selected provider per session (null = default Anthropic, or custom profile name)
   selectedProviders: Record<string, string | null>
 
+  // Named provider account per session (null = the CLI's own login)
+  selectedProviderAccounts: Record<string, string | null>
+
   // Enabled MCP servers per session (server names that are active)
   enabledMcpServers: Record<string, string[]>
 
@@ -532,6 +535,10 @@ interface ChatUIState {
 
   // Actions - Selected provider (session-based)
   setSelectedProvider: (sessionId: string, provider: string | null) => void
+  setSelectedProviderAccount: (
+    sessionId: string,
+    accountId: string | null
+  ) => void
 
   // Actions - Copy all per-session settings from one session to another
   copySessionSettings: (fromSessionId: string, toSessionId: string) => void
@@ -820,6 +827,7 @@ const SESSION_SCOPED_RECORD_KEYS = [
   'selectedBackends',
   'selectedModels',
   'selectedProviders',
+  'selectedProviderAccounts',
   'enabledMcpServers',
   'answeredQuestions',
   'submittedAnswers',
@@ -982,6 +990,7 @@ export const useChatStore = create<ChatUIState>()(
       selectedBackends: {},
       selectedModels: {},
       selectedProviders: {},
+      selectedProviderAccounts: {},
       enabledMcpServers: {},
       scheduledWakeups: {},
       scheduledWakeupSessionIds: {},
@@ -2717,6 +2726,23 @@ export const useChatStore = create<ChatUIState>()(
           'setSelectedProvider'
         ),
 
+      setSelectedProviderAccount: (sessionId, accountId) =>
+        set(
+          state => {
+            if (state.selectedProviderAccounts[sessionId] === accountId) {
+              return state
+            }
+            return {
+              selectedProviderAccounts: {
+                ...state.selectedProviderAccounts,
+                [sessionId]: accountId,
+              },
+            }
+          },
+          undefined,
+          'setSelectedProviderAccount'
+        ),
+
       // Copy all per-session settings from one session to another
       copySessionSettings: (fromId, toId) =>
         set(
@@ -2756,6 +2782,13 @@ export const useChatStore = create<ChatUIState>()(
               updates.selectedProviders = {
                 ...state.selectedProviders,
                 [toId]: sp,
+              }
+            }
+            const accountId = state.selectedProviderAccounts[fromId]
+            if (accountId !== undefined) {
+              updates.selectedProviderAccounts = {
+                ...state.selectedProviderAccounts,
+                [toId]: accountId,
               }
             }
             const ms = state.enabledMcpServers[fromId]

@@ -3658,6 +3658,43 @@ pub async fn dispatch_command(
             emit_cache_invalidation(app, &["session", "sessions"]);
             Ok(Value::Null)
         }
+        "create_provider_account" => {
+            let backend: String = from_field(&args, "backend")?;
+            let label: String = from_field(&args, "label")?;
+            let account =
+                crate::provider_accounts::create_provider_account(app.clone(), backend, label)
+                    .await?;
+            emit_cache_invalidation(app, &["preferences"]);
+            to_value(account)
+        }
+        "delete_provider_account" => {
+            let id: String = from_field(&args, "id")?;
+            crate::provider_accounts::delete_provider_account(app.clone(), id).await?;
+            emit_cache_invalidation(app, &["preferences"]);
+            Ok(Value::Null)
+        }
+        "capture_provider_account_auth" => {
+            let id: String = from_field(&args, "id")?;
+            let copied =
+                crate::provider_accounts::capture_provider_account_auth(app.clone(), id).await?;
+            to_value(copied)
+        }
+        "set_session_provider_account" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let account_id: Option<String> = field_opt(&args, "accountId", "account_id")?;
+            crate::provider_accounts::set_session_provider_account(
+                app.clone(),
+                worktree_id,
+                worktree_path,
+                session_id,
+                account_id,
+            )
+            .await?;
+            emit_cache_invalidation(app, &["session", "sessions"]);
+            Ok(Value::Null)
+        }
         "set_session_last_opened" => {
             let session_id: String = field(&args, "sessionId", "session_id")?;
             crate::chat::set_session_last_opened(app.clone(), session_id).await?;

@@ -70,6 +70,7 @@ mod pi_cli;
 mod platform;
 mod prerequisites;
 mod projects;
+mod provider_accounts;
 mod server_update;
 mod terminal;
 mod ui_client_state;
@@ -326,6 +327,12 @@ pub struct AppPreferences {
     pub custom_codex_providers: Vec<CodexProviderProfile>, // Codex custom model_provider profiles
     #[serde(default)]
     pub default_codex_provider: Option<String>, // Default Codex provider profile name (None = built-in)
+    /// Named Claude/Codex logins. Auth lives in per-account config directories.
+    #[serde(default)]
+    pub provider_accounts: Vec<provider_accounts::ProviderAccount>,
+    /// Default account id for new sessions, keyed by backend ("claude", "codex").
+    #[serde(default)]
+    pub default_provider_accounts: std::collections::HashMap<String, String>,
     #[serde(default)]
     pub custom_pi_providers: Vec<PiProviderProfile>, // PI custom providers (index; disk = models.json)
     #[serde(default)]
@@ -3344,6 +3351,8 @@ impl Default for AppPreferences {
             default_provider: None,
             custom_codex_providers: Vec::new(),
             default_codex_provider: None,
+            provider_accounts: Vec::new(),
+            default_provider_accounts: std::collections::HashMap::new(),
             custom_pi_providers: Vec::new(),
             favorite_models: Vec::new(),
             favorite_package_scripts: Vec::new(),

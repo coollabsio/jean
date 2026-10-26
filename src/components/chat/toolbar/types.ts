@@ -3,6 +3,7 @@ import type {
   CliBackend,
   CodexProviderProfile,
   CustomCliProfile,
+  ProviderAccount,
 } from '@/types/preferences'
 import type {
   ThinkingLevel,
@@ -113,6 +114,9 @@ export interface ChatToolbarProps {
   onModelChange: (model: ClaudeModel) => void
   onBackendModelChange: (backend: CliBackend, model: string) => void
   onProviderChange: (provider: string | null) => void
+  providerAccounts?: ProviderAccount[]
+  selectedProviderAccountId?: string | null
+  onProviderAccountChange?: (accountId: string | null) => void
   customCliProfiles: CustomCliProfile[]
   /** Codex custom model_provider profiles from Settings → Providers */
   customCodexProviders?: CodexProviderProfile[]
