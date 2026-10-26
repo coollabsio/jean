@@ -85,10 +85,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for full development setup and guidelines
 Every Jean instance can run **Web Access**: an embedded HTTP + WebSocket server
 that serves the same UI in a browser. That applies to both:
 
-| Mode | How you get Web Access |
-| --- | --- |
+| Mode                                         | How you get Web Access                                                                        |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | **Native desktop** (macOS / Windows / Linux) | Settings → **Web Access** - enable the HTTP server, set port/bind address, copy the token URL |
-| **Headless server** (`jean-server`) | Always on - the process *is* the Web Access endpoint |
+| **Headless server** (`jean-server`)          | Always on - the process _is_ the Web Access endpoint                                          |
 
 Use it to open Jean from another machine on your LAN, a phone/tablet browser,
 or a remote host. Token authentication is on by default; keep it enabled for
@@ -131,12 +131,18 @@ The desktop app can work with any number of Jean servers at the same time:
    - **Install via SSH** - enter SSH user, host/IP, and ports; Jean installs
      `jean-server` on that machine for you, or
    - **Existing URL** - paste the Web Access URL and access token
-3. Projects from Local and every enabled remote appear together in one sidebar,
-   grouped by server. Use the **All servers** filter to focus on one host.
+3. A repository stays **one project** in the sidebar, even when a checkout
+   exists on more than one Jean. Use the **All servers** filter to focus the
+   list. Projects that are not the same git remote still group by server.
 
-There is no switching: sessions, terminals, file previews, and git actions run
-on the server that owns the project. Uncheck **Include in combined dashboard**
-to hide a server without removing it.
+When you create a worktree or session, **Start on** lists Local and each
+connected remote. If that host does not have the checkout yet, Jean clones it
+from the project's git remotes and shows git's clone progress (a percent bar
+when git prints one, otherwise a moving bar and the latest git line). It then
+asks before copying env files such as `.env` and `.env.local`, and the copy
+advances file by file. Nothing is synced after that. The host is where the
+new worktree or session runs. Uncheck **Include in combined dashboard** to
+hide a server without removing it.
 
 ### Headless server (`jean-server`)
 

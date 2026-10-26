@@ -374,7 +374,7 @@ export function useChatWindowEvents({
       window.removeEventListener('set-chat-input', handler as EventListener)
   }, [activeSessionId, inputRef])
 
-  // Append text to chat input from external context providers (browser Grab).
+  // Append `{ text }` into the active chat draft at the caret.
   useEffect(() => {
     const handler = (e: CustomEvent<{ text: string }>) => {
       const { text } = e.detail
@@ -396,7 +396,8 @@ export function useChatWindowEvents({
       window.removeEventListener('append-chat-input', handler as EventListener)
   }, [activeSessionId, inputRef])
 
-  // Save external context as a pending pasted-text attachment (browser Grab).
+  // `attach-pasted-text` from embedded-browser grab: save DOM context as a
+  // pending pasted-text attachment.
   useEffect(() => {
     const handler = (
       e: CustomEvent<{ content: string; filename?: string }>

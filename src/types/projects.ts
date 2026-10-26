@@ -109,6 +109,10 @@ export interface Project {
   resourceId?: string
   /** Client-only display name for the owning server. */
   serverName?: string
+  /** Origin fetch URL from the owning host. Used to keep one project identity. */
+  origin_url?: string | null
+  /** Other hosts that already have this repository. Client-only. */
+  hostCheckouts?: ProjectHostCheckout[]
   /** Client-only marker for a read-only cached server snapshot. */
   offline?: boolean
   /** Unique identifier (UUID v4) */
@@ -165,6 +169,14 @@ export interface Project {
   has_base_session?: boolean
   /** SSH target when this project is a managed server */
   server?: ProjectServer | null
+}
+
+export interface ProjectHostCheckout {
+  serverId: string
+  projectId: string
+  path: string
+  serverName: string
+  offline?: boolean
 }
 
 export function isServerProject(project: Project): boolean {
@@ -245,6 +257,8 @@ export interface UnmanagedWorktreeListing {
 export interface Worktree {
   /** Client-only owning server for native multi-server views. */
   serverId?: string
+  /** Client-only display name for the owning server. */
+  serverName?: string
   /** Original server-side ID when `id` is a composite client identity. */
   resourceId?: string
   /** Unique identifier (UUID v4) */

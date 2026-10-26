@@ -302,6 +302,23 @@ describe('server command routing', () => {
     ).toMatchObject({ id: 'remote:folder', serverId: 'remote' })
   })
 
+  it('scopes the project returned by ensure_project_present', () => {
+    expect(
+      decorateServerResult('remote', 'ensure_project_present', {
+        status: 'cloned',
+        project: { id: 'jean', path: '/srv/jean' },
+      })
+    ).toMatchObject({
+      status: 'cloned',
+      project: {
+        id: 'remote:jean',
+        resourceId: 'jean',
+        serverId: 'remote',
+        path: '/srv/jean',
+      },
+    })
+  })
+
   it('scopes remote unread session lists like full session lists', () => {
     for (const command of ['list_all_sessions', 'list_unread_sessions']) {
       expect(
