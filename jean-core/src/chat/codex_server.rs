@@ -976,7 +976,16 @@ fn ensure_running_socket(
         "--listen".to_string(),
         format!("unix://{}", socket_path.display()),
     ];
-    let pid = super::detached::spawn_detached_process(cli_path, &args, &log_path, &app_data)?;
+    // #875 removed Jean-managed Codex homes. Only the CLIProxyAPI client key
+    // is injected, and only when that sidecar has generated one.
+    let cliproxy_env = crate::opinionated::cliproxyapi::codex_process_env();
+    let env: Vec<(&str, &str)> = cliproxy_env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    let pid = super::detached::spawn_detached_process_with_env(
+        cli_path, &args, &log_path, &app_data, &env,
+    )?;
 
     write_pid_file(&ServerPidRecord {
         jean_pid: std::process::id(),
@@ -1045,6 +1054,9 @@ fn ensure_running_stdio(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    for (key, value) in crate::opinionated::cliproxyapi::codex_process_env() {
+        command.env(key, value);
+    }
     let mut child = command
         .spawn()
         .map_err(|e| format!("Failed to spawn codex app-server: {e}"))?;

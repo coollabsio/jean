@@ -17,6 +17,8 @@ import {
   RefreshCw,
   ChevronRight,
   Trash2,
+  Play,
+  Square,
 } from '@/components/icons/reicon'
 import { toast } from 'sonner'
 import { SettingsSection } from '../SettingsSection'
@@ -27,17 +29,67 @@ interface UsageStep {
   note?: string
 }
 
+interface PluginLink {
+  label: string
+  url: string
+}
+
 interface PluginDefinition {
   id: string
   name: string
   description: string
   githubUrl: string
+  links?: PluginLink[]
   usage: UsageStep[]
-  scope: 'system-wide' | 'ai-backends' | 'claude-cli'
+  scope: 'system-wide' | 'ai-backends' | 'claude-cli' | 'local-proxy'
   backends: string[]
 }
 
 const PLUGINS: PluginDefinition[] = [
+  {
+    id: 'cliproxyapi',
+    name: 'CLIProxyAPI',
+    description:
+      'Local MIT-licensed proxy (router-for-me/CLIProxyAPI). CLIProxyAPI keeps multi-account pooling and round-robin outside Jean. Jean installs the official binary, runs it on 127.0.0.1:8317, and adds Claude and Codex profiles that point at that localhost URL. Jean does not store extra Claude or Codex subscription logins and does not switch accounts for you.',
+    githubUrl: 'https://github.com/router-for-me/CLIProxyAPI',
+    links: [
+      {
+        label: 'MIT license',
+        url: 'https://github.com/router-for-me/CLIProxyAPI/blob/main/LICENSE',
+      },
+      {
+        label: 'EasyCLIProxyAPI',
+        url: 'https://github.com/router-for-me/EasyCLIProxyAPI',
+      },
+      {
+        label: 'CLIProxyAPI docs',
+        url: 'https://help.router-for.me/',
+      },
+    ],
+    scope: 'local-proxy',
+    backends: ['Claude', 'Codex'],
+    usage: [
+      {
+        note: 'Install downloads the official release for this OS into ~/.jean/opinionated/cliproxyapi and binds 127.0.0.1:8317. LAN access stays off unless you edit server.host in that config.yaml yourself.',
+      },
+      {
+        note: 'After install, pick the CLIProxyAPI provider on a Claude or Codex session (Preferences → Providers). Codex is injected per session (base_url http://127.0.0.1:8317/v1, wire_api responses). Jean does not rewrite ~/.codex/config.toml.',
+      },
+      {
+        note: 'OAuth accounts are added in CLIProxyAPI, not in Jean. Use the login commands below, the management page (key file: ~/.jean/opinionated/cliproxyapi/management-key), or EasyCLIProxyAPI. Tokens stay in ~/.jean/opinionated/cliproxyapi/auths.',
+      },
+      {
+        label: 'Claude account login',
+        command:
+          '~/.jean/opinionated/cliproxyapi/cli-proxy-api --config ~/.jean/opinionated/cliproxyapi/config.yaml -claude-login',
+      },
+      {
+        label: 'Codex account login',
+        command:
+          '~/.jean/opinionated/cliproxyapi/cli-proxy-api --config ~/.jean/opinionated/cliproxyapi/config.yaml -codex-login',
+      },
+    ],
+  },
   {
     id: 'rtk',
     name: 'RTK',
@@ -226,6 +278,10 @@ interface PluginStatus {
   install_supported?: boolean
   unsupported_reason?: string
   backends?: BackendPluginStatus[]
+  running?: boolean
+  endpoint?: string | null
+  management_url?: string | null
+  lan_exposed?: boolean
 }
 
 interface BackendPluginStatus {
@@ -239,6 +295,7 @@ function PluginCard({ plugin }: { plugin: PluginDefinition }) {
   const [checking, setChecking] = useState(true)
   const [installing, setInstalling] = useState(false)
   const [uninstalling, setUninstalling] = useState(false)
+  const [controlling, setControlling] = useState(false)
   const [expanded, setExpanded] = useState(false)
 
   const checkStatus = useCallback(async () => {
@@ -269,21 +326,58 @@ function PluginCard({ plugin }: { plugin: PluginDefinition }) {
         pluginName: plugin.id,
       })
       toast.success(message, { id: toastId })
-      await checkStatus()
     } catch (error) {
       toast.error(`Failed to install ${plugin.name}: ${error}`, {
         id: toastId,
       })
     } finally {
       setInstalling(false)
+      await checkStatus()
     }
   }, [plugin.id, plugin.name, checkStatus])
+
+  const handleControl = useCallback(
+    async (action: 'start' | 'stop') => {
+      setControlling(true)
+      const toastId = toast.loading(
+        action === 'start'
+          ? `Starting ${plugin.name}...`
+          : `Stopping ${plugin.name}...`
+      )
+      try {
+        const message = await invoke<string>(
+          action === 'start'
+            ? 'start_opinionated_plugin'
+            : 'stop_opinionated_plugin',
+          { pluginName: plugin.id }
+        )
+        toast.success(message, { id: toastId })
+      } catch (error) {
+        toast.error(`Failed to ${action} ${plugin.name}: ${error}`, {
+          id: toastId,
+        })
+      } finally {
+        setControlling(false)
+        await checkStatus()
+      }
+    },
+    [plugin.id, plugin.name, checkStatus]
+  )
 
   const hasMissingBackend =
     plugin.scope === 'ai-backends' &&
     (status?.backends?.some(backend => !backend.installed) ?? false)
-  const statusLabel = hasMissingBackend ? 'Partial' : 'Installed'
+  const supervises = plugin.scope === 'local-proxy'
+  const statusLabel = hasMissingBackend
+    ? 'Partial'
+    : supervises && status?.installed
+      ? status.running
+        ? 'Running'
+        : 'Stopped'
+      : 'Installed'
   const installUnsupported = status?.install_supported === false
+  const canUninstall = plugin.scope === 'ai-backends' || supervises
+  const busy = installing || uninstalling || controlling
 
   const handleUninstall = useCallback(async () => {
     setUninstalling(true)
@@ -294,13 +388,13 @@ function PluginCard({ plugin }: { plugin: PluginDefinition }) {
         pluginName: plugin.id,
       })
       toast.success(message, { id: toastId })
-      await checkStatus()
     } catch (error) {
       toast.error(`Failed to uninstall ${plugin.name}: ${error}`, {
         id: toastId,
       })
     } finally {
       setUninstalling(false)
+      await checkStatus()
     }
   }, [plugin.id, plugin.name, checkStatus])
 
@@ -349,7 +443,9 @@ function PluginCard({ plugin }: { plugin: PluginDefinition }) {
               ? 'System-wide (shell)'
               : plugin.scope === 'ai-backends'
                 ? 'AI backend skills'
-                : 'Claude CLI plugin'}
+                : plugin.scope === 'local-proxy'
+                  ? 'Local proxy (localhost)'
+                  : 'Claude CLI plugin'}
           </Badge>
         </button>
         <span className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:shrink-0">
@@ -362,16 +458,36 @@ function PluginCard({ plugin }: { plugin: PluginDefinition }) {
                 size="sm"
                 aria-label={`Refresh ${plugin.name} status`}
                 onClick={checkStatus}
-                disabled={installing || uninstalling}
+                disabled={busy}
               >
                 <RefreshCw className="h-4 w-4" />
               </Button>
+              {supervises && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    handleControl(status?.running ? 'stop' : 'start')
+                  }
+                  disabled={busy}
+                  className="flex-1 sm:flex-none"
+                >
+                  {controlling ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : status?.running ? (
+                    <Square className="h-4 w-4" />
+                  ) : (
+                    <Play className="h-4 w-4" />
+                  )}
+                  {status?.running ? 'Stop' : 'Start'}
+                </Button>
+              )}
               {plugin.scope === 'ai-backends' && (
                 <Button
                   variant={hasMissingBackend ? 'default' : 'outline'}
                   size="sm"
                   onClick={handleInstall}
-                  disabled={installing || uninstalling}
+                  disabled={busy}
                   className="flex-1 sm:flex-none"
                 >
                   {installing ? (
@@ -382,12 +498,12 @@ function PluginCard({ plugin }: { plugin: PluginDefinition }) {
                   {hasMissingBackend ? 'Reinstall' : 'Install again'}
                 </Button>
               )}
-              {plugin.scope === 'ai-backends' && (
+              {canUninstall && (
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={handleUninstall}
-                  disabled={installing || uninstalling}
+                  disabled={busy}
                   className="flex-1 sm:flex-none"
                 >
                   {uninstalling ? (
@@ -421,7 +537,7 @@ function PluginCard({ plugin }: { plugin: PluginDefinition }) {
             <Button
               size="sm"
               onClick={handleInstall}
-              disabled={installing || uninstalling || installUnsupported}
+              disabled={busy || installUnsupported}
               className="w-full sm:w-auto"
             >
               {installUnsupported ? null : installing ? (
@@ -451,14 +567,46 @@ function PluginCard({ plugin }: { plugin: PluginDefinition }) {
                 {status.unsupported_reason}
               </p>
             )}
-            <button
-              type="button"
-              onClick={() => openExternal(plugin.githubUrl)}
-              className="inline-flex items-center gap-1 text-xs text-primary hover:underline underline-offset-2 cursor-pointer"
-            >
-              <ExternalLink className="h-3 w-3" />
-              GitHub
-            </button>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => openExternal(plugin.githubUrl)}
+                className="inline-flex items-center gap-1 text-xs text-primary hover:underline underline-offset-2 cursor-pointer"
+              >
+                <ExternalLink className="h-3 w-3" />
+                GitHub
+              </button>
+              {plugin.links?.map(link => (
+                <button
+                  key={link.url}
+                  type="button"
+                  onClick={() => openExternal(link.url)}
+                  className="inline-flex items-center gap-1 text-xs text-primary hover:underline underline-offset-2 cursor-pointer"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  {link.label}
+                </button>
+              ))}
+              {supervises && status?.running && status.management_url && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (status.management_url)
+                      openExternal(status.management_url)
+                  }}
+                  className="inline-flex items-center gap-1 text-xs text-primary hover:underline underline-offset-2 cursor-pointer"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  Open management
+                </button>
+              )}
+            </div>
+            {status?.lan_exposed && (
+              <p className="text-xs text-destructive">
+                This config is not bound to localhost. Jean will not widen the
+                bind; edit config.yaml only if you intend to expose the proxy.
+              </p>
+            )}
           </div>
 
           {plugin.scope === 'ai-backends' && status?.backends && (

@@ -5324,6 +5324,9 @@ pub fn execute_one_shot_codex(
     cmd.stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
+    for (key, value) in crate::opinionated::cliproxyapi::codex_process_env() {
+        cmd.env(key, value);
+    }
 
     // Run in a new process group so a timeout kill can take down the whole tree.
     // Codex spawns MCP server children (e.g. chrome-devtools-mcp) that survive a

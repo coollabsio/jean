@@ -4252,13 +4252,33 @@ pub async fn dispatch_command(
         "install_opinionated_plugin" => {
             let plugin_name: String = from_field(&args, "pluginName")?;
             let result =
-                crate::opinionated::install_opinionated_plugin(app.clone(), plugin_name).await?;
+                crate::opinionated::install_opinionated_plugin(app.clone(), plugin_name.clone())
+                    .await?;
+            if plugin_name == "cliproxyapi" {
+                emit_cache_invalidation(app, &["preferences"]);
+            }
             to_value(result)
         }
         "uninstall_opinionated_plugin" => {
             let plugin_name: String = from_field(&args, "pluginName")?;
             let result =
-                crate::opinionated::uninstall_opinionated_plugin(app.clone(), plugin_name).await?;
+                crate::opinionated::uninstall_opinionated_plugin(app.clone(), plugin_name.clone())
+                    .await?;
+            if plugin_name == "cliproxyapi" {
+                emit_cache_invalidation(app, &["preferences"]);
+            }
+            to_value(result)
+        }
+        "start_opinionated_plugin" => {
+            let plugin_name: String = from_field(&args, "pluginName")?;
+            let result =
+                crate::opinionated::start_opinionated_plugin(app.clone(), plugin_name).await?;
+            to_value(result)
+        }
+        "stop_opinionated_plugin" => {
+            let plugin_name: String = from_field(&args, "pluginName")?;
+            let result =
+                crate::opinionated::stop_opinionated_plugin(app.clone(), plugin_name).await?;
             to_value(result)
         }
 

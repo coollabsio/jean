@@ -1524,6 +1524,13 @@ export const PREDEFINED_CODEX_PROVIDERS: CodexProviderProfile[] = [
     env_key: 'OPENROUTER_API_KEY',
     wire_api: 'responses',
   },
+  {
+    name: 'CLIProxyAPI',
+    provider_id: 'cliproxyapi',
+    base_url: 'http://127.0.0.1:8317/v1',
+    env_key: 'CLIPROXYAPI_API_KEY',
+    wire_api: 'responses',
+  },
 ]
 
 export const PREDEFINED_PI_PROVIDERS: PiProviderProfile[] = [
@@ -1546,6 +1553,24 @@ export const PREDEFINED_PI_PROVIDERS: PiProviderProfile[] = [
 ]
 
 export const PREDEFINED_CLI_PROFILES: CustomCliProfile[] = [
+  {
+    name: 'CLIProxyAPI',
+    settings_json: JSON.stringify(
+      {
+        env: {
+          ANTHROPIC_BASE_URL: 'http://127.0.0.1:8317',
+          ANTHROPIC_AUTH_TOKEN:
+            '<filled when Opinionated CLIProxyAPI is installed>',
+          ANTHROPIC_API_KEY:
+            '<filled when Opinionated CLIProxyAPI is installed>',
+          CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1',
+          API_TIMEOUT_MS: '600000',
+        },
+      },
+      null,
+      2
+    ),
+  },
   {
     name: 'OpenRouter',
     settings_json: JSON.stringify(

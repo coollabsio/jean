@@ -217,4 +217,72 @@ describe('OpinionatedPane', () => {
       screen.getByText(/requires glibc 2\.39 or newer/)
     ).toBeInTheDocument()
   })
+
+  it('describes CLIProxyAPI as an external localhost proxy and can start it', async () => {
+    const user = userEvent.setup()
+    vi.mocked(invoke).mockImplementation(async (command, args) => {
+      const pluginName = (args as { pluginName?: string })?.pluginName
+      if (command === 'check_opinionated_plugin_status') {
+        if (pluginName === 'cliproxyapi') {
+          return {
+            installed: true,
+            version: 'v8.0.43',
+            install_supported: true,
+            running: false,
+            endpoint: 'http://127.0.0.1:8317',
+            management_url: 'http://127.0.0.1:8317/management.html',
+            lan_exposed: false,
+          }
+        }
+        return { installed: false, version: null, install_supported: true }
+      }
+      if (command === 'start_opinionated_plugin') {
+        return 'CLIProxyAPI is running at http://127.0.0.1:8317'
+      }
+      throw new Error(`Unexpected command ${command}`)
+    })
+
+    render(<OpinionatedPane />)
+
+    const label = await screen.findByText('CLIProxyAPI')
+    const card = label.closest('.rounded-md')?.parentElement
+    if (!card) throw new Error('Expected CLIProxyAPI card')
+
+    expect(within(card as HTMLElement).getByText('Stopped')).toBeInTheDocument()
+    expect(
+      within(card as HTMLElement).getByText('Local proxy (localhost)')
+    ).toBeInTheDocument()
+
+    await user.click(label)
+
+    expect(
+      within(card as HTMLElement).getByText(
+        /pooling and round-robin outside Jean/i
+      )
+    ).toBeInTheDocument()
+    expect(
+      within(card as HTMLElement).getByText(
+        /does not store extra Claude or Codex/i
+      )
+    ).toBeInTheDocument()
+    expect(
+      within(card as HTMLElement).getByText(/127\.0\.0\.1:8317\/v1/)
+    ).toBeInTheDocument()
+    expect(
+      within(card as HTMLElement).getByText(/-claude-login/)
+    ).toBeInTheDocument()
+    expect(
+      within(card as HTMLElement).getByRole('button', { name: 'MIT license' })
+    ).toBeInTheDocument()
+
+    await user.click(
+      within(card as HTMLElement).getByRole('button', { name: 'Start' })
+    )
+
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith('start_opinionated_plugin', {
+        pluginName: 'cliproxyapi',
+      })
+    })
+  })
 })

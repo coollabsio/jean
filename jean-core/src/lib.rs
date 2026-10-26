@@ -4313,6 +4313,42 @@ async fn delete_cli_profile(name: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Add or refresh the CLIProxyAPI Claude settings file and Codex provider.
+/// Does not switch the user's default provider.
+pub(crate) async fn upsert_cliproxyapi_provider_profiles(
+    app: &AppHandle,
+    client_key: &str,
+) -> Result<(), String> {
+    let mut preferences = load_preferences(app.clone()).await?;
+    opinionated::cliproxyapi::upsert_provider_profiles(
+        &mut preferences.custom_cli_profiles,
+        &mut preferences.custom_codex_providers,
+        client_key,
+    );
+    save_preferences(app.clone(), preferences).await
+}
+
+/// Remove CLIProxyAPI provider profiles and the Claude settings file they use.
+pub(crate) async fn remove_cliproxyapi_provider_profiles(app: &AppHandle) -> Result<(), String> {
+    let mut preferences = load_preferences(app.clone()).await?;
+    let changed = opinionated::cliproxyapi::detach_provider_profiles(
+        &mut preferences.custom_cli_profiles,
+        &mut preferences.custom_codex_providers,
+        &mut preferences.default_provider,
+        &mut preferences.default_codex_provider,
+    );
+    if let Ok(path) = get_cli_profile_path(opinionated::cliproxyapi::PROFILE_NAME) {
+        if path.exists() {
+            std::fs::remove_file(&path)
+                .map_err(|error| format!("Failed to delete CLIProxyAPI Claude profile: {error}"))?;
+        }
+    }
+    if changed {
+        save_preferences(app.clone(), preferences).await?;
+    }
+    Ok(())
+}
+
 fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let app_data_dir = app
         .path()
@@ -5402,6 +5438,8 @@ pub fn initialize_runtime(context: &RuntimeContext) -> Result<(), String> {
         if let Err(error) = opinionated::sync_native_backend_skills_on_startup() {
             log::warn!("Failed to sync native backend skills: {error}");
         }
+        opinionated::cliproxyapi::export_client_key_to_process();
+        opinionated::cliproxyapi::resume_if_enabled();
     });
     Ok(())
 }
