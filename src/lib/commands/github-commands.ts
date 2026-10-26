@@ -3,6 +3,10 @@ import type { AppCommand } from './types'
 import { useUIStore } from '@/store/ui-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { projectsQueryKeys } from '@/services/projects'
+import {
+  gitProviderQueryKeys,
+  type GitProviderInfo,
+} from '@/services/git-provider'
 import type { Project } from '@/types/projects'
 
 export const githubCommands: AppCommand[] = [
@@ -69,6 +73,18 @@ export const githubCommands: AppCommand[] = [
       const { setWorkflowRunsModalOpen } = useUIStore.getState()
       setWorkflowRunsModalOpen(true, project.path)
     },
-    isAvailable: context => context.hasSelectedProject(),
+    isAvailable: context => {
+      if (!context.hasSelectedProject()) return false
+      const { selectedProjectId } = useProjectsStore.getState()
+      const projects = context.queryClient.getQueryData<Project[]>(
+        projectsQueryKeys.list()
+      )
+      const project = projects?.find(p => p.id === selectedProjectId)
+      if (!project?.path) return true
+      const provider = context.queryClient.getQueryData<GitProviderInfo>(
+        gitProviderQueryKeys.forPath(project.path)
+      )
+      return provider?.provider !== 'gitlab'
+    },
   },
 ]

@@ -3266,6 +3266,12 @@ pub async fn list_dependabot_alerts(
 ) -> Result<Vec<DependabotAlert>, String> {
     log::trace!("Listing Dependabot alerts for {project_path} with state: {state:?}");
 
+    // Dependabot is GitHub-only. The Security tab is hidden for GitLab; return
+    // an empty list so badges and web access don't shell out to `gh`.
+    if is_gitlab_project(&project_path) {
+        return Ok(vec![]);
+    }
+
     let gh = resolve_gh_binary(&app);
     let repo_id = get_repo_identifier(&project_path)?;
     let state_arg = state.unwrap_or_else(|| "open".to_string());
@@ -3314,6 +3320,10 @@ pub async fn get_dependabot_alert(
     project_path: String,
     alert_number: u32,
 ) -> Result<DependabotAlert, String> {
+    if is_gitlab_project(&project_path) {
+        return Err("Security alerts are not available for GitLab projects.".to_string());
+    }
+
     let gh = resolve_gh_binary(&app);
     let repo_id = get_repo_identifier(&project_path)?;
 
@@ -3356,6 +3366,10 @@ pub async fn load_security_alert_context(
     project_path: String,
 ) -> Result<LoadedSecurityAlertContext, String> {
     log::trace!("Loading security alert #{alert_number} context for session {session_id}");
+
+    if is_gitlab_project(&project_path) {
+        return Err("Security alerts are not available for GitLab projects.".to_string());
+    }
 
     let repo_id = get_repo_identifier(&project_path)?;
     let repo_key = repo_id.to_key();
@@ -3578,6 +3592,10 @@ pub async fn list_repository_advisories(
 ) -> Result<Vec<RepositoryAdvisory>, String> {
     log::trace!("Listing repository advisories for {project_path} with state: {state:?}");
 
+    if is_gitlab_project(&project_path) {
+        return Ok(vec![]);
+    }
+
     let gh = resolve_gh_binary(&app);
     let repo_id = get_repo_identifier(&project_path)?;
 
@@ -3628,6 +3646,10 @@ pub async fn get_repository_advisory(
     project_path: String,
     ghsa_id: String,
 ) -> Result<RepositoryAdvisory, String> {
+    if is_gitlab_project(&project_path) {
+        return Err("Security advisories are not available for GitLab projects.".to_string());
+    }
+
     let gh = resolve_gh_binary(&app);
     let repo_id = get_repo_identifier(&project_path)?;
 
@@ -3670,6 +3692,10 @@ pub async fn load_advisory_context(
     project_path: String,
 ) -> Result<LoadedAdvisoryContext, String> {
     log::trace!("Loading advisory {ghsa_id} context for session {session_id}");
+
+    if is_gitlab_project(&project_path) {
+        return Err("Security advisories are not available for GitLab projects.".to_string());
+    }
 
     let repo_id = get_repo_identifier(&project_path)?;
     let repo_key = repo_id.to_key();

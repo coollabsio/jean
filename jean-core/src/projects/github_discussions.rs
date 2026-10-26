@@ -382,6 +382,11 @@ fn detail_query() -> String {
     )
 }
 
+fn is_gitlab_project(project_path: &str) -> bool {
+    crate::projects::provider::resolve_git_provider(project_path).0
+        == crate::projects::provider::GitProvider::Gitlab
+}
+
 /// List one page of discussions, most recently updated first.
 /// state: "open" | "closed" | "all". `after` is the previous page's end cursor.
 /// Returns an empty page when the repository has discussions disabled.
@@ -391,6 +396,17 @@ pub async fn list_github_discussions(
     state: Option<String>,
     after: Option<String>,
 ) -> Result<GitHubDiscussionPage, String> {
+    // GitHub Discussions have no GitLab counterpart. The tab is hidden; don't
+    // call `gh` just because the repo identifier now resolves for GitLab.
+    if is_gitlab_project(&project_path) {
+        return Ok(GitHubDiscussionPage {
+            discussions: Vec::new(),
+            total_count: 0,
+            end_cursor: None,
+            has_next_page: false,
+        });
+    }
+
     let repo_id = get_repo_identifier(&project_path)?;
     let query = list_query(state.as_deref())?;
     let mut string_vars = vec![
@@ -409,6 +425,10 @@ pub async fn search_github_discussions(
     project_path: String,
     query: String,
 ) -> Result<Vec<GitHubDiscussion>, String> {
+    if is_gitlab_project(&project_path) {
+        return Ok(Vec::new());
+    }
+
     let repo_id = get_repo_identifier(&project_path)?;
     let search = format!("repo:{}/{} {}", repo_id.owner, repo_id.repo, query.trim());
     let stdout = run_gh_graphql(&app, &project_path, &search_query(), &[("q", &search)], &[])?;
@@ -420,6 +440,10 @@ pub async fn get_github_discussion(
     project_path: String,
     discussion_number: u32,
 ) -> Result<GitHubDiscussionDetail, String> {
+    if is_gitlab_project(&project_path) {
+        return Err("Discussions are not available for GitLab projects.".to_string());
+    }
+
     let repo_id = get_repo_identifier(&project_path)?;
     let stdout = run_gh_graphql(
         &app,

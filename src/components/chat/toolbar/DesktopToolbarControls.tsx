@@ -57,6 +57,12 @@ import type {
   PrDisplayStatus,
 } from '@/types/pr-status'
 import { openExternal } from '@/lib/platform'
+import {
+  hostedRepoWebUrl,
+  issueWebUrl,
+  pullRequestWebUrl,
+} from '@/lib/git-provider'
+import { providerLabels, useProjectGitProvider } from '@/services/git-provider'
 import { cn } from '@/lib/utils'
 import {
   CODEX_EFFORT_LEVEL_OPTIONS,
@@ -177,7 +183,7 @@ export function DesktopToolbarControls({
   displayStatus,
   checkStatus: _checkStatus,
   mergeableStatus,
-  activeWorktreePath: _activeWorktreePath,
+  activeWorktreePath,
   availableMcpServers: _availableMcpServers,
   enabledMcpServers: _enabledMcpServers,
   isHealthChecking: _isHealthChecking,
@@ -219,6 +225,14 @@ export function DesktopToolbarControls({
   handleViewSentry,
   handleViewSavedContext,
 }: DesktopToolbarControlsProps) {
+  const { data: gitProviderInfo } = useProjectGitProvider(activeWorktreePath)
+  const gitProvider = gitProviderInfo?.provider ?? 'github'
+  const forgeLabels = providerLabels(gitProvider)
+  const forgeHost =
+    gitProviderInfo?.host ??
+    (gitProvider === 'gitlab' ? 'gitlab.com' : 'github.com')
+  const forgeRepoUrl = (owner: string, repo: string) =>
+    hostedRepoWebUrl(forgeHost, owner, repo)
   const isPi = selectedBackend === 'pi'
   const isGrok = selectedBackend === 'grok'
   const isKimi = selectedBackend === 'kimi'
@@ -416,7 +430,11 @@ export function DesktopToolbarControls({
                         onClick={e => {
                           e.stopPropagation()
                           openExternal(
-                            `https://github.com/${ctx.repoOwner}/${ctx.repoName}/issues/${ctx.number}`
+                            issueWebUrl(
+                              forgeRepoUrl(ctx.repoOwner, ctx.repoName),
+                              ctx.number,
+                              gitProvider
+                            )
                           )
                         }}
                       >
@@ -431,7 +449,7 @@ export function DesktopToolbarControls({
                 <>
                   {loadedIssueContexts.length > 0 && <DropdownMenuSeparator />}
                   <DropdownMenuLabel className="text-xs text-muted-foreground">
-                    Pull Requests
+                    {forgeLabels.pullRequest}s
                   </DropdownMenuLabel>
                   {loadedPRContexts.map(ctx => (
                     <DropdownMenuItem
@@ -449,7 +467,11 @@ export function DesktopToolbarControls({
                         onClick={e => {
                           e.stopPropagation()
                           openExternal(
-                            `https://github.com/${ctx.repoOwner}/${ctx.repoName}/pull/${ctx.number}`
+                            pullRequestWebUrl(
+                              forgeRepoUrl(ctx.repoOwner, ctx.repoName),
+                              ctx.number,
+                              gitProvider
+                            )
                           )
                         }}
                       >

@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { openExternal } from '@/lib/platform'
+import { providerLabels, useProjectGitProvider } from '@/services/git-provider'
 import {
   useGitHubIssue,
   useGitHubPR,
@@ -240,7 +241,13 @@ function IssueContent({ detail }: { detail: GitHubIssueDetail }) {
   )
 }
 
-function PRContent({ detail }: { detail: GitHubPullRequestDetail }) {
+function PRContent({
+  detail,
+  itemLabel,
+}: {
+  detail: GitHubPullRequestDetail
+  itemLabel: string
+}) {
   const stateIcon = useMemo(() => {
     if (detail.state === 'MERGED')
       return (
@@ -289,7 +296,8 @@ function PRContent({ detail }: { detail: GitHubPullRequestDetail }) {
         <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/50 border-b border-border">
           <span className="text-sm font-medium">{detail.author.login}</span>
           <span className="text-xs text-muted-foreground">
-            opened this pull request on {formatDate(getCreatedAt(detail))}
+            opened this {itemLabel.toLowerCase()} on{' '}
+            {formatDate(getCreatedAt(detail))}
           </span>
         </div>
         <div className="px-4 py-3">
@@ -591,6 +599,8 @@ export function IssuePreviewModal({
   ghsaId,
   repo,
 }: IssuePreviewModalProps) {
+  const { data: gitProviderInfo } = useProjectGitProvider(projectPath)
+  const forgeLabels = providerLabels(gitProviderInfo?.provider ?? 'github')
   const issueQuery = useGitHubIssue(
     projectPath,
     type === 'issue' ? number : null,
@@ -620,6 +630,8 @@ export function IssuePreviewModal({
           : securityQuery
   const isLoading = activeQuery.isLoading
   const error = activeQuery.error
+
+  const typeLabel = type === 'pr' ? forgeLabels.pullRequest : TYPE_LABELS[type]
 
   const headerTitle: string | null =
     type === 'issue'
@@ -654,7 +666,7 @@ export function IssuePreviewModal({
         <DialogHeader className="flex-shrink-0 pr-16 text-left">
           <DialogTitle className="text-lg flex items-center gap-3 min-w-0">
             <span className="truncate">
-              {headerTitle ?? TYPE_LABELS[type]}{' '}
+              {headerTitle ?? typeLabel}{' '}
               <span className="text-muted-foreground font-normal">
                 {headerNumberSuffix}
               </span>
@@ -666,13 +678,15 @@ export function IssuePreviewModal({
                     type="button"
                     onClick={() => void openExternal(headerUrl)}
                     className="inline-flex items-center gap-1 text-xs font-normal text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
-                    aria-label="Open on GitHub"
+                    aria-label={`Open on ${forgeLabels.name}`}
                   >
                     <ExternalLink className="h-3.5 w-3.5" />
-                    <span className="hidden sm:inline">Open on GitHub</span>
+                    <span className="hidden sm:inline">
+                      Open on {forgeLabels.name}
+                    </span>
                   </button>
                 </TooltipTrigger>
-                <TooltipContent>Open on GitHub</TooltipContent>
+                <TooltipContent>Open on {forgeLabels.name}</TooltipContent>
               </Tooltip>
             )}
           </DialogTitle>
@@ -689,7 +703,7 @@ export function IssuePreviewModal({
             {error && (
               <div className="flex flex-col items-center gap-2 py-12 text-sm text-muted-foreground">
                 <AlertCircle className="h-6 w-6" />
-                <p>Failed to load {TYPE_LABELS[type].toLowerCase()} details.</p>
+                <p>Failed to load {typeLabel.toLowerCase()} details.</p>
                 <p className="text-xs">{String(error)}</p>
               </div>
             )}
@@ -699,7 +713,10 @@ export function IssuePreviewModal({
             )}
 
             {!isLoading && !error && type === 'pr' && prQuery.data && (
-              <PRContent detail={prQuery.data} />
+              <PRContent
+                detail={prQuery.data}
+                itemLabel={forgeLabels.pullRequest}
+              />
             )}
 
             {!isLoading &&

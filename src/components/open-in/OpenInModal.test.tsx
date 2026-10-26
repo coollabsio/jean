@@ -93,6 +93,7 @@ vi.mock('@/services/preferences', () => ({
 }))
 
 vi.mock('@/lib/environment', () => ({
+  hasBackendTransport: () => localBackendState.value,
   isLocalBackend: () => localBackendState.value,
   isNativeApp: () => localBackendState.value || remoteEditorLocallyState.value,
   canOpenNativeApps: () =>
