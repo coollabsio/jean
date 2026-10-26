@@ -10,6 +10,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { Badge } from '@/components/ui/badge'
+import { Separator } from '@/components/ui/separator'
 import {
   ExternalLink,
   Download,
@@ -379,6 +380,12 @@ function PluginCard({ plugin }: { plugin: PluginDefinition }) {
   const installUnsupported = status?.install_supported === false
   const canUninstall = plugin.scope === 'ai-backends' || supervises
   const busy = installing || uninstalling || controlling || loggingIn !== null
+  const versionText =
+    status?.installed && status.version
+      ? plugin.scope === 'ai-backends'
+        ? ` (${status.version})`
+        : ` (v${status.version})`
+      : null
 
   useEffect(() => {
     if (plugin.id !== 'cliproxyapi') return
@@ -465,55 +472,50 @@ function PluginCard({ plugin }: { plugin: PluginDefinition }) {
 
   return (
     <div>
-      <div className="flex flex-col gap-2 rounded-md px-2 py-1.5 hover:bg-muted/40 sm:flex-row sm:items-center">
+      <div className="flex min-h-10 min-w-0 max-w-full flex-col gap-2 rounded-md px-2 py-1.5 hover:bg-muted/40 sm:flex-row sm:items-center">
         <button
           type="button"
           onClick={() => setExpanded(e => !e)}
           aria-expanded={expanded}
-          className="min-w-0 w-full flex-1 flex flex-wrap items-center gap-2 text-left cursor-pointer"
+          className="flex min-w-0 w-full flex-1 items-center gap-2 overflow-hidden text-left cursor-pointer"
         >
           <ChevronRight
             className={`h-3.5 w-3.5 text-muted-foreground shrink-0 transition-transform ${
               expanded ? 'rotate-90' : ''
             }`}
           />
-          <Label className="text-sm font-medium text-foreground cursor-pointer">
-            {plugin.name}
+          <Label className="max-w-[46%] shrink-0 cursor-pointer overflow-hidden text-sm font-medium text-foreground sm:w-36 sm:max-w-none">
+            <span className="block truncate">{plugin.name}</span>
           </Label>
           {!checking && status?.installed && (
-            <Badge
-              variant="secondary"
-              className="min-w-0 max-w-full gap-1 text-xs"
-            >
-              <CheckCircle className="h-3 w-3 text-success" />
-              <span>{statusLabel}</span>
-              {status.version &&
-                (plugin.scope === 'ai-backends' ? (
-                  <span className="hidden truncate sm:inline">
-                    {' '}
-                    ({status.version})
-                  </span>
-                ) : (
-                  <span className="truncate"> (v{status.version})</span>
-                ))}
-            </Badge>
+            <span className="flex min-w-0 flex-1 items-center overflow-hidden">
+              <Badge
+                variant="secondary"
+                title={`${statusLabel}${versionText ?? ''}`}
+                className="w-auto min-w-0 max-w-full shrink justify-start gap-1 overflow-hidden text-xs"
+              >
+                <CheckCircle className="h-3 w-3 shrink-0 text-success" />
+                <span className="shrink-0">{statusLabel}</span>
+                {versionText && (
+                  <span className="min-w-0 truncate">{versionText}</span>
+                )}
+              </Badge>
+            </span>
           )}
-          {!checking && installUnsupported && (
-            <Badge variant="outline" className="text-xs">
-              Unsupported
-            </Badge>
+          {!checking && !status?.installed && (
+            <span className="flex min-w-0 flex-1 items-center overflow-hidden">
+              <Badge
+                variant="outline"
+                className="max-w-full shrink text-xs text-muted-foreground"
+              >
+                <span className="truncate">
+                  {installUnsupported ? 'Unsupported' : 'Not installed'}
+                </span>
+              </Badge>
+            </span>
           )}
-          <Badge variant="outline" className="max-w-full truncate text-xs">
-            {plugin.scope === 'system-wide'
-              ? 'System-wide (shell)'
-              : plugin.scope === 'ai-backends'
-                ? 'AI backend skills'
-                : plugin.scope === 'local-proxy'
-                  ? 'Local proxy (localhost)'
-                  : 'Claude CLI plugin'}
-          </Badge>
         </button>
-        <span className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:shrink-0">
+        <span className="flex w-full min-w-0 flex-wrap items-center justify-end gap-2 sm:w-auto sm:shrink-0 sm:flex-nowrap">
           {checking ? (
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
           ) : status?.installed ? (
@@ -770,7 +772,22 @@ function PluginCard({ plugin }: { plugin: PluginDefinition }) {
   )
 }
 
+const PLUGIN_SECTIONS: {
+  scope: PluginDefinition['scope']
+  title: string
+}[] = [
+  { scope: 'local-proxy', title: 'Local proxy' },
+  { scope: 'system-wide', title: 'System-wide (shell)' },
+  { scope: 'ai-backends', title: 'AI backend skills' },
+  { scope: 'claude-cli', title: 'Claude CLI plugin' },
+]
+
 export const OpinionatedPane: React.FC = () => {
+  const sections = PLUGIN_SECTIONS.map(section => ({
+    ...section,
+    plugins: PLUGINS.filter(plugin => plugin.scope === section.scope),
+  })).filter(section => section.plugins.length > 0)
+
   return (
     <div className="space-y-6">
       <SettingsSection
@@ -778,9 +795,28 @@ export const OpinionatedPane: React.FC = () => {
         description="Curated tools that enhance your development workflow across Jean AI backends."
         anchorId="pref-opinionated-section-recommended-plugins"
       >
-        <div className="space-y-1">
-          {PLUGINS.map(plugin => (
-            <PluginCard key={plugin.id} plugin={plugin} />
+        <div className="space-y-4">
+          {sections.map(section => (
+            <section
+              key={section.scope}
+              aria-labelledby={`opinionated-plugins-${section.scope}`}
+              className="min-w-0 space-y-1"
+            >
+              <div className="flex items-center gap-2 px-2">
+                <h4
+                  id={`opinionated-plugins-${section.scope}`}
+                  className="shrink-0 text-xs font-medium text-muted-foreground"
+                >
+                  {section.title}
+                </h4>
+                <Separator className="flex-1" />
+              </div>
+              <div>
+                {section.plugins.map(plugin => (
+                  <PluginCard key={plugin.id} plugin={plugin} />
+                ))}
+              </div>
+            </section>
           ))}
         </div>
       </SettingsSection>

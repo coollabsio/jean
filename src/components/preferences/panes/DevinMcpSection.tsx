@@ -47,7 +47,11 @@ export function DevinMcpSection() {
   }
 
   return (
-    <SettingsSection title="Devin and DeepWiki MCP (optional)">
+    <SettingsSection
+      title="Devin and DeepWiki MCP (optional)"
+      collapsible
+      defaultOpen={false}
+    >
       <p className="text-sm text-muted-foreground">
         These services are separate from the local Devin chat backend. Nothing
         is installed or enabled automatically.

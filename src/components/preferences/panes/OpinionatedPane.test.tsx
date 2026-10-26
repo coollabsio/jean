@@ -165,22 +165,98 @@ describe('OpinionatedPane', () => {
     ).toBeInTheDocument()
   })
 
-  it('uses a stacked, wrapping card header for narrow screens', async () => {
+  it('groups recommended plugins into kind sections', async () => {
     render(<OpinionatedPane />)
 
-    await screen.findByRole('button', { name: /Superpowers/i })
+    await screen.findByRole('button', { name: /CLIProxyAPI/i })
 
-    const superpowersLabel = screen.getByText('Superpowers')
-    const header = superpowersLabel.closest('.rounded-md')
-    if (!header) throw new Error('Expected Superpowers card header')
-
-    expect(header).toHaveClass('flex-col')
-    expect(header).toHaveClass('sm:flex-row')
     expect(
-      within(header as HTMLElement)
-        .getByText('Reinstall')
-        .closest('span')
-    ).toHaveClass('flex-wrap')
+      screen
+        .getAllByRole('heading', { level: 4 })
+        .map(heading => heading.textContent)
+    ).toEqual(['Local proxy', 'System-wide (shell)', 'AI backend skills'])
+
+    const localProxy = screen.getByRole('region', { name: 'Local proxy' })
+    expect(within(localProxy).getByText('CLIProxyAPI')).toBeInTheDocument()
+    expect(within(localProxy).queryByText('RTK')).not.toBeInTheDocument()
+    expect(within(localProxy).queryByText('Caveman')).not.toBeInTheDocument()
+
+    const shell = screen.getByRole('region', { name: 'System-wide (shell)' })
+    expect(within(shell).getByText('RTK')).toBeInTheDocument()
+    expect(within(shell).queryByText('CLIProxyAPI')).not.toBeInTheDocument()
+
+    const skills = screen.getByRole('region', { name: 'AI backend skills' })
+    for (const name of ['Caveman', 'Superpowers', 'pstack', 'tstack']) {
+      expect(within(skills).getByText(name)).toBeInTheDocument()
+    }
+    expect(within(skills).queryByText('RTK')).not.toBeInTheDocument()
+    expect(
+      screen.queryByText('Local proxy (localhost)')
+    ).not.toBeInTheDocument()
+  })
+
+  it('keeps installed and not-installed rows on the same layout', async () => {
+    vi.mocked(invoke).mockImplementation(async (command, args) => {
+      const pluginName = (args as { pluginName?: string })?.pluginName
+      if (command === 'check_opinionated_plugin_status') {
+        if (pluginName === 'superpowers') {
+          return {
+            installed: true,
+            version: 'claude, codex, opencode, cursor, pi, commandcode, grok',
+            backends: [
+              { id: 'claude', label: 'Claude', installed: false },
+              { id: 'codex', label: 'Codex', installed: true },
+            ],
+          }
+        }
+        return { installed: false, version: null, install_supported: true }
+      }
+      throw new Error(`Unexpected command ${command}`)
+    })
+
+    render(<OpinionatedPane />)
+
+    const superpowersLabel = await screen.findByText('Superpowers')
+    const tstackLabel = screen.getByText('tstack')
+    const superpowersHeader = superpowersLabel.closest('.rounded-md')
+    const tstackHeader = tstackLabel.closest('.rounded-md')
+    if (!superpowersHeader || !tstackHeader) {
+      throw new Error('Expected plugin rows')
+    }
+
+    for (const header of [superpowersHeader, tstackHeader]) {
+      expect(header).toHaveClass('flex-col')
+      expect(header).toHaveClass('sm:flex-row')
+      expect(header).toHaveClass('sm:items-center')
+    }
+
+    const superpowersIdentity = within(
+      superpowersHeader as HTMLElement
+    ).getByRole('button', { expanded: false })
+    const tstackIdentity = within(tstackHeader as HTMLElement).getByRole(
+      'button',
+      { expanded: false }
+    )
+    expect(superpowersIdentity).not.toHaveClass('flex-wrap')
+    expect(tstackIdentity).not.toHaveClass('flex-wrap')
+    expect(superpowersIdentity.className).toBe(tstackIdentity.className)
+    expect(
+      within(superpowersHeader as HTMLElement).getByText('Partial')
+    ).toBeInTheDocument()
+    expect(
+      within(tstackHeader as HTMLElement).getByText('Not installed')
+    ).toBeInTheDocument()
+    const superpowersActions = within(superpowersHeader as HTMLElement)
+      .getByText('Reinstall')
+      .closest('span')
+    expect(superpowersActions).toHaveClass('flex-wrap')
+    expect(superpowersActions).toHaveClass('sm:flex-nowrap')
+    expect(superpowersActions).not.toHaveClass('flex-nowrap')
+    expect(
+      within(tstackHeader as HTMLElement).getByRole('button', {
+        name: 'Install',
+      })
+    ).toBeInTheDocument()
   })
 
   it('disables unsupported RTK installation and explains why', async () => {
@@ -269,8 +345,13 @@ describe('OpinionatedPane', () => {
 
     expect(within(card as HTMLElement).getByText('Stopped')).toBeInTheDocument()
     expect(
-      within(card as HTMLElement).getByText('Local proxy (localhost)')
+      within(screen.getByRole('region', { name: 'Local proxy' })).getByText(
+        'CLIProxyAPI'
+      )
     ).toBeInTheDocument()
+    expect(
+      within(card as HTMLElement).queryByText('Local proxy (localhost)')
+    ).not.toBeInTheDocument()
 
     await user.click(label)
 

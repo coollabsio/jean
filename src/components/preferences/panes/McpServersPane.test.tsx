@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -207,6 +207,40 @@ describe('McpServersPane Jean MCP install', () => {
     expect(toast.loading).not.toHaveBeenCalled()
     expect(toast.error).not.toHaveBeenCalled()
     consoleErrorSpy.mockRestore()
+  })
+
+  it('keeps Jean MCP open and collapses optional Devin MCP by default', async () => {
+    const user = userEvent.setup()
+    renderPane()
+
+    expect(await screen.findByText(/required · automatic/i)).toBeVisible()
+    expect(
+      screen.getByRole('heading', { name: 'Jean MCP Server' })
+    ).toBeVisible()
+    expect(screen.getByRole('button', { name: /repair config/i })).toBeVisible()
+
+    const devinHeading = screen.getByRole('heading', {
+      name: 'Devin and DeepWiki MCP (optional)',
+    })
+    const toggle = within(devinHeading).getByRole('button')
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+
+    const instructions = screen.queryByText(/merge the selected template/i)
+    if (instructions) expect(instructions).not.toBeVisible()
+    const template = screen.queryByRole('textbox', {
+      name: 'Devin MCP template',
+    })
+    if (template) expect(template).not.toBeVisible()
+
+    await user.click(toggle)
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText(/merge the selected template/i)).toBeVisible()
+    expect(
+      screen.getByRole('textbox', { name: 'Devin MCP template' })
+    ).toBeVisible()
+    expect(screen.getByText(/required · automatic/i)).toBeVisible()
+    expect(screen.getByRole('button', { name: /repair config/i })).toBeVisible()
   })
 
   it('shows Jean MCP as required without an off switch', async () => {
