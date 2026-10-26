@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import userEvent from '@testing-library/user-event'
 import { render, screen } from '@/test/test-utils'
 import { OpenInModal } from './OpenInModal'
 
@@ -11,6 +12,13 @@ const mocks = vi.hoisted(() => ({
   openPreferencesPane: vi.fn(),
   openRemotePicker: vi.fn(),
   openExternal: vi.fn(),
+}))
+
+const openInState = vi.hoisted(() => ({
+  ports: [] as { port: number; label: string; host?: string | null }[],
+  serverId: undefined as string | undefined,
+  browserHost: null as string | null,
+  seenPreferenceServerId: undefined as string | undefined,
 }))
 
 interface UiStoreMock {
@@ -72,9 +80,16 @@ vi.mock('@/store/chat-store', () => ({
 }))
 
 vi.mock('@/services/preferences', () => ({
-  usePreferences: () => ({
-    data: { editor: 'zed', terminal: 'ghostty' },
-  }),
+  usePreferences: (serverId?: string) => {
+    openInState.seenPreferenceServerId = serverId
+    return {
+      data: {
+        editor: 'zed',
+        terminal: 'ghostty',
+        browser_default_host: openInState.browserHost,
+      },
+    }
+  },
 }))
 
 vi.mock('@/lib/environment', () => ({
@@ -120,6 +135,7 @@ vi.mock('@/services/projects', () => ({
       branch: 'fix-advisory',
       pr_url: null,
       pr_number: null,
+      serverId: openInState.serverId,
       security_alert_url: 'https://github.com/acme/app/security/dependabot/7',
       security_alert_number: 7,
       advisory_url:
@@ -133,7 +149,7 @@ vi.mock('@/services/projects', () => ({
   useOpenWorktreeInFinder: () => ({ mutate: vi.fn() }),
   useOpenWorktreeInTerminal: () => ({ mutate: vi.fn() }),
   useOpenWorktreeInEditor: () => ({ mutate: vi.fn() }),
-  usePorts: () => ({ data: [] }),
+  usePorts: () => ({ data: openInState.ports }),
 }))
 
 vi.mock('@/services/github', () => ({
@@ -176,6 +192,10 @@ describe('OpenInModal', () => {
     localBackendState.value = true
     nativeOpenAllowedState.value = false
     remoteEditorLocallyState.value = false
+    openInState.ports = []
+    openInState.serverId = undefined
+    openInState.browserHost = null
+    openInState.seenPreferenceServerId = undefined
   })
 
   it('hides Finder/editor/terminal in browser/headless mode without native open', async () => {
@@ -240,6 +260,28 @@ describe('OpenInModal', () => {
     expect(screen.getByText('Ghostty')).toBeInTheDocument()
     expect(screen.getByText('Finder')).toBeInTheDocument()
     expect(screen.getByText('GitHub')).toBeInTheDocument()
+  })
+
+  it('opens a port with the remote server hostname when jean.json has no host', async () => {
+    openInState.serverId = 'remote-1'
+    openInState.browserHost = 'dev.example.com'
+    openInState.ports = [
+      { port: 3000, label: 'API' },
+      { port: 1420, label: 'App', host: '10.0.0.8' },
+    ]
+
+    render(<OpenInModal />)
+
+    expect(
+      await screen.findByText('API (dev.example.com:3000)')
+    ).toBeInTheDocument()
+    expect(screen.getByText('App (10.0.0.8:1420)')).toBeInTheDocument()
+    expect(openInState.seenPreferenceServerId).toBe('remote-1')
+
+    await userEvent.click(screen.getByText('API (dev.example.com:3000)'))
+    expect(mocks.openExternal).toHaveBeenCalledWith(
+      'http://dev.example.com:3000'
+    )
   })
 
   it('shows worktree and loaded security/advisory context URLs', async () => {

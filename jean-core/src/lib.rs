@@ -466,6 +466,11 @@ pub struct AppPreferences {
     pub jean_mcp_rate_limit_per_minute: u32, // Per-source rate limit for session-spawning tools (default 20)
     #[serde(default)]
     pub agent_browser_enabled: bool, // Install agent-browser and add its MCP server to CLI configs (default false)
+    /// Hostname for new browser tabs and port open buttons when a jean.json
+    /// port omits `host`. Unset means localhost. Every client attached to this
+    /// server uses the same value. Jean MCP is unrelated and stays enabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser_default_host: Option<String>,
 }
 
 fn default_finished_session_animation_enabled() -> bool {
@@ -920,6 +925,68 @@ fn normalize_http_bind_host(bind_host: Option<&str>) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+/// Canonical browser preview hostname, or `None` when the server default is unset.
+/// Loopback names stay loopback so remote preview forwarding can still apply.
+/// Any other hostname is stored as written (lowercased).
+fn normalize_browser_default_host(value: Option<String>) -> Result<Option<String>, String> {
+    let Some(raw) = value else {
+        return Ok(None);
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    if trimmed.len() > 253 {
+        return Err("Browser default hostname is too long".to_string());
+    }
+    if trimmed.contains("://")
+        || trimmed.contains('/')
+        || trimmed.contains('\\')
+        || trimmed.contains('@')
+        || trimmed.contains('?')
+        || trimmed.contains('#')
+        || trimmed.contains(char::is_whitespace)
+    {
+        return Err("Enter a hostname or IP address, without a scheme, port, or path".to_string());
+    }
+    let unbracketed = trimmed
+        .strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+        .unwrap_or(trimmed);
+    if unbracketed.is_empty() {
+        return Err("Enter a hostname or IP address".to_string());
+    }
+    if unbracketed.contains(':') {
+        let ip: std::net::Ipv6Addr = unbracketed
+            .parse()
+            .map_err(|_| "Enter a hostname or IP address, without a port".to_string())?;
+        return Ok(Some(ip.to_string()));
+    }
+    if let Ok(ip) = unbracketed.parse::<std::net::Ipv4Addr>() {
+        return Ok(Some(ip.to_string()));
+    }
+    if !is_browser_hostname(unbracketed) {
+        return Err("Enter a hostname or IP address".to_string());
+    }
+    Ok(Some(unbracketed.to_ascii_lowercase()))
+}
+
+fn is_browser_hostname(host: &str) -> bool {
+    if host.len() > 253 || host.starts_with('.') || host.ends_with('.') {
+        return false;
+    }
+    host.split('.').all(|label| {
+        let bytes = label.as_bytes();
+        !bytes.is_empty()
+            && bytes.len() <= 63
+            && bytes[0].is_ascii_alphanumeric()
+            && bytes[bytes.len() - 1].is_ascii_alphanumeric()
+            && bytes
+                .iter()
+                .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'-')
+    })
+}
+
 fn resolve_http_server_bind_host(prefs: &AppPreferences) -> String {
     normalize_http_bind_host(prefs.http_server_bind_host.as_deref()).unwrap_or_else(|| {
         if prefs.http_server_localhost_only {
@@ -937,11 +1004,12 @@ mod tests {
         default_global_system_prompt_without_branch_rule, default_model,
         default_parallel_execution_prompt, effective_global_system_prompt,
         is_legacy_default_global_system_prompt,
-        legacy_parallel_execution_prompt_before_subagent_strategy, parse_cli_args_from,
-        resolve_headless_bind_host, resolve_headless_token_required, resolve_http_server_bind_host,
-        resolve_stored_parallel_execution_prompt, server_preferences_value,
-        should_auto_select_cli_source, upgrade_legacy_parallel_execution_prompt,
-        validate_headless_security, AppPreferences, MagicPrompts,
+        legacy_parallel_execution_prompt_before_subagent_strategy, normalize_browser_default_host,
+        parse_cli_args_from, resolve_headless_bind_host, resolve_headless_token_required,
+        resolve_http_server_bind_host, resolve_stored_parallel_execution_prompt,
+        server_preferences_value, should_auto_select_cli_source,
+        upgrade_legacy_parallel_execution_prompt, validate_headless_security, AppPreferences,
+        MagicPrompts,
     };
     use serde_json::json;
 
@@ -978,6 +1046,63 @@ mod tests {
         assert_eq!(value["linear_api_key_configured"], json!(true));
         assert!(value.get("http_server_token").is_none());
         assert_eq!(value["http_server_token_configured"], json!(true));
+    }
+
+    #[test]
+    fn browser_default_host_is_a_server_preference_and_leaves_jean_mcp_on() {
+        let mut preferences = AppPreferences::default();
+        assert!(preferences.browser_default_host.is_none());
+        assert!(preferences.jean_mcp_enabled);
+
+        preferences.browser_default_host = Some("dev.example.com".to_string());
+        let value = server_preferences_value(&preferences).unwrap();
+
+        assert_eq!(value["browser_default_host"], json!("dev.example.com"));
+        assert_eq!(value["jean_mcp_enabled"], json!(true));
+        assert!(value.get("theme").is_none());
+    }
+
+    #[test]
+    fn browser_default_host_missing_field_stays_unset() {
+        let mut value = serde_json::to_value(AppPreferences::default()).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("browser_default_host");
+
+        let prefs: AppPreferences = serde_json::from_value(value).unwrap();
+
+        assert!(prefs.browser_default_host.is_none());
+        assert!(prefs.jean_mcp_enabled);
+    }
+
+    #[test]
+    fn normalize_browser_default_host_preserves_loopback_and_custom_hosts() {
+        assert_eq!(normalize_browser_default_host(None).unwrap(), None);
+        assert_eq!(
+            normalize_browser_default_host(Some("   ".to_string())).unwrap(),
+            None
+        );
+        assert_eq!(
+            normalize_browser_default_host(Some(" LocalHost ".to_string())).unwrap(),
+            Some("localhost".to_string())
+        );
+        assert_eq!(
+            normalize_browser_default_host(Some("127.0.0.1".to_string())).unwrap(),
+            Some("127.0.0.1".to_string())
+        );
+        assert_eq!(
+            normalize_browser_default_host(Some("[::1]".to_string())).unwrap(),
+            Some("::1".to_string())
+        );
+        assert_eq!(
+            normalize_browser_default_host(Some("Dev.Example.COM".to_string())).unwrap(),
+            Some("dev.example.com".to_string())
+        );
+        assert!(
+            normalize_browser_default_host(Some("http://dev.example.com".to_string())).is_err()
+        );
+        assert!(normalize_browser_default_host(Some("dev.example.com:3000".to_string())).is_err());
     }
 
     #[test]
@@ -3289,6 +3414,7 @@ impl Default for AppPreferences {
             jean_mcp_max_depth: default_jean_mcp_max_depth(),
             jean_mcp_rate_limit_per_minute: default_jean_mcp_rate_limit(),
             agent_browser_enabled: false,
+            browser_default_host: None,
         }
     }
 }
@@ -3743,6 +3869,17 @@ async fn load_preferences(app: AppHandle) -> Result<AppPreferences, String> {
         preferences.jean_mcp_enabled = true;
         needs_resave = true;
     }
+    match normalize_browser_default_host(preferences.browser_default_host.clone()) {
+        Ok(host) if host != preferences.browser_default_host => {
+            preferences.browser_default_host = host;
+            needs_resave = true;
+        }
+        Err(_) => {
+            preferences.browser_default_host = None;
+            needs_resave = true;
+        }
+        Ok(_) => {}
+    }
     if let Some(new_model) = migrate_default_claude_model(&preferences.selected_model) {
         preferences.selected_model = new_model.to_string();
         needs_resave = true;
@@ -3815,9 +3952,11 @@ async fn load_preferences(app: AppHandle) -> Result<AppPreferences, String> {
     Ok(preferences)
 }
 
-async fn save_preferences(app: AppHandle, preferences: AppPreferences) -> Result<(), String> {
+async fn save_preferences(app: AppHandle, mut preferences: AppPreferences) -> Result<(), String> {
     // Validate before this command changes any related persisted state.
     validate_theme(&preferences.theme)?;
+    preferences.browser_default_host =
+        normalize_browser_default_host(preferences.browser_default_host.take())?;
 
     // Keep per-project Sentry region caches consistent with the global token:
     // a global set/change/remove invalidates the cached region host on projects that

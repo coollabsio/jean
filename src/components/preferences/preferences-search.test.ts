@@ -70,6 +70,16 @@ describe('preferences search index', () => {
     ).toBe(true)
   })
 
+  it('finds the server preview hostname in web access', () => {
+    setTauriInternals(false)
+
+    expect(
+      searchPreferenceEntries('preview hostname').some(
+        entry => entry.id === 'general-browser'
+      )
+    ).toBe(true)
+  })
+
   it('routes backend searches to dedicated backend panes', () => {
     setTauriInternals(true)
 

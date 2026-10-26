@@ -11,6 +11,7 @@ import {
   useWsConnectionStatus,
   setAppDataDir,
 } from '@/lib/transport'
+import { collapseProjectsByIdentity } from '@/lib/project-identity'
 import { registerServerResourcePath } from '@/lib/server-command-routing'
 import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import { parseServerResourceKey } from '@/lib/server-resource'
@@ -280,10 +281,10 @@ export function useProjects() {
     const routedRemoteProjects = native
       ? toRoutedProjects(remoteProjectData ?? [])
       : []
-    return [
+    return collapseProjectsByIdentity([
       ...(native && !localDashboardEnabled ? [] : (localProjectData ?? [])),
       ...routedRemoteProjects,
-    ]
+    ])
   }, [localDashboardEnabled, localProjectData, native, remoteProjectData])
   return {
     ...localProjects,

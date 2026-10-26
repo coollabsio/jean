@@ -1,5 +1,6 @@
 pub mod checkpoints;
 mod commands;
+pub mod ensure_present;
 pub mod git;
 pub mod git_log;
 pub mod git_status;
@@ -27,6 +28,10 @@ pub use checkpoints::{
     restore_ai_checkpoint_file, restore_ai_checkpoint_turn,
 };
 pub use commands::*;
+pub use ensure_present::{
+    ensure_project_present, list_clone_urls, list_project_env_files, read_project_env_files,
+    write_project_env_files, EnvFileContents,
+};
 pub use github_actions::*;
 pub use github_discussions::*;
 pub use github_issues::*;
