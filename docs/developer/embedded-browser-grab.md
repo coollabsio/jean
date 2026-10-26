@@ -9,7 +9,7 @@ Jean's embedded browser uses native Tauri child Webviews. The React app cannot d
 3. The wrapper initializes React Grab with telemetry disabled, registers the `Send to Jean Chat` action, and activates Grab in toggle mode.
 4. Selecting/copying an element invokes `browser_report_grab_context` from inside the child Webview.
 5. Rust validates/truncates the payload and emits `browser:grab-context`.
-6. `useBrowserEvents()` formats that payload and dispatches `append-chat-input`, which inserts the context into the active chat draft.
+6. `useBrowserEvents()` formats that payload and dispatches `attach-pasted-text` with `{ content, filename }`. `useChatWindowEvents()` saves it through `save_pasted_text` and attaches it as a pending pasted-text file on the active session. That hook also still handles `append-chat-input` (`{ text }`), which inserts plain text into the active draft.
 
 ## Bundled asset rule
 

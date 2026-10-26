@@ -187,6 +187,13 @@ partitions updates: client keys never cross the backend transport, while server
 keys continue to use backend persistence. New code can use
 `useClientPreferences()` directly.
 
+`browser_default_host` is one of those server settings (Settings → General →
+Browser). New browser tabs and port open buttons use a jean.json `ports[].host`
+when that port sets one, then this hostname, then `localhost`. A client viewing
+a worktree on a remote Jean server reads that server's value. Loopback names
+stay loopback so remote preview forwarding can still apply; any other hostname
+is used as written. Jean MCP stays mandatory and is not part of this setting.
+
 Project and worktree display state uses the same ownership rule through the
 versioned `jean-client-view-state-v1` browser storage record. This includes
 canvas sorting and active filters, tree expansion, dashboard favorites, sidebar
@@ -383,6 +390,22 @@ Additional systems (no dedicated docs yet):
   The supervisor lives in `src-tauri/src/ssh_tunnel/` and is not dispatched
   through jean-core or MCP. See `docs/developer/ssh-tunnel.md`. Notifications
   such as ntfy are not part of this transport.
+
+  **Start on a host.** New worktree and new session pick a host (Local or a
+  connected remote) without duplicating the project in the sidebar. Projects
+  that share a normalized git remote URL collapse to one row; each host
+  checkout is attached as `hostCheckouts`. `ensure_project_present` on the
+  target Jean reuses a checkout whose remotes match, or clones into
+  `~/jean/checkouts/<name>`. The clone runs with `git clone --progress`.
+  The target Jean emits `project:ensure-progress` on the existing event
+  channel (`emit_all`, so a remote desktop hears it on that host's socket).
+  The dialog shows git's status line. When the line contains a percent, the
+  bar is a weighted overall of counting, receiving objects, and resolving
+  deltas so it does not reset between phases. A line with no percent keeps an
+  indeterminate bar. Env files (`.env`, `.env.local`, and the
+  development/production variants) are copied only after an explicit confirm,
+  one file at a time, with the bar advancing per file. There is no continuous
+  file sync.
 
   When an established WebSocket disconnects, the frontend reloads the page
   instead of repairing stale in-memory state. The normal

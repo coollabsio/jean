@@ -50,6 +50,7 @@ import { LinearIssuesTab } from './LinearIssuesTab'
 import { SentryIssuesTab } from './SentryIssuesTab'
 import { GitHubDiscussionsTab } from './GitHubDiscussionsTab'
 import { IssuePreviewModal } from './IssuePreviewModal'
+import { StartOnHostPicker, useStartOnHost } from './StartOnHost'
 
 export type TabId =
   | 'quick'
@@ -164,6 +165,7 @@ function NewWorktreeModalContent() {
     projectId: data.selectedProjectId,
     projectPath: data.selectedProject?.path ?? null,
   })
+  const startOnHost = useStartOnHost(data.selectedProject ?? null)
   const handlers = useNewWorktreeHandlers(
     data,
     {
@@ -184,7 +186,8 @@ function NewWorktreeModalContent() {
         preferences?.magic_prompts?.investigate_issue ??
         DEFAULT_INVESTIGATE_ISSUE_PROMPT,
     },
-    getContextMatches
+    getContextMatches,
+    { run: startOnHost.run, hostId: startOnHost.hostId }
   )
 
   const handlePreviewIssue = (issue: { number: number }) => {
@@ -396,6 +399,13 @@ function NewWorktreeModalContent() {
             <DialogTitle>
               New Session for {data.selectedProject?.name ?? 'Project'}
             </DialogTitle>
+            <div className="pt-2">
+              <StartOnHostPicker
+                value={startOnHost.hostId}
+                onChange={startOnHost.setHostId}
+                disabled={startOnHost.phase !== 'idle'}
+              />
+            </div>
           </DialogHeader>
 
           {/* Tabs */}

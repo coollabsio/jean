@@ -6,8 +6,9 @@
 
 use super::args::{
     build_exec_args, build_forward_args, classify_health_failure, classify_ssh_failure,
-    decide_after_failure, failure_message, redact, sanitize_detail, AfterFailure, FailureClass,
-    ForwardSpec, DEFAULT_REMOTE_HOST, DEFAULT_REMOTE_PORT, DEFAULT_SSH_PORT,
+    decide_after_failure, failure_message, preview_forward_failure, preview_forward_spec, redact,
+    sanitize_detail, AfterFailure, FailureClass, ForwardSpec, DEFAULT_REMOTE_HOST,
+    DEFAULT_REMOTE_PORT, DEFAULT_SSH_PORT,
 };
 use super::hostkey::{
     parse_keyscan, parse_ssh_g, trusted_fingerprint_matches, upsert_trusted_key, ScannedKey,
@@ -15,7 +16,7 @@ use super::hostkey::{
 use super::secrets::{identity_file_path, validate_profile_id, SecretStore};
 use jean_core::kill_and_reap;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Read};
 use std::net::TcpListener;
 use std::path::PathBuf;
@@ -72,6 +73,14 @@ pub struct TunnelStatusPayload {
     pub attempt: u32,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewForwardPayload {
+    pub profile_id: String,
+    pub remote_port: u16,
+    pub local_port: u16,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LoadedSshSecret {
@@ -87,6 +96,7 @@ struct Timing {
     /// `None` keeps retrying retryable failures. Tests set a bound.
     max_retryable_attempts: Option<u32>,
     backoff_ms: Arc<dyn Fn(u32) -> u64 + Send + Sync>,
+    preview_wait: Duration,
 }
 
 impl Timing {
@@ -97,8 +107,42 @@ impl Timing {
             health_interval: Duration::from_millis(500),
             max_retryable_attempts: None,
             backoff_ms: Arc::new(super::args::backoff_delay_ms),
+            preview_wait: Duration::from_secs(8),
         }
     }
+}
+
+struct PreviewForward {
+    remote_port: u16,
+    local_port: u16,
+    child: Mutex<Child>,
+}
+
+struct SpawnPreview {
+    program: std::ffi::OsString,
+    forward: ForwardSpec,
+    timeout: Duration,
+}
+
+struct StartingGuard {
+    inner: Arc<Mutex<Inner>>,
+    key: String,
+}
+
+impl Drop for StartingGuard {
+    fn drop(&mut self) {
+        self.inner
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .preview_starting
+            .remove(&self.key);
+    }
+}
+
+enum PreviewPoll {
+    Running,
+    Exited,
+    Unknown,
 }
 
 struct Shared {
@@ -120,6 +164,10 @@ struct Inner {
     shared: Arc<Shared>,
     tunnels: HashMap<String, Running>,
     statuses: HashMap<String, TunnelStatusPayload>,
+    /// Forward spec captured when the jean-server tunnel is ready.
+    tunnel_forwards: HashMap<String, ForwardSpec>,
+    previews: HashMap<String, Vec<PreviewForward>>,
+    preview_starting: HashSet<String>,
     next_generation: u64,
     shutting_down: bool,
 }
@@ -172,6 +220,9 @@ impl SshTunnelSupervisor {
                 }),
                 tunnels: HashMap::new(),
                 statuses: HashMap::new(),
+                tunnel_forwards: HashMap::new(),
+                previews: HashMap::new(),
+                preview_starting: HashSet::new(),
                 next_generation: 0,
                 shutting_down: false,
             })),
@@ -391,14 +442,17 @@ impl SshTunnelSupervisor {
     }
 
     pub fn stop(&self, profile_id: &str) -> Result<(), String> {
-        let join = {
+        let (join, previews) = {
             let mut guard = self.lock();
-            let Some(running) = guard.tunnels.remove(profile_id) else {
-                return Ok(());
-            };
-            running.stop.store(true, Ordering::SeqCst);
-            running.join
+            let previews = guard.previews.remove(profile_id).unwrap_or_default();
+            guard.tunnel_forwards.remove(profile_id);
+            let join = guard.tunnels.remove(profile_id).and_then(|running| {
+                running.stop.store(true, Ordering::SeqCst);
+                running.join
+            });
+            (join, previews)
         };
+        reap_preview_forwards(previews);
         if let Some(join) = join {
             let _ = join.join();
         }
@@ -406,21 +460,177 @@ impl SshTunnelSupervisor {
     }
 
     pub fn shutdown(&self) {
-        let joins: Vec<JoinHandle<()>> = {
+        let (joins, previews): (Vec<JoinHandle<()>>, Vec<PreviewForward>) = {
             let mut guard = self.lock();
             guard.shutting_down = true;
-            guard
+            let previews = guard
+                .previews
+                .drain()
+                .flat_map(|(_, items)| items)
+                .collect();
+            guard.tunnel_forwards.clear();
+            let joins = guard
                 .tunnels
                 .drain()
                 .filter_map(|(_, running)| {
                     running.stop.store(true, Ordering::SeqCst);
                     running.join
                 })
-                .collect()
+                .collect();
+            (joins, previews)
         };
+        reap_preview_forwards(previews);
         for join in joins {
             let _ = join.join();
         }
+    }
+
+    /// Open `127.0.0.1:<remote_port>` on this computer and forward it to the
+    /// SSH server's `127.0.0.1:<remote_port>`. The local port is the remote
+    /// port so in-page localhost links stay on the forward.
+    pub fn ensure_preview_forward(
+        &self,
+        profile_id: &str,
+        remote_port: u16,
+    ) -> Result<PreviewForwardPayload, String> {
+        validate_profile_id(profile_id)?;
+        crate::remote_install::validate_port(remote_port, "Preview port")?;
+
+        let key = format!("{profile_id}:{remote_port}");
+        let mut dead = Vec::new();
+        let mut dead_error: Option<String> = None;
+        let spawn = {
+            let mut guard = self.lock();
+            if guard.shutting_down {
+                return Err("Jean is shutting down.".to_string());
+            }
+            if guard.preview_starting.contains(&key) {
+                return Err(format!(
+                    "The remote preview forward for port {remote_port} is already starting. Retry in a moment."
+                ));
+            }
+            if let Some(message) = preview_blocked(guard.statuses.get(profile_id)) {
+                return Err(message);
+            }
+            if guard
+                .statuses
+                .get(profile_id)
+                .and_then(|status| status.local_port)
+                == Some(remote_port)
+            {
+                return Err(format!(
+                    "Port {remote_port} is already used by the Jean SSH tunnel on this computer, so the remote preview forward could not start. Jean left this computer's server untouched."
+                ));
+            }
+            if let Some(list) = guard.previews.get_mut(profile_id) {
+                if let Some(index) = list
+                    .iter()
+                    .position(|preview| preview.remote_port == remote_port)
+                {
+                    match preview_poll(&list[index]) {
+                        PreviewPoll::Running => {
+                            return Ok(PreviewForwardPayload {
+                                profile_id: profile_id.to_string(),
+                                remote_port,
+                                local_port: list[index].local_port,
+                            });
+                        }
+                        PreviewPoll::Exited => {
+                            let _finished = list.remove(index);
+                        }
+                        PreviewPoll::Unknown => dead.push(list.remove(index)),
+                    }
+                }
+            }
+            let base = guard.tunnel_forwards.get(profile_id).cloned();
+            let bind_failure = local_bind_failure(remote_port);
+            match (base, bind_failure) {
+                (None, _) => None,
+                (_, Some(message)) => {
+                    dead_error = Some(message);
+                    None
+                }
+                (Some(base), None) => {
+                    guard.preview_starting.insert(key.clone());
+                    Some(SpawnPreview {
+                        program: guard.shared.program.clone(),
+                        forward: preview_forward_spec(&base, remote_port),
+                        timeout: guard.shared.timing.preview_wait,
+                    })
+                }
+            }
+        };
+        reap_preview_forwards(dead);
+        let Some(spawn) = spawn else {
+            return Err(dead_error.unwrap_or_else(|| {
+                "The SSH tunnel is missing connection details, so Jean cannot preview the remote host. Reconnect the tunnel and try again."
+                    .to_string()
+            }));
+        };
+
+        let _starting = StartingGuard {
+            inner: self.inner.clone(),
+            key,
+        };
+        let args = build_forward_args(&spawn.forward);
+        log::info!("Opening SSH preview forward profile={profile_id} remote_port={remote_port}");
+        let mut child = spawn_program(&spawn.program, &args)?;
+        let mut stderr = collect_stderr(child.stderr.take());
+        if !wait_for_local_port(
+            remote_port,
+            &AtomicBool::new(false),
+            &mut child,
+            spawn.timeout,
+        ) {
+            return Err(preview_exit_error(&mut child, &mut stderr, remote_port));
+        }
+
+        let payload = PreviewForwardPayload {
+            profile_id: profile_id.to_string(),
+            remote_port,
+            local_port: remote_port,
+        };
+        {
+            let mut guard = self.lock();
+            if guard.shutting_down || preview_blocked(guard.statuses.get(profile_id)).is_some() {
+                drop(guard);
+                kill_and_reap(&mut child);
+                return Err(
+                    "The SSH tunnel is no longer ready, so Jean did not keep the remote preview forward."
+                        .to_string(),
+                );
+            }
+            guard
+                .previews
+                .entry(profile_id.to_string())
+                .or_default()
+                .push(PreviewForward {
+                    remote_port,
+                    local_port: remote_port,
+                    child: Mutex::new(child),
+                });
+        }
+        Ok(payload)
+    }
+
+    /// Stop preview forwards. `keep_profile_id` retains one profile's forwards
+    /// when the desktop switches between SSH hosts.
+    pub fn release_preview_forwards(&self, keep_profile_id: Option<&str>) {
+        let previews = {
+            let mut guard = self.lock();
+            let ids: Vec<String> = guard.previews.keys().cloned().collect();
+            let mut taken = Vec::new();
+            for id in ids {
+                if keep_profile_id == Some(id.as_str()) {
+                    continue;
+                }
+                if let Some(items) = guard.previews.remove(&id) {
+                    taken.extend(items);
+                }
+            }
+            taken
+        };
+        reap_preview_forwards(previews);
     }
 
     pub fn list_status(&self) -> Vec<TunnelStatusPayload> {
@@ -728,19 +938,122 @@ fn publish(
         "SSH tunnel {} status={status} attempt={attempt}",
         prepared.profile_id
     );
-    let emit = {
+    let (emit, previews) = {
         let mut guard = inner.lock().unwrap_or_else(|err| err.into_inner());
         if let Some(running) = guard.tunnels.get(&payload.profile_id) {
             if running.generation != generation {
                 return;
             }
         }
+        if status == "ready" {
+            guard
+                .tunnel_forwards
+                .insert(prepared.profile_id.clone(), prepared.forward.clone());
+        }
+        let previews = if status == "failed" || status == "stopped" {
+            guard.tunnel_forwards.remove(&prepared.profile_id);
+            guard
+                .previews
+                .remove(&prepared.profile_id)
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         guard
             .statuses
             .insert(payload.profile_id.clone(), payload.clone());
-        guard.shared.emit.clone()
+        (guard.shared.emit.clone(), previews)
     };
+    reap_preview_forwards(previews);
     emit(payload);
+}
+
+fn preview_blocked(status: Option<&TunnelStatusPayload>) -> Option<String> {
+    let Some(status) = status else {
+        return Some(
+            "The SSH tunnel is not connected, so Jean cannot preview the remote host's localhost. Reconnect the tunnel and try again."
+                .to_string(),
+        );
+    };
+    match status.status.as_str() {
+        "ready" => None,
+        "reconnecting" => Some(
+            "The SSH tunnel is reconnecting, so Jean cannot preview the remote host yet. Try again when the tunnel is ready."
+                .to_string(),
+        ),
+        "connecting" => Some(
+            "The SSH tunnel is still connecting, so Jean cannot preview the remote host yet."
+                .to_string(),
+        ),
+        "failed" => Some(status.error.clone().unwrap_or_else(|| {
+            "The SSH tunnel failed, so Jean cannot preview the remote host.".to_string()
+        })),
+        "stopped" => Some(
+            "The SSH tunnel is stopped, so Jean cannot preview the remote host's localhost. Reconnect the tunnel and try again."
+                .to_string(),
+        ),
+        _ => Some(
+            "The SSH tunnel is not connected, so Jean cannot preview the remote host's localhost. Reconnect the tunnel and try again."
+                .to_string(),
+        ),
+    }
+}
+
+fn local_bind_failure(port: u16) -> Option<String> {
+    match std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)) {
+        Ok(listener) => {
+            drop(listener);
+            None
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => Some(format!(
+            "Port {port} is already in use on this computer, so the remote preview forward could not start. Jean left this computer's server untouched. Stop the local process using that port and retry."
+        )),
+        Err(error) => Some(format!(
+            "Could not bind 127.0.0.1:{port} for the remote preview forward. {error}"
+        )),
+    }
+}
+
+fn preview_poll(preview: &PreviewForward) -> PreviewPoll {
+    let mut child = preview.child.lock().unwrap_or_else(|err| err.into_inner());
+    match child.try_wait() {
+        Ok(None) => PreviewPoll::Running,
+        Ok(Some(_)) => PreviewPoll::Exited,
+        Err(_) => PreviewPoll::Unknown,
+    }
+}
+
+fn reap_preview_forwards(previews: Vec<PreviewForward>) {
+    for preview in previews {
+        let mut child = preview
+            .child
+            .into_inner()
+            .unwrap_or_else(|err| err.into_inner());
+        match child.try_wait() {
+            Ok(Some(_)) => {}
+            Ok(None) | Err(_) => kill_and_reap(&mut child),
+        }
+    }
+}
+
+fn preview_exit_error(child: &mut Child, stderr: &mut StderrCapture, remote_port: u16) -> String {
+    match child.try_wait() {
+        Ok(Some(_)) => {
+            let detail = stderr.finish();
+            preview_forward_failure(classify_ssh_failure(&detail), &detail, remote_port)
+        }
+        _ => {
+            kill_and_reap(child);
+            let detail = stderr.finish();
+            if detail.is_empty() {
+                format!(
+                    "Could not forward remote port {remote_port}. Timed out waiting for the local SSH forward to open."
+                )
+            } else {
+                preview_forward_failure(classify_ssh_failure(&detail), &detail, remote_port)
+            }
+        }
+    }
 }
 
 fn check_health(local_port: u16, token: &str) -> Result<(), String> {
@@ -1051,6 +1364,7 @@ mod tests {
                 health_interval: Duration::from_millis(1),
                 max_retryable_attempts: Some(3),
                 backoff_ms: Arc::new(|_| 0),
+                preview_wait: Duration::from_secs(3),
             },
         );
         supervisor
@@ -1180,5 +1494,169 @@ mod tests {
         let error = harness.supervisor.start(spec).unwrap_err();
         assert!(error.contains("not trusted"));
         assert!(harness.events.lock().unwrap().is_empty());
+    }
+
+    fn seed_ready(supervisor: &SshTunnelSupervisor, jean_port: u16) {
+        let known_hosts = supervisor.known_hosts_path();
+        let mut guard = supervisor.lock();
+        guard.statuses.insert(
+            PROFILE.to_string(),
+            TunnelStatusPayload {
+                profile_id: PROFILE.into(),
+                status: "ready".into(),
+                local_url: Some(format!("http://127.0.0.1:{jean_port}")),
+                local_port: Some(jean_port),
+                error: None,
+                attempt: 0,
+            },
+        );
+        guard.tunnel_forwards.insert(
+            PROFILE.to_string(),
+            ForwardSpec {
+                user: "ubuntu".into(),
+                host: "build.example".into(),
+                ssh_port: 22,
+                identity_file: None,
+                remote_host: "127.0.0.1".into(),
+                remote_port: 3456,
+                local_port: jean_port,
+                known_hosts_file: known_hosts,
+            },
+        );
+    }
+
+    fn free_port() -> u16 {
+        // Ephemeral ports (typically 32768–60999) can stay busy for a moment
+        // after a probe bind. Preview tests use a private range instead.
+        use std::sync::atomic::{AtomicU16, Ordering};
+        static NEXT: AtomicU16 = AtomicU16::new(18_080);
+        loop {
+            let port = NEXT.fetch_add(1, Ordering::Relaxed);
+            assert!(port < 19_000, "exhausted preview test ports");
+            if let Ok(listener) = TcpListener::bind(("127.0.0.1", port)) {
+                drop(listener);
+                return port;
+            }
+        }
+    }
+
+    fn listening_script(log: &Path) -> String {
+        format!(
+            r#"#!/bin/sh
+echo "$@" >> "{log}"
+forward=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "-L" ]; then
+    forward=$arg
+  fi
+  prev=$arg
+done
+port=$(printf '%s\n' "$forward" | cut -d: -f2)
+exec python3 -c 'import socket,sys,time
+s=socket.socket()
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("127.0.0.1", int(sys.argv[1])))
+s.listen(16)
+time.sleep(30)
+' "$port"
+"#,
+            log = log.display()
+        )
+    }
+
+    #[test]
+    fn preview_requires_a_ready_tunnel() {
+        let harness = harness("#!/bin/sh\nsleep 30\n");
+        let error = harness
+            .supervisor
+            .ensure_preview_forward(PROFILE, 5173)
+            .unwrap_err();
+        assert!(error.contains("not connected"), "{error}");
+    }
+
+    #[test]
+    fn preview_refuses_a_port_held_on_this_computer() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("ssh.log");
+        let harness = harness(&listening_script(&log));
+        seed_ready(&harness.supervisor, 41_000);
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let error = harness
+            .supervisor
+            .ensure_preview_forward(PROFILE, port)
+            .unwrap_err();
+        assert!(error.contains("already in use"), "{error}");
+        assert!(error.contains("untouched"), "{error}");
+        assert!(!log.exists());
+        drop(listener);
+    }
+
+    #[test]
+    fn preview_refuses_the_jean_tunnel_port() {
+        let harness = harness("#!/bin/sh\nsleep 30\n");
+        seed_ready(&harness.supervisor, 3456);
+        let error = harness
+            .supervisor
+            .ensure_preview_forward(PROFILE, 3456)
+            .unwrap_err();
+        assert!(error.contains("Jean SSH tunnel"), "{error}");
+    }
+
+    #[test]
+    fn preview_reports_ssh_auth_failure() {
+        let harness = harness("#!/bin/sh\necho 'Permission denied (publickey).' >&2\nexit 255\n");
+        seed_ready(&harness.supervisor, 41_000);
+        let port = free_port();
+        let error = harness
+            .supervisor
+            .ensure_preview_forward(PROFILE, port)
+            .unwrap_err();
+        assert!(
+            error.contains("authentication"),
+            "error should explain the SSH failure: {error}"
+        );
+        assert!(!error.contains("token-value"));
+    }
+
+    #[test]
+    fn preview_forward_reaches_the_remote_port_and_can_be_released() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("ssh.log");
+        let harness = harness(&listening_script(&log));
+        seed_ready(&harness.supervisor, 41_000);
+        let port = free_port();
+        let first = harness
+            .supervisor
+            .ensure_preview_forward(PROFILE, port)
+            .unwrap();
+        assert_eq!(first.local_port, port);
+        assert_eq!(first.remote_port, port);
+        std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let second = harness
+            .supervisor
+            .ensure_preview_forward(PROFILE, port)
+            .unwrap();
+        assert_eq!(second, first);
+        let log_text = std::fs::read_to_string(&log).unwrap();
+        assert_eq!(
+            log_text.lines().filter(|line| line.contains("-L")).count(),
+            1,
+            "a live forward is reused: {log_text}"
+        );
+        assert!(log_text.contains(&format!("127.0.0.1:{port}:127.0.0.1:{port}")));
+        assert!(log_text.contains("ubuntu@build.example"));
+        assert!(log_text.contains("StrictHostKeyChecking=yes"));
+        assert!(!log_text.contains("token-value-1234"));
+
+        harness.supervisor.release_preview_forwards(Some(PROFILE));
+        std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        harness.supervisor.release_preview_forwards(None);
+        let refused = std::net::TcpStream::connect_timeout(
+            &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+            Duration::from_millis(200),
+        );
+        assert!(refused.is_err(), "forward should close when released");
     }
 }
