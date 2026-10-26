@@ -175,6 +175,7 @@ import { Toaster } from '@/components/ui/sonner'
 import { MobileLeftSidebar } from './MobileLeftSidebar'
 import { SidebarTabRail } from '@/components/projects/SidebarTabRail'
 import { useShowAgents } from '@/components/agents/agents-feature'
+import { AgentsTitleSync, resolveWindowTitle } from './window-title'
 import { BrowserSidePane } from '@/components/browser/BrowserSidePane'
 import { BrowserPanel } from '@/components/browser/BrowserPanel'
 import { useBrowserEvents } from '@/hooks/useBrowserPane'
@@ -354,18 +355,26 @@ export function MainWindow() {
     ? projects?.find(p => p.id === worktree.project_id)
     : null
 
-  // Compute window title based on selected project/worktree
-  // On mobile, show only the project name to fit the compact title bar.
-  const windowTitle = useMemo(() => {
-    // Agents page is not a project page
-    if (showAgents) return 'Agents'
-    if (!project || !worktree) return 'Jean'
-    if (isMobile) return project.name
-    const branchSuffix =
-      worktree.branch !== worktree.name ? ` (${worktree.branch})` : ''
+  // Selected agent name, reported only while the Agents view is mounted.
+  const [agentName, setAgentName] = useState<string | undefined>(undefined)
+  const handleAgentName = useCallback((name: string | undefined) => {
+    setAgentName(current => (current === name ? current : name))
+  }, [])
 
-    return `${project.name} › ${worktree.name}${branchSuffix}`
-  }, [project, worktree, isMobile, showAgents])
+  // Project pages: project name on mobile, project › worktree on desktop.
+  // Agents view: the selected agent's name, in the title bar and browser tab.
+  const windowTitle = useMemo(
+    () =>
+      resolveWindowTitle({
+        showAgents,
+        agentName,
+        projectName: project?.name,
+        worktreeName: worktree?.name,
+        worktreeBranch: worktree?.branch,
+        isMobile,
+      }),
+    [showAgents, agentName, project, worktree, isMobile]
+  )
 
   // Compute polling info - null if no worktree or data not loaded.
   // Must use the worktree's own base_branch (e.g. v4.x), not the project
@@ -583,6 +592,7 @@ export function MainWindow() {
       )}
     >
       <UIStatePersistence onInitializedChange={setIsInitialized} />
+      {showAgents && <AgentsTitleSync onName={handleAgentName} />}
       {isNativeApp() && isLinux && <WindowResizeHandles />}
 
       {/* Touch swipe-down pull indicator */}
