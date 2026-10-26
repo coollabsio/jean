@@ -375,8 +375,8 @@ Additional systems (no dedicated docs yet):
   on an interrupt. The backing Jean `sessionId` must therefore be carried through
   terminal creation, native-session reconnect, frontend terminal persistence,
   `start_terminal`, and both native/WebSocket transports. Terminals opened in an
-  *external* OS terminal cannot be instrumented and stay idle. Only the CLI
-  Jean itself launches is instrumented; one the user starts *by hand* in that
+  _external_ OS terminal cannot be instrumented and stay idle. Only the CLI
+  Jean itself launches is instrumented; one the user starts _by hand_ in that
   terminal carries no hook and does not report.
 
   **Web-mode persistence.** In web access (Axum HTTP server + WebSocket),

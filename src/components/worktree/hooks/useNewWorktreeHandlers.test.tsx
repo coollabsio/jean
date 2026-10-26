@@ -30,7 +30,10 @@ describe('useNewWorktreeHandlers duplicate guard', () => {
   }
 
   function setup(
-    getMatches: (ref: { type: string; id: number | string }) => (typeof match)[],
+    getMatches: (ref: {
+      type: string
+      id: number | string
+    }) => (typeof match)[],
     extra: Record<string, unknown> = {}
   ) {
     const createWorktree = { mutate: vi.fn(), mutateAsync: vi.fn() }
@@ -139,8 +142,7 @@ describe('useNewWorktreeHandlers duplicate guard', () => {
           number: 42,
           repo: 'octocat/jean',
         }),
-      }),
-      undefined
+      })
     )
   })
 

@@ -215,7 +215,7 @@ export function useNewWorktreeHandlers(
 
   /** Drop items that already have a worktree/session; toast how many were skipped. */
   const skipLinkedItems = useCallback(
-    <T,>(
+    <T>(
       items: T[],
       toRef: (item: T) => ContextLinkRef,
       shouldCheck: (item: T) => boolean = () => true

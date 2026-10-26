@@ -85,10 +85,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for full development setup and guidelines
 Every Jean instance can run **Web Access**: an embedded HTTP + WebSocket server
 that serves the same UI in a browser. That applies to both:
 
-| Mode | How you get Web Access |
-| --- | --- |
+| Mode                                         | How you get Web Access                                                                        |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | **Native desktop** (macOS / Windows / Linux) | Settings → **Web Access** - enable the HTTP server, set port/bind address, copy the token URL |
-| **Headless server** (`jean-server`) | Always on - the process *is* the Web Access endpoint |
+| **Headless server** (`jean-server`)          | Always on - the process _is_ the Web Access endpoint                                          |
 
 Use it to open Jean from another machine on your LAN, a phone/tablet browser,
 or a remote host. Token authentication is on by default; keep it enabled for
