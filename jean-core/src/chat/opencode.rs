@@ -1509,7 +1509,7 @@ fn verify_permission_rules_applied(
 }
 
 fn agent_for_execution_mode(execution_mode: Option<&str>) -> &'static str {
-    match execution_mode.unwrap_or("plan") {
+    match execution_mode.unwrap_or("build") {
         "plan" => "plan",
         _ => "build",
     }
@@ -2979,7 +2979,7 @@ pub fn execute_opencode_http(
         opencode_session_id.clone(),
         working_dir_string.clone(),
     );
-    if let Some(rules) = permission_rules_for_mode(execution_mode.unwrap_or("plan")) {
+    if let Some(rules) = permission_rules_for_mode(execution_mode.unwrap_or("build")) {
         let policy_url = format!("{base_url}/session/{opencode_session_id}");
         let response = client
             .patch(&policy_url)

@@ -6,5 +6,5 @@ export function buildCommentAndCloseIssuePrompt(
   const targets = issues
     .map(issue => `${issue.repoOwner}/${issue.repoName}#${issue.number}`)
     .join(', ')
-  return `Find the full SHA of the latest commit on this worktree. For these GitHub issues only: ${targets}, add a comment containing exactly "Fixed in <commit SHA>" with that SHA in place of <commit SHA>. Add no other text to each comment. Then close only these issues. Do not change any other issue.`
+  return `For these GitHub issues only: ${targets}, add a brief comment that references the fix (for example "Fixed in <commit SHA>", a PR link, or another relevant reference). Use what you already know from this session; do not look up the latest commit. Then close only these issues. Do not change any other issue.`
 }

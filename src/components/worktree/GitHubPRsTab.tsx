@@ -5,7 +5,11 @@ import {
   RefreshCw,
   AlertCircle,
 } from '@/components/icons/reicon'
-import { isGhAuthError } from '@/services/github'
+import { githubItemKey, isGhAuthError } from '@/services/github'
+import {
+  isSameGitHubCreateTarget,
+  reusesPrimaryGitHubSource,
+} from '@/lib/remote-worktree-sources'
 import { GhAuthError } from '@/components/shared/GhAuthError'
 import { isGlabAuthError } from '@/services/glab-cli'
 import { GlabAuthError } from '@/components/shared/GlabAuthError'
@@ -46,7 +50,12 @@ export interface GitHubPRsTabProps {
   onStackPR: (pr: GitHubPullRequest, background?: boolean) => void
   onPreviewPR: (pr: GitHubPullRequest) => void
   creatingFromNumber: number | null
+  creatingFromRepo?: string | null
   stackingFromPR: number | null
+  stackingFromRepo?: string | null
+  showSource?: boolean
+  hasMultipleGitHubRemotes?: boolean
+  primaryGitHubRemote?: string | null
   isBulkInvestigating?: boolean
   searchInputRef: React.RefObject<HTMLInputElement | null>
   onLogin: () => void
@@ -61,7 +70,7 @@ export interface GitHubPRsTabProps {
   getContextMatches?: GetContextLinkMatches
 }
 
-const getPRKey = (pr: GitHubPullRequest) => pr.number
+const getPRKey = (pr: GitHubPullRequest) => githubItemKey(pr)
 
 export function GitHubPRsTab({
   searchQuery,
@@ -82,7 +91,12 @@ export function GitHubPRsTab({
   onStackPR,
   onPreviewPR,
   creatingFromNumber,
+  creatingFromRepo = null,
   stackingFromPR,
+  stackingFromRepo = null,
+  showSource = false,
+  hasMultipleGitHubRemotes = false,
+  primaryGitHubRemote = null,
   isBulkInvestigating = false,
   searchInputRef,
   onLogin,
@@ -241,25 +255,44 @@ export function GitHubPRsTab({
 
         {!isLoading && !error && prs.length > 0 && (
           <div>
-            {prs.map((pr, index) => (
-              <PRItem
-                key={pr.number}
-                pr={pr}
-                index={index}
-                isSelected={index === selectedIndex}
-                isCreating={creatingFromNumber === pr.number}
-                contextMatches={matchesByNumber.get(pr.number)}
-                isStacking={stackingFromPR === pr.number}
-                isChecked={multi.isChecked(pr.number)}
-                onCheckedChange={checked => multi.toggle(pr.number, checked)}
-                onMouseEnter={() => setSelectedIndex(index)}
-                onClick={bg => onSelectPR(pr, bg)}
-                onInvestigate={bg => onInvestigatePR(pr, bg)}
-                onStack={bg => onStackPR(pr, bg)}
-                onPreview={() => onPreviewPR(pr)}
-                onLabelClick={handleLabelClick}
-              />
-            ))}
+            {prs.map((pr, index) => {
+              const key = githubItemKey(pr)
+              const showExisting = reusesPrimaryGitHubSource(
+                pr,
+                hasMultipleGitHubRemotes,
+                primaryGitHubRemote
+              )
+              return (
+                <PRItem
+                  key={key}
+                  pr={pr}
+                  index={index}
+                  isSelected={index === selectedIndex}
+                  isCreating={isSameGitHubCreateTarget(
+                    pr,
+                    creatingFromNumber,
+                    creatingFromRepo
+                  )}
+                  contextMatches={
+                    showExisting ? matchesByNumber.get(pr.number) : undefined
+                  }
+                  isStacking={isSameGitHubCreateTarget(
+                    pr,
+                    stackingFromPR,
+                    stackingFromRepo
+                  )}
+                  isChecked={multi.isChecked(key)}
+                  onCheckedChange={checked => multi.toggle(key, checked)}
+                  onMouseEnter={() => setSelectedIndex(index)}
+                  onClick={bg => onSelectPR(pr, bg)}
+                  onInvestigate={bg => onInvestigatePR(pr, bg)}
+                  onStack={bg => onStackPR(pr, bg)}
+                  onPreview={() => onPreviewPR(pr)}
+                  onLabelClick={handleLabelClick}
+                  showSource={showSource}
+                />
+              )
+            })}
             {isSearching && (
               <div className="flex items-center justify-center py-2">
                 <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />

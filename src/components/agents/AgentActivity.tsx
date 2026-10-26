@@ -3,9 +3,10 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { parseServerResourceKey } from '@/lib/server-resource'
-import { useWorktree } from '@/services/projects'
+import { useProjects, useWorktree } from '@/services/projects'
 import {
   useAgentDetails,
+  useAgentsList,
   useDecideAgentApproval,
   useRevertAgentChange,
   type AgentApproval,
@@ -16,6 +17,8 @@ import {
 import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
+import { AgentQuestionCard } from './AgentQuestionCard'
+import { useAgentsEnabledServers } from './agents-feature'
 import {
   agentChangeActorLabel,
   agentChangeDetail,
@@ -47,71 +50,94 @@ export function formatRelative(unixSeconds: number, now = Date.now()): string {
   return diff > 0 ? `in ${value}` : `${value} ago`
 }
 
-/** One line that says what an approval will do. */
-export function describeApproval(approval: AgentApproval): string {
+/** One line that says what an approval will do, with names, not IDs. */
+export function describeApproval(
+  approval: AgentApproval,
+  targetName?: string
+): string {
   const args = approval.args ?? {}
+  const text = (key: string) =>
+    typeof args[key] === 'string' && args[key] ? (args[key] as string) : ''
   if (
     approval.tool === 'agent_update' ||
     approval.tool === 'agent_delete' ||
     approval.tool === 'agent_revert'
   ) {
-    const who =
-      (typeof args.targetName === 'string' && args.targetName) ||
-      (typeof args.agentId === 'string' && args.agentId) ||
-      (typeof args.name === 'string' && args.name) ||
-      ''
+    const who = text('targetName') || 'another agent'
     const verb =
       approval.tool === 'agent_delete'
         ? 'Delete agent'
         : approval.tool === 'agent_revert'
-          ? 'Revert the last change to'
+          ? 'Undo the last change to'
           : 'Update agent'
-    return `${verb} ${who}`.trim()
+    return `${verb} ${who}`
   }
+  // A deleted worktree has no name to look up: fall back to its folder name
   const target =
-    (args.worktreeId as string | undefined) ??
-    (args.worktreePath as string | undefined) ??
-    ''
-  const labels: Record<string, string> = {
-    delete_worktree: 'Delete worktree',
-    permanently_delete_worktree: 'Permanently delete worktree',
-    push_worktree: 'Push worktree',
-    merge_pull_request: 'Merge pull request of worktree',
-    create_pull_request: 'Create pull request for worktree',
+    targetName ?? text('worktreePath').split(/[\\/]/).filter(Boolean).pop()
+  const labels: Record<string, [string, string]> = {
+    delete_worktree: ['Delete worktree', 'Delete a worktree'],
+    permanently_delete_worktree: [
+      'Permanently delete worktree',
+      'Permanently delete a worktree',
+    ],
+    push_worktree: ['Push worktree', 'Push a worktree'],
+    merge_pull_request: [
+      'Merge the pull request of',
+      'Merge the pull request of a worktree',
+    ],
+    create_pull_request: [
+      'Create a pull request for',
+      'Create a pull request for a worktree',
+    ],
+    remove_project: ['Remove project', 'Remove a project'],
   }
-  return `${labels[approval.tool] ?? approval.tool} ${target}`.trim()
+  const label = labels[approval.tool]
+  if (!label) return approval.tool.replace(/_/g, ' ')
+  return target ? `${label[0]} ${target}` : label[1]
 }
 
-function ApprovalRow({ approval }: { approval: AgentApproval }) {
+const APPROVE = 'Approve'
+const DENY = 'Deny'
+
+function useDecide(approval: AgentApproval) {
   const decide = useDecideAgentApproval()
-  const { data: worktree } = useWorktree(
-    (approval.args?.worktreeId as string | undefined) ?? null
-  )
   const run = (approve: boolean) =>
     decide.mutate(
       { agentId: approval.agentId, approvalId: approval.id, approve },
       {
         onSuccess: result =>
           result.status === 'failed'
-            ? toast.error(`#${approval.id} failed: ${result.result}`)
-            : toast.success(
-                approve ? `#${approval.id} approved` : `#${approval.id} denied`
-              ),
+            ? toast.error(`It failed: ${result.result}`)
+            : toast.success(approve ? 'Approved' : 'Denied'),
         onError: e => toast.error(`Failed: ${e}`),
       }
     )
+  return { run, isPending: decide.isPending }
+}
+
+/** Name of the worktree or project an approval acts on, if it still exists. */
+function useTargetName(approval: AgentApproval): string | undefined {
+  const { data: worktree } = useWorktree(
+    (approval.args?.worktreeId as string | undefined) ?? null
+  )
+  const { data: projects = [] } = useProjects()
+  const projectId = approval.args?.projectId as string | undefined
+  return (
+    worktree?.name ??
+    (projectId ? projects.find(p => p.id === projectId)?.name : undefined)
+  )
+}
+
+function ApprovalRow({ approval }: { approval: AgentApproval }) {
+  const decide = useDecide(approval)
+  const targetName = useTargetName(approval)
+  const run = decide.run
   return (
     <li className="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center">
       <div className="min-w-0 flex-1">
         <p className="text-sm text-foreground">
-          <span className="mr-1.5 text-muted-foreground">#{approval.id}</span>
-          {describeApproval(approval)}
-          {worktree ? (
-            <span className="text-muted-foreground"> ({worktree.name})</span>
-          ) : null}
-        </p>
-        <p className="truncate font-mono text-[11px] text-muted-foreground">
-          {JSON.stringify(approval.args)}
+          {describeApproval(approval, targetName)}
         </p>
         {approval.status !== 'pending' && (
           <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -151,6 +177,51 @@ function ApprovalRow({ approval }: { approval: AgentApproval }) {
         </div>
       )}
     </li>
+  )
+}
+
+/** Approval request inside the agent chat, with its current status. */
+export function AgentApprovalInline({
+  approvalId,
+  worktreeId,
+}: {
+  approvalId: number
+  /** Worktree of the session that asked for approval */
+  worktreeId: string | null | undefined
+}) {
+  const agents = useAgentsList(useAgentsEnabledServers()).data ?? []
+  const agent = agents.find(
+    a => a.worktreeId === worktreeId || a.tasksWorktreeId === worktreeId
+  )
+  const { data } = useAgentDetails(agent?.id ?? null)
+  const approval = data?.approvals.find(a => a.id === approvalId)
+  if (!approval) return null
+  return <ApprovalQuestion approval={approval} />
+}
+
+function ApprovalQuestion({ approval }: { approval: AgentApproval }) {
+  const decide = useDecide(approval)
+  const targetName = useTargetName(approval)
+  const pending = approval.status === 'pending'
+  return (
+    <AgentQuestionCard
+      question={{
+        question: `${describeApproval(approval, targetName)}?`,
+        options: [APPROVE, DENY],
+        multiple: false,
+      }}
+      answer={
+        pending ? undefined : approval.status === 'denied' ? DENY : APPROVE
+      }
+      disabled={decide.isPending}
+      onSend={answer => decide.run(answer === APPROVE)}
+    >
+      {approval.status === 'failed' && (
+        <p className="text-xs text-destructive">
+          It failed: {approval.result ?? 'unknown error'}
+        </p>
+      )}
+    </AgentQuestionCard>
   )
 }
 

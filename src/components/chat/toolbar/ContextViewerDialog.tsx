@@ -3,6 +3,7 @@ import {
   CircleDot,
   FolderOpen,
   GitPullRequest,
+  MessagesSquare,
   Shield,
   ShieldAlert,
   Sentry,
@@ -68,6 +69,9 @@ export function ContextViewerDialog({
               )}
               {viewingContext.type === 'pr' && (
                 <GitPullRequest className="h-4 w-4 text-success" />
+              )}
+              {viewingContext.type === 'discussion' && (
+                <MessagesSquare className="h-4 w-4 text-success" />
               )}
               {viewingContext.type === 'saved' && (
                 <FolderOpen className="h-4 w-4 text-info" />

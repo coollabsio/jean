@@ -145,7 +145,7 @@ pub struct MuseMode {
 }
 
 pub fn muse_mode(mode: Option<&str>) -> MuseMode {
-    match mode.unwrap_or("plan") {
+    match mode.unwrap_or("build") {
         "yolo" => MuseMode {
             permission_profile: ":unrestricted",
             approval_mode: None,
@@ -173,7 +173,13 @@ mod tests {
 
     #[test]
     fn maps_jean_modes_to_muse_profiles() {
-        let plan = muse_mode(None);
+        let missing = muse_mode(None);
+        assert_eq!(missing.permission_profile, ":ask-me");
+        assert_eq!(missing.approval_mode, Some("allowAll"));
+        assert!(!missing.disable_sandbox);
+        assert!(missing.auto_approve);
+
+        let plan = muse_mode(Some("plan"));
         assert_eq!(plan.permission_profile, ":read-only");
         assert_eq!(plan.approval_mode, None);
         assert!(!plan.disable_sandbox);

@@ -635,7 +635,7 @@ export const ChatInput = memo(function ChatInput({
       }
 
       // TAB toggles Claude/Codex backend when available.
-      // Keep Shift+Tab for global "cycle execution mode" keybinding.
+      // Shift+Tab toggles Plan mode while this composer is focused.
       if (
         e.key === 'Tab' &&
         !e.shiftKey &&
@@ -1082,6 +1082,10 @@ export const ChatInput = memo(function ChatInput({
         return item.issue ? `#${item.issue.number}` : item.label
       case 'pr':
         return item.pr ? `PR#${item.pr.number}` : item.label.replace(/\s+/g, '')
+      case 'discussion':
+        return item.discussion
+          ? `Discussion#${item.discussion.number}`
+          : item.label.replace(/\s+/g, '')
       case 'security':
         return item.securityAlert
           ? `Security#${item.securityAlert.number}`
@@ -1266,26 +1270,25 @@ export const ChatInput = memo(function ChatInput({
         return
       }
 
-      // One background session per item. Sequential, so concurrent
-      // create_session calls do not race on the worktree's session index.
+      // One background session per item, started in parallel. The backend
+      // serializes session index writes per worktree.
       const toastId = toast.loading(
         `Starting ${items.length} investigations in new sessions...`
       )
+      const results = await Promise.allSettled(
+        items.map(item => investigate([item], false))
+      )
       let succeeded = 0
-      for (const item of items) {
-        try {
-          await investigate([item], false)
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
           succeeded += 1
-        } catch (error) {
-          logger.error('Context investigation failed', { item: item.id, error })
+        } else {
+          logger.error('Context investigation failed', {
+            item: items[index]?.id,
+            error: result.reason,
+          })
         }
-      }
-      // Starting an investigation selects its session; stay where the user was
-      if (activeSessionId) {
-        useChatStore
-          .getState()
-          .setActiveSession(activeWorktreeId, activeSessionId)
-      }
+      })
       reportBulkInvestigateResults(
         toastId,
         succeeded,
@@ -1353,11 +1356,19 @@ export const ChatInput = memo(function ChatInput({
   // Handle command selection from / mention popover (executes immediately)
   const handleCommandSelect = useCallback(
     (command: ClaudeCommand) => {
-      // Built-in `/goal` is not a command-template. Insert "/goal "
-      // literal so the user types an objective; submit handling either
-      // intercepts it for Codex or passes it through to native backends.
-      if (command.path === '<built-in:goal>') {
-        const literal = '/goal '
+      // Built-in workflow commands are not command templates. Insert the
+      // slash literal so submit handling switches mode and starts the turn.
+      if (
+        command.path === '<built-in:goal>' ||
+        command.path === '<built-in:plan>' ||
+        command.path === '<built-in:build>'
+      ) {
+        const literal =
+          command.path === '<built-in:plan>'
+            ? '/plan '
+            : command.path === '<built-in:build>'
+              ? '/build '
+              : '/goal '
         if (inputRef.current) {
           inputRef.current.value = literal
           inputRef.current.setSelectionRange(literal.length, literal.length)
@@ -1446,7 +1457,7 @@ export const ChatInput = memo(function ChatInput({
           'min-h-[40px] w-full resize-none overflow-x-hidden overflow-y-auto border-0 dark:bg-transparent p-0 font-mono text-base placeholder:text-sm shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 md:text-sm',
           zenMode ? 'h-12 max-h-12' : 'max-h-[30vh]',
           pill &&
-            'min-h-10 py-2 font-sans text-base leading-6 placeholder:text-base md:text-base'
+            'min-h-8 py-1 font-sans text-base leading-6 placeholder:text-base md:text-sm md:placeholder:text-sm'
         )}
         rows={1}
         autoFocus={!isMobile}

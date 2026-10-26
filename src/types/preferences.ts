@@ -681,8 +681,12 @@ export const DEFAULT_GLOBAL_SYSTEM_PROMPT = `Always use ASD-STE100 Simplified Te
 - Skip tests for docs, copy, comments, styling-only, and prompt/config text changes; say that you skipped them.
 - Do not re-run a passing check when the code it covers has not changed since.
 - Write new tests only for behavior that can break silently: business logic, parsing/serialization, state transitions, persistence, and a regression test for each fixed bug.
-- Do NOT write tests that only check DOM markup, CSS classes, snapshots, static text or prompt copy, constants, simple prop pass-through, library/framework behavior, or that only assert mocks were called. Verify UI changes in the running app instead.
-- If a UI check needs a browser and no other browser tool is available, use the Agent Browser.
+- Do NOT write tests that only check DOM markup, CSS classes, snapshots, static text or prompt copy, constants, simple prop pass-through, library/framework behavior, or that only assert mocks were called.
+- ALWAYS use a browser when the user asks for it, or when the task is visual: copy or match a style from a reference, compare with another page or screenshot, or fix a layout or visual bug.
+- Also use a browser when the change has runtime UI behavior that typecheck, lint, or tests cannot prove: new or changed user flows, or state/interaction logic.
+- In all other cases, do NOT open a browser. Examples: small copy/text edits, small class or prop tweaks that you did not have to match to a reference, refactors with no behavior change, backend-only changes. For these, a typecheck or the narrowest test is enough. Say "Not tested in browser" in the recap.
+- Before you open a browser on your own decision (not a user request), state in one line why a cheaper check is not enough.
+- If a UI check needs a browser and no other browser tool is available, use the Agent Browser. Check only the changed area, not the full app.
 
 ### 5. Demand Elegance (Balanced)
 - For non-trivial changes: pause and ask "is there a more elegant way?"
@@ -721,6 +725,7 @@ export const DEFAULT_GLOBAL_SYSTEM_PROMPT = `Always use ASD-STE100 Simplified Te
 - Do NOT create git worktrees manually (\`git worktree add\`, Superpowers \`using-git-worktrees\`, or similar) unless the user explicitly asks for a new worktree.
 - If a new worktree is explicitly required, use Jean's worktree features through Jean MCP/tools, not raw git worktree commands.
 - If already in a Jean worktree or base/main workspace, continue in the current workspace.
+- Do NOT change the branch of the current worktree or the base/main session (\`git checkout <branch>\`, \`git switch\`, \`git checkout -b\`, \`gh pr checkout\`, or similar) unless the user explicitly asks. Keep all work on the current branch.
 
 ## Jean Run Environment
 - When you need to test a running app (UI, HTTP, browser, smoke, e2e), call Jean MCP \`get_run_environments\` first (pass this worktreeId when known).
@@ -1311,7 +1316,7 @@ export interface AppPreferences {
   selected_model: ClaudeModel // Claude model ID passed to --model flag
   thinking_level: ThinkingLevel // Thinking level: 'off' | 'think' | 'megathink' | 'ultrathink'
   default_effort_level: EffortLevel // Effort level for Opus adaptive thinking: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultracode'
-  terminal: TerminalApp // Terminal app: 'terminal' | 'warp' | 'ghostty' | 'iterm2' | 'powershell' | 'windows-terminal'
+  terminal: TerminalApp // Terminal app: 'terminal' | 'warp' | 'ghostty' | 'kitty' | 'iterm2' | 'powershell' | 'windows-terminal'
   terminal_renderer?: TerminalRenderer // Embedded terminal renderer: 'xterm' or 'ghostty-web' (experimental)
   terminal_font?: TerminalFont // Embedded terminal font
   terminal_font_size?: number // Embedded terminal font size in pixels
@@ -1385,6 +1390,10 @@ export interface AppPreferences {
   custom_codex_providers: CodexProviderProfile[]
   /** Default Codex provider profile name (null = Codex default / ChatGPT OpenAI) */
   default_codex_provider: string | null
+  /** Named Claude and Codex logins. Each account has its own CLI config directory. */
+  provider_accounts?: ProviderAccount[]
+  /** Default account id for new sessions, keyed by backend ("claude" | "codex"). */
+  default_provider_accounts?: Record<string, string>
   /** PI custom providers mirrored into ~/.pi/agent/models.json */
   custom_pi_providers: PiProviderProfile[]
   favorite_models: string[] // Favourited model keys ("backend:model") shown at top of picker
@@ -1461,6 +1470,12 @@ export interface AppPreferences {
   jean_mcp_max_depth: number // Max recursive spawn depth via Jean MCP (default 3)
   jean_mcp_rate_limit_per_minute: number // Per-source rate limit for session-spawning tools (default 20)
   agent_browser_enabled: boolean // Install agent-browser and add its MCP server to CLI configs (default false)
+  /**
+   * Hostname for new browser tabs and port open buttons when a jean.json port
+   * has no host. Null or blank means localhost. Stored on the Jean server, so
+   * every attached client — including remote sessions — uses this value.
+   */
+  browser_default_host?: string | null
 }
 
 export type TerminalBackgroundMode = 'auto' | 'light' | 'dark' | 'custom'
@@ -1474,6 +1489,13 @@ export const terminalBackgroundOptions: {
   { value: 'dark', label: 'Dark' },
   { value: 'custom', label: 'Custom color' },
 ]
+
+/** A named login for Claude or Codex, stored separately from the CLI's own home. */
+export interface ProviderAccount {
+  id: string
+  backend: string
+  label: string
+}
 
 export interface CustomCliProfile {
   name: string // Display name, e.g. "OpenRouter"
@@ -2170,6 +2192,7 @@ export type TerminalApp =
   | 'terminal'
   | 'warp'
   | 'ghostty'
+  | 'kitty'
   | 'iterm2'
   | 'powershell'
   | 'windows-terminal'
@@ -2188,6 +2211,7 @@ const allTerminalOptions: {
   { value: 'terminal', label: 'Terminal', platforms: ['mac', 'linux'] },
   { value: 'warp', label: 'Warp', platforms: ['mac', 'windows'] },
   { value: 'ghostty', label: 'Ghostty', platforms: ['mac', 'linux'] },
+  { value: 'kitty', label: 'Kitty', platforms: ['linux'] },
   { value: 'iterm2', label: 'iTerm2', platforms: ['mac'] },
   { value: 'powershell', label: 'PowerShell', platforms: ['windows'] },
   {
@@ -2573,6 +2597,8 @@ export const defaultPreferences: AppPreferences = {
   default_provider: null,
   custom_codex_providers: [],
   default_codex_provider: null,
+  provider_accounts: [],
+  default_provider_accounts: {},
   custom_pi_providers: [],
   favorite_models: [],
   favorite_package_scripts: [],
@@ -2645,4 +2671,5 @@ export const defaultPreferences: AppPreferences = {
   jean_mcp_max_depth: 3,
   jean_mcp_rate_limit_per_minute: 20,
   agent_browser_enabled: false, // Default: off
+  browser_default_host: null, // Unset: tabs and port buttons use localhost
 }

@@ -1,7 +1,10 @@
 import { memo, useCallback, useMemo } from 'react'
+import { AgentMessageFromRow } from '@/components/agents/AgentMessageLink'
+import { parseAgentSentMessage } from '@/components/agents/agent-messages'
 import { Copy } from '@/components/icons/reicon'
 import { toast } from 'sonner'
 import { PILL_BUBBLE_CLASS, ReplyBubble } from './ReplyBubble'
+import { ChatContinuedNotice } from './ChatContinuedNotice'
 import { cn } from '@/lib/utils'
 import { normalizePath } from '@/lib/path-utils'
 import { copyToClipboard } from '@/lib/clipboard'
@@ -61,6 +64,7 @@ import {
   extractSkillPaths,
   stripAllMarkers,
   isAgentUpdateMessage,
+  isChatContinuedMessage,
 } from './message-content-utils'
 import {
   getAskUserQuestions,
@@ -1015,7 +1019,9 @@ export const MessageItem = memo(function MessageItem({
               hideSettingsBadges
                 ? cn(
                     PILL_BUBBLE_CLASS,
-                    '[--bubble-bg:color-mix(in_oklab,var(--agent-accent,var(--muted))_22%,var(--background))] bg-(--bubble-bg)',
+                    '[--bubble-bg:var(--agent-accent,var(--muted))] bg-(--bubble-bg)',
+                    // Agent-colored bubbles are strong shades: use white text
+                    '[--bubble-fg:var(--agent-accent-fg,var(--foreground))] text-(--bubble-fg) [&_a]:text-inherit',
                     // Attachments: the bubble color, a bit darker
                     '[&_[data-attachments]>*]:border-transparent [&_[data-attachments]>*]:bg-[color-mix(in_oklab,var(--bubble-bg)_80%,black)]'
                   )
@@ -1101,6 +1107,19 @@ export const MessageItem = memo(function MessageItem({
   if (message.role === 'user') {
     // Jean's automatic agent updates are for the agent only; show its reply.
     if (isAgentUpdateMessage(message.content)) return null
+    if (isChatContinuedMessage(message.content))
+      return <ChatContinuedNotice content={message.content} />
+    // A message from an agent: one line that opens the conversation
+    const agentSent = parseAgentSentMessage(message.content)
+    if (agentSent)
+      return (
+        <AgentMessageFromRow
+          sent={agentSent}
+          sessionId={sessionId}
+          worktreeId={worktreeId}
+          worktreePath={worktreePath}
+        />
+      )
     return (
       <MessageThreadContextMenu
         messageText={displayContent}

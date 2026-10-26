@@ -166,8 +166,10 @@ export function CommitsTabView({
 
   // Load branches once
   useEffect(() => {
-    getRepoBranches(worktreePath).then(setBranches).catch(console.error)
-  }, [worktreePath])
+    getRepoBranches(worktreePath, worktreeId)
+      .then(setBranches)
+      .catch(console.error)
+  }, [worktreePath, worktreeId])
 
   // Load commits when branch changes
   const loadCommits = useCallback(
@@ -180,7 +182,8 @@ export function CommitsTabView({
           worktreePath,
           branch ?? undefined,
           50,
-          skip
+          skip,
+          worktreeId
         )
         if (append) {
           setCommits(prev => [...prev, ...result.commits])
@@ -202,7 +205,7 @@ export function CommitsTabView({
         setIsLoadingCommits(false)
       }
     },
-    [worktreePath, commits.length]
+    [worktreePath, worktreeId, commits.length]
   )
 
   // Initial load + branch change
@@ -221,11 +224,11 @@ export function CommitsTabView({
     setDiffError(null)
     setSelectedFileIndex(0)
     setFileFilter('')
-    getCommitDiff(worktreePath, selectedCommitSha)
+    getCommitDiff(worktreePath, selectedCommitSha, worktreeId)
       .then(setCommitDiff)
       .catch(err => setDiffError(String(err)))
       .finally(() => setIsLoadingDiff(false))
-  }, [worktreePath, selectedCommitSha])
+  }, [worktreePath, worktreeId, selectedCommitSha])
 
   // ========================================================================
   // Parsed files from diff

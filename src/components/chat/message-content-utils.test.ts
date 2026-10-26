@@ -10,6 +10,8 @@ import {
   parsePlainTextPromptMetadata,
   splitAgentUpdateTurns,
   stripAllMarkers,
+  chatContinuedJournalId,
+  isChatContinuedMessage,
 } from './message-content-utils'
 
 describe('message-content-utils prompt metadata', () => {
@@ -95,6 +97,30 @@ describe('isAgentUpdateMessage', () => {
       )
     ).toBe(true)
     expect(isAgentUpdateMessage('Please check [Jean agent update]')).toBe(false)
+  })
+})
+
+describe('chat continued message', () => {
+  const content =
+    '[Jean chat continued] Automatic message from Jean, not from the user.\nYour previous chat (42 messages) was long, so Jean archived it. Jean saved its end as journal entry #17.'
+
+  it('reads the journal entry and stays in the chat with its recap', () => {
+    expect(isChatContinuedMessage(content)).toBe(true)
+    expect(chatContinuedJournalId(content)).toBe(17)
+    const messages = [
+      { role: 'user', content },
+      { role: 'assistant', content: 'Saved. Recap: ...' },
+    ]
+    expect(splitAgentUpdateTurns(messages).chat).toEqual(messages)
+  })
+
+  it('has no journal entry when the save failed', () => {
+    expect(
+      chatContinuedJournalId(
+        '[Jean chat continued] Jean could not save it to the journal.'
+      )
+    ).toBeNull()
+    expect(isChatContinuedMessage('hello')).toBe(false)
   })
 })
 

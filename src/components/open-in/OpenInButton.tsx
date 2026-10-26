@@ -7,6 +7,7 @@ import {
   ChevronDown,
   Settings,
 } from '@/components/icons/reicon'
+import { GitLabIcon } from '@/components/icons/GitLabIcon'
 import { Button, edgePrimary, raised } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
@@ -29,6 +30,7 @@ import {
 } from '@/services/projects'
 import { usePreferences } from '@/services/preferences'
 import { getOpenInDefaultLabel } from '@/types/preferences'
+import { providerLabels, useProjectGitProvider } from '@/services/git-provider'
 import {
   canOpenInEditor,
   canOpenInFinder,
@@ -64,6 +66,11 @@ export function OpenInButton({
   const openInTerminal = useOpenWorktreeInTerminal()
   const openInFinder = useOpenWorktreeInFinder()
   const openOnGitHub = useOpenBranchOnGitHub()
+  const { data: gitProviderInfo } = useProjectGitProvider(
+    server ? null : worktreePath
+  )
+  const gitProvider = gitProviderInfo?.provider ?? 'github'
+  const forgeName = providerLabels(gitProvider).name
 
   const canFinder =
     canOpenInFinder(serverId) &&
@@ -132,11 +139,14 @@ export function OpenInButton({
                 ? 'github'
                 : 'editor'
 
-  const defaultLabel = getOpenInDefaultLabel(
-    effectiveDefault,
-    preferences?.editor,
-    preferences?.terminal
-  )
+  const defaultLabel =
+    effectiveDefault === 'github'
+      ? forgeName
+      : getOpenInDefaultLabel(
+          effectiveDefault,
+          preferences?.editor,
+          preferences?.terminal
+        )
 
   if (!canEditor && !canTerminal && !canFinder) return null
 
@@ -202,8 +212,12 @@ export function OpenInButton({
           )}
           {branch && (
             <DropdownMenuItem onSelect={() => openAction('github')}>
-              <Github className="h-4 w-4" />
-              GitHub
+              {gitProvider === 'gitlab' ? (
+                <GitLabIcon className="h-4 w-4" />
+              ) : (
+                <Github className="h-4 w-4" />
+              )}
+              {forgeName}
             </DropdownMenuItem>
           )}
           <DropdownMenuSeparator />

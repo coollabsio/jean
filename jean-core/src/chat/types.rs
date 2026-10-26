@@ -886,6 +886,9 @@ pub struct Session {
     /// Selected provider (custom CLI profile name) for this session
     #[serde(default)]
     pub selected_provider: Option<String>,
+    /// Named provider account for this session (None = the CLI's own login)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_account_id: Option<String>,
     /// Selected workflow/permission policy for this session
     #[serde(
         default = "legacy_execution_mode",
@@ -1209,6 +1212,7 @@ impl Session {
             selected_thinking_level: None,
             selected_effort_level: None,
             selected_provider: None,
+            provider_account_id: None,
             selected_execution_mode: Some("yolo".to_string()),
             selected_permission_mode: Some("yolo".to_string()),
             session_naming_completed: false,
@@ -1586,6 +1590,7 @@ impl SessionMetadata {
             selected_thinking_level: self.selected_thinking_level.clone(),
             selected_effort_level: self.selected_effort_level.clone(),
             selected_provider: self.selected_provider.clone(),
+            provider_account_id: self.provider_account_id.clone(),
             selected_execution_mode: self.selected_execution_mode.clone(),
             selected_permission_mode: self.selected_permission_mode.clone(),
             session_naming_completed: self.session_naming_completed,
@@ -1661,6 +1666,7 @@ impl SessionMetadata {
         self.selected_thinking_level = session.selected_thinking_level.clone();
         self.selected_effort_level = session.selected_effort_level.clone();
         self.selected_provider = session.selected_provider.clone();
+        self.provider_account_id = session.provider_account_id.clone();
         self.selected_execution_mode = session.selected_execution_mode.clone();
         self.selected_permission_mode = session.selected_permission_mode.clone();
         self.session_naming_completed = session.session_naming_completed;
@@ -1913,6 +1919,12 @@ pub struct RunEntry {
     /// Whether the run was cancelled by the user
     #[serde(default)]
     pub cancelled: bool,
+    /// Provider rejected the turn before any assistant output (usage limit,
+    /// auth, API error). The user request stays in history and provider-switch
+    /// handoff. Explicit user cancel/undo-send leaves this false so withdrawn
+    /// text is not reintroduced.
+    #[serde(default)]
+    pub provider_rejected: bool,
     /// Whether this run was recovered from a crash
     #[serde(default)]
     pub recovered: bool,
@@ -1963,10 +1975,15 @@ impl RunEntry {
     /// Whether this run should appear as user/assistant messages in the visible chat timeline.
     ///
     /// Cancelled runs remain in metadata and JSONL for diagnostics. Instant
-    /// cancellations with no assistant id are hidden; cancellations after the
-    /// backend started are shown as the user prompt plus whatever partial
-    /// assistant/tool output had already streamed, marked as cancelled.
+    /// user cancellations with no assistant id are hidden. A provider rejection
+    /// before any assistant output stays visible as the user request so a later
+    /// turn can recover it. Cancellations after the backend started are shown
+    /// as the user prompt plus whatever partial assistant/tool output had
+    /// already streamed, marked as cancelled.
     pub fn is_renderable_in_chat_history(&self) -> bool {
+        if self.provider_rejected {
+            return !self.user_message.trim().is_empty();
+        }
         self.status != RunStatus::Cancelled || self.assistant_message_id.is_some()
     }
 
@@ -2071,6 +2088,9 @@ pub struct SessionMetadata {
     /// Selected provider (custom CLI profile name) for this session
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_provider: Option<String>,
+    /// Named provider account for this session (None = the CLI's own login)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_account_id: Option<String>,
     /// Selected workflow/permission policy for this session
     #[serde(
         default = "legacy_execution_mode",
@@ -2307,6 +2327,7 @@ impl SessionMetadata {
             selected_thinking_level: None,
             selected_effort_level: None,
             selected_provider: None,
+            provider_account_id: None,
             selected_execution_mode: None,
             selected_permission_mode: None,
             session_naming_completed: false,
@@ -3153,6 +3174,7 @@ mod tests {
             status: RunStatus::Completed,
             assistant_message_id: Some("assistant-1".to_string()),
             cancelled: false,
+            provider_rejected: false,
             recovered: false,
             claude_session_id: None,
             pid: None,
@@ -3200,6 +3222,7 @@ mod tests {
             status: RunStatus::Running,
             assistant_message_id: None,
             cancelled: false,
+            provider_rejected: false,
             recovered: false,
             claude_session_id: None,
             pid: Some(12345),
@@ -3236,6 +3259,7 @@ mod tests {
             status: RunStatus::Cancelled,
             assistant_message_id: Some("assistant-cancelled".to_string()),
             cancelled: true,
+            provider_rejected: false,
             recovered: false,
             claude_session_id: None,
             pid: None,
@@ -3268,13 +3292,22 @@ mod tests {
         assert!(run.renders_assistant_message());
         assert_eq!(run.rendered_message_count(), 2);
 
-        // Instant cancel (no assistant id) stays fully hidden.
+        // Instant user cancel (no assistant id) stays fully hidden.
         run.assistant_message_id = None;
         run.status = RunStatus::Cancelled;
         run.cancelled = true;
+        run.provider_rejected = false;
         assert!(!run.is_renderable_in_chat_history());
         assert!(!run.renders_assistant_message());
         assert_eq!(run.rendered_message_count(), 0);
+
+        // Provider rejection before output keeps the user request, with no
+        // fabricated assistant reply.
+        run.provider_rejected = true;
+        assert!(run.is_renderable_in_chat_history());
+        assert!(!run.renders_assistant_message());
+        assert_eq!(run.rendered_message_count(), 1);
+        run.provider_rejected = false;
 
         run.assistant_message_id = Some("assistant-cancelled".to_string());
         run.status = RunStatus::Completed;
@@ -3282,6 +3315,23 @@ mod tests {
 
         assert!(run.is_renderable_in_chat_history());
         assert_eq!(run.rendered_message_count(), 2);
+    }
+
+    #[test]
+    fn older_cancelled_runs_without_provider_rejected_stay_hidden() {
+        let run: RunEntry = serde_json::from_value(serde_json::json!({
+            "run_id": "run-old",
+            "user_message_id": "user-old",
+            "user_message": "withdrawn before this field existed",
+            "started_at": 1,
+            "status": "cancelled",
+            "cancelled": true
+        }))
+        .unwrap();
+
+        assert!(!run.provider_rejected);
+        assert!(!run.is_renderable_in_chat_history());
+        assert_eq!(run.rendered_message_count(), 0);
     }
 
     #[test]
@@ -3307,6 +3357,7 @@ mod tests {
             status: RunStatus::Cancelled,
             assistant_message_id: Some("assistant-cancelled".to_string()),
             cancelled: true,
+            provider_rejected: false,
             recovered: false,
             claude_session_id: None,
             pid: None,
@@ -3336,6 +3387,7 @@ mod tests {
             status: RunStatus::Completed,
             assistant_message_id: Some("assistant-completed".to_string()),
             cancelled: false,
+            provider_rejected: false,
             recovered: false,
             claude_session_id: None,
             pid: None,
@@ -3383,6 +3435,7 @@ mod tests {
             status: RunStatus::Completed,
             assistant_message_id: None,
             cancelled: false,
+            provider_rejected: false,
             recovered: false,
             claude_session_id: None,
             pid: None,
@@ -3416,6 +3469,7 @@ mod tests {
             status: RunStatus::Completed,
             assistant_message_id: None,
             cancelled: false,
+            provider_rejected: false,
             recovered: false,
             claude_session_id: Some("claude-sess-abc".to_string()),
             pid: None,

@@ -4,20 +4,26 @@ import type {
   GitHubIssue,
   GitHubPullRequest,
   DependabotAlert,
+  GitHubDiscussion,
   RepositoryAdvisory,
 } from '@/types/github'
 import type { LinearIssue } from '@/types/linear'
 import type { SentryIssue } from '@/types/sentry'
+import {
+  worktreeBranchCheckoutRef,
+  type RemoteBranch,
+} from '@/lib/remote-worktree-sources'
 
 interface Params {
   activeTab: TabId
   setActiveTab: (tab: TabId) => void
-  /** Whether the Security tab is available (hidden for GitLab projects). */
-  securityTabEnabled: boolean
+  /** Whether the GitHub-only Security and Discussions tabs are available (hidden for GitLab projects). */
+  githubOnlyTabsEnabled: boolean
   filteredIssues: GitHubIssue[]
   filteredPRs: GitHubPullRequest[]
   filteredSecurityAlerts: DependabotAlert[]
-  filteredBranches: string[]
+  filteredBranches: RemoteBranch[]
+  branchRemoteCount: number
   selectedItemIndex: number
   setSelectedItemIndex: (i: number | ((prev: number) => number)) => void
   creatingFromNumber: number | null
@@ -67,16 +73,22 @@ interface Params {
     issue: SentryIssue,
     background?: boolean
   ) => void
+  filteredDiscussions: GitHubDiscussion[]
+  handleSelectDiscussion: (
+    discussion: GitHubDiscussion,
+    background?: boolean
+  ) => void
 }
 
 export function useNewWorktreeKeyboard({
   activeTab,
   setActiveTab,
-  securityTabEnabled,
+  githubOnlyTabsEnabled,
   filteredIssues,
   filteredPRs,
   filteredSecurityAlerts,
   filteredBranches,
+  branchRemoteCount,
   selectedItemIndex,
   setSelectedItemIndex,
   creatingFromNumber,
@@ -102,6 +114,8 @@ export function useNewWorktreeKeyboard({
   filteredSentryIssues,
   handleSelectSentryIssue,
   handleSelectSentryIssueAndInvestigate,
+  filteredDiscussions,
+  handleSelectDiscussion,
 }: Params) {
   // Scroll selected item into view
   useEffect(() => {
@@ -135,7 +149,7 @@ export function useNewWorktreeKeyboard({
         if (key === '4') {
           e.preventDefault()
           // Security tab is hidden for GitLab projects — ignore its shortcut.
-          if (securityTabEnabled) {
+          if (githubOnlyTabsEnabled) {
             setActiveTab('security')
           }
           return
@@ -153,6 +167,13 @@ export function useNewWorktreeKeyboard({
         if (key === '7') {
           e.preventDefault()
           setActiveTab('sentry')
+          return
+        }
+        if (key === '8') {
+          e.preventDefault()
+          if (githubOnlyTabsEnabled) {
+            setActiveTab('discussions')
+          }
           return
         }
       }
@@ -240,10 +261,7 @@ export function useNewWorktreeKeyboard({
         }
         if (key === 'enter' && filteredPRs[selectedItemIndex]) {
           e.preventDefault()
-          handleSelectPR(
-            filteredPRs[selectedItemIndex],
-            e.metaKey || e.ctrlKey
-          )
+          handleSelectPR(filteredPRs[selectedItemIndex], e.metaKey || e.ctrlKey)
           return
         }
         if (
@@ -292,15 +310,13 @@ export function useNewWorktreeKeyboard({
           e.preventDefault()
           if (selectedItemIndex < filteredSecurityAlerts.length) {
             const alert = filteredSecurityAlerts[selectedItemIndex]
-            if (alert)
-              handleSelectSecurityAlert(alert, e.metaKey || e.ctrlKey)
+            if (alert) handleSelectSecurityAlert(alert, e.metaKey || e.ctrlKey)
           } else {
             const advisory =
               filteredAdvisories[
                 selectedItemIndex - filteredSecurityAlerts.length
               ]
-            if (advisory)
-              handleSelectAdvisory(advisory, e.metaKey || e.ctrlKey)
+            if (advisory) handleSelectAdvisory(advisory, e.metaKey || e.ctrlKey)
           }
           return
         }
@@ -385,7 +401,31 @@ export function useNewWorktreeKeyboard({
         }
       }
 
-      // Branches tab navigation
+      // Discussions tab navigation
+      if (activeTab === 'discussions' && filteredDiscussions.length > 0) {
+        if (key === 'arrowdown') {
+          e.preventDefault()
+          setSelectedItemIndex((prev: number) =>
+            Math.min(prev + 1, filteredDiscussions.length - 1)
+          )
+          return
+        }
+        if (key === 'arrowup') {
+          e.preventDefault()
+          setSelectedItemIndex((prev: number) => Math.max(prev - 1, 0))
+          return
+        }
+        if (key === 'enter' && filteredDiscussions[selectedItemIndex]) {
+          e.preventDefault()
+          handleSelectDiscussion(
+            filteredDiscussions[selectedItemIndex],
+            e.metaKey || e.ctrlKey
+          )
+          return
+        }
+      }
+
+      // Sentry tab navigation
       if (activeTab === 'sentry' && filteredSentryIssues.length > 0) {
         if (key === 'arrowdown') {
           e.preventDefault()
@@ -439,7 +479,10 @@ export function useNewWorktreeKeyboard({
         if (key === 'enter' && filteredBranches[selectedItemIndex]) {
           e.preventDefault()
           handleSelectBranch(
-            filteredBranches[selectedItemIndex],
+            worktreeBranchCheckoutRef(
+              filteredBranches[selectedItemIndex],
+              branchRemoteCount
+            ),
             e.metaKey || e.ctrlKey
           )
           return
@@ -453,6 +496,7 @@ export function useNewWorktreeKeyboard({
       filteredSecurityAlerts,
       filteredAdvisories,
       filteredBranches,
+      branchRemoteCount,
       selectedItemIndex,
       handleCreateWorktree,
       handleBaseSession,
@@ -475,9 +519,11 @@ export function useNewWorktreeKeyboard({
       handleSelectLinearIssueAndInvestigate,
       handleSelectSentryIssue,
       handleSelectSentryIssueAndInvestigate,
+      filteredDiscussions,
+      handleSelectDiscussion,
       creatingFromNumber,
       setActiveTab,
-      securityTabEnabled,
+      githubOnlyTabsEnabled,
       setSelectedItemIndex,
     ]
   )

@@ -416,6 +416,20 @@ describe('git-status service', () => {
         'Git diff only available in Tauri'
       )
     })
+
+    it('sends the worktree id so a shared path can be routed', async () => {
+      mockInvoke.mockResolvedValueOnce({ files: [] })
+
+      await getGitDiff('/srv/project', 'uncommitted', 'main', 'origin', 'wt-1')
+
+      expect(mockInvoke).toHaveBeenCalledWith('get_git_diff', {
+        worktreeId: 'wt-1',
+        worktreePath: '/srv/project',
+        diffType: 'uncommitted',
+        baseBranch: 'main',
+        baseRemote: 'origin',
+      })
+    })
   })
 
   describe('performGitPull', () => {

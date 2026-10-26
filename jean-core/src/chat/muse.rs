@@ -1855,6 +1855,7 @@ mod tests {
             status: super::super::types::RunStatus::Completed,
             assistant_message_id: None,
             cancelled: false,
+            provider_rejected: false,
             recovered: false,
             claude_session_id: None,
             pid: None,

@@ -135,4 +135,14 @@ describe('client-preferences', () => {
       default_backend: 'codex',
     })
   })
+
+  it('keeps the browser preview hostname on the server', () => {
+    const [client, server] = splitClientPreferencePatch({
+      theme: 'dark',
+      browser_default_host: 'dev.example.com',
+    })
+
+    expect(client).toEqual({ theme: 'dark' })
+    expect(server).toEqual({ browser_default_host: 'dev.example.com' })
+  })
 })

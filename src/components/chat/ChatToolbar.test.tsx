@@ -82,6 +82,7 @@ function renderChatToolbar(props: Partial<ChatToolbarProps> = {}) {
     projectId: undefined,
     loadedIssueContexts: [],
     loadedPRContexts: [],
+    loadedDiscussionContexts: [],
     loadedSecurityContexts: [],
     loadedAdvisoryContexts: [],
     loadedLinearContexts: [],

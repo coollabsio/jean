@@ -85,7 +85,7 @@ describe('agentStatusLabel', () => {
     expect(agentStatusLabel(agent({ activeDelegations: 3 }))).toBe(
       'Following 3 sessions'
     )
-    expect(agentStatusLabel(agent({}))).toBe('Idle')
+    expect(agentStatusLabel(agent({}))).toBeNull()
   })
 })
 
@@ -131,10 +131,10 @@ describe('describeApproval', () => {
         tool: 'agent_revert',
         args: { agentId: 'reviewer' },
       })
-    ).toBe('Revert the last change to reviewer')
+    ).toBe('Undo the last change to another agent')
   })
 
-  it('names the action and its worktree', () => {
+  it('names the action and its worktree by name', () => {
     const approval: AgentApproval = {
       id: 1,
       agentId: 'jean',
@@ -144,10 +144,34 @@ describe('describeApproval', () => {
       result: null,
       createdAt: 0,
     }
-    expect(describeApproval(approval)).toBe('Permanently delete worktree wt-1')
-    expect(describeApproval({ ...approval, tool: 'custom', args: {} })).toBe(
-      'custom'
+    // Names, never IDs
+    expect(describeApproval(approval, 'feature-x')).toBe(
+      'Permanently delete worktree feature-x'
     )
+    expect(describeApproval(approval)).toBe('Permanently delete a worktree')
+    expect(
+      describeApproval({
+        ...approval,
+        tool: 'push_worktree',
+        args: { worktreePath: '/home/me/jean/app/fix-login/' },
+      })
+    ).toBe('Push worktree fix-login')
+    expect(
+      describeApproval(
+        { ...approval, tool: 'remove_project', args: { projectId: 'p-1' } },
+        'my-app'
+      )
+    ).toBe('Remove project my-app')
+    expect(
+      describeApproval({
+        ...approval,
+        tool: 'remove_project',
+        args: { projectId: 'p-1' },
+      })
+    ).toBe('Remove a project')
+    expect(
+      describeApproval({ ...approval, tool: 'custom_tool', args: {} })
+    ).toBe('custom tool')
   })
 })
 

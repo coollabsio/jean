@@ -197,6 +197,7 @@ export function useUIStatePersistence() {
       sessionTerminalIds,
       sessionPrimarySurface,
       seenFailedWorkflowRunIds,
+      agentUpdatesSeenAt,
       gitDiffViewMode,
     } = useUIStore.getState()
     const { terminals, activeTerminalIds } = useTerminalStore.getState()
@@ -285,6 +286,7 @@ export function useUIStatePersistence() {
         ])
       ),
       seen_failed_workflow_run_ids: seenFailedWorkflowRunIds,
+      agent_updates_seen_at: agentUpdatesSeenAt,
       auto_resume: autoResumeForPersist,
       git_diff_view_mode: gitDiffViewMode,
       version: 1, // Reset for first release
@@ -1001,6 +1003,11 @@ export function useUIStatePersistence() {
         .setSeenFailedWorkflowRunIds(seenFailedWorkflowRunIds)
     }
 
+    const agentUpdatesSeenAt = uiState.agent_updates_seen_at ?? {}
+    if (Object.keys(agentUpdatesSeenAt).length > 0) {
+      useUIStore.getState().setAgentUpdatesSeenAt(agentUpdatesSeenAt)
+    }
+
     // Restore armed auto-continue sessions (sessionId → reset epoch ms) plus
     // their replayable send args. The watcher (useAutoResume) fires them.
     const persistedAutoResume = uiState.auto_resume ?? []
@@ -1189,6 +1196,7 @@ export function useUIStatePersistence() {
     let prevSessionPrimarySurface = useUIStore.getState().sessionPrimarySurface
     let prevSeenFailedWorkflowRunIds =
       useUIStore.getState().seenFailedWorkflowRunIds
+    let prevAgentUpdatesSeenAt = useUIStore.getState().agentUpdatesSeenAt
     let prevGitDiffViewMode = useUIStore.getState().gitDiffViewMode
     let prevWorktreeId = useChatStore.getState().activeWorktreeId
     let prevWorktreePath = useChatStore.getState().activeWorktreePath
@@ -1235,6 +1243,8 @@ export function useUIStatePersistence() {
         state.sessionPrimarySurface !== prevSessionPrimarySurface
       const seenFailedWorkflowRunIdsChanged =
         state.seenFailedWorkflowRunIds !== prevSeenFailedWorkflowRunIds
+      const agentUpdatesSeenAtChanged =
+        state.agentUpdatesSeenAt !== prevAgentUpdatesSeenAt
       const gitDiffViewModeChanged =
         state.gitDiffViewMode !== prevGitDiffViewMode
 
@@ -1242,11 +1252,13 @@ export function useUIStatePersistence() {
         sessionTerminalIdsChanged ||
         sessionPrimarySurfaceChanged ||
         seenFailedWorkflowRunIdsChanged ||
+        agentUpdatesSeenAtChanged ||
         gitDiffViewModeChanged
       ) {
         prevSessionTerminalIds = state.sessionTerminalIds
         prevSessionPrimarySurface = state.sessionPrimarySurface
         prevSeenFailedWorkflowRunIds = state.seenFailedWorkflowRunIds
+        prevAgentUpdatesSeenAt = state.agentUpdatesSeenAt
         prevGitDiffViewMode = state.gitDiffViewMode
         debouncedSaveRef.current?.()
       }

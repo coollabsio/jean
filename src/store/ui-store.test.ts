@@ -421,3 +421,32 @@ describe('mobile left sidebar closes when a surface opens over it', () => {
     expect(useUIStore.getState()).toBe(before)
   })
 })
+
+describe('rail section sidebar visibility', () => {
+  beforeEach(() => {
+    useUIStore.setState({
+      railSection: 'workspace',
+      railSidebarVisible: {},
+      leftSidebarVisible: false,
+    })
+  })
+
+  it('restores each section sidebar state when switching back', () => {
+    const ui = () => useUIStore.getState()
+    // Workspace collapsed; Agents never opened, so its panel shows
+    ui().setRailSection('agents', true)
+    expect(ui().leftSidebarVisible).toBe(true)
+
+    ui().setRailSection('workspace', true)
+    expect(ui().leftSidebarVisible).toBe(false)
+
+    ui().setRailSection('agents', true)
+    expect(ui().leftSidebarVisible).toBe(true)
+  })
+
+  it('keeps sidebar visibility when restore is off', () => {
+    useUIStore.getState().setRailSection('agents')
+    expect(useUIStore.getState().leftSidebarVisible).toBe(false)
+    expect(useUIStore.getState().railSidebarVisible.workspace).toBe(false)
+  })
+})

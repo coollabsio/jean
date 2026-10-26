@@ -19,6 +19,7 @@ mod engine;
 pub mod mcp;
 mod self_manage;
 mod subagents;
+pub mod templates;
 
 use std::sync::Mutex;
 
@@ -92,6 +93,12 @@ pub fn agent_for_worktree(app: &AppHandle, worktree_id: &str) -> Option<Agent> {
 }
 
 /// The agent that owns this session (the session is in an agent worktree).
+/// Message an agent sends to a workspace session. The UI parses the first line
+/// (see `parseAgentSentMessage` in message-content-utils.ts).
+pub fn agent_message_text(agent_name: &str, agent_id: &str, message: &str) -> String {
+    format!("[Message from agent {agent_name} (`{agent_id}`)]\n\n{message}")
+}
+
 pub fn agent_for_session(app: &AppHandle, session_id: &str) -> Option<Agent> {
     let metadata = crate::chat::storage::load_metadata(app, session_id).ok()??;
     agent_for_worktree(app, &metadata.worktree_id)
@@ -307,13 +314,13 @@ fn render_system_prompt(
 - You run inside Jean, not inside a project. Your working directory is only a scratch space.
 - Use only the `{mcp}` MCP server tools for project work. Never use another Jean MCP server.
 - When you give work to a session with `send_chat_message`, do not pass `executionMode`: the session then uses its selected mode or the user's default. Pass a mode only when the user asks for one. Jean tracks the session. When that session finishes, fails, or waits for input, you get an automatic update message. Do not poll or wait in a loop: end your turn and continue when the update arrives.
-- Messages that start with \"[Jean agent update]\" come from Jean, not from the user.
+- Messages that start with \"[Jean agent update]\" or \"[Jean chat continued]\" come from Jean, not from the user.
 - The user does not see update messages, only your reply. Reply to an update with a short status: one to three sentences, plus links to the PRs, issues, or sessions involved. Do not add headings, tables, diffs, a recap, or test steps, even if other instructions ask for them.
 - Delete, permanent delete, push, merge, and pull request creation need the user's approval. The tool then returns `approvalRequired`. Tell the user what you asked for and end your turn. The result arrives as an update.
 - Use `schedule_create` for later checks (`delayMinutes`), one run at an exact date-time (`runAt` plus `timezone`), repeating intervals (`everyMinutes`, at least 5), cron (`cron` plus `timezone`), or an event (`event`: session_finished, session_failed, worktree_archived, pr_merged, approval_resolved). Use `schedule_update`, `schedule_list`, and `schedule_cancel` to manage them. Each run is a separate background task.
 - Use `spawn_subagent` to hand one task to a subagent type from `subagent_type_list`. Pass the type name and the task. The result arrives as an update. Use `subagent_type_save` and `subagent_type_delete` to define types. A subagent cannot define types or spawn further subagents.
 - Use `agent_list` to see agents. Use `agent_update` with no `agentId` to change your name, description, instructions, color, backend, model, effort, or skills. Use `agent_create` to make an agent; it cannot receive more backend, model, effort, thinking, skills, or wake budget than you have. Use `agent_revert` to undo the latest change.
-- Use `notify_user` only for what the user must know: results of goals, questions, failures, needed decisions. Not for routine progress.
+- Use `notify_user` only for what the user must know: results of goals, questions, failures, needed decisions. Not for routine progress. In a task session, ask questions with `notify_user` (level `action`), not `ask_user`.
 - Use `task_list` to see your background tasks and their results.
 - Use `list_connectors` to see the MCP connectors saved for you and whether this backend applies that limit. It is read-only.
 - Use `memory_save` for lasting rules, facts the code does not show, and open work. Do not save live state (project lists, PR status) or secrets. scope `user` is only for facts about the user (name, timezone, preferences) and every agent sees them. scope `shared` is working memory for all agents, not who the user is. Omit scope for a private memory.
@@ -328,7 +335,7 @@ fn render_system_prompt(
     }
     match role {
         SessionRole::Chat { carry_over, recap } => {
-            out.push_str("\n## This session: chat with the user\n- The user talks with you here. Background work (schedules, follow-ups of tasks, requests from other agents) runs in separate task sessions. Use `task_list` when the user asks about it.\n- The user sees only your text, not your tool calls. Before each group of tool calls, write one short sentence that tells what you do now (for example: \"I check the open PRs.\"). When a step gives a result, write one short line about it.\n- End each reply to the user, including replies to updates, with one short question that suggests the most useful next action (for example: \"Do you want me to open a PR for this?\"). Suggest one to three concrete options when there is more than one good path. Do not ask when the user only said thanks or ended the conversation.\n");
+            out.push_str("\n## This session: chat with the user\n- The user talks with you here. Background work (schedules, follow-ups of tasks, requests from other agents) runs in separate task sessions. Use `task_list` when the user asks about it.\n- The user sees only your text, not your tool calls. Before each group of tool calls, write one short sentence that tells what you do now (for example: \"I check the open PRs.\"). When a step gives a result, write one short line about it.\n- When the user must decide between fixed choices, call `ask_user` instead of writing the question as text. Give the question and two to eight short options. Set `multiple` to true only when the user can pick more than one. Do not add a \"something else\" option: the user can always type an answer. Then end your turn. The answer arrives as the next user message.\n- End each reply to the user, including replies to updates, with one short question that suggests the most useful next action (for example: \"Do you want me to open a PR for this?\"). When there is more than one good path, ask it with `ask_user` and one to three concrete options. Do not ask when the user only said thanks or ended the conversation.\n");
             if *recap {
                 out.push_str(AGENT_RECAP_INSTRUCTION);
             }

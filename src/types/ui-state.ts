@@ -1,5 +1,6 @@
-// Types that match the Rust UIState struct
-// Contains ephemeral UI state that should be restored on app restart
+// Types that match the Rust UIState struct.
+// The server stores one navigation snapshot per client. Pins and pinned
+// canvas labels stay in the shared UI state file.
 // Note: Field names use snake_case to match Rust struct exactly
 //
 // Durable session state (answered_questions, submitted_answers, fixed_findings,
@@ -186,6 +187,8 @@ export interface UIState {
    * (failed-run badges only count runs not in this list).
    */
   seen_failed_workflow_run_ids?: number[]
+  /** Agent ID → newest agent update time (Unix seconds) the user has seen */
+  agent_updates_seen_at?: Record<string, number>
   /** Sessions armed for auto-continue after a usage limit resets */
   auto_resume?: AutoResumeEntry[]
   /** Git diff modal file list view mode */
@@ -237,6 +240,7 @@ export const defaultUIState: UIState = {
   browser_bottom_panel_height: 360,
   pinned_recent_session_ids: [],
   seen_failed_workflow_run_ids: [],
+  agent_updates_seen_at: {},
   auto_resume: [],
   git_diff_view_mode: 'list',
   version: 1,

@@ -39,6 +39,12 @@ once_cell = "1.20"
 tokio = { version = "1", features = ["rt-multi-thread"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 arboard = { version = "3", features = ["wayland-data-control"] }
+sha2 = "0.10"
+
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+# Keychain / Credential Manager. Linux keeps the 0600 file store: current
+# Secret Service crates need a newer Rust than this repo's toolchain.
+keyring = { version = "=2.3.3", default-features = false, features = ["platform-macos", "platform-windows"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSColor", "NSResponder"] }

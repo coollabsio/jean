@@ -70,8 +70,10 @@ mod pi_cli;
 mod platform;
 mod prerequisites;
 mod projects;
+mod provider_accounts;
 mod server_update;
 mod terminal;
+mod ui_client_state;
 mod version;
 
 pub use prerequisites::*;
@@ -81,8 +83,12 @@ pub use version::{app_version, set_app_version};
 // launch logic stays shared and complete: binary mapping, -g goto args,
 // macOS app fallbacks, Windows .cmd wrappers).
 pub use chat::open_file_in_default_app;
+pub use platform::kill_and_reap;
 pub use platform::open_url_in_browser;
+pub use platform::silent_command;
 pub use projects::open_worktree_in_editor;
+pub use projects::open_worktree_in_finder;
+pub use projects::open_worktree_in_terminal;
 
 // Process startup helper shared by the desktop and headless entry points.
 pub use platform::add_fnm_node_to_path;
@@ -184,7 +190,7 @@ pub struct AppPreferences {
     #[serde(default = "default_effort_level")]
     pub default_effort_level: String, // Effort level for Opus adaptive thinking: low, medium, high, xhigh, max, ultracode
     #[serde(default = "default_terminal")]
-    pub terminal: String, // Terminal app: terminal, warp, ghostty, iterm2, powershell, windows-terminal
+    pub terminal: String, // Terminal app: terminal, warp, ghostty, kitty, iterm2, powershell, windows-terminal
     #[serde(default = "default_terminal_renderer")]
     pub terminal_renderer: String, // Embedded terminal renderer: "xterm" or "ghostty-web" (experimental)
     #[serde(default = "default_terminal_font")]
@@ -321,6 +327,12 @@ pub struct AppPreferences {
     pub custom_codex_providers: Vec<CodexProviderProfile>, // Codex custom model_provider profiles
     #[serde(default)]
     pub default_codex_provider: Option<String>, // Default Codex provider profile name (None = built-in)
+    /// Named Claude/Codex logins. Auth lives in per-account config directories.
+    #[serde(default)]
+    pub provider_accounts: Vec<provider_accounts::ProviderAccount>,
+    /// Default account id for new sessions, keyed by backend ("claude", "codex").
+    #[serde(default)]
+    pub default_provider_accounts: std::collections::HashMap<String, String>,
     #[serde(default)]
     pub custom_pi_providers: Vec<PiProviderProfile>, // PI custom providers (index; disk = models.json)
     #[serde(default)]
@@ -461,6 +473,11 @@ pub struct AppPreferences {
     pub jean_mcp_rate_limit_per_minute: u32, // Per-source rate limit for session-spawning tools (default 20)
     #[serde(default)]
     pub agent_browser_enabled: bool, // Install agent-browser and add its MCP server to CLI configs (default false)
+    /// Hostname for new browser tabs and port open buttons when a jean.json
+    /// port omits `host`. Unset means localhost. Every client attached to this
+    /// server uses the same value. Jean MCP is unrelated and stays enabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser_default_host: Option<String>,
 }
 
 fn default_finished_session_animation_enabled() -> bool {
@@ -725,6 +742,16 @@ fn default_execution_mode() -> String {
     "yolo".to_string()
 }
 
+/// Plan is opt-in per session. A saved "always plan" preference would put
+/// every new session into Plan, so rewrite it to Build on load.
+fn migrate_plan_default_execution_mode(preferences: &mut AppPreferences) -> bool {
+    if preferences.default_execution_mode == "plan" {
+        preferences.default_execution_mode = "build".to_string();
+        return true;
+    }
+    false
+}
+
 fn default_backend() -> String {
     "claude".to_string()
 }
@@ -915,6 +942,68 @@ fn normalize_http_bind_host(bind_host: Option<&str>) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+/// Canonical browser preview hostname, or `None` when the server default is unset.
+/// Loopback names stay loopback so remote preview forwarding can still apply.
+/// Any other hostname is stored as written (lowercased).
+fn normalize_browser_default_host(value: Option<String>) -> Result<Option<String>, String> {
+    let Some(raw) = value else {
+        return Ok(None);
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    if trimmed.len() > 253 {
+        return Err("Browser default hostname is too long".to_string());
+    }
+    if trimmed.contains("://")
+        || trimmed.contains('/')
+        || trimmed.contains('\\')
+        || trimmed.contains('@')
+        || trimmed.contains('?')
+        || trimmed.contains('#')
+        || trimmed.contains(char::is_whitespace)
+    {
+        return Err("Enter a hostname or IP address, without a scheme, port, or path".to_string());
+    }
+    let unbracketed = trimmed
+        .strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+        .unwrap_or(trimmed);
+    if unbracketed.is_empty() {
+        return Err("Enter a hostname or IP address".to_string());
+    }
+    if unbracketed.contains(':') {
+        let ip: std::net::Ipv6Addr = unbracketed
+            .parse()
+            .map_err(|_| "Enter a hostname or IP address, without a port".to_string())?;
+        return Ok(Some(ip.to_string()));
+    }
+    if let Ok(ip) = unbracketed.parse::<std::net::Ipv4Addr>() {
+        return Ok(Some(ip.to_string()));
+    }
+    if !is_browser_hostname(unbracketed) {
+        return Err("Enter a hostname or IP address".to_string());
+    }
+    Ok(Some(unbracketed.to_ascii_lowercase()))
+}
+
+fn is_browser_hostname(host: &str) -> bool {
+    if host.len() > 253 || host.starts_with('.') || host.ends_with('.') {
+        return false;
+    }
+    host.split('.').all(|label| {
+        let bytes = label.as_bytes();
+        !bytes.is_empty()
+            && bytes.len() <= 63
+            && bytes[0].is_ascii_alphanumeric()
+            && bytes[bytes.len() - 1].is_ascii_alphanumeric()
+            && bytes
+                .iter()
+                .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'-')
+    })
+}
+
 fn resolve_http_server_bind_host(prefs: &AppPreferences) -> String {
     normalize_http_bind_host(prefs.http_server_bind_host.as_deref()).unwrap_or_else(|| {
         if prefs.http_server_localhost_only {
@@ -928,13 +1017,16 @@ fn resolve_http_server_bind_host(prefs: &AppPreferences) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        default_global_system_prompt, default_model, default_parallel_execution_prompt,
-        effective_global_system_prompt, is_legacy_global_system_prompt_with_subagent_strategy,
-        legacy_parallel_execution_prompt_before_subagent_strategy, parse_cli_args_from,
-        resolve_headless_bind_host, resolve_headless_token_required, resolve_http_server_bind_host,
-        resolve_stored_parallel_execution_prompt, server_preferences_value,
-        should_auto_select_cli_source, upgrade_legacy_parallel_execution_prompt,
-        validate_headless_security, AppPreferences, MagicPrompts,
+        default_global_system_prompt, default_global_system_prompt_with_legacy_ui_verification,
+        default_global_system_prompt_without_branch_rule, default_model,
+        default_parallel_execution_prompt, effective_global_system_prompt,
+        is_legacy_default_global_system_prompt,
+        legacy_parallel_execution_prompt_before_subagent_strategy, normalize_browser_default_host,
+        parse_cli_args_from, resolve_headless_bind_host, resolve_headless_token_required,
+        resolve_http_server_bind_host, resolve_stored_parallel_execution_prompt,
+        server_preferences_value, should_auto_select_cli_source,
+        upgrade_legacy_parallel_execution_prompt, validate_headless_security, AppPreferences,
+        MagicPrompts,
     };
     use serde_json::json;
 
@@ -974,13 +1066,71 @@ mod tests {
     }
 
     #[test]
+    fn browser_default_host_is_a_server_preference_and_leaves_jean_mcp_on() {
+        let mut preferences = AppPreferences::default();
+        assert!(preferences.browser_default_host.is_none());
+        assert!(preferences.jean_mcp_enabled);
+
+        preferences.browser_default_host = Some("dev.example.com".to_string());
+        let value = server_preferences_value(&preferences).unwrap();
+
+        assert_eq!(value["browser_default_host"], json!("dev.example.com"));
+        assert_eq!(value["jean_mcp_enabled"], json!(true));
+        assert!(value.get("theme").is_none());
+    }
+
+    #[test]
+    fn browser_default_host_missing_field_stays_unset() {
+        let mut value = serde_json::to_value(AppPreferences::default()).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("browser_default_host");
+
+        let prefs: AppPreferences = serde_json::from_value(value).unwrap();
+
+        assert!(prefs.browser_default_host.is_none());
+        assert!(prefs.jean_mcp_enabled);
+    }
+
+    #[test]
+    fn normalize_browser_default_host_preserves_loopback_and_custom_hosts() {
+        assert_eq!(normalize_browser_default_host(None).unwrap(), None);
+        assert_eq!(
+            normalize_browser_default_host(Some("   ".to_string())).unwrap(),
+            None
+        );
+        assert_eq!(
+            normalize_browser_default_host(Some(" LocalHost ".to_string())).unwrap(),
+            Some("localhost".to_string())
+        );
+        assert_eq!(
+            normalize_browser_default_host(Some("127.0.0.1".to_string())).unwrap(),
+            Some("127.0.0.1".to_string())
+        );
+        assert_eq!(
+            normalize_browser_default_host(Some("[::1]".to_string())).unwrap(),
+            Some("::1".to_string())
+        );
+        assert_eq!(
+            normalize_browser_default_host(Some("Dev.Example.COM".to_string())).unwrap(),
+            Some("dev.example.com".to_string())
+        );
+        assert!(
+            normalize_browser_default_host(Some("http://dev.example.com".to_string())).is_err()
+        );
+        assert!(normalize_browser_default_host(Some("dev.example.com:3000".to_string())).is_err());
+    }
+
+    #[test]
     fn agent_browser_prompt_lines_follow_preference() {
         let prompt = default_global_system_prompt();
         let mut prefs = AppPreferences::default();
 
         let off = crate::apply_agent_browser_preference(prompt.clone(), Some(&prefs));
         assert!(!off.to_ascii_lowercase().contains("agent browser"));
-        assert!(off.contains("Verify UI changes in the running app instead."));
+        assert!(off.contains("ALWAYS use a browser when the user asks for it"));
+        assert!(off.contains("Not tested in browser"));
         assert!(
             !crate::apply_agent_browser_preference(prompt.clone(), None).contains("Agent Browser")
         );
@@ -990,6 +1140,14 @@ mod tests {
             crate::apply_agent_browser_preference(prompt.clone(), Some(&prefs)),
             prompt
         );
+    }
+
+    #[test]
+    fn default_global_system_prompt_forbids_branch_changes() {
+        let prompt = default_global_system_prompt();
+        assert!(prompt.contains("Do NOT change the branch of the current worktree"));
+        assert!(!default_global_system_prompt_without_branch_rule()
+            .contains("Do NOT change the branch of the current worktree"));
     }
 
     #[test]
@@ -1041,7 +1199,7 @@ mod tests {
     }
 
     fn previous_global_system_prompt() -> String {
-        let bumped = default_global_system_prompt()
+        let bumped = default_global_system_prompt_without_branch_rule()
             .replace(
                 "### 6. Autonomous Bug Fixing",
                 "### 7. Autonomous Bug Fixing",
@@ -1106,20 +1264,35 @@ mod tests {
     }
 
     #[test]
+    fn default_prompt_before_browser_rule_change_migrates() {
+        let legacy = default_global_system_prompt_with_legacy_ui_verification();
+        assert!(legacy.contains("Verify UI changes in the running app instead."));
+        assert!(!legacy.contains("Not tested in browser"));
+        assert!(legacy.contains("### 5. Demand Elegance (Balanced)"));
+        assert!(is_legacy_default_global_system_prompt(&legacy));
+        assert_eq!(
+            effective_global_system_prompt(Some(&legacy)),
+            default_global_system_prompt()
+        );
+
+        let custom = format!("{legacy}\nExtra user rule.");
+        assert!(!is_legacy_default_global_system_prompt(&custom));
+        assert!(!is_legacy_default_global_system_prompt(
+            &default_global_system_prompt()
+        ));
+    }
+
+    #[test]
     fn legacy_default_global_prompt_migrates_and_custom_text_is_kept() {
         let legacy = previous_global_system_prompt();
-        assert!(is_legacy_global_system_prompt_with_subagent_strategy(
-            &legacy
-        ));
+        assert!(is_legacy_default_global_system_prompt(&legacy));
         assert_eq!(
             effective_global_system_prompt(Some(&legacy)),
             default_global_system_prompt()
         );
 
         let custom = format!("{legacy}\n\nExtra user rule: keep my wording.");
-        assert!(!is_legacy_global_system_prompt_with_subagent_strategy(
-            &custom
-        ));
+        assert!(!is_legacy_default_global_system_prompt(&custom));
         assert_eq!(effective_global_system_prompt(Some(&custom)), custom.trim());
         assert_eq!(
             effective_global_system_prompt(Some("  My global prompt.  ")),
@@ -2454,8 +2627,12 @@ fn default_global_system_prompt() -> String {
 - Skip tests for docs, copy, comments, styling-only, and prompt/config text changes; say that you skipped them.
 - Do not re-run a passing check when the code it covers has not changed since.
 - Write new tests only for behavior that can break silently: business logic, parsing/serialization, state transitions, persistence, and a regression test for each fixed bug.
-- Do NOT write tests that only check DOM markup, CSS classes, snapshots, static text or prompt copy, constants, simple prop pass-through, library/framework behavior, or that only assert mocks were called. Verify UI changes in the running app instead.
-- If a UI check needs a browser and no other browser tool is available, use the Agent Browser.
+- Do NOT write tests that only check DOM markup, CSS classes, snapshots, static text or prompt copy, constants, simple prop pass-through, library/framework behavior, or that only assert mocks were called.
+- ALWAYS use a browser when the user asks for it, or when the task is visual: copy or match a style from a reference, compare with another page or screenshot, or fix a layout or visual bug.
+- Also use a browser when the change has runtime UI behavior that typecheck, lint, or tests cannot prove: new or changed user flows, or state/interaction logic.
+- In all other cases, do NOT open a browser. Examples: small copy/text edits, small class or prop tweaks that you did not have to match to a reference, refactors with no behavior change, backend-only changes. For these, a typecheck or the narrowest test is enough. Say "Not tested in browser" in the recap.
+- Before you open a browser on your own decision (not a user request), state in one line why a cheaper check is not enough.
+- If a UI check needs a browser and no other browser tool is available, use the Agent Browser. Check only the changed area, not the full app.
 
 ### 5. Demand Elegance (Balanced)
 - For non-trivial changes: pause and ask "is there a more elegant way?"
@@ -2494,6 +2671,7 @@ fn default_global_system_prompt() -> String {
 - Do NOT create git worktrees manually (`git worktree add`, Superpowers `using-git-worktrees`, or similar) unless the user explicitly asks for a new worktree.
 - If a new worktree is explicitly required, use Jean's worktree features through Jean MCP/tools, not raw git worktree commands.
 - If already in a Jean worktree or base/main workspace, continue in the current workspace.
+- Do NOT change the branch of the current worktree or the base/main session (`git checkout <branch>`, `git switch`, `git checkout -b`, `gh pr checkout`, or similar) unless the user explicitly asks. Keep all work on the current branch.
 
 ## Jean Run Environment
 - When you need to test a running app (UI, HTTP, browser, smoke, e2e), call Jean MCP `get_run_environments` first (pass this worktreeId when known).
@@ -2515,11 +2693,42 @@ const LEGACY_SUBAGENT_STRATEGY_SECTION: &str = "\
 
 ";
 
-/// True only when `prompt` is the previous built-in global prompt, whose
-/// sub-agent section now lives in the parallel-execution prompt. Any other
-/// text, including a customized prompt that still mentions sub-agents, is kept.
-pub(crate) fn is_legacy_global_system_prompt_with_subagent_strategy(prompt: &str) -> bool {
+/// UI verification rules before they said when to skip the browser.
+const LEGACY_UI_VERIFICATION_RULES: &str = "\
+- Do NOT write tests that only check DOM markup, CSS classes, snapshots, static text or prompt copy, constants, simple prop pass-through, library/framework behavior, or that only assert mocks were called. Verify UI changes in the running app instead.
+- If a UI check needs a browser and no other browser tool is available, use the Agent Browser.
+";
+
+const UI_VERIFICATION_RULES_START: &str = "- Do NOT write tests that only check DOM markup";
+const UI_VERIFICATION_RULES_END: &str =
+    "use the Agent Browser. Check only the changed area, not the full app.\n";
+
+/// The current default global prompt with the legacy UI verification rules.
+fn default_global_system_prompt_with_legacy_ui_verification() -> String {
+    let prompt = default_global_system_prompt();
+    let start = prompt
+        .find(UI_VERIFICATION_RULES_START)
+        .expect("default prompt has UI verification rules");
+    let end = prompt
+        .find(UI_VERIFICATION_RULES_END)
+        .expect("default prompt has Agent Browser rule")
+        + UI_VERIFICATION_RULES_END.len();
+    format!(
+        "{}{LEGACY_UI_VERIFICATION_RULES}{}",
+        &prompt[..start],
+        &prompt[end..]
+    )
+}
+
+/// True only when `prompt` is a previous built-in global prompt: the one
+/// before the browser rules changed, or the older one whose sub-agent section
+/// now lives in the parallel-execution prompt. Any other text, including a
+/// customized prompt, is kept.
+pub(crate) fn is_legacy_default_global_system_prompt(prompt: &str) -> bool {
     let normalized = prompt.replace("\r\n", "\n");
+    if normalized.trim() == default_global_system_prompt_with_legacy_ui_verification().trim() {
+        return true;
+    }
     let Some(start) = normalized.find(LEGACY_SUBAGENT_STRATEGY_SECTION) else {
         return false;
     };
@@ -2548,16 +2757,22 @@ pub(crate) fn is_legacy_global_system_prompt_with_subagent_strategy(prompt: &str
             "### 4. Self-Improvement Loop",
             "### 3. Self-Improvement Loop",
         );
-    renumbered.trim() == default_global_system_prompt().trim()
+    renumbered.trim() == default_global_system_prompt_without_branch_rule().trim()
+}
+
+/// The branch rule was added after the sub-agent section moved out, so legacy
+/// stored prompts never contain it.
+const BRANCH_RULE_LINE: &str = "- Do NOT change the branch of the current worktree or the base/main session (`git checkout <branch>`, `git switch`, `git checkout -b`, `gh pr checkout`, or similar) unless the user explicitly asks. Keep all work on the current branch.\n";
+
+fn default_global_system_prompt_without_branch_rule() -> String {
+    default_global_system_prompt_with_legacy_ui_verification().replacen(BRANCH_RULE_LINE, "", 1)
 }
 
 /// Stored `None`/empty/legacy-default text uses the current global prompt.
 /// Any other stored text is returned unchanged.
 pub(crate) fn effective_global_system_prompt(stored: Option<&str>) -> String {
     match stored.map(str::trim).filter(|prompt| !prompt.is_empty()) {
-        Some(prompt) if !is_legacy_global_system_prompt_with_subagent_strategy(prompt) => {
-            prompt.to_string()
-        }
+        Some(prompt) if !is_legacy_default_global_system_prompt(prompt) => prompt.to_string(),
         _ => default_global_system_prompt(),
     }
 }
@@ -3056,7 +3271,7 @@ impl MagicPrompts {
         if self
             .global_system_prompt
             .as_deref()
-            .is_some_and(is_legacy_global_system_prompt_with_subagent_strategy)
+            .is_some_and(is_legacy_default_global_system_prompt)
         {
             self.global_system_prompt = None;
             changed = true;
@@ -3146,6 +3361,8 @@ impl Default for AppPreferences {
             default_provider: None,
             custom_codex_providers: Vec::new(),
             default_codex_provider: None,
+            provider_accounts: Vec::new(),
+            default_provider_accounts: std::collections::HashMap::new(),
             custom_pi_providers: Vec::new(),
             favorite_models: Vec::new(),
             favorite_package_scripts: Vec::new(),
@@ -3216,15 +3433,19 @@ impl Default for AppPreferences {
             jean_mcp_max_depth: default_jean_mcp_max_depth(),
             jean_mcp_rate_limit_per_minute: default_jean_mcp_rate_limit(),
             agent_browser_enabled: false,
+            browser_default_host: None,
         }
     }
 }
 
-// UI State data structure
-// Contains ephemeral UI state that should be restored on app restart
+// UI navigation snapshot restored when a client reconnects.
+//
+// Each client has its own file under `ui-clients/<client-id>.json`. The shared
+// `ui-state.json` keeps pinned recent sessions and pinned canvas labels only.
+// The installation's native client claims a pre-existing shared snapshot once.
 //
 // NOTE: Durable session-specific state is stored in Session files. Lightweight
-// unsent input drafts stay here so textareas survive full UI reloads.
+// unsent input drafts stay in the client snapshot so textareas survive reloads.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UIState {
     /// Last opened worktree ID (to restore active worktree)
@@ -3420,6 +3641,10 @@ pub struct UIState {
     #[serde(default)]
     pub seen_failed_workflow_run_ids: Vec<u64>,
 
+    /// Agent ID → newest agent update time (Unix seconds) the user has seen
+    #[serde(default)]
+    pub agent_updates_seen_at: std::collections::HashMap<String, u64>,
+
     /// Sessions armed for auto-continue after a usage limit resets
     #[serde(default)]
     pub auto_resume: Vec<AutoResumeEntry>,
@@ -3577,6 +3802,7 @@ impl Default for UIState {
             pinned_recent_session_ids: Vec::new(),
             last_opened_per_project: std::collections::HashMap::new(),
             seen_failed_workflow_run_ids: Vec::new(),
+            agent_updates_seen_at: std::collections::HashMap::new(),
             auto_resume: Vec::new(),
             git_diff_view_mode: None,
             version: default_ui_state_version(),
@@ -3615,6 +3841,7 @@ pub fn load_preferences_sync(app: &AppHandle) -> Result<AppPreferences, String> 
     // preference-file compatibility, but never honor an old disabled value.
     preferences.jean_mcp_enabled = true;
     preferences.magic_prompts.migrate_defaults();
+    migrate_plan_default_execution_mode(&mut preferences);
     migrate_final_review_preferences(&mut preferences, &raw_preferences);
     maybe_auto_select_system_cli_preferences(app, &mut preferences, Some(&raw_preferences));
     Ok(preferences)
@@ -3662,6 +3889,18 @@ async fn load_preferences(app: AppHandle) -> Result<AppPreferences, String> {
         preferences.jean_mcp_enabled = true;
         needs_resave = true;
     }
+    match normalize_browser_default_host(preferences.browser_default_host.clone()) {
+        Ok(host) if host != preferences.browser_default_host => {
+            preferences.browser_default_host = host;
+            needs_resave = true;
+        }
+        Err(_) => {
+            preferences.browser_default_host = None;
+            needs_resave = true;
+        }
+        Ok(_) => {}
+    }
+    needs_resave |= migrate_plan_default_execution_mode(&mut preferences);
     if let Some(new_model) = migrate_default_claude_model(&preferences.selected_model) {
         preferences.selected_model = new_model.to_string();
         needs_resave = true;
@@ -3734,9 +3973,11 @@ async fn load_preferences(app: AppHandle) -> Result<AppPreferences, String> {
     Ok(preferences)
 }
 
-async fn save_preferences(app: AppHandle, preferences: AppPreferences) -> Result<(), String> {
+async fn save_preferences(app: AppHandle, mut preferences: AppPreferences) -> Result<(), String> {
     // Validate before this command changes any related persisted state.
     validate_theme(&preferences.theme)?;
+    preferences.browser_default_host =
+        normalize_browser_default_host(preferences.browser_default_host.take())?;
 
     // Keep per-project Sentry region caches consistent with the global token:
     // a global set/change/remove invalidates the cached region host on projects that
@@ -4044,17 +4285,20 @@ async fn delete_cli_profile(name: String) -> Result<(), String> {
     Ok(())
 }
 
-fn get_ui_state_path(app: &AppHandle) -> Result<PathBuf, String> {
+fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let app_data_dir = app
         .path()
         .app_data_dir()
         .map_err(|e| format!("Failed to get app data directory: {e}"))?;
 
-    // Ensure the directory exists
     std::fs::create_dir_all(&app_data_dir)
         .map_err(|e| format!("Failed to create app data directory: {e}"))?;
 
-    Ok(app_data_dir.join("ui-state.json"))
+    Ok(app_data_dir)
+}
+
+fn get_ui_state_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(ui_client_state::shared_ui_state_path(&app_data_dir(app)?))
 }
 
 /// Serializes read-modify-write cycles on `ui-state.json` within this process.
@@ -4100,25 +4344,6 @@ fn write_ui_state_file(path: &Path, ui_state: &UIState) -> Result<(), String> {
     })
 }
 
-/// Writes a full UI state snapshot but keeps the pinned recent sessions that are on disk.
-///
-/// Pins change only through `set_recent_session_pinned`, so concurrent clients
-/// (native desktop, Web Access) cannot overwrite each other's pins with a stale
-/// full-state save. If the existing file cannot be parsed, the incoming pins are
-/// kept so the rewrite does not silently drop them.
-fn write_ui_state_keeping_pins(path: &Path, mut ui_state: UIState) -> Result<(), String> {
-    let _guard = lock_ui_state_writes();
-
-    match read_ui_state_file(path) {
-        Ok(existing) => ui_state.pinned_recent_session_ids = existing.pinned_recent_session_ids,
-        Err(e) => log::warn!(
-            "Keeping incoming pinned recent sessions, existing UI state is unreadable: {e}"
-        ),
-    }
-
-    write_ui_state_file(path, &ui_state)
-}
-
 /// Adds (appended at the end, no duplicates) or removes one pinned recent session.
 /// Returns the resulting pins and whether the file changed. A corrupt file is
 /// reported as an error and left untouched.
@@ -4159,21 +4384,51 @@ fn emit_ui_state_invalidation(app: &AppHandle) {
     }
 }
 
-async fn load_ui_state(app: AppHandle) -> Result<UIState, String> {
-    log::trace!("Loading UI state from disk");
-    let state_path = get_ui_state_path(&app)?;
-    let ui_state = read_ui_state_file(&state_path)?;
-    log::trace!("Successfully loaded UI state");
+async fn get_native_client_id(app: AppHandle) -> Result<String, String> {
+    let dir = app_data_dir(&app)?;
+    ui_client_state::ensure_native_ui_client(&dir)
+}
+
+async fn load_ui_state(app: AppHandle, client_id: String) -> Result<UIState, String> {
+    log::trace!("Loading UI state for client {client_id}");
+    let dir = app_data_dir(&app)?;
+    let ui_state = ui_client_state::load_client_ui_state(&dir, &client_id)?;
+    log::trace!("Successfully loaded UI state for client {client_id}");
     Ok(ui_state)
 }
 
-async fn save_ui_state(app: AppHandle, ui_state: UIState) -> Result<(), String> {
-    log::trace!("Saving UI state to disk: {ui_state:?}");
-    let state_path = get_ui_state_path(&app)?;
+/// Init payload for a browser that did not send a client id, or sent one we
+/// cannot use. Navigation stays empty so this request cannot inherit another
+/// client's place in the app. Shared pins and labels still apply.
+async fn load_ui_state_for_init(
+    app: AppHandle,
+    client_id: Option<String>,
+) -> Result<UIState, String> {
+    let Some(client_id) = client_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+    else {
+        let dir = app_data_dir(&app)?;
+        return ui_client_state::load_shared_navigation_defaults(&dir);
+    };
 
-    write_ui_state_keeping_pins(&state_path, ui_state)?;
+    match load_ui_state(app.clone(), client_id.to_string()).await {
+        Ok(ui_state) => Ok(ui_state),
+        Err(error) if error == ui_client_state::INVALID_CLIENT_ID => {
+            log::warn!("Ignoring invalid UI client id while building /api/init");
+            let dir = app_data_dir(&app)?;
+            ui_client_state::load_shared_navigation_defaults(&dir)
+        }
+        Err(error) => Err(error),
+    }
+}
 
-    log::trace!("Saved UI state to {state_path:?}");
+async fn save_ui_state(app: AppHandle, client_id: String, ui_state: UIState) -> Result<(), String> {
+    log::trace!("Saving UI state for client {client_id}");
+    let dir = app_data_dir(&app)?;
+    ui_client_state::save_client_ui_state(&dir, &client_id, ui_state)?;
+    log::trace!("Saved UI state for client {client_id}");
     emit_ui_state_invalidation(&app);
     Ok(())
 }
@@ -4207,9 +4462,7 @@ async fn set_recent_session_pinned(
 
 #[cfg(test)]
 mod ui_state_pin_tests {
-    use super::{
-        read_ui_state_file, set_pinned_session_in_file, write_ui_state_keeping_pins, UIState,
-    };
+    use super::{read_ui_state_file, set_pinned_session_in_file, UIState};
 
     fn pins(ids: &[&str]) -> Vec<String> {
         ids.iter().map(|id| id.to_string()).collect()
@@ -4217,68 +4470,6 @@ mod ui_state_pin_tests {
 
     fn write_state(path: &std::path::Path, ui_state: &UIState) {
         std::fs::write(path, serde_json::to_string_pretty(ui_state).unwrap()).unwrap();
-    }
-
-    #[test]
-    fn save_keeps_pins_on_disk_and_ignores_incoming_pins() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("ui-state.json");
-        write_state(
-            &path,
-            &UIState {
-                pinned_recent_session_ids: pins(&["pinned-by-other-client"]),
-                ..UIState::default()
-            },
-        );
-
-        let incoming = UIState {
-            active_worktree_id: Some("worktree-1".to_string()),
-            seen_failed_workflow_run_ids: vec![42],
-            pinned_recent_session_ids: pins(&["stale-pin"]),
-            ..UIState::default()
-        };
-        write_ui_state_keeping_pins(&path, incoming).unwrap();
-
-        let saved = read_ui_state_file(&path).unwrap();
-        assert_eq!(
-            saved.pinned_recent_session_ids,
-            pins(&["pinned-by-other-client"])
-        );
-        assert_eq!(saved.active_worktree_id.as_deref(), Some("worktree-1"));
-        assert_eq!(saved.seen_failed_workflow_run_ids, vec![42]);
-    }
-
-    #[test]
-    fn save_without_existing_file_writes_empty_pins() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("ui-state.json");
-
-        let incoming = UIState {
-            active_worktree_id: Some("worktree-1".to_string()),
-            pinned_recent_session_ids: pins(&["stale-pin"]),
-            ..UIState::default()
-        };
-        write_ui_state_keeping_pins(&path, incoming).unwrap();
-
-        let saved = read_ui_state_file(&path).unwrap();
-        assert!(saved.pinned_recent_session_ids.is_empty());
-        assert_eq!(saved.active_worktree_id.as_deref(), Some("worktree-1"));
-    }
-
-    #[test]
-    fn save_over_corrupt_file_keeps_incoming_pins() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("ui-state.json");
-        std::fs::write(&path, "{ not json").unwrap();
-
-        let incoming = UIState {
-            pinned_recent_session_ids: pins(&["incoming-pin"]),
-            ..UIState::default()
-        };
-        write_ui_state_keeping_pins(&path, incoming).unwrap();
-
-        let saved = read_ui_state_file(&path).unwrap();
-        assert_eq!(saved.pinned_recent_session_ids, pins(&["incoming-pin"]));
     }
 
     #[test]
@@ -5139,6 +5330,12 @@ pub fn build_tokio_runtime() -> std::io::Result<tokio::runtime::Runtime> {
 
 /// Initialize the shared runtime used by both transport adapters.
 pub fn initialize_runtime(context: &RuntimeContext) -> Result<(), String> {
+    if let Ok(dir) = context.path().app_data_dir() {
+        if let Err(error) = ui_client_state::ensure_native_ui_client(&dir) {
+            log::warn!("Failed to isolate legacy UI state for this installation: {error}");
+        }
+    }
+
     let (broadcaster, _) = http_server::WsBroadcaster::new();
     context.manage(broadcaster);
     context.manage(std::sync::Arc::new(tokio::sync::Mutex::new(

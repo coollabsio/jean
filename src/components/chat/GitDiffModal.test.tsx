@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import userEvent from '@testing-library/user-event'
 import { fireEvent, render, screen, waitFor } from '@/test/test-utils'
 import { GitDiffModal } from './GitDiffModal'
+import { getGitDiff } from '@/services/git-status'
 import type { GitDiff } from '@/types/git-diff'
 
 vi.mock('@/services/preferences', () => ({
@@ -75,6 +76,7 @@ function renderGitDiffModal() {
       diffRequest={{
         type: 'uncommitted',
         worktreePath: '/tmp/worktree',
+        worktreeId: 'wt-1',
         baseBranch: 'main',
       }}
       onClose={vi.fn()}
@@ -105,6 +107,26 @@ async function getDiffScrollContainer() {
 
   return scrollContainer as HTMLDivElement
 }
+
+describe('GitDiffModal ownership', () => {
+  beforeEach(() => {
+    vi.mocked(getGitDiff).mockClear()
+  })
+
+  it('loads the diff for the worktree that opened the dialog', async () => {
+    renderGitDiffModal()
+
+    await screen.findByTestId('file-diff')
+
+    expect(getGitDiff).toHaveBeenCalledWith(
+      '/tmp/worktree',
+      'uncommitted',
+      'main',
+      undefined,
+      'wt-1'
+    )
+  })
+})
 
 describe('GitDiffModal keyboard shortcuts', () => {
   beforeEach(() => {

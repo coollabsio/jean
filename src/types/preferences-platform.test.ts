@@ -8,6 +8,7 @@ describe('server platform option filtering', () => {
     expect(getTerminalOptions().map(option => option.value)).toEqual([
       'terminal',
       'ghostty',
+      'kitty',
     ])
 
     setServerPlatform('windows')

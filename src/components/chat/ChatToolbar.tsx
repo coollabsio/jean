@@ -32,6 +32,7 @@ import { MobileBackendModelPickerSheet } from '@/components/chat/toolbar/MobileB
 import { DesktopToolbarControls } from '@/components/chat/toolbar/DesktopToolbarControls'
 import { DockBurgerButton } from '@/components/chat/toolbar/DockBurgerButton'
 import { ExecutionModeDropdown } from '@/components/chat/toolbar/ExecutionModeDropdown'
+import { ProviderAccountMenu } from '@/components/chat/toolbar/ProviderAccountMenu'
 import { SendCancelButton } from '@/components/chat/toolbar/SendCancelButton'
 import { ContextViewerDialog } from '@/components/chat/toolbar/ContextViewerDialog'
 import {
@@ -117,6 +118,7 @@ export const ChatToolbar = memo(function ChatToolbar({
   favoritePackageScripts,
   loadedIssueContexts,
   loadedPRContexts,
+  loadedDiscussionContexts,
   loadedSecurityContexts,
   loadedAdvisoryContexts,
   loadedLinearContexts,
@@ -138,6 +140,9 @@ export const ChatToolbar = memo(function ChatToolbar({
   onModelChange,
   onBackendModelChange,
   onProviderChange,
+  providerAccounts = [],
+  selectedProviderAccountId = null,
+  onProviderAccountChange,
   customCliProfiles,
   customCodexProviders = EMPTY_CODEX_PROVIDERS,
   onThinkingLevelChange,
@@ -288,6 +293,7 @@ export const ChatToolbar = memo(function ChatToolbar({
     setViewingContext,
     handleViewIssue,
     handleViewPR,
+    handleViewDiscussion,
     handleViewSavedContext,
     handleViewSecurityAlert,
     handleViewAdvisory,
@@ -562,6 +568,7 @@ export const ChatToolbar = memo(function ChatToolbar({
               openReasoningSheetSignal={openReasoningSheetSignal}
               loadedIssueContexts={loadedIssueContexts}
               loadedPRContexts={loadedPRContexts}
+              loadedDiscussionContexts={loadedDiscussionContexts}
               loadedSecurityContexts={loadedSecurityContexts}
               loadedAdvisoryContexts={loadedAdvisoryContexts}
               loadedLinearContexts={loadedLinearContexts}
@@ -569,6 +576,7 @@ export const ChatToolbar = memo(function ChatToolbar({
               attachedSavedContexts={attachedSavedContexts}
               handleViewIssue={handleViewIssue}
               handleViewPR={handleViewPR}
+              handleViewDiscussion={handleViewDiscussion}
               handleViewSecurityAlert={handleViewSecurityAlert}
               handleViewAdvisory={handleViewAdvisory}
               handleViewLinear={handleViewLinear}
@@ -610,6 +618,15 @@ export const ChatToolbar = memo(function ChatToolbar({
 
             <div className="block @xl:hidden h-4 w-px shrink-0 bg-border/50" />
 
+            {onProviderAccountChange && (
+              <ProviderAccountMenu
+                backend={selectedBackend}
+                accounts={providerAccounts}
+                selectedAccountId={selectedProviderAccountId}
+                onChange={onProviderAccountChange}
+              />
+            )}
+
             <ExecutionModeDropdown
               backend={selectedBackend}
               sessionId={activeSessionId}
@@ -650,6 +667,7 @@ export const ChatToolbar = memo(function ChatToolbar({
               mcpStatuses={mcpStatuses}
               loadedIssueContexts={loadedIssueContexts}
               loadedPRContexts={loadedPRContexts}
+              loadedDiscussionContexts={loadedDiscussionContexts}
               loadedSecurityContexts={loadedSecurityContexts}
               loadedAdvisoryContexts={loadedAdvisoryContexts}
               loadedLinearContexts={loadedLinearContexts}
@@ -677,6 +695,7 @@ export const ChatToolbar = memo(function ChatToolbar({
               handleEffortLevelChange={handleEffortLevelChange}
               handleViewIssue={handleViewIssue}
               handleViewPR={handleViewPR}
+              handleViewDiscussion={handleViewDiscussion}
               handleViewSecurityAlert={handleViewSecurityAlert}
               handleViewAdvisory={handleViewAdvisory}
               handleViewLinear={handleViewLinear}

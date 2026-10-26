@@ -2,6 +2,11 @@ import { useState } from 'react'
 import { ChevronRight } from '@/components/icons/reicon'
 import { Button } from '@/components/ui/button'
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
@@ -68,13 +73,17 @@ function NotificationRow({
         )}
         onClick={() => onOpen(notification)}
       >
-        <span
-          className={cn(
-            'size-2 shrink-0 rounded-full',
-            LEVEL_DOTS[notification.level] ?? LEVEL_DOTS.info
-          )}
-          title={levelLabel(notification.level)}
-        />
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              className={cn(
+                'size-2 shrink-0 rounded-full',
+                LEVEL_DOTS[notification.level] ?? LEVEL_DOTS.info
+              )}
+            />
+          </TooltipTrigger>
+          <TooltipContent>{levelLabel(notification.level)}</TooltipContent>
+        </Tooltip>
         <span
           className={cn(
             'min-w-0 flex-1 truncate',

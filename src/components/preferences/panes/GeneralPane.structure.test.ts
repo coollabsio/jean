@@ -182,6 +182,28 @@ describe('GeneralPane settings structure', () => {
     )
   })
 
+  it('renders the server preview hostname in general settings', () => {
+    const source = readFileSync(
+      'src/components/preferences/panes/GeneralPane.tsx',
+      'utf8'
+    )
+    const fieldSource = readFileSync(
+      'src/components/preferences/panes/BrowserDefaultHostField.tsx',
+      'utf8'
+    )
+    const browserIndex = source.indexOf('title="Browser"')
+    const archiveIndex = source.indexOf('title="Archive"')
+
+    expect(browserIndex).toBeGreaterThan(-1)
+    expect(browserIndex).toBeLessThan(archiveIndex)
+    expect(source).toContain('anchorId="pref-general-section-browser"')
+    expect(source).toContain(
+      '<BrowserDefaultHostField preferences={preferences} />'
+    )
+    expect(fieldSource).toContain('browser_default_host')
+    expect(fieldSource).toContain('usePatchPreferences()')
+  })
+
   it('renders chat path and spellcheck toggles before auto-generate', () => {
     const source = readFileSync(
       'src/components/preferences/panes/GeneralPane.tsx',

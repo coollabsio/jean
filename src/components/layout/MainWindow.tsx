@@ -22,6 +22,7 @@ import { CommandPalette } from '@/components/command-palette/CommandPalette'
 import { BranchConflictDialog } from '@/components/worktree/BranchConflictDialog'
 import { ImportExistingWorktreeDialog } from '@/components/worktree/ImportExistingWorktreeDialog'
 import { TeardownOutputDialog } from '@/components/worktree/TeardownOutputDialog'
+import { StartOnHostPrompt } from '@/components/worktree/StartOnHost'
 import { WindowResizeHandles } from './WindowResizeHandles'
 
 // Lazy-loaded heavy modals (code splitting)
@@ -174,6 +175,7 @@ import { Toaster } from '@/components/ui/sonner'
 import { MobileLeftSidebar } from './MobileLeftSidebar'
 import { SidebarTabRail } from '@/components/projects/SidebarTabRail'
 import { useShowAgents } from '@/components/agents/agents-feature'
+import { AgentsTitleSync, resolveWindowTitle } from './window-title'
 import { BrowserSidePane } from '@/components/browser/BrowserSidePane'
 import { BrowserPanel } from '@/components/browser/BrowserPanel'
 import { useBrowserEvents } from '@/hooks/useBrowserPane'
@@ -212,6 +214,8 @@ import { usePreferences } from '@/services/preferences'
 
 // Left sidebar resize constraints (pixels)
 const MIN_SIDEBAR_WIDTH = 150
+// Agents sidebar can shrink to an icon column, as wide as the tab rail
+const MIN_AGENTS_SIDEBAR_WIDTH = 72
 const MAX_SIDEBAR_WIDTH = 500
 // File browser sidebar resize constraints (pixels)
 const MIN_FILE_BROWSER_WIDTH = 180
@@ -254,8 +258,11 @@ export function MainWindow() {
   const { offset: toasterOffset, mobileOffset: toasterMobileOffset } =
     useToasterOffset()
   const leftSidebarVisible = useUIStore(state => state.leftSidebarVisible)
-  const leftSidebarSize = useUIStore(state => state.leftSidebarSize)
-  const setLeftSidebarSize = useUIStore(state => state.setLeftSidebarSize)
+  const showAgents = useShowAgents()
+  // Agents and projects keep their own sidebar width
+  const leftSidebarSize = useUIStore(state =>
+    showAgents ? state.agentsSidebarSize : state.leftSidebarSize
+  )
   const setLeftSidebarVisible = useUIStore(state => state.setLeftSidebarVisible)
   const fileBrowserVisible = useUIStore(state => state.fileBrowserVisible)
   const fileBrowserSize = useUIStore(state => state.fileBrowserSize)
@@ -348,20 +355,26 @@ export function MainWindow() {
     ? projects?.find(p => p.id === worktree.project_id)
     : null
 
-  const showAgents = useShowAgents()
+  // Selected agent name, reported only while the Agents view is mounted.
+  const [agentName, setAgentName] = useState<string | undefined>(undefined)
+  const handleAgentName = useCallback((name: string | undefined) => {
+    setAgentName(current => (current === name ? current : name))
+  }, [])
 
-  // Compute window title based on selected project/worktree
-  // On mobile, show only the project name to fit the compact title bar.
-  const windowTitle = useMemo(() => {
-    // Agents page is not a project page
-    if (showAgents) return 'Agents'
-    if (!project || !worktree) return 'Jean'
-    if (isMobile) return project.name
-    const branchSuffix =
-      worktree.branch !== worktree.name ? ` (${worktree.branch})` : ''
-
-    return `${project.name} › ${worktree.name}${branchSuffix}`
-  }, [project, worktree, isMobile, showAgents])
+  // Project pages: project name on mobile, project › worktree on desktop.
+  // Agents view: the selected agent's name, in the title bar and browser tab.
+  const windowTitle = useMemo(
+    () =>
+      resolveWindowTitle({
+        showAgents,
+        agentName,
+        projectName: project?.name,
+        worktreeName: worktree?.name,
+        worktreeBranch: worktree?.branch,
+        isMobile,
+      }),
+    [showAgents, agentName, project, worktree, isMobile]
+  )
 
   // Compute polling info - null if no worktree or data not loaded.
   // Must use the worktree's own base_branch (e.g. v4.x), not the project
@@ -464,6 +477,7 @@ export function MainWindow() {
       e.preventDefault()
       const startX = e.clientX
       const startWidth = leftSidebarSize
+      const minWidth = showAgents ? MIN_AGENTS_SIDEBAR_WIDTH : MIN_SIDEBAR_WIDTH
       let currentWidth = startWidth
 
       const handleMouseMove = (moveEvent: MouseEvent) => {
@@ -471,7 +485,7 @@ export function MainWindow() {
         const delta = moveEvent.clientX - startX
         currentWidth = Math.min(
           MAX_SIDEBAR_WIDTH,
-          Math.max(MIN_SIDEBAR_WIDTH, startWidth + delta)
+          Math.max(minWidth, startWidth + delta)
         )
         // Update DOM directly for smooth resize (no React re-render)
         if (sidebarRef.current) {
@@ -483,13 +497,15 @@ export function MainWindow() {
         document.removeEventListener('mousemove', handleMouseMove)
         document.removeEventListener('mouseup', handleMouseUp)
         // Commit final width to Zustand state
-        setLeftSidebarSize(currentWidth)
+        const ui = useUIStore.getState()
+        if (showAgents) ui.setAgentsSidebarSize(currentWidth)
+        else ui.setLeftSidebarSize(currentWidth)
       }
 
       document.addEventListener('mousemove', handleMouseMove)
       document.addEventListener('mouseup', handleMouseUp)
     },
-    [leftSidebarSize, setLeftSidebarSize]
+    [leftSidebarSize, showAgents]
   )
 
   const handleFileBrowserResizeStart = useCallback(
@@ -576,6 +592,7 @@ export function MainWindow() {
       )}
     >
       <UIStatePersistence onInitializedChange={setIsInitialized} />
+      {showAgents && <AgentsTitleSync onName={handleAgentName} />}
       {isNativeApp() && isLinux && <WindowResizeHandles />}
 
       {/* Touch swipe-down pull indicator */}
@@ -602,6 +619,12 @@ export function MainWindow() {
       <TitleBar
         title={windowTitle}
         hideTitle={!isMobile}
+        contentInset={
+          isMobile || !isInitialized
+            ? 0
+            : // 72px tab rail + sidebar + 1px resize handle
+              72 + (leftSidebarVisible ? leftSidebarSize + 1 : 0)
+        }
         className="absolute top-0 left-0 right-0"
       />
 
@@ -860,6 +883,7 @@ export function MainWindow() {
           <ReviewCommentsDialog />
         </Suspense>
       )}
+      <StartOnHostPrompt />
       {shouldRenderNewWorktreeModal && (
         <Suspense fallback={null}>
           <NewWorktreeModal />

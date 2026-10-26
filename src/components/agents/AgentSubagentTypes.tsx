@@ -2,6 +2,11 @@ import { useState } from 'react'
 import { toast } from 'sonner'
 import { Pencil, Play, Plus, Trash2 } from '@/components/icons/reicon'
 import { Button } from '@/components/ui/button'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -251,35 +256,44 @@ function TypeRow({
             <Play />
             Run
           </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            aria-label={`Edit ${type.name}`}
-            title="Edit"
-            onClick={() => onEdit(type)}
-          >
-            <Pencil />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            aria-label={`Delete ${type.name}`}
-            title="Delete"
-            disabled={remove.isPending}
-            onClick={() =>
-              remove.mutate(
-                { agentId: agent.id, typeId: type.id },
-                {
-                  onSuccess: () => toast.success(`${type.name} deleted`),
-                  onError: error => toast.error(`Failed to delete: ${error}`),
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`Edit ${type.name}`}
+                onClick={() => onEdit(type)}
+              >
+                <Pencil />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Edit</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`Delete ${type.name}`}
+                disabled={remove.isPending}
+                onClick={() =>
+                  remove.mutate(
+                    { agentId: agent.id, typeId: type.id },
+                    {
+                      onSuccess: () => toast.success(`${type.name} deleted`),
+                      onError: error =>
+                        toast.error(`Failed to delete: ${error}`),
+                    }
+                  )
                 }
-              )
-            }
-          >
-            <Trash2 />
-          </Button>
+              >
+                <Trash2 />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Delete</TooltipContent>
+          </Tooltip>
         </div>
       </div>
       {open ? (

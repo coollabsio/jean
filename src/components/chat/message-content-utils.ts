@@ -226,6 +226,17 @@ export function isAgentUpdateMessage(content: string): boolean {
   return stripAllMarkers(content).startsWith('[Jean agent update]')
 }
 
+/** First message of an agent chat that continues a long, archived chat (see `chat_continued_message` in jean-core) */
+export function isChatContinuedMessage(content: string): boolean {
+  return stripAllMarkers(content).startsWith('[Jean chat continued]')
+}
+
+/** Journal entry that holds the archived chat, or null when it was not saved */
+export function chatContinuedJournalId(content: string): number | null {
+  const match = /journal entry #(\d+)/.exec(content)
+  return match?.[1] ? Number(match[1]) : null
+}
+
 /**
  * Splits an agent chat into the user's conversation and the agent's replies
  * to Jean's automatic updates. An update turn (the update message and the

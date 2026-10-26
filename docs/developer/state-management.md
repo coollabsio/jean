@@ -148,6 +148,7 @@ export function useUIStatePersistence() {
 - Change detection to only save when needed
 - Set → Array conversion for JSON serialization
 - Validates worktrees still exist before restoring
+- Saves are scoped by client id (`ui-clients/<client-id>.json`). Shared pins and pinned canvas labels stay in `ui-state.json`
 
 ### useSessionStatePersistence
 

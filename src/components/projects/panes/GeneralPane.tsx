@@ -7,6 +7,7 @@ import {
   GitBranch,
   ImageIcon,
   Loader2,
+  RefreshCw,
   RotateCcw,
   X,
 } from '@/components/icons/reicon'
@@ -36,6 +37,11 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import {
   useProjects,
   useProjectBranches,
@@ -82,7 +88,9 @@ export function GeneralPane({
   const {
     data: branches = [],
     isLoading: branchesLoading,
+    isFetching: branchesFetching,
     error: branchesError,
+    refetch: refetchBranches,
   } = useProjectBranches(projectId)
 
   const { data: preferences } = usePreferences()
@@ -329,73 +337,96 @@ export function GeneralPane({
             label="Default Branch"
             description="New worktrees will be created from this branch"
           >
-            {branchesLoading ? (
-              <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Fetching branches...
+            <div className="flex items-center gap-2">
+              <div className="min-w-0 flex-1">
+                {branchesLoading ? (
+                  <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Fetching branches...
+                  </div>
+                ) : branchesError ? (
+                  <div className="py-2 text-sm text-destructive">
+                    Failed to load branches
+                  </div>
+                ) : branches.length === 0 ? (
+                  <div className="py-2 text-sm text-muted-foreground">
+                    No branches found
+                  </div>
+                ) : (
+                  <Popover
+                    open={branchPopoverOpen}
+                    onOpenChange={setBranchPopoverOpen}
+                  >
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        role="combobox"
+                        aria-expanded={branchPopoverOpen}
+                        aria-controls="default-branch-selector"
+                        className="w-full justify-between"
+                      >
+                        <span className="flex items-center gap-2 truncate">
+                          <GitBranch className="h-4 w-4 shrink-0" />
+                          {selectedBranch || 'Select a branch'}
+                        </span>
+                        <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent
+                      id="default-branch-selector"
+                      align="start"
+                      className="!w-[var(--radix-popover-trigger-width)] p-0"
+                    >
+                      <Command>
+                        <CommandInput placeholder="Search branches..." />
+                        <CommandList>
+                          <CommandEmpty>No branch found.</CommandEmpty>
+                          <CommandGroup>
+                            {branches.map(branch => (
+                              <CommandItem
+                                key={branch}
+                                value={branch}
+                                onSelect={handleSelectBranch}
+                              >
+                                <GitBranch className="h-4 w-4" />
+                                {branch}
+                                <Check
+                                  className={cn(
+                                    'ml-auto h-4 w-4',
+                                    selectedBranch === branch
+                                      ? 'opacity-100'
+                                      : 'opacity-0'
+                                  )}
+                                />
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                )}
               </div>
-            ) : branchesError ? (
-              <div className="py-2 text-sm text-destructive">
-                Failed to load branches
-              </div>
-            ) : branches.length === 0 ? (
-              <div className="py-2 text-sm text-muted-foreground">
-                No branches found
-              </div>
-            ) : (
-              <Popover
-                open={branchPopoverOpen}
-                onOpenChange={setBranchPopoverOpen}
-              >
-                <PopoverTrigger asChild>
+              <Tooltip>
+                <TooltipTrigger asChild>
                   <Button
                     variant="outline"
-                    role="combobox"
-                    aria-expanded={branchPopoverOpen}
-                    aria-controls="default-branch-selector"
-                    className="w-full justify-between"
+                    size="icon"
+                    aria-label="Refresh branches"
+                    disabled={branchesFetching}
+                    onClick={() => refetchBranches()}
                   >
-                    <span className="flex items-center gap-2 truncate">
-                      <GitBranch className="h-4 w-4 shrink-0" />
-                      {selectedBranch || 'Select a branch'}
-                    </span>
-                    <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+                    <RefreshCw
+                      className={cn(
+                        'h-4 w-4',
+                        branchesFetching && 'animate-spin'
+                      )}
+                    />
                   </Button>
-                </PopoverTrigger>
-                <PopoverContent
-                  id="default-branch-selector"
-                  align="start"
-                  className="!w-[var(--radix-popover-trigger-width)] p-0"
-                >
-                  <Command>
-                    <CommandInput placeholder="Search branches..." />
-                    <CommandList>
-                      <CommandEmpty>No branch found.</CommandEmpty>
-                      <CommandGroup>
-                        {branches.map(branch => (
-                          <CommandItem
-                            key={branch}
-                            value={branch}
-                            onSelect={handleSelectBranch}
-                          >
-                            <GitBranch className="h-4 w-4" />
-                            {branch}
-                            <Check
-                              className={cn(
-                                'ml-auto h-4 w-4',
-                                selectedBranch === branch
-                                  ? 'opacity-100'
-                                  : 'opacity-0'
-                              )}
-                            />
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-            )}
+                </TooltipTrigger>
+                <TooltipContent>Fetch branches from remote</TooltipContent>
+              </Tooltip>
+            </div>
           </InlineField>
 
           {profiles.length > 0 && (

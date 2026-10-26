@@ -11,6 +11,7 @@ import {
   useWsConnectionStatus,
   setAppDataDir,
 } from '@/lib/transport'
+import { collapseProjectsByIdentity } from '@/lib/project-identity'
 import { registerServerResourcePath } from '@/lib/server-command-routing'
 import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import { parseServerResourceKey } from '@/lib/server-resource'
@@ -57,7 +58,7 @@ import { browserBackend } from '@/hooks/useBrowserPane'
 import { useBrowserStore } from '@/store/browser-store'
 
 import type { AppPreferences } from '@/types/preferences'
-import type { AdvisoryContext } from '@/types/github'
+import type { AdvisoryContext, DiscussionContext } from '@/types/github'
 import type { ProviderConfig } from '@/types/provider'
 import { hasBackend, hasBackendTransport, isNativeApp } from '@/lib/environment'
 import { gitProviderQueryKeys } from '@/services/git-provider'
@@ -280,10 +281,10 @@ export function useProjects() {
     const routedRemoteProjects = native
       ? toRoutedProjects(remoteProjectData ?? [])
       : []
-    return [
+    return collapseProjectsByIdentity([
       ...(native && !localDashboardEnabled ? [] : (localProjectData ?? [])),
       ...routedRemoteProjects,
-    ]
+    ])
   }, [localDashboardEnabled, localProjectData, native, remoteProjectData])
   return {
     ...localProjects,
@@ -907,6 +908,7 @@ export function useCreateWorktree() {
       advisoryContext,
       linearContext,
       sentryContext,
+      discussionContext,
       customName,
       origin,
       background: _background,
@@ -917,6 +919,7 @@ export function useCreateWorktree() {
         number: number
         title: string
         body?: string
+        repo?: string
         comments: {
           body: string
           author: { login: string }
@@ -928,6 +931,7 @@ export function useCreateWorktree() {
         number: number
         title: string
         body?: string
+        repo?: string
         headRefName: string
         baseRefName: string
         comments: {
@@ -977,6 +981,8 @@ export function useCreateWorktree() {
         permalink: string
         content: string
       }
+      /** GitHub discussion context to attach to the new worktree */
+      discussionContext?: DiscussionContext
       /** Custom worktree name (used when retrying after path conflict) */
       customName?: string
       /** Origin/category for the worktree */
@@ -1008,6 +1014,7 @@ export function useCreateWorktree() {
         advisoryContext,
         linearContext,
         sentryContext,
+        discussionContext,
         customName,
         origin,
         autoOpenInJean: !_background,
@@ -1119,6 +1126,7 @@ export function useCreateWorktreeFromExistingBranch() {
         number: number
         title: string
         body?: string
+        repo?: string
         comments: {
           body: string
           author: { login: string }
@@ -1129,6 +1137,7 @@ export function useCreateWorktreeFromExistingBranch() {
         number: number
         title: string
         body?: string
+        repo?: string
         headRefName: string
         baseRefName: string
         comments: {
@@ -1698,20 +1707,31 @@ export function useWorktreeEvents() {
         invalidateProjectLists(queryClient)
 
         const toastId = `teardown-${id}`
+        const teardownPrefix = 'Teardown script failed:'
+        const isTeardownFailure = error.startsWith(teardownPrefix)
         toast.error('Failed to delete worktree', {
           id: toastId,
-          description: error,
+          // Keep the description short: the toast also holds two buttons, and
+          // a long script error squeezes the text into a thin column.
+          description: isTeardownFailure
+            ? 'The teardown script failed. View the output for details.'
+            : error,
           duration: Infinity,
           action: {
             label: toastActionLabel('View Output'),
             onClick: () =>
               window.dispatchEvent(
                 new CustomEvent('show-teardown-output', {
-                  detail: { output: error, success: false },
+                  detail: {
+                    output: isTeardownFailure
+                      ? error.slice(teardownPrefix.length).trim()
+                      : error,
+                    success: false,
+                  },
                 })
               ),
           },
-          ...(error.startsWith('Teardown script failed:')
+          ...(isTeardownFailure
             ? {
                 cancel: {
                   label: 'Delete without teardown',
@@ -3158,6 +3178,43 @@ export async function updateWorktreeCachedStatus(
  * Hook to fetch available branches for a project
  * Fetches from origin first, then returns remote branches (or local if no remote)
  */
+export interface RemoteBranchRef {
+  remote: string
+  name: string
+  qualified: string
+}
+
+/**
+ * Remote-tracking branches for the New Worktree dialog.
+ * Fetches every configured remote and keeps same-named branches distinct.
+ */
+export function useWorktreeBranches(projectId: string | null) {
+  return useQuery({
+    queryKey: [
+      ...projectsQueryKeys.detail(projectId ?? ''),
+      'remote-branches',
+    ] as const,
+    queryFn: async (): Promise<RemoteBranchRef[]> => {
+      if (!isTauri() || !projectId) {
+        return []
+      }
+
+      try {
+        logger.debug('Fetching remote branches for project', { projectId })
+        return await invoke<RemoteBranchRef[]>('list_worktree_branches', {
+          projectId,
+        })
+      } catch (error) {
+        logger.error('Failed to load remote branches', { error, projectId })
+        throw error
+      }
+    },
+    enabled: !!projectId,
+    staleTime: 1000 * 30,
+    gcTime: 1000 * 60 * 5,
+  })
+}
+
 export function useProjectBranches(projectId: string | null) {
   return useQuery({
     queryKey: [

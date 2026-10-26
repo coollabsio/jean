@@ -8,6 +8,9 @@ import {
 } from '@/hooks/useBrowserPane'
 import { useChatStore } from '@/store/chat-store'
 import { usePorts } from '@/services/projects'
+import { usePreferences } from '@/services/preferences'
+import { parseServerResourceKey } from '@/lib/server-resource'
+import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import { resolveDefaultTabUrl } from './default-tab-url'
 import { BrowserTabContent } from './BrowserTabContent'
 import { BrowserToolbar } from './BrowserToolbar'
@@ -52,27 +55,52 @@ export const BrowserView = memo(function BrowserView({
   const effectiveVisible = isVisible && !blockingModalOpen && !activeError
   const actions = useBrowserTabActions(activeTabId || null)
 
-  // Resolve worktreePath → first jean.json port (used as default new-tab URL)
+  // First tab when the pane opens uses jean.json ports[0]. Extra tabs and
+  // the port picker live in the toolbar so later ports are selectable.
   const worktreePath = useChatStore(state => state.worktreePaths[worktreeId])
   const { data: ports, isFetched: portsFetched } = usePorts(
     worktreePath ?? null
   )
+  const ownerServerId = parseServerResourceKey(worktreeId)?.serverId
+  const preferenceServerId =
+    ownerServerId && ownerServerId !== LOCAL_SERVER_ID
+      ? ownerServerId
+      : undefined
+  const { data: preferences, isFetched: preferencesFetched } =
+    usePreferences(preferenceServerId)
+  const serverDefaultHost = preferences?.browser_default_host
 
   // Auto-create the first tab when the view first opens with no tabs.
-  // Wait for ports query so we can default to localhost:<port> if configured.
+  // Wait for ports and this server's preview hostname so a remote session
+  // opens the remote jean-server's host instead of this computer's localhost.
   useEffect(() => {
     if (!isVisible || tabs.length > 0) return
     if (!worktreePath) {
       useBrowserStore.getState().addTab(worktreeId)
       return
     }
-    if (!portsFetched) return
-    useBrowserStore.getState().addTab(worktreeId, resolveDefaultTabUrl(ports))
-  }, [isVisible, tabs.length, worktreeId, worktreePath, portsFetched, ports])
+    if (!portsFetched || !preferencesFetched) return
+    useBrowserStore
+      .getState()
+      .addTab(worktreeId, resolveDefaultTabUrl(ports, serverDefaultHost))
+  }, [
+    isVisible,
+    tabs.length,
+    worktreeId,
+    worktreePath,
+    portsFetched,
+    ports,
+    preferencesFetched,
+    serverDefaultHost,
+  ])
 
   return (
     <div className="flex h-full w-full min-w-0 flex-col">
-      <BrowserToolbar worktreeId={worktreeId} onClose={onClose} />
+      <BrowserToolbar
+        worktreeId={worktreeId}
+        onClose={onClose}
+        serverDefaultHost={serverDefaultHost}
+      />
       <div className="relative flex-1 overflow-hidden">
         {activeError && (
           <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-background p-6 text-center">
@@ -85,8 +113,10 @@ export const BrowserView = memo(function BrowserView({
               variant="outline"
               size="sm"
               onClick={() => {
+                const url = activeTab?.url
+                if (!activeTabId || !url) return
                 useBrowserStore.getState().setTabError(activeTabId, null)
-                void actions.reload()
+                void actions.navigate(url)
               }}
             >
               <RotateCw className="mr-1.5 h-3 w-3" />

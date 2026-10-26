@@ -16,6 +16,7 @@ export interface InvestigationOverride {
   prompt?: string
   promptTemplate?: string
   issueContext?: IssueContext
+  /** true: select and open the session. false: run it in the background. */
   openSession?: boolean
 }
 
@@ -129,6 +130,8 @@ export type RailSection = 'workspace' | 'agents'
 interface UIState {
   leftSidebarVisible: boolean
   railSection: RailSection
+  /** Last sidebar visibility of each rail section, restored on switch */
+  railSidebarVisible: Partial<Record<RailSection, boolean>>
   /** Agent open on the Agents page */
   selectedAgentId: string
   /** When the user last left the Agents page (ms, 0 = never this session) */
@@ -140,6 +143,8 @@ interface UIState {
   /** Per agent: timestamp (unix s) of the newest update reply the user saw */
   agentUpdatesSeenAt: Record<string, number>
   leftSidebarSize: number // Width in pixels, persisted across sessions
+  /** Agents sidebar width in pixels; can shrink to an icon column */
+  agentsSidebarSize: number
   /** File browser (worktree explorer) visibility */
   fileBrowserVisible: boolean
   /** File browser width in pixels, persisted across sessions */
@@ -258,12 +263,15 @@ interface UIState {
   availableCliUpdates: PendingCliUpdate[]
   toggleLeftSidebar: () => void
   setLeftSidebarVisible: (visible: boolean) => void
-  setRailSection: (section: RailSection) => void
+  /** restoreSidebar: show the sidebar as the section last left it (desktop rail) */
+  setRailSection: (section: RailSection, restoreSidebar?: boolean) => void
   setSelectedAgentId: (agentId: string) => void
   setAgentsServerFilter: (serverId: string) => void
   setAgentsAdvanced: (advanced: boolean) => void
   markAgentUpdatesSeen: (agentId: string, timestamp: number) => void
+  setAgentUpdatesSeenAt: (seenAt: Record<string, number>) => void
   setLeftSidebarSize: (size: number) => void
+  setAgentsSidebarSize: (size: number) => void
   leftSidebarSwipe: {
     isDragging: boolean
     dragOffset: number
@@ -432,12 +440,14 @@ export const useUIStore = create<UIState>()(
     (set, get) => ({
       leftSidebarVisible: false,
       railSection: 'workspace',
+      railSidebarVisible: {},
       selectedAgentId: 'jean',
       agentsLeftAt: 0,
       agentsServerFilter: 'all',
       agentsAdvanced: false,
       agentUpdatesSeenAt: {},
       leftSidebarSize: 250, // Default width in pixels
+      agentsSidebarSize: 250,
       leftSidebarSwipe: {
         isDragging: false,
         dragOffset: 0,
@@ -562,13 +572,22 @@ export const useUIStore = create<UIState>()(
           'setLeftSidebarVisible'
         ),
 
-      setRailSection: section =>
+      setRailSection: (section, restoreSidebar = false) =>
         set(
           state =>
             state.railSection === section
               ? state
               : {
                   railSection: section,
+                  railSidebarVisible: {
+                    ...state.railSidebarVisible,
+                    [state.railSection]: state.leftSidebarVisible,
+                  },
+                  // A section never opened before shows its panel
+                  ...(restoreSidebar && {
+                    leftSidebarVisible:
+                      state.railSidebarVisible[section] ?? true,
+                  }),
                   ...(state.railSection === 'agents' && {
                     agentsLeftAt: Date.now(),
                   }),
@@ -612,6 +631,16 @@ export const useUIStore = create<UIState>()(
           'markAgentUpdatesSeen'
         ),
 
+      setAgentUpdatesSeenAt: seenAt =>
+        set(
+          state =>
+            state.agentUpdatesSeenAt === seenAt
+              ? state
+              : { agentUpdatesSeenAt: seenAt },
+          undefined,
+          'setAgentUpdatesSeenAt'
+        ),
+
       setAgentsServerFilter: serverId =>
         set(
           state =>
@@ -635,6 +664,16 @@ export const useUIStore = create<UIState>()(
             state.leftSidebarSize === size ? state : { leftSidebarSize: size },
           undefined,
           'setLeftSidebarSize'
+        ),
+
+      setAgentsSidebarSize: size =>
+        set(
+          state =>
+            state.agentsSidebarSize === size
+              ? state
+              : { agentsSidebarSize: size },
+          undefined,
+          'setAgentsSidebarSize'
         ),
 
       setLeftSidebarSwipe: swipe =>

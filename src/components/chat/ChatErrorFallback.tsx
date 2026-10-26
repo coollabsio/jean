@@ -1,5 +1,10 @@
 import { useCallback, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { useChatStore } from '@/store/chat-store'
 import { copyToClipboard } from '@/lib/clipboard'
 import { AlertTriangle, Copy, Check } from '@/components/icons/reicon'
@@ -78,18 +83,22 @@ function CopyErrorButton({ error }: { error: Error }) {
   }, [error])
 
   return (
-    <button
-      type="button"
-      aria-label="Copy error details"
-      onClick={handleCopy}
-      className="absolute top-1.5 right-1.5 rounded p-1 text-muted-foreground hover:text-foreground hover:bg-muted-foreground/10 transition-colors"
-      title="Copy error details"
-    >
-      {copied ? (
-        <Check className="h-3.5 w-3.5" />
-      ) : (
-        <Copy className="h-3.5 w-3.5" />
-      )}
-    </button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label="Copy error details"
+          onClick={handleCopy}
+          className="absolute top-1.5 right-1.5 rounded p-1 text-muted-foreground hover:text-foreground hover:bg-muted-foreground/10 transition-colors"
+        >
+          {copied ? (
+            <Check className="h-3.5 w-3.5" />
+          ) : (
+            <Copy className="h-3.5 w-3.5" />
+          )}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>Copy error details</TooltipContent>
+    </Tooltip>
   )
 }

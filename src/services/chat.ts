@@ -2578,6 +2578,57 @@ export function useSetSessionProvider() {
 }
 
 /**
+ * Hook to set the named provider account (Claude/Codex login) for a session.
+ * Null keeps the CLI's own login.
+ */
+export function useSetSessionProviderAccount() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({
+      worktreeId,
+      worktreePath,
+      sessionId,
+      accountId,
+    }: {
+      worktreeId: string
+      worktreePath: string
+      sessionId: string
+      accountId: string | null
+    }): Promise<void> => {
+      if (!isTauri()) {
+        throw new Error('Not in Tauri context')
+      }
+
+      await invoke('set_session_provider_account', {
+        worktreeId,
+        worktreePath,
+        sessionId,
+        accountId,
+      })
+    },
+    onSuccess: (_, { sessionId, worktreeId }) => {
+      queryClient.invalidateQueries({
+        queryKey: chatQueryKeys.session(sessionId),
+      })
+      queryClient.invalidateQueries({
+        queryKey: chatQueryKeys.sessions(worktreeId),
+      })
+    },
+    onError: error => {
+      if (isWsDisconnectError(error)) return
+      const message =
+        error instanceof Error
+          ? error.message
+          : typeof error === 'string'
+            ? error
+            : 'Unknown error occurred'
+      toast.error('Failed to save account', { description: message })
+    },
+  })
+}
+
+/**
  * Hook to set the selected thinking level for a session
  */
 export function useSetSessionThinkingLevel() {

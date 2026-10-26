@@ -4,6 +4,7 @@ import {
   FolderOpen,
   GitMerge,
   GitPullRequest,
+  MessagesSquare,
   Paperclip,
   Shield,
   ShieldAlert,
@@ -45,6 +46,7 @@ import type {
   LoadedPullRequestContext,
   LoadedSecurityAlertContext,
   LoadedAdvisoryContext,
+  LoadedDiscussionContext,
 } from '@/types/github'
 import type { LoadedLinearIssueContext } from '@/types/linear'
 import type { SentryIssueContext } from '@/types/sentry'
@@ -55,6 +57,12 @@ import type {
   PrDisplayStatus,
 } from '@/types/pr-status'
 import { openExternal } from '@/lib/platform'
+import {
+  hostedRepoWebUrl,
+  issueWebUrl,
+  pullRequestWebUrl,
+} from '@/lib/git-provider'
+import { providerLabels, useProjectGitProvider } from '@/services/git-provider'
 import { cn } from '@/lib/utils'
 import {
   CODEX_EFFORT_LEVEL_OPTIONS,
@@ -113,6 +121,7 @@ interface DesktopToolbarControlsProps {
 
   loadedIssueContexts: LoadedIssueContext[]
   loadedPRContexts: LoadedPullRequestContext[]
+  loadedDiscussionContexts: LoadedDiscussionContext[]
   loadedSecurityContexts: LoadedSecurityAlertContext[]
   loadedAdvisoryContexts: LoadedAdvisoryContext[]
   loadedLinearContexts: LoadedLinearIssueContext[]
@@ -143,6 +152,7 @@ interface DesktopToolbarControlsProps {
   handleEffortLevelChange: (value: string) => void
   handleViewIssue: (ctx: LoadedIssueContext) => void
   handleViewPR: (ctx: LoadedPullRequestContext) => void
+  handleViewDiscussion: (ctx: LoadedDiscussionContext) => void
   handleViewSecurityAlert: (ctx: LoadedSecurityAlertContext) => void
   handleViewAdvisory: (ctx: LoadedAdvisoryContext) => void
   handleViewLinear: (ctx: LoadedLinearIssueContext) => void
@@ -173,13 +183,14 @@ export function DesktopToolbarControls({
   displayStatus,
   checkStatus: _checkStatus,
   mergeableStatus,
-  activeWorktreePath: _activeWorktreePath,
+  activeWorktreePath,
   availableMcpServers: _availableMcpServers,
   enabledMcpServers: _enabledMcpServers,
   isHealthChecking: _isHealthChecking,
   mcpStatuses: _mcpStatuses,
   loadedIssueContexts,
   loadedPRContexts,
+  loadedDiscussionContexts,
   loadedSecurityContexts,
   loadedAdvisoryContexts,
   loadedLinearContexts,
@@ -207,12 +218,21 @@ export function DesktopToolbarControls({
   handleEffortLevelChange,
   handleViewIssue,
   handleViewPR,
+  handleViewDiscussion,
   handleViewSecurityAlert,
   handleViewAdvisory,
   handleViewLinear,
   handleViewSentry,
   handleViewSavedContext,
 }: DesktopToolbarControlsProps) {
+  const { data: gitProviderInfo } = useProjectGitProvider(activeWorktreePath)
+  const gitProvider = gitProviderInfo?.provider ?? 'github'
+  const forgeLabels = providerLabels(gitProvider)
+  const forgeHost =
+    gitProviderInfo?.host ??
+    (gitProvider === 'gitlab' ? 'gitlab.com' : 'github.com')
+  const forgeRepoUrl = (owner: string, repo: string) =>
+    hostedRepoWebUrl(forgeHost, owner, repo)
   const isPi = selectedBackend === 'pi'
   const isGrok = selectedBackend === 'grok'
   const isKimi = selectedBackend === 'kimi'
@@ -303,6 +323,7 @@ export function DesktopToolbarControls({
 
   const loadedIssueCount = loadedIssueContexts.length
   const loadedPRCount = loadedPRContexts.length
+  const loadedDiscussionCount = loadedDiscussionContexts.length
   const loadedSecurityCount =
     loadedSecurityContexts.length + loadedAdvisoryContexts.length
   const loadedLinearCount = loadedLinearContexts.length
@@ -357,6 +378,7 @@ export function DesktopToolbarControls({
 
       {(loadedIssueCount > 0 ||
         loadedPRCount > 0 ||
+        loadedDiscussionCount > 0 ||
         loadedSecurityCount > 0 ||
         loadedLinearCount > 0 ||
         loadedSentryCount > 0 ||
@@ -375,6 +397,7 @@ export function DesktopToolbarControls({
                   {[
                     loadedIssueCount > 0 && `${loadedIssueCount}`,
                     loadedPRCount > 0 && `${loadedPRCount}`,
+                    loadedDiscussionCount > 0 && `${loadedDiscussionCount}`,
                     loadedSecurityCount > 0 && `${loadedSecurityCount}`,
                     loadedLinearCount > 0 && `${loadedLinearCount}`,
                     loadedSentryCount > 0 && `${loadedSentryCount}`,
@@ -407,7 +430,11 @@ export function DesktopToolbarControls({
                         onClick={e => {
                           e.stopPropagation()
                           openExternal(
-                            `https://github.com/${ctx.repoOwner}/${ctx.repoName}/issues/${ctx.number}`
+                            issueWebUrl(
+                              forgeRepoUrl(ctx.repoOwner, ctx.repoName),
+                              ctx.number,
+                              gitProvider
+                            )
                           )
                         }}
                       >
@@ -422,7 +449,7 @@ export function DesktopToolbarControls({
                 <>
                   {loadedIssueContexts.length > 0 && <DropdownMenuSeparator />}
                   <DropdownMenuLabel className="text-xs text-muted-foreground">
-                    Pull Requests
+                    {forgeLabels.pullRequest}s
                   </DropdownMenuLabel>
                   {loadedPRContexts.map(ctx => (
                     <DropdownMenuItem
@@ -440,7 +467,44 @@ export function DesktopToolbarControls({
                         onClick={e => {
                           e.stopPropagation()
                           openExternal(
-                            `https://github.com/${ctx.repoOwner}/${ctx.repoName}/pull/${ctx.number}`
+                            pullRequestWebUrl(
+                              forgeRepoUrl(ctx.repoOwner, ctx.repoName),
+                              ctx.number,
+                              gitProvider
+                            )
+                          )
+                        }}
+                      >
+                        <ExternalLink className="h-3.5 w-3.5 opacity-60" />
+                      </button>
+                    </DropdownMenuItem>
+                  ))}
+                </>
+              )}
+              {loadedDiscussionContexts.length > 0 && (
+                <>
+                  {(loadedIssueContexts.length > 0 ||
+                    loadedPRContexts.length > 0) && <DropdownMenuSeparator />}
+                  <DropdownMenuLabel className="text-xs text-muted-foreground">
+                    Discussions
+                  </DropdownMenuLabel>
+                  {loadedDiscussionContexts.map(ctx => (
+                    <DropdownMenuItem
+                      key={ctx.number}
+                      onClick={() => handleViewDiscussion(ctx)}
+                    >
+                      <MessagesSquare className="h-4 w-4 text-success" />
+                      <span className="truncate">
+                        #{ctx.number} {ctx.title}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label="Open external link"
+                        className="ml-auto shrink-0 rounded p-0.5 hover:bg-accent"
+                        onClick={e => {
+                          e.stopPropagation()
+                          openExternal(
+                            `https://github.com/${ctx.repoOwner}/${ctx.repoName}/discussions/${ctx.number}`
                           )
                         }}
                       >
@@ -454,7 +518,10 @@ export function DesktopToolbarControls({
               {loadedSecurityContexts.length > 0 && (
                 <>
                   {(loadedIssueContexts.length > 0 ||
-                    loadedPRContexts.length > 0) && <DropdownMenuSeparator />}
+                    loadedPRContexts.length > 0 ||
+                    loadedDiscussionContexts.length > 0) && (
+                    <DropdownMenuSeparator />
+                  )}
                   <DropdownMenuLabel className="text-xs text-muted-foreground">
                     Security Alerts
                   </DropdownMenuLabel>
@@ -489,6 +556,7 @@ export function DesktopToolbarControls({
                 <>
                   {(loadedIssueContexts.length > 0 ||
                     loadedPRContexts.length > 0 ||
+                    loadedDiscussionContexts.length > 0 ||
                     loadedSecurityContexts.length > 0) && (
                     <DropdownMenuSeparator />
                   )}
@@ -526,6 +594,7 @@ export function DesktopToolbarControls({
                 <>
                   {(loadedIssueContexts.length > 0 ||
                     loadedPRContexts.length > 0 ||
+                    loadedDiscussionContexts.length > 0 ||
                     loadedSecurityContexts.length > 0 ||
                     loadedAdvisoryContexts.length > 0) && (
                     <DropdownMenuSeparator />
@@ -564,6 +633,7 @@ export function DesktopToolbarControls({
                 <>
                   {(loadedIssueContexts.length > 0 ||
                     loadedPRContexts.length > 0 ||
+                    loadedDiscussionContexts.length > 0 ||
                     loadedSecurityContexts.length > 0 ||
                     loadedAdvisoryContexts.length > 0 ||
                     loadedLinearContexts.length > 0) && (
@@ -603,6 +673,7 @@ export function DesktopToolbarControls({
                 <>
                   {(loadedIssueContexts.length > 0 ||
                     loadedPRContexts.length > 0 ||
+                    loadedDiscussionContexts.length > 0 ||
                     loadedSecurityContexts.length > 0 ||
                     loadedAdvisoryContexts.length > 0 ||
                     loadedLinearContexts.length > 0 ||

@@ -7,6 +7,7 @@ use super::types::{
     PermissionDenial, PermissionDeniedEvent, SubagentUsage, ThinkingLevel, ToolCall, UsageData,
 };
 use crate::http_server::EmitExt;
+use crate::projects::github_discussions::get_discussion_context_paths;
 use crate::projects::github_issues::{
     get_github_contexts_dir, get_preferred_issue_refs, get_preferred_pr_refs,
     get_session_advisory_refs, get_session_security_refs,
@@ -58,8 +59,12 @@ Always use ASD-STE100 Simplified Technical English when you talk to me.\n\
 - Skip tests for docs, copy, comments, styling-only, and prompt/config text changes; say that you skipped them.\n\
 - Do not re-run a passing check when the code it covers has not changed since.\n\
 - Write new tests only for behavior that can break silently: business logic, parsing/serialization, state transitions, persistence, and a regression test for each fixed bug.\n\
-- Do NOT write tests that only check DOM markup, CSS classes, snapshots, static text or prompt copy, constants, simple prop pass-through, library/framework behavior, or that only assert mocks were called. Verify UI changes in the running app instead.\n\
-- If a UI check needs a browser and no other browser tool is available, use the Agent Browser.\n\
+- Do NOT write tests that only check DOM markup, CSS classes, snapshots, static text or prompt copy, constants, simple prop pass-through, library/framework behavior, or that only assert mocks were called.\n\
+- ALWAYS use a browser when the user asks for it, or when the task is visual: copy or match a style from a reference, compare with another page or screenshot, or fix a layout or visual bug.\n\
+- Also use a browser when the change has runtime UI behavior that typecheck, lint, or tests cannot prove: new or changed user flows, or state/interaction logic.\n\
+- In all other cases, do NOT open a browser. Examples: small copy/text edits, small class or prop tweaks that you did not have to match to a reference, refactors with no behavior change, backend-only changes. For these, a typecheck or the narrowest test is enough. Say \"Not tested in browser\" in the recap.\n\
+- Before you open a browser on your own decision (not a user request), state in one line why a cheaper check is not enough.\n\
+- If a UI check needs a browser and no other browser tool is available, use the Agent Browser. Check only the changed area, not the full app.\n\
 \n\
 ### 5. Demand Elegance (Balanced)\n\
 - For non-trivial changes: pause and ask \"is there a more elegant way?\"\n\
@@ -98,6 +103,7 @@ Always use ASD-STE100 Simplified Technical English when you talk to me.\n\
 - Do NOT create git worktrees manually (`git worktree add`, Superpowers `using-git-worktrees`, or similar) unless the user explicitly asks for a new worktree.\n\
 - If a new worktree is explicitly required, use Jean's worktree features through Jean MCP/tools, not raw git worktree commands.\n\
 - If already in a Jean worktree or base/main workspace, continue in the current workspace.\n\
+- Do NOT change the branch of the current worktree or the base/main session (`git checkout <branch>`, `git switch`, `git checkout -b`, `gh pr checkout`, or similar) unless the user explicitly asks. Keep all work on the current branch.\n\
 \n\
 ## Jean Run Environment\n\
 - When you need to test a running app (UI, HTTP, browser, smoke, e2e), call Jean MCP `get_run_environments` first (pass this worktreeId when known).\n\
@@ -110,7 +116,7 @@ Always use ASD-STE100 Simplified Technical English when you talk to me.\n\
 - After each finished task, please write a few bullet points on how to test the changes.";
 
 fn execution_mode_instruction(execution_mode: Option<&str>) -> Option<&'static str> {
-    match execution_mode.unwrap_or("plan") {
+    match execution_mode.unwrap_or("build") {
         "build" | "auto" | "supervised" => Some(
             "You are in BUILD MODE. Start implementing immediately. \
              Do NOT enter plan mode and do NOT use ExitPlanMode unless the user explicitly asks \
@@ -427,7 +433,7 @@ fn split_fast_model(model: &str) -> (&str, bool) {
 }
 
 fn claude_permission_mode(execution_mode: Option<&str>) -> &'static str {
-    match execution_mode.unwrap_or("plan") {
+    match execution_mode.unwrap_or("build") {
         "supervised" => "default",
         "build" => "acceptEdits",
         "auto" => "auto",
@@ -774,7 +780,7 @@ fn build_claude_args(
     // In build/yolo, remove ExitPlanMode entirely so Claude can't loop back
     // into plan-approval after the user already approved one.
     if matches!(
-        execution_mode.unwrap_or("plan"),
+        execution_mode.unwrap_or("build"),
         "build" | "yolo" | "auto" | "supervised"
     ) {
         args.push("--disallowedTools".to_string());
@@ -1160,6 +1166,8 @@ fn build_claude_args(
         }
     }
 
+    all_context_paths.extend(get_discussion_context_paths(app, session_id, worktree_id));
+
     // Check for attached saved context files
     if let Ok(app_data_dir) = app.path().app_data_dir() {
         let saved_contexts_dir = app_data_dir.join("session-context");
@@ -1226,6 +1234,13 @@ fn build_claude_args(
                     s.contains("git-context") && s.contains("-advisory-")
                 })
                 .count();
+            let discussion_count = all_context_paths
+                .iter()
+                .filter(|p| {
+                    let s = p.to_string_lossy();
+                    s.contains("git-context") && s.contains("-discussion-")
+                })
+                .count();
             let linear_count = all_context_paths
                 .iter()
                 .filter(|p| {
@@ -1265,6 +1280,7 @@ fn build_claude_args(
                     || pr_count > 0
                     || security_count > 0
                     || advisory_count > 0
+                    || discussion_count > 0
                     || linear_count > 0
                     || saved_context_count > 0
                 {
@@ -1283,6 +1299,10 @@ fn build_claude_args(
                     if advisory_count > 0 {
                         combined_content
                             .push_str(&format!("- {} Security Advisory(s)\n", advisory_count));
+                    }
+                    if discussion_count > 0 {
+                        combined_content
+                            .push_str(&format!("- {discussion_count} GitHub Discussion(s)\n"));
                     }
                     if linear_count > 0 {
                         combined_content.push_str(&format!("- {} Linear Issue(s)\n", linear_count));
@@ -1359,7 +1379,7 @@ fn build_claude_args(
     ));
     env_vars.push((
         "JEAN_EXECUTION_MODE".to_string(),
-        execution_mode.unwrap_or("plan").to_string(),
+        execution_mode.unwrap_or("build").to_string(),
     ));
     if let Some(claude_sid) = existing_claude_session_id {
         env_vars.push(("JEAN_CLAUDE_SESSION_ID".to_string(), claude_sid.to_string()));
@@ -1561,8 +1581,11 @@ pub fn execute_claude_detached(
         return Err(error_msg);
     }
 
+    let account_home =
+        crate::provider_accounts::account_config_home_for_session(app, "claude", session_id)?;
+
     // Build args
-    let (args, env_vars) = build_claude_args(
+    let (args, mut env_vars) = build_claude_args(
         app,
         session_id,
         worktree_id,
@@ -1581,6 +1604,10 @@ pub fn execute_claude_detached(
         include_recap,
         working_dir,
     );
+    if let Some(home) = account_home {
+        let (key, value) = crate::provider_accounts::config_env("claude", &home)?;
+        env_vars.push((key.to_string(), value));
+    }
 
     // Log the full Claude CLI command for debugging
     log::debug!(
@@ -3447,7 +3474,7 @@ mod tests {
         assert_eq!(claude_permission_mode(Some("auto")), "auto");
         assert_eq!(claude_permission_mode(Some("build")), "acceptEdits");
         assert_eq!(claude_permission_mode(Some("plan")), "plan");
-        assert_eq!(claude_permission_mode(None), "plan");
+        assert_eq!(claude_permission_mode(None), "acceptEdits");
         assert!(claude_allows_all_bash(Some("yolo")));
         assert!(!claude_allows_all_bash(Some("build")));
     }

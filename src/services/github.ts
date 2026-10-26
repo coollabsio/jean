@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { invoke } from '@/lib/transport'
 import { logger } from '@/lib/logger'
 import type {
@@ -14,6 +14,10 @@ import type {
   LoadedSecurityAlertContext,
   RepositoryAdvisory,
   LoadedAdvisoryContext,
+  GitHubDiscussion,
+  GitHubDiscussionPage,
+  GitHubDiscussionDetail,
+  LoadedDiscussionContext,
   AttachedSavedContext,
   WorkflowRunsResult,
 } from '@/types/github'
@@ -74,8 +78,8 @@ export const githubQueryKeys = {
     [...githubQueryKeys.all, 'labels', projectPath] as const,
   issues: (projectPath: string, state: string) =>
     [...githubQueryKeys.all, 'issues', projectPath, state] as const,
-  issue: (projectPath: string, issueNumber: number) =>
-    [...githubQueryKeys.all, 'issue', projectPath, issueNumber] as const,
+  issue: (projectPath: string, issueNumber: number, repo?: string) =>
+    [...githubQueryKeys.all, 'issue', projectPath, issueNumber, repo ?? ''] as const,
   loadedContexts: (sessionId: string, worktreeId?: string | null) =>
     worktreeId
       ? ([
@@ -87,8 +91,8 @@ export const githubQueryKeys = {
       : ([...githubQueryKeys.all, 'loaded-contexts', sessionId] as const),
   prs: (projectPath: string, state: string) =>
     [...githubQueryKeys.all, 'prs', projectPath, state] as const,
-  pr: (projectPath: string, prNumber: number) =>
-    [...githubQueryKeys.all, 'pr', projectPath, prNumber] as const,
+  pr: (projectPath: string, prNumber: number, repo?: string) =>
+    [...githubQueryKeys.all, 'pr', projectPath, prNumber, repo ?? ''] as const,
   loadedPrContexts: (sessionId: string, worktreeId?: string | null) =>
     worktreeId
       ? ([
@@ -152,6 +156,30 @@ export const githubQueryKeys = {
       : ([
           ...githubQueryKeys.all,
           'loaded-advisory-contexts',
+          sessionId,
+        ] as const),
+  discussions: (projectPath: string, state: string) =>
+    [...githubQueryKeys.all, 'discussions', projectPath, state] as const,
+  discussionSearch: (projectPath: string, query: string) =>
+    [...githubQueryKeys.all, 'discussion-search', projectPath, query] as const,
+  discussion: (projectPath: string, discussionNumber: number) =>
+    [
+      ...githubQueryKeys.all,
+      'discussion',
+      projectPath,
+      discussionNumber,
+    ] as const,
+  loadedDiscussionContexts: (sessionId: string, worktreeId?: string | null) =>
+    worktreeId
+      ? ([
+          ...githubQueryKeys.all,
+          'loaded-discussion-contexts',
+          sessionId,
+          worktreeId,
+        ] as const)
+      : ([
+          ...githubQueryKeys.all,
+          'loaded-discussion-contexts',
           sessionId,
         ] as const),
 }
@@ -238,10 +266,15 @@ export function useGitHubIssues(
  */
 export function useGitHubIssue(
   projectPath: string | null,
-  issueNumber: number | null
+  issueNumber: number | null,
+  repo?: string | null
 ) {
   return useQuery({
-    queryKey: githubQueryKeys.issue(projectPath ?? '', issueNumber ?? 0),
+    queryKey: githubQueryKeys.issue(
+      projectPath ?? '',
+      issueNumber ?? 0,
+      repo ?? undefined
+    ),
     queryFn: async (): Promise<GitHubIssueDetail> => {
       if (!isTauri() || !projectPath || !issueNumber) {
         throw new Error('Missing required parameters')
@@ -251,10 +284,12 @@ export function useGitHubIssue(
         logger.debug('Fetching GitHub issue details', {
           projectPath,
           issueNumber,
+          repo,
         })
         const issue = await invoke<GitHubIssueDetail>('get_github_issue', {
           projectPath,
           issueNumber,
+          ...(repo ? { repo } : {}),
         })
         logger.info('GitHub issue loaded', {
           number: issue.number,
@@ -359,6 +394,13 @@ export function filterIssues(
 
     // Match by label name
     if (issue.labels.some(l => l.name.toLowerCase().includes(lowerQuery))) {
+      return true
+    }
+
+    if (issue.repo?.toLowerCase().includes(lowerQuery)) {
+      return true
+    }
+    if (issue.remote?.toLowerCase().includes(lowerQuery)) {
       return true
     }
 
@@ -537,20 +579,30 @@ export function useGitHubPRs(
  */
 export function useGitHubPR(
   projectPath: string | null,
-  prNumber: number | null
+  prNumber: number | null,
+  repo?: string | null
 ) {
   return useQuery({
-    queryKey: githubQueryKeys.pr(projectPath ?? '', prNumber ?? 0),
+    queryKey: githubQueryKeys.pr(
+      projectPath ?? '',
+      prNumber ?? 0,
+      repo ?? undefined
+    ),
     queryFn: async (): Promise<GitHubPullRequestDetail> => {
       if (!isTauri() || !projectPath || !prNumber) {
         throw new Error('Missing required parameters')
       }
 
       try {
-        logger.debug('Fetching GitHub PR details', { projectPath, prNumber })
+        logger.debug('Fetching GitHub PR details', {
+          projectPath,
+          prNumber,
+          repo,
+        })
         const pr = await invoke<GitHubPullRequestDetail>('get_github_pr', {
           projectPath,
           prNumber,
+          ...(repo ? { repo } : {}),
         })
         logger.info('GitHub PR loaded', { number: pr.number, title: pr.title })
         return pr
@@ -725,6 +777,13 @@ export function filterPRs(
       return true
     }
 
+    if (pr.repo?.toLowerCase().includes(lowerQuery)) {
+      return true
+    }
+    if (pr.remote?.toLowerCase().includes(lowerQuery)) {
+      return true
+    }
+
     return false
   })
 }
@@ -770,19 +829,31 @@ export function useSearchGitHubPRs(projectPath: string | null, query: string) {
   })
 }
 
+interface NumberedGitHubItem {
+  number: number
+  repo?: string | null
+}
+
+/** Keeps issue/PR #12 on two repositories distinct. */
+export function githubItemKey(item: NumberedGitHubItem): string {
+  const repo = item.repo?.trim()
+  return repo ? `${repo}#${item.number}` : `#${item.number}`
+}
+
 /**
- * Merge local-filtered results with remote search results, deduplicating by number.
- * Local results appear first, remote-only results are appended.
+ * Merge local-filtered results with remote search results.
+ * Items are distinct by repository and number, so the same number on two
+ * remotes is kept. Local results appear first.
  */
-export function mergeWithSearchResults<T extends { number: number }>(
+export function mergeWithSearchResults<T extends NumberedGitHubItem>(
   localResults: T[],
   searchResults: T[] | undefined
 ): T[] {
   if (!searchResults?.length) return localResults
 
-  const localNumbers = new Set(localResults.map(item => item.number))
+  const localKeys = new Set(localResults.map(githubItemKey))
   const remoteOnly = searchResults.filter(
-    item => !localNumbers.has(item.number)
+    item => !localKeys.has(githubItemKey(item))
   )
 
   if (remoteOnly.length === 0) return localResults
@@ -801,21 +872,66 @@ export function parseItemNumber(query: string): number | null {
 }
 
 /**
- * Prepend an exact-match item to an array, deduplicating by number.
+ * Prepend exact-match items, deduplicating by repository and number.
  */
-export function prependExactMatch<T extends { number: number }>(
+export function prependExactMatches<T extends NumberedGitHubItem>(
+  items: T[],
+  exactMatches: T[] | undefined | null
+): T[] {
+  if (!exactMatches?.length) return items
+  const exactKeys = new Set(exactMatches.map(githubItemKey))
+  return [
+    ...exactMatches,
+    ...items.filter(item => !exactKeys.has(githubItemKey(item))),
+  ]
+}
+
+/**
+ * Prepend an exact-match item to an array, deduplicating by repository and number.
+ */
+export function prependExactMatch<T extends NumberedGitHubItem>(
   items: T[],
   exactMatch: T | undefined | null
 ): T[] {
-  if (!exactMatch) return items
-  const filtered = items.filter(item => item.number !== exactMatch.number)
-  return [exactMatch, ...filtered]
+  return prependExactMatches(items, exactMatch ? [exactMatch] : [])
 }
 
 /**
  * Hook to fetch a single GitHub issue by exact number.
  * Returns the same GitHubIssue type as list_github_issues.
  */
+/**
+ * Exact-number lookup across every linked GitHub repository.
+ * The same number on two remotes is returned as two issues.
+ */
+export function useListGitHubIssuesByNumber(
+  projectPath: string | null,
+  query: string
+) {
+  const itemNumber = parseItemNumber(query)
+  return useQuery({
+    queryKey: [
+      ...githubQueryKeys.issueByNumber(projectPath ?? '', itemNumber ?? 0),
+      'all-remotes',
+    ],
+    queryFn: async (): Promise<GitHubIssue[]> => {
+      if (!isTauri() || !projectPath || !itemNumber) return []
+      try {
+        return await invoke<GitHubIssue[]>('list_github_issues_by_number', {
+          projectPath,
+          issueNumber: itemNumber,
+        })
+      } catch {
+        return []
+      }
+    },
+    enabled: !!projectPath && itemNumber !== null,
+    staleTime: 1000 * 30,
+    gcTime: 1000 * 60 * 5,
+    retry: 0,
+  })
+}
+
 export function useGetGitHubIssueByNumber(
   projectPath: string | null,
   query: string
@@ -845,6 +961,38 @@ export function useGetGitHubIssueByNumber(
  * Hook to fetch a single GitHub PR by exact number.
  * Returns the same GitHubPullRequest type as list_github_prs.
  */
+/**
+ * Exact-number lookup across every linked GitHub repository.
+ * The same number on two remotes is returned as two pull requests.
+ */
+export function useListGitHubPRsByNumber(
+  projectPath: string | null,
+  query: string
+) {
+  const itemNumber = parseItemNumber(query)
+  return useQuery({
+    queryKey: [
+      ...githubQueryKeys.prByNumber(projectPath ?? '', itemNumber ?? 0),
+      'all-remotes',
+    ],
+    queryFn: async (): Promise<GitHubPullRequest[]> => {
+      if (!isTauri() || !projectPath || !itemNumber) return []
+      try {
+        return await invoke<GitHubPullRequest[]>('list_github_prs_by_number', {
+          projectPath,
+          prNumber: itemNumber,
+        })
+      } catch {
+        return []
+      }
+    },
+    enabled: !!projectPath && itemNumber !== null,
+    staleTime: 1000 * 30,
+    gcTime: 1000 * 60 * 5,
+    retry: 0,
+  })
+}
+
 export function useGetGitHubPRByNumber(
   projectPath: string | null,
   query: string
@@ -868,6 +1016,233 @@ export function useGetGitHubPRByNumber(
     gcTime: 1000 * 60 * 5,
     retry: 0,
   })
+}
+
+// =============================================================================
+// GitHub Discussion Hooks and Functions
+// =============================================================================
+
+/**
+ * Hook to list GitHub discussions for a project.
+ * Returns an empty list when discussions are disabled for the repository.
+ */
+export function useGitHubDiscussions(
+  projectPath: string | null,
+  state: 'open' | 'closed' | 'all' = 'open',
+  options?: { enabled?: boolean; staleTime?: number }
+) {
+  return useInfiniteQuery({
+    queryKey: githubQueryKeys.discussions(projectPath ?? '', state),
+    queryFn: async ({ pageParam }): Promise<GitHubDiscussionPage> => {
+      if (!isTauri() || !projectPath) {
+        return {
+          discussions: [],
+          totalCount: 0,
+          endCursor: null,
+          hasNextPage: false,
+        }
+      }
+
+      try {
+        logger.debug('Fetching GitHub discussions', { projectPath, state })
+        const page = await invoke<GitHubDiscussionPage>(
+          'list_github_discussions',
+          { projectPath, state, after: pageParam }
+        )
+        logger.info('GitHub discussions loaded', {
+          count: page.discussions.length,
+          totalCount: page.totalCount,
+        })
+        return page
+      } catch (error) {
+        logger.error('Failed to load GitHub discussions', {
+          error,
+          projectPath,
+        })
+        throw error
+      }
+    },
+    initialPageParam: null as string | null,
+    getNextPageParam: lastPage =>
+      lastPage.hasNextPage ? lastPage.endCursor : undefined,
+    select: data => data.pages.flatMap(page => page.discussions),
+    enabled: (options?.enabled ?? true) && !!projectPath,
+    staleTime: options?.staleTime ?? 1000 * 60 * 2,
+    gcTime: 1000 * 60 * 10,
+    retry: 1,
+  })
+}
+
+/**
+ * Hook to search GitHub discussions remotely
+ *
+ * @param query - Search query (should be debounced by caller)
+ */
+export function useSearchGitHubDiscussions(
+  projectPath: string | null,
+  query: string
+) {
+  return useQuery({
+    queryKey: githubQueryKeys.discussionSearch(projectPath ?? '', query),
+    queryFn: async (): Promise<GitHubDiscussion[]> => {
+      if (!isTauri() || !projectPath || !query) return []
+
+      try {
+        return await invoke<GitHubDiscussion[]>('search_github_discussions', {
+          projectPath,
+          query,
+        })
+      } catch (error) {
+        logger.error('Failed to search GitHub discussions', {
+          error,
+          projectPath,
+          query,
+        })
+        throw error
+      }
+    },
+    enabled: !!projectPath && query.length >= 2,
+    staleTime: 1000 * 30,
+    gcTime: 1000 * 60 * 5,
+    retry: 0,
+  })
+}
+
+/**
+ * Hook to fetch a single GitHub discussion by exact number ("123" or "#123").
+ */
+export function useGetGitHubDiscussionByNumber(
+  projectPath: string | null,
+  query: string
+) {
+  const itemNumber = parseItemNumber(query)
+  return useQuery({
+    queryKey: githubQueryKeys.discussion(projectPath ?? '', itemNumber ?? 0),
+    queryFn: async (): Promise<GitHubDiscussionDetail | null> => {
+      if (!isTauri() || !projectPath || !itemNumber) return null
+      try {
+        return await getGitHubDiscussion(projectPath, itemNumber)
+      } catch {
+        return null
+      }
+    },
+    enabled: !!projectPath && itemNumber !== null,
+    staleTime: 1000 * 30,
+    gcTime: 1000 * 60 * 5,
+    retry: 0,
+  })
+}
+
+/**
+ * Fetch a discussion with its full markdown content (including comments)
+ */
+export async function getGitHubDiscussion(
+  projectPath: string,
+  discussionNumber: number
+): Promise<GitHubDiscussionDetail> {
+  return invoke<GitHubDiscussionDetail>('get_github_discussion', {
+    projectPath,
+    discussionNumber,
+  })
+}
+
+/**
+ * Hook to list loaded discussion contexts for a session
+ */
+export function useLoadedDiscussionContexts(
+  sessionId: string | null,
+  worktreeId?: string | null
+) {
+  return useQuery({
+    queryKey: githubQueryKeys.loadedDiscussionContexts(
+      sessionId ?? '',
+      worktreeId
+    ),
+    queryFn: async (): Promise<LoadedDiscussionContext[]> => {
+      if (!isTauri() || !sessionId) return []
+
+      try {
+        return await invoke<LoadedDiscussionContext[]>(
+          'list_loaded_discussion_contexts',
+          { sessionId, worktreeId: worktreeId ?? undefined }
+        )
+      } catch (error) {
+        logger.debug('Failed to load discussion contexts', {
+          error,
+          sessionId,
+        })
+        return []
+      }
+    },
+    enabled: !!sessionId,
+    staleTime: 1000 * 60,
+    gcTime: 1000 * 60 * 5,
+  })
+}
+
+/**
+ * Load discussion context for a session (fetch from GitHub and save)
+ */
+export async function loadDiscussionContext(
+  sessionId: string,
+  discussionNumber: number,
+  projectPath: string
+): Promise<LoadedDiscussionContext> {
+  return invoke<LoadedDiscussionContext>('load_discussion_context', {
+    sessionId,
+    discussionNumber,
+    projectPath,
+  })
+}
+
+/**
+ * Remove a loaded discussion context from a session
+ */
+export async function removeDiscussionContext(
+  sessionId: string,
+  discussionNumber: number,
+  projectPath: string
+): Promise<void> {
+  return invoke('remove_discussion_context', {
+    sessionId,
+    discussionNumber,
+    projectPath,
+  })
+}
+
+/**
+ * Get the content of a loaded discussion context file
+ */
+export async function getDiscussionContextContent(
+  sessionId: string,
+  discussionNumber: number,
+  projectPath: string
+): Promise<string> {
+  return invoke<string>('get_discussion_context_content', {
+    sessionId,
+    discussionNumber,
+    projectPath,
+  })
+}
+
+/**
+ * Filter discussions by number, title, body, or category name
+ */
+export function filterDiscussions(
+  discussions: GitHubDiscussion[],
+  query: string
+): GitHubDiscussion[] {
+  const lowerQuery = query.trim().toLowerCase()
+  if (!lowerQuery) return discussions
+
+  const numberQuery = lowerQuery.replace(/^#/, '')
+  return discussions.filter(
+    discussion =>
+      discussion.number.toString().includes(numberQuery) ||
+      discussion.title.toLowerCase().includes(lowerQuery) ||
+      discussion.body.toLowerCase().includes(lowerQuery) ||
+      (discussion.category?.name.toLowerCase().includes(lowerQuery) ?? false)
+  )
 }
 
 // =============================================================================

@@ -158,13 +158,16 @@ pub async fn dispatch_command(
             crate::set_window_vibrancy(app.clone(), enabled).await?;
             Ok(Value::Null)
         }
+        "get_native_client_id" => to_value(crate::get_native_client_id(app.clone()).await?),
         "load_ui_state" => {
-            let result = crate::load_ui_state(app.clone()).await?;
+            let client_id: String = field(&args, "clientId", "client_id")?;
+            let result = crate::load_ui_state(app.clone(), client_id).await?;
             to_value(result)
         }
         "save_ui_state" => {
             let ui_state = field(&args, "uiState", "ui_state")?;
-            crate::save_ui_state(app.clone(), ui_state).await?;
+            let client_id: String = field(&args, "clientId", "client_id")?;
+            crate::save_ui_state(app.clone(), client_id, ui_state).await?;
             Ok(Value::Null)
         }
         "get_pinned_recent_session_ids" => {
@@ -263,6 +266,7 @@ pub async fn dispatch_command(
             let advisory_context = field_opt(&args, "advisoryContext", "advisory_context")?;
             let linear_context = field_opt(&args, "linearContext", "linear_context")?;
             let sentry_context = field_opt(&args, "sentryContext", "sentry_context")?;
+            let discussion_context = field_opt(&args, "discussionContext", "discussion_context")?;
             let custom_name = field_opt(&args, "customName", "custom_name")?;
             let auto_open_in_jean = field_opt(&args, "autoOpenInJean", "auto_open_in_jean")?;
             let origin = field_opt(&args, "origin", "origin")?;
@@ -276,6 +280,7 @@ pub async fn dispatch_command(
                 advisory_context,
                 linear_context,
                 sentry_context,
+                discussion_context,
                 custom_name,
                 auto_open_in_jean,
                 origin,
@@ -310,6 +315,11 @@ pub async fn dispatch_command(
         "get_project_branches" => {
             let project_id: String = field(&args, "projectId", "project_id")?;
             let result = crate::projects::get_project_branches(app.clone(), project_id).await?;
+            to_value(result)
+        }
+        "list_worktree_branches" => {
+            let project_id: String = field(&args, "projectId", "project_id")?;
+            let result = crate::projects::list_worktree_branches(app.clone(), project_id).await?;
             to_value(result)
         }
         "update_project_settings" => {
@@ -840,8 +850,10 @@ pub async fn dispatch_command(
         "get_github_issue" => {
             let project_path: String = field(&args, "projectPath", "project_path")?;
             let issue_number: u32 = field(&args, "issueNumber", "issue_number")?;
+            let repo: Option<String> = from_field_opt(&args, "repo")?;
             let result =
-                crate::projects::get_github_issue(app.clone(), project_path, issue_number).await?;
+                crate::projects::get_github_issue(app.clone(), project_path, issue_number, repo)
+                    .await?;
             to_value(result)
         }
         "list_github_prs" => {
@@ -853,8 +865,9 @@ pub async fn dispatch_command(
         "get_github_pr" => {
             let project_path: String = field(&args, "projectPath", "project_path")?;
             let pr_number: u32 = field(&args, "prNumber", "pr_number")?;
+            let repo: Option<String> = from_field_opt(&args, "repo")?;
             let result =
-                crate::projects::get_github_pr(app.clone(), project_path, pr_number).await?;
+                crate::projects::get_github_pr(app.clone(), project_path, pr_number, repo).await?;
             to_value(result)
         }
         "get_pr_review_comments" => {
@@ -1098,6 +1111,86 @@ pub async fn dispatch_command(
                 ghsa_id,
                 project_path,
                 worktree_id,
+            )
+            .await?;
+            to_value(result)
+        }
+
+        "list_github_discussions" => {
+            let project_path: String = field(&args, "projectPath", "project_path")?;
+            let state: Option<String> = from_field_opt(&args, "state")?;
+            let after: Option<String> = from_field_opt(&args, "after")?;
+            let result =
+                crate::projects::list_github_discussions(app.clone(), project_path, state, after)
+                    .await?;
+            to_value(result)
+        }
+        "search_github_discussions" => {
+            let project_path: String = field(&args, "projectPath", "project_path")?;
+            let query: String = from_field(&args, "query")?;
+            let result =
+                crate::projects::search_github_discussions(app.clone(), project_path, query)
+                    .await?;
+            to_value(result)
+        }
+        "get_github_discussion" => {
+            let project_path: String = field(&args, "projectPath", "project_path")?;
+            let discussion_number: u32 = field(&args, "discussionNumber", "discussion_number")?;
+            let result = crate::projects::get_github_discussion(
+                app.clone(),
+                project_path,
+                discussion_number,
+            )
+            .await?;
+            to_value(result)
+        }
+        "load_discussion_context" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let discussion_number: u32 = field(&args, "discussionNumber", "discussion_number")?;
+            let project_path: String = field(&args, "projectPath", "project_path")?;
+            let result = crate::projects::load_discussion_context(
+                app.clone(),
+                session_id,
+                discussion_number,
+                project_path,
+            )
+            .await?;
+            to_value(result)
+        }
+        "list_loaded_discussion_contexts" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let worktree_id: Option<String> = field_opt(&args, "worktreeId", "worktree_id")?;
+            let result = crate::projects::list_loaded_discussion_contexts(
+                app.clone(),
+                session_id,
+                worktree_id,
+            )
+            .await?;
+            to_value(result)
+        }
+        "remove_discussion_context" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let discussion_number: u32 = field(&args, "discussionNumber", "discussion_number")?;
+            let project_path: String = field(&args, "projectPath", "project_path")?;
+            crate::projects::remove_discussion_context(
+                app.clone(),
+                session_id,
+                discussion_number,
+                project_path,
+            )
+            .await?;
+            emit_cache_invalidation(app, &["contexts"]);
+            Ok(Value::Null)
+        }
+        "get_discussion_context_content" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let discussion_number: u32 = field(&args, "discussionNumber", "discussion_number")?;
+            let project_path: String = field(&args, "projectPath", "project_path")?;
+            let result = crate::projects::get_discussion_context_content(
+                app.clone(),
+                session_id,
+                discussion_number,
+                project_path,
             )
             .await?;
             to_value(result)
@@ -3573,6 +3666,43 @@ pub async fn dispatch_command(
             emit_cache_invalidation(app, &["session", "sessions"]);
             Ok(Value::Null)
         }
+        "create_provider_account" => {
+            let backend: String = from_field(&args, "backend")?;
+            let label: String = from_field(&args, "label")?;
+            let account =
+                crate::provider_accounts::create_provider_account(app.clone(), backend, label)
+                    .await?;
+            emit_cache_invalidation(app, &["preferences"]);
+            to_value(account)
+        }
+        "delete_provider_account" => {
+            let id: String = from_field(&args, "id")?;
+            crate::provider_accounts::delete_provider_account(app.clone(), id).await?;
+            emit_cache_invalidation(app, &["preferences"]);
+            Ok(Value::Null)
+        }
+        "capture_provider_account_auth" => {
+            let id: String = from_field(&args, "id")?;
+            let copied =
+                crate::provider_accounts::capture_provider_account_auth(app.clone(), id).await?;
+            to_value(copied)
+        }
+        "set_session_provider_account" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let account_id: Option<String> = field_opt(&args, "accountId", "account_id")?;
+            crate::provider_accounts::set_session_provider_account(
+                app.clone(),
+                worktree_id,
+                worktree_path,
+                session_id,
+                account_id,
+            )
+            .await?;
+            emit_cache_invalidation(app, &["session", "sessions"]);
+            Ok(Value::Null)
+        }
         "set_session_last_opened" => {
             let session_id: String = field(&args, "sessionId", "session_id")?;
             crate::chat::set_session_last_opened(app.clone(), session_id).await?;
@@ -3604,6 +3734,43 @@ pub async fn dispatch_command(
             let result = crate::projects::clone_project(app.clone(), url, path, parent_id).await?;
             emit_cache_invalidation(app, &["projects"]);
             to_value(result)
+        }
+        "list_clone_urls" => {
+            let repo_path: String = field(&args, "repoPath", "repo_path")?;
+            to_value(crate::projects::list_clone_urls(repo_path).await?)
+        }
+        "ensure_project_present" => {
+            let clone_urls: Vec<String> = field(&args, "cloneUrls", "clone_urls")?;
+            let name: String = from_field(&args, "name")?;
+            let operation_id: String =
+                field_opt(&args, "operationId", "operation_id")?.unwrap_or_default();
+            let result = crate::projects::ensure_project_present(
+                app.clone(),
+                clone_urls,
+                name,
+                operation_id,
+            )
+            .await?;
+            emit_cache_invalidation(app, &["projects"]);
+            to_value(result)
+        }
+        "list_project_env_files" => {
+            let project_path: String = field(&args, "projectPath", "project_path")?;
+            to_value(crate::projects::list_project_env_files(project_path)?)
+        }
+        "read_project_env_files" => {
+            let project_path: String = field(&args, "projectPath", "project_path")?;
+            let names: Vec<String> = from_field(&args, "names")?;
+            to_value(crate::projects::read_project_env_files(
+                project_path,
+                names,
+            )?)
+        }
+        "write_project_env_files" => {
+            let project_path: String = field(&args, "projectPath", "project_path")?;
+            let files: Vec<crate::projects::EnvFileContents> = from_field(&args, "files")?;
+            crate::projects::write_project_env_files(project_path, files)?;
+            Ok(Value::Null)
         }
         "open_branch_on_github" => {
             Err("Opening a browser is only available in the desktop app".to_string())
@@ -3846,11 +4013,30 @@ pub async fn dispatch_command(
             .await?;
             to_value(result)
         }
+        "list_github_issues_by_number" => {
+            let project_path: String = field(&args, "projectPath", "project_path")?;
+            let issue_number: u32 = field(&args, "issueNumber", "issue_number")?;
+            let result = crate::projects::list_github_issues_by_number(
+                app.clone(),
+                project_path,
+                issue_number,
+            )
+            .await?;
+            to_value(result)
+        }
         "get_github_pr_by_number" => {
             let project_path: String = field(&args, "projectPath", "project_path")?;
             let pr_number: u32 = field(&args, "prNumber", "pr_number")?;
             let result =
                 crate::projects::get_github_pr_by_number(app.clone(), project_path, pr_number)
+                    .await?;
+            to_value(result)
+        }
+        "list_github_prs_by_number" => {
+            let project_path: String = field(&args, "projectPath", "project_path")?;
+            let pr_number: u32 = field(&args, "prNumber", "pr_number")?;
+            let result =
+                crate::projects::list_github_prs_by_number(app.clone(), project_path, pr_number)
                     .await?;
             to_value(result)
         }
@@ -4188,6 +4374,8 @@ const AGENT_COMMANDS: &[&str] = &[
     "list_agents",
     "get_agent_details",
     "create_agent",
+    "list_agent_templates",
+    "install_agent_template",
     "update_agent",
     "delete_agent",
     "decide_agent_approval",
@@ -4259,6 +4447,11 @@ async fn dispatch_agents_command(
                     )
                     .await?,
                 )
+            }
+            "list_agent_templates" => to_value(crate::agents::commands::list_agent_templates()?),
+            "install_agent_template" => {
+                let template_id: String = field(args, "templateId", "template_id")?;
+                to_value(crate::agents::commands::install_agent_template(app, &template_id).await?)
             }
             "update_agent" => {
                 let agent_id: String = field(args, "agentId", "agent_id")?;

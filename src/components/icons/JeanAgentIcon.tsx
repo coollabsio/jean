@@ -1,14 +1,15 @@
 import type { SVGProps } from 'react'
 
 /** Face colors for agent icons: [head, shadow]. `jean` is the crowned boss. */
+// [head, shadow, bubble]: bubble is a strong shade that keeps white text readable
 export const AGENT_ICON_COLORS = {
-  jean: ['#FDD24F', '#7A6531'],
-  yellow: ['#FDD24F', '#7A6531'],
-  blue: ['#7DB8F5', '#2F5B8A'],
-  green: ['#86D99A', '#2F6B3E'],
-  pink: ['#F5A3C7', '#8A3A5E'],
-  purple: ['#B9A3F5', '#4F3A8A'],
-  orange: ['#F7B26A', '#8A5121'],
+  jean: ['#FFD21F', '#8A6500', '#B87A00'],
+  yellow: ['#FFD21F', '#8A6500', '#B87A00'],
+  blue: ['#4DA6FF', '#1A4F99', '#1D6FD8'],
+  green: ['#3DDC84', '#16733F', '#15934B'],
+  pink: ['#FF6EB4', '#99285E', '#D42A7E'],
+  purple: ['#A57BFF', '#4B2A99', '#7C3AED'],
+  orange: ['#FF9A3D', '#994400', '#CC5200'],
 } as const
 
 export type AgentIconKey = keyof typeof AGENT_ICON_COLORS

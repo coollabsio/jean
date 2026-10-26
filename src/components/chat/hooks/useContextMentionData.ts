@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import {
   filterAdvisories,
+  filterDiscussions,
   filterIssues,
   filterPRs,
   filterSecurityAlerts,
@@ -9,12 +10,15 @@ import {
   prependExactMatch,
   useDependabotAlert,
   useDependabotAlerts,
+  useGetGitHubDiscussionByNumber,
   useGetGitHubIssueByNumber,
   useGetGitHubPRByNumber,
+  useGitHubDiscussions,
   useGitHubIssues,
   useGitHubPRs,
   useRepositoryAdvisories,
   useRepositoryAdvisory,
+  useSearchGitHubDiscussions,
   useSearchGitHubIssues,
   useSearchGitHubPRs,
 } from '@/services/github'
@@ -27,6 +31,7 @@ import {
 } from '@/services/linear'
 import type {
   DependabotAlert,
+  GitHubDiscussion,
   GitHubIssue,
   GitHubPullRequest,
   RepositoryAdvisory,
@@ -36,6 +41,7 @@ import type { LinearIssue } from '@/types/linear'
 export type ContextMentionType =
   | 'issue'
   | 'pr'
+  | 'discussion'
   | 'security'
   | 'advisory'
   | 'linear'
@@ -48,6 +54,7 @@ export interface ContextMentionItem {
   badge?: string
   issue?: GitHubIssue
   pr?: GitHubPullRequest
+  discussion?: GitHubDiscussion
   securityAlert?: DependabotAlert
   advisory?: RepositoryAdvisory
   linearIssue?: LinearIssue
@@ -89,6 +96,17 @@ function prToItem(pr: GitHubPullRequest): ContextMentionItem {
     title: pr.title,
     badge: pr.isDraft ? 'draft' : undefined,
     pr,
+  }
+}
+
+function discussionToItem(discussion: GitHubDiscussion): ContextMentionItem {
+  return {
+    id: `discussion:${discussion.number}`,
+    type: 'discussion',
+    label: `Discussion #${discussion.number}`,
+    title: discussion.title,
+    badge: discussion.isAnswered ? 'answered' : discussion.category?.name,
+    discussion,
   }
 }
 
@@ -154,6 +172,7 @@ export function useContextMentionData({
   includeClosed,
   issueLimit = 8,
   prLimit = 8,
+  discussionLimit = 8,
 }: {
   open: boolean
   projectPath: string | null
@@ -162,7 +181,13 @@ export function useContextMentionData({
   includeClosed: boolean
   issueLimit?: number
   prLimit?: number
-}): { groups: ContextMentionGroup[]; isFetching: boolean } {
+  discussionLimit?: number
+}): {
+  groups: ContextMentionGroup[]
+  isFetching: boolean
+  /** Fetch the next GitHub page when `limit` passes the loaded discussions */
+  loadMoreDiscussions: (limit: number) => void
+} {
   const enabledProjectPath = open ? projectPath : null
   const enabledProjectId = open ? projectId : null
   const activeQuery = open ? query : ''
@@ -172,6 +197,7 @@ export function useContextMentionData({
 
   const issueState = includeClosed ? 'all' : 'open'
   const prState = includeClosed ? 'all' : 'open'
+  const discussionState = includeClosed ? 'all' : 'open'
   const securityState = includeClosed ? 'all' : 'open'
   const advisoryState = includeClosed ? 'all' : 'published'
 
@@ -185,6 +211,14 @@ export function useContextMentionData({
     prState,
     { enabled: open, ownerId: enabledProjectId ?? undefined }
   )
+  const {
+    data: discussions = [],
+    isFetching: isFetchingDiscussions,
+    hasNextPage: hasMoreDiscussionPages,
+    fetchNextPage: fetchNextDiscussionPage,
+  } = useGitHubDiscussions(enabledProjectPath, discussionState, {
+    enabled: open,
+  })
   const { data: alerts = [], isFetching: isFetchingAlerts } =
     useDependabotAlerts(enabledProjectPath, securityState, { enabled: open })
   const { data: advisories = [], isFetching: isFetchingAdvisories } =
@@ -202,6 +236,8 @@ export function useContextMentionData({
     enabledProjectPath,
     activeQuery
   )
+  const { data: searchedDiscussions, isFetching: isSearchingDiscussions } =
+    useSearchGitHubDiscussions(enabledProjectPath, activeQuery)
   const { data: searchedLinear, isFetching: isSearchingLinear } =
     useSearchLinearIssues(enabledProjectId, activeQuery, { enabled: open })
 
@@ -209,6 +245,8 @@ export function useContextMentionData({
     useGetGitHubIssueByNumber(enabledProjectPath, activeQuery)
   const { data: exactPR, isFetching: isFetchingExactPR } =
     useGetGitHubPRByNumber(enabledProjectPath, activeQuery)
+  const { data: exactDiscussion, isFetching: isFetchingExactDiscussion } =
+    useGetGitHubDiscussionByNumber(enabledProjectPath, activeQuery)
   const { data: exactSecurity, isFetching: isFetchingExactSecurity } =
     useDependabotAlert(enabledProjectPath, itemNumber)
   const { data: exactAdvisory, isFetching: isFetchingExactAdvisory } =
@@ -227,6 +265,8 @@ export function useContextMentionData({
     const issueVisible = (issue: GitHubIssue) =>
       includeClosed || isOpenIssue(issue)
     const prVisible = (pr: GitHubPullRequest) => includeClosed || isOpenPR(pr)
+    const discussionVisible = (discussion: GitHubDiscussion) =>
+      includeClosed || !discussion.closed
     const securityVisible = (alert: DependabotAlert) =>
       includeClosed || isOpenSecurityAlert(alert)
     const advisoryVisible = (advisory: RepositoryAdvisory) =>
@@ -237,6 +277,10 @@ export function useContextMentionData({
     const visibleExactIssue =
       exactIssue && issueVisible(exactIssue) ? exactIssue : null
     const visibleExactPR = exactPR && prVisible(exactPR) ? exactPR : null
+    const visibleExactDiscussion =
+      exactDiscussion && discussionVisible(exactDiscussion)
+        ? exactDiscussion
+        : null
     const visibleExactSecurity =
       exactSecurity && securityVisible(exactSecurity) ? exactSecurity : null
     const visibleExactAdvisory =
@@ -262,6 +306,16 @@ export function useContextMentionData({
             searchedPRs
           ).filter(prVisible),
           visibleExactPR
+        )
+
+    const filteredDiscussions = bareNumberSearch
+      ? prependExactMatch([], visibleExactDiscussion)
+      : prependExactMatch(
+          mergeWithSearchResults(
+            filterDiscussions(discussions, activeQuery),
+            searchedDiscussions
+          ).filter(discussionVisible),
+          visibleExactDiscussion
         )
 
     const filteredAlerts = bareNumberSearch
@@ -302,6 +356,16 @@ export function useContextMentionData({
         hasMore: filteredPRs.length > prLimit,
       },
       {
+        id: 'discussion',
+        heading: 'GitHub Discussions',
+        items: filteredDiscussions
+          .slice(0, discussionLimit)
+          .map(discussionToItem),
+        hasMore:
+          filteredDiscussions.length > discussionLimit ||
+          (!q && hasMoreDiscussionPages),
+      },
+      {
         id: 'security',
         heading: 'Security Alerts',
         items: filteredAlerts.slice(0, 8).map(securityToItem),
@@ -327,7 +391,11 @@ export function useContextMentionData({
     activeQuery,
     advisories,
     alerts,
+    discussionLimit,
+    discussions,
+    hasMoreDiscussionPages,
     exactAdvisory,
+    exactDiscussion,
     exactIssue,
     exactLinear,
     exactPR,
@@ -342,24 +410,35 @@ export function useContextMentionData({
     open,
     prs,
     prLimit,
+    searchedDiscussions,
     searchedIssues,
     searchedLinear,
     searchedPRs,
   ])
 
+  const loadMoreDiscussions = (limit: number) => {
+    if (limit > discussions.length && hasMoreDiscussionPages) {
+      void fetchNextDiscussionPage()
+    }
+  }
+
   return {
     groups,
+    loadMoreDiscussions,
     isFetching:
       isFetchingIssues ||
       isFetchingPRs ||
+      isFetchingDiscussions ||
       isFetchingAlerts ||
       isFetchingAdvisories ||
       isFetchingLinear ||
       isSearchingIssues ||
       isSearchingPRs ||
+      isSearchingDiscussions ||
       isSearchingLinear ||
       isFetchingExactIssue ||
       isFetchingExactPR ||
+      isFetchingExactDiscussion ||
       isFetchingExactSecurity ||
       isFetchingExactAdvisory ||
       isFetchingExactLinear,

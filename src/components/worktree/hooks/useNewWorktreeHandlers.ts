@@ -1,16 +1,17 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { invoke } from '@/lib/transport'
 import { toast } from 'sonner'
 import { useUIStore, type InvestigationOverride } from '@/store/ui-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
-import { githubQueryKeys } from '@/services/github'
+import { getGitHubDiscussion, githubQueryKeys } from '@/services/github'
 import { projectsQueryKeys } from '@/services/projects'
 import type {
   GitHubIssue,
   GitHubPullRequest,
   DependabotAlert,
   RepositoryAdvisory,
+  GitHubDiscussion,
   IssueContext,
   PullRequestContext,
   SecurityAlertContext,
@@ -28,6 +29,12 @@ import {
   type ContextLinkRef,
 } from '@/hooks/useContextLinkUsage'
 import type { GetContextLinkMatches } from '../ContextLinkBadge'
+import { isStartOnHostCancelled } from '@/lib/start-on-host'
+import { reusesPrimaryGitHubSource } from '@/lib/remote-worktree-sources'
+
+function githubRepoArgs(repo?: string | null): { repo?: string } {
+  return repo ? { repo } : {}
+}
 
 type Data = ReturnType<typeof useNewWorktreeData>
 
@@ -42,7 +49,11 @@ export function useNewWorktreeHandlers(
   data: Data,
   setters: Setters,
   investigationOverride?: InvestigationOverride,
-  getMatches?: GetContextLinkMatches
+  getMatches?: GetContextLinkMatches,
+  startOnHost?: {
+    run: () => Promise<{ projectId: string }>
+    hostId: string
+  }
 ) {
   const {
     queryClient,
@@ -50,10 +61,123 @@ export function useNewWorktreeHandlers(
     selectedProject,
     hasBaseSession,
     baseSession,
-    createWorktree,
-    createBaseSession,
-    createWorktreeFromBranch,
+    createWorktree: createWorktreeRaw,
+    createBaseSession: createBaseSessionRaw,
+    createWorktreeFromBranch: createWorktreeFromBranchRaw,
+    hasMultipleGitHubRemotes: hasMultipleGitHubRemotesRaw,
+    primaryGitHubRemote: primaryGitHubRemoteRaw,
   } = data
+  const hasMultipleGitHubRemotes = hasMultipleGitHubRemotesRaw ?? false
+  const primaryGitHubRemoteName = primaryGitHubRemoteRaw ?? null
+
+  const ensureInflight = useRef(new Map<string, Promise<string>>())
+  const ensureRun = startOnHost?.run
+  const hostKey = startOnHost?.hostId ?? ''
+  const ensureProjectId = useCallback(() => {
+    if (!ensureRun) {
+      if (!selectedProjectId) {
+        return Promise.reject(new Error('No project selected'))
+      }
+      return Promise.resolve(selectedProjectId)
+    }
+    const existing = ensureInflight.current.get(hostKey)
+    if (existing) return existing
+    const pending = ensureRun()
+      .then(result => result.projectId)
+      .catch(error => {
+        ensureInflight.current.delete(hostKey)
+        throw error
+      })
+    ensureInflight.current.set(hostKey, pending)
+    return pending
+  }, [ensureRun, hostKey, selectedProjectId])
+
+  const createWorktree = useMemo(() => {
+    if (!createWorktreeRaw) return createWorktreeRaw
+    return {
+      ...createWorktreeRaw,
+      mutate: (
+        vars: Parameters<typeof createWorktreeRaw.mutate>[0],
+        opts?: Parameters<typeof createWorktreeRaw.mutate>[1]
+      ) => {
+        void ensureProjectId()
+          .then(projectId => {
+            if (selectedProjectId) {
+              useProjectsStore.getState().expandProject(selectedProjectId)
+            }
+            createWorktreeRaw.mutate({ ...vars, projectId }, opts)
+          })
+          .catch(error => {
+            if (isStartOnHostCancelled(error)) return
+            opts?.onError?.(error as never, vars, undefined, undefined as never)
+            const message =
+              error instanceof Error ? error.message : String(error)
+            toast.error(message)
+          })
+      },
+      mutateAsync: async (
+        vars: Parameters<typeof createWorktreeRaw.mutateAsync>[0]
+      ) => {
+        const projectId = await ensureProjectId()
+        if (selectedProjectId) {
+          useProjectsStore.getState().expandProject(selectedProjectId)
+        }
+        return createWorktreeRaw.mutateAsync({ ...vars, projectId })
+      },
+    }
+  }, [createWorktreeRaw, ensureProjectId, selectedProjectId])
+
+  const createBaseSession = useMemo(() => {
+    if (!createBaseSessionRaw) return createBaseSessionRaw
+    return {
+      ...createBaseSessionRaw,
+      mutate: (
+        _projectId: string,
+        opts?: { onError?: (error: unknown) => void }
+      ) => {
+        void ensureProjectId()
+          .then(resolvedId => {
+            if (selectedProjectId) {
+              useProjectsStore.getState().expandProject(selectedProjectId)
+            }
+            createBaseSessionRaw.mutate(resolvedId, opts)
+          })
+          .catch(error => {
+            if (isStartOnHostCancelled(error)) return
+            opts?.onError?.(error)
+            const message =
+              error instanceof Error ? error.message : String(error)
+            toast.error(message)
+          })
+      },
+    }
+  }, [createBaseSessionRaw, ensureProjectId, selectedProjectId])
+
+  const createWorktreeFromBranch = useMemo(() => {
+    if (!createWorktreeFromBranchRaw) return createWorktreeFromBranchRaw
+    return {
+      ...createWorktreeFromBranchRaw,
+      mutate: (
+        vars: Parameters<typeof createWorktreeFromBranchRaw.mutate>[0],
+        opts?: Parameters<typeof createWorktreeFromBranchRaw.mutate>[1]
+      ) => {
+        void ensureProjectId()
+          .then(projectId => {
+            if (selectedProjectId) {
+              useProjectsStore.getState().expandProject(selectedProjectId)
+            }
+            createWorktreeFromBranchRaw.mutate({ ...vars, projectId }, opts)
+          })
+          .catch(error => {
+            if (isStartOnHostCancelled(error)) return
+            opts?.onError?.(error as never, vars, undefined, undefined as never)
+            const message =
+              error instanceof Error ? error.message : String(error)
+            toast.error(message)
+          })
+      },
+    }
+  }, [createWorktreeFromBranchRaw, ensureProjectId, selectedProjectId])
 
   const {
     setActiveTab,
@@ -66,6 +190,7 @@ export function useNewWorktreeHandlers(
   const [creatingFromNumber, setCreatingFromNumber] = useState<number | null>(
     null
   )
+  const [creatingFromRepo, setCreatingFromRepo] = useState<string | null>(null)
   const [creatingFromLinearId, setCreatingFromLinearId] = useState<
     string | null
   >(null)
@@ -79,16 +204,19 @@ export function useNewWorktreeHandlers(
     null
   )
   const [stackingFromPR, setStackingFromPR] = useState<number | null>(null)
+  const [stackingFromRepo, setStackingFromRepo] = useState<string | null>(null)
   const [isBulkInvestigating, setIsBulkInvestigating] = useState(false)
 
   const handleOpenChange = useCallback(
     (open: boolean) => {
       setCreatingFromNumber(null)
+      setCreatingFromRepo(null)
       setCreatingFromLinearId(null)
       setCreatingFromSentryId(null)
       setCreatingFromBranch(null)
       setCreatingFromGhsaId(null)
       setStackingFromPR(null)
+      setStackingFromRepo(null)
       setIsBulkInvestigating(false)
       setSearchQuery('')
       setSelectedItemIndex(0)
@@ -129,12 +257,24 @@ export function useNewWorktreeHandlers(
           queryClient.invalidateQueries({
             queryKey: githubQueryKeys.advisories(projectPath, 'all'),
           })
+          queryClient.invalidateQueries({
+            queryKey: githubQueryKeys.discussions(projectPath, 'open'),
+          })
+          queryClient.invalidateQueries({
+            queryKey: githubQueryKeys.discussions(projectPath, 'all'),
+          })
         }
         if (selectedProjectId) {
           queryClient.invalidateQueries({
             queryKey: [
               ...projectsQueryKeys.detail(selectedProjectId),
               'branches',
+            ],
+          })
+          queryClient.invalidateQueries({
+            queryKey: [
+              ...projectsQueryKeys.detail(selectedProjectId),
+              'remote-branches',
             ],
           })
           // Invalidate Linear issues cache
@@ -177,13 +317,28 @@ export function useNewWorktreeHandlers(
     [getMatches, handleOpenChange]
   )
 
+  const reusesExistingWorktree = useCallback(
+    (item: { remote?: string | null }) =>
+      reusesPrimaryGitHubSource(
+        item,
+        hasMultipleGitHubRemotes,
+        primaryGitHubRemoteName
+      ),
+    [hasMultipleGitHubRemotes, primaryGitHubRemoteName]
+  )
+
   /** Drop items that already have a worktree/session; toast how many were skipped. */
   const skipLinkedItems = useCallback(
-    <T>(items: T[], toRef: (item: T) => ContextLinkRef): T[] => {
+    <T,>(
+      items: T[],
+      toRef: (item: T) => ContextLinkRef,
+      shouldCheck: (item: T) => boolean = () => true
+    ): T[] => {
       if (!getMatches) return items
-      const remaining = items.filter(
-        item => getMatches(toRef(item)).length === 0
-      )
+      const remaining = items.filter(item => {
+        if (!shouldCheck(item)) return true
+        return getMatches(toRef(item)).length === 0
+      })
       const skipped = items.length - remaining.length
       if (skipped > 0) {
         toast.info(
@@ -217,7 +372,11 @@ export function useNewWorktreeHandlers(
       return
     }
 
-    if (hasBaseSession && baseSession) {
+    const targetIsCurrent =
+      !startOnHost ||
+      startOnHost.hostId === (selectedProject?.serverId ?? 'local')
+
+    if (targetIsCurrent && hasBaseSession && baseSession) {
       const { selectWorktree } = useProjectsStore.getState()
       selectWorktree(baseSession.id)
       useChatStore
@@ -244,10 +403,12 @@ export function useNewWorktreeHandlers(
     handleOpenChange(false)
   }, [
     selectedProjectId,
+    selectedProject,
     hasBaseSession,
     baseSession,
     createBaseSession,
     handleOpenChange,
+    startOnHost,
   ])
 
   const handleSelectBranch = useCallback(
@@ -282,6 +443,7 @@ export function useNewWorktreeHandlers(
       }
 
       if (
+        reusesExistingWorktree(issue) &&
         openExistingMatch(
           { type: 'issue', id: issue.number },
           `Issue #${issue.number}`
@@ -290,6 +452,7 @@ export function useNewWorktreeHandlers(
         return
 
       setCreatingFromNumber(issue.number)
+      setCreatingFromRepo(issue.repo ?? null)
 
       try {
         const issueDetail = await invoke<
@@ -303,6 +466,7 @@ export function useNewWorktreeHandlers(
         >('get_github_issue', {
           projectPath,
           issueNumber: issue.number,
+          ...githubRepoArgs(issue.repo),
         })
 
         const issueContext: IssueContext = {
@@ -320,6 +484,7 @@ export function useNewWorktreeHandlers(
                 ]
               : []
           ),
+          ...githubRepoArgs(issue.repo),
         }
 
         if (background)
@@ -332,12 +497,14 @@ export function useNewWorktreeHandlers(
 
         if (background) {
           setCreatingFromNumber(null)
+          setCreatingFromRepo(null)
         } else {
           handleOpenChange(false)
         }
       } catch (error) {
         toast.error(`Failed to fetch issue details: ${error}`)
         setCreatingFromNumber(null)
+        setCreatingFromRepo(null)
       }
     },
     [
@@ -346,6 +513,7 @@ export function useNewWorktreeHandlers(
       createWorktree,
       handleOpenChange,
       openExistingMatch,
+      reusesExistingWorktree,
     ]
   )
 
@@ -358,6 +526,7 @@ export function useNewWorktreeHandlers(
       }
 
       if (
+        reusesExistingWorktree(issue) &&
         openExistingMatch(
           { type: 'issue', id: issue.number },
           `Issue #${issue.number}`
@@ -366,6 +535,7 @@ export function useNewWorktreeHandlers(
         return
 
       setCreatingFromNumber(issue.number)
+      setCreatingFromRepo(issue.repo ?? null)
 
       try {
         const issueDetail = await invoke<
@@ -379,6 +549,7 @@ export function useNewWorktreeHandlers(
         >('get_github_issue', {
           projectPath,
           issueNumber: issue.number,
+          ...githubRepoArgs(issue.repo),
         })
 
         const issueContext: IssueContext = {
@@ -396,6 +567,7 @@ export function useNewWorktreeHandlers(
                 ]
               : []
           ),
+          ...githubRepoArgs(issue.repo),
         }
 
         if (background)
@@ -412,12 +584,14 @@ export function useNewWorktreeHandlers(
 
         if (background) {
           setCreatingFromNumber(null)
+          setCreatingFromRepo(null)
         } else {
           handleOpenChange(false)
         }
       } catch (error) {
         toast.error(`Failed to fetch issue details: ${error}`)
         setCreatingFromNumber(null)
+        setCreatingFromRepo(null)
       }
     },
     [
@@ -426,6 +600,7 @@ export function useNewWorktreeHandlers(
       createWorktree,
       handleOpenChange,
       openExistingMatch,
+      reusesExistingWorktree,
       investigationOverride,
     ]
   )
@@ -438,10 +613,14 @@ export function useNewWorktreeHandlers(
         toast.error('No project selected')
         return
       }
-      const issues = skipLinkedItems(selectedIssues, issue => ({
-        type: 'issue',
-        id: issue.number,
-      }))
+      const issues = skipLinkedItems(
+        selectedIssues,
+        issue => ({
+          type: 'issue',
+          id: issue.number,
+        }),
+        issue => reusesExistingWorktree(issue)
+      )
       if (issues.length < 1) return
 
       setIsBulkInvestigating(true)
@@ -462,6 +641,7 @@ export function useNewWorktreeHandlers(
           >('get_github_issue', {
             projectPath,
             issueNumber: issue.number,
+            ...githubRepoArgs(issue.repo),
           })
 
           const issueContext: IssueContext = {
@@ -479,6 +659,7 @@ export function useNewWorktreeHandlers(
                   ]
                 : []
             ),
+            ...githubRepoArgs(issue.repo),
           }
 
           useUIStore.getState().incrementPendingBackgroundCreations()
@@ -510,6 +691,7 @@ export function useNewWorktreeHandlers(
       createWorktree,
       investigationOverride,
       skipLinkedItems,
+      reusesExistingWorktree,
     ]
   )
 
@@ -520,10 +702,14 @@ export function useNewWorktreeHandlers(
         toast.error('No project selected')
         return
       }
-      const prs = skipLinkedItems(selectedPrs, pr => ({
-        type: 'pr',
-        id: pr.number,
-      }))
+      const prs = skipLinkedItems(
+        selectedPrs,
+        pr => ({
+          type: 'pr',
+          id: pr.number,
+        }),
+        pr => reusesExistingWorktree(pr)
+      )
       if (prs.length < 1) return
 
       setIsBulkInvestigating(true)
@@ -550,6 +736,7 @@ export function useNewWorktreeHandlers(
           >('get_github_pr', {
             projectPath,
             prNumber: pr.number,
+            ...githubRepoArgs(pr.repo),
           })
 
           const prContext: PullRequestContext = {
@@ -581,6 +768,7 @@ export function useNewWorktreeHandlers(
                   ]
                 : []
             ),
+            ...githubRepoArgs(pr.repo),
           }
 
           useUIStore.getState().incrementPendingBackgroundCreations()
@@ -615,6 +803,7 @@ export function useNewWorktreeHandlers(
       createWorktree,
       investigationOverride,
       skipLinkedItems,
+      reusesExistingWorktree,
     ]
   )
 
@@ -827,10 +1016,14 @@ export function useNewWorktreeHandlers(
         return
       }
 
-      if (openExistingMatch({ type: 'pr', id: pr.number }, `PR #${pr.number}`))
+      if (
+        reusesExistingWorktree(pr) &&
+        openExistingMatch({ type: 'pr', id: pr.number }, `PR #${pr.number}`)
+      )
         return
 
       setCreatingFromNumber(pr.number)
+      setCreatingFromRepo(pr.repo ?? null)
 
       try {
         const prDetail = await invoke<
@@ -850,6 +1043,7 @@ export function useNewWorktreeHandlers(
         >('get_github_pr', {
           projectPath,
           prNumber: pr.number,
+          ...githubRepoArgs(pr.repo),
         })
 
         const prContext: PullRequestContext = {
@@ -881,6 +1075,7 @@ export function useNewWorktreeHandlers(
                 ]
               : []
           ),
+          ...githubRepoArgs(pr.repo),
         }
 
         if (background)
@@ -893,12 +1088,14 @@ export function useNewWorktreeHandlers(
 
         if (background) {
           setCreatingFromNumber(null)
+          setCreatingFromRepo(null)
         } else {
           handleOpenChange(false)
         }
       } catch (error) {
         toast.error(`Failed to fetch PR details: ${error}`)
         setCreatingFromNumber(null)
+        setCreatingFromRepo(null)
       }
     },
     [
@@ -907,6 +1104,7 @@ export function useNewWorktreeHandlers(
       createWorktree,
       handleOpenChange,
       openExistingMatch,
+      reusesExistingWorktree,
     ]
   )
 
@@ -918,10 +1116,14 @@ export function useNewWorktreeHandlers(
         return
       }
 
-      if (openExistingMatch({ type: 'pr', id: pr.number }, `PR #${pr.number}`))
+      if (
+        reusesExistingWorktree(pr) &&
+        openExistingMatch({ type: 'pr', id: pr.number }, `PR #${pr.number}`)
+      )
         return
 
       setCreatingFromNumber(pr.number)
+      setCreatingFromRepo(pr.repo ?? null)
 
       try {
         const prDetail = await invoke<
@@ -941,6 +1143,7 @@ export function useNewWorktreeHandlers(
         >('get_github_pr', {
           projectPath,
           prNumber: pr.number,
+          ...githubRepoArgs(pr.repo),
         })
 
         const prContext: PullRequestContext = {
@@ -972,6 +1175,7 @@ export function useNewWorktreeHandlers(
                 ]
               : []
           ),
+          ...githubRepoArgs(pr.repo),
         }
 
         if (background)
@@ -988,12 +1192,14 @@ export function useNewWorktreeHandlers(
 
         if (background) {
           setCreatingFromNumber(null)
+          setCreatingFromRepo(null)
         } else {
           handleOpenChange(false)
         }
       } catch (error) {
         toast.error(`Failed to fetch PR details: ${error}`)
         setCreatingFromNumber(null)
+        setCreatingFromRepo(null)
       }
     },
     [
@@ -1002,6 +1208,7 @@ export function useNewWorktreeHandlers(
       createWorktree,
       handleOpenChange,
       openExistingMatch,
+      reusesExistingWorktree,
       investigationOverride,
     ]
   )
@@ -1452,6 +1659,56 @@ export function useNewWorktreeHandlers(
   )
 
   // =========================================================================
+  // Discussion handler (context only, no investigate)
+  // =========================================================================
+
+  const handleSelectDiscussion = useCallback(
+    async (discussion: GitHubDiscussion, background = false) => {
+      const projectPath = selectedProject?.path
+      if (!selectedProjectId || !projectPath) {
+        toast.error('No project selected')
+        return
+      }
+
+      if (
+        openExistingMatch(
+          { type: 'discussion', id: discussion.number },
+          `Discussion #${discussion.number}`
+        )
+      )
+        return
+
+      setCreatingFromNumber(discussion.number)
+      try {
+        const detail = await getGitHubDiscussion(projectPath, discussion.number)
+        if (background)
+          useUIStore.getState().incrementPendingBackgroundCreations()
+        await createWorktree.mutateAsync({
+          projectId: selectedProjectId,
+          discussionContext: {
+            number: detail.number,
+            title: detail.title,
+            content: detail.content,
+          },
+          background,
+        })
+        if (background) setCreatingFromNumber(null)
+        else handleOpenChange(false)
+      } catch (error) {
+        toast.error(`Failed to create worktree from discussion: ${error}`)
+        setCreatingFromNumber(null)
+      }
+    },
+    [
+      selectedProjectId,
+      selectedProject,
+      createWorktree,
+      handleOpenChange,
+      openExistingMatch,
+    ]
+  )
+
+  // =========================================================================
   // Stack handler: create a new worktree branched off a PR head
   // =========================================================================
 
@@ -1462,18 +1719,29 @@ export function useNewWorktreeHandlers(
         return
       }
       setStackingFromPR(pr.number)
+      setStackingFromRepo(pr.repo ?? null)
       if (background)
         useUIStore.getState().incrementPendingBackgroundCreations()
+      const baseBranch =
+        pr.remote && pr.remote !== 'origin'
+          ? `${pr.remote}/${pr.headRefName}`
+          : pr.headRefName
       createWorktree.mutate(
         {
           projectId: selectedProjectId,
-          baseBranch: pr.headRefName,
+          baseBranch,
           background,
         },
         {
-          onError: () => setStackingFromPR(null),
+          onError: () => {
+            setStackingFromPR(null)
+            setStackingFromRepo(null)
+          },
           onSuccess: () => {
-            if (background) setStackingFromPR(null)
+            if (background) {
+              setStackingFromPR(null)
+              setStackingFromRepo(null)
+            }
           },
         }
       )
@@ -1484,11 +1752,13 @@ export function useNewWorktreeHandlers(
 
   return {
     creatingFromNumber,
+    creatingFromRepo,
     creatingFromLinearId,
     creatingFromSentryId,
     creatingFromBranch,
     creatingFromGhsaId,
     stackingFromPR,
+    stackingFromRepo,
     isBulkInvestigating,
     handleOpenChange,
     handleCreateWorktree,
@@ -1512,5 +1782,6 @@ export function useNewWorktreeHandlers(
     handleSelectSentryIssue,
     handleSelectSentryIssueAndInvestigate,
     handleBulkInvestigateSentryIssues,
+    handleSelectDiscussion,
   }
 }

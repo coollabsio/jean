@@ -540,7 +540,7 @@ fn append_pi_agent_policy_args(
         return;
     }
     args.push("--tools".to_string());
-    args.push(pi_tools_for_mode(execution_mode.unwrap_or("plan")).to_string());
+    args.push(pi_tools_for_mode(execution_mode.unwrap_or("build")).to_string());
     append_system_prompt_arg(args, system_prompt);
 }
 
@@ -1833,6 +1833,7 @@ mod tests {
             status: super::super::types::RunStatus::Completed,
             assistant_message_id: Some("assistant-pi".to_string()),
             cancelled: false,
+            provider_rejected: false,
             recovered: false,
             claude_session_id: None,
             pid: None,

@@ -83,8 +83,8 @@ export function agentSubtitle(agent: AgentSummary): string {
   return agent.activity ?? (agent.description || 'No activity yet')
 }
 
-/** Short status text for an agent row and header. */
-export function agentStatusLabel(agent: AgentSummary): string {
+/** Short status text for an agent row and header; null when idle. */
+export function agentStatusLabel(agent: AgentSummary): string | null {
   if (agent.pendingApprovals > 0)
     return `Needs approval (${agent.pendingApprovals})`
   if (agent.unreadNotifications > 0)
@@ -97,7 +97,7 @@ export function agentStatusLabel(agent: AgentSummary): string {
   if (agent.budgetReached) return 'Hourly limit reached'
   if (agent.activeDelegations > 0)
     return `Following ${agent.activeDelegations} session${agent.activeDelegations === 1 ? '' : 's'}`
-  return 'Idle'
+  return null
 }
 
 /** Sections of the agent side panel (the chat is always shown). */

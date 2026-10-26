@@ -58,10 +58,14 @@ pub struct ServerStatus {
 #[derive(Deserialize)]
 struct WsAuth {
     token: Option<String>,
-    /// Browser-provided selected project id. Overrides `ui_state.selected_project_id`
-    /// when the disk copy is stale. Used to scope the init payload to only the
-    /// worktrees/sessions the user is currently viewing.
+    /// Browser-provided selected project id. Overrides this client's
+    /// `active_project_id` when the disk copy is stale. Used to scope the init
+    /// payload to only the worktrees/sessions the user is currently viewing.
     selected_project: Option<String>,
+    /// Browser or desktop client whose navigation snapshot should be restored.
+    /// Absent or invalid ids do not fall back to another client's snapshot.
+    #[serde(default, alias = "clientId")]
+    client_id: Option<String>,
     /// `?download=true` makes file routes send `Content-Disposition: attachment`.
     #[serde(default)]
     download: bool,
@@ -583,10 +587,11 @@ async fn init_handler(
     }
 
     // Fetch base (always-included) data in parallel
+    let client_id = params.client_id.clone();
     let (projects_result, preferences_result, ui_state_result) = tokio::join!(
         crate::projects::list_projects(state.app.clone()),
         crate::load_preferences(state.app.clone()),
-        crate::load_ui_state(state.app.clone()),
+        crate::load_ui_state_for_init(state.app.clone(), client_id.clone()),
     );
 
     let mut response = serde_json::json!({});
@@ -809,47 +814,54 @@ async fn init_handler(
             active_sessions.insert(sess_id, session);
         }
 
-        match crate::load_ui_state(state.app.clone()).await {
-            Ok(mut latest_ui_state) => {
-                let mut persisted_cleanup = false;
+        if let Some(client_id) = client_id.filter(|id| !id.trim().is_empty()) {
+            match crate::load_ui_state(state.app.clone(), client_id.clone()).await {
+                Ok(mut latest_ui_state) => {
+                    let mut persisted_cleanup = false;
 
-                for (worktree_id, fallback_session_id) in &cleaned_active_sessions {
-                    let should_update = latest_ui_state
-                        .active_session_ids
-                        .get(worktree_id)
-                        .map(|session_id| !is_active_session_valid(worktree_id, session_id))
-                        .unwrap_or(false);
-
-                    if !should_update {
-                        continue;
-                    }
-
-                    persisted_cleanup = true;
-
-                    if let Some(fallback_id) = fallback_session_id {
-                        latest_ui_state
+                    for (worktree_id, fallback_session_id) in &cleaned_active_sessions {
+                        let should_update = latest_ui_state
                             .active_session_ids
-                            .insert(worktree_id.clone(), fallback_id.clone());
-                    } else {
-                        latest_ui_state.active_session_ids.remove(worktree_id);
-                    }
-                }
+                            .get(worktree_id)
+                            .map(|session_id| !is_active_session_valid(worktree_id, session_id))
+                            .unwrap_or(false);
 
-                if persisted_cleanup {
-                    if let Err(e) = crate::save_ui_state(state.app.clone(), latest_ui_state).await {
-                        log::error!("Failed to persist cleaned ui_state for /api/init: {e}");
-                    } else if let Err(e) = state.app.emit_all(
-                        "cache:invalidate",
-                        &serde_json::json!({ "keys": ["ui-state"] }),
-                    ) {
-                        log::error!("Failed to emit cache:invalidate after ui_state cleanup: {e}");
+                        if !should_update {
+                            continue;
+                        }
+
+                        persisted_cleanup = true;
+
+                        if let Some(fallback_id) = fallback_session_id {
+                            latest_ui_state
+                                .active_session_ids
+                                .insert(worktree_id.clone(), fallback_id.clone());
+                        } else {
+                            latest_ui_state.active_session_ids.remove(worktree_id);
+                        }
+                    }
+
+                    if persisted_cleanup {
+                        if let Err(e) =
+                            crate::save_ui_state(state.app.clone(), client_id, latest_ui_state)
+                                .await
+                        {
+                            log::error!("Failed to persist cleaned ui_state for /api/init: {e}");
+                        } else if let Err(e) = state.app.emit_all(
+                            "cache:invalidate",
+                            &serde_json::json!({ "keys": ["ui-state"] }),
+                        ) {
+                            log::error!(
+                                "Failed to emit cache:invalidate after ui_state cleanup: {e}"
+                            );
+                        }
                     }
                 }
-            }
-            Err(e) => {
-                log::error!(
-                    "Failed to reload ui_state before persisting cleanup for /api/init: {e}"
-                );
+                Err(e) => {
+                    log::error!(
+                        "Failed to reload ui_state before persisting cleanup for /api/init: {e}"
+                    );
+                }
             }
         }
     }

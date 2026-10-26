@@ -142,14 +142,23 @@ resolve_latest_tag() {
   echo "$tag"
 }
 
+# Hex tokens are URL-safe. Base64 `+` turns into a space in `?token=` URLs.
 generate_token() {
   if command -v openssl >/dev/null 2>&1; then
-    openssl rand -base64 32 | tr -d '\n'
+    openssl rand -hex 32
   elif [[ -r /dev/urandom ]]; then
-    head -c 32 /dev/urandom | base64 | tr -d '\n'
+    od -An -tx1 -N32 /dev/urandom | tr -d ' \n'
   else
     die "Need openssl or /dev/urandom to generate a token"
   fi
+}
+
+# Older installs may reuse a base64 token, so encode it for printed URLs.
+url_encode_token() {
+  local t="${1//%/%25}"
+  t="${t//+/%2B}"
+  t="${t//\//%2F}"
+  echo "${t//=/%3D}"
 }
 
 download() {
@@ -847,7 +856,7 @@ for dh in "${DISPLAY_HOSTS[@]}"; do
   url_host="$(format_host_for_url "$dh")"
   echo "  http://${url_host}:${PORT}/"
   if [[ "$NO_TOKEN" != "1" && "$PRINT_TOKEN" == "1" ]]; then
-    echo "  http://${url_host}:${PORT}/?token=${TOKEN}"
+    echo "  http://${url_host}:${PORT}/?token=$(url_encode_token "$TOKEN")"
   fi
 done
 echo

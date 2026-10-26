@@ -1225,25 +1225,51 @@ async fn rotate_chat_if_long(app: &AppHandle, agent: &db::Agent) -> Result<bool,
             },
         )
     })
-    .map(|entry| entry.id.to_string())
+    .map(|entry| Some(entry.id))
     .unwrap_or_else(|e| {
         log::warn!("[Agents] {} rotation journal not saved: {e}", agent.id);
-        "none".to_string()
+        None
     });
     crate::chat::archive_session(
         app.clone(),
         agent.worktree_id.clone(),
-        path,
+        path.clone(),
         home.id.clone(),
     )
     .await?;
     log::info!(
-        "[Agents] {} continues in a new chat ({} messages archived, journal #{journal_id}, {} chars)",
+        "[Agents] {} continues in a new chat ({} messages archived, journal #{journal_id:?}, {} chars)",
         agent.id,
         old.messages.len(),
         journal.chars().count()
     );
+    // The new chat starts with the agent's recap, so the user does not see
+    // an empty chat.
+    send_to_session(
+        app,
+        agent,
+        &new,
+        &agent.worktree_id,
+        &path,
+        chat_continued_message(old.messages.len(), journal_id),
+        None,
+    );
     Ok(true)
+}
+
+/// First message of a rotated chat. The UI shows it as a "saved to journal"
+/// notice (see `isChatContinuedMessage`) and the agent replies with a recap.
+pub(crate) fn chat_continued_message(message_count: usize, journal_id: Option<i64>) -> String {
+    let saved = match journal_id {
+        Some(id) => format!("Jean saved its end as journal entry #{id}"),
+        None => "Jean could not save it to the journal".to_string(),
+    };
+    format!(
+        "[Jean chat continued] Automatic message from Jean, not from the user.
+Your previous chat ({message_count} messages) was long, so Jean archived it. {saved}. The end of that chat is in your system prompt.
+
+Reply to the user now. Start with one sentence that tells them the previous chat is saved to the journal and continues here. Then write a short recap of the previous chat: three to six bullets with what was done, what was decided, and what is still open. Use `journal_search` only when the system prompt does not have enough. Do not call other tools. Do not add headings, tables, or test steps. End with one short question about the most useful next step."
+    )
 }
 
 /// Rotate only long chats that nobody used for a while.
@@ -1435,6 +1461,16 @@ mod tests {
         assert!(!should_rotate_chat(80, now - 60, now, limits));
         // Clock skew (activity "in the future") never rotates
         assert!(!should_rotate_chat(80, now + 60, now, limits));
+    }
+
+    #[test]
+    fn chat_continued_message_names_the_journal_entry() {
+        let text = chat_continued_message(42, Some(7));
+        assert!(text.starts_with("[Jean chat continued]"));
+        assert!(text.contains("(42 messages)"));
+        assert!(text.contains("journal entry #7"));
+        let failed = chat_continued_message(42, None);
+        assert!(!failed.contains('#'));
     }
 
     #[test]

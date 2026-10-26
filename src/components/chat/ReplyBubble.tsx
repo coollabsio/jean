@@ -1,9 +1,12 @@
 import type { ReactNode } from 'react'
 import { Markdown } from '@/components/ui/markdown'
 
-/** Borderless pill bubble shared by agent chat replies and prompts. */
+/**
+ * Borderless pill bubble shared by agent chat replies and prompts.
+ * Code uses bg-muted too, so it gets the page background to stand out.
+ */
 export const PILL_BUBBLE_CLASS =
-  'min-w-0 break-words [overflow-wrap:anywhere] rounded-[22px] bg-muted px-4 py-2.5 text-foreground'
+  'min-w-0 break-words [overflow-wrap:anywhere] rounded-[22px] bg-muted/60 px-4 py-2.5 text-foreground [&_pre]:bg-background [&_:not(pre)>code]:bg-background'
 
 /** Agent chat reply: a pill bubble, aligned left. */
 export function ReplyBubble({ children }: { children: ReactNode }) {

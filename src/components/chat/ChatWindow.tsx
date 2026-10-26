@@ -18,6 +18,11 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { ChatSearchBar } from './ChatSearchBar'
 import { Button } from '@/components/ui/button'
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import {
   AlertDialog,
   AlertDialogContent,
   AlertDialogHeader,
@@ -33,6 +38,7 @@ import { generateId } from '@/lib/uuid'
 import {
   ArrowDown,
   ArrowUp,
+  ClipboardList,
   GitBranch,
   GitMerge,
   Layers,
@@ -49,6 +55,7 @@ import {
   useSetSessionEffortLevel,
   useSetSessionBackend,
   useSetSessionProvider,
+  useSetSessionProviderAccount,
   useCreateSession,
   useLoadOlderMessages,
   chatQueryKeys,
@@ -69,6 +76,7 @@ import type { Worktree } from '@/types/projects'
 import type {
   AttachedSavedContext,
   LoadedAdvisoryContext,
+  LoadedDiscussionContext,
   LoadedIssueContext,
   LoadedPullRequestContext,
   LoadedSecurityAlertContext,
@@ -80,6 +88,7 @@ import {
   useLoadedPRContexts,
   useLoadedSecurityContexts,
   useLoadedAdvisoryContexts,
+  useLoadedDiscussionContexts,
   useAttachedSavedContexts,
 } from '@/services/github'
 import { useLoadedLinearIssueContexts } from '@/services/linear'
@@ -314,6 +323,7 @@ const EMPTY_ISSUE_CONTEXTS: LoadedIssueContext[] = []
 const EMPTY_PR_CONTEXTS: LoadedPullRequestContext[] = []
 const EMPTY_SECURITY_CONTEXTS: LoadedSecurityAlertContext[] = []
 const EMPTY_ADVISORY_CONTEXTS: LoadedAdvisoryContext[] = []
+const EMPTY_DISCUSSION_CONTEXTS: LoadedDiscussionContext[] = []
 const EMPTY_LINEAR_CONTEXTS: LoadedLinearIssueContext[] = []
 const EMPTY_SENTRY_CONTEXTS: SentryIssueContext[] = []
 const EMPTY_SAVED_CONTEXTS: AttachedSavedContext[] = []
@@ -802,6 +812,9 @@ const ChatWindowContent = memo(function ChatWindowContent({
   const setSessionEffortLevel = useStableMutation(useSetSessionEffortLevel())
   const setSessionBackend = useStableMutation(useSetSessionBackend())
   const setSessionProvider = useStableMutation(useSetSessionProvider())
+  const setSessionProviderAccount = useStableMutation(
+    useSetSessionProviderAccount()
+  )
 
   // Fetch worktree data for PR link display
   const { data: worktree } = useWorktree(activeWorktreeId ?? null)
@@ -823,6 +836,12 @@ const ChatWindowContent = memo(function ChatWindowContent({
 
   // Loaded PR contexts for indicator and investigate PR functionality
   const { data: loadedPRContexts } = useLoadedPRContexts(
+    activeSessionId ?? null,
+    activeWorktreeId
+  )
+
+  // Loaded discussion contexts for indicator
+  const { data: loadedDiscussionContexts } = useLoadedDiscussionContexts(
     activeSessionId ?? null,
     activeWorktreeId
   )
@@ -1011,6 +1030,15 @@ const ChatWindowContent = memo(function ChatWindowContent({
     selectedProvider !== '__anthropic__' &&
     selectedProvider !== '__default__'
   )
+  const zustandProviderAccount = useChatStore(state =>
+    deferredSessionId
+      ? state.selectedProviderAccounts[deferredSessionId]
+      : undefined
+  )
+  const selectedProviderAccountId =
+    zustandProviderAccount !== undefined
+      ? zustandProviderAccount
+      : (session?.provider_account_id ?? null)
 
   // Per-session model selection, falls back to preferences default (backend-aware)
   const selectedModel = resolveSelectedModelForBackend(
@@ -1577,14 +1605,14 @@ const ChatWindowContent = memo(function ChatWindowContent({
     dismissedTodoMessageId,
     setDismissedTodoMessageId,
     activeAgents,
-    agentSourceMessageId,
-    dismissedAgentMessageId,
-    setDismissedAgentMessageId,
+    isAgentWidgetDismissed,
+    dismissAgentWidget,
   } = useActiveTodosAndAgents({
     activeSessionId,
     isSending,
     currentToolCalls,
     lastAssistantMessage,
+    messages: session?.messages,
   })
 
   // Plan state: finished pending plan awaiting approval
@@ -2066,6 +2094,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
     handleToolbarBackendModelChange,
     handleTabBackendSwitch,
     handleToolbarProviderChange,
+    handleToolbarProviderAccountChange,
     handleToolbarThinkingLevelChange,
     handleToolbarEffortLevelChange,
     handleToggleMcpServer,
@@ -2091,6 +2120,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
     setSessionModel,
     setSessionBackend,
     setSessionProvider,
+    setSessionProviderAccount,
     setSessionThinkingLevel,
     setSessionEffortLevel,
     setExecutionMode,
@@ -2872,6 +2902,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                   <CompactMessageList
                                     ref={virtualizedListRef}
                                     hideToolActivity={Boolean(workingLabel)}
+                                    onSendAnswer={sendMagicPrompt}
                                     messages={compactMessages}
                                     scrollContainerRef={scrollViewportRef}
                                     totalMessages={compactMessages.length}
@@ -3328,18 +3359,24 @@ const ChatWindowContent = memo(function ChatWindowContent({
                               !zenMode &&
                               !isCompactHistoryExpanded &&
                               compactHistoryWindow.hiddenPromptCount > 0 && (
-                                <button
-                                  type="button"
-                                  onClick={handleShowHiddenCompactPrompts}
-                                  aria-label={`Show ${compactHistoryWindow.hiddenPromptCount} earlier prompts`}
-                                  title="Show earlier prompts"
-                                  className="flex h-6 items-center gap-1 rounded-t-md border border-b-0 border-border bg-card px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                                >
-                                  <ArrowUp className="h-3.5 w-3.5" />
-                                  <span>
-                                    {compactHistoryWindow.hiddenPromptCount}
-                                  </span>
-                                </button>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      type="button"
+                                      onClick={handleShowHiddenCompactPrompts}
+                                      aria-label={`Show ${compactHistoryWindow.hiddenPromptCount} earlier prompts`}
+                                      className="flex h-6 items-center gap-1 rounded-t-md border border-b-0 border-border bg-card px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                    >
+                                      <ArrowUp className="h-3.5 w-3.5" />
+                                      <span>
+                                        {compactHistoryWindow.hiddenPromptCount}
+                                      </span>
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    Show earlier prompts
+                                  </TooltipContent>
+                                </Tooltip>
                               )}
                             <PinnedTablesButton
                               sessionId={activeSessionId}
@@ -3374,38 +3411,38 @@ const ChatWindowContent = memo(function ChatWindowContent({
                               onScrollToBottom={scrollToBottom}
                             />
                             {!isAtBottom && messages.length > 0 && (
-                              <button
-                                type="button"
-                                onClick={() => scrollToBottom(true)}
-                                aria-label="Scroll to bottom"
-                                title="Scroll to bottom"
-                                className="relative flex h-6 items-center gap-1 rounded-t-md border border-b-0 border-border bg-card px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                              >
-                                <ArrowDown className="h-3.5 w-3.5" />
-                                <span>Bottom</span>
-                                {isSending && (
-                                  <span
-                                    aria-hidden="true"
-                                    className="absolute -top-0.5 -right-0.5 flex h-2 w-2"
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    type="button"
+                                    onClick={() => scrollToBottom(true)}
+                                    aria-label="Scroll to bottom"
+                                    className="relative flex h-6 items-center gap-1 rounded-t-md border border-b-0 border-border bg-card px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                                   >
-                                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
-                                    <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
-                                  </span>
-                                )}
-                              </button>
+                                    <ArrowDown className="h-3.5 w-3.5" />
+                                    <span>Bottom</span>
+                                    {isSending && (
+                                      <span
+                                        aria-hidden="true"
+                                        className="absolute -top-0.5 -right-0.5 flex h-2 w-2"
+                                      >
+                                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
+                                        <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
+                                      </span>
+                                    )}
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  Scroll to bottom
+                                </TooltipContent>
+                              </Tooltip>
                             )}
                           </div>
                           {/* Subagents panel - separate section above the chat input */}
                           {!zenMode &&
                             activeAgents.length > 0 &&
                             !pillComposer &&
-                            (dismissedAgentMessageId === null ||
-                              activeAgents.some(
-                                agent => agent.status === 'in_progress'
-                              ) ||
-                              (agentSourceMessageId !== null &&
-                                agentSourceMessageId !==
-                                  dismissedAgentMessageId)) && (
+                            !isAgentWidgetDismissed && (
                               <AgentWidget
                                 key={activeSessionId ?? undefined}
                                 className="sm:mb-2"
@@ -3421,11 +3458,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                       open
                                     )
                                 }
-                                onClose={() =>
-                                  setDismissedAgentMessageId(
-                                    agentSourceMessageId ?? '__streaming__'
-                                  )
-                                }
+                                onClose={dismissAgentWidget}
                               />
                             )}
                           {/* Queued prompts - rendered as an extension above the chat input */}
@@ -3448,7 +3481,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
                             className={cn(
                               'relative overflow-hidden border-t border-border bg-card transition-[background-color,box-shadow] duration-150 sm:rounded-lg sm:border',
                               pillComposer &&
-                                'mx-2 mb-4 rounded-[28px] border sm:mx-0 sm:mb-3 sm:rounded-[28px]',
+                                'mx-2 mb-4 rounded-[22px] border sm:mx-0 sm:mb-3 sm:rounded-[22px]',
                               activeSessionId &&
                                 currentQueuedMessages.length > 0 &&
                                 'sm:rounded-t-none',
@@ -3456,11 +3489,34 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                 'ring-2 ring-primary ring-inset bg-primary/5'
                             )}
                             style={
-                              isMobile
-                                ? { paddingBottom: 'var(--safe-area-bottom)' }
-                                : undefined
+                              !isMobile
+                                ? undefined
+                                : pillComposer
+                                  ? // Keep the pill one line tall: clear the home indicator outside it
+                                    {
+                                      marginBottom:
+                                        'max(var(--safe-area-bottom, 0px), 1rem)',
+                                    }
+                                  : { paddingBottom: 'var(--safe-area-bottom)' }
                             }
                           >
+                            {executionMode === 'plan' && (
+                              <div
+                                className={cn(
+                                  'flex items-start gap-2 border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-amber-800 dark:text-amber-200',
+                                  pillComposer && 'rounded-t-[20px] px-3 py-1.5'
+                                )}
+                                role="status"
+                              >
+                                <ClipboardList className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                                <span>
+                                  <span className="font-medium">Plan mode.</span>{' '}
+                                  Jean will explore and propose a plan. It will
+                                  not change code until you approve, or until
+                                  you switch modes.
+                                </span>
+                              </div>
+                            )}
                             {/* Pending file preview (@ mentions) */}
                             <FilePreview
                               files={currentPendingFiles}
@@ -3531,7 +3587,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
                               className={cn(
                                 zenMode && 'flex items-center overflow-hidden',
                                 zenMode && 'max-h-20',
-                                pillComposer && 'flex items-end gap-2 p-2'
+                                pillComposer && 'flex items-end gap-2 p-1.5'
                               )}
                             >
                               {pillComposer && (
@@ -3539,9 +3595,9 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                   type="button"
                                   onClick={handleToolbarAttach}
                                   aria-label="Attach files"
-                                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+                                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
                                 >
-                                  <Plus className="h-5 w-5" />
+                                  <Plus className="h-4 w-4" />
                                 </button>
                               )}
                               {/* Textarea section */}
@@ -3599,9 +3655,9 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                     type="button"
                                     onClick={handleCancel}
                                     aria-label="Stop"
-                                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90"
+                                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90"
                                   >
-                                    <Square className="h-4 w-4" />
+                                    <Square className="h-3.5 w-3.5" />
                                   </button>
                                 ) : (
                                   <button
@@ -3610,9 +3666,9 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                       !hasInputValue && !hasPendingAttachments
                                     }
                                     aria-label={isSending ? 'Queue' : 'Send'}
-                                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-40"
+                                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-40"
                                   >
-                                    <ArrowUp className="h-5 w-5" />
+                                    <ArrowUp className="h-4 w-4" />
                                   </button>
                                 )
                               ) : zenMode ? (
@@ -3712,6 +3768,10 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                     loadedPRContexts={
                                       loadedPRContexts ?? EMPTY_PR_CONTEXTS
                                     }
+                                    loadedDiscussionContexts={
+                                      loadedDiscussionContexts ??
+                                      EMPTY_DISCUSSION_CONTEXTS
+                                    }
                                     loadedSecurityContexts={
                                       loadedSecurityContexts ??
                                       EMPTY_SECURITY_CONTEXTS
@@ -3762,6 +3822,15 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                     onModelChange={handleToolbarModelChange}
                                     onProviderChange={
                                       handleToolbarProviderChange
+                                    }
+                                    providerAccounts={
+                                      preferences?.provider_accounts ?? []
+                                    }
+                                    selectedProviderAccountId={
+                                      selectedProviderAccountId
+                                    }
+                                    onProviderAccountChange={
+                                      handleToolbarProviderAccountChange
                                     }
                                     customCliProfiles={
                                       preferences?.custom_cli_profiles ??

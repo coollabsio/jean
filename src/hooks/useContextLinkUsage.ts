@@ -11,13 +11,14 @@ import type { Worktree } from '@/types/projects'
 export type ContextLinkType =
   | 'issue'
   | 'pr'
+  | 'discussion'
   | 'security'
   | 'advisory'
   | 'linear'
 
 export interface ContextLinkRef {
   type: ContextLinkType
-  /** Issue/PR/alert number, GHSA ID, or Linear identifier */
+  /** Issue/PR/discussion/alert number, GHSA ID, or Linear identifier */
   id: number | string
 }
 
@@ -33,6 +34,7 @@ export interface ContextLinkMatch {
 interface ContextLinkUsageResponse {
   issues: Record<string, string[]>
   prs: Record<string, string[]>
+  discussions: Record<string, string[]>
   security: Record<string, string[]>
   advisories: Record<string, string[]>
   linear: Record<string, string[]>
@@ -41,6 +43,7 @@ interface ContextLinkUsageResponse {
 const usageField: Record<ContextLinkType, keyof ContextLinkUsageResponse> = {
   issue: 'issues',
   pr: 'prs',
+  discussion: 'discussions',
   security: 'security',
   advisory: 'advisories',
   linear: 'linear',
@@ -55,6 +58,8 @@ function worktreeLinkId(
       return worktree.issue_number
     case 'pr':
       return worktree.pr_number
+    case 'discussion':
+      return undefined
     case 'security':
       return worktree.security_alert_number
     case 'advisory':
