@@ -43,6 +43,10 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { InlineFileDiff } from './InlineFileDiff'
+import {
+  codexSubagentDetail,
+  formatSubagentModel,
+} from './hooks/useActiveTodosAndAgents'
 
 // Streaming tool calls are replaced by persisted message tool calls when a run
 // finishes. Keep explicit user choices through that remount so an open tool
@@ -165,7 +169,13 @@ function formatSubAgentActivity(
     string,
     { status?: string } | undefined
   >
-  const lines = [`Agent: ${String(input.prompt ?? 'sub-agent')}`]
+  const name = codexSubagentDetail(input) ?? 'sub-agent'
+  const lines = [`Agent: ${name}`]
+  const model =
+    typeof input.model === 'string' && input.model.trim()
+      ? formatSubagentModel(input.model)
+      : undefined
+  if (model && !name.includes(model)) lines.push(`Model: ${model}`)
   for (const id of threadIds) {
     lines.push(`Thread: ${id}`)
     const status = states[id]?.status
@@ -1544,6 +1554,16 @@ export function summarizeToolCall(toolCall: ToolCall): {
   const input = normalized.input
   const label = getToolSummaryName({ ...toolCall, name: normalized.name })
 
+  if (
+    normalized.name === 'SpawnAgent' ||
+    normalized.name === 'SendInput' ||
+    normalized.name === 'CloseAgent' ||
+    normalized.name === 'ResumeAgent' ||
+    normalized.name === 'WaitForAgents'
+  ) {
+    return { label, detail: codexSubagentDetail(input) }
+  }
+
   if (isJeanMcpToolName(normalized.name)) {
     const detail = formatJeanMcpToolDetail(input)
     return { label, detail: detail ? truncateOneLine(detail, 80) : undefined }
@@ -1844,12 +1864,10 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
     // Codex multi-agent tools
     case 'SpawnAgent': {
       const prompt = input.prompt as string | undefined
-      const truncatedPrompt =
-        prompt && prompt.length > 60 ? prompt.substring(0, 60) + '...' : prompt
       return {
         icon: <Users className="h-4 w-4 shrink-0" />,
         label: 'Spawn Agent',
-        detail: truncatedPrompt ?? 'sub-agent',
+        detail: codexSubagentDetail(input) ?? 'sub-agent',
         expandedContent:
           formatSubAgentActivity(input) ??
           prompt ??
@@ -1859,11 +1877,11 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
 
     case 'SendInput': {
       // Codex sub_agent_activity puts the agent path in `prompt`
-      const agentId = (input.agent_id ?? input.prompt) as string | undefined
+      const detail = codexSubagentDetail(input)
       return {
         icon: <Send className="h-4 w-4 shrink-0" />,
         label: 'Send Input',
-        detail: agentId ? `to agent ${agentId}` : undefined,
+        detail: detail ? `to ${detail}` : undefined,
         expandedContent:
           formatSubAgentActivity(input) ?? JSON.stringify(input, null, 2),
       }
@@ -1883,11 +1901,10 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
     }
 
     case 'CloseAgent': {
-      const agentId = (input.agent_id ?? input.prompt) as string | undefined
       return {
         icon: <XCircle className="h-4 w-4 shrink-0" />,
         label: 'Close Agent',
-        detail: agentId,
+        detail: codexSubagentDetail(input),
         expandedContent:
           formatSubAgentActivity(input) ?? JSON.stringify(input, null, 2),
       }

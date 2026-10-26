@@ -1606,6 +1606,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
     isSending,
     currentToolCalls,
     lastAssistantMessage,
+    messages: session?.messages,
   })
 
   // Plan state: finished pending plan awaiting approval
