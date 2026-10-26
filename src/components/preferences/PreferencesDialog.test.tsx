@@ -137,6 +137,92 @@ describe('PreferencesDialog', () => {
     })
   })
 
+  it('opens as a near-fullscreen modal with a backdrop', () => {
+    render(<PreferencesDialog />)
+
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toHaveAttribute('data-slot', 'dialog-content')
+    expect(dialog).toHaveAttribute('aria-modal', 'true')
+    expect(dialog.className).toContain('w-[96vw]')
+    expect(dialog.className).toContain('h-[94dvh]')
+    expect(dialog.className).toContain('max-w-[96vw]')
+    expect(dialog.className).not.toContain('inset-0')
+    expect(dialog.className).not.toContain('max-w-lg')
+
+    const overlay = document.querySelector('[data-slot="dialog-overlay"]')
+    expect(overlay).toBeTruthy()
+    expect(overlay?.className).toContain('inset-0')
+  })
+
+  it('hides the rest of the page and keeps focus inside the modal', async () => {
+    render(
+      <>
+        <button type="button">Outside preferences</button>
+        <PreferencesDialog />
+      </>
+    )
+
+    const outside = screen.getByRole('button', {
+      name: 'Outside preferences',
+      hidden: true,
+    })
+    expect(
+      outside.closest('[aria-hidden="true"], [data-aria-hidden="true"]')
+    ).not.toBeNull()
+
+    outside.focus()
+    await waitFor(() => {
+      const dialog = screen.getByRole('dialog')
+      expect(outside).not.toHaveFocus()
+      expect(dialog.contains(document.activeElement)).toBe(true)
+    })
+  })
+
+  it('closes when the backdrop is clicked', async () => {
+    const user = userEvent.setup()
+
+    render(<PreferencesDialog />)
+
+    const overlay = document.querySelector('[data-slot="dialog-overlay"]')
+    if (!overlay) {
+      throw new Error('Expected preferences backdrop to be rendered')
+    }
+
+    await user.click(overlay)
+
+    await waitFor(() => {
+      expect(useUIStore.getState().preferencesOpen).toBe(false)
+    })
+  })
+
+  it('closes on Escape when search and nested menus are closed', async () => {
+    const user = userEvent.setup()
+
+    render(<PreferencesDialog />)
+
+    await user.keyboard('{Escape}')
+
+    await waitFor(() => {
+      expect(useUIStore.getState().preferencesOpen).toBe(false)
+    })
+  })
+
+  it('keeps the dialog open when Escape dismisses an open pane select', async () => {
+    const user = userEvent.setup()
+
+    render(<PreferencesDialog />)
+
+    await user.click(screen.getByRole('combobox'))
+    expect(screen.getByRole('listbox')).toBeInTheDocument()
+
+    await user.keyboard('{Escape}')
+
+    await waitFor(() => {
+      expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+    })
+    expect(useUIStore.getState().preferencesOpen).toBe(true)
+  })
+
   it('selects the server whose settings are shown in native mode', async () => {
     const user = userEvent.setup()
     settingsServerMocks.native = true

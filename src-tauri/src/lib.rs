@@ -452,6 +452,8 @@ pub fn run() {
             ssh_tunnel::store_ssh_profile_secret,
             ssh_tunnel::delete_ssh_profile_secret,
             ssh_tunnel::load_ssh_profile_secrets,
+            ssh_tunnel::ensure_ssh_preview_forward,
+            ssh_tunnel::release_ssh_preview_forwards,
             browser::browser_create,
             browser::browser_navigate,
             browser::browser_back,

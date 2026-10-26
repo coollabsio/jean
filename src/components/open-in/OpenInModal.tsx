@@ -37,6 +37,8 @@ import {
   useLoadedAdvisoryContexts,
 } from '@/services/github'
 import { usePreferences } from '@/services/preferences'
+import { parseServerResourceKey } from '@/lib/server-resource'
+import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import { getEditorLabel, getTerminalLabel } from '@/types/preferences'
 import { notify } from '@/lib/notifications'
 import { openExternal } from '@/lib/platform'
@@ -46,7 +48,10 @@ import {
   canOpenInFinder,
   canOpenInTerminal,
 } from '@/lib/environment'
-import { resolvePortUrl } from '@/components/browser/default-tab-url'
+import {
+  resolvePortHost,
+  resolvePortUrl,
+} from '@/components/browser/default-tab-url'
 
 interface ModalOption {
   id: string
@@ -83,7 +88,16 @@ export function OpenInModal() {
   const openInFinder = useOpenWorktreeInFinder()
   const openInTerminal = useOpenWorktreeInTerminal()
   const openInEditor = useOpenWorktreeInEditor()
-  const { data: preferences } = usePreferences()
+  const ownerServerId =
+    worktree?.serverId ??
+    (selectedWorktreeId
+      ? parseServerResourceKey(selectedWorktreeId)?.serverId
+      : undefined)
+  const preferenceServerId =
+    ownerServerId && ownerServerId !== LOCAL_SERVER_ID
+      ? ownerServerId
+      : undefined
+  const { data: preferences } = usePreferences(preferenceServerId)
   const activeSessionId = useChatStore(state =>
     selectedWorktreeId
       ? (state.activeSessionIds[selectedWorktreeId] ?? null)
@@ -303,13 +317,13 @@ export function OpenInModal() {
     if (!ports || ports.length === 0) return []
     return ports.map((p, i) => ({
       id: `port-${p.port}`,
-      label: `${p.label} (${p.host?.trim() || 'localhost'}:${p.port})`,
+      label: `${p.label} (${resolvePortHost(p, preferences?.browser_default_host)}:${p.port})`,
       icon: Globe,
       key: i < 9 ? String(i + 1) : undefined,
       metaKey: true,
-      url: resolvePortUrl(p),
+      url: resolvePortUrl(p, preferences?.browser_default_host),
     }))
-  }, [ports])
+  }, [ports, preferences?.browser_default_host])
 
   const allOptions = useMemo(
     () => [...baseOptions, ...portOptions, ...contextOptions],

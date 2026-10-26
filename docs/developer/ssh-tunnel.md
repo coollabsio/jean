@@ -41,6 +41,24 @@ Commands are desktop IPC only (`LOCAL_SHELL` / `DESKTOP_ONLY` in
 `src/lib/transport.ts`). They are not registered on the jean-core HTTP
 dispatch, and MCP stays enabled.
 
+## Embedded browser preview
+
+The embedded browser is a desktop webview. A `localhost` URL in that webview
+is this computer, including while the UI is attached to a remote jean-server.
+
+When the active profile's SSH tunnel is ready, opening a loopback URL
+(`localhost`, `127.0.0.1`, `::1`, or `0.0.0.0`) starts another `ssh -N -L`
+forward to the remote host's `127.0.0.1:<port>`, bound on that same port.
+The webview then loads `http://127.0.0.1:<port>`. If the local port is already
+taken, or the forward fails, the pane shows that error and does not open this
+computer's server. Preview forwards stop when that profile tunnel stops, when
+the desktop switches to another host, or when Jean exits.
+
+A direct Web Access profile rewrites loopback URLs to the remote connection's
+hostname. A loopback Web Access URL is left unchanged, because that server is
+already this computer. Non-loopback `jean.json` hosts are used as written.
+With the local connection selected, preview URLs are unchanged.
+
 ## Install via SSH
 
 The native install path passes `viaTunnel: true`. The remote installer binds

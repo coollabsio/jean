@@ -19,6 +19,7 @@ mod engine;
 pub mod mcp;
 mod self_manage;
 mod subagents;
+pub mod templates;
 
 use std::sync::Mutex;
 

@@ -81,6 +81,8 @@ interface BrowserState {
   setBottomPanelOpen: (worktreeId: string, open: boolean) => void
   toggleBottomPanel: (worktreeId: string) => void
   setBottomPanelHeight: (height: number) => void
+  // Shortcut / View menu. See toggleBrowserSurface.
+  toggleBrowserSurface: (worktreeId: string, sessionModalOpen: boolean) => void
 }
 
 function findWorktreeForTab(
@@ -196,10 +198,8 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
 
     set(current => {
       const { [worktreeId]: _tabs, ...tabs } = current.tabs
-      const { [worktreeId]: _activeTab, ...activeTabIds } =
-        current.activeTabIds
-      const { [worktreeId]: _sidePane, ...sidePaneOpen } =
-        current.sidePaneOpen
+      const { [worktreeId]: _activeTab, ...activeTabIds } = current.activeTabIds
+      const { [worktreeId]: _sidePane, ...sidePaneOpen } = current.sidePaneOpen
       const { [worktreeId]: _modal, ...modalOpen } = current.modalOpen
       const { [worktreeId]: _bottomPanel, ...bottomPanelOpen } =
         current.bottomPanelOpen
@@ -367,6 +367,34 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
         ? { ...state.modalOpen, [worktreeId]: false }
         : state.modalOpen,
     }))
+  },
+
+  // Shortcut and View → Toggle Browser.
+  // Session chat: closed → modal drawer → bottom panel → closed.
+  // Main window: closed → side pane → bottom panel → closed.
+  // Opening a surface closes the other browser surfaces and the terminal modal.
+  toggleBrowserSurface: (worktreeId, sessionModalOpen) => {
+    const state = get()
+    const sideOpen = state.sidePaneOpen[worktreeId] ?? false
+    const modalOpen = state.modalOpen[worktreeId] ?? false
+    const bottomOpen = state.bottomPanelOpen[worktreeId] ?? false
+
+    if (sessionModalOpen) {
+      // Open modal drawer → bottom panel. Open bottom panel → closed.
+      if (bottomOpen || modalOpen) {
+        get().toggleBottomPanel(worktreeId)
+        return
+      }
+      get().toggleModal(worktreeId)
+      return
+    }
+
+    // Main window: side pane first, then the bottom panel, then close.
+    if (bottomOpen || sideOpen) {
+      get().toggleBottomPanel(worktreeId)
+      return
+    }
+    get().toggleSidePane(worktreeId)
   },
 
   setBottomPanelHeight: height =>
