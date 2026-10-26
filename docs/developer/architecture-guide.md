@@ -347,8 +347,8 @@ Additional systems (no dedicated docs yet):
   on an interrupt. The backing Jean `sessionId` must therefore be carried through
   terminal creation, native-session reconnect, frontend terminal persistence,
   `start_terminal`, and both native/WebSocket transports. Terminals opened in an
-  *external* OS terminal cannot be instrumented and stay idle. Only the CLI
-  Jean itself launches is instrumented; one the user starts *by hand* in that
+  _external_ OS terminal cannot be instrumented and stay idle. Only the CLI
+  Jean itself launches is instrumented; one the user starts _by hand_ in that
   terminal carries no hook and does not report.
 
   **Web-mode persistence.** In web access (Axum HTTP server + WebSocket),
@@ -376,6 +376,22 @@ Additional systems (no dedicated docs yet):
   The supervisor lives in `src-tauri/src/ssh_tunnel/` and is not dispatched
   through jean-core or MCP. See `docs/developer/ssh-tunnel.md`. Notifications
   such as ntfy are not part of this transport.
+
+  **Start on a host.** New worktree and new session pick a host (Local or a
+  connected remote) without duplicating the project in the sidebar. Projects
+  that share a normalized git remote URL collapse to one row; each host
+  checkout is attached as `hostCheckouts`. `ensure_project_present` on the
+  target Jean reuses a checkout whose remotes match, or clones into
+  `~/jean/checkouts/<name>`. The clone runs with `git clone --progress`.
+  The target Jean emits `project:ensure-progress` on the existing event
+  channel (`emit_all`, so a remote desktop hears it on that host's socket).
+  The dialog shows git's status line. When the line contains a percent, the
+  bar is a weighted overall of counting, receiving objects, and resolving
+  deltas so it does not reset between phases. A line with no percent keeps an
+  indeterminate bar. Env files (`.env`, `.env.local`, and the
+  development/production variants) are copied only after an explicit confirm,
+  one file at a time, with the bar advancing per file. There is no continuous
+  file sync.
 
   When an established WebSocket disconnects, the frontend reloads the page
   instead of repairing stale in-memory state. The normal

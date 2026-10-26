@@ -268,6 +268,10 @@ pub struct ProjectListItem {
     pub project: Project,
     pub worktree_count: usize,
     pub has_base_session: bool,
+    /// Fetch URL of `origin` (or the first remote). Sidebar identity only;
+    /// not stored in projects.json.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin_url: Option<String>,
 }
 
 /// A git worktree created for a project
