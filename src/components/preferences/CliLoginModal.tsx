@@ -122,33 +122,35 @@ function CliLoginModalContent({
   }, [minimized])
 
   const cliName =
-    cliType === 'claude'
-      ? 'Claude CLI'
-      : cliType === 'codex'
-        ? 'Codex CLI'
-        : cliType === 'coderabbit'
-          ? 'CodeRabbit CLI'
-          : cliType === 'opencode'
-            ? 'OpenCode CLI'
-            : cliType === 'cursor'
-              ? 'Cursor CLI'
-              : cliType === 'pi'
-                ? 'PI CLI'
-                : cliType === 'commandcode'
-                  ? 'Command Code CLI'
-                  : cliType === 'grok'
-                    ? 'Grok CLI'
-                    : cliType === 'kimi'
-                      ? 'Kimi Code'
-                      : cliType === 'devin'
-                        ? 'Devin CLI'
-                        : cliType === 'antigravity'
-                          ? 'Antigravity CLI'
-                          : cliType === 'muse'
-                            ? 'Muse CLI'
-                            : cliType === 'glab'
-                              ? 'GitLab CLI'
-                              : 'GitHub CLI'
+    cliType === 'cliproxyapi'
+      ? 'CLIProxyAPI'
+      : cliType === 'claude'
+        ? 'Claude CLI'
+        : cliType === 'codex'
+          ? 'Codex CLI'
+          : cliType === 'coderabbit'
+            ? 'CodeRabbit CLI'
+            : cliType === 'opencode'
+              ? 'OpenCode CLI'
+              : cliType === 'cursor'
+                ? 'Cursor CLI'
+                : cliType === 'pi'
+                  ? 'PI CLI'
+                  : cliType === 'commandcode'
+                    ? 'Command Code CLI'
+                    : cliType === 'grok'
+                      ? 'Grok CLI'
+                      : cliType === 'kimi'
+                        ? 'Kimi Code'
+                        : cliType === 'devin'
+                          ? 'Devin CLI'
+                          : cliType === 'antigravity'
+                            ? 'Antigravity CLI'
+                            : cliType === 'muse'
+                              ? 'Muse CLI'
+                              : cliType === 'glab'
+                                ? 'GitLab CLI'
+                                : 'GitHub CLI'
   const cliTitle =
     cliType === 'cursor' ||
     cliType === 'pi' ||
@@ -374,6 +376,14 @@ function CliLoginModalContent({
             the full return URL from your browser and paste it here when asked.
             If the browser cannot load the return page, you can still copy its
             URL.
+          </p>
+        )}
+
+        {cliType === 'cliproxyapi' && (
+          <p className="text-sm text-muted-foreground">
+            CLIProxyAPI opens the provider login and saves the account in its
+            own auth directory. Jean does not store this subscription login and
+            does not switch accounts.
           </p>
         )}
 

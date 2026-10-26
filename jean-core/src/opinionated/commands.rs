@@ -25,6 +25,9 @@ pub struct PluginStatus {
     /// True when the sidecar config is not bound to localhost.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lan_exposed: Option<bool>,
+    /// JSON files in the sidecar auth directory. Jean counts names only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_file_count: Option<u32>,
 }
 
 #[derive(Debug, Serialize, Clone, PartialEq)]
@@ -161,6 +164,12 @@ pub async fn stop_opinionated_plugin(
     }
 }
 
+pub async fn prepare_cliproxyapi_account_login(
+    provider: String,
+) -> Result<super::cliproxyapi::AccountLoginLaunch, String> {
+    super::cliproxyapi::prepare_account_login(&provider).await
+}
+
 async fn install_cliproxyapi(app: &AppHandle) -> Result<String, String> {
     let outcome = super::cliproxyapi::install().await?;
     crate::upsert_cliproxyapi_provider_profiles(app, &outcome.client_key).await?;
@@ -224,6 +233,7 @@ async fn check_rtk_status(app: &AppHandle) -> Result<PluginStatus, String> {
                 endpoint: None,
                 management_url: None,
                 lan_exposed: None,
+                auth_file_count: None,
             })
         }
         _ => Ok(PluginStatus {
@@ -236,6 +246,7 @@ async fn check_rtk_status(app: &AppHandle) -> Result<PluginStatus, String> {
             endpoint: None,
             management_url: None,
             lan_exposed: None,
+            auth_file_count: None,
         }),
     }
 }
@@ -267,6 +278,7 @@ async fn check_caveman_status(app: &AppHandle) -> Result<PluginStatus, String> {
         endpoint: None,
         management_url: None,
         lan_exposed: None,
+        auth_file_count: None,
     })
 }
 
@@ -876,6 +888,7 @@ async fn check_superpowers_status(app: &AppHandle) -> Result<PluginStatus, Strin
         endpoint: None,
         management_url: None,
         lan_exposed: None,
+        auth_file_count: None,
     })
 }
 
@@ -898,6 +911,7 @@ async fn check_pstack_status(app: &AppHandle) -> Result<PluginStatus, String> {
         endpoint: None,
         management_url: None,
         lan_exposed: None,
+        auth_file_count: None,
     })
 }
 
@@ -920,6 +934,7 @@ async fn check_tstack_status(app: &AppHandle) -> Result<PluginStatus, String> {
         endpoint: None,
         management_url: None,
         lan_exposed: None,
+        auth_file_count: None,
     })
 }
 

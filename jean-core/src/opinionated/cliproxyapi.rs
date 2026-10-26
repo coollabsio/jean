@@ -5,8 +5,9 @@
 //! release binary, supervises it on localhost, and points Claude/Codex at
 //! `http://127.0.0.1:8317` through the existing provider profiles.
 //!
-//! OAuth logins stay in CLIProxyAPI (`-claude-login` / `-codex-login`) or
-//! EasyCLIProxyAPI. Jean does not store subscription credentials for failover.
+//! Subscription login is CLIProxyAPI's own `-claude-login` / `-codex-login`.
+//! Jean can launch those against the managed binary and config. Tokens stay in
+//! CLIProxyAPI's auth directory. Jean does not store them or switch accounts.
 
 use crate::platform::{is_process_alive, kill_process_tree, silent_command, write_binary_file};
 use crate::{CodexProviderProfile, CustomCliProfile};
@@ -391,6 +392,7 @@ pub async fn check_status() -> Result<crate::opinionated::commands::PluginStatus
         endpoint: Some(endpoint_url(port)),
         management_url: Some(management_url(port)),
         lan_exposed,
+        auth_file_count: Some(count_auth_files(&paths.auth_dir)),
     })
 }
 
@@ -506,6 +508,109 @@ pub async fn stop() -> Result<String, String> {
         .await
         .map_err(|error| format!("Failed to stop CLIProxyAPI: {error}"))??;
     Ok("CLIProxyAPI stopped".to_string())
+}
+
+/// Launch spec for CLIProxyAPI's own OAuth login. Jean does not receive the token.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct AccountLoginLaunch {
+    pub provider: String,
+    pub binary: String,
+    pub args: Vec<String>,
+    /// True when this call started a stopped sidecar before opening login.
+    pub started_proxy: bool,
+    pub message: String,
+}
+
+pub fn account_login_flag(provider: &str) -> Result<&'static str, String> {
+    match provider {
+        "claude" => Ok("-claude-login"),
+        "codex" => Ok("-codex-login"),
+        other => Err(format!(
+            "CLIProxyAPI account login supports claude or codex, not {other}"
+        )),
+    }
+}
+
+pub fn account_login_args(config: &Path, provider: &str) -> Result<Vec<String>, String> {
+    let flag = account_login_flag(provider)?;
+    let config = config
+        .to_str()
+        .ok_or_else(|| "CLIProxyAPI config path is not valid UTF-8".to_string())?;
+    Ok(vec![
+        "--config".to_string(),
+        config.to_string(),
+        flag.to_string(),
+    ])
+}
+
+#[derive(Debug)]
+struct AccountLoginPlan {
+    binary: PathBuf,
+    auth_dir: PathBuf,
+    args: Vec<String>,
+    needs_start: bool,
+    flag: &'static str,
+}
+
+fn plan_account_login(home: &Path, provider: &str) -> Result<AccountLoginPlan, String> {
+    let flag = account_login_flag(provider)?;
+    let paths = layout(home);
+    if !paths.binary.is_file() {
+        return Err(
+            "CLIProxyAPI is not installed. Install it from Preferences → Opinionated.".to_string(),
+        );
+    }
+    if !paths.config.is_file() {
+        return Err(
+            "CLIProxyAPI config.yaml is missing. Reinstall it from Preferences → Opinionated."
+                .to_string(),
+        );
+    }
+    refuse_symlink(&paths.binary)?;
+    refuse_symlink(&paths.config)?;
+    Ok(AccountLoginPlan {
+        binary: paths.binary,
+        auth_dir: paths.auth_dir,
+        args: account_login_args(&paths.config, provider)?,
+        needs_start: !pid_is_cliproxy(&paths.pid),
+        flag,
+    })
+}
+
+/// Ensure the managed sidecar is installed and running, then return the
+/// CLIProxyAPI login argv. The caller runs that process; Jean never reads the
+/// OAuth token.
+pub async fn prepare_account_login(provider: &str) -> Result<AccountLoginLaunch, String> {
+    let home = home_dir()?;
+    let plan = plan_account_login(&home, provider)?;
+    if plan.needs_start {
+        start().await?;
+    }
+    let binary = plan
+        .binary
+        .to_str()
+        .ok_or_else(|| "CLIProxyAPI binary path is not valid UTF-8".to_string())?;
+    let provider_label = match provider {
+        "claude" => "Claude",
+        "codex" => "Codex",
+        _ => "subscription",
+    };
+    let flag = plan.flag;
+    let started_note = if plan.needs_start {
+        "CLIProxyAPI was stopped, so Jean started it."
+    } else {
+        "CLIProxyAPI is already running."
+    };
+    Ok(AccountLoginLaunch {
+        provider: provider.to_string(),
+        binary: binary.to_string(),
+        args: plan.args,
+        started_proxy: plan.needs_start,
+        message: format!(
+            "{started_note} Opening {provider_label} subscription login ({flag}). CLIProxyAPI stores the account in {}. Jean does not keep a copy and does not switch accounts.",
+            plan.auth_dir.display()
+        ),
+    })
 }
 
 /// Start the sidecar again when the user left it enabled. Never enables it.
@@ -886,12 +991,37 @@ fn write_manifest(path: &Path, manifest: &Manifest) -> Result<(), String> {
 
 fn login_hint(paths: &InstallLayout) -> String {
     format!(
-        "Add OAuth accounts with `{} --config {} -claude-login` or `-codex-login`, or open {} (management key file: {}). EasyCLIProxyAPI can do this graphically.",
+        "Add Claude or Codex subscription accounts from Preferences → Opinionated → CLIProxyAPI. Jean runs `{} --config {} -claude-login` or `-codex-login` and does not store those logins. Tokens stay in {}. Management page: {} (key file: {}).",
         paths.binary.display(),
         paths.config.display(),
+        paths.auth_dir.display(),
         management_url(configured_port(paths)),
         paths.management_key.display()
     )
+}
+
+/// Count CLIProxyAPI auth files by name. Does not open them.
+fn count_auth_files(dir: &Path) -> u32 {
+    let Ok(metadata) = std::fs::symlink_metadata(dir) else {
+        return 0;
+    };
+    if !metadata.file_type().is_dir() {
+        return 0;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .filter(|entry| {
+            let path = entry.path();
+            let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+                return false;
+            };
+            metadata.file_type().is_file()
+                && path.extension().and_then(|extension| extension.to_str()) == Some("json")
+        })
+        .count() as u32
 }
 
 fn log_tail(path: &Path) -> Option<String> {
@@ -1193,6 +1323,91 @@ mod tests {
         );
         assert_eq!(paths.config, paths.dir.join("config.yaml"));
         assert_eq!(paths.auth_dir, paths.dir.join("auths"));
+    }
+
+    #[test]
+    fn account_login_flags_are_only_claude_and_codex() {
+        assert_eq!(
+            account_login_flag("claude").expect("claude"),
+            "-claude-login"
+        );
+        assert_eq!(account_login_flag("codex").expect("codex"), "-codex-login");
+        let error = account_login_flag("gemini").expect_err("reject");
+        assert!(error.contains("claude or codex"));
+    }
+
+    #[test]
+    fn account_login_args_point_at_the_managed_config() {
+        let config = Path::new("/home/ada/.jean/opinionated/cliproxyapi/config.yaml");
+        let args = account_login_args(config, "codex").expect("args");
+        assert_eq!(
+            args,
+            vec![
+                "--config".to_string(),
+                config.to_string_lossy().to_string(),
+                "-codex-login".to_string(),
+            ]
+        );
+        assert!(args.iter().all(|arg| !arg.contains("management-key")));
+        assert!(args.iter().all(|arg| !arg.contains("client-key")));
+    }
+
+    #[test]
+    fn account_login_requires_the_managed_binary_and_config() {
+        let temp = tempfile::tempdir().expect("temp");
+        let error = plan_account_login(temp.path(), "claude").expect_err("missing");
+        assert!(error.contains("not installed"));
+
+        let paths = layout(temp.path());
+        std::fs::create_dir_all(&paths.dir).expect("dir");
+        std::fs::write(&paths.binary, b"").expect("binary");
+        let error = plan_account_login(temp.path(), "claude").expect_err("config");
+        assert!(error.contains("config.yaml"));
+
+        std::fs::write(&paths.config, "server:\n  host: 127.0.0.1\n  port: 8317\n")
+            .expect("config");
+        let plan = plan_account_login(temp.path(), "claude").expect("plan");
+        assert!(plan.needs_start);
+        assert_eq!(plan.flag, "-claude-login");
+        assert_eq!(plan.args[2], "-claude-login");
+        assert_eq!(plan.binary, paths.binary);
+        assert_eq!(plan.auth_dir, paths.auth_dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn account_login_refuses_a_symlinked_binary() {
+        let temp = tempfile::tempdir().expect("temp");
+        let paths = layout(temp.path());
+        std::fs::create_dir_all(&paths.dir).expect("dir");
+        let real = temp.path().join("real-binary");
+        std::fs::write(&real, b"#!/bin/sh\n").expect("real");
+        std::os::unix::fs::symlink(&real, &paths.binary).expect("symlink");
+        std::fs::write(&paths.config, "server:\n  host: 127.0.0.1\n").expect("config");
+        let error = plan_account_login(temp.path(), "codex").expect_err("symlink");
+        assert!(error.contains("symlink"));
+    }
+
+    #[test]
+    fn auth_file_count_ignores_directories_symlinks_and_non_json() {
+        let temp = tempfile::tempdir().expect("temp");
+        let dir = temp.path().join("auths");
+        assert_eq!(count_auth_files(&dir), 0);
+        std::fs::create_dir_all(&dir).expect("dir");
+        std::fs::write(dir.join("claude-a.json"), b"{}").expect("json");
+        std::fs::write(dir.join("notes.txt"), b"ignore").expect("txt");
+        std::fs::create_dir(dir.join("nested.json")).expect("dir name");
+        assert_eq!(count_auth_files(&dir), 1);
+
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(dir.join("claude-a.json"), dir.join("linked.json"))
+                .expect("file symlink");
+            assert_eq!(count_auth_files(&dir), 1);
+            let link = temp.path().join("auths-link");
+            std::os::unix::fs::symlink(&dir, &link).expect("dir symlink");
+            assert_eq!(count_auth_files(&link), 0);
+        }
     }
 
     fn tar_gz_with_file(name: &str, contents: &[u8]) -> Vec<u8> {

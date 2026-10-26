@@ -1,6 +1,7 @@
-import React, { useCallback, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { invoke } from '@/lib/transport'
 import { openExternal } from '@/lib/platform'
+import { useUIStore } from '@/store/ui-store'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import {
@@ -19,6 +20,7 @@ import {
   Trash2,
   Play,
   Square,
+  LogIn,
 } from '@/components/icons/reicon'
 import { toast } from 'sonner'
 import { SettingsSection } from '../SettingsSection'
@@ -58,10 +60,6 @@ const PLUGINS: PluginDefinition[] = [
         url: 'https://github.com/router-for-me/CLIProxyAPI/blob/main/LICENSE',
       },
       {
-        label: 'EasyCLIProxyAPI',
-        url: 'https://github.com/router-for-me/EasyCLIProxyAPI',
-      },
-      {
         label: 'CLIProxyAPI docs',
         url: 'https://help.router-for.me/',
       },
@@ -76,17 +74,7 @@ const PLUGINS: PluginDefinition[] = [
         note: 'After install, pick the CLIProxyAPI provider on a Claude or Codex session (Preferences → Providers). Codex is injected per session (base_url http://127.0.0.1:8317/v1, wire_api responses). Jean does not rewrite ~/.codex/config.toml.',
       },
       {
-        note: 'OAuth accounts are added in CLIProxyAPI, not in Jean. Use the login commands below, the management page (key file: ~/.jean/opinionated/cliproxyapi/management-key), or EasyCLIProxyAPI. Tokens stay in ~/.jean/opinionated/cliproxyapi/auths.',
-      },
-      {
-        label: 'Claude account login',
-        command:
-          '~/.jean/opinionated/cliproxyapi/cli-proxy-api --config ~/.jean/opinionated/cliproxyapi/config.yaml -claude-login',
-      },
-      {
-        label: 'Codex account login',
-        command:
-          '~/.jean/opinionated/cliproxyapi/cli-proxy-api --config ~/.jean/opinionated/cliproxyapi/config.yaml -codex-login',
+        note: 'Subscription accounts stay in CLIProxyAPI (~/.jean/opinionated/cliproxyapi/auths), not in Jean. Jean does not store those logins and does not switch accounts. Add Claude account and Add Codex account run CLIProxyAPI -claude-login and -codex-login. If the sidecar is stopped, Jean starts it first, then CLIProxyAPI opens the provider login. The management page key file is ~/.jean/opinionated/cliproxyapi/management-key.',
       },
     ],
   },
@@ -282,6 +270,15 @@ interface PluginStatus {
   endpoint?: string | null
   management_url?: string | null
   lan_exposed?: boolean
+  auth_file_count?: number | null
+}
+
+interface AccountLoginLaunch {
+  provider: string
+  binary: string
+  args: string[]
+  started_proxy: boolean
+  message: string
 }
 
 interface BackendPluginStatus {
@@ -297,6 +294,10 @@ function PluginCard({ plugin }: { plugin: PluginDefinition }) {
   const [uninstalling, setUninstalling] = useState(false)
   const [controlling, setControlling] = useState(false)
   const [expanded, setExpanded] = useState(false)
+  const [loggingIn, setLoggingIn] = useState<'claude' | 'codex' | null>(null)
+  const loginPending = useRef(false)
+  const openCliLoginModal = useUIStore(state => state.openCliLoginModal)
+  const cliLoginOpen = useUIStore(state => state.cliLoginModalOpen)
 
   const checkStatus = useCallback(async () => {
     setChecking(true)
@@ -377,7 +378,71 @@ function PluginCard({ plugin }: { plugin: PluginDefinition }) {
       : 'Installed'
   const installUnsupported = status?.install_supported === false
   const canUninstall = plugin.scope === 'ai-backends' || supervises
-  const busy = installing || uninstalling || controlling
+  const busy = installing || uninstalling || controlling || loggingIn !== null
+
+  useEffect(() => {
+    if (plugin.id !== 'cliproxyapi') return
+    if (!cliLoginOpen && loginPending.current) {
+      loginPending.current = false
+      void checkStatus()
+    }
+  }, [cliLoginOpen, checkStatus, plugin.id])
+
+  const handleAccountLogin = useCallback(
+    async (provider: 'claude' | 'codex') => {
+      setLoggingIn(provider)
+      const label = provider === 'claude' ? 'Claude' : 'Codex'
+      const toastId = toast.loading(`Opening ${label} account login...`)
+      try {
+        const launch = await invoke<AccountLoginLaunch>(
+          'prepare_cliproxyapi_account_login',
+          { provider }
+        )
+        toast.success(launch.message, { id: toastId })
+        loginPending.current = true
+        openCliLoginModal('cliproxyapi', launch.binary, launch.args)
+      } catch (error) {
+        toast.error(`Failed to open ${label} account login: ${error}`, {
+          id: toastId,
+        })
+      } finally {
+        setLoggingIn(null)
+        await checkStatus()
+      }
+    },
+    [checkStatus, openCliLoginModal]
+  )
+
+  const handleOpenManagement = useCallback(async () => {
+    const url = status?.management_url
+    if (!url) return
+    if (status?.running) {
+      openExternal(url)
+      return
+    }
+    setControlling(true)
+    const toastId = toast.loading(`Starting ${plugin.name}...`)
+    try {
+      const message = await invoke<string>('start_opinionated_plugin', {
+        pluginName: plugin.id,
+      })
+      toast.success(message, { id: toastId })
+      openExternal(url)
+    } catch (error) {
+      toast.error(`Failed to start ${plugin.name}: ${error}`, {
+        id: toastId,
+      })
+    } finally {
+      setControlling(false)
+      await checkStatus()
+    }
+  }, [
+    checkStatus,
+    plugin.id,
+    plugin.name,
+    status?.management_url,
+    status?.running,
+  ])
 
   const handleUninstall = useCallback(async () => {
     setUninstalling(true)
@@ -587,20 +652,61 @@ function PluginCard({ plugin }: { plugin: PluginDefinition }) {
                   {link.label}
                 </button>
               ))}
-              {supervises && status?.running && status.management_url && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (status.management_url)
-                      openExternal(status.management_url)
-                  }}
-                  className="inline-flex items-center gap-1 text-xs text-primary hover:underline underline-offset-2 cursor-pointer"
-                >
-                  <ExternalLink className="h-3 w-3" />
-                  Open management
-                </button>
-              )}
             </div>
+            {supervises && status?.installed && (
+              <div className="space-y-2 pt-1">
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleAccountLogin('claude')}
+                    disabled={busy}
+                  >
+                    {loggingIn === 'claude' ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <LogIn className="h-4 w-4" />
+                    )}
+                    Add Claude account
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleAccountLogin('codex')}
+                    disabled={busy}
+                  >
+                    {loggingIn === 'codex' ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <LogIn className="h-4 w-4" />
+                    )}
+                    Add Codex account
+                  </Button>
+                  {status.management_url && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={handleOpenManagement}
+                      disabled={busy}
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                      Open management
+                    </Button>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {typeof status.auth_file_count === 'number'
+                    ? `${status.auth_file_count} OAuth file${
+                        status.auth_file_count === 1 ? '' : 's'
+                      } in CLIProxyAPI. `
+                    : ''}
+                  Jean does not read or copy those files.
+                </p>
+              </div>
+            )}
             {status?.lan_exposed && (
               <p className="text-xs text-destructive">
                 This config is not bound to localhost. Jean will not widen the

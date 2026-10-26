@@ -25,12 +25,13 @@ Jean exports `CLIPROXYAPI_API_KEY` into Codex app-server and one-shot processes 
 
 ## Accounts
 
-Jean is not the OAuth UI. Users add accounts with CLIProxyAPI:
+Preferences → Opinionated → CLIProxyAPI shows **Add Claude account** and **Add Codex account** once the sidecar is installed. Those buttons call `prepare_cliproxyapi_account_login`, which starts the sidecar when it is stopped, then opens Jean's login terminal on the managed binary:
 
-```bash
-~/.jean/opinionated/cliproxyapi/cli-proxy-api \
-  --config ~/.jean/opinionated/cliproxyapi/config.yaml \
-  -claude-login
+```text
+cli-proxy-api --config <jean config.yaml> -claude-login
+cli-proxy-api --config <jean config.yaml> -codex-login
 ```
 
-The same binary accepts `-codex-login`. The management panel is `http://127.0.0.1:8317/management.html` (key in `management-key`). [EasyCLIProxyAPI](https://github.com/router-for-me/EasyCLIProxyAPI) is an optional external GUI.
+CLIProxyAPI opens the provider login and writes the OAuth file under `auths/`. Jean does not read those files, does not copy the tokens, and does not switch or round-robin accounts. The row only counts `*.json` names in that directory. **Open management** opens `http://127.0.0.1:8317/management.html` (key in `management-key`) and starts the sidecar first when it is stopped.
+
+[EasyCLIProxyAPI](https://github.com/router-for-me/EasyCLIProxyAPI) is a separate MIT desktop client with its own CLIProxyAPI lifecycle. Jean does not install it. The Opinionated row launches the binary Jean already supervises.
