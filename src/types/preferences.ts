@@ -1390,10 +1390,6 @@ export interface AppPreferences {
   custom_codex_providers: CodexProviderProfile[]
   /** Default Codex provider profile name (null = Codex default / ChatGPT OpenAI) */
   default_codex_provider: string | null
-  /** Named Claude and Codex logins. Each account has its own CLI config directory. */
-  provider_accounts?: ProviderAccount[]
-  /** Default account id for new sessions, keyed by backend ("claude" | "codex"). */
-  default_provider_accounts?: Record<string, string>
   /** PI custom providers mirrored into ~/.pi/agent/models.json */
   custom_pi_providers: PiProviderProfile[]
   favorite_models: string[] // Favourited model keys ("backend:model") shown at top of picker
@@ -1489,13 +1485,6 @@ export const terminalBackgroundOptions: {
   { value: 'dark', label: 'Dark' },
   { value: 'custom', label: 'Custom color' },
 ]
-
-/** A named login for Claude or Codex, stored separately from the CLI's own home. */
-export interface ProviderAccount {
-  id: string
-  backend: string
-  label: string
-}
 
 export interface CustomCliProfile {
   name: string // Display name, e.g. "OpenRouter"
@@ -2597,8 +2586,6 @@ export const defaultPreferences: AppPreferences = {
   default_provider: null,
   custom_codex_providers: [],
   default_codex_provider: null,
-  provider_accounts: [],
-  default_provider_accounts: {},
   custom_pi_providers: [],
   favorite_models: [],
   favorite_package_scripts: [],

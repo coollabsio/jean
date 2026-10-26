@@ -343,8 +343,6 @@ export interface Session {
   selected_effort_level?: EffortLevel
   /** Selected provider (custom CLI profile name) for this session */
   selected_provider?: string
-  /** Named provider account for this session. Absent means the CLI's own login. */
-  provider_account_id?: string | null
   /** Selected workflow/permission policy for this session */
   selected_execution_mode?: ExecutionMode
   /** Build permission choice, retained while planning. */

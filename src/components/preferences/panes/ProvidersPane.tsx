@@ -22,7 +22,6 @@ import {
   PREDEFINED_PI_PROVIDERS,
 } from '@/types/preferences'
 import { SettingsSection } from '../SettingsSection'
-import { ProviderAccountsSection } from './ProviderAccountsSection'
 
 export const ProvidersPane: React.FC = () => {
   const { data: preferences } = usePreferences()
@@ -61,7 +60,6 @@ export const ProvidersPane: React.FC = () => {
 
   return (
     <div className="space-y-8">
-      <ProviderAccountsSection />
       <SettingsSection
         title="Claude CLI"
         description="Custom settings profiles for the Claude CLI. Each profile can override the API endpoint, authentication, and model routing via Anthropic-compatible env vars. Stored under ~/.claude/settings.jean.*.json."

@@ -2523,12 +2523,6 @@ export default function useStreamingEvents({
               : value
           )
           break
-        case 'providerAccount':
-          store.setSelectedProviderAccount(
-            session_id,
-            value === '' ? null : value
-          )
-          break
         case 'waitingForInput':
           if (value === 'false') {
             store.setWaitingForInput(session_id, false)

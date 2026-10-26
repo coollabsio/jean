@@ -40,8 +40,6 @@ interface UseToolbarHandlersParams {
         selected_kimi_model?: string
         custom_cli_profiles?: { name: string }[]
         default_execution_mode?: ExecutionMode
-        provider_accounts?: { id: string; backend: string }[]
-        default_provider_accounts?: Record<string, string>
       }
     | undefined
   piModelOptions?: ModelOption[]
@@ -54,8 +52,6 @@ interface UseToolbarHandlersParams {
   setSessionBackend: { mutate: (args: any, opts?: any) => void }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   setSessionProvider: { mutate: (args: any) => void }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  setSessionProviderAccount: { mutate: (args: any) => void }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   setSessionThinkingLevel: { mutate: (args: any) => void }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -87,7 +83,6 @@ export function useToolbarHandlers({
   setSessionModel,
   setSessionBackend,
   setSessionProvider,
-  setSessionProviderAccount,
   setSessionThinkingLevel,
   setSessionEffortLevel,
   setExecutionMode,
@@ -143,32 +138,6 @@ export function useToolbarHandlers({
           key: 'executionMode',
           value: nextExecutionMode,
         }).catch(() => undefined)
-        const nextAccountId = preferences?.provider_accounts?.some(
-          account =>
-            account.backend === backend &&
-            account.id === preferences.default_provider_accounts?.[backend]
-        )
-          ? (preferences.default_provider_accounts?.[backend] ?? null)
-          : null
-        useChatStore
-          .getState()
-          .setSelectedProviderAccount(activeSessionId, nextAccountId)
-        queryClient.setQueryData(
-          chatQueryKeys.session(activeSessionId),
-          (old: Session | null | undefined) =>
-            old
-              ? applySessionSettingToSession(
-                  old,
-                  'providerAccount',
-                  nextAccountId ?? ''
-                )
-              : old
-        )
-        invoke('broadcast_session_setting', {
-          sessionId: activeSessionId,
-          key: 'providerAccount',
-          value: nextAccountId ?? '',
-        }).catch(() => undefined)
         setSessionBackend.mutate(
           {
             sessionId: activeSessionId,
@@ -202,8 +171,6 @@ export function useToolbarHandlers({
       activeWorktreePath,
       queryClient,
       preferences?.default_execution_mode,
-      preferences?.default_provider_accounts,
-      preferences?.provider_accounts,
       session?.selected_execution_mode,
       setSessionBackend,
       setSessionModel,
@@ -303,46 +270,6 @@ export function useToolbarHandlers({
       activeWorktreePath,
       queryClient,
       setSessionProvider,
-    ]
-  )
-
-  const handleToolbarProviderAccountChange = useCallback(
-    (accountId: string | null) => {
-      if (activeSessionId && activeWorktreeId && activeWorktreePath) {
-        useChatStore
-          .getState()
-          .setSelectedProviderAccount(activeSessionId, accountId)
-        queryClient.setQueryData(
-          chatQueryKeys.session(activeSessionId),
-          (old: Session | null | undefined) =>
-            old
-              ? applySessionSettingToSession(
-                  old,
-                  'providerAccount',
-                  accountId ?? ''
-                )
-              : old
-        )
-        setSessionProviderAccount.mutate({
-          sessionId: activeSessionId,
-          worktreeId: activeWorktreeId,
-          worktreePath: activeWorktreePath,
-          accountId,
-        })
-        invoke('broadcast_session_setting', {
-          sessionId: activeSessionId,
-          key: 'providerAccount',
-          value: accountId ?? '',
-        }).catch(() => undefined)
-      }
-      window.dispatchEvent(new CustomEvent('focus-chat-input'))
-    },
-    [
-      activeSessionId,
-      activeWorktreeId,
-      activeWorktreePath,
-      queryClient,
-      setSessionProviderAccount,
     ]
   )
 
@@ -488,7 +415,6 @@ export function useToolbarHandlers({
     handleToolbarBackendModelChange,
     handleTabBackendSwitch,
     handleToolbarProviderChange,
-    handleToolbarProviderAccountChange,
     handleToolbarThinkingLevelChange,
     handleToolbarEffortLevelChange,
     handleToggleMcpServer,

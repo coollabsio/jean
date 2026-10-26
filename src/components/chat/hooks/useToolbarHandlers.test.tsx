@@ -57,7 +57,6 @@ function renderHandlers(
       setSessionModel: { mutate: vi.fn() },
       setSessionBackend: { mutate: vi.fn() },
       setSessionProvider: { mutate: vi.fn() },
-      setSessionProviderAccount: { mutate: vi.fn() },
       setSessionThinkingLevel: { mutate: vi.fn() },
       setSessionEffortLevel,
       setExecutionMode: vi.fn(),
@@ -75,7 +74,6 @@ describe('useToolbarHandlers', () => {
     useChatStore.setState({
       effortLevels: {},
       selectedProviders: {},
-      selectedProviderAccounts: {},
       selectedBackends: {},
     })
   })
@@ -151,49 +149,6 @@ describe('useToolbarHandlers', () => {
       key: 'provider',
       value: 'MiniMax',
     })
-  })
-
-  it('persists the selected provider account and can return to the CLI login', () => {
-    const setSessionProviderAccount = { mutate: vi.fn() }
-    const { result, queryClient } = renderHandlers({
-      setSessionProviderAccount,
-    })
-    queryClient.setQueryData(chatQueryKeys.session('session-1'), baseSession)
-
-    act(() => {
-      result.current.handleToolbarProviderAccountChange('work-acct')
-    })
-
-    expect(useChatStore.getState().selectedProviderAccounts['session-1']).toBe(
-      'work-acct'
-    )
-    expect(setSessionProviderAccount.mutate).toHaveBeenCalledWith({
-      sessionId: 'session-1',
-      worktreeId: 'worktree-1',
-      worktreePath: '/tmp/worktree',
-      accountId: 'work-acct',
-    })
-    expect(
-      queryClient.getQueryData<Session>(chatQueryKeys.session('session-1'))
-        ?.provider_account_id
-    ).toBe('work-acct')
-    expect(invokeMock).toHaveBeenCalledWith('broadcast_session_setting', {
-      sessionId: 'session-1',
-      key: 'providerAccount',
-      value: 'work-acct',
-    })
-
-    act(() => {
-      result.current.handleToolbarProviderAccountChange(null)
-    })
-
-    expect(
-      useChatStore.getState().selectedProviderAccounts['session-1']
-    ).toBeNull()
-    expect(
-      queryClient.getQueryData<Session>(chatQueryKeys.session('session-1'))
-        ?.provider_account_id
-    ).toBeNull()
   })
 
   it('clears provider selection when switching back to the default', () => {

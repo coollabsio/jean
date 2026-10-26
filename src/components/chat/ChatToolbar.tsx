@@ -32,7 +32,6 @@ import { MobileBackendModelPickerSheet } from '@/components/chat/toolbar/MobileB
 import { DesktopToolbarControls } from '@/components/chat/toolbar/DesktopToolbarControls'
 import { DockBurgerButton } from '@/components/chat/toolbar/DockBurgerButton'
 import { ExecutionModeDropdown } from '@/components/chat/toolbar/ExecutionModeDropdown'
-import { ProviderAccountMenu } from '@/components/chat/toolbar/ProviderAccountMenu'
 import { SendCancelButton } from '@/components/chat/toolbar/SendCancelButton'
 import { ContextViewerDialog } from '@/components/chat/toolbar/ContextViewerDialog'
 import {
@@ -140,9 +139,6 @@ export const ChatToolbar = memo(function ChatToolbar({
   onModelChange,
   onBackendModelChange,
   onProviderChange,
-  providerAccounts = [],
-  selectedProviderAccountId = null,
-  onProviderAccountChange,
   customCliProfiles,
   customCodexProviders = EMPTY_CODEX_PROVIDERS,
   onThinkingLevelChange,
@@ -617,15 +613,6 @@ export const ChatToolbar = memo(function ChatToolbar({
             )}
 
             <div className="block @xl:hidden h-4 w-px shrink-0 bg-border/50" />
-
-            {onProviderAccountChange && (
-              <ProviderAccountMenu
-                backend={selectedBackend}
-                accounts={providerAccounts}
-                selectedAccountId={selectedProviderAccountId}
-                onChange={onProviderAccountChange}
-              />
-            )}
 
             <ExecutionModeDropdown
               backend={selectedBackend}

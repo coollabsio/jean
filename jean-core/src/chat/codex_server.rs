@@ -17,7 +17,7 @@ use once_cell::sync::Lazy;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::io::{BufRead, BufWriter, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -91,8 +91,6 @@ struct CodexAppServerInner {
     /// True when the connection to the server is dead. For the socket
     /// transport this does NOT imply the server process is dead.
     server_dead: Arc<AtomicBool>,
-    /// `CODEX_HOME` this process was started with. None is the user's login.
-    codex_home: Option<PathBuf>,
 }
 
 // Global singleton
@@ -143,19 +141,21 @@ struct ServerPidRecord {
     proxy_pid: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     socket_path: Option<PathBuf>,
-    /// `CODEX_HOME` the server was spawned with. Missing on older pid files.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    codex_home: Option<PathBuf>,
 }
 
-/// Which Codex login the next app-server should use.
-pub enum CodexHomeRequest {
-    /// Leave a live server on whatever account it already has.
-    Unspecified,
-    /// The user's own `~/.codex` login.
-    UserDefault,
-    /// A Jean-managed account directory.
-    Account(PathBuf),
+/// True when a pid file records a Jean-managed Codex account directory.
+///
+/// Those homes are no longer used. The recorded server is stopped so the next
+/// spawn uses the CLI's own `~/.codex`.
+fn pid_json_uses_managed_codex_home(json: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(json)
+        .ok()
+        .and_then(|value| value.get("codex_home").cloned())
+        .is_some_and(|home| match home {
+            serde_json::Value::String(path) => !path.trim().is_empty(),
+            serde_json::Value::Null => false,
+            _ => true,
+        })
 }
 
 fn pid_file_path() -> Option<PathBuf> {
@@ -241,6 +241,17 @@ pub fn cleanup_orphaned_server(app: &AppHandle) {
                 record.server_pid,
                 record.jean_pid
             );
+            return;
+        }
+
+        // A server started with a Jean-managed account home must not be
+        // reused. Stop it so the next spawn uses ~/.codex.
+        if recorded_server_uses_managed_codex_home() {
+            log::info!(
+                "Stopping Codex app-server (pid={}) that was started with a Jean-managed account home",
+                record.server_pid
+            );
+            kill_recorded_codex_server(&record);
             return;
         }
 
@@ -330,31 +341,16 @@ fn kill_server(mut server: CodexAppServerInner) {
 
 /// Ensure the server is running. Spawns + initializes if needed.
 /// Increments usage count — caller MUST call `unregister_session` when done.
+///
+/// The server always uses the CLI's own Codex home. Jean does not set
+/// `CODEX_HOME`.
 pub fn ensure_running(app: &AppHandle) -> Result<(), String> {
-    ensure_running_for_account(app, CodexHomeRequest::Unspecified)
-}
-
-/// Ensure the server is running on the account selected for `session_id`.
-pub fn ensure_running_for_session(app: &AppHandle, session_id: &str) -> Result<(), String> {
-    let request = match crate::provider_accounts::account_config_home_for_session(
-        app, "codex", session_id,
-    )? {
-        Some(home) => CodexHomeRequest::Account(home),
-        None => CodexHomeRequest::UserDefault,
-    };
-    ensure_running_for_account(app, request)
-}
-
-pub fn ensure_running_for_account(
-    app: &AppHandle,
-    request: CodexHomeRequest,
-) -> Result<(), String> {
     let _ = APP_HANDLE.set(app.clone());
 
     IDLE_EPOCH.fetch_add(1, Ordering::SeqCst);
     USAGE_COUNT.fetch_add(1, Ordering::SeqCst);
 
-    match ensure_running_inner(app, &request) {
+    match ensure_running_inner(app) {
         Ok(()) => Ok(()),
         Err(e) => {
             // Roll back usage count on failure so we don't leave a phantom user
@@ -372,15 +368,8 @@ fn use_stdio_transport() -> bool {
     std::env::var("JEAN_CODEX_STDIO").is_ok_and(|v| v == "1")
 }
 
-fn ensure_running_inner(app: &AppHandle, request: &CodexHomeRequest) -> Result<(), String> {
+fn ensure_running_inner(app: &AppHandle) -> Result<(), String> {
     let mut guard = CODEX_SERVER.lock().unwrap();
-    if !matches!(request, CodexHomeRequest::Unspecified) {
-        align_codex_home(app, &mut guard, request)?;
-    }
-    let spawn_home = match request {
-        CodexHomeRequest::Account(path) => Some(path.clone()),
-        CodexHomeRequest::UserDefault | CodexHomeRequest::Unspecified => None,
-    };
     #[cfg(unix)]
     let mut reconnect_sessions = None;
 
@@ -457,20 +446,14 @@ fn ensure_running_inner(app: &AppHandle, request: &CodexHomeRequest) -> Result<(
     #[cfg(unix)]
     if !use_stdio_transport() {
         let sessions_to_resume = reconnect_sessions.clone();
-        let connected = ensure_running_socket(
-            app,
-            &cli_path,
-            &mut guard,
-            reconnect_sessions,
-            spawn_home.clone(),
-        );
+        let connected = ensure_running_socket(app, &cli_path, &mut guard, reconnect_sessions);
         drop(guard);
         let result = connected.and_then(|()| do_initialize());
         finish_session_recovery(&result, sessions_to_resume.as_ref());
         return result;
     }
 
-    let spawned = ensure_running_stdio(&cli_path, &mut guard, spawn_home);
+    let spawned = ensure_running_stdio(&cli_path, &mut guard);
     drop(guard);
     spawned.and_then(|()| do_initialize())
 }
@@ -692,53 +675,14 @@ fn should_preserve_unreachable_live_server(has_active_sessions: bool) -> bool {
     has_active_sessions
 }
 
-fn wanted_codex_home(request: &CodexHomeRequest) -> Option<&Path> {
-    match request {
-        CodexHomeRequest::Account(path) => Some(path.as_path()),
-        CodexHomeRequest::UserDefault | CodexHomeRequest::Unspecified => None,
-    }
-}
-
-fn align_codex_home(
-    app: &AppHandle,
-    guard: &mut std::sync::MutexGuard<'_, Option<CodexAppServerInner>>,
-    request: &CodexHomeRequest,
-) -> Result<(), String> {
-    let record = read_pid_file();
-    let memory_alive = guard.as_ref().is_some_and(|server| {
-        !server.server_dead.load(Ordering::SeqCst) && is_process_alive(server.server_pid)
-    });
-    let record_alive = record
-        .as_ref()
-        .is_some_and(|record| is_process_alive(record.server_pid));
-    let running_home = if memory_alive {
-        guard.as_ref().and_then(|server| server.codex_home.clone())
-    } else if record_alive {
-        record.as_ref().and_then(|record| record.codex_home.clone())
-    } else {
-        None
+fn recorded_server_uses_managed_codex_home() -> bool {
+    let Some(path) = pid_file_path() else {
+        return false;
     };
-    let busy = guard
-        .as_ref()
-        .is_some_and(|server| !server.active_sessions.lock().unwrap().is_empty())
-        || has_incomplete_codex_runs(app);
-    match crate::provider_accounts::codex_home_switch_action(
-        memory_alive || record_alive,
-        running_home.as_deref(),
-        wanted_codex_home(request),
-        busy,
-    )? {
-        crate::provider_accounts::CodexHomeSwitch::Keep
-        | crate::provider_accounts::CodexHomeSwitch::Spawn => Ok(()),
-        crate::provider_accounts::CodexHomeSwitch::Restart => {
-            if let Some(server) = guard.take() {
-                kill_server(server);
-            } else if let Some(record) = record {
-                kill_recorded_codex_server(&record);
-            }
-            Ok(())
-        }
-    }
+    let Ok(json) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    pid_json_uses_managed_codex_home(&json)
 }
 
 fn kill_recorded_codex_server(record: &ServerPidRecord) {
@@ -827,7 +771,6 @@ fn reconnect_detached_server(
                 drop(outgoing_tx);
                 return;
             }
-            let codex_home = guard.as_ref().and_then(|server| server.codex_home.clone());
 
             *guard = Some(CodexAppServerInner {
                 transport: Transport::Socket {
@@ -839,7 +782,6 @@ fn reconnect_detached_server(
                 pending_requests,
                 active_sessions: active_sessions.clone(),
                 server_dead: server_dead.clone(),
-                codex_home,
             });
             adopted.store(true, Ordering::SeqCst);
             drop(guard);
@@ -918,6 +860,14 @@ fn try_adopt_existing_server(active_sessions: Option<ActiveSessions>) -> AdoptAt
         remove_pid_file();
         return AdoptAttempt::Missing;
     }
+    if recorded_server_uses_managed_codex_home() {
+        log::info!(
+            "Stopping Codex app-server (pid={}) that was started with a Jean-managed account home",
+            record.server_pid
+        );
+        kill_recorded_codex_server(&record);
+        return AdoptAttempt::Missing;
+    }
 
     let pending_requests: PendingRequests = Arc::new(Mutex::new(HashMap::new()));
     let active_sessions = active_sessions.unwrap_or_else(|| Arc::new(Mutex::new(HashMap::new())));
@@ -945,7 +895,6 @@ fn try_adopt_existing_server(active_sessions: Option<ActiveSessions>) -> AdoptAt
                 server_pid: record.server_pid,
                 proxy_pid: None,
                 socket_path: Some(socket_path.clone()),
-                codex_home: record.codex_home.clone(),
             });
             AdoptAttempt::Adopted(CodexAppServerInner {
                 transport: Transport::Socket {
@@ -957,7 +906,6 @@ fn try_adopt_existing_server(active_sessions: Option<ActiveSessions>) -> AdoptAt
                 pending_requests,
                 active_sessions,
                 server_dead,
-                codex_home: record.codex_home.clone(),
             })
         }
         Err(e) => {
@@ -989,7 +937,6 @@ fn ensure_running_socket(
     cli_path: &std::path::Path,
     guard: &mut std::sync::MutexGuard<'_, Option<CodexAppServerInner>>,
     active_sessions: Option<ActiveSessions>,
-    codex_home: Option<PathBuf>,
 ) -> Result<(), String> {
     // 1. Adopt a live detached server from a previous Jean process (or a
     //    previous connection of this process).
@@ -1029,23 +976,13 @@ fn ensure_running_socket(
         "--listen".to_string(),
         format!("unix://{}", socket_path.display()),
     ];
-    let home_value = codex_home
-        .as_ref()
-        .and_then(|path| path.to_str().map(str::to_string));
-    let env: Vec<(&str, &str)> = match home_value.as_deref() {
-        Some(home) => vec![("CODEX_HOME", home)],
-        None => Vec::new(),
-    };
-    let pid = super::detached::spawn_detached_process_with_env(
-        cli_path, &args, &log_path, &app_data, &env,
-    )?;
+    let pid = super::detached::spawn_detached_process(cli_path, &args, &log_path, &app_data)?;
 
     write_pid_file(&ServerPidRecord {
         jean_pid: std::process::id(),
         server_pid: pid,
         proxy_pid: None,
         socket_path: Some(socket_path.clone()),
-        codex_home: codex_home.clone(),
     });
     SERVER_GENERATION.fetch_add(1, Ordering::SeqCst);
     log::info!("Detached codex app-server spawned with PID: {pid}");
@@ -1082,7 +1019,6 @@ fn ensure_running_socket(
         pending_requests,
         active_sessions,
         server_dead,
-        codex_home,
     });
 
     Ok(())
@@ -1095,7 +1031,6 @@ fn ensure_running_socket(
 fn ensure_running_stdio(
     cli_path: &std::path::Path,
     guard: &mut std::sync::MutexGuard<'_, Option<CodexAppServerInner>>,
-    codex_home: Option<PathBuf>,
 ) -> Result<(), String> {
     log::info!(
         "Starting codex app-server (stdio): {} app-server",
@@ -1110,9 +1045,6 @@ fn ensure_running_stdio(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    if let Some(home) = codex_home.as_ref().and_then(|path| path.to_str()) {
-        command.env("CODEX_HOME", home);
-    }
     let mut child = command
         .spawn()
         .map_err(|e| format!("Failed to spawn codex app-server: {e}"))?;
@@ -1123,7 +1055,6 @@ fn ensure_running_stdio(
         server_pid: pid,
         proxy_pid: None,
         socket_path: None,
-        codex_home: codex_home.clone(),
     });
     SERVER_GENERATION.fetch_add(1, Ordering::SeqCst);
     log::info!("Codex app-server spawned with PID: {pid}");
@@ -1178,7 +1109,6 @@ fn ensure_running_stdio(
         pending_requests,
         active_sessions,
         server_dead,
-        codex_home,
     });
 
     Ok(())
@@ -1908,7 +1838,6 @@ mod tests {
             server_pid: 2,
             proxy_pid: None,
             socket_path: Some(PathBuf::from("/tmp/jean-codex.sock")),
-            codex_home: None,
         };
         let json = serde_json::to_string(&record).unwrap();
         let parsed: ServerPidRecord = serde_json::from_str(&json).unwrap();
@@ -1918,6 +1847,25 @@ mod tests {
             parsed.socket_path,
             Some(PathBuf::from("/tmp/jean-codex.sock"))
         );
+    }
+
+    #[test]
+    fn managed_codex_home_pid_records_are_detected_and_not_rewritten() {
+        assert!(!pid_json_uses_managed_codex_home(
+            r#"{"jean_pid":1,"server_pid":2}"#
+        ));
+        assert!(!pid_json_uses_managed_codex_home(
+            r#"{"jean_pid":1,"server_pid":2,"codex_home":null}"#
+        ));
+        assert!(pid_json_uses_managed_codex_home(
+            r#"{"jean_pid":1,"server_pid":2,"codex_home":"/tmp/jean/provider-accounts/codex/work"}"#
+        ));
+
+        let legacy = r#"{"jean_pid":1,"server_pid":2,"proxy_pid":null,"socket_path":"/tmp/jean-codex.sock","codex_home":"/tmp/jean/provider-accounts/codex/work"}"#;
+        let parsed: ServerPidRecord = serde_json::from_str(legacy).unwrap();
+        let rewritten = serde_json::to_string(&parsed).unwrap();
+        assert!(!pid_json_uses_managed_codex_home(&rewritten));
+        assert!(rewritten.contains("\"server_pid\":2"));
     }
 
     #[test]
@@ -2116,7 +2064,7 @@ mod tests {
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         let _ = APP_HANDLE.set(app.clone());
         let mut guard = CODEX_SERVER.lock().unwrap();
-        ensure_running_stdio(&script, &mut guard, None).unwrap();
+        ensure_running_stdio(&script, &mut guard).unwrap();
     }
 
     #[cfg(unix)]
