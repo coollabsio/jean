@@ -58,9 +58,7 @@ describe('RecentWorktreesList structure', () => {
   })
 
   it('uses fully rounded rows and a full background for the current row', () => {
-    expect(source).toContain(
-      '@container flex flex-col gap-2 px-2 pt-2'
-    )
+    expect(source).toContain('@container flex flex-col gap-2 px-2 pt-2')
     expect(source).toContain('rounded-lg border py-2.5 pl-3 pr-3')
     expect(source).toContain(
       "isCurrent ? 'border-border bg-muted/50 text-foreground shadow'"
@@ -142,6 +140,8 @@ describe('RecentWorktreesList structure', () => {
     expect(projectName).toBeGreaterThan(pinLabel)
     expect(gitAdded).toBeGreaterThan(projectName)
     expect(source).toContain("isPinned ? 'Unpin session' : 'Pin session'")
+    expect(source).toContain('<TooltipContent>')
+    expect(source).not.toContain('title={isPinned')
     expect(source).toContain('!isPinned &&')
     expect(source).toContain('showPinnedSeparator')
     expect(source).toContain('role="separator"')

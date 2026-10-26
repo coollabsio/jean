@@ -12,6 +12,11 @@ import {
   X,
 } from '@/components/icons/reicon'
 import { Button } from '@/components/ui/button'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
   Collapsible,
@@ -187,50 +192,62 @@ function MemoryRow({
       </div>
       {!editing && (
         <div className="flex shrink-0 gap-0.5 text-muted-foreground">
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            aria-label={memory.pinned ? 'Unpin' : 'Pin'}
-            aria-pressed={memory.pinned}
-            title={memory.pinned ? 'Unpin' : 'Pin'}
-            className={cn(
-              memory.pinned &&
-                'text-amber-600 hover:text-amber-600 dark:text-amber-400'
-            )}
-            onClick={() =>
-              update.mutate(
-                {
-                  agentId,
-                  memoryId: memory.id,
-                  patch: { pinned: !memory.pinned },
-                },
-                { onError }
-              )
-            }
-          >
-            <Thumbtack />
-          </Button>
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            aria-label="Edit"
-            title="Edit"
-            onClick={() => setEditing(true)}
-          >
-            <Pencil />
-          </Button>
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            aria-label="Forget"
-            title="Forget"
-            disabled={remove.isPending}
-            onClick={() =>
-              remove.mutate({ agentId, memoryId: memory.id }, { onError })
-            }
-          >
-            <Trash2 />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label={memory.pinned ? 'Unpin' : 'Pin'}
+                aria-pressed={memory.pinned}
+                className={cn(
+                  memory.pinned &&
+                    'text-amber-600 hover:text-amber-600 dark:text-amber-400'
+                )}
+                onClick={() =>
+                  update.mutate(
+                    {
+                      agentId,
+                      memoryId: memory.id,
+                      patch: { pinned: !memory.pinned },
+                    },
+                    { onError }
+                  )
+                }
+              >
+                <Thumbtack />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{memory.pinned ? 'Unpin' : 'Pin'}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label="Edit"
+                onClick={() => setEditing(true)}
+              >
+                <Pencil />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Edit</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label="Forget"
+                disabled={remove.isPending}
+                onClick={() =>
+                  remove.mutate({ agentId, memoryId: memory.id }, { onError })
+                }
+              >
+                <Trash2 />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Forget</TooltipContent>
+          </Tooltip>
         </div>
       )}
     </li>
@@ -477,15 +494,15 @@ export function AgentMemoryView({ agent }: { agent: AgentSummary }) {
               Clear
             </Button>
           )}
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={handleExport}
-            title="Copy all memory as Markdown"
-          >
-            <Copy />
-            <span className="hidden sm:inline">Copy as Markdown</span>
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button size="sm" variant="ghost" onClick={handleExport}>
+                <Copy />
+                <span className="hidden sm:inline">Copy as Markdown</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Copy all memory as Markdown</TooltipContent>
+          </Tooltip>
         </div>
         {filtersOpen && (
           <div

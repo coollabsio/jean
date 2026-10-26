@@ -94,14 +94,13 @@ export function SidebarTabRail({
   const handleSelect = useCallback(
     (section: RailSection) => {
       const ui = useUIStore.getState()
-      // Switching section shows its panel; the active section toggles it
+      // Switching section restores its panel; the active section toggles it
       const current =
         ui.railSection === 'agents' && !agentsEnabled
           ? 'workspace'
           : ui.railSection
       if (current !== section) {
-        ui.setRailSection(section)
-        if (togglesSidebar) ui.setLeftSidebarVisible(true)
+        ui.setRailSection(section, togglesSidebar)
         return
       }
       if (togglesSidebar) ui.setLeftSidebarVisible(!ui.leftSidebarVisible)

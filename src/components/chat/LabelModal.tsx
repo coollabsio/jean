@@ -7,6 +7,11 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { Tag, Check, Pencil, Pin, Trash2 } from '@/components/icons/reicon'
 import { useChatStore } from '@/store/chat-store'
 import type { LabelData } from '@/types/chat'
@@ -363,25 +368,28 @@ export function LabelModal({
 
             <div className="grid grid-cols-5 gap-2">
               {LABEL_COLORS.map(color => (
-                <button
-                  type="button"
-                  key={color.value}
-                  className={`w-full h-8 rounded-md transition-transform hover:scale-105 ${
-                    selectedColor === color.value
-                      ? 'ring-2 ring-offset-2 ring-primary'
-                      : ''
-                  }`}
-                  style={{ backgroundColor: color.value }}
-                  onClick={() => setSelectedColor(color.value)}
-                  title={color.name}
-                  aria-label={color.name}
-                >
-                  {selectedColor === color.value && (
-                    <Check
-                      className={`h-4 w-4 mx-auto ${getLabelTextColor(color.value)}`}
-                    />
-                  )}
-                </button>
+                <Tooltip key={color.value}>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className={`w-full h-8 rounded-md transition-transform hover:scale-105 ${
+                        selectedColor === color.value
+                          ? 'ring-2 ring-offset-2 ring-primary'
+                          : ''
+                      }`}
+                      style={{ backgroundColor: color.value }}
+                      onClick={() => setSelectedColor(color.value)}
+                      aria-label={color.name}
+                    >
+                      {selectedColor === color.value && (
+                        <Check
+                          className={`h-4 w-4 mx-auto ${getLabelTextColor(color.value)}`}
+                        />
+                      )}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{color.name}</TooltipContent>
+                </Tooltip>
               ))}
             </div>
 

@@ -3,6 +3,7 @@ import { invoke } from '@/lib/transport'
 import { logger } from '@/lib/logger'
 import { defaultUIState, type UIState } from '@/types/ui-state'
 
+import { getClientId } from '@/lib/client-session'
 import { hasBackend, hasBackendTransport, isNativeApp } from '@/lib/environment'
 import { preserveQueryCacheOnError } from '@/lib/query-error'
 import { getActiveRemoteConnection } from '@/lib/remote-connections'
@@ -32,7 +33,8 @@ export function useUIState() {
 
       try {
         logger.debug('Loading UI state from backend')
-        const uiState = await invoke<UIState>('load_ui_state')
+        const clientId = await getClientId()
+        const uiState = await invoke<UIState>('load_ui_state', { clientId })
         const remote = isNativeApp() ? getActiveRemoteConnection() : null
         const restoredState = remote
           ? scopeUIStateResources(uiState, remote.id)
@@ -69,7 +71,8 @@ export function useSaveUIState() {
         const stateToSave = remote
           ? unscopeUIStateResources(uiState, remote.id)
           : uiState
-        await invoke('save_ui_state', { uiState: stateToSave })
+        const clientId = await getClientId()
+        await invoke('save_ui_state', { uiState: stateToSave, clientId })
         logger.debug('UI state saved successfully')
       } catch (error) {
         // Silent fail for UI state saves - don't bother user with errors

@@ -7,7 +7,10 @@ import { isNativeApp } from '@/lib/environment'
 import { isClientLinux, isClientMacOS } from '@/lib/platform'
 import { cn } from '@/lib/utils'
 
-/** A full-window settings surface without a modal overlay or focus trap. */
+/**
+ * Full-window project-settings shell (no overlay, no focus trap).
+ * App preferences use the shared modal Dialog instead.
+ */
 export function SettingsPage({
   open,
   onOpenChange,

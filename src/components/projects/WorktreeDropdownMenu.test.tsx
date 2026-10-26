@@ -58,7 +58,6 @@ vi.mock('./useWorktreeMenuActions', () => ({
   useWorktreeMenuActions: () => ({
     showDeleteConfirm: false,
     setShowDeleteConfirm: vi.fn(),
-    deleteSkipTeardown: false,
     isBase: false,
     runScripts: actionMocks.runScripts,
     preferences: {},
@@ -68,7 +67,6 @@ vi.mock('./useWorktreeMenuActions', () => ({
     handleOpenInTerminal: vi.fn(),
     handleOpenInEditor: vi.fn(),
     handleArchiveOrClose: vi.fn(),
-    openDeleteConfirm: vi.fn(),
     handleDelete: vi.fn(),
   }),
 }))

@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   addRemoteConnection,
+  addSshRemoteConnection,
+  SSH_TUNNEL_PLACEHOLDER_URL,
   clearConnectionSwitch,
   getActiveConnectionId,
   getActiveRemoteConnection,
@@ -186,5 +188,38 @@ describe('remote connections', () => {
     expect(updated.sshUser).toBe('deploy')
     // Default SSH port is not stored.
     expect(updated.sshPort).toBeUndefined()
+  })
+
+  it('keeps SSH tunnel tokens out of localStorage', () => {
+    const remote = addSshRemoteConnection({
+      id: 'ssh-profile-1',
+      name: 'Loopback',
+      token: 'secret-token',
+      user: 'ubuntu',
+      host: '10.0.0.8',
+      sshPort: 22,
+      remotePort: 3456,
+      hostKeyFingerprint: 'SHA256:abc',
+    })
+
+    expect(remote.transport).toBe('ssh')
+    expect(remote.token).toBe('secret-token')
+    expect(remote.url).toBe(SSH_TUNNEL_PLACEHOLDER_URL)
+    expect(remote.sshUser).toBe('ubuntu')
+    expect(remote.sshHost).toBe('10.0.0.8')
+
+    const calls = vi.mocked(localStorage.setItem).mock.calls
+    const write = [...calls]
+      .reverse()
+      .find(([key]) => key === 'jean-remote-connections')
+    const stored = JSON.parse(String(write?.[1])) as {
+      token: string
+      url: string
+      transport: string
+    }[]
+    expect(stored[0]?.token).toBe('')
+    expect(stored[0]?.url).toBe(SSH_TUNNEL_PLACEHOLDER_URL)
+    expect(stored[0]?.transport).toBe('ssh')
+    expect(JSON.stringify(stored)).not.toContain('secret-token')
   })
 })

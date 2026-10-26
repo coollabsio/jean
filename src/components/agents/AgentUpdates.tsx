@@ -1,11 +1,17 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { BellDot } from '@/components/icons/reicon'
 import {
   isAgentUpdateMessage,
+  isChatContinuedMessage,
   splitAgentUpdateTurns,
 } from '@/components/chat/message-content-utils'
 import { formatLocalTime } from '@/components/chat/time-utils'
 import { Button } from '@/components/ui/button'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { Markdown } from '@/components/ui/markdown'
 import {
   Sheet,
@@ -35,7 +41,11 @@ export function agentUpdateFeed(
     .reverse()
   let lastPromptAt = 0
   for (const m of messages) {
-    if (m.role === 'user' && !isAgentUpdateMessage(m.content)) {
+    if (
+      m.role === 'user' &&
+      !isAgentUpdateMessage(m.content) &&
+      !isChatContinuedMessage(m.content)
+    ) {
       lastPromptAt = Math.max(lastPromptAt, m.timestamp)
     }
   }
@@ -67,14 +77,28 @@ export function AgentUpdatesButton({
   const [open, setOpen] = useState(false)
   const newest = updates[0]?.timestamp ?? 0
 
+  // Mark as seen up to now, not up to the newest message: the saved copy of a
+  // streamed reply carries its run end time, which is later than the live one
+  const markSeen = useCallback(() => {
+    const now = Math.floor(Date.now() / 1000)
+    useUIStore.getState().markAgentUpdatesSeen(agent.id, Math.max(newest, now))
+  }, [agent.id, newest])
+
   // Updates that arrive while the panel is open are seen
   useEffect(() => {
-    if (open && newest > 0) {
-      useUIStore.getState().markAgentUpdatesSeen(agent.id, newest)
-    }
-  }, [open, newest, agent.id])
+    if (open && newest > 0) markSeen()
+  }, [open, newest, markSeen])
 
-  if (updates.length === 0) return null
+  const handleOpenChange = useCallback(
+    (next: boolean) => {
+      if (!next) markSeen()
+      setOpen(next)
+    },
+    [markSeen]
+  )
+
+  // Shown only when there is something new (kept while the panel is open)
+  if (unread === 0 && !open) return null
 
   return (
     <>
@@ -93,7 +117,7 @@ export function AgentUpdatesButton({
           </span>
         )}
       </Button>
-      <Sheet open={open} onOpenChange={setOpen}>
+      <Sheet open={open} onOpenChange={handleOpenChange}>
         <SheetContent side="right" className="gap-0 sm:max-w-md">
           <SheetHeader className="border-b">
             <SheetTitle>Updates</SheetTitle>
@@ -110,12 +134,16 @@ export function AgentUpdatesButton({
                   update.timestamp > seenAt && 'bg-amber-500/5'
                 )}
               >
-                <p
-                  className="mb-1 text-[11px] text-muted-foreground tabular-nums"
-                  title={formatLocalTime(update.timestamp)}
-                >
-                  {formatRelative(update.timestamp)}
-                </p>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <p className="mb-1 text-[11px] text-muted-foreground tabular-nums">
+                      {formatRelative(update.timestamp)}
+                    </p>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {formatLocalTime(update.timestamp)}
+                  </TooltipContent>
+                </Tooltip>
                 <Markdown className="text-sm">{update.content}</Markdown>
               </li>
             ))}

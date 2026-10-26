@@ -4,6 +4,7 @@ import { RemoteSetupStep } from './RemoteSetupStep'
 
 const {
   addRemoteConnection,
+  addSshRemoteConnection,
   selectConnection,
   fetchRemoteServerInfo,
   warnRemoteVersionMismatch,
@@ -13,6 +14,7 @@ const {
   markConnectionSwitch,
 } = vi.hoisted(() => ({
   addRemoteConnection: vi.fn(() => ({ id: 'remote-1' })),
+  addSshRemoteConnection: vi.fn(() => ({ id: 'remote-1' })),
   selectConnection: vi.fn(),
   fetchRemoteServerInfo: vi.fn(async () => ({
     ok: true,
@@ -37,6 +39,7 @@ const {
 vi.mock('@/lib/remote-connections', () => ({
   LOCAL_CONNECTION_ID: 'local',
   addRemoteConnection,
+  addSshRemoteConnection,
   markConnectionSwitch,
   parseOptionalSshPort: (raw: string) => {
     const trimmed = raw.trim()
@@ -74,14 +77,35 @@ vi.mock('@/lib/transport', () => ({
   listenLocal,
 }))
 
+const HOST_KEY = {
+  host: '192.168.1.50',
+  canonicalHost: '192.168.1.50',
+  port: 22,
+  keyType: 'ssh-ed25519',
+  publicKey: 'AAAAC3NzaC1lZDI1NTE5AAAAIFake',
+  fingerprint: 'SHA256:abc',
+}
+
 const INSTALL_RESULT = {
   name: 'build-box',
   url: 'http://192.168.1.50:3456',
-  token: 'tok-abc',
+  token: '',
   alreadyInstalled: false,
   installMode: 'system',
   ready: true,
   log: 'ok',
+  transport: 'ssh',
+  localUrl: 'http://127.0.0.1:4567',
+  hostKeyFingerprint: 'SHA256:abc',
+  tokenStored: true,
+  profileId: 'profile-1',
+  pendingTunnel: false,
+}
+
+async function confirmHostKey() {
+  fireEvent.click(screen.getByRole('button', { name: /Install & Connect/i }))
+  expect(await screen.findByText(/SHA256:abc/)).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: /Trust and install/i }))
 }
 
 const SSH_HOSTS = [
@@ -127,6 +151,8 @@ describe('RemoteSetupStep', () => {
   it('installs jean-server via SSH and connects', async () => {
     mockCommands({
       list_ssh_config_hosts: () => [],
+      preview_ssh_host_key: () => HOST_KEY,
+      trust_ssh_host_key: () => null,
       install_remote_jean_server: () => INSTALL_RESULT,
     })
     const onComplete = vi.fn()
@@ -142,7 +168,7 @@ describe('RemoteSetupStep', () => {
     fireEvent.change(screen.getByLabelText('Host / IP'), {
       target: { value: '192.168.1.50' },
     })
-    fireEvent.click(screen.getByRole('button', { name: /Install & Connect/i }))
+    await confirmHostKey()
 
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith('install_remote_jean_server', {
@@ -152,8 +178,12 @@ describe('RemoteSetupStep', () => {
         sshPort: 22,
         jeanPort: 3456,
         userInstall: null,
+        viaTunnel: true,
+        hostKeyFingerprint: 'SHA256:abc',
+        profileId: expect.any(String),
       })
-      expect(addRemoteConnection).toHaveBeenCalled()
+      expect(addSshRemoteConnection).toHaveBeenCalled()
+      expect(addRemoteConnection).not.toHaveBeenCalled()
       expect(selectConnection).not.toHaveBeenCalled()
       expect(onComplete).toHaveBeenCalledExactlyOnceWith('remote-1')
     })
@@ -284,6 +314,8 @@ describe('RemoteSetupStep', () => {
     }
     mockCommands({
       list_ssh_config_hosts: () => [],
+      preview_ssh_host_key: () => HOST_KEY,
+      trust_ssh_host_key: () => null,
       install_remote_jean_server: () =>
         new Promise(resolve => {
           finishInstall = resolve
@@ -293,7 +325,7 @@ describe('RemoteSetupStep', () => {
     render(<RemoteSetupStep onComplete={onComplete} />)
 
     fillSshTarget()
-    fireEvent.click(screen.getByRole('button', { name: /Install & Connect/i }))
+    await confirmHostKey()
 
     await waitFor(() => expect(emit).toBeDefined())
     expect(phaseState('ssh')).toBe('active')
@@ -353,13 +385,15 @@ describe('RemoteSetupStep', () => {
       .mockResolvedValueOnce(INSTALL_RESULT)
     mockCommands({
       list_ssh_config_hosts: () => [],
+      preview_ssh_host_key: () => HOST_KEY,
+      trust_ssh_host_key: () => null,
       install_remote_jean_server: install,
     })
     const onComplete = vi.fn()
     render(<RemoteSetupStep onComplete={onComplete} />)
 
     fillSshTarget()
-    fireEvent.click(screen.getByRole('button', { name: /Install & Connect/i }))
+    await confirmHostKey()
     await waitFor(() => expect(emit).toBeDefined())
     act(() => {
       emit?.({ payload: { step: 'install', message: 'Installing…' } })

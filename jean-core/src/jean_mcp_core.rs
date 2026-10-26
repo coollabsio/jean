@@ -45,6 +45,7 @@ const RATE_LIMITED_TOOLS: &[&str] = &[
     "move_session",
     "permanently_delete_worktree",
     "push_worktree",
+    "remove_project",
     "run_review",
     "send_chat_message",
     "set_session_model",
@@ -240,6 +241,7 @@ fn tool_registry_core() -> Value {
         {"name":"add_project","description":"Add an existing local git repository as a Jean project. Path must already be a git repo (use init_project for a new folder, or clone_project for a remote URL). Returns the created project (id, name, path, default_branch).","inputSchema":{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to an existing local git repository."},"parentId":{"type":"string","description":"Optional Jean folder/project parent id for nesting in the project list."}},"required":["path"],"additionalProperties":false}},
         {"name":"clone_project","description":"Clone a remote git repository to a local path and add it as a Jean project. Returns the created project.","inputSchema":{"type":"object","properties":{"url":{"type":"string","description":"Git remote URL to clone (https or ssh)."},"path":{"type":"string","description":"Absolute local path where the repo should be cloned."},"parentId":{"type":"string","description":"Optional Jean folder/project parent id for nesting in the project list."}},"required":["url","path"],"additionalProperties":false}},
         {"name":"init_project","description":"Create a new git repository at path (creating the directory if needed) and add it as a Jean project. Use add_project instead when the path is already a git repo. Returns the created project.","inputSchema":{"type":"object","properties":{"path":{"type":"string","description":"Absolute path for the new project directory."},"parentId":{"type":"string","description":"Optional Jean folder/project parent id for nesting in the project list."}},"required":["path"],"additionalProperties":false}},
+        {"name":"remove_project","description":"Remove a project from Jean (same as the UI \"Remove project\"). Repository files on disk are kept. Fails if the project has active (non-archived) worktrees; its archived worktrees and their sessions are removed from Jean. Does not remove folders. Needs user approval.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"}},"required":["projectId"],"additionalProperties":false}},
         {"name":"list_worktrees","description":"List all worktrees for a project.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"}},"required":["projectId"],"additionalProperties":false}},
         {"name":"get_worktree","description":"Get a single worktree by id (path, branch, status, etc.).","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"}},"required":["worktreeId"],"additionalProperties":false}},
         {"name":"get_project_context","description":"Get project-level context needed by orchestration agents: project settings, linked projects, default branch/backend, and worktree counts. Does not read arbitrary repo files.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"}},"required":["projectId"],"additionalProperties":false}},
@@ -681,6 +683,13 @@ async fn run_tool(
                 Ok(result)
             }
         }
+        "remove_project" => {
+            let project_id = require_str(&args, "projectId")?;
+            dispatch_command(app, "remove_project", json!({ "projectId": project_id }))
+                .await
+                .map_err(ToolError::internal)?;
+            Ok(json!({ "projectId": project_id, "removed": true }))
+        }
         "delete_worktree" => {
             let worktree_id = require_str(&args, "worktreeId")?;
             dispatch_command(app, "delete_worktree", json!({ "worktreeId": worktree_id }))
@@ -1110,10 +1119,27 @@ async fn run_tool(
             )?;
             // Agent callers: the agent gets an update when this session's run ends.
             crate::agents::mcp::record_delegation(app, source, &session_id, &worktree_id);
+            // Agent callers: mark the sender so the chat shows one "Message from" line
+            let message = match crate::agents::agent_for_session(app, source) {
+                Some(agent) if source != session_id => {
+                    crate::agents::agent_message_text(&agent.name, &agent.id, &message)
+                }
+                _ => message,
+            };
+            let session_name = crate::chat::storage::load_mcp_session_metadata(app, &session_id)
+                .ok()
+                .flatten()
+                .map(|metadata| metadata.name);
+            let worktree_name = crate::projects::storage::load_projects_data(app)
+                .ok()
+                .and_then(|data| data.find_worktree(&worktree_id).map(|w| w.name.clone()));
             let mut payload = serde_json::Map::new();
             payload.insert("sessionId".to_string(), Value::String(session_id.clone()));
-            payload.insert("worktreeId".to_string(), Value::String(worktree_id));
-            payload.insert("worktreePath".to_string(), Value::String(worktree_path));
+            payload.insert("worktreeId".to_string(), Value::String(worktree_id.clone()));
+            payload.insert(
+                "worktreePath".to_string(),
+                Value::String(worktree_path.clone()),
+            );
             payload.insert("message".to_string(), Value::String(message));
             for key in [
                 "model",
@@ -1137,7 +1163,14 @@ async fn run_tool(
                     log::warn!("Jean MCP send_chat_message (source={source_clone}) failed: {e}");
                 }
             });
-            Ok(json!({ "sessionId": session_id, "status": "started" }))
+            Ok(json!({
+                "sessionId": session_id,
+                "status": "started",
+                "worktreeId": worktree_id,
+                "worktreePath": worktree_path,
+                "sessionName": session_name,
+                "worktreeName": worktree_name,
+            }))
         }
         "archive_session" => {
             let session_id = require_str(&args, "sessionId")?;
@@ -1917,12 +1950,8 @@ async fn run_tool(
                 .cloned()
                 .ok_or_else(|| ToolError::internal("Started Run environment was not found"))?;
 
-            let mut ui_state = crate::load_ui_state(app.clone()).await.unwrap_or_default();
-            register_run_in_ui_state(&mut ui_state, &worktree_id, &terminal_id, &command);
-            if let Err(error) = crate::save_ui_state(app.clone(), ui_state).await {
-                log::warn!("Failed to persist MCP-started Run environment UI state: {error}");
-            }
-
+            // Panel layout is per client. Connected UIs record the terminal from
+            // this event; the live PTY registry is what other clients can see.
             app.emit_all(
                 "run-environment:started",
                 &json!({
@@ -3256,8 +3285,9 @@ mod tests {
     async fn mcp_recovered_empty_session_uses_new_session_execution_policy() {
         for (backend, default_policy, expected_policy) in [
             ("claude", "build", "build"),
+            ("claude", "plan", "build"),
             ("codex", "supervised", "supervised"),
-            ("cursor", "build", "plan"),
+            ("cursor", "build", "yolo"),
         ] {
             for force_new in [false, true] {
                 let (_temp, app) = session_lookup_app();
@@ -3292,11 +3322,7 @@ mod tests {
                 );
                 assert_eq!(
                     metadata.selected_permission_mode.as_deref(),
-                    Some(if expected_policy == "plan" {
-                        "yolo"
-                    } else {
-                        expected_policy
-                    })
+                    Some(expected_policy)
                 );
                 assert_eq!(created["selected_execution_mode"], expected_policy);
             }
@@ -3453,7 +3479,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"F
             return;
         }
         for force_new in [false, true] {
-            let (_temp, app) = session_send_app();
+            let (temp, app) = session_send_app();
             if force_new {
                 crate::chat::storage::save_empty_index(&app, "current-base").unwrap();
             }
@@ -3484,7 +3510,14 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"F
                 .unwrap();
             assert_eq!(
                 sent,
-                json!({ "sessionId": session_id, "status": "started" })
+                json!({
+                    "sessionId": session_id,
+                    "status": "started",
+                    "worktreeId": "current-base",
+                    "worktreePath": temp.path().to_string_lossy(),
+                    "sessionName": "Session 1",
+                    "worktreeName": "base",
+                })
             );
             assert_mcp_send_completed(&app, session_id, "hello world", "build").await;
         }
@@ -4344,6 +4377,19 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"F
             update_worktree_labels["inputSchema"]["required"],
             json!(["worktreeId", "action"])
         );
+    }
+
+    #[test]
+    fn remove_project_is_registered_rate_limited_and_needs_approval() {
+        let tools = tool_registry();
+        let remove = find_tool(&tools, "remove_project");
+        assert_eq!(remove["inputSchema"]["required"], json!(["projectId"]));
+        assert!(remove["description"]
+            .as_str()
+            .unwrap()
+            .contains("files on disk are kept"));
+        assert!(RATE_LIMITED_TOOLS.contains(&"remove_project"));
+        assert!(crate::agents::mcp::APPROVAL_TOOLS.contains(&"remove_project"));
     }
 
     #[test]

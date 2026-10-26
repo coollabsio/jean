@@ -208,6 +208,25 @@ pub async fn create_agent(
     Ok(agent)
 }
 
+/// Repo-shipped templates. Not built-in agents.
+pub fn list_agent_templates() -> Result<Vec<super::templates::AgentTemplate>, String> {
+    super::templates::load_templates()
+}
+
+/// Install a template as a normal custom agent (editable and deletable).
+/// Jean stays the only built-in. Jean MCP is left unrestricted.
+pub async fn install_agent_template(
+    app: &AppHandle,
+    template_id: &str,
+) -> Result<db::Agent, String> {
+    let agent = super::with_db(app, |conn| {
+        super::templates::install_template(conn, template_id)
+    })?;
+    settle_agent_update(app, &agent, true).await;
+    super::notify_changed(app);
+    Ok(agent)
+}
+
 pub async fn update_agent(
     app: &AppHandle,
     agent_id: &str,

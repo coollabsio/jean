@@ -19,6 +19,7 @@ import {
   getActiveRemoteConnection,
   getRemoteConnections,
 } from './remote-connections'
+import { getSshTransportEndpoint } from './ssh-tunnel-endpoint'
 import {
   prepareRemoteEditorOpenArgs,
   prepareRemoteTerminalOpenArgs,
@@ -145,6 +146,24 @@ export function convertProjectFileSrc(filePath: string): string {
   return `${base}/api/project-files/${encodeURIComponent(filePath)}${params}`
 }
 
+function remoteHttpEndpoint(
+  connection:
+    | {
+        id: string
+        url: string
+        token: string
+        transport?: string
+      }
+    | null
+    | undefined
+): { url: string; token: string } | null {
+  if (!connection) return null
+  if (connection.transport === 'ssh')
+    return getSshTransportEndpoint(connection.id)
+  if (!connection.url) return null
+  return { url: connection.url, token: connection.token }
+}
+
 /** Build an authenticated file URL for a project owned by a specific server. */
 export function convertServerProjectFileSrc(
   serverId: string | undefined,
@@ -153,10 +172,11 @@ export function convertServerProjectFileSrc(
   if (!serverId || serverId === 'local') return convertProjectFileSrc(filePath)
 
   const connection = getRemoteConnections().find(item => item.id === serverId)
-  if (!connection) return filePath
-  const base = connection.url.replace(/\/+$/, '')
-  const token = connection.token
-    ? `?token=${encodeURIComponent(connection.token)}`
+  const endpoint = remoteHttpEndpoint(connection)
+  if (!endpoint) return filePath
+  const base = endpoint.url.replace(/\/+$/, '')
+  const token = endpoint.token
+    ? `?token=${encodeURIComponent(endpoint.token)}`
     : ''
   return `${base}/api/project-files/${encodeURIComponent(filePath)}${token}`
 }
@@ -169,10 +189,11 @@ export function convertServerFileSrc(
   if (!serverId || serverId === 'local') return convertFileSrc(filePath)
 
   const connection = getRemoteConnections().find(item => item.id === serverId)
-  if (!connection) return filePath
-  const base = connection.url.replace(/\/+$/, '')
-  const token = connection.token
-    ? `?token=${encodeURIComponent(connection.token)}`
+  const endpoint = remoteHttpEndpoint(connection)
+  if (!endpoint) return filePath
+  const base = endpoint.url.replace(/\/+$/, '')
+  const token = endpoint.token
+    ? `?token=${encodeURIComponent(endpoint.token)}`
     : ''
   const encodedPath = /^[/\\]|^[A-Za-z]:[/\\]/.test(filePath)
     ? encodeURIComponent(filePath)
@@ -221,6 +242,17 @@ const DESKTOP_ONLY_COMMANDS = new Set([
   'install_remote_jean_server',
   'list_ssh_config_hosts',
   'test_ssh_connection',
+  'preview_ssh_host_key',
+  'trust_ssh_host_key',
+  'test_ssh_tunnel_auth',
+  'start_ssh_tunnel',
+  'stop_ssh_tunnel',
+  'list_ssh_tunnel_status',
+  'store_ssh_profile_secret',
+  'delete_ssh_profile_secret',
+  'load_ssh_profile_secrets',
+  'ensure_ssh_preview_forward',
+  'release_ssh_preview_forwards',
   'browser_create',
   'browser_navigate',
   'browser_back',
@@ -242,6 +274,9 @@ const DESKTOP_ONLY_COMMANDS = new Set([
 // These commands belong to the local desktop shell even when its application
 // content is connected to a remote Jean backend.
 const LOCAL_SHELL_COMMANDS = new Set([
+  // This installation's UI client id must stay on the desktop, even while the
+  // window is connected to a remote Jean server.
+  'get_native_client_id',
   'set_window_vibrancy',
   'send_native_notification',
   'read_clipboard_image',
@@ -253,6 +288,17 @@ const LOCAL_SHELL_COMMANDS = new Set([
   'install_remote_jean_server',
   'list_ssh_config_hosts',
   'test_ssh_connection',
+  'preview_ssh_host_key',
+  'trust_ssh_host_key',
+  'test_ssh_tunnel_auth',
+  'start_ssh_tunnel',
+  'stop_ssh_tunnel',
+  'list_ssh_tunnel_status',
+  'store_ssh_profile_secret',
+  'delete_ssh_profile_secret',
+  'load_ssh_profile_secrets',
+  'ensure_ssh_preview_forward',
+  'release_ssh_preview_forwards',
   'browser_create',
   'browser_navigate',
   'browser_back',
@@ -417,7 +463,7 @@ async function resolveUploadTarget(
   const remote = serverId
     ? getRemoteConnections().find(connection => connection.id === serverId)
     : getActiveRemoteConnection()
-  return remote ? { url: remote.url, token: remote.token } : null
+  return remoteHttpEndpoint(remote)
 }
 
 /** Invoke through the active transport unless a specific server owns the request. */
@@ -573,10 +619,14 @@ let initialDataResolved = false
  * Build the /api/init URL with the given query params.
  * Centralizes token and selected_project encoding.
  */
-function buildInitUrl(opts: { selectedProjectId?: string | null }): string {
+function buildInitUrl(opts: {
+  selectedProjectId?: string | null
+  clientId: string
+}): string {
   const token = getWebBackendToken()
   const params = new URLSearchParams()
   if (token) params.set('token', token)
+  if (opts.clientId) params.set('client_id', opts.clientId)
   if (opts.selectedProjectId) {
     params.set('selected_project', opts.selectedProjectId)
   }
@@ -594,7 +644,8 @@ function buildInitUrl(opts: { selectedProjectId?: string | null }): string {
  *
  * @param selectedProjectId - Browser's currently-selected project id.
  *   Sent so the server scopes the init payload to just that project's
- *   worktrees/sessions. Falls back to `ui_state.json` on disk when absent.
+ *   worktrees/sessions. When absent, the server uses this client's saved
+ *   project, not another client's navigation snapshot.
  */
 export async function preloadInitialData(
   selectedProjectId?: string | null
@@ -608,7 +659,9 @@ export async function preloadInitialData(
 
   initialDataPromise = (async () => {
     try {
-      const url = buildInitUrl({ selectedProjectId })
+      const { getClientId } = await import('./client-session')
+      const clientId = await getClientId()
+      const url = buildInitUrl({ selectedProjectId, clientId })
       const response = await fetchBackend(url)
       if (!response.ok) {
         return null
@@ -776,7 +829,35 @@ export class WsTransport {
 
   onEstablishedDisconnect(callback: () => void): () => void {
     this._establishedDisconnectListeners.add(callback)
+    // The socket may have dropped before this listener registered (it opens in
+    // parallel with preload). Recover now instead of staying disconnected.
+    if (this.isStuckAfterDisconnect()) callback()
     return () => this._establishedDisconnectListeners.delete(callback)
+  }
+
+  /** An established web-access socket closed and nothing reconnected. Only a
+   *  page reload (the established-disconnect listener) recovers this state. */
+  private isStuckAfterDisconnect(): boolean {
+    return (
+      !this.config &&
+      !isNativeApp() &&
+      this._hasConnectedOnce &&
+      !this._connected &&
+      !this.ws
+    )
+  }
+
+  private notifyEstablishedDisconnect(): void {
+    for (const callback of this._establishedDisconnectListeners) {
+      try {
+        callback()
+      } catch (error) {
+        console.error(
+          '[WsTransport] Established disconnect listener failed:',
+          error
+        )
+      }
+    }
   }
 
   /** Get current connection snapshot for useSyncExternalStore. */
@@ -970,18 +1051,7 @@ export class WsTransport {
     this.ws.onclose = () => {
       const wasConnected = this._connected
 
-      if (wasConnected) {
-        for (const callback of this._establishedDisconnectListeners) {
-          try {
-            callback()
-          } catch (error) {
-            console.error(
-              '[WsTransport] Established disconnect listener failed:',
-              error
-            )
-          }
-        }
-      }
+      if (wasConnected) this.notifyEstablishedDisconnect()
 
       this.clearConnectWatchdog()
       this.stopLivenessTimer()
@@ -1333,6 +1403,13 @@ export class WsTransport {
       return
     }
 
+    // The reload after an established disconnect can be lost while the page
+    // is frozen in the background. Run the recovery again on wake.
+    if (this.isStuckAfterDisconnect()) {
+      console.warn('[WsTransport] Disconnected after wake, recovering')
+      this.notifyEstablishedDisconnect()
+      return
+    }
     // Before the first successful connection, retry immediately on wake.
     if (this._hasConnectedOnce) return
     if (this.connectRetryTimer) {

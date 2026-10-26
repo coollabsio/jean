@@ -12,13 +12,17 @@ vi.mock('./projects', () => ({
 
 import {
   attachSessionReference,
+  filterDiscussions,
   filterIssues,
+  githubItemKey,
   getAdvisoryContextContent,
   isGhAuthError,
   isUnsupportedGitHubRepoError,
+  mergeWithSearchResults,
+  prependExactMatches,
   sessionReferenceSlug,
 } from './github'
-import type { GitHubIssue } from '@/types/github'
+import type { GitHubDiscussion, GitHubIssue } from '@/types/github'
 
 describe('GitHub issue search', () => {
   const issues: GitHubIssue[] = [
@@ -42,10 +46,76 @@ describe('GitHub issue search', () => {
     },
   ]
 
+  it('keeps the same issue number distinct across repositories', () => {
+    const base = issues[0]
+    if (!base) throw new Error('missing issue fixture')
+    const origin: GitHubIssue = {
+      ...base,
+      repo: 'coollabsio/jean',
+      remote: 'origin',
+    }
+    const fork: GitHubIssue = {
+      ...base,
+      title: 'Fork copy',
+      repo: 'octocat/jean',
+      remote: 'fork',
+    }
+    expect(githubItemKey(origin)).not.toBe(githubItemKey(fork))
+    expect(mergeWithSearchResults([origin], [fork, origin])).toEqual([
+      origin,
+      fork,
+    ])
+    expect(prependExactMatches([origin], [fork])).toEqual([fork, origin])
+    expect(filterIssues([origin, fork], 'octocat')).toEqual([fork])
+  })
+
   it('matches issue titles and descriptions', () => {
     expect(filterIssues(issues, 'login fails')).toEqual([issues[0]])
     expect(filterIssues(issues, 'button stays disabled')).toEqual([issues[0]])
     expect(filterIssues(issues, 'project list')).toEqual([issues[1]])
+  })
+})
+
+describe('GitHub discussion search', () => {
+  const discussion = (
+    number: number,
+    title: string,
+    body: string,
+    category: string | null
+  ): GitHubDiscussion => ({
+    number,
+    title,
+    body,
+    url: `https://github.com/o/r/discussions/${number}`,
+    closed: false,
+    isAnswered: false,
+    author: null,
+    category: category ? { name: category, emoji: '' } : null,
+    commentCount: 0,
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+  })
+  const discussions = [
+    discussion(12, 'Roadmap for v2', 'What ships next', 'Ideas'),
+    discussion(34, 'Install fails on Windows', 'PATH error', 'Q&A'),
+    discussion(56, 'Uncategorized thread', 'hello', null),
+  ]
+  const numbers = (query: string) =>
+    filterDiscussions(discussions, query).map(d => d.number)
+
+  it('returns every discussion for a blank query', () => {
+    expect(numbers('  ')).toEqual([12, 34, 56])
+  })
+
+  it('matches number with or without #, title, body, and category', () => {
+    expect(numbers('#34')).toEqual([34])
+    expect(numbers('roadmap')).toEqual([12])
+    expect(numbers('path error')).toEqual([34])
+    expect(numbers('q&a')).toEqual([34])
+  })
+
+  it('skips the category check when a discussion has none', () => {
+    expect(numbers('ideas')).toEqual([12])
   })
 })
 

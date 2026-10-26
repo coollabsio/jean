@@ -14,6 +14,7 @@ pub const APPROVAL_TOOLS: &[&str] = &[
     "push_worktree",
     "merge_pull_request",
     "create_pull_request",
+    "remove_project",
 ];
 
 const AGENT_TOOLS: &[&str] = &[
@@ -30,6 +31,7 @@ const AGENT_TOOLS: &[&str] = &[
     "journal_search",
     "message_agent",
     "notify_user",
+    "ask_user",
     "task_list",
     "list_connectors",
     "agent_list",
@@ -71,6 +73,7 @@ const READ_ONLY_SUBAGENT_TOOLS: &[&str] = &[
 pub const APPROVED_REPLAY_SOURCE: &str = "agent-approval";
 
 const MIN_EVERY_MINUTES: i64 = 5;
+const MAX_QUESTION_OPTIONS: usize = 8;
 const MAX_MINUTES: i64 = 60 * 24 * 30;
 
 pub fn is_agent_tool(name: &str) -> bool {
@@ -223,6 +226,7 @@ fn base_tool_definitions() -> Value {
         {"name":"journal_search","description":"Agent sessions only. Recall your journal by text and/or date, including chats that were archived. from/to are unix seconds on occurred_at. Other agents' journals are not included.","inputSchema":{"type":"object","properties":{"query":{"type":"string"},"from":{"type":"integer"},"to":{"type":"integer"},"limit":{"type":"integer","minimum":1,"maximum":50}},"additionalProperties":false}},
         {"name":"message_agent","description":"Agent sessions only. Send a request to another agent. Its answer arrives automatically as an update message; end your turn after sending.","inputSchema":{"type":"object","properties":{"agentId":{"type":"string"},"message":{"type":"string"}},"required":["agentId","message"],"additionalProperties":false}},
         {"name":"notify_user","description":"Agent sessions only. Tell the user something they must know: a result of a goal, a question, a failure, or a needed decision (level 'action'). Shows on the agent page and as a notification. Not for routine progress.","inputSchema":{"type":"object","properties":{"message":{"type":"string","maxLength":2000},"level":{"type":"string","enum":["info","action","error"]}},"required":["message"],"additionalProperties":false}},
+        {"name":"ask_user","description":"Agent chat sessions only. Ask the user a question that needs a decision. The chat shows it with the options as buttons. multiple false: the user picks one option and it is sent at once. multiple true: the user picks one or more and sends them. The answer arrives as the next user message. End your turn after calling it.","inputSchema":{"type":"object","properties":{"question":{"type":"string","maxLength":500},"options":{"type":"array","items":{"type":"string","maxLength":200},"minItems":2,"maxItems":MAX_QUESTION_OPTIONS},"multiple":{"type":"boolean","description":"Default false."}},"required":["question","options"],"additionalProperties":false}},
         {"name":"task_list","description":"Agent sessions only. List your recent background tasks (schedule runs, follow-ups, agent requests) with status and one-line result.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":50}},"additionalProperties":false}},
         {"name":"list_connectors","description":"Agent sessions only. Read-only. List the MCP connectors saved for this agent, whether a limit is saved, and whether this session's backend can apply that limit. Does not change the limit or sign in.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}}
     ])
@@ -293,6 +297,34 @@ pub(crate) fn timing_from_tool_args(args: &Value, now: i64) -> Result<db::Schedu
         None,
         now,
     )
+}
+
+/// Check an `ask_user` call: a question and 2 to 8 distinct, non-empty options.
+fn question_from_args(args: &Value) -> Result<(String, Vec<String>), String> {
+    let question = required_str(args, "question")?;
+    let options: Vec<String> = args
+        .get("options")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(|s| s.trim().to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    if options.len() < 2 || options.len() > MAX_QUESTION_OPTIONS {
+        return Err(format!("Give 2 to {MAX_QUESTION_OPTIONS} options"));
+    }
+    if options.iter().any(String::is_empty) {
+        return Err("Options cannot be empty".to_string());
+    }
+    let mut unique = options.clone();
+    unique.sort();
+    unique.dedup();
+    if unique.len() != options.len() {
+        return Err("Options must be different".to_string());
+    }
+    Ok((question, options))
 }
 
 fn tool_has_arg(args: &Value, key: &str) -> bool {
@@ -623,6 +655,14 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value, source: &str) -> Res
             );
             json!({ "notificationId": notification.id, "status": "sent" })
         }
+        "ask_user" => {
+            let is_task = super::with_db(app, |conn| db::task_by_session(conn, source))?.is_some();
+            if is_task {
+                return Err("ask_user works only in your chat with the user. In a task session, use notify_user with level 'action'.".to_string());
+            }
+            question_from_args(args)?;
+            json!({ "status": "shown", "note": "The user sees the question with the options. End your turn now. The answer arrives as the next user message." })
+        }
         "task_list" => {
             let limit = int_arg(args, "limit").unwrap_or(20).clamp(1, 50);
             let tasks = super::with_db(app, |conn| db::list_tasks(conn, &agent.id, limit))?;
@@ -869,6 +909,26 @@ mod tests {
             assert!(!is_agent_tool(tool));
         }
         assert!(is_agent_tool("spawn_subagent"));
+    }
+
+    #[test]
+    fn ask_user_needs_two_to_eight_distinct_options() {
+        let ok = question_from_args(&json!({ "question": "Which?", "options": ["A", " B "] }));
+        assert_eq!(
+            ok.unwrap(),
+            ("Which?".to_string(), vec!["A".to_string(), "B".to_string()])
+        );
+        for options in [
+            json!(["A"]),
+            json!(["A", "A"]),
+            json!(["A", " "]),
+            json!(["1", "2", "3", "4", "5", "6", "7", "8", "9"]),
+        ] {
+            assert!(
+                question_from_args(&json!({ "question": "Which?", "options": options })).is_err()
+            );
+        }
+        assert!(question_from_args(&json!({ "options": ["A", "B"] })).is_err());
     }
 
     #[test]

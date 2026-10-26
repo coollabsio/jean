@@ -8,6 +8,11 @@ import {
   Trash2,
 } from '@/components/icons/reicon'
 import { Button } from '@/components/ui/button'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
@@ -300,42 +305,60 @@ function ScheduleRow({
         </p>
       </div>
       <div className="flex shrink-0 gap-0.5 text-muted-foreground">
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          aria-label={schedule.paused ? 'Resume routine' : 'Pause routine'}
-          title={schedule.paused ? 'Resume' : 'Pause'}
-          disabled={update.isPending}
-          onClick={() =>
-            update.mutate(
-              { agentId, scheduleId: schedule.id, paused: !schedule.paused },
-              { onError }
-            )
-          }
-        >
-          {schedule.paused ? <Play /> : <PauseCircle />}
-        </Button>
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          aria-label="Edit routine"
-          title="Edit"
-          onClick={() => onEdit(schedule)}
-        >
-          <Pencil />
-        </Button>
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          aria-label="Delete routine"
-          title="Delete"
-          disabled={cancel.isPending}
-          onClick={() =>
-            cancel.mutate({ agentId, scheduleId: schedule.id }, { onError })
-          }
-        >
-          <Trash2 />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-label={schedule.paused ? 'Resume routine' : 'Pause routine'}
+              disabled={update.isPending}
+              onClick={() =>
+                update.mutate(
+                  {
+                    agentId,
+                    scheduleId: schedule.id,
+                    paused: !schedule.paused,
+                  },
+                  { onError }
+                )
+              }
+            >
+              {schedule.paused ? <Play /> : <PauseCircle />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {schedule.paused ? 'Resume' : 'Pause'}
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-label="Edit routine"
+              onClick={() => onEdit(schedule)}
+            >
+              <Pencil />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Edit</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-label="Delete routine"
+              disabled={cancel.isPending}
+              onClick={() =>
+                cancel.mutate({ agentId, scheduleId: schedule.id }, { onError })
+              }
+            >
+              <Trash2 />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Delete</TooltipContent>
+        </Tooltip>
       </div>
     </li>
   )

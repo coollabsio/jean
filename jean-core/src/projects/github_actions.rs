@@ -48,6 +48,17 @@ pub async fn list_workflow_runs(
 ) -> Result<WorkflowRunsResult, String> {
     log::trace!("Listing workflow runs for {project_path} with branch: {branch:?}");
 
+    // GitHub Actions has no GitLab equivalent here. Return an empty list instead
+    // of running `gh run list` against a GitLab project.
+    if crate::projects::provider::resolve_git_provider(&project_path).0
+        == crate::projects::provider::GitProvider::Gitlab
+    {
+        return Ok(WorkflowRunsResult {
+            runs: Vec::new(),
+            failed_count: 0,
+        });
+    }
+
     let gh = resolve_gh_binary(&app);
 
     let mut args = vec![

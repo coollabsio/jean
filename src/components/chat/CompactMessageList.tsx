@@ -55,6 +55,13 @@ import {
 } from './tool-call-utils'
 import { MessageTiming } from './MessageTiming'
 import { getAssistantDurationMs } from './time-utils'
+import { AgentApprovalInline } from '@/components/agents/AgentActivity'
+import { AgentMessageLinkRow } from '@/components/agents/AgentMessageLink'
+import { AgentQuestionCard } from '@/components/agents/AgentQuestionCard'
+import {
+  assistantReplyItems,
+  nextUserAnswers,
+} from '@/components/agents/agent-messages'
 import {
   TOOL_CALL_ROW_CLASS,
   TOOL_CALL_DETAIL_PILL_CLASS,
@@ -126,6 +133,8 @@ interface CompactMessageListProps {
   onShowHiddenPrompts?: () => void
   /** Show only assistant prose: no tool activity rows or edited files */
   hideToolActivity?: boolean
+  /** Sends a user message to this session (answers to `ask_user` questions) */
+  onSendAnswer?: (text: string) => void
 }
 
 type RenderItem =
@@ -515,15 +524,20 @@ const CompactActivityRow = memo(function CompactActivityRow({
       </div>
       {(groupTiming != null || hasCancelledMessage) && (
         <div className="mt-1 flex min-h-4 items-center gap-2 text-xs leading-4 text-muted-foreground/40">
-          {groupTiming != null && (
+          {groupTiming != null ? (
             <span className="tabular-nums font-mono">
               <MessageTiming
                 durationMs={groupTiming.durationMs}
                 timestamp={groupTiming.timestamp}
-              />
+              >
+                {hasCancelledMessage && (
+                  <span className="ml-2 font-sans italic text-muted-foreground/50">
+                    (cancelled)
+                  </span>
+                )}
+              </MessageTiming>
             </span>
-          )}
-          {hasCancelledMessage && (
+          ) : (
             <span className="italic text-muted-foreground/50">(cancelled)</span>
           )}
         </div>
@@ -749,6 +763,7 @@ export const CompactMessageList = memo(
         hiddenPromptCount = 0,
         onShowHiddenPrompts,
         hideToolActivity = false,
+        onSendAnswer,
       },
       ref
     ) {
@@ -792,6 +807,11 @@ export const CompactMessageList = memo(
         }
         return map
       }, [messages])
+
+      const userAnswers = useMemo(
+        () => (hideToolActivity ? nextUserAnswers(messages) : []),
+        [hideToolActivity, messages]
+      )
 
       const hasFollowUpFor = useCallback(
         (globalIndex: number) => hasFollowUpMap.get(globalIndex) ?? false,
@@ -1275,15 +1295,49 @@ export const CompactMessageList = memo(
             }
 
             if (hideToolActivity) {
-              const parts = collectAssistantText(item.messages)
-              if (parts.length === 0) return null
+              // Messages to other agents or sessions, approvals, and questions: one row each
+              const replyItems = assistantReplyItems(item.messages)
+              if (replyItems.length === 0) return null
               return (
-                <div key={item.key} className="pb-4">
-                  <ReplyBubbles
-                    parts={parts}
-                    messageId={item.key}
-                    sessionId={sessionId}
-                  />
+                <div key={item.key} className="flex flex-col gap-1.5 pb-4">
+                  {replyItems.map((reply, index) =>
+                    reply.type === 'text' ? (
+                      <ReplyBubbles
+                        key={`text-${index}`}
+                        parts={reply.texts}
+                        messageId={
+                          index === 0 ? item.key : `${item.key}:group${index}`
+                        }
+                        sessionId={sessionId}
+                      />
+                    ) : reply.type === 'question' ? (
+                      <AgentQuestionCard
+                        key={reply.toolId}
+                        question={reply.question}
+                        answer={
+                          userAnswers[
+                            item.messages[item.messages.length - 1]
+                              ?.globalIndex ?? -1
+                          ]
+                        }
+                        disabled={isSending}
+                        onSend={onSendAnswer}
+                      />
+                    ) : reply.type === 'approval' ? (
+                      <AgentApprovalInline
+                        key={reply.toolId}
+                        approvalId={reply.approvalId}
+                        worktreeId={worktreeId}
+                      />
+                    ) : (
+                      <AgentMessageLinkRow
+                        key={reply.link.toolId}
+                        link={reply.link}
+                        sentAt={reply.sentAt}
+                        worktreeId={worktreeId}
+                      />
+                    )
+                  )}
                 </div>
               )
             }

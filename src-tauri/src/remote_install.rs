@@ -34,6 +34,21 @@ pub struct InstallRemoteInput {
     pub jean_port: Option<u16>,
     /// Force user-level install (no sudo). When None, try system then user.
     pub user_install: Option<bool>,
+    /// Install loopback-only and let the desktop open an SSH tunnel.
+    #[serde(default)]
+    pub via_tunnel: Option<bool>,
+    /// Skip the "reuse existing token" short circuit and reinstall.
+    #[serde(default)]
+    pub force_install: Option<bool>,
+    #[serde(default)]
+    pub host_key_fingerprint: Option<String>,
+    #[serde(default)]
+    pub identity_file: Option<String>,
+    /// Jean-owned known_hosts path. Set by the desktop command, not the webview.
+    #[serde(default)]
+    pub known_hosts_file: Option<String>,
+    #[serde(default)]
+    pub profile_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -46,6 +61,50 @@ pub struct InstallRemoteResult {
     pub install_mode: String,
     pub ready: bool,
     pub log: String,
+    /// `direct` keeps the public URL. `ssh` means readiness is through a tunnel.
+    pub transport: String,
+    #[serde(default)]
+    pub local_url: Option<String>,
+    #[serde(default)]
+    pub host_key_fingerprint: Option<String>,
+    #[serde(default)]
+    pub token_stored: bool,
+    #[serde(default)]
+    pub profile_id: Option<String>,
+    /// Token is present for the desktop command to store; the command clears it
+    /// before the value reaches the webview when `token_stored` is set.
+    #[serde(default)]
+    pub pending_tunnel: bool,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn install_result(
+    name: String,
+    url: String,
+    token: String,
+    already_installed: bool,
+    install_mode: String,
+    ready: bool,
+    log: String,
+    transport: &str,
+    pending_tunnel: bool,
+) -> InstallRemoteResult {
+    let log = crate::ssh_tunnel::redact(&log, &token);
+    InstallRemoteResult {
+        name,
+        url,
+        token,
+        already_installed,
+        install_mode,
+        ready,
+        log,
+        transport: transport.to_string(),
+        local_url: None,
+        host_key_fingerprint: None,
+        token_stored: false,
+        profile_id: None,
+        pending_tunnel,
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -156,15 +215,81 @@ fn emit_progress(app: &AppHandle, step: &str, message: &str) {
 }
 
 fn silent_ssh_command() -> Command {
-    #[allow(unused_mut)]
-    let mut cmd = Command::new("ssh");
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
+    jean_core::silent_command("ssh")
+}
+
+#[derive(Clone)]
+struct SshClientOptions {
+    known_hosts_file: Option<std::path::PathBuf>,
+    identity_file: Option<std::path::PathBuf>,
+    strict_host_keys: bool,
+}
+
+impl SshClientOptions {
+    fn legacy() -> Self {
+        Self {
+            known_hosts_file: None,
+            identity_file: None,
+            strict_host_keys: false,
+        }
     }
-    cmd
+}
+
+fn apply_ssh_client_options(cmd: &mut Command, ssh_port: u16, options: &SshClientOptions) {
+    cmd.arg("-o").arg("BatchMode=yes");
+    cmd.arg("-o").arg("PasswordAuthentication=no");
+    cmd.arg("-o").arg("KbdInteractiveAuthentication=no");
+    cmd.arg("-o").arg("PreferredAuthentications=publickey");
+    cmd.arg("-o").arg("ForwardAgent=no");
+    cmd.arg("-o")
+        .arg(format!("ConnectTimeout={SSH_CONNECT_TIMEOUT_SECS}"));
+    if options.strict_host_keys {
+        let Some(file) = options.known_hosts_file.as_ref() else {
+            cmd.arg("-o").arg("StrictHostKeyChecking=yes");
+            cmd.arg("-p").arg(ssh_port.to_string());
+            return;
+        };
+        cmd.arg("-o").arg("StrictHostKeyChecking=yes");
+        cmd.arg("-o").arg("UpdateHostKeys=no");
+        cmd.arg("-o").arg(known_hosts_option(file));
+        cmd.arg("-o").arg(format!(
+            "GlobalKnownHostsFile={}",
+            if cfg!(windows) { "NUL" } else { "/dev/null" }
+        ));
+    } else {
+        cmd.arg("-o").arg("StrictHostKeyChecking=accept-new");
+    }
+    if let Some(identity) = &options.identity_file {
+        cmd.arg("-o").arg("IdentitiesOnly=yes");
+        cmd.arg("-i").arg(identity);
+    }
+    cmd.arg("-p").arg(ssh_port.to_string());
+}
+
+fn known_hosts_option(path: &std::path::Path) -> String {
+    let text = path.to_string_lossy().replace('\\', "/");
+    let value = if text.contains(' ') || text.contains('"') {
+        format!("\"{}\"", text.replace('"', "\\\""))
+    } else {
+        text
+    };
+    format!("UserKnownHostsFile={value}")
+}
+
+fn ssh_failure(error: std::io::Error) -> String {
+    if error.kind() == std::io::ErrorKind::NotFound {
+        "ssh is not installed on this computer. Install OpenSSH client and try again.".to_string()
+    } else {
+        format!("Failed to run ssh: {error}")
+    }
+}
+
+fn command_output(output: std::process::Output) -> (i32, String, String) {
+    (
+        output.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
 }
 
 fn run_ssh(
@@ -172,46 +297,67 @@ fn run_ssh(
     host: &str,
     ssh_port: u16,
     remote_cmd: &str,
+    options: &SshClientOptions,
 ) -> Result<(i32, String, String), String> {
     let target = format!("{user}@{host}");
-    let output = silent_ssh_command()
-        .args([
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "StrictHostKeyChecking=accept-new",
-            "-o",
-            "PasswordAuthentication=no",
-            "-o",
-            &format!("ConnectTimeout={SSH_CONNECT_TIMEOUT_SECS}"),
-            "-p",
-            &ssh_port.to_string(),
-            &target,
-            remote_cmd,
-        ])
+    let mut cmd = silent_ssh_command();
+    apply_ssh_client_options(&mut cmd, ssh_port, options);
+    let output = cmd
+        .arg(&target)
+        .arg(remote_cmd)
         .output()
-        .map_err(|error| {
-            if error.kind() == std::io::ErrorKind::NotFound {
-                "ssh is not installed on this computer. Install OpenSSH client and try again."
-                    .to_string()
-            } else {
-                format!("Failed to run ssh: {error}")
-            }
-        })?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-    let code = output.status.code().unwrap_or(-1);
-    Ok((code, stdout, stderr))
+        .map_err(ssh_failure)?;
+    Ok(command_output(output))
 }
 
-fn run_ssh_ok(user: &str, host: &str, ssh_port: u16, remote_cmd: &str) -> Result<String, String> {
-    let (code, stdout, stderr) = run_ssh(user, host, ssh_port, remote_cmd)?;
+/// Run a bash script on stdin so the install token is not in the local argv.
+fn run_ssh_script(
+    user: &str,
+    host: &str,
+    ssh_port: u16,
+    script: &str,
+    options: &SshClientOptions,
+) -> Result<(i32, String, String), String> {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let target = format!("{user}@{host}");
+    let mut cmd = silent_ssh_command();
+    apply_ssh_client_options(&mut cmd, ssh_port, options);
+    let mut child = cmd
+        .arg(&target)
+        .arg("bash")
+        .arg("-s")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(ssh_failure)?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(script.as_bytes())
+            .map_err(|error| format!("Failed to send the install script: {error}"))?;
+    }
+    let output = child
+        .wait_with_output()
+        .map_err(|error| format!("Failed to finish ssh: {error}"))?;
+    Ok(command_output(output))
+}
+
+fn run_ssh_ok(
+    user: &str,
+    host: &str,
+    ssh_port: u16,
+    remote_cmd: &str,
+    options: &SshClientOptions,
+) -> Result<String, String> {
+    let (code, stdout, stderr) = run_ssh(user, host, ssh_port, remote_cmd, options)?;
     if code != 0 {
         let detail = [stderr.trim(), stdout.trim()]
             .into_iter()
             .find(|s| !s.is_empty())
             .unwrap_or("unknown ssh error");
+        let detail = crate::ssh_tunnel::redact(detail, "");
         return Err(format!("SSH command failed (exit {code}): {detail}"));
     }
     Ok(stdout)
@@ -474,7 +620,13 @@ pub fn test_ssh_connection(
     let ssh_port = ssh_port.unwrap_or(DEFAULT_SSH_PORT);
     validate_port(ssh_port, "SSH port")?;
 
-    let stdout = run_ssh_ok(user, host, ssh_port, "echo JEAN_SSH_OK && uname -sm")?;
+    let stdout = run_ssh_ok(
+        user,
+        host,
+        ssh_port,
+        "echo JEAN_SSH_OK && uname -sm",
+        &SshClientOptions::legacy(),
+    )?;
     parse_ssh_test_output(&stdout)
 }
 
@@ -670,17 +822,22 @@ fn wait_until_ready(app: &AppHandle, url: &str, token: &str) -> Result<(), Strin
     ))
 }
 
-fn try_read_existing_token(user: &str, host: &str, ssh_port: u16) -> Option<(String, String)> {
+fn try_read_existing_token(
+    user: &str,
+    host: &str,
+    ssh_port: u16,
+    options: &SshClientOptions,
+) -> Option<(String, String)> {
     // Prefer system env, then user env.
     let system_cmd = "sudo -n cat /etc/jean-server.env 2>/dev/null || true";
-    if let Ok(body) = run_ssh_ok(user, host, ssh_port, system_cmd) {
+    if let Ok(body) = run_ssh_ok(user, host, ssh_port, system_cmd, options) {
         if let Some(token) = parse_env_token(&body) {
             return Some((token, "system".to_string()));
         }
     }
 
     let user_cmd = "cat \"$HOME/.config/jean-server/jean-server.env\" 2>/dev/null || true";
-    if let Ok(body) = run_ssh_ok(user, host, ssh_port, user_cmd) {
+    if let Ok(body) = run_ssh_ok(user, host, ssh_port, user_cmd, options) {
         if let Some(token) = parse_env_token(&body) {
             return Some((token, "user".to_string()));
         }
@@ -695,6 +852,7 @@ fn set_existing_server_name(
     ssh_port: u16,
     mode: &str,
     name: &str,
+    options: &SshClientOptions,
 ) -> Result<(), String> {
     let name = shell_escape(name);
     let command = if mode == "system" {
@@ -706,16 +864,24 @@ fn set_existing_server_name(
             "sed -i '/^JEAN_SERVER_NAME=/d' \"$HOME/.config/jean-server/jean-server.env\" && printf '%s\\n' {name} | sed 's/^/JEAN_SERVER_NAME=/' >> \"$HOME/.config/jean-server/jean-server.env\" && systemctl --user restart jean-server"
         )
     };
-    run_ssh_ok(user, host, ssh_port, &command).map(|_| ())
+    run_ssh_ok(user, host, ssh_port, &command, options).map(|_| ())
 }
 
 /// Build the remote bash install script.
-pub fn build_install_remote_script(jean_port: u16, user_install: bool, name: &str) -> String {
+pub fn build_install_remote_script(
+    jean_port: u16,
+    user_install: bool,
+    name: &str,
+    bind_host: &str,
+) -> String {
     let name_arg = format!(" --name {}", shell_escape(name));
+    let bind_host = shell_escape(bind_host);
     let install_args = if user_install {
-        format!("--user-install --host 0.0.0.0 --port {jean_port} --token \"$TOKEN\"{name_arg} -y")
+        format!(
+            "--user-install --host {bind_host} --port {jean_port} --token \"$TOKEN\"{name_arg} -y"
+        )
     } else {
-        format!("--host 0.0.0.0 --port {jean_port} --token \"$TOKEN\"{name_arg} -y")
+        format!("--host {bind_host} --port {jean_port} --token \"$TOKEN\"{name_arg} -y")
     };
     let sudo_prefix = if user_install {
         String::new()
@@ -724,8 +890,8 @@ pub fn build_install_remote_script(jean_port: u16, user_install: bool, name: &st
     };
     let script_url = shell_escape(INSTALL_SCRIPT_URL);
 
-    // Bind 0.0.0.0 so the desktop client can reach the server by the host/IP
-    // the user entered. Token auth stays required.
+    // Direct installs bind every interface. SSH-tunnel installs pass 127.0.0.1
+    // so the server stays loopback-only and the desktop reaches it through ssh -L.
     format!(
         r#"set -euo pipefail
 if ! command -v curl >/dev/null 2>&1; then
@@ -749,6 +915,7 @@ curl -fsSL {script_url} | {sudo_prefix}bash -s -- {install_args}
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_install(
     app: &AppHandle,
     user: &str,
@@ -757,6 +924,8 @@ fn run_install(
     jean_port: u16,
     force_user_install: Option<bool>,
     name: &str,
+    bind_host: &str,
+    options: &SshClientOptions,
 ) -> Result<(String, String, String), String> {
     let mut log = String::new();
     let modes: Vec<(bool, &str)> = match force_user_install {
@@ -772,18 +941,20 @@ fn run_install(
             "install",
             &format!("Installing jean-server ({mode_name} install)…"),
         );
-        let script = build_install_remote_script(jean_port, user_install, name);
-        let (code, stdout, stderr) = run_ssh(user, host, ssh_port, &script)?;
+        let script = build_install_remote_script(jean_port, user_install, name, bind_host);
+        let (code, stdout, stderr) = run_ssh_script(user, host, ssh_port, &script, options)?;
         log.push_str(&format!("--- {mode_name} install ---\n"));
-        if !stdout.is_empty() {
-            log.push_str(&stdout);
-            if !stdout.ends_with('\n') {
+        let safe_stdout = crate::ssh_tunnel::redact(&stdout, "");
+        let safe_stderr = crate::ssh_tunnel::redact(&stderr, "");
+        if !safe_stdout.is_empty() {
+            log.push_str(&safe_stdout);
+            if !safe_stdout.ends_with('\n') {
                 log.push('\n');
             }
         }
-        if !stderr.is_empty() {
-            log.push_str(&stderr);
-            if !stderr.ends_with('\n') {
+        if !safe_stderr.is_empty() {
+            log.push_str(&safe_stderr);
+            if !safe_stderr.ends_with('\n') {
                 log.push('\n');
             }
         }
@@ -797,12 +968,15 @@ fn run_install(
             return Ok((token, mode_name.to_string(), log));
         }
 
-        last_error = format!(
-            "{mode_name} install failed (exit {code}): {}",
-            [stderr.trim(), stdout.trim()]
-                .into_iter()
-                .find(|s| !s.is_empty())
-                .unwrap_or("no output")
+        last_error = crate::ssh_tunnel::redact(
+            &format!(
+                "{mode_name} install failed (exit {code}): {}",
+                [stderr.trim(), stdout.trim()]
+                    .into_iter()
+                    .find(|s| !s.is_empty())
+                    .unwrap_or("no output")
+            ),
+            "",
         );
 
         // If system install failed because sudo needs a password, try user install.
@@ -846,7 +1020,29 @@ pub fn install_remote_jean_server(
         .unwrap_or(&host)
         .to_string();
 
+    let via_tunnel = input.via_tunnel.unwrap_or(false);
+    let force_install = input.force_install.unwrap_or(false);
+    let ssh_options = if via_tunnel {
+        let known_hosts = input
+            .known_hosts_file
+            .clone()
+            .ok_or_else(|| "Trust the SSH host key before installing over a tunnel.".to_string())?;
+        SshClientOptions {
+            known_hosts_file: Some(std::path::PathBuf::from(known_hosts)),
+            identity_file: input
+                .identity_file
+                .as_ref()
+                .map(|path| std::path::PathBuf::from(path.trim()))
+                .filter(|path| !path.as_os_str().is_empty()),
+            strict_host_keys: true,
+        }
+    } else {
+        SshClientOptions::legacy()
+    };
+    let bind_host = if via_tunnel { "127.0.0.1" } else { "0.0.0.0" };
+
     // The SSH target may be an ssh config alias; the HTTP URL needs the real host.
+    // Tunnel installs never use this URL for traffic.
     let url_host = resolve_ssh_hostname(&user, &host, ssh_port).unwrap_or_else(|| host.clone());
     let url = build_web_access_url(&url_host, jean_port);
     let mut log = String::new();
@@ -857,7 +1053,14 @@ pub fn install_remote_jean_server(
         "ssh",
         &format!("Connecting via SSH to {user}@{host}:{ssh_port}…"),
     );
-    run_ssh_ok(&user, &host, ssh_port, "echo JEAN_SSH_OK && uname -s").map_err(|e| {
+    run_ssh_ok(
+        &user,
+        &host,
+        ssh_port,
+        "echo JEAN_SSH_OK && uname -s",
+        &ssh_options,
+    )
+    .map_err(|e| {
         format!(
             "{e}\n\nMake sure:\n\
              • SSH key auth works for {user}@{host} (password login is not supported)\n\
@@ -867,25 +1070,31 @@ pub fn install_remote_jean_server(
     })?;
     log.push_str("SSH connection OK\n");
 
-    // 2) Reuse existing install if already ready
+    // 2) Reuse existing install when it is already reachable.
     emit_progress(&app, "probe", "Checking for an existing jean-server…");
-    if let Some((token, mode)) = try_read_existing_token(&user, &host, ssh_port) {
-        log.push_str(&format!("Found existing env token ({mode})\n"));
-        if check_remote_ready(&url, &token).is_ok() {
-            set_existing_server_name(&user, &host, ssh_port, &mode, &name)?;
-            wait_until_ready(&app, &url, &token)?;
-            emit_progress(&app, "done", "Existing jean-server is ready.");
-            return Ok(InstallRemoteResult {
-                name,
-                url,
-                token,
-                already_installed: true,
-                install_mode: mode,
-                ready: true,
-                log,
-            });
+    if !force_install {
+        if let Some((token, mode)) = try_read_existing_token(&user, &host, ssh_port, &ssh_options) {
+            log.push_str(&format!("Found existing env token ({mode})\n"));
+            if via_tunnel {
+                emit_progress(
+                    &app,
+                    "tunnel",
+                    "Existing jean-server found. Opening the SSH tunnel…",
+                );
+                return Ok(install_result(
+                    name, url, token, true, mode, false, log, "ssh", true,
+                ));
+            }
+            if check_remote_ready(&url, &token).is_ok() {
+                set_existing_server_name(&user, &host, ssh_port, &mode, &name, &ssh_options)?;
+                wait_until_ready(&app, &url, &token)?;
+                emit_progress(&app, "done", "Existing jean-server is ready.");
+                return Ok(install_result(
+                    name, url, token, true, mode, true, log, "direct", false,
+                ));
+            }
+            log.push_str("Existing install found but not reachable yet; reinstalling…\n");
         }
-        log.push_str("Existing install found but not reachable yet; reinstalling…\n");
     }
 
     // 3) Install
@@ -897,28 +1106,37 @@ pub fn install_remote_jean_server(
         jean_port,
         input.user_install,
         &name,
+        bind_host,
+        &ssh_options,
     )?;
     log.push_str(&install_log);
 
-    // 4) Wait until healthy from this client
+    if via_tunnel {
+        emit_progress(
+            &app,
+            "tunnel",
+            "jean-server is installed on 127.0.0.1. Opening the SSH tunnel…",
+        );
+        return Ok(install_result(
+            name, url, token, false, mode, false, log, "ssh", true,
+        ));
+    }
+
+    // 4) Wait until healthy from this client (direct URL only).
     emit_progress(&app, "health", "Waiting for jean-server to become ready…");
     wait_until_ready(&app, &url, &token).map_err(|e| {
+        let safe_log = crate::ssh_tunnel::redact(&log, &token);
+        let safe_error = crate::ssh_tunnel::redact(&e, &token);
         format!(
-            "{e}\n\nInstall finished, but this computer cannot reach {url}.\n\
-             Check firewall rules for port {jean_port} and that the host IP is correct.\n\n{log}"
+            "{safe_error}\n\nInstall finished, but this computer cannot reach {url}.\n\
+             Check firewall rules for port {jean_port} and that the host IP is correct.\n\n{safe_log}"
         )
     })?;
 
     emit_progress(&app, "done", "Remote jean-server is ready.");
-    Ok(InstallRemoteResult {
-        name,
-        url,
-        token,
-        already_installed: false,
-        install_mode: mode,
-        ready: true,
-        log,
-    })
+    Ok(install_result(
+        name, url, token, false, mode, true, log, "direct", false,
+    ))
 }
 
 #[cfg(test)]
@@ -970,19 +1188,21 @@ JEAN_INSTALL_TOKEN=abc123+/=
 
     #[test]
     fn install_script_includes_flags() {
-        let system = build_install_remote_script(3456, false, "Dev Server");
+        let system = build_install_remote_script(3456, false, "Dev Server", "0.0.0.0");
         assert!(system.contains("sudo -n"));
-        assert!(system.contains("--host 0.0.0.0"));
+        assert!(system.contains("--host '0.0.0.0'"));
         assert!(system.contains("--port 3456"));
         assert!(system.contains("--name 'Dev Server'"));
         assert!(system.contains("JEAN_INSTALL_TOKEN="));
         assert!(!system.contains("--user-install"));
         assert!(system.contains(INSTALL_SCRIPT_URL));
 
-        let user = build_install_remote_script(4000, true, "Dev Server");
+        let user = build_install_remote_script(4000, true, "Dev Server", "127.0.0.1");
         assert!(user.contains("--user-install"));
+        assert!(user.contains("--host '127.0.0.1'"));
         assert!(user.contains("--port 4000"));
         assert!(!user.contains("sudo -n"));
+        assert!(!user.contains("0.0.0.0"));
     }
 
     #[test]

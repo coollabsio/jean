@@ -738,6 +738,37 @@ describe('transport bootstrap', () => {
     expect(ws.close).toHaveBeenCalledTimes(1)
   })
 
+  it('recovers on wake when an established socket closed without a reload', async () => {
+    Object.defineProperty(document, 'hidden', {
+      configurable: true,
+      value: false,
+    })
+    const transport = await loadTransportModule()
+    transport.connectTransport()
+    await flushAsync()
+    const recover = vi.fn()
+    transport.onEstablishedWsDisconnect(recover)
+
+    getWs(0).close()
+    expect(recover).toHaveBeenCalledTimes(1)
+
+    // The reload did not happen (page frozen). Wake must recover again.
+    window.dispatchEvent(new Event('pageshow'))
+    expect(recover).toHaveBeenCalledTimes(2)
+  })
+
+  it('recovers at once when the listener registers after the socket dropped', async () => {
+    const transport = await loadTransportModule()
+    transport.connectTransport()
+    await flushAsync()
+
+    getWs(0).close()
+    const recover = vi.fn()
+    transport.onEstablishedWsDisconnect(recover)
+
+    expect(recover).toHaveBeenCalledTimes(1)
+  })
+
   it('uses extended timeout for terminal lifecycle commands', async () => {
     vi.useFakeTimers()
     const transport = await loadTransportModule()

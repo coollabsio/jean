@@ -31,6 +31,17 @@ pub struct BrowserClosedEvent {
     pub tab_id: String,
 }
 
+/// `window.open` / `target=_blank` should become a tab in the source pane.
+///
+/// `url` is an http(s) address. An empty string asks the pane for a blank tab
+/// (`window.open()` / `about:blank`).
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserNewWindowEvent {
+    pub tab_id: String,
+    pub url: String,
+}
+
 #[derive(Clone, Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BrowserGrabContext {

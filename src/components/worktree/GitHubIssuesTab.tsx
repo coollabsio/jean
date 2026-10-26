@@ -5,7 +5,11 @@ import {
   RefreshCw,
   AlertCircle,
 } from '@/components/icons/reicon'
-import { isGhAuthError } from '@/services/github'
+import { githubItemKey, isGhAuthError } from '@/services/github'
+import {
+  isSameGitHubCreateTarget,
+  reusesPrimaryGitHubSource,
+} from '@/lib/remote-worktree-sources'
 import { GhAuthError } from '@/components/shared/GhAuthError'
 import { isGlabAuthError } from '@/services/glab-cli'
 import { GlabAuthError } from '@/components/shared/GlabAuthError'
@@ -45,6 +49,10 @@ export interface GitHubIssuesTabProps {
   onBulkInvestigateIssues?: (issues: GitHubIssue[]) => void | Promise<void>
   onPreviewIssue: (issue: GitHubIssue) => void
   creatingFromNumber: number | null
+  creatingFromRepo?: string | null
+  showSource?: boolean
+  hasMultipleGitHubRemotes?: boolean
+  primaryGitHubRemote?: string | null
   isBulkInvestigating?: boolean
   searchInputRef: React.RefObject<HTMLInputElement | null>
   onLogin: () => void
@@ -59,7 +67,7 @@ export interface GitHubIssuesTabProps {
   getContextMatches?: GetContextLinkMatches
 }
 
-const getIssueKey = (issue: GitHubIssue) => issue.number
+const getIssueKey = (issue: GitHubIssue) => githubItemKey(issue)
 
 export function GitHubIssuesTab({
   searchQuery,
@@ -79,6 +87,10 @@ export function GitHubIssuesTab({
   onBulkInvestigateIssues,
   onPreviewIssue,
   creatingFromNumber,
+  creatingFromRepo = null,
+  showSource = false,
+  hasMultipleGitHubRemotes = false,
+  primaryGitHubRemote = null,
   isBulkInvestigating = false,
   searchInputRef,
   onLogin,
@@ -236,23 +248,38 @@ export function GitHubIssuesTab({
 
         {!isLoading && !error && issues.length > 0 && (
           <div>
-            {issues.map((issue, index) => (
-              <IssueItem
-                key={issue.number}
-                issue={issue}
-                index={index}
-                isSelected={index === selectedIndex}
-                isCreating={creatingFromNumber === issue.number}
-                contextMatches={matchesByNumber.get(issue.number)}
-                isChecked={multi.isChecked(issue.number)}
-                onCheckedChange={checked => multi.toggle(issue.number, checked)}
-                onMouseEnter={() => setSelectedIndex(index)}
-                onClick={bg => onSelectIssue(issue, bg)}
-                onInvestigate={bg => onInvestigateIssue(issue, bg)}
-                onPreview={() => onPreviewIssue(issue)}
-                onLabelClick={handleLabelClick}
-              />
-            ))}
+            {issues.map((issue, index) => {
+              const key = githubItemKey(issue)
+              const showExisting = reusesPrimaryGitHubSource(
+                issue,
+                hasMultipleGitHubRemotes,
+                primaryGitHubRemote
+              )
+              return (
+                <IssueItem
+                  key={key}
+                  issue={issue}
+                  index={index}
+                  isSelected={index === selectedIndex}
+                  isCreating={isSameGitHubCreateTarget(
+                    issue,
+                    creatingFromNumber,
+                    creatingFromRepo
+                  )}
+                  contextMatches={
+                    showExisting ? matchesByNumber.get(issue.number) : undefined
+                  }
+                  isChecked={multi.isChecked(key)}
+                  onCheckedChange={checked => multi.toggle(key, checked)}
+                  onMouseEnter={() => setSelectedIndex(index)}
+                  onClick={bg => onSelectIssue(issue, bg)}
+                  onInvestigate={bg => onInvestigateIssue(issue, bg)}
+                  onPreview={() => onPreviewIssue(issue)}
+                  onLabelClick={handleLabelClick}
+                  showSource={showSource}
+                />
+              )
+            })}
             {isSearching && (
               <div className="flex items-center justify-center py-2">
                 <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />

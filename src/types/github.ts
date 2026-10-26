@@ -19,6 +19,10 @@ export interface GitHubIssue {
   labels: GitHubLabel[]
   created_at: string
   author: GitHubAuthor
+  /** `owner/name` when the issue was listed from a linked GitHub remote. */
+  repo?: string
+  /** Git remote that points at `repo`. */
+  remote?: string
 }
 
 export interface GitHubIssueListResult {
@@ -53,6 +57,8 @@ export interface IssueContext {
   title: string
   body?: string
   comments: IssueComment[]
+  /** `owner/name` of the repository this issue belongs to. */
+  repo?: string
 }
 
 /**
@@ -81,6 +87,10 @@ export interface GitHubPullRequest {
   created_at: string // From GitHub API (snake_case)
   author: GitHubAuthor
   labels: GitHubLabel[]
+  /** `owner/name` when the pull request was listed from a linked GitHub remote. */
+  repo?: string
+  /** Git remote that points at `repo`. */
+  remote?: string
 }
 
 export interface GitHubReview {
@@ -123,6 +133,8 @@ export interface PullRequestContext {
   comments: IssueComment[]
   reviews: GitHubReview[]
   diff?: string
+  /** `owner/name` of the repository this pull request belongs to. */
+  repo?: string
 }
 
 /**
@@ -230,6 +242,57 @@ export interface LoadedAdvisoryContext {
   ghsaId: string
   severity: string
   summary: string
+  repoOwner: string
+  repoName: string
+}
+
+// =============================================================================
+// GitHub Discussion Types
+// =============================================================================
+
+export interface GitHubDiscussion {
+  number: number
+  title: string
+  body: string
+  url: string
+  closed: boolean
+  isAnswered: boolean
+  author: { login: string } | null
+  category: { name: string; emoji: string } | null
+  commentCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+/** Discussion with full markdown content, including comments */
+/** One page of discussions; `endCursor` fetches the next page */
+export interface GitHubDiscussionPage {
+  discussions: GitHubDiscussion[]
+  totalCount: number
+  endCursor: string | null
+  hasNextPage: boolean
+}
+
+export interface GitHubDiscussionDetail extends GitHubDiscussion {
+  content: string
+}
+
+/**
+ * Discussion context to pass when creating a worktree
+ */
+export interface DiscussionContext {
+  number: number
+  title: string
+  content: string
+}
+
+/**
+ * Loaded discussion context info (from backend)
+ */
+export interface LoadedDiscussionContext {
+  number: number
+  title: string
+  commentCount: number
   repoOwner: string
   repoName: string
 }

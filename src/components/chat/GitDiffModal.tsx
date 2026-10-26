@@ -344,7 +344,8 @@ export function GitDiffModal({
           request.worktreePath,
           request.type,
           request.baseBranch,
-          request.baseRemote
+          request.baseRemote,
+          request.worktreeId
         )
         if (!isCurrent()) return
         setDiff(result)
@@ -385,6 +386,9 @@ export function GitDiffModal({
     try {
       await startCommitJob(
         {
+          ...(diffRequest.worktreeId
+            ? { worktreeId: diffRequest.worktreeId }
+            : {}),
           worktreePath: diffRequest.worktreePath,
           customPrompt: preferences?.magic_prompts?.commit_message,
           push: false,
@@ -440,7 +444,8 @@ export function GitDiffModal({
       await revertFile(
         diffRequest.worktreePath,
         revertTarget.fileName,
-        revertTarget.fileStatus
+        revertTarget.fileStatus,
+        diffRequest.worktreeId
       )
       // Refresh diff to reflect reverted file (revert only available in diff tabs)
       if (activeDiffType === 'uncommitted' || activeDiffType === 'branch') {

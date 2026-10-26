@@ -45,12 +45,15 @@ interface TitleBarProps {
   className?: string
   title?: string
   hideTitle?: boolean
+  /** Width (px) of the left rail + sidebar; the center group is centered over the remaining content area */
+  contentInset?: number
 }
 
 export function TitleBar({
   className,
   title = 'Jean',
   hideTitle = false,
+  contentInset = 0,
 }: TitleBarProps) {
   const leftSidebarVisible = useUIStore(state => state.leftSidebarVisible)
   const toggleLeftSidebar = useUIStore(state => state.toggleLeftSidebar)
@@ -206,8 +209,13 @@ export function TitleBar({
         </div>
       ) : (
         <div
-          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 max-w-[50%] px-2 pt-1"
-          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+          className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 max-w-[50%] px-2 pt-1"
+          style={
+            {
+              left: `calc(50% + ${contentInset / 2}px)`,
+              WebkitAppRegion: 'no-drag',
+            } as React.CSSProperties
+          }
         >
           <div className="flex items-center gap-2">
             <UnreadBell title={title} hideTitle={hideTitle} />

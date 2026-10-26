@@ -1,4 +1,11 @@
-import { useCallback, useState, useRef, useEffect, useMemo } from 'react'
+import {
+  useCallback,
+  useState,
+  useRef,
+  useEffect,
+  useMemo,
+  type ComponentType,
+} from 'react'
 import {
   Code,
   Terminal,
@@ -18,6 +25,14 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { invoke } from '@/lib/transport'
+import {
+  branchWebUrl,
+  hostedRepoWebUrl,
+  issueWebUrl,
+  pullRequestWebUrl,
+} from '@/lib/git-provider'
+import { providerLabels, useProjectGitProvider } from '@/services/git-provider'
+import { GitLabIcon } from '@/components/icons/GitLabIcon'
 import { useUIStore } from '@/store/ui-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
@@ -37,6 +52,8 @@ import {
   useLoadedAdvisoryContexts,
 } from '@/services/github'
 import { usePreferences } from '@/services/preferences'
+import { parseServerResourceKey } from '@/lib/server-resource'
+import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import { getEditorLabel, getTerminalLabel } from '@/types/preferences'
 import { notify } from '@/lib/notifications'
 import { openExternal } from '@/lib/platform'
@@ -46,12 +63,15 @@ import {
   canOpenInFinder,
   canOpenInTerminal,
 } from '@/lib/environment'
-import { resolvePortUrl } from '@/components/browser/default-tab-url'
+import {
+  resolvePortHost,
+  resolvePortUrl,
+} from '@/components/browser/default-tab-url'
 
 interface ModalOption {
   id: string
   label: string
-  icon: typeof Code
+  icon: ComponentType<{ className?: string }>
   key?: string
   metaKey?: boolean
   url?: string
@@ -83,7 +103,16 @@ export function OpenInModal() {
   const openInFinder = useOpenWorktreeInFinder()
   const openInTerminal = useOpenWorktreeInTerminal()
   const openInEditor = useOpenWorktreeInEditor()
-  const { data: preferences } = usePreferences()
+  const ownerServerId =
+    worktree?.serverId ??
+    (selectedWorktreeId
+      ? parseServerResourceKey(selectedWorktreeId)?.serverId
+      : undefined)
+  const preferenceServerId =
+    ownerServerId && ownerServerId !== LOCAL_SERVER_ID
+      ? ownerServerId
+      : undefined
+  const { data: preferences } = usePreferences(preferenceServerId)
   const activeSessionId = useChatStore(state =>
     selectedWorktreeId
       ? (state.activeSessionIds[selectedWorktreeId] ?? null)
@@ -129,6 +158,12 @@ export function OpenInModal() {
     if (selectedProject) return selectedProject.path
     return null
   }, [worktree?.path, selectedWorktreeId, selectedProject])
+  const { data: gitProviderInfo } = useProjectGitProvider(targetPath)
+  const gitProvider = gitProviderInfo?.provider ?? 'github'
+  const forgeLabels = providerLabels(gitProvider)
+  const forgeHost =
+    gitProviderInfo?.host ??
+    (gitProvider === 'gitlab' ? 'gitlab.com' : 'github.com')
 
   const { data: ports } = usePorts(targetPath)
 
@@ -155,15 +190,15 @@ export function OpenInModal() {
       },
       {
         id: 'github',
-        label: 'GitHub',
-        icon: Github,
+        label: forgeLabels.name,
+        icon: gitProvider === 'gitlab' ? GitLabIcon : Github,
         key: 'G',
       },
       ...(worktree?.pr_url
         ? [
             {
               id: 'open-pr',
-              label: `PR #${worktree.pr_number}`,
+              label: `${forgeLabels.pullRequestShort} #${worktree.pr_number}`,
               icon: GitPullRequest,
               key: 'P',
             },
@@ -185,6 +220,9 @@ export function OpenInModal() {
     canOpenTerminal,
     worktree?.pr_url,
     worktree?.pr_number,
+    forgeLabels.name,
+    forgeLabels.pullRequestShort,
+    gitProvider,
   ])
 
   // Context options (worktree + loaded GitHub contexts, numbered 1-9)
@@ -233,9 +271,13 @@ export function OpenInModal() {
       for (const pr of loadedPRs) {
         addOption({
           id: `pr-${pr.number}`,
-          label: `PR #${pr.number}`,
+          label: `${forgeLabels.pullRequestShort} #${pr.number}`,
           icon: GitPullRequest,
-          url: `https://github.com/${pr.repoOwner}/${pr.repoName}/pull/${pr.number}`,
+          url: pullRequestWebUrl(
+            hostedRepoWebUrl(forgeHost, pr.repoOwner, pr.repoName),
+            pr.number,
+            gitProvider
+          ),
         })
       }
     }
@@ -246,7 +288,11 @@ export function OpenInModal() {
           id: `issue-${issue.number}`,
           label: `Issue #${issue.number}`,
           icon: CircleDot,
-          url: `https://github.com/${issue.repoOwner}/${issue.repoName}/issues/${issue.number}`,
+          url: issueWebUrl(
+            hostedRepoWebUrl(forgeHost, issue.repoOwner, issue.repoName),
+            issue.number,
+            gitProvider
+          ),
         })
       }
     }
@@ -277,6 +323,9 @@ export function OpenInModal() {
   }, [
     loadedPRs,
     loadedIssues,
+    forgeHost,
+    forgeLabels.pullRequestShort,
+    gitProvider,
     loadedSecurityAlerts,
     loadedAdvisories,
     worktree,
@@ -303,13 +352,13 @@ export function OpenInModal() {
     if (!ports || ports.length === 0) return []
     return ports.map((p, i) => ({
       id: `port-${p.port}`,
-      label: `${p.label} (${p.host?.trim() || 'localhost'}:${p.port})`,
+      label: `${p.label} (${resolvePortHost(p, preferences?.browser_default_host)}:${p.port})`,
       icon: Globe,
       key: i < 9 ? String(i + 1) : undefined,
       metaKey: true,
-      url: resolvePortUrl(p),
+      url: resolvePortUrl(p, preferences?.browser_default_host),
     }))
-  }, [ports])
+  }, [ports, preferences?.browser_default_host])
 
   const allOptions = useMemo(
     () => [...baseOptions, ...portOptions, ...contextOptions],
@@ -379,11 +428,25 @@ export function OpenInModal() {
             .then(remotes => {
               if (!remotes || remotes.length <= 1) {
                 const url = remotes?.[0]?.url
-                if (url) openExternal(`${url}/tree/${branch}`)
+                if (url) {
+                  openExternal(branchWebUrl(url, branch, gitProvider))
+                } else {
+                  invoke<string>('get_github_branch_url', {
+                    repoPath: targetPath,
+                    branch,
+                  })
+                    .then(branchUrl => openExternal(branchUrl))
+                    .catch(() =>
+                      notify(`Failed to open ${forgeLabels.name}`, undefined, {
+                        type: 'error',
+                      })
+                    )
+                }
               } else {
                 openRemotePicker(targetPath as string, remoteName => {
                   const remote = remotes.find(r => r.name === remoteName)
-                  if (remote) openExternal(`${remote.url}/tree/${branch}`)
+                  if (remote)
+                    openExternal(branchWebUrl(remote.url, branch, gitProvider))
                 })
               }
             })
@@ -408,6 +471,8 @@ export function OpenInModal() {
       preferences,
       setOpenInModalOpen,
       selectedProjectId,
+      gitProvider,
+      forgeLabels.name,
     ]
   )
 

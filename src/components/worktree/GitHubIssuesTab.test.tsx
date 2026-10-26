@@ -260,3 +260,60 @@ describe('GitHubIssuesTab provider-aware auth errors', () => {
     ).toBeInTheDocument()
   })
 })
+
+describe('GitHubIssuesTab multi-remote', () => {
+  it('keeps the same issue number distinct and only spins the source being created', async () => {
+    const user = userEvent.setup()
+    const onBulkInvestigateIssues = vi.fn()
+    renderTab({
+      showSource: true,
+      hasMultipleGitHubRemotes: true,
+      primaryGitHubRemote: 'origin',
+      creatingFromNumber: 12,
+      creatingFromRepo: 'octocat/jean',
+      onBulkInvestigateIssues,
+      getContextMatches: () => [
+        {
+          worktreeId: 'wt-1',
+          worktreeName: 'origin-twelve',
+          worktreePath: '/repo/origin-twelve',
+        },
+      ],
+      issues: [
+        {
+          number: 12,
+          title: 'Origin twelve',
+          body: '',
+          state: 'OPEN',
+          labels: [],
+          created_at: '2026-01-01T00:00:00Z',
+          author: { login: 'alice' },
+          repo: 'coollabsio/jean',
+          remote: 'origin',
+        },
+        {
+          number: 12,
+          title: 'Fork twelve',
+          body: '',
+          state: 'OPEN',
+          labels: [],
+          created_at: '2026-01-02T00:00:00Z',
+          author: { login: 'bob' },
+          repo: 'octocat/jean',
+          remote: 'fork',
+        },
+      ],
+    })
+
+    expect(screen.getByText('coollabsio/jean')).toBeInTheDocument()
+    expect(screen.getByText('octocat/jean')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Origin twelve' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Fork twelve' })).toBeDisabled()
+    expect(screen.getAllByTestId('context-link-badge')).toHaveLength(1)
+
+    await user.click(
+      screen.getByRole('checkbox', { name: 'Select all visible issues' })
+    )
+    expect(screen.getByText('2 selected')).toBeInTheDocument()
+  })
+})

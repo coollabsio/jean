@@ -1,4 +1,26 @@
+import type { ReactElement } from 'react'
 import { cn } from '@/lib/utils'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+
+function StatusTooltip({
+  label,
+  children,
+}: {
+  label?: string
+  children: ReactElement
+}) {
+  if (!label) return children
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  )
+}
 
 export type IndicatorStatus =
   | 'idle'
@@ -18,7 +40,7 @@ export type IndicatorShape = 'circle' | 'square' | 'diamond' | 'ring'
 interface StatusIndicatorProps {
   status: IndicatorStatus
   shape?: IndicatorShape
-  /** Accessible name describing the status (also used as title fallback). */
+  /** Accessible name describing the status. Shown in the shared tooltip. */
   label?: string
   className?: string
 }
@@ -71,19 +93,21 @@ export function WorkingWaveform({
   className?: string
 }) {
   return (
-    <span
-      {...(label
-        ? { role: 'img', 'aria-label': label, title: label }
-        : { 'aria-hidden': true })}
-      className={cn(
-        'working-waveform shrink-0 text-primary forced-colors:text-[Highlight]',
-        className
-      )}
-    >
-      <span />
-      <span />
-      <span />
-    </span>
+    <StatusTooltip label={label}>
+      <span
+        {...(label
+          ? { role: 'img' as const, 'aria-label': label }
+          : { 'aria-hidden': true as const })}
+        className={cn(
+          'working-waveform shrink-0 text-primary forced-colors:text-[Highlight]',
+          className
+        )}
+      >
+        <span />
+        <span />
+        <span />
+      </span>
+    </StatusTooltip>
   )
 }
 
@@ -95,7 +119,6 @@ export function StatusIndicator({
 }: StatusIndicatorProps) {
   const resolvedShape = resolveShape(status, shape)
   const shapeClass = shapeClasses(resolvedShape)
-  const title = label
 
   // Running state: shared 3-bar waveform. It has a fixed size, so the
   // dot size classes from `className` do not apply here. Static dots sit in
@@ -125,21 +148,22 @@ export function StatusIndicator({
   const fillClass = resolvedShape === 'ring' ? '' : 'bg-current'
 
   return (
-    <span
-      role="img"
-      aria-label={label}
-      title={title}
-      className="inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center"
-    >
+    <StatusTooltip label={label}>
       <span
-        className={cn(
-          'shrink-0 block',
-          fillClass,
-          shapeClass,
-          colorClass,
-          className
-        )}
-      />
-    </span>
+        role="img"
+        aria-label={label}
+        className="inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center"
+      >
+        <span
+          className={cn(
+            'shrink-0 block',
+            fillClass,
+            shapeClass,
+            colorClass,
+            className
+          )}
+        />
+      </span>
+    </StatusTooltip>
   )
 }

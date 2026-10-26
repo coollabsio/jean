@@ -9,6 +9,31 @@ const ACTIVE_CONNECTION_KEY = 'jean-active-connection'
 const SWITCHING_CONNECTION_KEY = 'jean-switching-connection-at'
 const LOCAL_DASHBOARD_ENABLED_KEY = 'jean-local-dashboard-enabled'
 
+/**
+ * Persisted URL for SSH-tunnel profiles. Traffic uses the runtime local
+ * forward (`http://127.0.0.1:<port>`) and must never fetch this placeholder.
+ */
+export const SSH_TUNNEL_PLACEHOLDER_URL = 'http://127.0.0.1'
+
+export type RemoteTransport = 'direct' | 'ssh'
+
+export interface SshTunnelSettings {
+  user: string
+  host: string
+  /** SSH port. Omitted when it is the default 22. */
+  port?: number
+  identityFile?: string
+  /** Remote bind address the forward targets. Default 127.0.0.1. */
+  remoteHost?: string
+  /** jean-server port on the remote loopback. Default 3456. */
+  remotePort?: number
+  hostKeyFingerprint: string
+  /** Local port reserved for this profile. Omitted until the tunnel allocates one. */
+  localPort?: number
+  /** Missing means reconnect on startup. */
+  autoConnect?: boolean
+}
+
 export interface RemoteConnection {
   id: string
   name: string
@@ -16,12 +41,33 @@ export interface RemoteConnection {
   token: string
   /** Missing on legacy profiles; missing means enabled. */
   enabled?: boolean
+  /** Missing means a direct Web Access URL. */
+  transport?: RemoteTransport
+  sshTunnel?: SshTunnelSettings
+  /** SSH profiles keep the access token in the OS secret store. */
+  tokenInSecretStore?: boolean
   /** SSH user for local editors that open remote paths (Zed `ssh://`). */
   sshUser?: string
   /** SSH host/IP; falls back to Web Access URL hostname when omitted. */
   sshHost?: string
   /** SSH port (default 22 when omitted). */
   sshPort?: number
+}
+
+export interface SshRemoteConnectionInput {
+  id?: string
+  name: string
+  /** Kept in memory only. The OS secret store is the persisted copy. */
+  token?: string
+  user: string
+  host: string
+  sshPort?: number
+  identityFile?: string
+  remoteHost?: string
+  remotePort?: number
+  hostKeyFingerprint: string
+  localPort?: number
+  autoConnect?: boolean
 }
 
 export interface RemoteConnectionInput {
@@ -45,6 +91,40 @@ export function parseOptionalSshPort(raw: string): number | undefined {
 }
 
 const subscribers = new Set<() => void>()
+const sshTokens = new Map<string, string>()
+
+interface SshProfileLifecycle {
+  onRemoved?: (id: string) => void
+}
+
+let sshProfileLifecycle: SshProfileLifecycle = {}
+
+/** Desktop tunnel supervisor hooks profile removal without a module cycle. */
+export function setSshProfileLifecycle(next: SshProfileLifecycle): void {
+  sshProfileLifecycle = next
+}
+
+export function rememberSshToken(id: string, token: string): void {
+  if (!token) return
+  sshTokens.set(id, token)
+  let changed = false
+  const next = connectionsSnapshot.map(connection => {
+    if (connection.id !== id || connection.transport !== 'ssh') return connection
+    if (connection.token === token) return connection
+    changed = true
+    return { ...connection, token }
+  })
+  if (!changed) return
+  connectionsSnapshot = next
+  for (const subscriber of subscribers) subscriber()
+}
+
+export function isSshConnection(
+  connection: RemoteConnection
+): connection is RemoteConnection & { sshTunnel: SshTunnelSettings } {
+  return connection.transport === 'ssh' && connection.sshTunnel !== undefined
+}
+
 let connectionsSnapshot: RemoteConnection[] = readConnections()
 const savedActiveConnection =
   storage()?.getItem(ACTIVE_CONNECTION_KEY) || LOCAL_CONNECTION_ID
@@ -76,6 +156,31 @@ function normalizeOptionalPort(value: unknown): number | undefined {
   return value
 }
 
+function normalizeSshTunnel(
+  value: unknown
+): SshTunnelSettings | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const record = value as Record<string, unknown>
+  const user = normalizeOptionalString(record.user)
+  const host = normalizeOptionalString(record.host)
+  const hostKeyFingerprint = normalizeOptionalString(record.hostKeyFingerprint)
+  if (!user || !host || !hostKeyFingerprint) return undefined
+
+  const tunnel: SshTunnelSettings = { user, host, hostKeyFingerprint }
+  const port = normalizeOptionalPort(record.port)
+  const identityFile = normalizeOptionalString(record.identityFile)
+  const remoteHost = normalizeOptionalString(record.remoteHost)
+  const remotePort = normalizeOptionalPort(record.remotePort)
+  const localPort = normalizeOptionalPort(record.localPort)
+  if (port && port !== 22) tunnel.port = port
+  if (identityFile) tunnel.identityFile = identityFile
+  if (remoteHost) tunnel.remoteHost = remoteHost
+  if (remotePort) tunnel.remotePort = remotePort
+  if (localPort) tunnel.localPort = localPort
+  if (record.autoConnect === false) tunnel.autoConnect = false
+  return tunnel
+}
+
 function normalizeConnection(item: unknown): RemoteConnection | null {
   if (!item || typeof item !== 'object') return null
   const record = item as Record<string, unknown>
@@ -94,6 +199,20 @@ function normalizeConnection(item: unknown): RemoteConnection | null {
     url: record.url,
     token: record.token,
     enabled: record.enabled !== false,
+  }
+
+  if (record.transport === 'ssh') {
+    const sshTunnel = normalizeSshTunnel(record.sshTunnel)
+    if (!sshTunnel) return null
+    connection.transport = 'ssh'
+    connection.sshTunnel = sshTunnel
+    connection.tokenInSecretStore = true
+    connection.token = sshTokens.get(connection.id) ?? ''
+    connection.url = SSH_TUNNEL_PLACEHOLDER_URL
+    connection.sshUser = sshTunnel.user
+    connection.sshHost = sshTunnel.host
+    if (sshTunnel.port) connection.sshPort = sshTunnel.port
+    return connection
   }
 
   const sshUser = normalizeOptionalString(record.sshUser)
@@ -141,10 +260,85 @@ function sshFieldsFromInput(input: RemoteConnectionInput): {
   return fields
 }
 
+function persistedConnection(connection: RemoteConnection): RemoteConnection {
+  if (connection.transport !== 'ssh') return connection
+  return {
+    ...connection,
+    token: '',
+    url: SSH_TUNNEL_PLACEHOLDER_URL,
+    tokenInSecretStore: true,
+  }
+}
+
 function writeConnections(connections: RemoteConnection[]): void {
-  connectionsSnapshot = connections
-  storage()?.setItem(CONNECTIONS_KEY, JSON.stringify(connections))
+  connectionsSnapshot = connections.map(connection => {
+    if (connection.transport !== 'ssh') return connection
+    const token = connection.token || sshTokens.get(connection.id) || ''
+    if (token) sshTokens.set(connection.id, token)
+    return {
+      ...connection,
+      token,
+      url: SSH_TUNNEL_PLACEHOLDER_URL,
+      tokenInSecretStore: true,
+    }
+  })
+  storage()?.setItem(
+    CONNECTIONS_KEY,
+    JSON.stringify(connectionsSnapshot.map(persistedConnection))
+  )
   for (const subscriber of subscribers) subscriber()
+}
+
+function sshSettingsFromInput(
+  input: SshRemoteConnectionInput
+): SshTunnelSettings {
+  const user = input.user.trim()
+  const host = input.host.trim()
+  const fingerprint = input.hostKeyFingerprint.trim()
+  if (!user || !host) {
+    throw new Error('SSH user and host are required.')
+  }
+  if (!fingerprint) {
+    throw new Error('Confirm the SSH host key before saving this connection.')
+  }
+  const sshPort = normalizeOptionalPort(input.sshPort)
+  const remotePort = normalizeOptionalPort(input.remotePort)
+  const localPort = normalizeOptionalPort(input.localPort)
+  const identityFile = normalizeOptionalString(input.identityFile)
+  const remoteHost = normalizeOptionalString(input.remoteHost)
+  const tunnel: SshTunnelSettings = {
+    user,
+    host,
+    hostKeyFingerprint: fingerprint,
+  }
+  if (sshPort && sshPort !== 22) tunnel.port = sshPort
+  if (identityFile) tunnel.identityFile = identityFile
+  if (remoteHost && remoteHost !== '127.0.0.1') tunnel.remoteHost = remoteHost
+  if (remotePort && remotePort !== 3456) tunnel.remotePort = remotePort
+  if (localPort) tunnel.localPort = localPort
+  if (input.autoConnect === false) tunnel.autoConnect = false
+  return tunnel
+}
+
+function connectionFromSshInput(
+  id: string,
+  input: SshRemoteConnectionInput,
+  enabled: boolean
+): RemoteConnection {
+  const sshTunnel = sshSettingsFromInput(input)
+  return {
+    id,
+    name: input.name.trim() || sshTunnel.host,
+    url: SSH_TUNNEL_PLACEHOLDER_URL,
+    token: input.token?.trim() || sshTokens.get(id) || '',
+    enabled,
+    transport: 'ssh',
+    tokenInSecretStore: true,
+    sshTunnel,
+    sshUser: sshTunnel.user,
+    sshHost: sshTunnel.host,
+    ...(sshTunnel.port ? { sshPort: sshTunnel.port } : {}),
+  }
 }
 
 export function parseRemoteConnectionInput(
@@ -188,6 +382,60 @@ export function addRemoteConnection(
   }
   writeConnections([...getRemoteConnections(), connection])
   return connection
+}
+
+export function addSshRemoteConnection(
+  input: SshRemoteConnectionInput
+): RemoteConnection {
+  const id = input.id?.trim() || generateId()
+  const connection = connectionFromSshInput(id, input, true)
+  writeConnections([...getRemoteConnections(), connection])
+  return (
+    getRemoteConnections().find(item => item.id === id) ?? connection
+  )
+}
+
+export function updateSshRemoteConnection(
+  id: string,
+  input: SshRemoteConnectionInput
+): RemoteConnection {
+  const existing = getRemoteConnections().find(
+    connection => connection.id === id
+  )
+  if (!existing) {
+    throw new Error('Remote connection not found.')
+  }
+  const updated = connectionFromSshInput(
+    id,
+    input,
+    existing.enabled !== false
+  )
+  writeConnections(
+    getRemoteConnections().map(connection =>
+      connection.id === id ? updated : connection
+    )
+  )
+  return getRemoteConnections().find(item => item.id === id) ?? updated
+}
+
+export function setSshTunnelLocalPort(id: string, localPort: number): void {
+  if (!Number.isInteger(localPort) || localPort < 1 || localPort > 65535) {
+    return
+  }
+  const existing = getRemoteConnections().find(
+    connection => connection.id === id
+  )
+  if (!existing?.sshTunnel || existing.sshTunnel.localPort === localPort) return
+  writeConnections(
+    getRemoteConnections().map(connection =>
+      connection.id === id && connection.sshTunnel
+        ? {
+            ...connection,
+            sshTunnel: { ...connection.sshTunnel, localPort },
+          }
+        : connection
+    )
+  )
 }
 
 export function updateRemoteConnection(
@@ -248,9 +496,14 @@ export function setLocalDashboardEnabled(enabled: boolean): void {
 }
 
 export function removeRemoteConnection(id: string): void {
+  const existing = getRemoteConnections().find(
+    connection => connection.id === id
+  )
   writeConnections(
     getRemoteConnections().filter(connection => connection.id !== id)
   )
+  sshTokens.delete(id)
+  if (existing?.transport === 'ssh') sshProfileLifecycle.onRemoved?.(id)
   if (getActiveConnectionId() === id) selectConnection(LOCAL_CONNECTION_ID)
 }
 

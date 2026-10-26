@@ -1,5 +1,6 @@
 use serde::Serialize;
 
+use crate::projects::github_discussions::get_discussion_context_paths;
 use crate::projects::github_issues::{
     get_github_contexts_dir, get_preferred_issue_refs, get_preferred_pr_refs,
     get_session_advisory_refs, get_session_security_refs,
@@ -277,6 +278,8 @@ fn collect_context_paths(
             }
         }
     }
+
+    paths.extend(get_discussion_context_paths(app, session_id, worktree_id));
 
     if let Ok(app_data_dir) = app.path().app_data_dir() {
         let saved_contexts_dir = app_data_dir.join("session-context");

@@ -650,7 +650,11 @@ export async function processBackgroundInvestigation(
     setSessionReviewing,
   } = useChatStore.getState()
 
-  setActiveSession(worktreeId, sessionId)
+  // `openSession: false` starts the run in the background: keep the user on
+  // the session they are viewing.
+  if (override?.openSession !== false) {
+    setActiveSession(worktreeId, sessionId)
+  }
 
   if (override?.openSession) {
     window.dispatchEvent(

@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef } from 'react'
 import { useClaudeCliStatus, useClaudeCliAuth } from '@/services/claude-cli'
 import { useCodexCliStatus, useCodexCliAuth } from '@/services/codex-cli'
 import {
@@ -246,8 +246,41 @@ export function useBackendAuthStatuses(options?: { enabled?: boolean }) {
     (!!muse.data?.installed && museAuth.isLoading) ||
     (!!devin.data?.installed && devinAuth.isLoading)
 
+  const authQueries = {
+    claude: [claude, claudeAuth],
+    codex: [codex, codexAuth],
+    opencode: [opencode, opencodeAuth],
+    cursor: [cursor, cursorAuth],
+    pi: [pi, piAuth],
+    commandcode: [commandcode, commandcodeAuth],
+    grok: [grok, grokAuth],
+    kimi: [kimi, kimiAuth],
+    antigravity: [antigravity, antigravityAuth],
+    muse: [muse, museAuth],
+    devin: [devin, devinAuth],
+  } as const
+  const authQueriesRef = useRef(authQueries)
+  useLayoutEffect(() => {
+    authQueriesRef.current = authQueries
+  }, [authQueries])
+
+  /**
+   * Re-probe one backend's auth, bypassing the cached result. A cached `false`
+   * can be stale (expired cache entry, failed probe, login in another window),
+   * so callers re-check before blocking the user.
+   */
+  const refetchAuth = useCallback(
+    async (backend: CliBackend): Promise<boolean | undefined> => {
+      const [status, auth] = authQueriesRef.current[backend]
+      const { data } = await auth.refetch()
+      return resolvedAuth(status.data?.installed, data)
+    },
+    []
+  )
+
   return {
     authByBackend,
+    refetchAuth,
     isLoading: isStatusLoading || isAuthLoading,
   }
 }

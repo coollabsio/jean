@@ -2,6 +2,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type MouseEvent,
@@ -9,6 +10,7 @@ import {
 import {
   ArrowLeft,
   ArrowRight,
+  Globe,
   Loader2,
   MousePointer2,
   Plus,
@@ -17,15 +19,42 @@ import {
   XSquare,
 } from '@/components/icons/reicon'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { isBlankTabUrl, useBrowserStore } from '@/store/browser-store'
+import { useChatStore } from '@/store/chat-store'
+import { useTerminalStore } from '@/store/terminal-store'
 import { browserBackend, useBrowserTabActions } from '@/hooks/useBrowserPane'
+import {
+  usePorts,
+  useTerminalListeningPorts,
+  type TerminalPortInfo,
+} from '@/services/projects'
+import {
+  listBrowserPortChoices,
+  resolveNewTabUrl,
+  resolvePortOpenAction,
+  type BrowserPortChoice,
+} from './default-tab-url'
 import type { BrowserTab } from '@/types/browser'
 import { toast } from 'sonner'
 
 // Stable empty-array reference — see comment in BrowserView.tsx.
 const EMPTY_TABS: BrowserTab[] = []
+const EMPTY_LISTENING: TerminalPortInfo[] = []
 
 const displayUrl = (u: string): string => (isBlankTabUrl(u) ? '' : u)
 
@@ -34,6 +63,8 @@ interface BrowserToolbarProps {
   className?: string
   /** Render close (X) button to dismiss the entire pane */
   onClose?: () => void
+  /** Server preview hostname. Same value the first tab uses. */
+  serverDefaultHost?: string | null
 }
 
 function normalizeUrl(input: string): string {
@@ -49,6 +80,108 @@ function normalizeUrl(input: string): string {
   if (/^[^\s]+\.[^\s]+/.test(trimmed)) return `https://${trimmed}`
   return `https://www.google.com/search?q=${encodeURIComponent(trimmed)}`
 }
+
+const PortMenuItem = memo(function PortMenuItem({
+  choice,
+  onOpenPort,
+}: {
+  choice: BrowserPortChoice
+  onOpenPort: (url: string) => void
+}) {
+  const handleSelect = useCallback(() => {
+    onOpenPort(choice.url)
+  }, [choice.url, onOpenPort])
+
+  return (
+    <DropdownMenuItem onSelect={handleSelect} title={choice.url}>
+      <span className="truncate">{choice.label}</span>
+    </DropdownMenuItem>
+  )
+})
+
+const BrowserPortControl = memo(function BrowserPortControl({
+  choices,
+  onOpenPort,
+}: {
+  choices: BrowserPortChoice[]
+  onOpenPort: (url: string) => void
+}) {
+  const only = choices.length === 1 ? choices[0] : undefined
+  const handleOpenOnly = useCallback(() => {
+    if (only) onOpenPort(only.url)
+  }, [onOpenPort, only])
+
+  if (choices.length === 0) return null
+
+  if (only) {
+    return (
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-6 w-6 shrink-0"
+        onClick={handleOpenOnly}
+        aria-label={`Open ${only.label}`}
+        title={only.url}
+      >
+        <Globe className="h-3.5 w-3.5" />
+      </Button>
+    )
+  }
+
+  const configured = choices.filter(choice => choice.source === 'configured')
+  const listening = choices.filter(choice => choice.source === 'listening')
+  const showGroups = configured.length > 0 && listening.length > 0
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6 shrink-0"
+          aria-label="Choose port"
+          title="Choose port"
+        >
+          <Globe className="h-3.5 w-3.5" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        side="top"
+        data-browser-port-menu=""
+        className="max-w-80 min-w-56"
+      >
+        {showGroups && (
+          <DropdownMenuLabel className="text-xs text-muted-foreground">
+            Configured
+          </DropdownMenuLabel>
+        )}
+        {configured.map(choice => (
+          <PortMenuItem
+            key={choice.id}
+            choice={choice}
+            onOpenPort={onOpenPort}
+          />
+        ))}
+        {showGroups && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-xs text-muted-foreground">
+              Listening
+            </DropdownMenuLabel>
+          </>
+        )}
+        {listening.map(choice => (
+          <PortMenuItem
+            key={choice.id}
+            choice={choice}
+            onOpenPort={onOpenPort}
+          />
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+})
 
 const TabPill = memo(function TabPill({
   tab,
@@ -120,6 +253,7 @@ export const BrowserToolbar = memo(function BrowserToolbar({
   worktreeId,
   className,
   onClose,
+  serverDefaultHost,
 }: BrowserToolbarProps) {
   const tabs = useBrowserStore(state => state.tabs[worktreeId] ?? EMPTY_TABS)
   const activeTabId = useBrowserStore(
@@ -155,12 +289,67 @@ export const BrowserToolbar = memo(function BrowserToolbar({
   }, [activeTabId])
 
   const actions = useBrowserTabActions(activeTabId || null)
+  const worktreePath = useChatStore(
+    state => state.worktreePaths[worktreeId] ?? null
+  )
+  const { data: configuredPorts } = usePorts(worktreePath)
+  const terminals = useTerminalStore(state => state.terminals[worktreeId])
+  const { data: listeningPorts = EMPTY_LISTENING } = useTerminalListeningPorts(
+    (terminals?.length ?? 0) > 0
+  )
+  const portChoices = useMemo(() => {
+    const ids = new Set((terminals ?? []).map(terminal => terminal.id))
+    const mine =
+      ids.size === 0
+        ? []
+        : listeningPorts.filter(port => ids.has(port.terminalId))
+    return listBrowserPortChoices(configuredPorts, mine, serverDefaultHost)
+  }, [configuredPorts, listeningPorts, serverDefaultHost, terminals])
+
+  const navigate = actions.navigate
+
+  const openPort = useCallback(
+    (url: string) => {
+      const state = useBrowserStore.getState()
+      const openTabs = state.tabs[worktreeId] ?? EMPTY_TABS
+      const currentId = state.activeTabIds[worktreeId] ?? ''
+      const action = resolvePortOpenAction(url, openTabs, currentId || null)
+      switch (action.type) {
+        case 'focus':
+          state.setActiveTab(worktreeId, action.tabId)
+          return
+        case 'navigate':
+          void navigate(url)
+          return
+        case 'add-tab':
+          state.addTab(worktreeId, url)
+          return
+        case 'noop':
+          return
+      }
+    },
+    [navigate, worktreeId]
+  )
 
   const handleAddTab = useCallback(() => {
-    // New tabs default to blank — port-based URL only used for the first
-    // auto-created tab when the pane initially opens (see BrowserView).
-    useBrowserStore.getState().addTab(worktreeId)
-  }, [worktreeId])
+    const state = useBrowserStore.getState()
+    const openTabs = state.tabs[worktreeId] ?? EMPTY_TABS
+    const current = openTabs.find(
+      tab => tab.id === (state.activeTabIds[worktreeId] ?? '')
+    )
+    const url = resolveNewTabUrl(
+      configuredPorts,
+      openTabs.map(tab => tab.url),
+      serverDefaultHost
+    )
+    // A blank extra tab is reused for the next configured port. One port
+    // still adds a blank tab in a single click.
+    if (url && current && isBlankTabUrl(current.url)) {
+      void navigate(url)
+      return
+    }
+    state.addTab(worktreeId, url)
+  }, [configuredPorts, navigate, serverDefaultHost, worktreeId])
 
   const handleSelectTab = useCallback(
     (tabId: string) => {
@@ -245,17 +434,21 @@ export const BrowserToolbar = memo(function BrowserToolbar({
             <RotateCw className="h-4 w-4" />
           </Button>
         )}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7"
-          onClick={handleEnableGrab}
-          disabled={!activeTab || isBlankTabUrl(activeTab.url)}
-          aria-label="Grab DOM element"
-          title="Grab DOM element"
-        >
-          <MousePointer2 className="h-4 w-4" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={handleEnableGrab}
+              disabled={!activeTab || isBlankTabUrl(activeTab.url)}
+              aria-label="Grab DOM element"
+            >
+              <MousePointer2 className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Grab DOM element</TooltipContent>
+        </Tooltip>
         <form className="min-w-0 flex-1" onSubmit={handleSubmit}>
           <Input
             ref={inputRef}
@@ -289,16 +482,27 @@ export const BrowserToolbar = memo(function BrowserToolbar({
           </Button>
         )}
       </div>
-      <div className="flex items-center gap-1 overflow-x-auto">
-        {tabs.map(tab => (
-          <TabPill
-            key={tab.id}
-            tab={tab}
-            isActive={tab.id === activeTabId}
-            onSelect={handleSelectTab}
-            onClose={handleCloseTab}
-          />
-        ))}
+      {activeTab?.previewNote && (
+        <p
+          className="px-1 text-xs leading-snug text-muted-foreground"
+          role="status"
+        >
+          {activeTab.previewNote}
+        </p>
+      )}
+      <div className="flex items-center gap-1">
+        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+          {tabs.map(tab => (
+            <TabPill
+              key={tab.id}
+              tab={tab}
+              isActive={tab.id === activeTabId}
+              onSelect={handleSelectTab}
+              onClose={handleCloseTab}
+            />
+          ))}
+        </div>
+        <BrowserPortControl choices={portChoices} onOpenPort={openPort} />
         <Button
           variant="ghost"
           size="icon"

@@ -38,7 +38,9 @@ export function RemoteConnectionRecovery({
         </div>
         <p className="mt-2 text-sm text-muted-foreground">{error}</p>
         <p className="mt-1 truncate text-xs text-muted-foreground">
-          {connection.url}
+          {connection.transport === 'ssh' && connection.sshTunnel
+            ? `${connection.sshTunnel.user}@${connection.sshTunnel.host} via SSH`
+            : connection.url}
         </p>
         <div className="mt-5 flex flex-wrap gap-2">
           <Button onClick={reloadPage}>Retry</Button>

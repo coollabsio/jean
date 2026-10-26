@@ -232,7 +232,18 @@ pub async fn get_run_environments(
 ) -> Result<RunEnvironmentsResult, String> {
     let data = crate::projects::storage::load_projects_data(&app)
         .map_err(|e| format!("load_projects_data: {e}"))?;
-    let ui_state = crate::load_ui_state(app.clone()).await.unwrap_or_default();
+    let terminal_ui = match app.path().app_data_dir() {
+        Ok(dir) => {
+            crate::ui_client_state::aggregated_terminal_snapshot(&dir).unwrap_or_else(|error| {
+                log::warn!("Failed to read per-client terminal UI state: {error}");
+                crate::ui_client_state::AggregatedTerminalUi::default()
+            })
+        }
+        Err(error) => {
+            log::warn!("Failed to resolve app data dir for run environments: {error}");
+            crate::ui_client_state::AggregatedTerminalUi::default()
+        }
+    };
 
     let live: Vec<LiveCommandTerminal> = list_live_terminal_meta()
         .into_iter()
@@ -248,7 +259,7 @@ pub async fn get_run_environments(
         })
         .collect();
 
-    let persisted: Vec<PersistedCommandTerminal> = ui_state
+    let persisted: Vec<PersistedCommandTerminal> = terminal_ui
         .terminal_instances
         .iter()
         .flat_map(|(worktree_id, terminals)| {
@@ -306,7 +317,7 @@ pub async fn get_run_environments(
         &listening,
         &worktrees,
         &projects,
-        &ui_state.active_session_ids,
+        &terminal_ui.active_session_ids,
         &configured_ports,
         &RunEnvironmentFilter {
             worktree_id,

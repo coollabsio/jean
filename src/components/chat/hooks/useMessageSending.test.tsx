@@ -46,6 +46,7 @@ const { mockInvoke, mockInstalledBackends, mockBackendAuthStatuses } =
         antigravity: true,
         muse: true,
       } as Record<string, boolean | undefined>,
+      refetchAuth: vi.fn(),
       isLoading: false,
     },
   }))
@@ -231,6 +232,11 @@ function resetInstalledBackendsMock() {
     antigravity: true,
     muse: true,
   }
+  mockBackendAuthStatuses.refetchAuth
+    .mockReset()
+    .mockImplementation(
+      async (backend: string) => mockBackendAuthStatuses.authByBackend[backend]
+    )
   mockBackendAuthStatuses.isLoading = false
 }
 
@@ -299,6 +305,103 @@ describe('useMessageSending Codex /goal', () => {
       expect.objectContaining({
         sessionId: 'session-1',
         message: 'keep this message',
+      }),
+      expect.any(Object)
+    )
+  })
+
+  it('enters Plan mode and starts a planning turn from /plan', async () => {
+    useChatStore.setState({
+      executionModes: { 'session-1': 'yolo' },
+      permissionModes: { 'session-1': 'yolo' },
+    })
+    const { result, sendMessage, executionModeRef } = renderUseMessageSending({
+      inputValue: '/plan Tighten auth checks',
+      selectedBackend: 'claude',
+    })
+
+    await act(async () => {
+      await result.current.handleSubmit({
+        preventDefault: vi.fn(),
+      } as unknown as React.FormEvent)
+    })
+
+    expect(useChatStore.getState().executionModes['session-1']).toBe('plan')
+    expect(useChatStore.getState().permissionModes['session-1']).toBe('yolo')
+    expect(executionModeRef.current).toBe('plan')
+    expect(sendMessage.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'Tighten auth checks',
+        executionMode: 'plan',
+      }),
+      expect.any(Object)
+    )
+  })
+
+  it('starts a default planning turn when /plan has no task', async () => {
+    const { result, sendMessage } = renderUseMessageSending({
+      inputValue: '/plan',
+      selectedBackend: 'claude',
+    })
+
+    await act(async () => {
+      await result.current.handleSubmit({
+        preventDefault: vi.fn(),
+      } as unknown as React.FormEvent)
+    })
+
+    expect(sendMessage.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringMatching(/propose a plan/i),
+        executionMode: 'plan',
+      }),
+      expect.any(Object)
+    )
+  })
+
+  it('leaves Plan without a turn when /build has no task', async () => {
+    useChatStore.setState({
+      executionModes: { 'session-1': 'plan' },
+      permissionModes: { 'session-1': 'yolo' },
+    })
+    const { result, sendMessage } = renderUseMessageSending({
+      inputValue: '/build',
+      selectedBackend: 'claude',
+    })
+
+    await act(async () => {
+      await result.current.handleSubmit({
+        preventDefault: vi.fn(),
+      } as unknown as React.FormEvent)
+    })
+
+    expect(useChatStore.getState().executionModes['session-1']).toBe('yolo')
+    expect(sendMessage.mutate).not.toHaveBeenCalled()
+  })
+
+  it('leaves Plan and implements when /build includes a task', async () => {
+    useChatStore.setState({
+      executionModes: { 'session-1': 'plan' },
+      permissionModes: { 'session-1': 'supervised' },
+    })
+    const { result, sendMessage } = renderUseMessageSending({
+      inputValue: '/build Apply the approved steps',
+      selectedBackend: 'claude',
+    })
+
+    await act(async () => {
+      await result.current.handleSubmit({
+        preventDefault: vi.fn(),
+      } as unknown as React.FormEvent)
+    })
+
+    expect(useChatStore.getState().executionModes['session-1']).toBe(
+      'supervised'
+    )
+    expect(sendMessage.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'Apply the approved steps',
+        executionMode: 'supervised',
       }),
       expect.any(Object)
     )
@@ -381,6 +484,29 @@ describe('useMessageSending Codex /goal', () => {
       'codex'
     )
     expect(sendMessage.mutate).not.toHaveBeenCalled()
+  })
+
+  it('sends when cached auth is stale but a fresh probe is authenticated', async () => {
+    mockInstalledBackends.installedBackends = ['claude', 'codex']
+    mockBackendAuthStatuses.authByBackend = {
+      ...mockBackendAuthStatuses.authByBackend,
+      claude: false,
+    }
+    mockBackendAuthStatuses.refetchAuth.mockResolvedValueOnce(true)
+    const { result, sendMessage } = renderUseMessageSending({
+      inputValue: 'hello',
+      selectedBackend: 'claude',
+    })
+
+    await act(async () => {
+      await result.current.handleSubmit({
+        preventDefault: vi.fn(),
+      } as unknown as React.FormEvent)
+    })
+
+    expect(mockBackendAuthStatuses.refetchAuth).toHaveBeenCalledWith('claude')
+    expect(handleCliAuthError).not.toHaveBeenCalled()
+    expect(sendMessage.mutate).toHaveBeenCalled()
   })
 
   it('starts goals in build mode by default', async () => {

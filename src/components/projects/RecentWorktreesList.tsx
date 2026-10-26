@@ -25,6 +25,11 @@ import {
   useModifierHintsVisible,
 } from '@/hooks/useModifierHintsVisible'
 import { Kbd } from '@/components/ui/kbd'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { WorkingWaveform } from '@/components/ui/status-indicator'
 import { isNativeApp } from '@/lib/environment'
 import { formatShortcutDisplay } from '@/types/keybindings'
@@ -435,25 +440,31 @@ export function RecentWorktreesList({
                   className={`relative flex w-full cursor-pointer flex-col gap-y-1 rounded-lg border py-2.5 pl-3 pr-3 text-left transition-[background-color,border-color,box-shadow,color] hover:bg-muted/30 hover:text-foreground has-[:focus-visible]:ring-1 has-[:focus-visible]:ring-ring ${isCurrent ? 'border-border bg-muted/50 text-foreground shadow' : 'border-transparent bg-transparent text-muted-foreground'}`}
                   onClick={() => handleOpen(row)}
                 >
-                  <button
-                    type="button"
-                    aria-label={isPinned ? 'Unpin session' : 'Pin session'}
-                    title={isPinned ? 'Unpin session' : 'Pin session'}
-                    className={`absolute -left-1.5 -top-1.5 z-10 flex size-5 items-center justify-center transition-opacity hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring md:opacity-0 md:focus-visible:opacity-100 md:group-hover:opacity-100 md:group-focus-within:opacity-100 ${isPinned ? 'text-foreground' : 'text-muted-foreground'}`}
-                    onClick={event => {
-                      event.stopPropagation()
-                      void setRecentSessionPinned(
-                        queryClient,
-                        row.session.id,
-                        !isPinned
-                      )
-                    }}
-                  >
-                    <Thumbtack
-                      size={11}
-                      weight={isPinned ? 'Filled' : 'Outline'}
-                    />
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label={isPinned ? 'Unpin session' : 'Pin session'}
+                        className={`absolute -left-1.5 -top-1.5 z-10 flex size-5 items-center justify-center transition-opacity hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring md:opacity-0 md:focus-visible:opacity-100 md:group-hover:opacity-100 md:group-focus-within:opacity-100 ${isPinned ? 'text-foreground' : 'text-muted-foreground'}`}
+                        onClick={event => {
+                          event.stopPropagation()
+                          void setRecentSessionPinned(
+                            queryClient,
+                            row.session.id,
+                            !isPinned
+                          )
+                        }}
+                      >
+                        <Thumbtack
+                          size={11}
+                          weight={isPinned ? 'Filled' : 'Outline'}
+                        />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {isPinned ? 'Unpin session' : 'Pin session'}
+                    </TooltipContent>
+                  </Tooltip>
                   <button
                     ref={element => {
                       if (element) rowRefs.current.set(row.session.id, element)

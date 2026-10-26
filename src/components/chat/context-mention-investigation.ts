@@ -3,6 +3,7 @@ import { queryClient } from '@/lib/query-client'
 import {
   githubQueryKeys,
   loadAdvisoryContext,
+  loadDiscussionContext,
   loadIssueContext,
   loadPRContext,
   loadSecurityContext,
@@ -30,6 +31,8 @@ export async function loadContextMentionItem(
     await loadIssueContext(sessionId, item.issue.number, worktreePath)
   } else if (item.type === 'pr' && item.pr && worktreePath) {
     await loadPRContext(sessionId, item.pr.number, worktreePath)
+  } else if (item.type === 'discussion' && item.discussion && worktreePath) {
+    await loadDiscussionContext(sessionId, item.discussion.number, worktreePath)
   } else if (item.type === 'security' && item.securityAlert && worktreePath) {
     await loadSecurityContext(
       sessionId,

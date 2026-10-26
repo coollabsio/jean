@@ -207,6 +207,7 @@ pub fn linear_issue_to_issue_context(detail: &LinearIssueDetail) -> IssueContext
         title: detail.title.clone(),
         body: detail.description.clone(),
         comments,
+        repo: None,
     }
 }
 

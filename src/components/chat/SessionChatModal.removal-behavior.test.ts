@@ -278,13 +278,17 @@ describe('SessionChatModal removal behavior', () => {
 
   it('offers to open resumable chat sessions in a separate native client session', () => {
     const source = readSource('src/components/chat/SessionChatModal.tsx')
+    const menuSource = readSource(
+      'src/components/chat/SessionContextMenuItems.tsx'
+    )
     const hookSource = readSource(
       'src/components/chat/hooks/useOpenInNativeClient.ts'
     )
 
     expect(source).toContain('useOpenInNativeClient(worktreeId, worktreePath)')
     expect(source).toContain('handleOpenInNativeClient')
-    expect(source).toContain('Open in Native Client')
+    expect(source).toContain('<SessionContextMenuItems')
+    expect(menuSource).toContain('Open in Native Client')
     expect(hookSource).toContain('buildNativeClientSessionInput')
     expect(hookSource).toMatch(
       /reconnectNativeCliSession\(nativeSession, worktreeId, \{[\s\S]*?openModal: false/

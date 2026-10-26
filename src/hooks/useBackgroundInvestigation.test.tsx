@@ -7,7 +7,10 @@ import { projectsQueryKeys } from '@/services/projects'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import type { Worktree } from '@/types/projects'
-import { useBackgroundInvestigation } from './useBackgroundInvestigation'
+import {
+  processBackgroundInvestigation,
+  useBackgroundInvestigation,
+} from './useBackgroundInvestigation'
 
 vi.mock('@/lib/transport', () => ({ invoke: vi.fn() }))
 
@@ -236,6 +239,48 @@ describe('useBackgroundInvestigation', () => {
       worktreePath: '/tmp/worktree-1',
     })
     window.removeEventListener('open-session-modal', listener)
+  })
+
+  it('keeps the current session selected for a background investigation', async () => {
+    useChatStore.setState({
+      activeSessionIds: { 'worktree-1': 'current-session' },
+    })
+    const queryClient = new QueryClient()
+    vi.mocked(invoke).mockImplementation(async command => {
+      if (command === 'start_background_investigation') {
+        return {
+          sessionId: 'background-session',
+          worktreeId: 'worktree-1',
+          status: 'investigation_started',
+        }
+      }
+      throw new Error(`Unexpected command: ${command}`)
+    })
+    const openEvents: Event[] = []
+    const listener = (event: Event) => openEvents.push(event)
+    window.addEventListener('open-session-modal', listener)
+
+    await processBackgroundInvestigation(
+      'worktree-1',
+      'issue',
+      {} as never,
+      null,
+      queryClient,
+      {
+        sessionId: 'background-session',
+        prompt: 'Investigate issue #42',
+        openSession: false,
+      }
+    )
+
+    window.removeEventListener('open-session-modal', listener)
+    expect(useChatStore.getState().activeSessionIds['worktree-1']).toBe(
+      'current-session'
+    )
+    expect(openEvents).toHaveLength(0)
+    expect(useChatStore.getState().lastSentMessages['background-session']).toBe(
+      'Investigate issue #42'
+    )
   })
 
   it('keeps the investigation pending when starting it fails', async () => {

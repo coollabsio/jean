@@ -18,14 +18,18 @@ use rand::Rng;
 
 use super::git;
 use super::git::get_repo_identifier;
+use super::github_discussions::{
+    add_discussion_reference, generate_branch_name_from_discussion, DiscussionContext,
+};
 use super::github_issues::{
     add_advisory_reference, add_issue_reference, add_pr_reference, add_security_reference,
-    format_advisory_context_markdown, format_issue_context_markdown, format_pr_context_markdown,
-    format_security_context_markdown, generate_branch_name_from_advisory,
-    generate_branch_name_from_issue, generate_branch_name_from_security_alert,
-    get_github_contexts_dir, get_github_pr, get_github_pr_by_number, get_pr_diff,
-    get_session_context_content, get_session_context_numbers, AdvisoryContext, IssueContext,
-    PullRequestContext, SecurityAlertContext,
+    context_repo_key, format_advisory_context_markdown, format_issue_context_markdown,
+    format_pr_context_markdown, format_security_context_markdown,
+    generate_branch_name_from_advisory, generate_branch_name_from_issue,
+    generate_branch_name_from_security_alert, get_github_contexts_dir, get_github_pr,
+    get_github_pr_by_number, get_pr_diff, get_session_context_content, get_session_context_numbers,
+    remote_name_for_github_repo, AdvisoryContext, IssueContext, PullRequestContext,
+    SecurityAlertContext,
 };
 use super::linear_issues::{
     add_linear_reference, format_linear_issue_context_markdown,
@@ -719,10 +723,16 @@ pub async fn list_projects(app: AppHandle) -> Result<Vec<ProjectListItem>, Strin
                 has_base_session |= worktree.session_type == SessionType::Base;
             }
 
+            let origin_url = if project.is_folder || project.server.is_some() {
+                None
+            } else {
+                git::origin_remote_url(&project.path)
+            };
             ProjectListItem {
                 project,
                 worktree_count,
                 has_base_session,
+                origin_url,
             }
         })
         .collect())
@@ -972,8 +982,15 @@ pub async fn clone_project(
 
     // Clone the repository
     git::clone_repo(&url, &path)?;
+    register_cloned_project(app, path, parent_id)
+}
 
-    // Get repository name and default branch from the cloned repo
+/// Register a checkout that has already been cloned onto this host.
+pub(crate) fn register_cloned_project(
+    app: AppHandle,
+    path: String,
+    parent_id: Option<String>,
+) -> Result<Project, String> {
     let name = git::get_repo_name(&path)?;
     let default_branch = git::get_current_branch(&path).unwrap_or_else(|_| "main".to_string());
 
@@ -1029,6 +1046,10 @@ pub async fn remove_project(app: AppHandle, project_id: String) -> Result<(), St
     log::trace!("Removing project: {project_id}");
 
     let mut data = load_projects_data(&app)?;
+
+    if data.find_project(&project_id).is_some_and(|p| p.is_folder) {
+        return Err("Cannot remove: this is a folder, not a project.".to_string());
+    }
 
     // Check if project has active (non-archived) worktrees
     let has_active_worktrees = data
@@ -1756,6 +1777,7 @@ pub async fn create_worktree(
     advisory_context: Option<AdvisoryContext>,
     linear_context: Option<LinearIssueContext>,
     sentry_context: Option<SentryIssueContext>,
+    discussion_context: Option<DiscussionContext>,
     custom_name: Option<String>,
     auto_open_in_jean: Option<bool>,
     origin: Option<String>,
@@ -1896,6 +1918,20 @@ pub async fn create_worktree(
         } else {
             sentry_branch
         }
+    } else if let Some(ref ctx) = discussion_context {
+        let discussion_branch = generate_branch_name_from_discussion(ctx.number, &ctx.title);
+        if data.worktree_name_exists(&project_id, &discussion_branch) {
+            let mut counter = 2;
+            loop {
+                let candidate = format!("{discussion_branch}-{counter}");
+                if !data.worktree_name_exists(&project_id, &candidate) {
+                    break candidate;
+                }
+                counter += 1;
+            }
+        } else {
+            discussion_branch
+        }
     } else if let Some(ref ctx) = issue_context {
         let issue_branch = generate_branch_name_from_issue(ctx.number, &ctx.title);
         // Check if this branch name already exists, if so, add a suffix
@@ -2020,6 +2056,7 @@ pub async fn create_worktree(
     let advisory_context_clone = advisory_context.clone();
     let linear_context_clone = linear_context.clone();
     let sentry_context_clone = sentry_context.clone();
+    let discussion_context_clone = discussion_context.clone();
     let worktree_origin_clone = worktree_origin.clone();
 
     // Spawn background thread for git operations
@@ -2296,18 +2333,27 @@ pub async fn create_worktree(
                     "Background: Branch collision, manual fetch PR #{} into {local_branch_name}",
                     ctx.number
                 );
-                    git::fetch_pr_to_branch(&project_path, ctx.number, &local_branch_name).and_then(
-                        |_| {
-                            git::checkout_branch(&worktree_path_clone, &local_branch_name)?;
-                            Ok(local_branch_name)
-                        },
+                    let fetch_remote = ctx
+                        .repo
+                        .as_deref()
+                        .and_then(|repo| remote_name_for_github_repo(&project_path, repo));
+                    git::fetch_pr_to_branch(
+                        &project_path,
+                        ctx.number,
+                        &local_branch_name,
+                        fetch_remote.as_deref(),
                     )
+                    .and_then(|_| {
+                        git::checkout_branch(&worktree_path_clone, &local_branch_name)?;
+                        Ok(local_branch_name)
+                    })
                 } else {
                     git::gh_pr_checkout(
                         &worktree_path_clone,
                         ctx.number,
                         Some(&local_branch_name),
                         &resolve_gh_binary(&app_clone),
+                        ctx.repo.as_deref(),
                     )
                 };
 
@@ -2363,8 +2409,7 @@ pub async fn create_worktree(
                     "Background: Writing issue context file for issue #{}",
                     ctx.number
                 );
-                if let Ok(repo_id) = get_repo_identifier(&project_path) {
-                    let repo_key = repo_id.to_key();
+                if let Ok(repo_key) = context_repo_key(&project_path, ctx.repo.as_deref()) {
                     if let Ok(contexts_dir) = get_github_contexts_dir(&app_clone) {
                         if let Err(e) = std::fs::create_dir_all(&contexts_dir) {
                             log::warn!("Background: Failed to create git-context directory: {e}");
@@ -2399,8 +2444,7 @@ pub async fn create_worktree(
             // Write PR context file if provided (to shared git-context directory)
             if let Some(ctx) = &pr_context_clone {
                 log::trace!("Background: Writing PR context file for PR #{}", ctx.number);
-                if let Ok(repo_id) = get_repo_identifier(&project_path) {
-                    let repo_key = repo_id.to_key();
+                if let Ok(repo_key) = context_repo_key(&project_path, ctx.repo.as_deref()) {
                     if let Ok(contexts_dir) = get_github_contexts_dir(&app_clone) {
                         if let Err(e) = std::fs::create_dir_all(&contexts_dir) {
                             log::warn!("Background: Failed to create git-context directory: {e}");
@@ -2408,7 +2452,13 @@ pub async fn create_worktree(
                             // Fetch the diff if not already present
                             let ctx_with_diff = if ctx.diff.is_none() {
                                 log::debug!("Background: Fetching diff for PR #{}", ctx.number);
-                                let diff = get_pr_diff(&app_clone, &project_path, ctx.number).ok();
+                                let diff = get_pr_diff(
+                                    &app_clone,
+                                    &project_path,
+                                    ctx.number,
+                                    ctx.repo.as_deref(),
+                                )
+                                .ok();
                                 PullRequestContext {
                                     number: ctx.number,
                                     title: ctx.title.clone(),
@@ -2418,6 +2468,7 @@ pub async fn create_worktree(
                                     comments: ctx.comments.clone(),
                                     reviews: ctx.reviews.clone(),
                                     diff,
+                                    repo: ctx.repo.clone(),
                                 }
                             } else {
                                 ctx.clone()
@@ -2590,6 +2641,39 @@ pub async fn create_worktree(
                             log::warn!("Background: Failed to add Sentry reference: {e}");
                         }
                     }
+                }
+            }
+
+            // Write discussion context file if provided (to shared git-context directory)
+            if let Some(ctx) = &discussion_context_clone {
+                log::trace!(
+                    "Background: Writing discussion context file for discussion #{}",
+                    ctx.number
+                );
+                match (
+                    get_repo_identifier(&project_path),
+                    get_github_contexts_dir(&app_clone),
+                ) {
+                    (Ok(repo_id), Ok(contexts_dir)) => {
+                        let repo_key = repo_id.to_key();
+                        let context_file =
+                            contexts_dir.join(format!("{repo_key}-discussion-{}.md", ctx.number));
+                        if let Err(e) = std::fs::create_dir_all(&contexts_dir) {
+                            log::warn!("Background: Failed to create git-context directory: {e}");
+                        } else if let Err(e) = std::fs::write(&context_file, &ctx.content) {
+                            log::warn!("Background: Failed to write discussion context file: {e}");
+                        } else if let Err(e) = add_discussion_reference(
+                            &app_clone,
+                            &repo_key,
+                            ctx.number,
+                            &worktree_id_clone,
+                        ) {
+                            log::warn!("Background: Failed to add discussion reference: {e}");
+                        }
+                    }
+                    _ => log::warn!(
+                        "Background: Could not resolve repo or context dir for discussion context"
+                    ),
                 }
             }
 
@@ -3202,8 +3286,7 @@ pub async fn create_worktree_from_existing_branch(
                     "Background: Writing issue context file for issue #{}",
                     ctx.number
                 );
-                if let Ok(repo_id) = get_repo_identifier(&project_path) {
-                    let repo_key = repo_id.to_key();
+                if let Ok(repo_key) = context_repo_key(&project_path, ctx.repo.as_deref()) {
                     if let Ok(contexts_dir) = get_github_contexts_dir(&app_clone) {
                         if let Err(e) = std::fs::create_dir_all(&contexts_dir) {
                             log::warn!("Background: Failed to create git-context directory: {e}");
@@ -3235,8 +3318,7 @@ pub async fn create_worktree_from_existing_branch(
             // Write PR context file if provided
             if let Some(ctx) = &pr_context_clone {
                 log::trace!("Background: Writing PR context file for PR #{}", ctx.number);
-                if let Ok(repo_id) = get_repo_identifier(&project_path) {
-                    let repo_key = repo_id.to_key();
+                if let Ok(repo_key) = context_repo_key(&project_path, ctx.repo.as_deref()) {
                     if let Ok(contexts_dir) = get_github_contexts_dir(&app_clone) {
                         if let Err(e) = std::fs::create_dir_all(&contexts_dir) {
                             log::warn!("Background: Failed to create git-context directory: {e}");
@@ -3244,7 +3326,13 @@ pub async fn create_worktree_from_existing_branch(
                             // Fetch the diff if not already present
                             let ctx_with_diff = if ctx.diff.is_none() {
                                 log::debug!("Background: Fetching diff for PR #{}", ctx.number);
-                                let diff = get_pr_diff(&app_clone, &project_path, ctx.number).ok();
+                                let diff = get_pr_diff(
+                                    &app_clone,
+                                    &project_path,
+                                    ctx.number,
+                                    ctx.repo.as_deref(),
+                                )
+                                .ok();
                                 PullRequestContext {
                                     number: ctx.number,
                                     title: ctx.title.clone(),
@@ -3254,6 +3342,7 @@ pub async fn create_worktree_from_existing_branch(
                                     comments: ctx.comments.clone(),
                                     reviews: ctx.reviews.clone(),
                                     diff,
+                                    repo: ctx.repo.clone(),
                                 }
                             } else {
                                 ctx.clone()
@@ -3583,7 +3672,7 @@ pub async fn checkout_pr(
     log::info!("[checkout_pr] No archived worktree found for PR #{pr_number}, creating new");
 
     // Fetch PR details from GitHub (for context and worktree naming)
-    let pr_detail = get_github_pr(app.clone(), project.path.clone(), pr_number).await?;
+    let pr_detail = get_github_pr(app.clone(), project.path.clone(), pr_number, None).await?;
     // Persist the same PR link fields as create/link PR so magic actions
     // (Open/Merge/PR Comments/status polling) work immediately after checkout.
     let pr_url = if pr_detail.url.trim().is_empty() {
@@ -3850,7 +3939,7 @@ pub async fn checkout_pr(
             // Instead, manually fetch the PR into the alt branch name and switch to it.
             let actual_branch = if branch_collision {
                 log::trace!("Background: Branch collision detected, using manual fetch for PR #{pr_number} into {local_branch_name}");
-                match git::fetch_pr_to_branch(&project_path, pr_number, &local_branch_name)
+                match git::fetch_pr_to_branch(&project_path, pr_number, &local_branch_name, None)
                     .and_then(|_| {
                         git::checkout_branch(&worktree_path_clone, &local_branch_name)?;
                         Ok(local_branch_name.clone())
@@ -3891,6 +3980,7 @@ pub async fn checkout_pr(
                     pr_number,
                     Some(&local_branch_name),
                     &resolve_gh_binary(&app_clone),
+                    None,
                 ) {
                     Ok(branch) => {
                         log::trace!("Background: gh pr checkout succeeded, branch: {branch}");
@@ -3989,7 +4079,8 @@ pub async fn checkout_pr(
                                     submitted_at: r.submitted_at,
                                 })
                                 .collect(),
-                            diff: get_pr_diff(&app_clone, &project_path, pr_number).ok(),
+                            diff: get_pr_diff(&app_clone, &project_path, pr_number, None).ok(),
+                            repo: None,
                         };
 
                         let context_file =
@@ -5188,6 +5279,162 @@ fn format_open_error(app_name: &str, error: &std::io::Error) -> String {
     }
 }
 
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+fn spawn_external_terminal(
+    program: &str,
+    args: &[String],
+    current_dir: Option<&str>,
+) -> Result<(), std::io::Error> {
+    let mut command = std::process::Command::new(program);
+    command.args(args);
+    if let Some(dir) = current_dir {
+        command.current_dir(dir);
+    }
+    command.spawn().map(|_| ())
+}
+
+/// PowerShell single-quoted strings escape `'` by doubling it.
+#[cfg(any(windows, test))]
+fn powershell_set_location_command(worktree_path: &str) -> String {
+    let escaped = worktree_path.replace('\'', "''");
+    format!("Set-Location -LiteralPath '{escaped}'")
+}
+
+#[cfg(any(windows, test))]
+#[derive(Debug, PartialEq, Eq)]
+struct WindowsExternalTerminalLaunch {
+    program: String,
+    args: Vec<String>,
+    current_dir: Option<String>,
+}
+
+/// Launch plan for the Windows "Open in terminal" preference.
+///
+/// PowerShell is the default. Windows Terminal and Warp are explicit choices.
+/// `warp_program` is the resolved Warp executable when the caller found one.
+#[cfg(any(windows, test))]
+fn windows_external_terminal_launch(
+    terminal: &str,
+    worktree_path: &str,
+    warp_program: Option<&str>,
+) -> Result<WindowsExternalTerminalLaunch, String> {
+    match terminal {
+        "warp" => {
+            let Some(program) = warp_program.filter(|program| !program.is_empty()) else {
+                return Err(
+                    "Warp not found. Install Warp or choose PowerShell or Windows Terminal."
+                        .to_string(),
+                );
+            };
+            Ok(WindowsExternalTerminalLaunch {
+                program: program.to_string(),
+                args: Vec::new(),
+                current_dir: Some(worktree_path.to_string()),
+            })
+        }
+        "windows-terminal" => Ok(WindowsExternalTerminalLaunch {
+            program: "wt".to_string(),
+            args: vec!["-d".to_string(), worktree_path.to_string()],
+            current_dir: None,
+        }),
+        _ => Ok(WindowsExternalTerminalLaunch {
+            program: "powershell.exe".to_string(),
+            args: vec![
+                "-NoExit".to_string(),
+                "-Command".to_string(),
+                powershell_set_location_command(worktree_path),
+            ],
+            current_dir: None,
+        }),
+    }
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn posix_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+#[cfg(any(target_os = "linux", test))]
+#[derive(Debug, PartialEq, Eq)]
+struct LinuxExternalTerminalCandidate {
+    program: &'static str,
+    args: Vec<String>,
+    current_dir: Option<String>,
+}
+
+/// Terminals to try on Linux, preferred app first.
+///
+/// The saved choice (`kitty`, `ghostty`) is tried before the generic list.
+/// `x-terminal-emulator` is the Debian/Ubuntu alternative and is missing on
+/// Arch, Fedora, and many other desktops, so the rest of the list still runs.
+#[cfg(any(target_os = "linux", test))]
+fn linux_external_terminal_candidates(
+    terminal: &str,
+    worktree_path: &str,
+) -> Vec<LinuxExternalTerminalCandidate> {
+    let path = worktree_path.to_string();
+    let quoted = posix_single_quote(worktree_path);
+    let mut candidates = vec![
+        LinuxExternalTerminalCandidate {
+            program: "x-terminal-emulator",
+            args: Vec::new(),
+            current_dir: Some(path.clone()),
+        },
+        LinuxExternalTerminalCandidate {
+            program: "gnome-terminal",
+            args: vec!["--working-directory".into(), path.clone()],
+            current_dir: None,
+        },
+        LinuxExternalTerminalCandidate {
+            program: "konsole",
+            args: vec!["--workdir".into(), path.clone()],
+            current_dir: None,
+        },
+        LinuxExternalTerminalCandidate {
+            program: "alacritty",
+            args: vec!["--working-directory".into(), path.clone()],
+            current_dir: None,
+        },
+        LinuxExternalTerminalCandidate {
+            program: "kitty",
+            args: vec!["--directory".into(), path.clone()],
+            current_dir: None,
+        },
+        LinuxExternalTerminalCandidate {
+            program: "ghostty",
+            args: Vec::new(),
+            current_dir: Some(path.clone()),
+        },
+        LinuxExternalTerminalCandidate {
+            program: "xterm",
+            args: vec![
+                "-e".into(),
+                "bash".into(),
+                "-c".into(),
+                format!("cd {quoted}; exec bash"),
+            ],
+            current_dir: None,
+        },
+    ];
+
+    let preferred = match terminal {
+        "kitty" => Some("kitty"),
+        "ghostty" => Some("ghostty"),
+        _ => None,
+    };
+    if let Some(program) = preferred {
+        if let Some(index) = candidates
+            .iter()
+            .position(|candidate| candidate.program == program)
+        {
+            let candidate = candidates.remove(index);
+            candidates.insert(0, candidate);
+        }
+    }
+
+    candidates
+}
+
 /// Open a worktree path in the configured terminal app
 pub async fn open_worktree_in_terminal(
     worktree_path: String,
@@ -5264,88 +5511,64 @@ pub async fn open_worktree_in_terminal(
 
     #[cfg(target_os = "linux")]
     {
-        // Try common Linux terminal emulators in order of preference
-        // Use owned Strings to avoid borrowing temporaries.
-        let terminals: Vec<(&str, Vec<String>)> = vec![
-            (
-                "gnome-terminal",
-                vec!["--working-directory".into(), worktree_path.clone()],
-            ),
-            ("konsole", vec!["--workdir".into(), worktree_path.clone()]),
-            (
-                "alacritty",
-                vec!["--working-directory".into(), worktree_path.clone()],
-            ),
-            ("kitty", vec!["--directory".into(), worktree_path.clone()]),
-            (
-                "xterm",
-                vec![
-                    "-e".into(),
-                    "bash".into(),
-                    "-c".into(),
-                    format!("cd '{}'; exec bash", worktree_path),
-                ],
-            ),
-        ];
-
+        // Honor Kitty/Ghostty when selected, then fall back through the
+        // terminals a desktop session is likely to have. `x-terminal-emulator`
+        // covers Debian alternatives; it is absent on Arch and Fedora.
+        let candidates = linux_external_terminal_candidates(&terminal_app, &worktree_path);
         let mut opened = false;
-        for (term, args) in terminals {
-            if crate::platform::executable_exists(term) {
-                match std::process::Command::new(term).args(args).spawn() {
-                    Ok(_) => {
-                        log::trace!("Opened terminal with {term}");
-                        opened = true;
-                        break;
-                    }
-                    Err(e) => {
-                        log::trace!("Failed to open {term}: {e}");
-                    }
+        for candidate in &candidates {
+            if !crate::platform::executable_exists(candidate.program) {
+                continue;
+            }
+            match spawn_external_terminal(
+                candidate.program,
+                &candidate.args,
+                candidate.current_dir.as_deref(),
+            ) {
+                Ok(()) => {
+                    log::trace!("Opened terminal with {}", candidate.program);
+                    opened = true;
+                    break;
+                }
+                Err(e) => {
+                    log::trace!("Failed to open {}: {e}", candidate.program);
                 }
             }
         }
 
         if !opened {
-            return Err("No supported terminal emulator found. Install gnome-terminal, konsole, alacritty, kitty, or xterm.".to_string());
+            return Err("No supported terminal emulator found. Install x-terminal-emulator, gnome-terminal, konsole, alacritty, kitty, ghostty, or xterm.".to_string());
         }
     }
 
     #[cfg(target_os = "windows")]
     {
-        let result = match terminal_app.as_str() {
-            "warp" => {
-                // Try known install path first, then fall back to PATH
-                let local = std::env::var("LOCALAPPDATA").unwrap_or_default();
-                let known_path = format!("{local}\\Programs\\Warp\\warp.exe");
-                let warp_exe = if std::path::Path::new(&known_path).exists() {
-                    known_path
-                } else if crate::platform::executable_exists("warp") {
-                    "warp".to_string()
-                } else {
-                    return Err(format!("Warp not found. Checked: {known_path} and PATH"));
-                };
-                log::trace!("Using Warp at: {warp_exe}");
-                std::process::Command::new(&warp_exe)
-                    .current_dir(&worktree_path)
-                    .spawn()
+        let warp_program = if terminal_app == "warp" {
+            let local = std::env::var("LOCALAPPDATA").unwrap_or_default();
+            let known_path = format!("{local}\\Programs\\Warp\\warp.exe");
+            if std::path::Path::new(&known_path).exists() {
+                Some(known_path)
+            } else if crate::platform::executable_exists("warp") {
+                Some("warp".to_string())
+            } else {
+                return Err(format!("Warp not found. Checked: {known_path} and PATH"));
             }
-            "windows-terminal" => std::process::Command::new("wt")
-                .args(["-d", &worktree_path])
-                .spawn(),
-            _ => {
-                // Default: PowerShell
-                std::process::Command::new("powershell")
-                    .args([
-                        "-NoExit",
-                        "-Command",
-                        &format!("Set-Location '{worktree_path}'"),
-                    ])
-                    .spawn()
-            }
+        } else {
+            None
         };
-
-        match result {
-            Ok(_) => log::trace!("Opened {terminal_app} in {worktree_path}"),
-            Err(e) => return Err(format!("Failed to open {terminal_app}: {e}")),
+        let plan = windows_external_terminal_launch(
+            &terminal_app,
+            &worktree_path,
+            warp_program.as_deref(),
+        )?;
+        log::trace!(
+            "Opening {terminal_app} via {} in {worktree_path}",
+            plan.program
+        );
+        if let Err(e) =
+            spawn_external_terminal(&plan.program, &plan.args, plan.current_dir.as_deref())
+        {
+            return Err(format!("Failed to open {terminal_app}: {e}"));
         }
     }
 
@@ -5570,9 +5793,10 @@ pub async fn get_github_remotes(repo_path: String) -> Result<Vec<git::GitHubRemo
 
 /// Get the GitHub URL for a branch (for frontend to open)
 pub async fn get_github_branch_url(repo_path: String, branch: String) -> Result<String, String> {
-    log::trace!("Getting GitHub branch URL: {branch} in {repo_path}");
-    let github_url = git::get_github_url(&repo_path)?;
-    Ok(format!("{github_url}/tree/{branch}"))
+    log::trace!("Getting branch URL: {branch} in {repo_path}");
+    let web_url = git::get_github_url(&repo_path)?;
+    let gitlab = resolve_git_provider(&repo_path).0 == GitProvider::Gitlab;
+    Ok(git::branch_web_url(&web_url, &branch, gitlab))
 }
 
 /// Get the GitHub URL for a repository (for frontend to open)
@@ -5583,12 +5807,13 @@ pub async fn get_github_repo_url(repo_path: String) -> Result<String, String> {
 
 /// Open a branch on GitHub in the browser (native only)
 pub async fn open_branch_on_github(repo_path: String, branch: String) -> Result<(), String> {
-    log::trace!("Opening branch on GitHub: {branch} in {repo_path}");
+    log::trace!("Opening branch in the browser: {branch} in {repo_path}");
 
-    let github_url = git::get_github_url(&repo_path)?;
-    let url = format!("{github_url}/tree/{branch}");
+    let web_url = git::get_github_url(&repo_path)?;
+    let gitlab = resolve_git_provider(&repo_path).0 == GitProvider::Gitlab;
+    let url = git::branch_web_url(&web_url, &branch, gitlab);
 
-    log::trace!("Opening GitHub branch URL: {url}");
+    log::trace!("Opening branch URL: {url}");
     crate::platform::open_url_in_browser(&url)
 }
 
@@ -5992,8 +6217,8 @@ pub async fn get_project_branches(
         .find_project(&project_id)
         .ok_or_else(|| format!("Project not found: {project_id}"))?;
 
-    // Fetch from origin to get latest branches (best effort)
-    let _ = git::fetch_origin(&project.path);
+    // Fetch every configured remote so non-origin branches are not stale.
+    let _ = git::fetch_all_remotes(&project.path);
 
     // Try to get remote branches first
     let remote_branches = git::get_remote_branches(&project.path)?;
@@ -6020,6 +6245,36 @@ pub async fn get_project_branches(
 
     let mut branches = local_branches;
     branches.sort();
+    Ok(branches)
+}
+
+/// Remote-tracking branches for the New Worktree dialog.
+///
+/// Fetches every configured remote, then returns each branch with its remote so
+/// the same name on `origin` and `upstream` stays distinct.
+pub async fn list_worktree_branches(
+    app: AppHandle,
+    project_id: String,
+) -> Result<Vec<git::RemoteBranch>, String> {
+    log::trace!("Listing worktree branches for project: {project_id}");
+
+    let data = load_projects_data(&app)?;
+    let project = data
+        .find_project(&project_id)
+        .ok_or_else(|| format!("Project not found: {project_id}"))?;
+
+    let _ = git::fetch_all_remotes(&project.path);
+    let mut branches = git::list_remote_branches(&project.path)?;
+    if branches.is_empty() {
+        branches = git::get_branches(&project.path)?
+            .into_iter()
+            .map(|name| git::RemoteBranch {
+                qualified: name.clone(),
+                remote: String::new(),
+                name,
+            })
+            .collect();
+    }
     Ok(branches)
 }
 
@@ -9529,7 +9784,7 @@ fn generate_commit_message(
         reasoning_effort,
     )?;
 
-    match validate_commit_message(&response.message, prompt, prompt) {
+    let result = match validate_commit_message(&response.message, prompt, prompt) {
         Ok(()) => Ok(response),
         Err(first_reason) => {
             log::warn!(
@@ -9560,7 +9815,27 @@ fn generate_commit_message(
                 }
             }
         }
-    }
+    };
+    result.map(|response| CommitMessageResponse {
+        message: strip_co_authored_by_trailers(&response.message),
+    })
+}
+
+/// Jean commits never carry `Co-Authored-By:` trailers, even when the model
+/// copies them from recent commits or a backend default.
+fn strip_co_authored_by_trailers(message: &str) -> String {
+    message
+        .lines()
+        .filter(|line| {
+            !line
+                .trim_start()
+                .to_ascii_lowercase()
+                .starts_with("co-authored-by:")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim_end()
+        .to_string()
 }
 
 /// Choose a usable commit message when validation failed but we still want to
@@ -15223,6 +15498,103 @@ mod tests {
     }
 
     #[test]
+    fn windows_terminal_preference_opens_powershell_by_default() {
+        let path = r"C:\Users\O'Brien\repo";
+        for terminal in ["powershell", "terminal", ""] {
+            let plan =
+                windows_external_terminal_launch(terminal, path, None).expect("powershell plan");
+            assert_eq!(plan.program, "powershell.exe");
+            assert_eq!(
+                plan.args,
+                vec![
+                    "-NoExit".to_string(),
+                    "-Command".to_string(),
+                    "Set-Location -LiteralPath 'C:\\Users\\O''Brien\\repo'".to_string(),
+                ]
+            );
+            assert_eq!(plan.current_dir, None);
+        }
+    }
+
+    #[test]
+    fn windows_terminal_preference_can_select_windows_terminal_or_warp() {
+        let path = r"C:\work\repo";
+        let wt = windows_external_terminal_launch("windows-terminal", path, None)
+            .expect("windows terminal plan");
+        assert_eq!(wt.program, "wt");
+        assert_eq!(wt.args, vec!["-d".to_string(), path.to_string()]);
+
+        let warp = windows_external_terminal_launch("warp", path, Some(r"C:\Warp\warp.exe"))
+            .expect("warp plan");
+        assert_eq!(warp.program, r"C:\Warp\warp.exe");
+        assert_eq!(warp.current_dir.as_deref(), Some(path));
+
+        let missing = windows_external_terminal_launch("warp", path, None);
+        assert!(missing.is_err());
+    }
+
+    #[test]
+    fn linux_terminal_candidates_try_a_fallback_chain() {
+        let candidates = linux_external_terminal_candidates("terminal", "/home/user/project");
+        let programs: Vec<_> = candidates
+            .iter()
+            .map(|candidate| candidate.program)
+            .collect();
+        assert_eq!(
+            programs,
+            vec![
+                "x-terminal-emulator",
+                "gnome-terminal",
+                "konsole",
+                "alacritty",
+                "kitty",
+                "ghostty",
+                "xterm",
+            ]
+        );
+        assert_eq!(
+            candidates[1].args,
+            vec![
+                "--working-directory".to_string(),
+                "/home/user/project".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn linux_terminal_candidates_prefer_kitty_and_quote_paths() {
+        let candidates = linux_external_terminal_candidates("kitty", "/home/user/o'brien/project");
+        assert_eq!(candidates[0].program, "kitty");
+        assert_eq!(
+            candidates[0].args,
+            vec![
+                "--directory".to_string(),
+                "/home/user/o'brien/project".to_string()
+            ]
+        );
+        let xterm = candidates
+            .iter()
+            .find(|candidate| candidate.program == "xterm")
+            .expect("xterm candidate");
+        assert_eq!(
+            xterm.args,
+            vec![
+                "-e".to_string(),
+                "bash".to_string(),
+                "-c".to_string(),
+                "cd '/home/user/o'\\''brien/project'; exec bash".to_string(),
+            ]
+        );
+
+        let ghostty = linux_external_terminal_candidates("ghostty", "/home/user/project");
+        assert_eq!(ghostty[0].program, "ghostty");
+        assert_eq!(
+            ghostty[0].current_dir.as_deref(),
+            Some("/home/user/project")
+        );
+    }
+
+    #[test]
     fn parse_worktree_origin_preserves_manual_origin() {
         assert_eq!(
             parse_worktree_origin(Some("manual")),
@@ -15868,6 +16240,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn remove_project_keeps_files_on_disk_and_rejects_folders() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = temp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::write(repo.join("keep.txt"), "keep").unwrap();
+        let app = crate::RuntimeContext::new(temp.path().join("data"), temp.path().into()).unwrap();
+        let data: ProjectsData = serde_json::from_value(serde_json::json!({
+            "projects": [
+                {"id": "folder", "name": "Folder", "path": "", "default_branch": "",
+                 "added_at": 0, "is_folder": true},
+                {"id": "project", "name": "Test", "path": repo, "default_branch": "main",
+                 "added_at": 0, "parent_id": "folder"}
+            ],
+            "worktrees": []
+        }))
+        .unwrap();
+        save_projects_data(&app, &data).unwrap();
+
+        let err = remove_project(app.clone(), "folder".into())
+            .await
+            .unwrap_err();
+        assert!(err.contains("folder"));
+        assert!(load_projects_data(&app)
+            .unwrap()
+            .find_project("folder")
+            .is_some());
+
+        crate::http_server::dispatch::dispatch_command(
+            &app,
+            "remove_project",
+            serde_json::json!({"projectId": "project"}),
+        )
+        .await
+        .unwrap();
+        assert!(load_projects_data(&app)
+            .unwrap()
+            .find_project("project")
+            .is_none());
+        assert!(repo.join("keep.txt").exists());
+    }
+
+    #[tokio::test]
     async fn delete_worktree_can_skip_failed_teardown() {
         let temp = tempfile::tempdir().expect("temp dir");
         let repo = temp.path().join("repo");
@@ -16170,6 +16584,19 @@ Body
 
         let custom = add_commit_prompt_rule("Custom prompt", "New rule");
         assert_eq!(custom, "Custom prompt\n\nAdditional rule:\n- New rule");
+    }
+
+    #[test]
+    fn strip_co_authored_by_trailers_removes_only_trailer_lines() {
+        let message = "feat(chat): add steering\n\nKeep body line.\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nco-authored-by: Bot <bot@example.com>\n";
+        assert_eq!(
+            strip_co_authored_by_trailers(message),
+            "feat(chat): add steering\n\nKeep body line."
+        );
+        assert_eq!(
+            strip_co_authored_by_trailers("fix: keep me"),
+            "fix: keep me"
+        );
     }
 
     #[test]

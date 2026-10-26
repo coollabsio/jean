@@ -393,7 +393,7 @@ pub fn execute_commandcode_headless(
         return Err("Command Code CLI not found. Install it with `npm install -g command-code` and run `cmd login`.".to_string());
     }
 
-    let mode = execution_mode.unwrap_or("plan");
+    let mode = execution_mode.unwrap_or("build");
     log::info!(
         "Starting Command Code headless run session={} worktree={} mode={} binary={} cwd={} streaming=false",
         jean_session_id,
@@ -668,7 +668,7 @@ pub fn execute_one_shot_commandcode(
     }
     log::info!(
         "Starting Command Code one-shot mode={} binary={} cwd={:?} streaming=false prompt_bytes={} selected_model={:?}",
-        execution_mode.unwrap_or("plan"),
+        execution_mode.unwrap_or("build"),
         binary_path.display(),
         working_dir,
         prompt.len(),
@@ -687,7 +687,7 @@ pub fn execute_one_shot_commandcode(
         command.arg("--model").arg(cli_model);
         log::info!("Command Code one-shot using --model {}", cli_model);
     }
-    match execution_mode.unwrap_or("plan") {
+    match execution_mode.unwrap_or("build") {
         "yolo" => {
             command.arg("--yolo");
         }

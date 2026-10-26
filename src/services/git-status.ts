@@ -611,6 +611,14 @@ export async function triggerImmediateRemotePoll(): Promise<void> {
   await invoke('trigger_immediate_remote_poll')
 }
 
+/** Keep a worktree id on path-based git commands so routing can see its owner. */
+function withWorktreeOwner(
+  worktreeId: string | undefined,
+  args: Record<string, unknown>
+): Record<string, unknown> {
+  return worktreeId ? { worktreeId, ...args } : args
+}
+
 /**
  * Get detailed git diff for a worktree.
  *
@@ -623,17 +631,21 @@ export async function getGitDiff(
   worktreePath: string,
   diffType: 'uncommitted' | 'branch',
   baseBranch?: string,
-  baseRemote?: string
+  baseRemote?: string,
+  worktreeId?: string
 ): Promise<GitDiff> {
   if (!isTauri()) {
     throw new Error('Git diff only available in Tauri')
   }
-  return invoke<GitDiff>('get_git_diff', {
-    worktreePath,
-    diffType,
-    baseBranch,
-    baseRemote,
-  })
+  return invoke<GitDiff>(
+    'get_git_diff',
+    withWorktreeOwner(worktreeId, {
+      worktreePath,
+      diffType,
+      baseBranch,
+      baseRemote,
+    })
+  )
 }
 
 /**
@@ -648,17 +660,21 @@ export async function getCommitHistory(
   worktreePath: string,
   branch?: string,
   limit?: number,
-  skip?: number
+  skip?: number,
+  worktreeId?: string
 ): Promise<CommitHistoryResult> {
   if (!isTauri()) {
     throw new Error('Commit history only available in Tauri')
   }
-  return invoke<CommitHistoryResult>('get_commit_history', {
-    worktreePath,
-    branch: branch ?? null,
-    limit: limit ?? null,
-    skip: skip ?? null,
-  })
+  return invoke<CommitHistoryResult>(
+    'get_commit_history',
+    withWorktreeOwner(worktreeId, {
+      worktreePath,
+      branch: branch ?? null,
+      limit: limit ?? null,
+      skip: skip ?? null,
+    })
+  )
 }
 
 /**
@@ -669,25 +685,35 @@ export async function getCommitHistory(
  */
 export async function getCommitDiff(
   worktreePath: string,
-  commitSha: string
+  commitSha: string,
+  worktreeId?: string
 ): Promise<GitDiff> {
   if (!isTauri()) {
     throw new Error('Commit diff only available in Tauri')
   }
-  return invoke<GitDiff>('get_commit_diff', {
-    worktreePath,
-    commitSha,
-  })
+  return invoke<GitDiff>(
+    'get_commit_diff',
+    withWorktreeOwner(worktreeId, {
+      worktreePath,
+      commitSha,
+    })
+  )
 }
 
 /**
  * Get local branches for a repository by path.
  */
-export async function getRepoBranches(repoPath: string): Promise<string[]> {
+export async function getRepoBranches(
+  repoPath: string,
+  worktreeId?: string
+): Promise<string[]> {
   if (!isTauri()) {
     throw new Error('Branch listing only available in Tauri')
   }
-  return invoke<string[]>('get_repo_branches', { repoPath })
+  return invoke<string[]>(
+    'get_repo_branches',
+    withWorktreeOwner(worktreeId, { repoPath })
+  )
 }
 
 /**
@@ -696,12 +722,16 @@ export async function getRepoBranches(repoPath: string): Promise<string[]> {
 export async function revertFile(
   worktreePath: string,
   filePath: string,
-  fileStatus: string
+  fileStatus: string,
+  worktreeId?: string
 ): Promise<void> {
   if (!isTauri()) {
     throw new Error('Revert file only available in Tauri')
   }
-  return invoke('revert_file', { worktreePath, filePath, fileStatus })
+  return invoke(
+    'revert_file',
+    withWorktreeOwner(worktreeId, { worktreePath, filePath, fileStatus })
+  )
 }
 
 // ============================================================================

@@ -107,6 +107,13 @@ export function shouldLetEditableHandleShortcut(
   )
 }
 
+/** Shift+Tab toggles Plan only from the composer, not from the rest of the app. */
+export function isChatComposerTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof Element && target.closest('[data-chat-input]') !== null
+  )
+}
+
 export function shouldLetChatInputHandleAction(
   action: KeybindingAction,
   target: EventTarget | null,
@@ -585,6 +592,23 @@ export function switchActiveTerminalTabByIndexForShortcut(
 }
 
 /**
+ * View → Toggle Browser and the `toggle_browser` shortcut.
+ * Session chat cycles closed → modal drawer → bottom panel → closed.
+ * The main window cycles closed → side pane → bottom panel → closed.
+ */
+export function toggleBrowserKeybinding(): void {
+  const uiState = useUIStore.getState()
+  const chatState = useChatStore.getState()
+  const worktreeId = uiState.sessionChatModalOpen
+    ? (uiState.sessionChatModalWorktreeId ?? chatState.activeWorktreeId)
+    : chatState.activeWorktreeId
+  if (!worktreeId) return
+  useBrowserStore
+    .getState()
+    .toggleBrowserSurface(worktreeId, uiState.sessionChatModalOpen)
+}
+
+/**
  * Main window event listeners - handles global keyboard shortcuts and other app-level events
  *
  * This hook provides a centralized place for all global event listeners, keeping
@@ -633,8 +657,10 @@ function executeKeybindingAction(
       logger.debug(`Keybinding: ${action}`)
       // Disabled Agents falls back to Workspace in the rail
       const ui = useUIStore.getState()
-      ui.setRailSection(action === 'show_agents' ? 'agents' : 'workspace')
-      ui.setLeftSidebarVisible(true)
+      const section = action === 'show_agents' ? 'agents' : 'workspace'
+      // Another section: restore its panel. Same section: show it.
+      if (ui.railSection === section) ui.setLeftSidebarVisible(true)
+      else ui.setRailSection(section, true)
       break
     }
     case 'toggle_zen_mode': {
@@ -904,16 +930,7 @@ function executeKeybindingAction(
     }
     case 'toggle_browser': {
       logger.debug('Keybinding: toggle_browser')
-      const uiState = useUIStore.getState()
-      const chatState = useChatStore.getState()
-      if (uiState.sessionChatModalOpen) {
-        const wid =
-          uiState.sessionChatModalWorktreeId ?? chatState.activeWorktreeId
-        if (wid) useBrowserStore.getState().toggleModal(wid)
-      } else {
-        const wid = chatState.activeWorktreeId
-        if (wid) useBrowserStore.getState().toggleSidePane(wid)
-      }
+      toggleBrowserKeybinding()
       break
     }
     case 'open_provider_dropdown':
@@ -1254,6 +1271,15 @@ export function useMainWindowEventListeners() {
             },
           })
         )
+        return
+      }
+
+      // Plan toggling is a composer control. Elsewhere Shift+Tab keeps its
+      // normal focus behavior.
+      if (
+        matchedAction === 'cycle_execution_mode' &&
+        !isChatComposerTarget(e.target)
+      ) {
         return
       }
 

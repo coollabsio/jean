@@ -220,8 +220,9 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
   },
   {
     action: 'cycle_execution_mode',
-    label: 'Cycle execution mode',
-    description: 'Cycle through Plan, Build, and Full access modes',
+    label: 'Toggle Plan mode',
+    description:
+      'Toggle Plan mode while the composer is focused. Does not change the permission used after approval.',
     default_shortcut: 'shift+tab',
     category: 'chat',
   },
@@ -301,7 +302,8 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
   {
     action: 'toggle_browser',
     label: 'Toggle browser',
-    description: 'Show or hide the embedded browser side pane',
+    description:
+      'Show or hide the embedded browser (side pane, bottom panel, or session drawer)',
     default_shortcut: 'mod+shift+backquote',
     category: 'navigation',
   },

@@ -61,6 +61,7 @@ function renderDesktopToolbarControls(
     mcpStatuses: undefined,
     loadedIssueContexts: [],
     loadedPRContexts: [],
+    loadedDiscussionContexts: [],
     loadedSecurityContexts: [],
     loadedAdvisoryContexts: [],
     loadedLinearContexts: [],
@@ -88,6 +89,7 @@ function renderDesktopToolbarControls(
     handleEffortLevelChange: vi.fn(),
     handleViewIssue: vi.fn(),
     handleViewPR: vi.fn(),
+    handleViewDiscussion: vi.fn(),
     handleViewSecurityAlert: vi.fn(),
     handleViewAdvisory: vi.fn(),
     handleViewLinear: vi.fn(),
@@ -121,7 +123,6 @@ describe('DesktopToolbarControls', () => {
   })
 
   it.each([
-    ['plan', 'Full access'],
     ['build', 'Auto-accept edits'],
     ['yolo', 'Full access'],
   ] as const)('shows %s label in the desktop mode trigger', (mode, label) => {
@@ -129,6 +130,14 @@ describe('DesktopToolbarControls', () => {
 
     expect(
       screen.getByRole('button', { name: new RegExp(`^Permissions: ${label}$`, 'i') })
+    ).toBeInTheDocument()
+  })
+
+  it('shows Plan in the desktop mode trigger', () => {
+    renderDesktopToolbarControls({ executionMode: 'plan' })
+
+    expect(
+      screen.getByRole('button', { name: 'Workflow: Plan' })
     ).toBeInTheDocument()
   })
 
@@ -141,7 +150,7 @@ describe('DesktopToolbarControls', () => {
       onSetExecutionMode,
     })
 
-    await user.click(screen.getByRole('button', { name: 'Permissions: Full access' }))
+    await user.click(screen.getByRole('button', { name: 'Workflow: Plan' }))
     await user.click(screen.getByRole('menuitemradio', { name: /Supervised/ }))
     expect(onSetExecutionMode).toHaveBeenCalledWith('supervised')
   })
@@ -186,7 +195,7 @@ describe('DesktopToolbarControls', () => {
       screen.getByRole('button', { name: /choose backend and model/i })
     ).toBeEnabled()
     expect(screen.getByRole('button', { name: /medium/i })).toBeEnabled()
-    expect(screen.getByRole('button', { name: 'Permissions: Full access' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Workflow: Plan' })).toBeEnabled()
   })
 
   it('keeps Claude provider switcher available after messages exist', () => {

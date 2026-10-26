@@ -142,21 +142,28 @@ is enabled and uses `deniedMcpServers` for known servers that are off. Grok
 disables them through `disabled_mcp_servers`, and Cursor through
 `mcp enable|disable`. Other backends load them automatically.
 
-### Full-screen settings pages
+### Settings surfaces
 
-App and project settings share `src/components/preferences/SettingsPage.tsx`.
-This full-window surface uses a non-modal Radix root and content portal, without
-an overlay, centered-dialog sizing, or a focus trap. Radix still manages initial
-focus, focus restoration, and Escape. Open child selects and popovers consume
-Escape before the page closes; settings search can also consume it to clear the
-query. Native window controls and macOS traffic-light spacing remain available.
+App preferences (`PreferencesDialog`) open through the shared modal `Dialog`.
+The surface is a true modal: backdrop, focus trap, and dismiss via Escape, the
+close button, or a backdrop click. Size it near the viewport — `96vw` by
+`94dvh` — so it fills most of the window with a modest inset. Open child
+selects and popovers consume Escape before the dialog closes; settings search
+can also consume it to clear the query. Do not copy native titlebar insets or
+Linux window controls onto this modal; those belong to the app title bar.
+
+Project settings still use `src/components/preferences/SettingsPage.tsx`. That
+full-window surface uses a non-modal Radix root and content portal, without an
+overlay or focus trap. Radix still manages initial focus, focus restoration, and
+Escape. Native window controls and macOS traffic-light spacing stay on that
+shell because it covers the title bar.
 
 Keep navigation in the left sidebar, Back at its bottom, and pane content in a
 centered, scrollable `max-w-4xl` column. Below the `md` breakpoint, use the pane
 selector and mobile search instead. Use the shared `SettingsSection` for subtle
 background cards in both app and project panes, with section headings above the
 cards. Preserve existing settings target
-ownership and persistence; the page changes presentation only.
+ownership and persistence; the chrome changes presentation only.
 
 Reference: [Radix Dialog](https://www.radix-ui.com/primitives/docs/components/dialog).
 
@@ -180,6 +187,13 @@ partitions updates: client keys never cross the backend transport, while server
 keys continue to use backend persistence. New code can use
 `useClientPreferences()` directly.
 
+`browser_default_host` is one of those server settings (Settings → General →
+Browser). New browser tabs and port open buttons use a jean.json `ports[].host`
+when that port sets one, then this hostname, then `localhost`. A client viewing
+a worktree on a remote Jean server reads that server's value. Loopback names
+stay loopback so remote preview forwarding can still apply; any other hostname
+is used as written. Jean MCP stays mandatory and is not part of this setting.
+
 Project and worktree display state uses the same ownership rule through the
 versioned `jean-client-view-state-v1` browser storage record. This includes
 canvas sorting and active filters, tree expansion, dashboard favorites, sidebar
@@ -187,13 +201,23 @@ layout, and browser/terminal layout. Pinned recent sessions and pinned canvas
 label filters are shared through server UI state instead. Resource-keyed values
 must use scoped server resource IDs. `useClientViewStatePersistence()` migrates the legacy
 server UI-state values on first load and then makes the client record
-authoritative. Keep session data, running terminal metadata, drafts, and other
-operational state in the backend persistence paths.
+authoritative.
+
+Navigation state is also per client, but it lives on the server so a desktop
+window, a browser profile, and a remote Jean client each restore their own
+place. The snapshot is `ui-clients/<client-id>.json` and holds the active
+project, worktree, and chat, input drafts, open terminal and browser tabs, and
+the last location. The desktop installation claims the legacy `ui-state.json`
+navigation once at startup; other clients start empty and do not inherit it.
+Projects, worktrees, chat sessions and messages, agent processes, server
+preferences, and providers stay shared. Live terminal processes stay in the
+server registry. `ui-state.json` keeps only the shared pins and pinned canvas
+labels.
 
 Each server owns the pins of its own recent sessions. Pins change only through
-`set_recent_session_pinned` (one ID per call); `save_ui_state` keeps the pins
-that are on disk, so a full save from one client cannot drop another client's
-pin. Native Jean reads each remote server's pins with
+`set_recent_session_pinned` (one ID per call). A full `save_ui_state` writes
+that client's navigation file and does not replace the shared pins. Native Jean
+reads each remote server's pins with
 `get_pinned_recent_session_ids` and merges them with its local pins
 (`src/services/recent-session-pins.ts`). An "Unknown command" answer marks an
 older server; native Jean then keeps that server's pins in its local UI state
@@ -206,6 +230,27 @@ detect concurrent edits. Capabilities provide the server-owned Magic Prompt
 catalog/defaults; the React UI retains bundled fallbacks for older servers.
 Duplicate pairs are rejected while running. Job progress emits
 `review-job:updated`.
+
+### Provider accounts
+
+Claude and Codex can keep more than one login. `provider_accounts` on
+`AppPreferences` stores `{ id, backend, label }`. Each account's auth files
+live under `{app_data}/provider-accounts/{backend}/{id}`. A session's
+`provider_account_id` selects one of them. An empty selection uses the CLI's
+own login (`~/.claude` or `~/.codex`).
+
+New Claude and Codex sessions copy `default_provider_accounts[backend]` when
+that id still belongs to the backend. The chat toolbar can change the account
+for the open session. Claude turns set `CLAUDE_CONFIG_DIR`. Codex turns set
+`CODEX_HOME` on the shared app-server and restart that server only when it is
+idle.
+
+Sign-in still writes the CLI's own home. `capture_provider_account_auth`
+copies that login into the account directory (`auth.json` or
+`.credentials.json`, plus optional config). The other commands are
+`create_provider_account`, `delete_provider_account`, and
+`set_session_provider_account`. Jean MCP stays enabled on every preference
+load and save.
 
 ### Command-Centric Design
 
@@ -337,8 +382,8 @@ Additional systems (no dedicated docs yet):
   on an interrupt. The backing Jean `sessionId` must therefore be carried through
   terminal creation, native-session reconnect, frontend terminal persistence,
   `start_terminal`, and both native/WebSocket transports. Terminals opened in an
-  *external* OS terminal cannot be instrumented and stay idle. Only the CLI
-  Jean itself launches is instrumented; one the user starts *by hand* in that
+  _external_ OS terminal cannot be instrumented and stay idle. Only the CLI
+  Jean itself launches is instrumented; one the user starts _by hand_ in that
   terminal carries no hook and does not report.
 
   **Web-mode persistence.** In web access (Axum HTTP server + WebSocket),
@@ -360,6 +405,28 @@ Additional systems (no dedicated docs yet):
   continues to access only its serving Jean instance. New global client state
   must use a composite `(serverId, resourceId)` identity; raw server resource
   IDs are not globally unique.
+
+  **SSH tunnel profiles.** A remote profile is either a direct Web Access URL
+  or a desktop-managed `ssh -N` local forward to a loopback-only jean-server.
+  The supervisor lives in `src-tauri/src/ssh_tunnel/` and is not dispatched
+  through jean-core or MCP. See `docs/developer/ssh-tunnel.md`. Notifications
+  such as ntfy are not part of this transport.
+
+  **Start on a host.** New worktree and new session pick a host (Local or a
+  connected remote) without duplicating the project in the sidebar. Projects
+  that share a normalized git remote URL collapse to one row; each host
+  checkout is attached as `hostCheckouts`. `ensure_project_present` on the
+  target Jean reuses a checkout whose remotes match, or clones into
+  `~/jean/checkouts/<name>`. The clone runs with `git clone --progress`.
+  The target Jean emits `project:ensure-progress` on the existing event
+  channel (`emit_all`, so a remote desktop hears it on that host's socket).
+  The dialog shows git's status line. When the line contains a percent, the
+  bar is a weighted overall of counting, receiving objects, and resolving
+  deltas so it does not reset between phases. A line with no percent keeps an
+  indeterminate bar. Env files (`.env`, `.env.local`, and the
+  development/production variants) are copied only after an explicit confirm,
+  one file at a time, with the bar advancing per file. There is no continuous
+  file sync.
 
   When an established WebSocket disconnects, the frontend reloads the page
   instead of repairing stale in-memory state. The normal
@@ -487,7 +554,7 @@ interaction finishes.
 
 ### Canvas View
 
-**ProjectCanvasView** (`src/components/dashboard/ProjectCanvasView.tsx`) shows sessions across all worktrees in a project, grouped by worktree with section headers. Sessions are opened via `SessionChatModal` overlay.
+**ProjectCanvasView** (`src/components/dashboard/ProjectCanvasView.tsx`) lists the selected project's worktrees. Focusing a worktree — from the canvas row or the sidebar worktree row — opens `WorktreeSessionsBrowser` instead of the horizontal session tab strip. The browser reuses session card status, labels, and `useCanvasKeyboardNav`. A row shows the effective session status and, when live agent activity differs from that status, the agent status as well. Choosing a session opens `SessionChatModal`. Sidebar session rows and other explicit session actions still open that session directly.
 
 Shared infrastructure in `src/components/chat/`:
 

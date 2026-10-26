@@ -7,6 +7,7 @@ import type {
   LoadedPullRequestContext,
   LoadedSecurityAlertContext,
   LoadedAdvisoryContext,
+  LoadedDiscussionContext,
 } from '@/types/github'
 import type { LoadedLinearIssueContext } from '@/types/linear'
 import type { SentryIssueContext } from '@/types/sentry'
@@ -16,6 +17,7 @@ import {
   getSavedContextContent,
   getSecurityContextContent,
   getAdvisoryContextContent,
+  getDiscussionContextContent,
 } from '@/services/github'
 import type { ViewingContext } from '@/components/chat/toolbar/types'
 
@@ -86,6 +88,28 @@ export function useContextViewer({
       }
     },
     [activeSessionId, activeWorktreePath, worktreeId]
+  )
+
+  const handleViewDiscussion = useCallback(
+    async (ctx: LoadedDiscussionContext) => {
+      if (!activeSessionId || !activeWorktreePath) return
+      try {
+        const content = await getDiscussionContextContent(
+          activeSessionId,
+          ctx.number,
+          activeWorktreePath
+        )
+        setViewingContext({
+          type: 'discussion',
+          number: ctx.number,
+          title: ctx.title,
+          content,
+        })
+      } catch (error) {
+        toast.error(`Failed to load context: ${error}`)
+      }
+    },
+    [activeSessionId, activeWorktreePath]
   )
 
   const handleViewSavedContext = useCallback(
@@ -190,6 +214,7 @@ export function useContextViewer({
     setViewingContext,
     handleViewIssue,
     handleViewPR,
+    handleViewDiscussion,
     handleViewSavedContext,
     handleViewSecurityAlert,
     handleViewAdvisory,

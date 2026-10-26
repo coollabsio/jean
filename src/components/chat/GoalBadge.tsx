@@ -4,6 +4,11 @@ import { toast } from 'sonner'
 import { useChatStore } from '@/store/chat-store'
 import { Button } from '@/components/ui/button'
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import {
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -39,17 +44,21 @@ export function GoalBadge({ sessionId, onClearGoal }: GoalBadgeProps) {
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          aria-label="Show goal"
-          title="Show goal"
-          className="flex h-6 items-center gap-1 rounded-t-md border border-b-0 border-border bg-card px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        >
-          <Flag className="h-3.5 w-3.5" aria-hidden="true" />
-          <span>Goal</span>
-        </button>
-      </PopoverTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              aria-label="Show goal"
+              className="flex h-6 items-center gap-1 rounded-t-md border border-b-0 border-border bg-card px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <Flag className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>Goal</span>
+            </button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent>Show goal</TooltipContent>
+      </Tooltip>
       <PopoverContent align="end" className="w-80 p-3">
         <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
           Goal

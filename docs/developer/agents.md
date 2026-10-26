@@ -158,8 +158,9 @@ run. Leave it unset in normal use.
 - When the agent has a backend, model, effort, or thinking level, the wake
   passes those on `send_chat_message`. Selected skills are appended to the
   wake message with the chat skill marker.
-- New chat and task sessions get the default execution mode saved once
-  (`ensure_session_mode`). Sessions without metadata otherwise load as Plan.
+- New chat and task sessions get an implement execution mode saved once
+  (`ensure_session_mode`). Plan is not that default. Old session JSON without
+  a saved mode still loads as Plan so those sessions are not escalated.
 - At startup, active delegations are checked once, so runs that ended while
   Jean was closed are still reported.
 
@@ -279,12 +280,36 @@ get it per thread through a config override
 (`jean_mcp_config::codex_session_config_override`), because the persistent
 `~/.codex/config.toml` entry only has a fixed label.
 
+**Agent messages in the chat:** an agent chat shows each `message_agent` and
+`send_chat_message` call as one "Messaged <target>" line, not as the full
+text. When an agent session calls `send_chat_message`, the message starts with
+`[Message from agent <name> (`<id>`)]` (`agents::agent_message_text`), so the
+receiving session shows one "Message from <agent>" line. The tool result also
+has `worktreeId`, `worktreePath`, `sessionName` and `worktreeName`. A click on
+a line opens the conversation dialog (`AgentMessageLink.tsx`). For
+`message_agent`, the dialog finds the target's first `Request from <sender>`
+task created after the send (`findRequestTask` in `agent-messages.ts`).
+
 **Approval gate:** `delete_worktree`, `permanently_delete_worktree`,
-`push_worktree`, `merge_pull_request` and `create_pull_request` called from an
+`push_worktree`, `merge_pull_request`, `create_pull_request` and
+`remove_project` called from an
 agent session are stored in `approvals` and not run. When the user approves,
 `jean_mcp_core::run_approved_tool` runs the same call, and the result goes to
 the agent as an event. The gate is in `call_tool`, so it works for every
-backend and does not depend on the prompt.
+backend and does not depend on the prompt. The agent chat shows each request
+at the tool call that made it (`agentApprovalId` in `agent-messages.ts`,
+`AgentApprovalInline`) as an `AgentQuestionCard` with Approve and Deny as the
+options. The text uses worktree and agent names (`describeApproval`), not IDs
+or raw arguments.
+
+**Questions:** `ask_user` (agent chat sessions only; task sessions get an
+error that points to `notify_user`) takes `question`, 2 to 8 `options`, and
+`multiple`. The tool only validates and returns `shown`. The agent chat renders
+the call input as `AgentQuestionCard`: one answer sends on click, multiple
+answers send with a Send button (one `- option` line each). The answer is a
+normal user message, so it works on every backend. The card is read-only once
+the user writes a message after it (`nextUserAnswers`, automatic updates do not
+count).
 
 **Agent-to-agent:** `message_agent` adds a `message` event (no target, so it
 runs as a task of the target agent) with `reply_to_agent` and
@@ -292,11 +317,28 @@ runs as a task of the target agent) with `reply_to_agent` and
 sender's session) is recorded, so the answer returns to the session that asked.
 `MAX_AGENT_HOPS` limits chains.
 
+## Agent templates
+
+Predefined roles live in `jean-core/src/agents/templates.yaml`. That file is
+the catalog. It is not copied into `agents.db` on startup, and a template is
+not a built-in agent. Only `jean` is built-in.
+
+`list_agent_templates` returns the catalog. `install_agent_template` creates
+one custom agent through `create_for_actor` (the same path as `create_agent`)
+and copies the template's default schedules. The new row has `builtin` false,
+so the user can edit and delete it. Skill hints are short names shown before
+install. They are not file paths and they are not saved as skills. Install
+leaves `mcp_servers` and `jean_tools` unset, so Jean MCP stays available.
+
+The New agent dialog has Blank and From template. From template calls
+`install_agent_template` on the server selected in the dialog.
+
 ## Commands
 
 Registered in `http_server/dispatch.rs` (`AGENT_COMMANDS`, served by
 `dispatch_agents_command`), so native IPC and web access both work:
-`list_agents`, `get_agent_details`, `create_agent`, `update_agent`,
+`list_agents`, `get_agent_details`, `create_agent`, `list_agent_templates`,
+`install_agent_template`, `update_agent`,
 `delete_agent`, `decide_agent_approval`, `create_agent_schedule`,
 `update_agent_schedule`, `cancel_agent_schedule`,
 `save/search/update/delete/supersede/export_agent_memory`, `save/search_agent_journal`, `mark_agent_notifications_read`,

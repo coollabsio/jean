@@ -17,6 +17,11 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { Markdown } from '@/components/ui/markdown'
 import {
   attachSavedContext,
@@ -225,17 +230,21 @@ export function RecentContexts({
         <div className="flex flex-col items-center gap-1.5">
           <span className="text-xs text-muted-foreground text-center items-center justify-center flex gap-2">
             Recent contexts{' '}
-            <button
-              type="button"
-              aria-label="Browse all contexts"
-              onClick={() =>
-                useUIStore.getState().setLoadContextModalOpen(true)
-              }
-              className="inline-flex items-center gap-0.5 text-muted-foreground/70 hover:text-foreground transition-colors cursor-pointer"
-              title="Browse all contexts"
-            >
-              <Ellipsis className="inline h-3 w-3" />
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="Browse all contexts"
+                  onClick={() =>
+                    useUIStore.getState().setLoadContextModalOpen(true)
+                  }
+                  className="inline-flex items-center gap-0.5 text-muted-foreground/70 hover:text-foreground transition-colors cursor-pointer"
+                >
+                  <Ellipsis className="inline h-3 w-3" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Browse all contexts</TooltipContent>
+            </Tooltip>
           </span>
           <div className="flex flex-wrap justify-center gap-2 max-w-2xl">
             {otherContexts.map(renderButton)}

@@ -112,6 +112,14 @@ describe('mobile history views', () => {
     expect(
       screen.queryByRole('listbox', { name: 'Commits' })
     ).not.toBeInTheDocument()
+    expect(getCommitHistory).toHaveBeenCalledWith(
+      '/tmp/repo',
+      undefined,
+      50,
+      0,
+      'wt-1'
+    )
+    expect(getCommitDiff).toHaveBeenCalledWith('/tmp/repo', 'abcdef123', 'wt-1')
   })
 
   it('opens one checkpoint detail panel and provides a back action', async () => {

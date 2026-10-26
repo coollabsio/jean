@@ -14,7 +14,8 @@ describe('buildCommentAndCloseIssuePrompt', () => {
     ])
 
     expect(prompt).toContain('owner/repo#42')
-    expect(prompt).toContain('"Fixed in <commit SHA>"')
+    expect(prompt).toContain('brief comment')
+    expect(prompt).toContain('do not look up the latest commit')
     expect(prompt).toContain('close only these issues')
   })
 })

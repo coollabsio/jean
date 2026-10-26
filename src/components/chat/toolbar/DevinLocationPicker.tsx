@@ -1,6 +1,11 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { invoke } from '@/lib/transport'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { chatQueryKeys, useSession } from '@/services/chat'
 import type { Session } from '@/types/chat'
 
@@ -105,28 +110,30 @@ export function DevinLocationPicker({
 
   return (
     <>
-      <label
-        className="inline-flex shrink-0 items-center gap-1 px-2 text-xs"
-        title={
-          location === 'cloud'
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <label className="inline-flex shrink-0 items-center gap-1 px-2 text-xs">
+            <span>Devin</span>
+            <select
+              aria-label="Devin session location"
+              value={location}
+              disabled={locked}
+              onChange={event =>
+                mutation.mutate(event.target.value as 'local' | 'cloud')
+              }
+              className="rounded border bg-background px-1 py-1 disabled:opacity-70"
+            >
+              <option value="local">Local</option>
+              <option value="cloud">Cloud · remote files</option>
+            </select>
+          </label>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-72">
+          {location === 'cloud'
             ? 'Runs on Devin Cloud. Local files and local MCP servers are not available. Start a new session to change location after chat starts.'
-            : 'Runs in this local worktree. Start a new session to change location after chat starts.'
-        }
-      >
-        <span>Devin</span>
-        <select
-          aria-label="Devin session location"
-          value={location}
-          disabled={locked}
-          onChange={event =>
-            mutation.mutate(event.target.value as 'local' | 'cloud')
-          }
-          className="rounded border bg-background px-1 py-1 disabled:opacity-70"
-        >
-          <option value="local">Local</option>
-          <option value="cloud">Cloud · remote files</option>
-        </select>
-      </label>
+            : 'Runs in this local worktree. Start a new session to change location after chat starts.'}
+        </TooltipContent>
+      </Tooltip>
       {location === 'cloud' && (
         <span className="px-2 text-xs text-muted-foreground">
           Cloud permissions are managed by Devin. Plan is a task instruction,

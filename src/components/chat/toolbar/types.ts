@@ -3,6 +3,7 @@ import type {
   CliBackend,
   CodexProviderProfile,
   CustomCliProfile,
+  ProviderAccount,
 } from '@/types/preferences'
 import type {
   ThinkingLevel,
@@ -23,13 +24,22 @@ import type {
   LoadedPullRequestContext,
   LoadedSecurityAlertContext,
   LoadedAdvisoryContext,
+  LoadedDiscussionContext,
   AttachedSavedContext,
 } from '@/types/github'
 import type { LoadedLinearIssueContext } from '@/types/linear'
 import type { SentryIssueContext } from '@/types/sentry'
 
 export interface ViewingContext {
-  type: 'issue' | 'pr' | 'saved' | 'security' | 'advisory' | 'linear' | 'sentry'
+  type:
+    | 'issue'
+    | 'pr'
+    | 'discussion'
+    | 'saved'
+    | 'security'
+    | 'advisory'
+    | 'linear'
+    | 'sentry'
   number?: number
   slug?: string
   ghsaId?: string
@@ -79,6 +89,7 @@ export interface ChatToolbarProps {
 
   loadedIssueContexts: LoadedIssueContext[]
   loadedPRContexts: LoadedPullRequestContext[]
+  loadedDiscussionContexts: LoadedDiscussionContext[]
   loadedSecurityContexts: LoadedSecurityAlertContext[]
   loadedAdvisoryContexts: LoadedAdvisoryContext[]
   loadedLinearContexts: LoadedLinearIssueContext[]
@@ -103,6 +114,9 @@ export interface ChatToolbarProps {
   onModelChange: (model: ClaudeModel) => void
   onBackendModelChange: (backend: CliBackend, model: string) => void
   onProviderChange: (provider: string | null) => void
+  providerAccounts?: ProviderAccount[]
+  selectedProviderAccountId?: string | null
+  onProviderAccountChange?: (accountId: string | null) => void
   customCliProfiles: CustomCliProfile[]
   /** Codex custom model_provider profiles from Settings → Providers */
   customCodexProviders?: CodexProviderProfile[]

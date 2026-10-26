@@ -286,6 +286,32 @@ export interface AgentPatch {
   jeanTools?: string[] | null
 }
 
+/** A schedule copied onto an agent when a template is installed. */
+export interface AgentTemplateSchedule {
+  name: string
+  prompt: string
+  /** cron | interval | event */
+  kind: string
+  everySecs?: number | null
+  cron?: string | null
+  timezone?: string | null
+  event?: string | null
+}
+
+/**
+ * A repo-shipped role. Installing it creates a normal custom agent.
+ * `skillHints` are names to attach later, not skill files.
+ */
+export interface AgentTemplate {
+  id: string
+  name: string
+  description: string
+  icon: string
+  rolePrompt: string
+  skillHints: string[]
+  schedules: AgentTemplateSchedule[]
+}
+
 export const agentsQueryKeys = {
   all: ['agents'] as const,
   list: () => [...agentsQueryKeys.all, 'list'] as const,
@@ -293,6 +319,8 @@ export const agentsQueryKeys = {
     [...agentsQueryKeys.all, 'details', agentId] as const,
   workdir: (agentId: string) =>
     [...agentsQueryKeys.all, 'workdir', agentId] as const,
+  templates: (serverId: string) =>
+    [...agentsQueryKeys.all, 'templates', serverId] as const,
 }
 
 type AgentRunKeys = 'backend' | 'model' | 'effort' | 'thinkingLevel' | 'skills'
@@ -467,6 +495,41 @@ export function useCreateAgent() {
         serverId,
         'create_agent',
         args
+      )
+      const key =
+        serverId === LOCAL_SERVER_ID
+          ? agent.id
+          : serverResourceKey({ serverId, resourceId: agent.id })
+      return { key, name: agent.name }
+    }
+  )
+}
+
+/** Predefined roles on one server. The catalog is static for a server build. */
+export function useAgentTemplates(serverId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: agentsQueryKeys.templates(serverId),
+    queryFn: () =>
+      invokeForServer<AgentTemplate[]>(serverId, 'list_agent_templates'),
+    enabled,
+    staleTime: Infinity,
+  })
+}
+
+/** Install a template as a custom agent on `serverId`. */
+export function useInstallAgentTemplate() {
+  return useAgentsMutation(
+    async ({
+      serverId,
+      templateId,
+    }: {
+      serverId: string
+      templateId: string
+    }): Promise<{ key: string; name: string }> => {
+      const agent = await invokeForServer<{ id: string; name: string }>(
+        serverId,
+        'install_agent_template',
+        { templateId }
       )
       const key =
         serverId === LOCAL_SERVER_ID
