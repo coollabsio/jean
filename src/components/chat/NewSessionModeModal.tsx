@@ -28,16 +28,6 @@ import {
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { invoke } from '@/lib/transport'
-import { toast } from 'sonner'
-import { useProjects, useWorktree } from '@/services/projects'
-import { findProjectForWorktree } from '@/lib/project-identity'
-import { isStartOnHostCancelled } from '@/lib/start-on-host'
-import {
-  StartOnHostPicker,
-  useStartOnHost,
-} from '@/components/worktree/StartOnHost'
-import type { Worktree } from '@/types/projects'
-import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import { useCreateSession } from '@/services/chat'
 import { useClaudeCliStatus } from '@/services/claude-cli'
 import { useCodexCliStatus } from '@/services/codex-cli'
@@ -139,47 +129,6 @@ export function NewSessionModeModal() {
   const autoHandledTargetRef = useRef<string | null>(null)
   const open = target !== null
   const isMobile = useIsMobile()
-  const { data: projects = [] } = useProjects()
-  const { data: currentWorktree } = useWorktree(target?.worktreeId ?? null)
-  const project = useMemo(
-    () => findProjectForWorktree(projects, currentWorktree?.project_id),
-    [currentWorktree?.project_id, projects]
-  )
-  const currentServerId = target
-    ? (parseServerResourceKey(target.worktreeId)?.serverId ?? LOCAL_SERVER_ID)
-    : LOCAL_SERVER_ID
-  const startOnHost = useStartOnHost(project, currentServerId)
-  const [hostedTarget, setHostedTarget] = useState<{
-    worktreeId: string
-    worktreePath: string
-  } | null>(null)
-
-  useEffect(() => {
-    setHostedTarget(null)
-  }, [target?.worktreeId, startOnHost.hostId])
-
-  const reportStartError = useCallback((error: unknown) => {
-    if (isStartOnHostCancelled(error)) return
-    const message = error instanceof Error ? error.message : String(error)
-    toast.error(message)
-  }, [])
-
-  const locateWorktree = useCallback(async () => {
-    if (!target) throw new Error('No worktree selected')
-    if (startOnHost.hostId === currentServerId) {
-      return {
-        worktreeId: target.worktreeId,
-        worktreePath: target.worktreePath,
-      }
-    }
-    const prepared = await startOnHost.run()
-    const base = await invoke<Worktree>('create_base_session', {
-      projectId: prepared.projectId,
-    })
-    const located = { worktreeId: base.id, worktreePath: base.path }
-    setHostedTarget(located)
-    return located
-  }, [currentServerId, startOnHost, target])
 
   const installedBackendChoices = useMemo(() => {
     const statusByBackend: Record<
@@ -312,115 +261,74 @@ export function NewSessionModeModal() {
 
   const chooseChat = useCallback(() => {
     if (!target) return
-    const openCreated = (worktreeId: string, worktreePath: string) => {
-      close()
-      createSession.mutate(
-        { worktreeId, worktreePath },
-        {
-          onSuccess: session => {
-            const backend = (session.backend ??
-              preferences?.default_backend ??
-              'claude') as CliBackend
-            const model = resolveDefaultModelForBackend(backend, preferences)
-            const effortLevel =
-              backend === 'codex'
-                ? (preferences?.default_codex_reasoning_effort ?? 'high')
-                : backend === 'grok'
-                  ? (preferences?.default_grok_reasoning_effort ?? 'high')
-                  : (preferences?.default_effort_level ?? 'high')
-            const defaultExecutionMode =
-              session.selected_execution_mode ??
-              preferences?.default_execution_mode ??
-              'yolo'
-            useChatStore
-              .getState()
-              .setPermissionMode(
-                session.id,
-                session.selected_permission_mode ??
-                  (defaultExecutionMode === 'plan'
-                    ? 'yolo'
-                    : defaultExecutionMode)
-              )
-            useChatStore
-              .getState()
-              .setExecutionMode(session.id, defaultExecutionMode)
-            useChatStore.getState().setSelectedModel(session.id, model)
-            useChatStore.getState().setEffortLevel(session.id, effortLevel)
-            invoke('update_session_state', {
-              worktreeId,
-              worktreePath,
-              sessionId: session.id,
-              selectedExecutionMode: defaultExecutionMode,
-              selectedModel: model,
-              selectedEffortLevel: effortLevel,
-            }).catch(() => undefined)
-            useChatStore.getState().setActiveSession(worktreeId, session.id)
-            useUIStore.getState().setSessionPrimarySurface(session.id, 'chat')
-            openSessionModal(session.id, worktreeId, worktreePath)
-          },
-        }
-      )
-    }
-    if (startOnHost.hostId === currentServerId) {
-      openCreated(target.worktreeId, target.worktreePath)
-      return
-    }
-    void locateWorktree()
-      .then(located => openCreated(located.worktreeId, located.worktreePath))
-      .catch(reportStartError)
-  }, [
-    close,
-    createSession,
-    currentServerId,
-    locateWorktree,
-    openSessionModal,
-    preferences,
-    reportStartError,
-    startOnHost.hostId,
-    target,
-  ])
-
-  const openNativePicker = useCallback(
-    (kind: NativeCliSessionKind, args: string[]) => {
-      const start = () => {
-        setNativePickerInitialCommandArgs(args)
-        setNativePickerKind(kind)
-        setMobileBackendActions(null)
+    const { worktreeId, worktreePath } = target
+    close()
+    createSession.mutate(
+      { worktreeId, worktreePath },
+      {
+        onSuccess: session => {
+          const backend = (session.backend ??
+            preferences?.default_backend ??
+            'claude') as CliBackend
+          const model = resolveDefaultModelForBackend(backend, preferences)
+          const effortLevel =
+            backend === 'codex'
+              ? (preferences?.default_codex_reasoning_effort ?? 'high')
+              : backend === 'grok'
+                ? (preferences?.default_grok_reasoning_effort ?? 'high')
+                : (preferences?.default_effort_level ?? 'high')
+          const defaultExecutionMode =
+            session.selected_execution_mode ??
+            preferences?.default_execution_mode ??
+            'yolo'
+          useChatStore
+            .getState()
+            .setPermissionMode(
+              session.id,
+              session.selected_permission_mode ??
+                (defaultExecutionMode === 'plan'
+                  ? 'yolo'
+                  : defaultExecutionMode)
+            )
+          useChatStore
+            .getState()
+            .setExecutionMode(session.id, defaultExecutionMode)
+          useChatStore.getState().setSelectedModel(session.id, model)
+          useChatStore.getState().setEffortLevel(session.id, effortLevel)
+          invoke('update_session_state', {
+            worktreeId,
+            worktreePath,
+            sessionId: session.id,
+            selectedExecutionMode: defaultExecutionMode,
+            selectedModel: model,
+            selectedEffortLevel: effortLevel,
+          }).catch(() => undefined)
+          useChatStore.getState().setActiveSession(worktreeId, session.id)
+          useUIStore.getState().setSessionPrimarySurface(session.id, 'chat')
+          openSessionModal(session.id, worktreeId, worktreePath)
+        },
       }
-      if (!target || startOnHost.hostId === currentServerId) {
-        start()
-        return
-      }
-      void locateWorktree().then(start).catch(reportStartError)
-    },
-    [
-      currentServerId,
-      locateWorktree,
-      reportStartError,
-      startOnHost.hostId,
-      target,
-    ]
-  )
+    )
+  }, [close, createSession, openSessionModal, preferences, target])
 
   const choosePlainTerminal = useCallback(() => {
-    openNativePicker('terminal', [])
-  }, [openNativePicker])
+    setNativePickerInitialCommandArgs([])
+    setNativePickerKind('terminal')
+  }, [])
 
-  const chooseBackendTerminal = useCallback(
-    (backend: CliBackend) => {
-      openNativePicker(backend, [])
-    },
-    [openNativePicker]
-  )
+  const chooseBackendTerminal = useCallback((backend: CliBackend) => {
+    setNativePickerInitialCommandArgs([])
+    setNativePickerKind(backend)
+    setMobileBackendActions(null)
+  }, [])
 
-  const chooseBackendTerminalYolo = useCallback(
-    (backend: CliBackend) => {
-      const yoloArgs = YOLO_ARGS_BY_BACKEND[backend]
-      if (!yoloArgs) return
-      openNativePicker(backend, yoloArgs)
-    },
-    [openNativePicker]
-  )
+  const chooseBackendTerminalYolo = useCallback((backend: CliBackend) => {
+    const yoloArgs = YOLO_ARGS_BY_BACKEND[backend]
+    if (!yoloArgs) return
+    setNativePickerInitialCommandArgs(yoloArgs)
+    setNativePickerKind(backend)
+    setMobileBackendActions(null)
+  }, [])
 
   const closeAll = useCallback(() => {
     autoHandledTargetRef.current = null
@@ -518,13 +426,6 @@ export function NewSessionModeModal() {
                 <DialogDescription className="text-xs leading-5">
                   Choose what to open for this worktree.
                 </DialogDescription>
-                <div className="pt-2">
-                  <StartOnHostPicker
-                    value={startOnHost.hostId}
-                    onChange={startOnHost.setHostId}
-                    disabled={startOnHost.phase !== 'idle'}
-                  />
-                </div>
               </DialogHeader>
 
               <div className="grid min-w-0 gap-2">
@@ -633,8 +534,8 @@ export function NewSessionModeModal() {
         <NativeCliSessionsModal
           open={open && nativePickerKind !== null}
           kind={nativePickerKind}
-          worktreeId={hostedTarget?.worktreeId ?? target.worktreeId}
-          worktreePath={hostedTarget?.worktreePath ?? target.worktreePath}
+          worktreeId={target.worktreeId}
+          worktreePath={target.worktreePath}
           command={nativePickerCommand}
           initialCommandArgs={nativePickerInitialCommandArgs}
           onBack={() => {

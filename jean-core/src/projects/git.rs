@@ -296,23 +296,35 @@ pub fn extract_repo_name_from_url(url: &str) -> Result<String, String> {
     Ok(name.to_string())
 }
 
-/// One git clone status line.
-///
-/// `percent` is the number git printed (`45` in `Receiving objects: 45%`).
-/// `overall_percent` maps known phases onto one 0–100 bar so the bar does not
-/// jump backward when git starts the next phase at 0%. It is `None` when the
-/// line has no percent.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct GitCloneProgress {
-    pub percent: Option<u8>,
-    pub overall_percent: Option<u8>,
-    pub line: String,
-}
-
 /// Clone a git repository from a remote URL to a local destination
 pub fn clone_repo(url: &str, destination: &str) -> Result<(), String> {
     let url = url.trim();
-    prepare_clone(url, destination)?;
+
+    // Basic URL format validation
+    let valid_prefix = url.starts_with("https://")
+        || url.starts_with("http://")
+        || url.starts_with("git@")
+        || url.starts_with("ssh://");
+
+    if !valid_prefix {
+        return Err(
+            "Invalid git URL. Use HTTPS (https://...) or SSH (git@...) format.".to_string(),
+        );
+    }
+
+    // Check destination doesn't already exist
+    let dest_path = Path::new(destination);
+    if dest_path.exists() {
+        return Err(format!("Destination already exists: {destination}"));
+    }
+
+    // Ensure parent directory exists
+    if let Some(parent) = dest_path.parent() {
+        if !parent.exists() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create parent directory: {e}"))?;
+        }
+    }
 
     log::info!("Cloning {url} into {destination}");
 
@@ -328,184 +340,6 @@ pub fn clone_repo(url: &str, destination: &str) -> Result<(), String> {
 
     log::info!("Successfully cloned repository to {destination}");
     Ok(())
-}
-
-/// Clone with `git clone --progress` and report each stderr status line.
-///
-/// Git updates the same line with carriage returns. This splits on `\r` and
-/// `\n` so a caller can forward "Receiving objects" / "Resolving deltas" while
-/// the process is still running. `--progress` is required because stderr here
-/// is a pipe, not a terminal, and git would otherwise stay silent.
-pub(crate) fn clone_repo_with_progress(
-    url: &str,
-    destination: &str,
-    on_progress: impl FnMut(GitCloneProgress),
-) -> Result<(), String> {
-    let url = url.trim();
-    prepare_clone(url, destination)?;
-
-    log::info!("Cloning {url} into {destination}");
-
-    let mut child = wsl_aware_command("git", None)
-        .args(["clone", "--progress", url, destination])
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| format!("Failed to run git clone: {error}"))?;
-
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| "git clone did not return stderr".to_string())?;
-    let tail = read_git_clone_progress(stderr, on_progress)?;
-    let status = child
-        .wait()
-        .map_err(|error| format!("Failed to wait for git clone: {error}"))?;
-    if !status.success() {
-        return Err(format!("git clone failed: {tail}"));
-    }
-
-    log::info!("Successfully cloned repository to {destination}");
-    Ok(())
-}
-
-fn prepare_clone(url: &str, destination: &str) -> Result<(), String> {
-    let url = url.trim();
-    let valid_prefix = url.starts_with("https://")
-        || url.starts_with("http://")
-        || url.starts_with("git@")
-        || url.starts_with("ssh://");
-    if !valid_prefix {
-        return Err(
-            "Invalid git URL. Use HTTPS (https://...) or SSH (git@...) format.".to_string(),
-        );
-    }
-
-    let dest_path = Path::new(destination);
-    if dest_path.exists() {
-        return Err(format!("Destination already exists: {destination}"));
-    }
-    if let Some(parent) = dest_path.parent() {
-        if !parent.exists() {
-            std::fs::create_dir_all(parent)
-                .map_err(|error| format!("Failed to create parent directory: {error}"))?;
-        }
-    }
-    Ok(())
-}
-
-pub(crate) fn push_git_clone_progress(pending: &mut String, chunk: &str) -> Vec<GitCloneProgress> {
-    pending.push_str(chunk);
-    let mut updates = Vec::new();
-    while let Some(index) = pending.find(['\r', '\n']) {
-        let line = pending[..index].to_string();
-        pending.drain(..=index);
-        if let Some(update) = git_clone_progress_line(&line) {
-            updates.push(update);
-        }
-    }
-    updates
-}
-
-pub(crate) fn finish_git_clone_progress(pending: &mut String) -> Option<GitCloneProgress> {
-    let line = std::mem::take(pending);
-    git_clone_progress_line(&line)
-}
-
-fn read_git_clone_progress<R: Read>(
-    mut reader: R,
-    mut on_progress: impl FnMut(GitCloneProgress),
-) -> Result<String, String> {
-    let mut pending = String::new();
-    let mut tail = String::new();
-    let mut buf = [0_u8; 512];
-    loop {
-        let read = reader
-            .read(&mut buf)
-            .map_err(|error| format!("Failed to read git clone progress: {error}"))?;
-        if read == 0 {
-            break;
-        }
-        let chunk = String::from_utf8_lossy(&buf[..read]);
-        append_clone_tail(&mut tail, &chunk);
-        for update in push_git_clone_progress(&mut pending, &chunk) {
-            on_progress(update);
-        }
-    }
-    if let Some(update) = finish_git_clone_progress(&mut pending) {
-        on_progress(update);
-    }
-    Ok(tail)
-}
-
-fn append_clone_tail(tail: &mut String, chunk: &str) {
-    tail.push_str(chunk);
-    const MAX_TAIL: usize = 4_000;
-    if tail.len() > MAX_TAIL {
-        let skip = tail.len() - MAX_TAIL;
-        tail.drain(..skip);
-    }
-}
-
-fn git_clone_progress_line(raw: &str) -> Option<GitCloneProgress> {
-    let line = raw.trim();
-    if line.is_empty() {
-        return None;
-    }
-    let percent = first_percent(line);
-    let overall_percent = percent.map(|value| overall_clone_percent(line, value));
-    Some(GitCloneProgress {
-        percent,
-        overall_percent,
-        line: line.to_string(),
-    })
-}
-
-fn first_percent(line: &str) -> Option<u8> {
-    let bytes = line.as_bytes();
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index].is_ascii_digit() {
-            let start = index;
-            while index < bytes.len() && bytes[index].is_ascii_digit() {
-                index += 1;
-            }
-            if index < bytes.len() && bytes[index] == b'%' {
-                let number: u16 = line[start..index].parse().unwrap_or(101);
-                if number <= 100 {
-                    return Some(number as u8);
-                }
-            }
-        } else {
-            index += 1;
-        }
-    }
-    None
-}
-
-/// Weight git's per-phase percent onto one bar.
-///
-/// Counting and compressing are the remote side. Receiving objects is most of
-/// the transfer. Resolving deltas is the local finish.
-fn overall_clone_percent(line: &str, percent: u8) -> u8 {
-    let lower = line.to_ascii_lowercase();
-    let (start, end): (u8, u8) = if lower.contains("resolving deltas") {
-        (90, 100)
-    } else if lower.contains("receiving objects") {
-        (18, 90)
-    } else if lower.contains("compressing objects") {
-        (8, 18)
-    } else if lower.contains("counting objects") {
-        (0, 8)
-    } else if lower.contains("enumerating objects") {
-        (0, 2)
-    } else {
-        return percent;
-    };
-    let span = u16::from(end - start);
-    let value = u16::from(start) + (u16::from(percent) * span) / 100;
-    u8::try_from(value).unwrap_or(100).min(100)
 }
 
 /// Get the repository name from a path (last component of the path)
@@ -725,48 +559,6 @@ pub fn configured_branch_remote(repo_path: &str, branch: &str) -> Option<String>
     } else {
         Some(remote)
     }
-}
-
-/// Fetch URLs for every remote (`git remote -v`), origin first.
-///
-/// Push URLs are ignored. A missing git directory or a failed command yields
-/// an empty list so project listing can stay best-effort.
-pub fn list_remote_urls(repo_path: &str) -> Vec<String> {
-    let output = match wsl_aware_command("git", Some(Path::new(repo_path)))
-        .args(["remote", "-v"])
-        .output()
-    {
-        Ok(output) if output.status.success() => output,
-        _ => return Vec::new(),
-    };
-
-    let mut origin = Vec::new();
-    let mut rest = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    for line in String::from_utf8_lossy(&output.stdout).lines() {
-        let mut parts = line.split_whitespace();
-        let Some(name) = parts.next() else { continue };
-        let Some(url) = parts.next() else { continue };
-        let direction = parts.next().unwrap_or("");
-        if direction.contains("push") {
-            continue;
-        }
-        if !seen.insert(url.to_string()) {
-            continue;
-        }
-        if name == "origin" {
-            origin.push(url.to_string());
-        } else {
-            rest.push(url.to_string());
-        }
-    }
-    origin.append(&mut rest);
-    origin
-}
-
-/// `origin` fetch URL, or the first remote when origin is unset.
-pub fn origin_remote_url(repo_path: &str) -> Option<String> {
-    list_remote_urls(repo_path).into_iter().next()
 }
 
 /// Get all git remotes for a repository (not filtered to GitHub)
@@ -4045,63 +3837,6 @@ mod jean_config_resolve_tests {
             .as_deref(),
             Some("project-run"),
         );
-    }
-}
-
-#[cfg(test)]
-mod clone_progress_tests {
-    use super::{finish_git_clone_progress, push_git_clone_progress, read_git_clone_progress};
-
-    #[test]
-    fn git_progress_lines_keep_phase_percent_and_a_forward_overall() {
-        let raw = "\
-Cloning into 'jean'...\n\
-remote: Counting objects:  50% (1/2)\r\
-remote: Counting objects: 100% (2/2), done.\n\
-Receiving objects:  45% (5/10), 1.00 MiB | 2.00 MiB/s\r\
-Receiving objects: 100% (10/10), done.\n\
-Resolving deltas: 100% (3/3), done.\n";
-        let updates = read_git_clone_progress(raw.as_bytes(), |_| {}).unwrap();
-        // The reader returns the stderr tail. Re-parse to inspect lines.
-        let mut pending = String::new();
-        let mut parsed = push_git_clone_progress(&mut pending, raw);
-        if let Some(last) = finish_git_clone_progress(&mut pending) {
-            parsed.push(last);
-        }
-
-        assert!(updates.contains("Receiving objects"));
-        assert_eq!(parsed[0].line, "Cloning into 'jean'...");
-        assert_eq!(parsed[0].percent, None);
-        assert_eq!(parsed[0].overall_percent, None);
-
-        let counting = parsed
-            .iter()
-            .find(|update| update.line.contains("Counting objects:  50%"))
-            .unwrap();
-        assert_eq!(counting.percent, Some(50));
-        assert_eq!(counting.overall_percent, Some(4));
-
-        let receiving = parsed
-            .iter()
-            .find(|update| update.line.starts_with("Receiving objects:  45%"))
-            .unwrap();
-        assert_eq!(receiving.percent, Some(45));
-        assert!(receiving.overall_percent.unwrap() > counting.overall_percent.unwrap());
-
-        let resolving = parsed.last().unwrap();
-        assert_eq!(resolving.percent, Some(100));
-        assert_eq!(resolving.overall_percent, Some(100));
-        assert!(resolving.line.contains("Resolving deltas"));
-    }
-
-    #[test]
-    fn progress_percent_split_across_chunks_is_one_update() {
-        let mut pending = String::new();
-        assert!(push_git_clone_progress(&mut pending, "Receiving objects:  4").is_empty());
-        let updates = push_git_clone_progress(&mut pending, "5% (1/2)\r");
-        assert_eq!(updates.len(), 1);
-        assert_eq!(updates[0].percent, Some(45));
-        assert!(updates[0].line.contains("Receiving objects"));
     }
 }
 

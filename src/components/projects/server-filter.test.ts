@@ -27,25 +27,4 @@ describe('filterProjectsByServer', () => {
       filterProjectsByServer(projects, 'remote').map(item => item.id)
     ).toEqual(['remote:a'])
   })
-
-  it('keeps a collapsed project when filtering to a host that has a checkout', () => {
-    const shared = project('local', 'local')
-    shared.hostCheckouts = [
-      {
-        serverId: 'local',
-        projectId: 'local',
-        path: '/tmp/local',
-        serverName: 'Local',
-      },
-      {
-        serverId: 'remote',
-        projectId: 'remote:a',
-        path: '/srv/a',
-        serverName: 'Build box',
-      },
-    ]
-    expect(
-      filterProjectsByServer([shared], 'remote').map(item => item.id)
-    ).toEqual(['local'])
-  })
 })

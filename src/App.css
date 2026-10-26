@@ -328,20 +328,6 @@
   --card-spin-color: var(--destructive);
 }
 
-/* Indeterminate bar for host clone progress when git has not printed a percent. */
-@keyframes start-on-host-indeterminate {
-  0% {
-    transform: translateX(-120%);
-  }
-  100% {
-    transform: translateX(420%);
-  }
-}
-
-.animate-start-on-host-indeterminate {
-  animation: start-on-host-indeterminate 1.1s ease-in-out infinite;
-}
-
 /* Animated dots for loading indicator */
 @keyframes dots {
   0%,

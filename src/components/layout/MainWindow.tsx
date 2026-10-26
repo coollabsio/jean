@@ -22,7 +22,6 @@ import { CommandPalette } from '@/components/command-palette/CommandPalette'
 import { BranchConflictDialog } from '@/components/worktree/BranchConflictDialog'
 import { ImportExistingWorktreeDialog } from '@/components/worktree/ImportExistingWorktreeDialog'
 import { TeardownOutputDialog } from '@/components/worktree/TeardownOutputDialog'
-import { StartOnHostPrompt } from '@/components/worktree/StartOnHost'
 import { WindowResizeHandles } from './WindowResizeHandles'
 
 // Lazy-loaded heavy modals (code splitting)
@@ -883,7 +882,6 @@ export function MainWindow() {
           <ReviewCommentsDialog />
         </Suspense>
       )}
-      <StartOnHostPrompt />
       {shouldRenderNewWorktreeModal && (
         <Suspense fallback={null}>
           <NewWorktreeModal />

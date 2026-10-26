@@ -346,17 +346,6 @@ export function decorateServerResult<T>(
   if (command === 'list_projects' && Array.isArray(value)) {
     return value.map(item => decorateProject(serverId, item)) as T
   }
-  if (
-    command === 'ensure_project_present' &&
-    value &&
-    typeof value === 'object'
-  ) {
-    const result = value as Record<string, unknown>
-    return {
-      ...result,
-      project: decorateProject(serverId, result.project),
-    } as T
-  }
   if (command === 'list_worktrees' && Array.isArray(value)) {
     return value.map(item => decorateWorktree(serverId, item)) as T
   }
