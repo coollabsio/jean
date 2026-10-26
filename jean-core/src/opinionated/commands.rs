@@ -34,6 +34,22 @@ const PSTACK_REPO_URL: &str = "https://github.com/michael-denyer/pstack-claude";
 const PSTACK_MARKETPLACE: &str = "michael-denyer/pstack-claude";
 // Claude and Codex both name the plugin `pstack` in the `pstack-claude` marketplace.
 const PSTACK_PLUGIN: &str = "pstack@pstack-claude";
+// Theo's everyday skill pack (MIT). Skills are copied as-is; there is no
+// Claude/Codex marketplace plugin. Skill folders are named full-send, council,
+// and so on — not "tstack" — so status uses a marker skill, not a name match.
+const TSTACK_REPO_URL: &str = "https://github.com/t3dotgg/tstack";
+const TSTACK_MARKER_SKILL: &str = "full-send";
+const TSTACK_KNOWN_SKILLS: &[&str] = &[
+    "babysit-pr",
+    "council",
+    "file-pr",
+    "full-send",
+    "full-stop",
+    "leaving-pr-comments",
+    "modernize",
+    "sol-loop",
+    "takeover",
+];
 const RTK_RELEASE_LATEST_API: &str = "https://api.github.com/repos/rtk-ai/rtk/releases/latest";
 const RTK_CLI_DIR_NAME: &str = "rtk-cli";
 const RTK_BINARY_NAME: &str = if cfg!(windows) { "rtk.exe" } else { "rtk" };
@@ -73,6 +89,7 @@ pub async fn check_opinionated_plugin_status(
         "caveman" => check_caveman_status(&app).await,
         "superpowers" => check_superpowers_status(&app).await,
         "pstack" => check_pstack_status(&app).await,
+        "tstack" => check_tstack_status(&app).await,
         _ => Err(format!("Unknown plugin: {plugin_name}")),
     }
 }
@@ -86,6 +103,7 @@ pub async fn install_opinionated_plugin(
         "caveman" => install_caveman(&app).await,
         "superpowers" => install_superpowers(&app).await,
         "pstack" => install_pstack(&app).await,
+        "tstack" => install_tstack(&app).await,
         _ => Err(format!("Unknown plugin: {plugin_name}")),
     }
 }
@@ -98,6 +116,7 @@ pub async fn uninstall_opinionated_plugin(
         "caveman" => uninstall_caveman(&app).await,
         "superpowers" => uninstall_superpowers(&app).await,
         "pstack" => uninstall_pstack(&app).await,
+        "tstack" => uninstall_tstack(&app).await,
         "rtk" => {
             Err("RTK is a system-wide CLI; uninstall it with your package manager".to_string())
         }
@@ -811,6 +830,24 @@ async fn check_pstack_status(app: &AppHandle) -> Result<PluginStatus, String> {
     })
 }
 
+async fn check_tstack_status(app: &AppHandle) -> Result<PluginStatus, String> {
+    let home = dirs::home_dir().ok_or("Cannot determine home directory")?;
+    let statuses = opinionated_backend_statuses(&home, "tstack");
+    let covered_backends = statuses
+        .iter()
+        .filter(|backend| backend.installed)
+        .map(|backend| backend.id.as_str())
+        .collect::<Vec<_>>();
+
+    Ok(PluginStatus {
+        installed: status_installed(&covered_backends, &detected_jean_backends(app)),
+        version: (!covered_backends.is_empty()).then(|| covered_backends.join(", ")),
+        install_supported: true,
+        unsupported_reason: None,
+        backends: Some(statuses),
+    })
+}
+
 fn plugin_installed_marker(home: &std::path::Path, plugin_id: &str) -> bool {
     let data_dir = home.join(".claude").join("plugins").join("data");
     if data_dir.exists() {
@@ -1284,6 +1321,7 @@ fn opinionated_backend_statuses(home: &Path, plugin_id: &str) -> Vec<BackendPlug
                 "caveman" => caveman_installed_for_backend(home, id),
                 "superpowers" => superpowers_installed_for_backend(home, id),
                 "pstack" => pstack_installed_for_backend(home, id),
+                "tstack" => tstack_installed_for_backend(home, id),
                 _ => false,
             };
 
@@ -2371,6 +2409,244 @@ async fn uninstall_pstack(app: &AppHandle) -> Result<String, String> {
     }
 }
 
+fn skill_named_installed(skills_dir: &Path, skill_name: &str) -> bool {
+    skills_dir.join(skill_name).join("SKILL.md").exists()
+}
+
+/// Jean-global skills dir, plus the CLI's native skills dir when it differs.
+/// Claude is not in `backend_skills_dir` (other packs use the marketplace).
+/// tstack is skills-only, and Claude Code reads `~/.claude/skills`.
+fn tstack_install_roots(home: &Path, backend: &str) -> Vec<PathBuf> {
+    let mut roots = vec![jean_global_backend_skills_dir(home, backend)];
+    if let Some(native) = backend_skills_dir(home, backend).filter(|path| !roots.contains(path)) {
+        roots.push(native);
+    }
+    if backend == "claude" {
+        let claude_skills = home.join(".claude").join("skills");
+        if !roots.contains(&claude_skills) {
+            roots.push(claude_skills);
+        }
+    }
+    roots
+}
+
+fn tstack_manifest_path(home: &Path) -> PathBuf {
+    home.join(".jean")
+        .join("opinionated")
+        .join("tstack-skills.txt")
+}
+
+fn tstack_manifest_skill_names(home: &Path) -> Vec<String> {
+    std::fs::read_to_string(tstack_manifest_path(home))
+        .unwrap_or_default()
+        .lines()
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn tstack_status_markers(home: &Path) -> Vec<String> {
+    let names = tstack_manifest_skill_names(home);
+    if names.is_empty() {
+        vec![TSTACK_MARKER_SKILL.to_string()]
+    } else {
+        names
+    }
+}
+
+fn tstack_installed_for_backend(home: &Path, backend: &str) -> bool {
+    let markers = tstack_status_markers(home);
+    tstack_install_roots(home, backend)
+        .iter()
+        .any(|root| markers.iter().any(|name| skill_named_installed(root, name)))
+}
+
+fn tstack_uninstall_names(home: &Path) -> Vec<String> {
+    let names = tstack_manifest_skill_names(home);
+    if names.is_empty() {
+        TSTACK_KNOWN_SKILLS
+            .iter()
+            .map(|name| name.to_string())
+            .collect()
+    } else {
+        names
+    }
+}
+
+fn copy_tstack_skills(source_skills_dir: &Path, target_skills_dir: &Path) -> Result<usize, String> {
+    std::fs::create_dir_all(target_skills_dir)
+        .map_err(|e| format!("Failed to create skills dir {target_skills_dir:?}: {e}"))?;
+
+    let entries = std::fs::read_dir(source_skills_dir)
+        .map_err(|e| format!("Failed to read tstack skills dir {source_skills_dir:?}: {e}"))?;
+    let mut copied = 0;
+    for entry in entries.flatten() {
+        let source = entry.path();
+        if !source.is_dir() || !source.join("SKILL.md").exists() {
+            continue;
+        }
+        let target = target_skills_dir.join(entry.file_name());
+        copy_dir_replace(&source, &target)?;
+        copied += 1;
+    }
+    Ok(copied)
+}
+
+fn tstack_skill_names(source_skills_dir: &Path) -> Result<Vec<String>, String> {
+    let entries = std::fs::read_dir(source_skills_dir)
+        .map_err(|e| format!("Failed to read tstack skills dir {source_skills_dir:?}: {e}"))?;
+    let mut names = entries
+        .flatten()
+        .filter(|entry| entry.path().is_dir() && entry.path().join("SKILL.md").exists())
+        .map(|entry| entry.file_name().to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+    names.sort();
+    Ok(names)
+}
+
+fn clone_tstack_skills_dir() -> Result<PathBuf, String> {
+    let temp = std::env::temp_dir().join(format!("jean-tstack-{}", uuid::Uuid::new_v4()));
+    let repo = temp.join("tstack");
+    if let Err(error) = std::fs::create_dir_all(&temp) {
+        return Err(format!(
+            "Failed to create tstack temp dir {temp:?}: {error}"
+        ));
+    }
+    let output = silent_command("git")
+        .args([
+            "clone",
+            "--depth",
+            "1",
+            TSTACK_REPO_URL,
+            repo.to_string_lossy().as_ref(),
+        ])
+        .output();
+    let skills = repo.join("skills");
+    let result = match output {
+        Ok(output) if output.status.success() && dir_contains_skill(&skills) => Ok(skills),
+        Ok(output) if output.status.success() => {
+            Err("tstack did not contain installable skills".to_string())
+        }
+        Ok(output) => Err(command_failure_message("Failed to clone tstack", &output)),
+        Err(error) => Err(format!("Failed to run git clone for tstack: {error}")),
+    };
+    if result.is_err() {
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+    result
+}
+
+fn install_cloned_tstack(home: &Path, skills_dir: &Path) -> Result<String, String> {
+    let names = tstack_skill_names(skills_dir)?;
+    if names.is_empty() {
+        return Err("tstack did not contain installable skills".to_string());
+    }
+
+    // Drop skills from an earlier install first so a smaller upstream pack
+    // does not leave stale folders behind.
+    let previous = tstack_manifest_skill_names(home);
+    if !previous.is_empty() {
+        remove_tstack_skill_copies(home, &previous)?;
+    }
+
+    let mut installed = Vec::new();
+    let mut warnings = Vec::new();
+    for (backend, label) in installable_jean_backends() {
+        let mut backend_ok = true;
+        let mut copied = 0;
+        for target in tstack_install_roots(home, backend) {
+            match copy_tstack_skills(skills_dir, &target) {
+                Ok(count) => copied += count,
+                Err(error) => {
+                    backend_ok = false;
+                    warnings.push(format!("Failed to install tstack for {label}: {error}"));
+                }
+            }
+        }
+        if backend_ok && copied > 0 {
+            installed.push(label);
+        } else if backend_ok {
+            warnings.push(format!("No tstack skills found to install for {label}"));
+        }
+    }
+
+    let manifest = tstack_manifest_path(home);
+    if let Some(parent) = manifest.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create tstack manifest dir {parent:?}: {e}"))?;
+    }
+    std::fs::write(&manifest, names.join("\n"))
+        .map_err(|e| format!("Failed to write the tstack install manifest: {e}"))?;
+
+    if installed.is_empty() {
+        let detail = if warnings.is_empty() {
+            "No backend-specific installer succeeded".to_string()
+        } else {
+            warnings.join("; ")
+        };
+        return Err(format!("Failed to install tstack: {detail}"));
+    }
+
+    let mut message = format!(
+        "tstack installed for Jean backends: {}",
+        installed.join(", ")
+    );
+    if !warnings.is_empty() {
+        message.push_str(&format!(". Warnings: {}", warnings.join("; ")));
+    }
+    Ok(message)
+}
+
+async fn install_tstack(_app: &AppHandle) -> Result<String, String> {
+    let home = dirs::home_dir().ok_or("Cannot determine home directory")?;
+    let skills_dir = tokio::task::spawn_blocking(clone_tstack_skills_dir)
+        .await
+        .map_err(|e| e.to_string())??;
+    let temp_root = skills_dir
+        .parent()
+        .and_then(Path::parent)
+        .map(Path::to_path_buf);
+    let result = install_cloned_tstack(&home, &skills_dir);
+    if let Some(temp_root) = temp_root {
+        let _ = std::fs::remove_dir_all(temp_root);
+    }
+    result
+}
+
+fn remove_tstack_skill_copies(home: &Path, names: &[String]) -> Result<Vec<String>, String> {
+    let mut removed = Vec::new();
+    for (backend, _) in installable_jean_backends() {
+        for root in tstack_install_roots(home, backend) {
+            for name in names {
+                remove_path_if_exists(&root.join(name), &mut removed)?;
+            }
+        }
+    }
+    Ok(removed)
+}
+
+fn uninstall_tstack_from_home(home: &Path) -> Result<Vec<String>, String> {
+    let names = tstack_uninstall_names(home);
+    let mut removed = remove_tstack_skill_copies(home, &names)?;
+    remove_path_if_exists(&tstack_manifest_path(home), &mut removed)?;
+    Ok(removed)
+}
+
+async fn uninstall_tstack(_app: &AppHandle) -> Result<String, String> {
+    let home = dirs::home_dir().ok_or("Cannot determine home directory")?;
+    let removed = tokio::task::spawn_blocking(move || uninstall_tstack_from_home(&home))
+        .await
+        .map_err(|e| e.to_string())??;
+    if removed.is_empty() {
+        Ok("tstack was not installed".to_string())
+    } else {
+        Ok(format!(
+            "tstack uninstalled from {} locations",
+            removed.len()
+        ))
+    }
+}
+
 fn extract_version(s: &str) -> Option<String> {
     let re = regex::Regex::new(r"(\d+\.\d+(?:\.\d+)?)").ok()?;
     re.find(s).map(|m| m.as_str().to_string())
@@ -2511,6 +2787,210 @@ mod tests {
         assert!(config.contains("superpowers@openai-curated"));
         assert!(!cache.exists());
         assert!(!pstack_installed_for_backend(temp.path(), "codex"));
+    }
+
+    fn write_skill(dir: &Path, body: &str) {
+        std::fs::create_dir_all(dir).expect("create skill dir");
+        std::fs::write(dir.join("SKILL.md"), body).expect("write skill");
+    }
+
+    #[test]
+    fn copies_tstack_skills_as_is_including_helper_scripts() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let source = temp.path().join("source");
+        let full_send = source.join("full-send");
+        let babysit = source.join("babysit-pr");
+        let notes = source.join("notes");
+        write_skill(
+            &full_send,
+            "# Full send\nUse delegate_task when T3 Code is available.",
+        );
+        std::fs::create_dir_all(babysit.join("scripts")).expect("create babysit scripts");
+        std::fs::write(
+            babysit.join("SKILL.md"),
+            "# Babysit\nPrefer watch_pull_request, else gh.",
+        )
+        .expect("write babysit skill");
+        std::fs::write(babysit.join("scripts/pr-wait"), "#!/usr/bin/env python3\n")
+            .expect("write helper");
+        std::fs::create_dir_all(&notes).expect("create notes dir");
+        std::fs::write(notes.join("README.md"), "not a skill").expect("write notes");
+
+        let target = temp.path().join("target");
+        let copied = copy_tstack_skills(&source, &target).expect("copy tstack skills");
+
+        assert_eq!(copied, 2);
+        let installed = std::fs::read_to_string(target.join("full-send/SKILL.md"))
+            .expect("read installed skill");
+        assert_eq!(
+            installed,
+            "# Full send\nUse delegate_task when T3 Code is available."
+        );
+        assert_eq!(
+            std::fs::read_to_string(target.join("babysit-pr/scripts/pr-wait"))
+                .expect("read helper"),
+            "#!/usr/bin/env python3\n"
+        );
+        assert!(!target.join("notes").exists());
+    }
+
+    #[test]
+    fn tstack_install_roots_cover_jean_global_and_native_dirs() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let home = temp.path();
+
+        assert_eq!(
+            tstack_install_roots(home, "claude"),
+            vec![
+                home.join(".jean/skills/claude"),
+                home.join(".claude/skills"),
+            ]
+        );
+        assert_eq!(
+            tstack_install_roots(home, "codex"),
+            vec![home.join(".jean/skills/codex"), home.join(".codex/skills")]
+        );
+        assert_eq!(
+            tstack_install_roots(home, "pi"),
+            vec![home.join(".jean/skills/pi")]
+        );
+    }
+
+    #[test]
+    fn tstack_status_uses_marker_or_manifest_not_the_name_tstack() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let home = temp.path();
+        let decoy = home.join(".jean/skills/codex/my-tstack-pack");
+        write_skill(&decoy, "# Not tstack");
+        assert!(!tstack_installed_for_backend(home, "codex"));
+
+        write_skill(&home.join(".codex/skills/full-send"), "# Full send");
+        assert!(tstack_installed_for_backend(home, "codex"));
+
+        let claude_only = home.join(".claude/skills/full-send");
+        write_skill(&claude_only, "# Full send");
+        assert!(tstack_installed_for_backend(home, "claude"));
+
+        std::fs::remove_dir_all(home.join(".codex/skills/full-send")).expect("remove marker");
+        std::fs::remove_dir_all(&claude_only).expect("remove claude marker");
+        assert!(!tstack_installed_for_backend(home, "codex"));
+
+        let manifest = tstack_manifest_path(home);
+        std::fs::create_dir_all(manifest.parent().expect("manifest parent"))
+            .expect("create manifest dir");
+        std::fs::write(&manifest, "council\nfile-pr\n").expect("write manifest");
+        write_skill(&home.join(".jean/skills/grok/council"), "# Council");
+        assert!(tstack_installed_for_backend(home, "grok"));
+        assert!(!tstack_installed_for_backend(home, "cursor"));
+    }
+
+    #[test]
+    fn uninstalls_only_skills_recorded_in_the_tstack_manifest() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let home = temp.path();
+        for root in [
+            home.join(".jean/skills/codex"),
+            home.join(".codex/skills"),
+            home.join(".claude/skills"),
+        ] {
+            write_skill(&root.join("full-send"), "# Full send");
+            write_skill(&root.join("council"), "# Council");
+            write_skill(&root.join("my-skill"), "# Mine");
+            write_skill(&root.join("my-tstack-pack"), "# Decoy");
+        }
+        let manifest = tstack_manifest_path(home);
+        std::fs::create_dir_all(manifest.parent().expect("manifest parent"))
+            .expect("create manifest dir");
+        std::fs::write(&manifest, "full-send\ncouncil\n").expect("write manifest");
+
+        uninstall_tstack_from_home(home).expect("uninstall tstack");
+
+        for root in [
+            home.join(".jean/skills/codex"),
+            home.join(".codex/skills"),
+            home.join(".claude/skills"),
+        ] {
+            assert!(!root.join("full-send").exists());
+            assert!(!root.join("council").exists());
+            assert!(root.join("my-skill/SKILL.md").exists());
+            assert!(root.join("my-tstack-pack/SKILL.md").exists());
+        }
+        assert!(!manifest.exists());
+        assert!(!tstack_installed_for_backend(home, "codex"));
+        assert!(!tstack_installed_for_backend(home, "claude"));
+    }
+
+    #[test]
+    fn installs_cloned_tstack_into_each_backend_and_writes_the_manifest() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let home = temp.path();
+        let source = temp.path().join("skills");
+        write_skill(&source.join("full-send"), "# Full send\ndelegate_task");
+        write_skill(&source.join("council"), "# Council");
+        std::fs::create_dir_all(source.join("babysit-pr/scripts")).expect("scripts");
+        std::fs::write(source.join("babysit-pr/SKILL.md"), "# Babysit").expect("babysit");
+        std::fs::write(source.join("babysit-pr/scripts/pr-wait"), "wait\n").expect("helper");
+
+        let message = install_cloned_tstack(home, &source).expect("install tstack");
+
+        assert!(message.contains("Claude"));
+        assert!(message.contains("Codex"));
+        assert!(message.contains("Grok"));
+        assert_eq!(
+            std::fs::read_to_string(tstack_manifest_path(home)).expect("manifest"),
+            "babysit-pr\ncouncil\nfull-send"
+        );
+        assert_eq!(
+            std::fs::read_to_string(home.join(".jean/skills/pi/full-send/SKILL.md"))
+                .expect("pi skill"),
+            "# Full send\ndelegate_task"
+        );
+        assert_eq!(
+            std::fs::read_to_string(home.join(".claude/skills/babysit-pr/scripts/pr-wait"))
+                .expect("claude helper"),
+            "wait\n"
+        );
+        assert!(home.join(".grok/skills/council/SKILL.md").exists());
+        assert!(tstack_installed_for_backend(home, "commandcode"));
+    }
+
+    #[test]
+    fn reinstall_drops_tstack_skills_missing_from_the_new_pack() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let home = temp.path();
+        let stale = home.join(".jean/skills/pi/sol-loop");
+        write_skill(&stale, "# Sol loop");
+        let manifest = tstack_manifest_path(home);
+        std::fs::create_dir_all(manifest.parent().expect("manifest parent"))
+            .expect("create manifest dir");
+        std::fs::write(&manifest, "sol-loop\nfull-send\n").expect("write manifest");
+
+        let source = temp.path().join("skills");
+        write_skill(&source.join("full-send"), "# Full send");
+        install_cloned_tstack(home, &source).expect("reinstall tstack");
+
+        assert!(!stale.exists());
+        assert!(home.join(".jean/skills/pi/full-send/SKILL.md").exists());
+        assert_eq!(
+            std::fs::read_to_string(tstack_manifest_path(home)).expect("manifest"),
+            "full-send"
+        );
+    }
+
+    #[test]
+    fn uninstall_without_manifest_removes_known_tstack_skills_only() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let home = temp.path();
+        let root = home.join(".jean/skills/pi");
+        write_skill(&root.join("full-send"), "# Full send");
+        write_skill(&root.join("council"), "# Council");
+        write_skill(&root.join("my-skill"), "# Mine");
+
+        uninstall_tstack_from_home(home).expect("uninstall tstack");
+
+        assert!(!root.join("full-send").exists());
+        assert!(!root.join("council").exists());
+        assert!(root.join("my-skill/SKILL.md").exists());
     }
 
     #[test]

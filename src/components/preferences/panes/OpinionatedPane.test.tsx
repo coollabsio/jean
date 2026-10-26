@@ -94,6 +94,32 @@ describe('OpinionatedPane', () => {
     ).not.toBeInTheDocument()
   })
 
+  it('offers tstack for every Jean AI backend', async () => {
+    render(<OpinionatedPane />)
+
+    const tstackLabel = await screen.findByText('tstack')
+    const tstackCard = tstackLabel.closest('.rounded-md')?.parentElement
+    if (!tstackCard) throw new Error('Expected tstack card')
+
+    await userEvent.click(tstackLabel)
+
+    expect(
+      within(tstackCard as HTMLElement).getByText('Codex')
+    ).toBeInTheDocument()
+    expect(
+      within(tstackCard as HTMLElement).getByText('Claude')
+    ).toBeInTheDocument()
+    expect(
+      within(tstackCard as HTMLElement).getByText('Command Code')
+    ).toBeInTheDocument()
+    expect(
+      within(tstackCard as HTMLElement).getByText('council')
+    ).toBeInTheDocument()
+    expect(
+      within(tstackCard as HTMLElement).getByText('full send')
+    ).toBeInTheDocument()
+  })
+
   it('shows opinionated skill installation status for each backend', async () => {
     render(<OpinionatedPane />)
 

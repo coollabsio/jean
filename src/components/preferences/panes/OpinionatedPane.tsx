@@ -168,6 +168,56 @@ const PLUGINS: PluginDefinition[] = [
       },
     ],
   },
+  {
+    id: 'tstack',
+    name: 'tstack',
+    description:
+      "Theo's everyday engineering skill pack. Adds full send and full stop, council multi-model review, file a PR, babysit a PR, takeover, and modernize.",
+    githubUrl: 'https://github.com/t3dotgg/tstack',
+    scope: 'ai-backends',
+    backends: [
+      'Claude',
+      'Codex',
+      'OpenCode',
+      'Cursor',
+      'Pi',
+      'Command Code',
+      'Grok',
+    ],
+    usage: [
+      {
+        note: 'Installs the upstream t3dotgg/tstack skills as-is into each backend path and the Jean-global mirror. Some skills mention T3 Code tools (watch_pull_request, delegate_task) and fall back to gh or native tools elsewhere.',
+      },
+      {
+        label: 'Ship a change through merge',
+        command: 'full send',
+      },
+      {
+        label: 'Stop when the PR is ready to merge',
+        command: 'full stop',
+      },
+      {
+        label: 'Multi-model review',
+        command: 'council',
+      },
+      {
+        label: 'File a short PR',
+        command: 'file a PR',
+      },
+      {
+        label: 'Watch CI and review bots',
+        command: 'babysit',
+      },
+      {
+        label: "Finish someone else's PR",
+        command: 'take over',
+      },
+      {
+        label: 'Rebase an old PR',
+        command: 'modernize',
+      },
+    ],
+  },
 ]
 
 interface PluginStatus {
