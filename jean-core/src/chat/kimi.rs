@@ -67,7 +67,7 @@ pub struct KimiExecutionOptions<'a> {
 }
 
 fn kimi_mode(mode: Option<&str>) -> &'static str {
-    match mode.unwrap_or("plan") {
+    match mode.unwrap_or("build") {
         "auto" => "auto",
         "build" | "supervised" => "default",
         "yolo" => "yolo",
@@ -1615,7 +1615,7 @@ mod tests {
         assert_eq!(kimi_mode(Some("supervised")), "default");
         assert_eq!(kimi_mode(Some("auto")), "auto");
         assert_eq!(kimi_mode(Some("yolo")), "yolo");
-        assert_eq!(kimi_mode(None), "plan");
+        assert_eq!(kimi_mode(None), "default");
     }
 
     #[test]

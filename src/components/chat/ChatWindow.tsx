@@ -18,6 +18,11 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { ChatSearchBar } from './ChatSearchBar'
 import { Button } from '@/components/ui/button'
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import {
   AlertDialog,
   AlertDialogContent,
   AlertDialogHeader,
@@ -33,6 +38,7 @@ import { generateId } from '@/lib/uuid'
 import {
   ArrowDown,
   ArrowUp,
+  ClipboardList,
   GitBranch,
   GitMerge,
   Layers,
@@ -49,6 +55,7 @@ import {
   useSetSessionEffortLevel,
   useSetSessionBackend,
   useSetSessionProvider,
+  useSetSessionProviderAccount,
   useCreateSession,
   useLoadOlderMessages,
   chatQueryKeys,
@@ -805,6 +812,9 @@ const ChatWindowContent = memo(function ChatWindowContent({
   const setSessionEffortLevel = useStableMutation(useSetSessionEffortLevel())
   const setSessionBackend = useStableMutation(useSetSessionBackend())
   const setSessionProvider = useStableMutation(useSetSessionProvider())
+  const setSessionProviderAccount = useStableMutation(
+    useSetSessionProviderAccount()
+  )
 
   // Fetch worktree data for PR link display
   const { data: worktree } = useWorktree(activeWorktreeId ?? null)
@@ -1020,6 +1030,15 @@ const ChatWindowContent = memo(function ChatWindowContent({
     selectedProvider !== '__anthropic__' &&
     selectedProvider !== '__default__'
   )
+  const zustandProviderAccount = useChatStore(state =>
+    deferredSessionId
+      ? state.selectedProviderAccounts[deferredSessionId]
+      : undefined
+  )
+  const selectedProviderAccountId =
+    zustandProviderAccount !== undefined
+      ? zustandProviderAccount
+      : (session?.provider_account_id ?? null)
 
   // Per-session model selection, falls back to preferences default (backend-aware)
   const selectedModel = resolveSelectedModelForBackend(
@@ -1593,6 +1612,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
     isSending,
     currentToolCalls,
     lastAssistantMessage,
+    messages: session?.messages,
   })
 
   // Plan state: finished pending plan awaiting approval
@@ -2074,6 +2094,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
     handleToolbarBackendModelChange,
     handleTabBackendSwitch,
     handleToolbarProviderChange,
+    handleToolbarProviderAccountChange,
     handleToolbarThinkingLevelChange,
     handleToolbarEffortLevelChange,
     handleToggleMcpServer,
@@ -2099,6 +2120,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
     setSessionModel,
     setSessionBackend,
     setSessionProvider,
+    setSessionProviderAccount,
     setSessionThinkingLevel,
     setSessionEffortLevel,
     setExecutionMode,
@@ -3337,18 +3359,24 @@ const ChatWindowContent = memo(function ChatWindowContent({
                               !zenMode &&
                               !isCompactHistoryExpanded &&
                               compactHistoryWindow.hiddenPromptCount > 0 && (
-                                <button
-                                  type="button"
-                                  onClick={handleShowHiddenCompactPrompts}
-                                  aria-label={`Show ${compactHistoryWindow.hiddenPromptCount} earlier prompts`}
-                                  title="Show earlier prompts"
-                                  className="flex h-6 items-center gap-1 rounded-t-md border border-b-0 border-border bg-card px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                                >
-                                  <ArrowUp className="h-3.5 w-3.5" />
-                                  <span>
-                                    {compactHistoryWindow.hiddenPromptCount}
-                                  </span>
-                                </button>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      type="button"
+                                      onClick={handleShowHiddenCompactPrompts}
+                                      aria-label={`Show ${compactHistoryWindow.hiddenPromptCount} earlier prompts`}
+                                      className="flex h-6 items-center gap-1 rounded-t-md border border-b-0 border-border bg-card px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                    >
+                                      <ArrowUp className="h-3.5 w-3.5" />
+                                      <span>
+                                        {compactHistoryWindow.hiddenPromptCount}
+                                      </span>
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    Show earlier prompts
+                                  </TooltipContent>
+                                </Tooltip>
                               )}
                             <PinnedTablesButton
                               sessionId={activeSessionId}
@@ -3383,25 +3411,31 @@ const ChatWindowContent = memo(function ChatWindowContent({
                               onScrollToBottom={scrollToBottom}
                             />
                             {!isAtBottom && messages.length > 0 && (
-                              <button
-                                type="button"
-                                onClick={() => scrollToBottom(true)}
-                                aria-label="Scroll to bottom"
-                                title="Scroll to bottom"
-                                className="relative flex h-6 items-center gap-1 rounded-t-md border border-b-0 border-border bg-card px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                              >
-                                <ArrowDown className="h-3.5 w-3.5" />
-                                <span>Bottom</span>
-                                {isSending && (
-                                  <span
-                                    aria-hidden="true"
-                                    className="absolute -top-0.5 -right-0.5 flex h-2 w-2"
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    type="button"
+                                    onClick={() => scrollToBottom(true)}
+                                    aria-label="Scroll to bottom"
+                                    className="relative flex h-6 items-center gap-1 rounded-t-md border border-b-0 border-border bg-card px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                                   >
-                                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
-                                    <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
-                                  </span>
-                                )}
-                              </button>
+                                    <ArrowDown className="h-3.5 w-3.5" />
+                                    <span>Bottom</span>
+                                    {isSending && (
+                                      <span
+                                        aria-hidden="true"
+                                        className="absolute -top-0.5 -right-0.5 flex h-2 w-2"
+                                      >
+                                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
+                                        <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
+                                      </span>
+                                    )}
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  Scroll to bottom
+                                </TooltipContent>
+                              </Tooltip>
                             )}
                           </div>
                           {/* Subagents panel - separate section above the chat input */}
@@ -3466,6 +3500,23 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                   : { paddingBottom: 'var(--safe-area-bottom)' }
                             }
                           >
+                            {executionMode === 'plan' && (
+                              <div
+                                className={cn(
+                                  'flex items-start gap-2 border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-amber-800 dark:text-amber-200',
+                                  pillComposer && 'rounded-t-[20px] px-3 py-1.5'
+                                )}
+                                role="status"
+                              >
+                                <ClipboardList className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                                <span>
+                                  <span className="font-medium">Plan mode.</span>{' '}
+                                  Jean will explore and propose a plan. It will
+                                  not change code until you approve, or until
+                                  you switch modes.
+                                </span>
+                              </div>
+                            )}
                             {/* Pending file preview (@ mentions) */}
                             <FilePreview
                               files={currentPendingFiles}
@@ -3771,6 +3822,15 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                     onModelChange={handleToolbarModelChange}
                                     onProviderChange={
                                       handleToolbarProviderChange
+                                    }
+                                    providerAccounts={
+                                      preferences?.provider_accounts ?? []
+                                    }
+                                    selectedProviderAccountId={
+                                      selectedProviderAccountId
+                                    }
+                                    onProviderAccountChange={
+                                      handleToolbarProviderAccountChange
                                     }
                                     customCliProfiles={
                                       preferences?.custom_cli_profiles ??

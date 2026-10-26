@@ -14,9 +14,12 @@ import {
   attachSessionReference,
   filterDiscussions,
   filterIssues,
+  githubItemKey,
   getAdvisoryContextContent,
   isGhAuthError,
   isUnsupportedGitHubRepoError,
+  mergeWithSearchResults,
+  prependExactMatches,
   sessionReferenceSlug,
 } from './github'
 import type { GitHubDiscussion, GitHubIssue } from '@/types/github'
@@ -42,6 +45,29 @@ describe('GitHub issue search', () => {
       author: { login: 'bob' },
     },
   ]
+
+  it('keeps the same issue number distinct across repositories', () => {
+    const base = issues[0]
+    if (!base) throw new Error('missing issue fixture')
+    const origin: GitHubIssue = {
+      ...base,
+      repo: 'coollabsio/jean',
+      remote: 'origin',
+    }
+    const fork: GitHubIssue = {
+      ...base,
+      title: 'Fork copy',
+      repo: 'octocat/jean',
+      remote: 'fork',
+    }
+    expect(githubItemKey(origin)).not.toBe(githubItemKey(fork))
+    expect(mergeWithSearchResults([origin], [fork, origin])).toEqual([
+      origin,
+      fork,
+    ])
+    expect(prependExactMatches([origin], [fork])).toEqual([fork, origin])
+    expect(filterIssues([origin, fork], 'octocat')).toEqual([fork])
+  })
 
   it('matches issue titles and descriptions', () => {
     expect(filterIssues(issues, 'login fails')).toEqual([issues[0]])

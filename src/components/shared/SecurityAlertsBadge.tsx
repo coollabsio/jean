@@ -8,6 +8,7 @@ import {
   TooltipContent,
 } from '@/components/ui/tooltip'
 import { useDependabotAlerts, useRepositoryAdvisories } from '@/services/github'
+import { useProjectGitProvider } from '@/services/git-provider'
 import { ghCliQueryKeys } from '@/services/gh-cli'
 import { useUIStore } from '@/store/ui-store'
 import { useProjectsStore } from '@/store/projects-store'
@@ -32,14 +33,16 @@ export function SecurityAlertsBadge({
     'local',
   ])
   const isAuthenticated = authData?.authenticated ?? false
+  const { data: gitProviderInfo } = useProjectGitProvider(projectPath)
+  const isGitlab = gitProviderInfo?.provider === 'gitlab'
 
   const { data: alerts } = useDependabotAlerts(projectPath, 'open', {
-    enabled: isAuthenticated,
+    enabled: isAuthenticated && !isGitlab,
     staleTime: BADGE_STALE_TIME,
   })
 
   const { data: advisories } = useRepositoryAdvisories(projectPath, undefined, {
-    enabled: isAuthenticated,
+    enabled: isAuthenticated && !isGitlab,
     staleTime: BADGE_STALE_TIME,
   })
 

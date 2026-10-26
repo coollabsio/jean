@@ -274,11 +274,15 @@ export function LinearItemsTab({
                 {loadingLinearIds.has(issue.identifier) ? (
                   <Loader2 className="h-4 w-4 mt-0.5 animate-spin text-muted-foreground flex-shrink-0" />
                 ) : (
-                  <div
-                    className="h-4 w-4 mt-0.5 flex-shrink-0 rounded-full border-2"
-                    style={{ borderColor: issue.state.color }}
-                    title={issue.state.name}
-                  />
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div
+                        className="h-4 w-4 mt-0.5 flex-shrink-0 rounded-full border-2"
+                        style={{ borderColor: issue.state.color }}
+                      />
+                    </TooltipTrigger>
+                    <TooltipContent>{issue.state.name}</TooltipContent>
+                  </Tooltip>
                 )}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">

@@ -329,6 +329,8 @@ fn issue_to_github(i: GlIssue) -> GitHubIssue {
         labels: map_labels(i.labels),
         created_at: i.created_at,
         author: map_author(i.author),
+        repo: None,
+        remote: None,
     }
 }
 
@@ -344,6 +346,8 @@ fn mr_to_github(m: GlMr) -> GitHubPullRequest {
         created_at: m.created_at,
         author: map_author(m.author),
         labels: map_labels(m.labels),
+        repo: None,
+        remote: None,
     }
 }
 

@@ -116,7 +116,7 @@ Always use ASD-STE100 Simplified Technical English when you talk to me.\n\
 - After each finished task, please write a few bullet points on how to test the changes.";
 
 fn execution_mode_instruction(execution_mode: Option<&str>) -> Option<&'static str> {
-    match execution_mode.unwrap_or("plan") {
+    match execution_mode.unwrap_or("build") {
         "build" | "auto" | "supervised" => Some(
             "You are in BUILD MODE. Start implementing immediately. \
              Do NOT enter plan mode and do NOT use ExitPlanMode unless the user explicitly asks \
@@ -433,7 +433,7 @@ fn split_fast_model(model: &str) -> (&str, bool) {
 }
 
 fn claude_permission_mode(execution_mode: Option<&str>) -> &'static str {
-    match execution_mode.unwrap_or("plan") {
+    match execution_mode.unwrap_or("build") {
         "supervised" => "default",
         "build" => "acceptEdits",
         "auto" => "auto",
@@ -780,7 +780,7 @@ fn build_claude_args(
     // In build/yolo, remove ExitPlanMode entirely so Claude can't loop back
     // into plan-approval after the user already approved one.
     if matches!(
-        execution_mode.unwrap_or("plan"),
+        execution_mode.unwrap_or("build"),
         "build" | "yolo" | "auto" | "supervised"
     ) {
         args.push("--disallowedTools".to_string());
@@ -1379,7 +1379,7 @@ fn build_claude_args(
     ));
     env_vars.push((
         "JEAN_EXECUTION_MODE".to_string(),
-        execution_mode.unwrap_or("plan").to_string(),
+        execution_mode.unwrap_or("build").to_string(),
     ));
     if let Some(claude_sid) = existing_claude_session_id {
         env_vars.push(("JEAN_CLAUDE_SESSION_ID".to_string(), claude_sid.to_string()));
@@ -1581,8 +1581,11 @@ pub fn execute_claude_detached(
         return Err(error_msg);
     }
 
+    let account_home =
+        crate::provider_accounts::account_config_home_for_session(app, "claude", session_id)?;
+
     // Build args
-    let (args, env_vars) = build_claude_args(
+    let (args, mut env_vars) = build_claude_args(
         app,
         session_id,
         worktree_id,
@@ -1601,6 +1604,10 @@ pub fn execute_claude_detached(
         include_recap,
         working_dir,
     );
+    if let Some(home) = account_home {
+        let (key, value) = crate::provider_accounts::config_env("claude", &home)?;
+        env_vars.push((key.to_string(), value));
+    }
 
     // Log the full Claude CLI command for debugging
     log::debug!(
@@ -3467,7 +3474,7 @@ mod tests {
         assert_eq!(claude_permission_mode(Some("auto")), "auto");
         assert_eq!(claude_permission_mode(Some("build")), "acceptEdits");
         assert_eq!(claude_permission_mode(Some("plan")), "plan");
-        assert_eq!(claude_permission_mode(None), "plan");
+        assert_eq!(claude_permission_mode(None), "acceptEdits");
         assert!(claude_allows_all_bash(Some("yolo")));
         assert!(!claude_allows_all_bash(Some("build")));
     }

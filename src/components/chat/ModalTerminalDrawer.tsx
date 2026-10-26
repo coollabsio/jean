@@ -7,6 +7,11 @@ import {
   Terminal,
 } from '@/components/icons/reicon'
 import { Button } from '@/components/ui/button'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { ModalCloseButton } from '@/components/ui/modal-close-button'
 import { cn } from '@/lib/utils'
@@ -137,55 +142,74 @@ export const ModalTerminalDrawer = memo(function ModalTerminalDrawer({
           </div>
           <div className="flex items-center gap-1">
             <div className="flex items-center rounded-md border bg-muted/30 p-0.5">
-              <Button
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  'h-7 w-7 p-0',
-                  dockMode === 'floating' && 'bg-muted'
-                )}
-                onClick={() => handleSetDockMode('floating')}
-                aria-label="Float terminal"
-                title="Float terminal"
-              >
-                <PanelRightDashed className="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className={cn('h-7 w-7 p-0', dockMode === 'left' && 'bg-muted')}
-                onClick={() => handleSetDockMode('left')}
-                aria-label="Dock terminal left"
-                title="Dock terminal left"
-              >
-                <PanelLeft className="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  'h-7 w-7 p-0',
-                  dockMode === 'right' && 'bg-muted'
-                )}
-                onClick={() => handleSetDockMode('right')}
-                aria-label="Dock terminal right"
-                title="Dock terminal right"
-              >
-                <PanelRight className="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  'h-7 w-7 p-0',
-                  dockMode === 'bottom' && 'bg-muted'
-                )}
-                onClick={() => handleSetDockMode('bottom')}
-                aria-label="Dock terminal bottom"
-                title="Dock terminal bottom"
-              >
-                <PanelBottom className="h-3.5 w-3.5" />
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={cn(
+                      'h-7 w-7 p-0',
+                      dockMode === 'floating' && 'bg-muted'
+                    )}
+                    onClick={() => handleSetDockMode('floating')}
+                    aria-label="Float terminal"
+                  >
+                    <PanelRightDashed className="h-3.5 w-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Float terminal</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={cn(
+                      'h-7 w-7 p-0',
+                      dockMode === 'left' && 'bg-muted'
+                    )}
+                    onClick={() => handleSetDockMode('left')}
+                    aria-label="Dock terminal left"
+                  >
+                    <PanelLeft className="h-3.5 w-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Dock terminal left</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={cn(
+                      'h-7 w-7 p-0',
+                      dockMode === 'right' && 'bg-muted'
+                    )}
+                    onClick={() => handleSetDockMode('right')}
+                    aria-label="Dock terminal right"
+                  >
+                    <PanelRight className="h-3.5 w-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Dock terminal right</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={cn(
+                      'h-7 w-7 p-0',
+                      dockMode === 'bottom' && 'bg-muted'
+                    )}
+                    onClick={() => handleSetDockMode('bottom')}
+                    aria-label="Dock terminal bottom"
+                  >
+                    <PanelBottom className="h-3.5 w-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Dock terminal bottom</TooltipContent>
+              </Tooltip>
             </div>
             <ModalCloseButton size="sm" onClick={handleClose} />
           </div>

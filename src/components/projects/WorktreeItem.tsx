@@ -19,6 +19,8 @@ import {
 } from '@/components/chat/CloseWorktreeDialog'
 import { LabelModal } from '@/components/chat/LabelModal'
 import { SidebarSessionContextMenu } from './SidebarSessionContextMenu'
+import { StatusGroupContextMenu } from './StatusGroupContextMenu'
+import { visibleWorktreeIds } from './sidebar-context-menu'
 import { useSessionArchive } from '@/components/chat/hooks/useSessionArchive'
 import { middleClickClose } from '@/lib/middle-click'
 import { hasCloseConfirmBypassModifier } from '@/lib/confirm-bypass'
@@ -27,7 +29,7 @@ import {
   decideSessionMiddleClose,
   isSessionEmpty,
 } from './worktree-close-decision'
-import { useRenameWorktree } from '@/services/projects'
+import { useRenameWorktree, useWorktrees } from '@/services/projects'
 import { useRenameSession, useSessions } from '@/services/chat'
 import { isAskUserQuestion, isPlanToolCall, type Session } from '@/types/chat'
 import {
@@ -54,6 +56,7 @@ interface WorktreeItemProps {
 }
 
 interface WorktreeSessionListProps {
+  projectId: string
   worktreeId: string
   worktreePath: string
   sessions: Session[]
@@ -70,6 +73,7 @@ interface WorktreeSessionListProps {
  * used for card status derivation.
  */
 const WorktreeSessionList = memo(function WorktreeSessionList({
+  projectId,
   worktreeId,
   worktreePath,
   sessions,
@@ -98,6 +102,22 @@ const WorktreeSessionList = memo(function WorktreeSessionList({
   )
 
   const renameSession = useRenameSession()
+  const { data: projectWorktrees } = useWorktrees(projectId)
+  const expandedWorktreeIds = useProjectsStore(
+    state => state.expandedWorktreeIds
+  )
+  const projectWorktreeIds = useMemo(() => {
+    const ids = visibleWorktreeIds(projectWorktrees ?? [])
+    return ids.length > 0 ? ids : [worktreeId]
+  }, [projectWorktrees, worktreeId])
+  const allWorktreesExpanded = projectWorktreeIds.every(id =>
+    expandedWorktreeIds.has(id)
+  )
+  const toggleAllWorktrees = useCallback(() => {
+    useProjectsStore
+      .getState()
+      .setWorktreesExpanded(projectWorktreeIds, !allWorktreesExpanded)
+  }, [allWorktreesExpanded, projectWorktreeIds])
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(
     null
   )
@@ -148,18 +168,23 @@ const WorktreeSessionList = memo(function WorktreeSessionList({
         const groupConfig = statusConfig[group.indicatorStatus]
         return (
           <div key={group.key}>
-            <div className="flex items-center gap-1.5 pl-3 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-              <StatusIndicator
-                status={groupConfig.indicatorStatus}
-                shape={groupConfig.indicatorShape}
-                label={group.title}
-                className="h-1.5 w-1.5 shrink-0"
-              />
-              <span>{group.title}</span>
-              <span className="text-muted-foreground/60">
-                {group.cards.length}
-              </span>
-            </div>
+            <StatusGroupContextMenu
+              allExpanded={allWorktreesExpanded}
+              onToggleAll={toggleAllWorktrees}
+            >
+              <div className="flex items-center gap-1.5 pl-3 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                <StatusIndicator
+                  status={groupConfig.indicatorStatus}
+                  shape={groupConfig.indicatorShape}
+                  label={group.title}
+                  className="h-1.5 w-1.5 shrink-0"
+                />
+                <span>{group.title}</span>
+                <span className="text-muted-foreground/60">
+                  {group.cards.length}
+                </span>
+              </div>
+            </StatusGroupContextMenu>
             {group.cards.map(card => {
               const config = statusConfig[card.status]
               const isGeneratingName =
@@ -236,16 +261,20 @@ const WorktreeSessionList = memo(function WorktreeSessionList({
                       label={config.label}
                       className="h-1.5 w-1.5 shrink-0"
                     />
-                    <span
-                      className="flex min-w-0 items-center gap-1.5 truncate text-xs"
-                      title={`${config.label}: ${card.session.name || 'Untitled'}`}
-                    >
-                      <span className="truncate">
-                        {isGeneratingName
-                          ? 'Generating…'
-                          : card.session.name || 'Untitled'}
-                      </span>
-                    </span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="flex min-w-0 items-center gap-1.5 truncate text-xs">
+                          <span className="truncate">
+                            {isGeneratingName
+                              ? 'Generating…'
+                              : card.session.name || 'Untitled'}
+                          </span>
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-72">
+                        {`${config.label}: ${card.session.name || 'Untitled'}`}
+                      </TooltipContent>
+                    </Tooltip>
                   </button>
                 </SidebarSessionContextMenu>
               )
@@ -930,6 +959,7 @@ export const WorktreeItem = memo(function WorktreeItem({
           expanded so collapsed rows skip the live card-status subscriptions. */}
       {isExpanded && sessionList && (
         <WorktreeSessionList
+          projectId={projectId}
           worktreeId={worktree.id}
           worktreePath={worktree.path}
           sessions={sessionList}

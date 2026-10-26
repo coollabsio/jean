@@ -66,7 +66,7 @@ pub struct DevinExecutionOptions<'a> {
 }
 
 pub(crate) fn devin_permission_mode(mode: Option<&str>) -> &'static str {
-    match mode.unwrap_or("plan") {
+    match mode.unwrap_or("build") {
         "yolo" => "bypass",
         "build" => "accept-edits",
         _ => "plan",
@@ -741,7 +741,7 @@ fn execute_devin_child(
     let mut message = prepared_message(options.message, options.system_prompt);
     if options.location == DevinLocation::Cloud {
         // A task instruction, not a remote sandbox or permission guarantee.
-        let instruction = match options.execution_mode.unwrap_or("plan") {
+        let instruction = match options.execution_mode.unwrap_or("build") {
             "plan" => "Plan only. Inspect the task and propose a plan. Do not edit files or implement changes. Wait for approval before implementation.",
             "yolo" => "Implement the task and verify the result without routine confirmation. Follow the cloud environment's permission rules.",
             _ => "Implement the requested task and verify the result. Ask before destructive actions. Follow the cloud environment's permission rules.",

@@ -44,6 +44,7 @@ import {
   useBackendAuthStatuses,
   useInstalledBackends,
 } from '@/hooks/useInstalledBackends'
+import { applySessionSettingToSession } from './session-setting-sync'
 import { CODEX_GOAL_TURN_PREFIX } from '../goal-utils'
 
 interface UseMessageSendingParams {
@@ -88,6 +89,22 @@ interface UseMessageSendingParams {
   markAtBottom: () => void
   clearInputDraft: (sessionId: string) => void
   clearChatInputState: () => void
+}
+
+const PLAN_TURN_PROMPT =
+  'Explore the task and propose a plan. Do not implement changes. Wait for approval before writing code.'
+
+function rememberedImplementMode(sessionId: string): ExecutionMode {
+  const remembered = useChatStore.getState().permissionModes[sessionId]
+  if (
+    remembered === 'build' ||
+    remembered === 'yolo' ||
+    remembered === 'supervised' ||
+    remembered === 'auto'
+  ) {
+    return remembered
+  }
+  return 'build'
 }
 
 /** `/goal` arguments the Claude CLI treats as "clear". */
@@ -500,7 +517,60 @@ export function useMessageSending({
           executionModeRef.current = goalMode
         }
       }
-      if (!startedCodexGoalTurn && textMessage.startsWith('/')) {
+      let handledWorkflowCommand = false
+      const workflowMatch = textMessage.match(
+        /^\/(plan|build)(?:\s+([\s\S]*))?$/
+      )
+      if (workflowMatch) {
+        const command = workflowMatch[1]
+        const arg = (workflowMatch[2] ?? '').trim()
+        const hasAttachments =
+          images.length > 0 ||
+          files.length > 0 ||
+          textFiles.length > 0 ||
+          skills.length > 0
+        const nextMode: ExecutionMode =
+          command === 'plan' ? 'plan' : rememberedImplementMode(activeSessionId)
+        setExecutionMode(activeSessionId, nextMode)
+        executionModeRef.current = nextMode
+        queryClient.setQueryData(
+          chatQueryKeys.session(activeSessionId),
+          (old: Session | null | undefined) =>
+            old
+              ? applySessionSettingToSession(old, 'executionMode', nextMode)
+              : old
+        )
+        void invoke('broadcast_session_setting', {
+          sessionId: activeSessionId,
+          key: 'executionMode',
+          value: nextMode,
+        }).catch(() => undefined)
+        void invoke('update_session_state', {
+          worktreeId: activeWorktreeId,
+          worktreePath: activeWorktreePath,
+          sessionId: activeSessionId,
+          selectedExecutionMode: nextMode,
+          selectedPermissionMode:
+            useChatStore.getState().permissionModes[activeSessionId],
+        }).catch(() => undefined)
+
+        if (command === 'build' && !arg && !hasAttachments) {
+          clearInputDraft(activeSessionId)
+          clearChatInputState()
+          toast.message('Left Plan mode')
+          return
+        }
+
+        message =
+          arg ||
+          (command === 'plan' ? PLAN_TURN_PROMPT : 'Continue implementing.')
+        handledWorkflowCommand = true
+      }
+      if (
+        !startedCodexGoalTurn &&
+        !handledWorkflowCommand &&
+        textMessage.startsWith('/')
+      ) {
         const slashName = textMessage.slice(1).split(/\s/)[0] ?? ''
         const params = textMessage.slice(1 + slashName.length).trim()
         const claudeSkills =

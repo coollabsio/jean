@@ -9,6 +9,10 @@ import type {
 } from '@/types/github'
 import type { LinearIssue } from '@/types/linear'
 import type { SentryIssue } from '@/types/sentry'
+import {
+  worktreeBranchCheckoutRef,
+  type RemoteBranch,
+} from '@/lib/remote-worktree-sources'
 
 interface Params {
   activeTab: TabId
@@ -18,7 +22,8 @@ interface Params {
   filteredIssues: GitHubIssue[]
   filteredPRs: GitHubPullRequest[]
   filteredSecurityAlerts: DependabotAlert[]
-  filteredBranches: string[]
+  filteredBranches: RemoteBranch[]
+  branchRemoteCount: number
   selectedItemIndex: number
   setSelectedItemIndex: (i: number | ((prev: number) => number)) => void
   creatingFromNumber: number | null
@@ -83,6 +88,7 @@ export function useNewWorktreeKeyboard({
   filteredPRs,
   filteredSecurityAlerts,
   filteredBranches,
+  branchRemoteCount,
   selectedItemIndex,
   setSelectedItemIndex,
   creatingFromNumber,
@@ -473,7 +479,10 @@ export function useNewWorktreeKeyboard({
         if (key === 'enter' && filteredBranches[selectedItemIndex]) {
           e.preventDefault()
           handleSelectBranch(
-            filteredBranches[selectedItemIndex],
+            worktreeBranchCheckoutRef(
+              filteredBranches[selectedItemIndex],
+              branchRemoteCount
+            ),
             e.metaKey || e.ctrlKey
           )
           return
@@ -487,6 +496,7 @@ export function useNewWorktreeKeyboard({
       filteredSecurityAlerts,
       filteredAdvisories,
       filteredBranches,
+      branchRemoteCount,
       selectedItemIndex,
       handleCreateWorktree,
       handleBaseSession,

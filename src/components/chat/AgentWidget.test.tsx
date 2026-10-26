@@ -73,6 +73,28 @@ describe('AgentWidget', () => {
     expect(screen.getByText('3 tools • 3s')).toBeInTheDocument()
   })
 
+  it('shows the model next to a named agent', () => {
+    render(
+      <AgentWidget
+        agents={[
+          agent({
+            id: 'named-agent',
+            label: 'reviewer',
+            prompt: 'Investigate the auth bug',
+            model: 'gpt-5.4',
+            status: 'completed',
+          }),
+        ]}
+        open
+      />
+    )
+
+    expect(screen.getByText('reviewer')).toBeInTheDocument()
+    expect(screen.getByText('Investigate the auth bug')).toBeInTheDocument()
+    expect(screen.getByText(/gpt-5\.4/)).toBeInTheDocument()
+    expect(screen.queryByLabelText('in progress')).not.toBeInTheDocument()
+  })
+
   it('prefers the CLI-reported duration once done', () => {
     render(
       <AgentWidget

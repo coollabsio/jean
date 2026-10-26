@@ -819,6 +819,7 @@ mod tests {
                 }],
                 reviews: vec![],
                 diff: None,
+                repo: None,
             }),
             security_context: None,
             advisory_context: None,

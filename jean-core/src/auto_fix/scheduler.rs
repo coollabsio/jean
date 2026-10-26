@@ -1050,6 +1050,7 @@ async fn start_issue_auto_fix(
         app.clone(),
         project.path.clone(),
         issue_number,
+        None,
     )
     .await?;
     // The issue may have closed between the scan and this fetch.
@@ -1063,6 +1064,7 @@ async fn start_issue_auto_fix(
         title: issue.title,
         body: issue.body,
         comments,
+        repo: None,
     };
 
     let ready_worktree = create_auto_fix_worktree(app, project.id.clone(), issue_context).await?;

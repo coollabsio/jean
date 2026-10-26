@@ -409,18 +409,22 @@ export function ContextMentionPopover({
             Context links
           </span>
           <div className="flex items-center gap-1">
-            <button
-              type="button"
-              aria-label="Refresh context links"
-              title="Refresh context links"
-              disabled={isRefreshing || (!projectPath && !projectId)}
-              onClick={() => void handleRefresh()}
-              className="flex size-8 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
-            >
-              <RefreshCw
-                className={cn('size-4', isRefreshing && 'animate-spin')}
-              />
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="Refresh context links"
+                  disabled={isRefreshing || (!projectPath && !projectId)}
+                  onClick={() => void handleRefresh()}
+                  className="flex size-8 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+                >
+                  <RefreshCw
+                    className={cn('size-4', isRefreshing && 'animate-spin')}
+                  />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Refresh context links</TooltipContent>
+            </Tooltip>
             <button
               type="button"
               onClick={() => {

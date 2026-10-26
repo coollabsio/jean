@@ -231,6 +231,27 @@ catalog/defaults; the React UI retains bundled fallbacks for older servers.
 Duplicate pairs are rejected while running. Job progress emits
 `review-job:updated`.
 
+### Provider accounts
+
+Claude and Codex can keep more than one login. `provider_accounts` on
+`AppPreferences` stores `{ id, backend, label }`. Each account's auth files
+live under `{app_data}/provider-accounts/{backend}/{id}`. A session's
+`provider_account_id` selects one of them. An empty selection uses the CLI's
+own login (`~/.claude` or `~/.codex`).
+
+New Claude and Codex sessions copy `default_provider_accounts[backend]` when
+that id still belongs to the backend. The chat toolbar can change the account
+for the open session. Claude turns set `CLAUDE_CONFIG_DIR`. Codex turns set
+`CODEX_HOME` on the shared app-server and restart that server only when it is
+idle.
+
+Sign-in still writes the CLI's own home. `capture_provider_account_auth`
+copies that login into the account directory (`auth.json` or
+`.credentials.json`, plus optional config). The other commands are
+`create_provider_account`, `delete_provider_account`, and
+`set_session_provider_account`. Jean MCP stays enabled on every preference
+load and save.
+
 ### Command-Centric Design
 
 All user actions flow through a centralized command system:

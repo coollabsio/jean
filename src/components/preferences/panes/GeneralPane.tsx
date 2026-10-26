@@ -4157,7 +4157,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
 
             <InlineField
               label="Default permissions"
-              description="Permission policy for new sessions on the default backend."
+              description="Permission policy for new sessions. Plan mode is opt-in on each session, not a default."
             >
               <Select
                 value={preferences?.default_execution_mode ?? 'yolo'}
@@ -4169,9 +4169,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {preferences?.default_execution_mode === 'plan' && (
-                    <SelectItem value="plan">Plan (legacy workflow)</SelectItem>
-                  )}
                   {preferences?.default_execution_mode === 'build' &&
                     !getSupportedPermissionModes(
                       preferences?.default_backend ?? 'claude'

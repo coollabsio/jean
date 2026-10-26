@@ -8,6 +8,7 @@ import {
   TooltipContent,
 } from '@/components/ui/tooltip'
 import { useWorkflowRuns } from '@/services/github'
+import { useProjectGitProvider } from '@/services/git-provider'
 import { ghCliQueryKeys } from '@/services/gh-cli'
 import { useUIStore } from '@/store/ui-store'
 import { countUnreadFailedWorkflowRuns } from '@/components/shared/workflow-run-utils'
@@ -32,12 +33,14 @@ export function FailedRunsBadge({
     'local',
   ])
   const isAuthenticated = authData?.authenticated ?? false
+  const { data: gitProviderInfo } = useProjectGitProvider(projectPath)
+  const isGitlab = gitProviderInfo?.provider === 'gitlab'
   const seenFailedWorkflowRunIds = useUIStore(
     state => state.seenFailedWorkflowRunIds
   )
 
   const { data: result } = useWorkflowRuns(projectPath, branch, {
-    enabled: isAuthenticated,
+    enabled: isAuthenticated && !isGitlab,
     staleTime: BADGE_STALE_TIME,
   })
 

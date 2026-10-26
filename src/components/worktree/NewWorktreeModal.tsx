@@ -114,6 +114,7 @@ function NewWorktreeModalContent() {
     type: 'issue' | 'pr' | 'security' | 'advisory'
     number: number
     ghsaId?: string
+    repo?: string
   } | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
   // Track preview-was-open across the same event cycle (ref survives after state clears)
@@ -190,14 +191,14 @@ function NewWorktreeModalContent() {
     { run: startOnHost.run, hostId: startOnHost.hostId }
   )
 
-  const handlePreviewIssue = (issue: { number: number }) => {
+  const handlePreviewIssue = (issue: { number: number; repo?: string }) => {
     previewOpenRef.current = true
-    setPreviewItem({ type: 'issue', number: issue.number })
+    setPreviewItem({ type: 'issue', number: issue.number, repo: issue.repo })
   }
 
-  const handlePreviewPR = (pr: { number: number }) => {
+  const handlePreviewPR = (pr: { number: number; repo?: string }) => {
     previewOpenRef.current = true
-    setPreviewItem({ type: 'pr', number: pr.number })
+    setPreviewItem({ type: 'pr', number: pr.number, repo: pr.repo })
   }
 
   const handlePreviewSecurityAlert = (alert: { number: number }) => {
@@ -228,6 +229,7 @@ function NewWorktreeModalContent() {
     filteredPRs: data.filteredPRs,
     filteredSecurityAlerts: data.filteredSecurityAlerts,
     filteredBranches: data.filteredBranches,
+    branchRemoteCount: data.branchRemoteCount,
     selectedItemIndex,
     setSelectedItemIndex,
     creatingFromNumber: handlers.creatingFromNumber,
@@ -498,6 +500,10 @@ function NewWorktreeModalContent() {
                 onBulkInvestigateIssues={handlers.handleBulkInvestigateIssues}
                 onPreviewIssue={handlePreviewIssue}
                 creatingFromNumber={handlers.creatingFromNumber}
+                creatingFromRepo={handlers.creatingFromRepo}
+                showSource={data.showGitHubSource}
+                hasMultipleGitHubRemotes={data.hasMultipleGitHubRemotes}
+                primaryGitHubRemote={data.primaryGitHubRemote}
                 isBulkInvestigating={handlers.isBulkInvestigating}
                 searchInputRef={searchInputRef}
                 onLogin={triggerLogin}
@@ -528,7 +534,12 @@ function NewWorktreeModalContent() {
                 onStackPR={handlers.handleStackOnPR}
                 onPreviewPR={handlePreviewPR}
                 creatingFromNumber={handlers.creatingFromNumber}
+                creatingFromRepo={handlers.creatingFromRepo}
                 stackingFromPR={handlers.stackingFromPR}
+                stackingFromRepo={handlers.stackingFromRepo}
+                showSource={data.showGitHubSource}
+                hasMultipleGitHubRemotes={data.hasMultipleGitHubRemotes}
+                primaryGitHubRemote={data.primaryGitHubRemote}
                 isBulkInvestigating={handlers.isBulkInvestigating}
                 searchInputRef={searchInputRef}
                 onLogin={triggerLogin}
@@ -663,6 +674,7 @@ function NewWorktreeModalContent() {
                 searchQuery={searchQuery}
                 setSearchQuery={setSearchQuery}
                 branches={data.filteredBranches}
+                remoteCount={data.branchRemoteCount}
                 isLoading={data.isLoadingBranches}
                 isRefetching={data.isRefetchingBranches}
                 error={data.branchesError}
@@ -711,6 +723,7 @@ function NewWorktreeModalContent() {
           type={previewItem.type}
           number={previewItem.number}
           ghsaId={previewItem.ghsaId}
+          repo={previewItem.repo}
         />
       )}
     </>

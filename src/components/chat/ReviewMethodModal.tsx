@@ -8,6 +8,11 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Kbd } from '@/components/ui/kbd'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { useCodeRabbitCliStatus } from '@/services/coderabbit-cli'
 import { cn } from '@/lib/utils'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -167,38 +172,52 @@ function CodeRabbitChoice({
         </span>
       </span>
       <span className="flex shrink-0 items-center gap-1.5">
-        <button
-          type="button"
-          disabled={cliDisabled}
-          onClick={onCliReview}
-          title={cliSubtitle}
-          className={cn(
-            'inline-flex h-8 items-center gap-1.5 rounded-md border border-border/70 bg-background px-2 text-xs font-medium text-muted-foreground transition-colors',
-            'hover:border-border hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-            cliDisabled && 'cursor-not-allowed opacity-50 hover:bg-background'
-          )}
-        >
-          CLI
-          {showShortcuts && (
-            <Kbd className="h-4 min-w-4 px-1 text-[10px]">2</Kbd>
-          )}
-        </button>
-        <button
-          type="button"
-          disabled={prDisabled}
-          onClick={onPrReview}
-          title={prSubtitle}
-          className={cn(
-            'inline-flex h-8 items-center gap-1.5 rounded-md border border-border/70 bg-background px-2 text-xs font-medium text-muted-foreground transition-colors',
-            'hover:border-border hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-            prDisabled && 'cursor-not-allowed opacity-50 hover:bg-background'
-          )}
-        >
-          PR
-          {showShortcuts && (
-            <Kbd className="h-4 min-w-4 px-1 text-[10px]">3</Kbd>
-          )}
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex">
+              <button
+                type="button"
+                disabled={cliDisabled}
+                onClick={onCliReview}
+                className={cn(
+                  'inline-flex h-8 items-center gap-1.5 rounded-md border border-border/70 bg-background px-2 text-xs font-medium text-muted-foreground transition-colors',
+                  'hover:border-border hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  cliDisabled &&
+                    'pointer-events-none cursor-not-allowed opacity-50 hover:bg-background'
+                )}
+              >
+                CLI
+                {showShortcuts && (
+                  <Kbd className="h-4 min-w-4 px-1 text-[10px]">2</Kbd>
+                )}
+              </button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{cliSubtitle}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex">
+              <button
+                type="button"
+                disabled={prDisabled}
+                onClick={onPrReview}
+                className={cn(
+                  'inline-flex h-8 items-center gap-1.5 rounded-md border border-border/70 bg-background px-2 text-xs font-medium text-muted-foreground transition-colors',
+                  'hover:border-border hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  prDisabled &&
+                    'pointer-events-none cursor-not-allowed opacity-50 hover:bg-background'
+                )}
+              >
+                PR
+                {showShortcuts && (
+                  <Kbd className="h-4 min-w-4 px-1 text-[10px]">3</Kbd>
+                )}
+              </button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{prSubtitle}</TooltipContent>
+        </Tooltip>
       </span>
     </div>
   )

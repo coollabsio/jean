@@ -11,20 +11,13 @@ import {
   type RefObject,
 } from 'react'
 import {
-  Archive,
-  Copy,
   GitBranchPlus,
   GitPullRequestArrow,
   Globe,
   Maximize,
   Minimize,
-  Pencil,
-  RefreshCw,
-  Tag,
-  Play,
   Plus,
   Terminal,
-  Trash2,
 } from '@/components/icons/reicon'
 import { ModalCloseButton } from '@/components/ui/modal-close-button'
 import { cn } from '@/lib/utils'
@@ -54,7 +47,6 @@ import {
   useClearSessionHistory,
   useRenameSession,
   reconnectNativeCliSession,
-  canReconnectSession,
 } from '@/services/chat'
 import { usePreferences } from '@/services/preferences'
 import {
@@ -70,7 +62,6 @@ import { isBaseSession, type Project, type Worktree } from '@/types/projects'
 import type { Session } from '@/types/chat'
 import { isNativeApp } from '@/lib/environment'
 import { isImeComposingEvent } from '@/lib/ime-composition'
-import { copyToClipboard } from '@/lib/clipboard'
 import { toast } from 'sonner'
 import { ChatWindow } from './ChatWindow'
 import { ModalTerminalDrawer } from './ModalTerminalDrawer'
@@ -98,11 +89,10 @@ import { useCanvasStoreState } from './hooks/useCanvasStoreState'
 import {
   ContextMenu,
   ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { WorktreeDropdownMenu } from '@/components/projects/WorktreeDropdownMenu'
+import { SessionContextMenuItems } from './SessionContextMenuItems'
 import { LabelModal } from './LabelModal'
 import { useSessionArchive } from './hooks/useSessionArchive'
 import { useOpenInNativeClient } from './hooks/useOpenInNativeClient'
@@ -1384,93 +1374,32 @@ export const SessionChatModal = memo(function SessionChatModal({
                           </div>
                         </ContextMenuTrigger>
                         <ContextMenuContent className="w-64">
-                          <ContextMenuItem
-                            onSelect={() =>
+                          <SessionContextMenuItems
+                            session={session}
+                            hasLabel={!!sessionLabel}
+                            resumeCommand={resumeCommand}
+                            nativeClientPending={isOpeningInNativeClient}
+                            onRename={() =>
                               handleStartRename(session.id, session.name)
                             }
-                          >
-                            <Pencil className="mr-2 h-4 w-4" />
-                            Rename
-                          </ContextMenuItem>
-                          <ContextMenuItem
-                            onSelect={() => {
+                            onToggleLabel={() => {
                               setLabelTargetSessionId(session.id)
                               setLabelModalOpen(true)
                             }}
-                          >
-                            <Tag className="mr-2 h-4 w-4" />
-                            {sessionLabel ? 'Remove Label' : 'Add Label'}
-                          </ContextMenuItem>
-                          {resumeCommand && (
-                            <>
-                              <ContextMenuItem
-                                disabled={isOpeningInNativeClient}
-                                onSelect={() =>
-                                  handleOpenInNativeClient(session)
-                                }
-                              >
-                                <Play className="mr-2 h-4 w-4" />
-                                Open in Native Client
-                              </ContextMenuItem>
-                              <ContextMenuItem
-                                onSelect={() => {
-                                  void copyToClipboard(resumeCommand)
-                                    .then(() =>
-                                      toast.success('Resume command copied')
-                                    )
-                                    .catch(() =>
-                                      toast.error(
-                                        'Failed to copy resume command'
-                                      )
-                                    )
-                                }}
-                              >
-                                <Copy className="mr-2 h-4 w-4" />
-                                Native Resume Command
-                              </ContextMenuItem>
-                            </>
-                          )}
-                          {canReconnectSession(session) && (
-                            <ContextMenuItem
-                              onSelect={() =>
-                                void reconnectNativeCliSession(
-                                  session,
-                                  worktreeId
-                                )
-                              }
-                            >
-                              <RefreshCw className="mr-2 h-4 w-4" />
-                              Reconnect
-                            </ContextMenuItem>
-                          )}
-                          <ContextMenuItem
-                            onSelect={() => {
-                              void copyToClipboard(session.id)
-                                .then(() => toast.success('Session ID copied'))
-                                .catch(() =>
-                                  toast.error('Failed to copy session ID')
-                                )
-                            }}
-                          >
-                            <Copy className="mr-2 h-4 w-4" />
-                            Copy Session ID
-                          </ContextMenuItem>
-                          <ContextMenuSeparator />
-                          <ContextMenuItem
-                            onSelect={() =>
+                            onOpenInNativeClient={() =>
+                              handleOpenInNativeClient(session)
+                            }
+                            onReconnect={() =>
+                              void reconnectNativeCliSession(
+                                session,
+                                worktreeId
+                              )
+                            }
+                            onArchive={() =>
                               removeSessionTab(session, { archive: true })
                             }
-                          >
-                            <Archive className="mr-2 h-4 w-4" />
-                            Archive Session
-                          </ContextMenuItem>
-                          <ContextMenuItem
-                            variant="destructive"
-                            onSelect={() => removeSessionTab(session)}
-                          >
-                            <Trash2 className="mr-2 h-4 w-4" />
-                            Delete Session
-                          </ContextMenuItem>
+                            onDelete={() => removeSessionTab(session)}
+                          />
                         </ContextMenuContent>
                       </ContextMenu>
                     )

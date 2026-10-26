@@ -57,6 +57,11 @@ import {
 } from '@/components/icons/reicon'
 import { Button } from '@/components/ui/button'
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
@@ -109,6 +114,7 @@ import {
   useWorkflowRuns,
 } from '@/services/github'
 import { useGhCliAuth } from '@/services/gh-cli'
+import { providerLabels, useProjectGitProvider } from '@/services/git-provider'
 import { useGitStatus } from '@/services/git-status'
 import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
@@ -989,6 +995,10 @@ export function ProjectCanvasView({
   })
 
   // Open PRs: used to link a worktree's base_branch to a PR number in row badges
+  const { data: gitProviderInfo } = useProjectGitProvider(project?.path)
+  const gitProvider = gitProviderInfo?.provider ?? 'github'
+  const isGitlab = gitProvider === 'gitlab'
+  const forgeLabels = providerLabels(gitProvider)
   const { data: openPRs } = useGitHubPRs(project?.path ?? null, 'open', {
     ownerId: projectId ?? undefined,
   })
@@ -1016,17 +1026,26 @@ export function ProjectCanvasView({
   const { data: mobileAlerts } = useDependabotAlerts(
     project?.path ?? null,
     'open',
-    { enabled: mobileGitHubEnabled, staleTime: BADGE_STALE_TIME }
+    {
+      enabled: mobileGitHubEnabled && !isGitlab,
+      staleTime: BADGE_STALE_TIME,
+    }
   )
   const { data: mobileAdvisories } = useRepositoryAdvisories(
     project?.path ?? null,
     undefined,
-    { enabled: mobileGitHubEnabled, staleTime: BADGE_STALE_TIME }
+    {
+      enabled: mobileGitHubEnabled && !isGitlab,
+      staleTime: BADGE_STALE_TIME,
+    }
   )
   const { data: mobileWorkflowRuns } = useWorkflowRuns(
     project?.path ?? null,
     undefined,
-    { enabled: mobileGitHubEnabled, staleTime: BADGE_STALE_TIME }
+    {
+      enabled: mobileGitHubEnabled && !isGitlab,
+      staleTime: BADGE_STALE_TIME,
+    }
   )
   const mobileIssueCount = mobileIssueResult?.totalCount ?? 0
   const mobilePRCount = mobileOpenPRs?.length ?? 0
@@ -3253,42 +3272,50 @@ export function ProjectCanvasView({
                           }}
                         >
                           <GitPullRequestArrow className="h-4 w-4 text-info" />
-                          {mobilePRCount > 0 ? `${mobilePRCount} PRs` : 'PRs'}
+                          {mobilePRCount > 0
+                            ? `${mobilePRCount} ${forgeLabels.pullRequestsShort}`
+                            : forgeLabels.pullRequestsShort}
                         </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onSelect={() =>
-                            useUIStore
-                              .getState()
-                              .setWorkflowRunsModalOpen(true, project.path)
-                          }
-                        >
-                          {mobileFailedWorkflowCount > 0 ? (
-                            <AlertCircle className="h-4 w-4 text-destructive" />
-                          ) : (
-                            <Activity className="h-4 w-4" />
-                          )}
-                          {mobileFailedWorkflowCount > 0
-                            ? `${mobileFailedWorkflowCount} Failed Workflows`
-                            : mobileWorkflowRunCount > 0
-                              ? `${mobileWorkflowRunCount} Workflows`
-                              : 'Workflows'}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onSelect={() => {
-                            useProjectsStore.getState().selectProject(projectId)
-                            const {
-                              setNewWorktreeModalDefaultTab,
-                              setNewWorktreeModalOpen,
-                            } = useUIStore.getState()
-                            setNewWorktreeModalDefaultTab('security')
-                            setNewWorktreeModalOpen(true)
-                          }}
-                        >
-                          <ShieldAlert className="h-4 w-4 text-warning" />
-                          {mobileSecurityCount > 0
-                            ? `${mobileSecurityCount} Security`
-                            : 'Security'}
-                        </DropdownMenuItem>
+                        {!isGitlab && (
+                          <DropdownMenuItem
+                            onSelect={() =>
+                              useUIStore
+                                .getState()
+                                .setWorkflowRunsModalOpen(true, project.path)
+                            }
+                          >
+                            {mobileFailedWorkflowCount > 0 ? (
+                              <AlertCircle className="h-4 w-4 text-destructive" />
+                            ) : (
+                              <Activity className="h-4 w-4" />
+                            )}
+                            {mobileFailedWorkflowCount > 0
+                              ? `${mobileFailedWorkflowCount} Failed Workflows`
+                              : mobileWorkflowRunCount > 0
+                                ? `${mobileWorkflowRunCount} Workflows`
+                                : 'Workflows'}
+                          </DropdownMenuItem>
+                        )}
+                        {!isGitlab && (
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              useProjectsStore
+                                .getState()
+                                .selectProject(projectId)
+                              const {
+                                setNewWorktreeModalDefaultTab,
+                                setNewWorktreeModalOpen,
+                              } = useUIStore.getState()
+                              setNewWorktreeModalDefaultTab('security')
+                              setNewWorktreeModalOpen(true)
+                            }}
+                          >
+                            <ShieldAlert className="h-4 w-4 text-warning" />
+                            {mobileSecurityCount > 0
+                              ? `${mobileSecurityCount} Security`
+                              : 'Security'}
+                          </DropdownMenuItem>
+                        )}
                       </>
                     )}
 
@@ -3362,7 +3389,7 @@ export function ProjectCanvasView({
                       onSelect={() => openOnGitHub.mutate(projectId)}
                     >
                       <ExternalLink className="h-4 w-4" />
-                      Open on GitHub
+                      Open on {forgeLabels.name}
                     </DropdownMenuItem>
 
                     <DropdownMenuSeparator />
@@ -3595,24 +3622,28 @@ export function ProjectCanvasView({
                           {count} {count === 1 ? 'worktree' : 'worktrees'}
                         </span>
                       </button>
-                      <button
-                        type="button"
-                        aria-label={`Configure ${tab.label}`}
-                        title={`Configure ${tab.label}`}
-                        className={cn(
-                          'mx-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors',
-                          isActive
-                            ? 'text-primary hover:bg-primary/15'
-                            : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                        )}
-                        onClick={() =>
-                          useProjectsStore
-                            .getState()
-                            .openProjectSettings(projectId, settingsPane)
-                        }
-                      >
-                        <Settings className="h-3.5 w-3.5" />
-                      </button>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            aria-label={`Configure ${tab.label}`}
+                            className={cn(
+                              'mx-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors',
+                              isActive
+                                ? 'text-primary hover:bg-primary/15'
+                                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                            )}
+                            onClick={() =>
+                              useProjectsStore
+                                .getState()
+                                .openProjectSettings(projectId, settingsPane)
+                            }
+                          >
+                            <Settings className="h-3.5 w-3.5" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent>{`Configure ${tab.label}`}</TooltipContent>
+                      </Tooltip>
                     </div>
                   )
                 }
@@ -3649,19 +3680,23 @@ export function ProjectCanvasView({
                       </span>
                     </button>
                     {settingsPane && (
-                      <button
-                        type="button"
-                        aria-label={`Configure ${tab.label}`}
-                        title={`Configure ${tab.label}`}
-                        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-transparent text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
-                        onClick={() =>
-                          useProjectsStore
-                            .getState()
-                            .openProjectSettings(projectId, settingsPane)
-                        }
-                      >
-                        <Settings className="h-3.5 w-3.5" />
-                      </button>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            aria-label={`Configure ${tab.label}`}
+                            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-transparent text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+                            onClick={() =>
+                              useProjectsStore
+                                .getState()
+                                .openProjectSettings(projectId, settingsPane)
+                            }
+                          >
+                            <Settings className="h-3.5 w-3.5" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent>{`Configure ${tab.label}`}</TooltipContent>
+                      </Tooltip>
                     )}
                   </div>
                 )

@@ -84,7 +84,8 @@ pub fn attached_scope(
 pub fn automatically_allowed(mode: Option<&str>, params: &Value) -> bool {
     match mode {
         Some("yolo") => true,
-        Some("build") => matches!(
+        // A missing mode implements as Build. Explicit Plan stays read-only.
+        None | Some("build") => matches!(
             params.pointer("/toolCall/kind").and_then(Value::as_str),
             Some("read" | "search" | "edit")
         ),
@@ -143,7 +144,7 @@ pub fn decide(mode: Option<&str>, params: &Value) -> Result<Value, String> {
         option_id(&options, "allow_once").or_else(|| option_id(&options, "allow_always"))
     } else if automatically_allowed(mode, params) {
         option_id(&options, "allow_once")
-    } else if matches!(mode, None | Some("plan")) {
+    } else if mode == Some("plan") {
         option_id(&options, "reject_once").or_else(|| option_id(&options, "reject_always"))
     } else {
         CONTEXT.with(|context| {
@@ -397,6 +398,18 @@ mod tests {
             "allow"
         )
         .is_err());
+    }
+    #[test]
+    fn missing_mode_auto_accepts_edits_and_plan_rejects_them() {
+        let edit = json!({"toolCall":{"kind":"edit"},"options":[
+            {"kind":"allow_once","optionId":"edit"},
+            {"kind":"reject_once","optionId":"deny"}
+        ]});
+        assert_eq!(decide(None, &edit).unwrap()["outcome"]["optionId"], "edit");
+        assert_eq!(
+            decide(Some("plan"), &edit).unwrap()["outcome"]["optionId"],
+            "deny"
+        );
     }
     #[test]
     fn edit_only_and_full_access_select_only_native_offered_options() {

@@ -107,6 +107,13 @@ export function shouldLetEditableHandleShortcut(
   )
 }
 
+/** Shift+Tab toggles Plan only from the composer, not from the rest of the app. */
+export function isChatComposerTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof Element && target.closest('[data-chat-input]') !== null
+  )
+}
+
 export function shouldLetChatInputHandleAction(
   action: KeybindingAction,
   target: EventTarget | null,
@@ -1264,6 +1271,15 @@ export function useMainWindowEventListeners() {
             },
           })
         )
+        return
+      }
+
+      // Plan toggling is a composer control. Elsewhere Shift+Tab keeps its
+      // normal focus behavior.
+      if (
+        matchedAction === 'cycle_execution_mode' &&
+        !isChatComposerTarget(e.target)
+      ) {
         return
       }
 

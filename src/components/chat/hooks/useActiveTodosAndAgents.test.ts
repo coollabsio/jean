@@ -1,6 +1,8 @@
 import { act, renderHook } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import {
+  codexAgentCodename,
+  codexSubagentDetail,
   extractClaudeAgents,
   extractCodexAgents,
   formatSubagentModel,
@@ -111,11 +113,55 @@ describe('extractCodexAgents', () => {
     expect(extractCodexAgents(tools, true)).toMatchObject([
       {
         id: 'agent-a',
-        prompt: '/root/reviewer',
+        prompt: 'reviewer',
+        label: undefined,
         status: 'interrupted',
         message: undefined,
       },
     ])
+  })
+
+  it('names a Codex agent from its path and keeps the task and model', () => {
+    expect(codexAgentCodename('/root/reviewer/helper')).toBe(
+      'reviewer / helper'
+    )
+    expect(
+      codexSubagentDetail({
+        type: 'sub_agent_activity',
+        prompt: '/root/demo_one',
+        agent_path: '/root/demo_one',
+        model: 'gpt-5.4',
+      })
+    ).toBe('demo_one · gpt-5.4')
+
+    const [agent] = extractCodexAgents(
+      [
+        toolCall('SpawnAgent', {
+          prompt: 'Investigate the auth bug',
+          model: 'gpt-5.4',
+          receiver_thread_ids: ['agent-a'],
+          agents_states: { 'agent-a': { status: 'running' } },
+        }),
+        toolCall('CloseAgent', {
+          type: 'sub_agent_activity',
+          prompt: '/root/reviewer',
+          agent_path: '/root/reviewer',
+          model: 'gpt-5.4',
+          receiver_thread_ids: ['agent-a'],
+          agents_states: { 'agent-a': { status: 'running' } },
+        }),
+      ],
+      true
+    )
+
+    expect(agent).toMatchObject({
+      id: 'agent-a',
+      label: 'reviewer',
+      prompt: 'Investigate the auth bug',
+      fullPrompt: 'Investigate the auth bug',
+      model: 'gpt-5.4',
+      status: 'in_progress',
+    })
   })
 
   it('completes unresolved agents when the parent turn finishes normally', () => {
@@ -153,13 +199,14 @@ describe('extractCodexAgents', () => {
 })
 
 describe('useActiveTodosAndAgents', () => {
-  it('clears agents from the finished turn when a new prompt starts', () => {
+  it('keeps finished agents visible and not loading when a new prompt starts', () => {
     const lastAssistantMessage = {
       id: 'assistant-1',
       role: 'assistant',
       content: 'Finished',
       tool_calls: [
         toolCall('SpawnAgent', {
+          id: 'spawn-a',
           receiver_thread_ids: ['agent-a'],
           prompt: 'Investigate the bug',
           agents_states: {
@@ -170,21 +217,168 @@ describe('useActiveTodosAndAgents', () => {
     } as ChatMessage
 
     const { result, rerender } = renderHook(
-      ({ isSending }) =>
+      ({ isSending, currentToolCalls }) =>
         useActiveTodosAndAgents({
           activeSessionId: 'session-1',
           isSending,
-          currentToolCalls: [],
+          currentToolCalls,
           lastAssistantMessage,
         }),
-      { initialProps: { isSending: false } }
+      {
+        initialProps: {
+          isSending: false,
+          currentToolCalls: [] as ChatMessage['tool_calls'],
+        },
+      }
     )
 
     expect(result.current.activeAgents[0]?.status).toBe('completed')
 
-    rerender({ isSending: true })
+    rerender({ isSending: true, currentToolCalls: [] })
 
-    expect(result.current.activeAgents).toEqual([])
+    expect(result.current.activeAgents).toMatchObject([
+      { id: 'agent-a', prompt: 'Investigate the bug', status: 'completed' },
+    ])
+
+    // Replayed tool calls from the finished turn must not start spinning again.
+    rerender({
+      isSending: true,
+      currentToolCalls: lastAssistantMessage.tool_calls,
+    })
+    expect(result.current.activeAgents[0]?.status).toBe('completed')
+
+    rerender({
+      isSending: true,
+      currentToolCalls: [
+        toolCall('SpawnAgent', {
+          id: 'spawn-b',
+          receiver_thread_ids: ['agent-b'],
+          prompt: '/root/helper',
+          agents_states: { 'agent-b': { status: 'running' } },
+        }),
+      ],
+    })
+    expect(result.current.activeAgents).toMatchObject([
+      { id: 'agent-a', status: 'completed' },
+      { id: 'agent-b', prompt: 'helper', status: 'in_progress' },
+    ])
+  })
+
+  it('keeps the task name when a later event only has the agent path', () => {
+    const first = {
+      id: 'assistant-1',
+      role: 'assistant',
+      content: '',
+      tool_calls: [
+        toolCall('SpawnAgent', {
+          id: 'spawn-a',
+          receiver_thread_ids: ['agent-a'],
+          prompt: 'Investigate the auth bug',
+          model: 'gpt-5.4',
+          agents_states: { 'agent-a': { status: 'completed' } },
+        }),
+      ],
+    } as ChatMessage
+
+    const { result } = renderHook(() =>
+      useActiveTodosAndAgents({
+        activeSessionId: 'session-1',
+        isSending: true,
+        currentToolCalls: [
+          toolCall('SendInput', {
+            id: 'send-a',
+            type: 'sub_agent_activity',
+            prompt: '/root/reviewer',
+            agent_path: '/root/reviewer',
+            receiver_thread_ids: ['agent-a'],
+            agents_states: { 'agent-a': { status: 'running' } },
+          }),
+        ],
+        lastAssistantMessage: first,
+        messages: [first],
+      })
+    )
+
+    expect(result.current.activeAgents).toMatchObject([
+      {
+        id: 'agent-a',
+        label: 'reviewer',
+        prompt: 'Investigate the auth bug',
+        model: 'gpt-5.4',
+        status: 'in_progress',
+      },
+    ])
+  })
+
+  it('keeps cancelled agents interrupted while the next prompt is sending', () => {
+    const cancelledTurn = {
+      id: 'assistant-1',
+      role: 'assistant',
+      content: 'Partial',
+      cancelled: true,
+      tool_calls: [
+        toolCall('SpawnAgent', {
+          id: 'spawn-a',
+          receiver_thread_ids: ['agent-a'],
+          prompt: '/root/reviewer',
+          agents_states: { 'agent-a': { status: 'running' } },
+        }),
+      ],
+    } as ChatMessage
+
+    const { result } = renderHook(() =>
+      useActiveTodosAndAgents({
+        activeSessionId: 'session-1',
+        isSending: true,
+        currentToolCalls: cancelledTurn.tool_calls ?? [],
+        lastAssistantMessage: cancelledTurn,
+        messages: [cancelledTurn],
+      })
+    )
+
+    expect(result.current.activeAgents).toMatchObject([
+      {
+        id: 'agent-a',
+        prompt: 'reviewer',
+        status: 'interrupted',
+        message: 'Interrupted before completion',
+      },
+    ])
+  })
+
+  it('keeps earlier subagents visible after a later turn', () => {
+    const first = {
+      id: 'assistant-1',
+      role: 'assistant',
+      content: '',
+      tool_calls: [
+        toolCall('Agent', {
+          id: 'task-1',
+          description: 'Explore auth',
+          subagent_type: 'Explore',
+        }),
+      ],
+    } as ChatMessage
+    const second = {
+      id: 'assistant-2',
+      role: 'assistant',
+      content: 'Done',
+      tool_calls: [] as ToolCall[],
+    } as ChatMessage
+
+    const { result } = renderHook(() =>
+      useActiveTodosAndAgents({
+        activeSessionId: 'session-1',
+        isSending: false,
+        currentToolCalls: [],
+        lastAssistantMessage: second,
+        messages: [first, second],
+      })
+    )
+
+    expect(result.current.activeAgents).toMatchObject([
+      { id: 'task-1', prompt: 'Explore auth', status: 'completed' },
+    ])
   })
 
   it('keeps the panel dismissed when the finished turn gets a new message id', () => {

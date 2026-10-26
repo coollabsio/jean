@@ -19,6 +19,10 @@ export interface GitHubIssue {
   labels: GitHubLabel[]
   created_at: string
   author: GitHubAuthor
+  /** `owner/name` when the issue was listed from a linked GitHub remote. */
+  repo?: string
+  /** Git remote that points at `repo`. */
+  remote?: string
 }
 
 export interface GitHubIssueListResult {
@@ -53,6 +57,8 @@ export interface IssueContext {
   title: string
   body?: string
   comments: IssueComment[]
+  /** `owner/name` of the repository this issue belongs to. */
+  repo?: string
 }
 
 /**
@@ -81,6 +87,10 @@ export interface GitHubPullRequest {
   created_at: string // From GitHub API (snake_case)
   author: GitHubAuthor
   labels: GitHubLabel[]
+  /** `owner/name` when the pull request was listed from a linked GitHub remote. */
+  repo?: string
+  /** Git remote that points at `repo`. */
+  remote?: string
 }
 
 export interface GitHubReview {
@@ -123,6 +133,8 @@ export interface PullRequestContext {
   comments: IssueComment[]
   reviews: GitHubReview[]
   diff?: string
+  /** `owner/name` of the repository this pull request belongs to. */
+  repo?: string
 }
 
 /**

@@ -4,7 +4,7 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
 
-use super::git::get_repo_identifier;
+use super::git::{get_github_remotes, get_repo_identifier, GitHubRemote};
 use crate::gh_cli::config::resolve_gh_binary;
 use crate::projects::provider::{resolve_git_provider, GitProvider};
 
@@ -50,6 +50,12 @@ pub struct GitHubIssue {
     pub labels: Vec<GitHubLabel>,
     pub created_at: String,
     pub author: GitHubAuthor,
+    /// `owner/name` of the GitHub repository this issue came from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo: Option<String>,
+    /// Git remote that points at `repo` (`origin`, `upstream`, …).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote: Option<String>,
 }
 
 /// GitHub comment
@@ -168,6 +174,9 @@ pub struct IssueContext {
     pub title: String,
     pub body: Option<String>,
     pub comments: Vec<GitHubComment>,
+    /// `owner/name` when the issue is not the gh-selected repository.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo: Option<String>,
 }
 
 /// Detect gh errors caused by a directory that cannot be resolved to a GitHub
@@ -197,43 +206,185 @@ pub(super) fn is_gh_cli_auth_error(stderr: &str) -> bool {
         || lower.contains("bad credentials")
 }
 
+/// A GitHub repository reached through one of the project's git remotes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkedGitHubRepo {
+    pub remote: String,
+    /// `owner/name`
+    pub repo: String,
+}
+
+/// `owner/name` from a GitHub remote URL.
+///
+/// Accepts HTTPS and SSH forms. `get_github_remotes` normalizes SSH to HTTPS
+/// first; parsing SSH here keeps a raw remote list from dropping the origin.
+pub fn github_repo_slug(url: &str) -> Option<String> {
+    let url = url.trim().trim_end_matches('/').trim_end_matches(".git");
+    let path = url
+        .strip_prefix("https://github.com/")
+        .or_else(|| url.strip_prefix("http://github.com/"))
+        .or_else(|| url.strip_prefix("ssh://git@github.com/"))
+        .or_else(|| url.strip_prefix("git@github.com:"))?;
+    let (owner, name) = path.split_once('/')?;
+    if owner.is_empty() || name.is_empty() || name.contains('/') {
+        return None;
+    }
+    Some(format!("{owner}/{name}"))
+}
+
+/// GitHub remotes, origin first, one entry per `owner/name`.
+pub fn linked_github_repos(remotes: &[GitHubRemote]) -> Vec<LinkedGitHubRepo> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut linked = Vec::new();
+    for remote in remotes {
+        let Some(repo) = github_repo_slug(&remote.url) else {
+            continue;
+        };
+        if seen.insert(repo.clone()) {
+            linked.push(LinkedGitHubRepo {
+                remote: remote.name.clone(),
+                repo,
+            });
+        }
+    }
+    linked
+}
+
+fn linked_github_repos_at(project_path: &str) -> Vec<LinkedGitHubRepo> {
+    match get_github_remotes(project_path) {
+        Ok(remotes) => linked_github_repos(&remotes),
+        Err(error) => {
+            log::debug!("Could not list GitHub remotes for {project_path}: {error}");
+            Vec::new()
+        }
+    }
+}
+
+/// Remote name whose URL is `owner/name`, if one is configured.
+pub fn remote_name_for_github_repo(project_path: &str, repo: &str) -> Option<String> {
+    let repo = repo.trim();
+    if repo.is_empty() {
+        return None;
+    }
+    linked_github_repos_at(project_path)
+        .into_iter()
+        .find(|linked| linked.repo == repo)
+        .map(|linked| linked.remote)
+}
+
+/// Context-file key for a source repository, falling back to the origin remote.
+pub fn context_repo_key(project_path: &str, repo: Option<&str>) -> Result<String, String> {
+    if let Some(slug) = repo.map(str::trim).filter(|slug| !slug.is_empty()) {
+        if let Some((owner, name)) = slug.split_once('/') {
+            if !owner.is_empty() && !name.is_empty() {
+                return Ok(format!("{owner}-{name}"));
+            }
+        }
+    }
+    Ok(get_repo_identifier(project_path)?.to_key())
+}
+
+/// Identity that keeps issue #12 on two repositories distinct.
+pub fn github_item_key(repo: Option<&str>, number: u32) -> String {
+    match repo.map(str::trim).filter(|repo| !repo.is_empty()) {
+        Some(repo) => format!("{repo}#{number}"),
+        None => format!("#{number}"),
+    }
+}
+
+fn apply_repo_flag(command: &mut std::process::Command, repo: Option<&str>) {
+    if let Some(repo) = repo.map(str::trim).filter(|repo| !repo.is_empty()) {
+        command.arg("--repo").arg(repo);
+    }
+}
+
+fn stamp_issue(mut issue: GitHubIssue, source: Option<&LinkedGitHubRepo>) -> GitHubIssue {
+    if let Some(source) = source {
+        issue.repo = Some(source.repo.clone());
+        issue.remote = Some(source.remote.clone());
+    }
+    issue
+}
+
+fn stamp_pr(mut pr: GitHubPullRequest, source: Option<&LinkedGitHubRepo>) -> GitHubPullRequest {
+    if let Some(source) = source {
+        pr.repo = Some(source.repo.clone());
+        pr.remote = Some(source.remote.clone());
+    }
+    pr
+}
+
+fn is_missing_github_item(stderr: &str) -> bool {
+    let lower = stderr.to_lowercase();
+    lower.contains("not found") || lower.contains("could not resolve")
+}
+
 /// List GitHub issues for a repository
 ///
 /// Uses `gh issue list` to fetch issues from the repository.
 /// - state: "open", "closed", or "all" (default: "open")
 /// - Returns up to 100 issues sorted by creation date (newest first)
 /// - Includes total_count from GitHub search API for accurate badge display
-pub async fn list_github_issues(
-    app: AppHandle,
-    project_path: String,
-    state: Option<String>,
-) -> Result<GitHubIssueListResult, String> {
-    log::trace!("Listing GitHub issues for {project_path} with state: {state:?}");
-
-    if is_gitlab_project(&project_path) {
-        return super::gitlab_issues::list_issues(&app, &project_path, state).await;
+fn collect_linked<T>(
+    project_path: &str,
+    mut query: impl FnMut(Option<&LinkedGitHubRepo>) -> Result<T, String>,
+) -> Result<Vec<T>, String> {
+    let repos = linked_github_repos_at(project_path);
+    if repos.is_empty() {
+        return Ok(vec![query(None)?]);
     }
-    let gh = resolve_gh_binary(&app);
-    let state_arg = state.unwrap_or_else(|| "open".to_string());
 
-    // Run gh issue list
-    let output = gh_command(&gh, &project_path)
-        .args([
-            "issue",
-            "list",
-            "--json",
-            "number,title,body,state,labels,createdAt,author,url",
-            "-L",
-            "1000",
-            "--state",
-            &state_arg,
-        ])
+    let mut values = Vec::new();
+    let mut errors = Vec::new();
+    for repo in &repos {
+        match query(Some(repo)) {
+            Ok(value) => values.push(value),
+            Err(error) => {
+                if is_gh_cli_auth_error(&error) {
+                    return Err(error);
+                }
+                log::warn!(
+                    "Skipping GitHub remote {} ({}): {error}",
+                    repo.remote,
+                    repo.repo
+                );
+                errors.push(error);
+            }
+        }
+    }
+    if values.is_empty() {
+        return Err(errors
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| "GitHub query failed".to_string()));
+    }
+    Ok(values)
+}
+
+fn list_github_issues_once(
+    gh: &std::path::Path,
+    project_path: &str,
+    state_arg: &str,
+    source: Option<&LinkedGitHubRepo>,
+) -> Result<GitHubIssueListResult, String> {
+    let mut command = gh_command(gh, project_path);
+    command.args([
+        "issue",
+        "list",
+        "--json",
+        "number,title,body,state,labels,createdAt,author,url",
+        "-L",
+        "1000",
+        "--state",
+        state_arg,
+    ]);
+    apply_repo_flag(&mut command, source.map(|source| source.repo.as_str()));
+    let output = command
         .output()
         .map_err(|e| format!("Failed to run gh issue list: {e}"))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        // Handle specific errors
         if is_gh_cli_auth_error(&stderr) {
             return Err("GitHub CLI not authenticated. Run 'gh auth login' first.".to_string());
         }
@@ -247,11 +398,47 @@ pub async fn list_github_issues(
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let issues = parse_github_issues_response(&stdout)?;
+    let issues = parse_github_issues_response(&stdout)?
+        .into_iter()
+        .map(|issue| stamp_issue(issue, source))
+        .collect::<Vec<_>>();
 
-    // Get accurate total count from GitHub search API
-    let total_count =
-        get_issue_total_count(&gh, &project_path, &state_arg).unwrap_or(issues.len() as u32);
+    let total_count = get_issue_total_count(
+        gh,
+        project_path,
+        state_arg,
+        source.map(|source| source.repo.as_str()),
+    )
+    .unwrap_or(issues.len() as u32);
+
+    Ok(GitHubIssueListResult {
+        issues,
+        total_count,
+    })
+}
+
+pub async fn list_github_issues(
+    app: AppHandle,
+    project_path: String,
+    state: Option<String>,
+) -> Result<GitHubIssueListResult, String> {
+    log::trace!("Listing GitHub issues for {project_path} with state: {state:?}");
+
+    if is_gitlab_project(&project_path) {
+        return super::gitlab_issues::list_issues(&app, &project_path, state).await;
+    }
+    let gh = resolve_gh_binary(&app);
+    let state_arg = state.unwrap_or_else(|| "open".to_string());
+    let results = collect_linked(&project_path, |source| {
+        list_github_issues_once(&gh, &project_path, &state_arg, source)
+    })?;
+
+    let mut issues = Vec::new();
+    let mut total_count = 0u32;
+    for result in results {
+        total_count = total_count.saturating_add(result.total_count);
+        issues.extend(result.issues);
+    }
 
     log::trace!("Found {} issues (total: {total_count})", issues.len());
     Ok(GitHubIssueListResult {
@@ -317,17 +504,25 @@ pub async fn list_open_issue_labels(
 ///
 /// Uses `gh api search/issues` to get the real total count without fetching all issues.
 /// Falls back to None on any error so callers can use issues.len() instead.
-fn get_issue_total_count(gh: &Path, project_path: &str, state: &str) -> Option<u32> {
-    let repo_id = get_repo_identifier(project_path).ok()?;
+fn get_issue_total_count(
+    gh: &Path,
+    project_path: &str,
+    state: &str,
+    repo: Option<&str>,
+) -> Option<u32> {
+    let repo_slug = match repo.map(str::trim).filter(|repo| !repo.is_empty()) {
+        Some(repo) => repo.to_string(),
+        None => {
+            let repo_id = get_repo_identifier(project_path).ok()?;
+            format!("{}/{}", repo_id.owner, repo_id.repo)
+        }
+    };
     let state_qualifier = match state {
         "closed" => "+state:closed",
         "all" => "",
         _ => "+state:open",
     };
-    let query = format!(
-        "search/issues?q=repo:{}/{}+is:issue{}&per_page=1",
-        repo_id.owner, repo_id.repo, state_qualifier
-    );
+    let query = format!("search/issues?q=repo:{repo_slug}+is:issue{state_qualifier}&per_page=1");
 
     let output = gh_command(gh, project_path)
         .args(["api", &query])
@@ -347,30 +542,27 @@ fn get_issue_total_count(gh: &Path, project_path: &str, state: &str) -> Option<u
 ///
 /// Uses `gh issue list --search` to query GitHub's search API.
 /// This finds issues beyond the default -L 100 limit.
-pub async fn search_github_issues(
-    app: AppHandle,
-    project_path: String,
-    query: String,
+fn search_github_issues_once(
+    gh: &std::path::Path,
+    project_path: &str,
+    query: &str,
+    source: Option<&LinkedGitHubRepo>,
 ) -> Result<Vec<GitHubIssue>, String> {
-    log::trace!("Searching GitHub issues for {project_path} with query: {query}");
-
-    if is_gitlab_project(&project_path) {
-        return super::gitlab_issues::search_issues(&app, &project_path, query).await;
-    }
-    let gh = resolve_gh_binary(&app);
-    let output = gh_command(&gh, &project_path)
-        .args([
-            "issue",
-            "list",
-            "--search",
-            &query,
-            "--json",
-            "number,title,body,state,labels,createdAt,author,url",
-            "-L",
-            "100",
-            "--state",
-            "all",
-        ])
+    let mut command = gh_command(gh, project_path);
+    command.args([
+        "issue",
+        "list",
+        "--search",
+        query,
+        "--json",
+        "number,title,body,state,labels,createdAt,author,url",
+        "-L",
+        "100",
+        "--state",
+        "all",
+    ]);
+    apply_repo_flag(&mut command, source.map(|source| source.repo.as_str()));
+    let output = command
         .output()
         .map_err(|e| format!("Failed to run gh issue list --search: {e}"))?;
 
@@ -389,7 +581,27 @@ pub async fn search_github_issues(
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let issues = parse_github_issues_response(&stdout)?;
+    Ok(parse_github_issues_response(&stdout)?
+        .into_iter()
+        .map(|issue| stamp_issue(issue, source))
+        .collect())
+}
+
+pub async fn search_github_issues(
+    app: AppHandle,
+    project_path: String,
+    query: String,
+) -> Result<Vec<GitHubIssue>, String> {
+    log::trace!("Searching GitHub issues for {project_path} with query: {query}");
+
+    if is_gitlab_project(&project_path) {
+        return super::gitlab_issues::search_issues(&app, &project_path, query).await;
+    }
+    let gh = resolve_gh_binary(&app);
+    let batches = collect_linked(&project_path, |source| {
+        search_github_issues_once(&gh, &project_path, &query, source)
+    })?;
+    let issues: Vec<GitHubIssue> = batches.into_iter().flatten().collect();
 
     log::trace!("Search found {} issues", issues.len());
     Ok(issues)
@@ -399,6 +611,40 @@ pub async fn search_github_issues(
 ///
 /// Uses `gh issue view` to fetch a single issue by exact number.
 /// This finds any issue regardless of age or state.
+fn view_github_issue_once(
+    gh: &std::path::Path,
+    project_path: &str,
+    issue_number: u32,
+    source: Option<&LinkedGitHubRepo>,
+) -> Result<GitHubIssue, String> {
+    let mut command = gh_command(gh, project_path);
+    command.args([
+        "issue",
+        "view",
+        &issue_number.to_string(),
+        "--json",
+        "number,title,body,state,labels,createdAt,author,url",
+    ]);
+    apply_repo_flag(&mut command, source.map(|source| source.repo.as_str()));
+    let output = command
+        .output()
+        .map_err(|e| format!("Failed to run gh issue view: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if is_gh_cli_auth_error(&stderr) {
+            return Err("GitHub CLI not authenticated. Run 'gh auth login' first.".to_string());
+        }
+        if is_missing_github_item(&stderr) {
+            return Err(format!("Issue #{issue_number} not found"));
+        }
+        return Err(format!("gh issue view failed: {stderr}"));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(stamp_issue(parse_github_issue_response(&stdout)?, source))
+}
+
 pub async fn get_github_issue_by_number(
     app: AppHandle,
     project_path: String,
@@ -409,43 +655,65 @@ pub async fn get_github_issue_by_number(
     if is_gitlab_project(&project_path) {
         return super::gitlab_issues::get_issue_by_number(&app, &project_path, issue_number).await;
     }
-    let gh = resolve_gh_binary(&app);
-    let output = gh_command(&gh, &project_path)
-        .args([
-            "issue",
-            "view",
-            &issue_number.to_string(),
-            "--json",
-            "number,title,body,state,labels,createdAt,author,url",
-        ])
-        .output()
-        .map_err(|e| format!("Failed to run gh issue view: {e}"))?;
+    let issues = list_github_issues_by_number(app, project_path, issue_number).await?;
+    issues
+        .into_iter()
+        .next()
+        .ok_or_else(|| format!("Issue #{issue_number} not found"))
+}
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if is_gh_cli_auth_error(&stderr) {
-            return Err("GitHub CLI not authenticated. Run 'gh auth login' first.".to_string());
-        }
-        if stderr.contains("Could not resolve") || stderr.contains("not found") {
-            return Err(format!("Issue #{issue_number} not found"));
-        }
-        return Err(format!("gh issue view failed: {stderr}"));
+/// Exact-number lookup across every linked GitHub repository.
+///
+/// The same number in two repositories is returned twice, each stamped with its source.
+pub async fn list_github_issues_by_number(
+    app: AppHandle,
+    project_path: String,
+    issue_number: u32,
+) -> Result<Vec<GitHubIssue>, String> {
+    if is_gitlab_project(&project_path) {
+        return match super::gitlab_issues::get_issue_by_number(&app, &project_path, issue_number)
+            .await
+        {
+            Ok(issue) => Ok(vec![issue]),
+            Err(error) if error.contains("not found") => Ok(Vec::new()),
+            Err(error) => Err(error),
+        };
     }
+    let gh = resolve_gh_binary(&app);
+    let repos = linked_github_repos_at(&project_path);
+    let sources: Vec<Option<LinkedGitHubRepo>> = if repos.is_empty() {
+        vec![None]
+    } else {
+        repos.into_iter().map(Some).collect()
+    };
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let issue = parse_github_issue_response(&stdout)?;
-
-    log::trace!("Got issue #{}: {}", issue.number, issue.title);
-    Ok(issue)
+    let mut issues = Vec::new();
+    let mut errors = Vec::new();
+    for source in &sources {
+        match view_github_issue_once(&gh, &project_path, issue_number, source.as_ref()) {
+            Ok(issue) => issues.push(issue),
+            Err(error) if is_missing_github_item(&error) || error.contains("not found") => {}
+            Err(error) if is_gh_cli_auth_error(&error) => return Err(error),
+            Err(error) => errors.push(error),
+        }
+    }
+    if issues.is_empty() {
+        if let Some(error) = errors.into_iter().next() {
+            return Err(error);
+        }
+    }
+    Ok(issues)
 }
 
 /// Get detailed information about a specific GitHub issue
 ///
 /// Uses `gh issue view` to fetch the issue with comments.
+/// `repo` is `owner/name` when the issue lives on a remote other than the gh default.
 pub async fn get_github_issue(
     app: AppHandle,
     project_path: String,
     issue_number: u32,
+    repo: Option<String>,
 ) -> Result<GitHubIssueDetail, String> {
     log::trace!("Getting GitHub issue #{issue_number} for {project_path}");
 
@@ -454,14 +722,16 @@ pub async fn get_github_issue(
     }
     let gh = resolve_gh_binary(&app);
     // Run gh issue view
-    let output = gh_command(&gh, &project_path)
-        .args([
-            "issue",
-            "view",
-            &issue_number.to_string(),
-            "--json",
-            "number,title,body,state,labels,createdAt,author,url,comments",
-        ])
+    let mut command = gh_command(&gh, &project_path);
+    command.args([
+        "issue",
+        "view",
+        &issue_number.to_string(),
+        "--json",
+        "number,title,body,state,labels,createdAt,author,url,comments",
+    ]);
+    apply_repo_flag(&mut command, repo.as_deref());
+    let output = command
         .output()
         .map_err(|e| format!("Failed to run gh issue view: {e}"))?;
 
@@ -1477,7 +1747,7 @@ pub async fn load_issue_context(
     log::trace!("Loading issue #{issue_number} context for session {session_id}");
 
     // Fetch issue data from GitHub
-    let issue = get_github_issue(app.clone(), project_path.clone(), issue_number).await?;
+    let issue = get_github_issue(app.clone(), project_path.clone(), issue_number, None).await?;
 
     // Create issue context
     let ctx = IssueContext {
@@ -1485,6 +1755,7 @@ pub async fn load_issue_context(
         title: issue.title,
         body: issue.body,
         comments: issue.comments,
+        repo: None,
     };
 
     attach_issue_context_for_session(&app, &session_id, &project_path, &ctx)
@@ -1679,6 +1950,12 @@ pub struct GitHubPullRequest {
     pub author: GitHubAuthor,
     #[serde(default)]
     pub labels: Vec<GitHubLabel>,
+    /// `owner/name` of the GitHub repository this pull request came from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo: Option<String>,
+    /// Git remote that points at `repo` (`origin`, `upstream`, …).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote: Option<String>,
 }
 
 /// GitHub review
@@ -1852,6 +2129,9 @@ pub struct PullRequestContext {
     pub comments: Vec<GitHubComment>,
     pub reviews: Vec<GitHubReview>,
     pub diff: Option<String>,
+    /// `owner/name` when the pull request is not the gh-selected repository.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo: Option<String>,
 }
 
 /// Loaded PR context info returned to frontend
@@ -1871,31 +2151,37 @@ pub struct LoadedPullRequestContext {
 /// Uses `gh pr list` to fetch PRs from the repository.
 /// - state: "open", "closed", "merged", or "all" (default: "open")
 /// - Returns up to 100 PRs sorted by creation date (newest first)
-pub async fn list_github_prs(
-    app: AppHandle,
-    project_path: String,
-    state: Option<String>,
+const PR_LIST_JSON: &str =
+    "number,title,body,state,headRefName,baseRefName,isDraft,createdAt,author,labels";
+
+fn parse_pr_list(
+    stdout: &str,
+    source: Option<&LinkedGitHubRepo>,
 ) -> Result<Vec<GitHubPullRequest>, String> {
-    log::trace!("Listing GitHub PRs for {project_path} with state: {state:?}");
+    let prs: Vec<GitHubPullRequest> =
+        serde_json::from_str(stdout).map_err(|e| format!("Failed to parse gh response: {e}"))?;
+    Ok(prs.into_iter().map(|pr| stamp_pr(pr, source)).collect())
+}
 
-    if is_gitlab_project(&project_path) {
-        return super::gitlab_issues::list_mrs(&app, &project_path, state).await;
-    }
-    let gh = resolve_gh_binary(&app);
-    let state_arg = state.unwrap_or_else(|| "open".to_string());
-
-    // Run gh pr list
-    let output = gh_command(&gh, &project_path)
-        .args([
-            "pr",
-            "list",
-            "--json",
-            "number,title,body,state,headRefName,baseRefName,isDraft,createdAt,author,labels",
-            "-L",
-            "1000",
-            "--state",
-            &state_arg,
-        ])
+fn list_github_prs_once(
+    gh: &std::path::Path,
+    project_path: &str,
+    state_arg: &str,
+    source: Option<&LinkedGitHubRepo>,
+) -> Result<Vec<GitHubPullRequest>, String> {
+    let mut command = gh_command(gh, project_path);
+    command.args([
+        "pr",
+        "list",
+        "--json",
+        PR_LIST_JSON,
+        "-L",
+        "1000",
+        "--state",
+        state_arg,
+    ]);
+    apply_repo_flag(&mut command, source.map(|source| source.repo.as_str()));
+    let output = command
         .output()
         .map_err(|e| format!("Failed to run gh pr list: {e}"))?;
 
@@ -1914,8 +2200,25 @@ pub async fn list_github_prs(
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let prs: Vec<GitHubPullRequest> =
-        serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse gh response: {e}"))?;
+    parse_pr_list(&stdout, source)
+}
+
+pub async fn list_github_prs(
+    app: AppHandle,
+    project_path: String,
+    state: Option<String>,
+) -> Result<Vec<GitHubPullRequest>, String> {
+    log::trace!("Listing GitHub PRs for {project_path} with state: {state:?}");
+
+    if is_gitlab_project(&project_path) {
+        return super::gitlab_issues::list_mrs(&app, &project_path, state).await;
+    }
+    let gh = resolve_gh_binary(&app);
+    let state_arg = state.unwrap_or_else(|| "open".to_string());
+    let batches = collect_linked(&project_path, |source| {
+        list_github_prs_once(&gh, &project_path, &state_arg, source)
+    })?;
+    let prs: Vec<GitHubPullRequest> = batches.into_iter().flatten().collect();
 
     log::trace!("Found {} PRs", prs.len());
     Ok(prs)
@@ -1925,30 +2228,27 @@ pub async fn list_github_prs(
 ///
 /// Uses `gh pr list --search` to query GitHub's search API.
 /// This finds PRs beyond the default -L 100 limit.
-pub async fn search_github_prs(
-    app: AppHandle,
-    project_path: String,
-    query: String,
+fn search_github_prs_once(
+    gh: &std::path::Path,
+    project_path: &str,
+    query: &str,
+    source: Option<&LinkedGitHubRepo>,
 ) -> Result<Vec<GitHubPullRequest>, String> {
-    log::trace!("Searching GitHub PRs for {project_path} with query: {query}");
-
-    if is_gitlab_project(&project_path) {
-        return super::gitlab_issues::search_mrs(&app, &project_path, query).await;
-    }
-    let gh = resolve_gh_binary(&app);
-    let output = gh_command(&gh, &project_path)
-        .args([
-            "pr",
-            "list",
-            "--search",
-            &query,
-            "--json",
-            "number,title,body,state,headRefName,baseRefName,isDraft,createdAt,author,labels",
-            "-L",
-            "100",
-            "--state",
-            "all",
-        ])
+    let mut command = gh_command(gh, project_path);
+    command.args([
+        "pr",
+        "list",
+        "--search",
+        query,
+        "--json",
+        PR_LIST_JSON,
+        "-L",
+        "100",
+        "--state",
+        "all",
+    ]);
+    apply_repo_flag(&mut command, source.map(|source| source.repo.as_str()));
+    let output = command
         .output()
         .map_err(|e| format!("Failed to run gh pr list --search: {e}"))?;
 
@@ -1967,8 +2267,24 @@ pub async fn search_github_prs(
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let prs: Vec<GitHubPullRequest> =
-        serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse gh response: {e}"))?;
+    parse_pr_list(&stdout, source)
+}
+
+pub async fn search_github_prs(
+    app: AppHandle,
+    project_path: String,
+    query: String,
+) -> Result<Vec<GitHubPullRequest>, String> {
+    log::trace!("Searching GitHub PRs for {project_path} with query: {query}");
+
+    if is_gitlab_project(&project_path) {
+        return super::gitlab_issues::search_mrs(&app, &project_path, query).await;
+    }
+    let gh = resolve_gh_binary(&app);
+    let batches = collect_linked(&project_path, |source| {
+        search_github_prs_once(&gh, &project_path, &query, source)
+    })?;
+    let prs: Vec<GitHubPullRequest> = batches.into_iter().flatten().collect();
 
     log::trace!("Search found {} PRs", prs.len());
     Ok(prs)
@@ -1978,6 +2294,36 @@ pub async fn search_github_prs(
 ///
 /// Uses `gh pr view` to fetch a single PR by exact number.
 /// This finds any PR regardless of age or state.
+fn view_github_pr_once(
+    gh: &std::path::Path,
+    project_path: &str,
+    pr_number: u32,
+    source: Option<&LinkedGitHubRepo>,
+) -> Result<GitHubPullRequest, String> {
+    let mut command = gh_command(gh, project_path);
+    command.args(["pr", "view", &pr_number.to_string(), "--json", PR_LIST_JSON]);
+    apply_repo_flag(&mut command, source.map(|source| source.repo.as_str()));
+    let output = command
+        .output()
+        .map_err(|e| format!("Failed to run gh pr view: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if is_gh_cli_auth_error(&stderr) {
+            return Err("GitHub CLI not authenticated. Run 'gh auth login' first.".to_string());
+        }
+        if is_missing_github_item(&stderr) {
+            return Err(format!("PR #{pr_number} not found"));
+        }
+        return Err(format!("gh pr view failed: {stderr}"));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let pr: GitHubPullRequest =
+        serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse gh response: {e}"))?;
+    Ok(stamp_pr(pr, source))
+}
+
 pub async fn get_github_pr_by_number(
     app: AppHandle,
     project_path: String,
@@ -1988,44 +2334,60 @@ pub async fn get_github_pr_by_number(
     if is_gitlab_project(&project_path) {
         return super::gitlab_issues::get_mr_by_number(&app, &project_path, pr_number).await;
     }
-    let gh = resolve_gh_binary(&app);
-    let output = gh_command(&gh, &project_path)
-        .args([
-            "pr",
-            "view",
-            &pr_number.to_string(),
-            "--json",
-            "number,title,body,state,headRefName,baseRefName,isDraft,createdAt,author,labels",
-        ])
-        .output()
-        .map_err(|e| format!("Failed to run gh pr view: {e}"))?;
+    let prs = list_github_prs_by_number(app, project_path, pr_number).await?;
+    prs.into_iter()
+        .next()
+        .ok_or_else(|| format!("PR #{pr_number} not found"))
+}
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if is_gh_cli_auth_error(&stderr) {
-            return Err("GitHub CLI not authenticated. Run 'gh auth login' first.".to_string());
-        }
-        if stderr.contains("Could not resolve") || stderr.contains("not found") {
-            return Err(format!("PR #{pr_number} not found"));
-        }
-        return Err(format!("gh pr view failed: {stderr}"));
+/// Exact-number lookup across every linked GitHub repository.
+pub async fn list_github_prs_by_number(
+    app: AppHandle,
+    project_path: String,
+    pr_number: u32,
+) -> Result<Vec<GitHubPullRequest>, String> {
+    if is_gitlab_project(&project_path) {
+        return match super::gitlab_issues::get_mr_by_number(&app, &project_path, pr_number).await {
+            Ok(pr) => Ok(vec![pr]),
+            Err(error) if error.contains("not found") => Ok(Vec::new()),
+            Err(error) => Err(error),
+        };
     }
+    let gh = resolve_gh_binary(&app);
+    let repos = linked_github_repos_at(&project_path);
+    let sources: Vec<Option<LinkedGitHubRepo>> = if repos.is_empty() {
+        vec![None]
+    } else {
+        repos.into_iter().map(Some).collect()
+    };
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let pr: GitHubPullRequest =
-        serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse gh response: {e}"))?;
-
-    log::trace!("Got PR #{}: {}", pr.number, pr.title);
-    Ok(pr)
+    let mut prs = Vec::new();
+    let mut errors = Vec::new();
+    for source in &sources {
+        match view_github_pr_once(&gh, &project_path, pr_number, source.as_ref()) {
+            Ok(pr) => prs.push(pr),
+            Err(error) if is_missing_github_item(&error) || error.contains("not found") => {}
+            Err(error) if is_gh_cli_auth_error(&error) => return Err(error),
+            Err(error) => errors.push(error),
+        }
+    }
+    if prs.is_empty() {
+        if let Some(error) = errors.into_iter().next() {
+            return Err(error);
+        }
+    }
+    Ok(prs)
 }
 
 /// Get detailed information about a specific GitHub PR
 ///
 /// Uses `gh pr view` to fetch the PR with comments and reviews.
+/// `repo` is `owner/name` when the pull request lives on a remote other than the gh default.
 pub async fn get_github_pr(
     app: AppHandle,
     project_path: String,
     pr_number: u32,
+    repo: Option<String>,
 ) -> Result<GitHubPullRequestDetail, String> {
     log::trace!("Getting GitHub PR #{pr_number} for {project_path}");
 
@@ -2033,15 +2395,16 @@ pub async fn get_github_pr(
         return super::gitlab_issues::get_mr_detail(&app, &project_path, pr_number).await;
     }
     let gh = resolve_gh_binary(&app);
-    // Run gh pr view
-    let output = gh_command(&gh, &project_path)
-        .args([
-            "pr",
-            "view",
-            &pr_number.to_string(),
-            "--json",
-            "number,title,body,state,headRefName,baseRefName,isDraft,createdAt,author,url,labels,comments,reviews",
-        ])
+    let mut command = gh_command(&gh, &project_path);
+    command.args([
+        "pr",
+        "view",
+        &pr_number.to_string(),
+        "--json",
+        "number,title,body,state,headRefName,baseRefName,isDraft,createdAt,author,url,labels,comments,reviews",
+    ]);
+    apply_repo_flag(&mut command, repo.as_deref());
+    let output = command
         .output()
         .map_err(|e| format!("Failed to run gh pr view: {e}"))?;
 
@@ -2250,15 +2613,22 @@ pub fn format_pr_context_markdown(ctx: &PullRequestContext) -> String {
 /// Get the diff for a PR using `gh pr diff`
 ///
 /// Returns the diff as a string, truncated to 100KB if too large.
-pub fn get_pr_diff(app: &AppHandle, project_path: &str, pr_number: u32) -> Result<String, String> {
+pub fn get_pr_diff(
+    app: &AppHandle,
+    project_path: &str,
+    pr_number: u32,
+    repo: Option<&str>,
+) -> Result<String, String> {
     log::debug!("Fetching diff for PR #{pr_number} in {project_path}");
 
     let diff = if is_gitlab_project(project_path) {
         super::gitlab_issues::get_mr_diff(app, project_path, pr_number)?
     } else {
         let gh_binary = resolve_gh_binary(app);
-        let output = gh_command(&gh_binary, project_path)
-            .args(["pr", "diff", &pr_number.to_string(), "--color", "never"])
+        let mut command = gh_command(&gh_binary, project_path);
+        command.args(["pr", "diff", &pr_number.to_string(), "--color", "never"]);
+        apply_repo_flag(&mut command, repo);
+        let output = command
             .output()
             .map_err(|e| format!("Failed to run gh pr diff: {e}"))?;
 
@@ -2310,10 +2680,10 @@ pub async fn load_pr_context(
     let repo_key = repo_id.to_key();
 
     // Fetch PR data from GitHub
-    let pr = get_github_pr(app.clone(), project_path.clone(), pr_number).await?;
+    let pr = get_github_pr(app.clone(), project_path.clone(), pr_number, None).await?;
 
     // Fetch the diff
-    let diff = get_pr_diff(&app, &project_path, pr_number).ok();
+    let diff = get_pr_diff(&app, &project_path, pr_number, None).ok();
 
     // Create PR context
     let ctx = PullRequestContext {
@@ -2325,6 +2695,7 @@ pub async fn load_pr_context(
         comments: pr.comments,
         reviews: pr.reviews.clone(),
         diff,
+        repo: None,
     };
 
     // Write to shared git-context directory
@@ -2895,6 +3266,12 @@ pub async fn list_dependabot_alerts(
 ) -> Result<Vec<DependabotAlert>, String> {
     log::trace!("Listing Dependabot alerts for {project_path} with state: {state:?}");
 
+    // Dependabot is GitHub-only. The Security tab is hidden for GitLab; return
+    // an empty list so badges and web access don't shell out to `gh`.
+    if is_gitlab_project(&project_path) {
+        return Ok(vec![]);
+    }
+
     let gh = resolve_gh_binary(&app);
     let repo_id = get_repo_identifier(&project_path)?;
     let state_arg = state.unwrap_or_else(|| "open".to_string());
@@ -2943,6 +3320,10 @@ pub async fn get_dependabot_alert(
     project_path: String,
     alert_number: u32,
 ) -> Result<DependabotAlert, String> {
+    if is_gitlab_project(&project_path) {
+        return Err("Security alerts are not available for GitLab projects.".to_string());
+    }
+
     let gh = resolve_gh_binary(&app);
     let repo_id = get_repo_identifier(&project_path)?;
 
@@ -2985,6 +3366,10 @@ pub async fn load_security_alert_context(
     project_path: String,
 ) -> Result<LoadedSecurityAlertContext, String> {
     log::trace!("Loading security alert #{alert_number} context for session {session_id}");
+
+    if is_gitlab_project(&project_path) {
+        return Err("Security alerts are not available for GitLab projects.".to_string());
+    }
 
     let repo_id = get_repo_identifier(&project_path)?;
     let repo_key = repo_id.to_key();
@@ -3207,6 +3592,10 @@ pub async fn list_repository_advisories(
 ) -> Result<Vec<RepositoryAdvisory>, String> {
     log::trace!("Listing repository advisories for {project_path} with state: {state:?}");
 
+    if is_gitlab_project(&project_path) {
+        return Ok(vec![]);
+    }
+
     let gh = resolve_gh_binary(&app);
     let repo_id = get_repo_identifier(&project_path)?;
 
@@ -3257,6 +3646,10 @@ pub async fn get_repository_advisory(
     project_path: String,
     ghsa_id: String,
 ) -> Result<RepositoryAdvisory, String> {
+    if is_gitlab_project(&project_path) {
+        return Err("Security advisories are not available for GitLab projects.".to_string());
+    }
+
     let gh = resolve_gh_binary(&app);
     let repo_id = get_repo_identifier(&project_path)?;
 
@@ -3299,6 +3692,10 @@ pub async fn load_advisory_context(
     project_path: String,
 ) -> Result<LoadedAdvisoryContext, String> {
     log::trace!("Loading advisory {ghsa_id} context for session {session_id}");
+
+    if is_gitlab_project(&project_path) {
+        return Err("Security advisories are not available for GitLab projects.".to_string());
+    }
 
     let repo_id = get_repo_identifier(&project_path)?;
     let repo_key = repo_id.to_key();
@@ -3776,6 +4173,73 @@ mod tests {
 
         assert!(!is_unsupported_github_repo_error(stderr));
         assert!(is_gh_cli_auth_error(stderr));
+    }
+
+    #[test]
+    fn test_linked_github_repos_keep_same_number_distinct() {
+        let remotes = vec![
+            GitHubRemote {
+                name: "upstream".to_string(),
+                url: "https://github.com/coollabsio/jean.git".to_string(),
+            },
+            GitHubRemote {
+                name: "origin".to_string(),
+                url: "git@github.com:octocat/jean.git".to_string(),
+            },
+            GitHubRemote {
+                name: "mirror".to_string(),
+                url: "https://github.com/octocat/jean".to_string(),
+            },
+            GitHubRemote {
+                name: "gitlab".to_string(),
+                url: "https://gitlab.com/octocat/jean.git".to_string(),
+            },
+        ];
+        // get_github_remotes sorts origin first before this helper runs.
+        // This test covers dedupe and slug parsing on an unsorted slice, so
+        // origin is not forced to the front here.
+        let linked = linked_github_repos(&remotes);
+        assert_eq!(
+            linked,
+            vec![
+                LinkedGitHubRepo {
+                    remote: "upstream".to_string(),
+                    repo: "coollabsio/jean".to_string(),
+                },
+                LinkedGitHubRepo {
+                    remote: "origin".to_string(),
+                    repo: "octocat/jean".to_string(),
+                },
+            ]
+        );
+        assert_eq!(
+            github_item_key(Some("coollabsio/jean"), 790),
+            "coollabsio/jean#790"
+        );
+        assert_eq!(
+            github_item_key(Some("octocat/jean"), 790),
+            "octocat/jean#790"
+        );
+        assert_ne!(
+            github_item_key(Some("coollabsio/jean"), 790),
+            github_item_key(Some("octocat/jean"), 790)
+        );
+        assert_eq!(
+            github_repo_slug("https://github.com/octocat/jean.git"),
+            Some("octocat/jean".to_string())
+        );
+        assert_eq!(
+            github_repo_slug("git@github.com:octocat/jean.git"),
+            Some("octocat/jean".to_string())
+        );
+        assert_eq!(
+            github_repo_slug("https://gitlab.com/octocat/jean.git"),
+            None
+        );
+        assert_eq!(
+            context_repo_key("/not/a/repo", Some("coollabsio/jean")).unwrap(),
+            "coollabsio-jean"
+        );
     }
 
     #[test]

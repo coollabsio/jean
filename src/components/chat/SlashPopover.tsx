@@ -53,18 +53,32 @@ const GOAL_BUILTIN: ClaudeCommand = {
   description: 'Set, view, or clear long-horizon objective',
 }
 
+const PLAN_BUILTIN: ClaudeCommand = {
+  name: 'plan',
+  path: '<built-in:plan>',
+  description: 'Switch to Plan mode and propose a plan',
+}
+
+const BUILD_BUILTIN: ClaudeCommand = {
+  name: 'build',
+  path: '<built-in:build>',
+  description: 'Leave Plan mode and continue implementing',
+}
+
 type ListItem =
   | {
       type: 'command'
       backend: CliBackend
       data: ClaudeCommand
       pluginName?: string
+      groupHeading?: string
     }
   | {
       type: 'skill'
       backend: CliBackend
       data: ClaudeSkill
       pluginName?: string
+      groupHeading?: string
     }
 
 interface RenderGroup {
@@ -94,6 +108,20 @@ export function SlashPopover({
 
   const filteredItems = useMemo(() => {
     const items: ListItem[] = []
+
+    if (triggerKind !== 'skill' && isAtPromptStart) {
+      const jeanBackend = sessionBackend ?? 'claude'
+      fuzzySearchItems([PLAN_BUILTIN, BUILD_BUILTIN], searchQuery, 2).forEach(
+        cmd => {
+          items.push({
+            type: 'command',
+            backend: jeanBackend,
+            data: cmd,
+            groupHeading: 'Jean',
+          })
+        }
+      )
+    }
 
     if (
       triggerKind !== 'skill' &&
@@ -143,10 +171,14 @@ export function SlashPopover({
 
     filteredItems.forEach((item, globalIndex) => {
       const pluginSuffix = item.pluginName ? `-${item.pluginName}` : '-user'
-      const key = `${item.backend}-${item.type}${pluginSuffix}`
+      const key = item.groupHeading
+        ? item.groupHeading
+        : `${item.backend}-${item.type}${pluginSuffix}`
       if (key !== currentKey) {
         let heading: string
-        if (item.pluginName) {
+        if (item.groupHeading) {
+          heading = item.groupHeading
+        } else if (item.pluginName) {
           heading = `${item.pluginName} Skills`
         } else {
           const backendLabel = getBackendLabel(item.backend)

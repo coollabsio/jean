@@ -16,6 +16,11 @@ import {
   Trash2,
 } from '@/components/icons/reicon'
 import { Button } from '@/components/ui/button'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
@@ -1484,17 +1489,23 @@ function ConnectionRow({
       <div className="flex w-full items-center gap-2 text-left text-sm font-medium">
         <span className="size-2 shrink-0 rounded-full bg-success" />
         {name}
-        <span
-          className={`ml-auto shrink-0 text-xs font-normal ${
-            versionWarning ? 'text-warning' : 'text-muted-foreground'
-          }`}
-          title={
-            versionWarning ? 'Remote version differs from this app' : undefined
-          }
-        >
-          {versionLabel}
-          {versionWarning ? ' · mismatch' : ''}
-        </span>
+        {versionWarning ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="ml-auto shrink-0 text-xs font-normal text-warning">
+                {versionLabel}
+                {' · mismatch'}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>
+              Remote version differs from this app
+            </TooltipContent>
+          </Tooltip>
+        ) : (
+          <span className="ml-auto shrink-0 text-xs font-normal text-muted-foreground">
+            {versionLabel}
+          </span>
+        )}
       </div>
       {/* Second row: detail URL + edit/delete actions */}
       <div className="ml-4 flex items-center gap-1">

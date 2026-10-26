@@ -222,52 +222,72 @@ export function TextFilePreview({
           <div className="flex items-center gap-1 pt-2 border-t border-border/50">
             {isEditing ? (
               <>
-                <button
-                  type="button"
-                  onClick={handleCancelEdit}
-                  disabled={isSaving}
-                  className="px-3 py-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors text-xs"
-                  title="Cancel editing"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openFile && handleSaveEdit(openFile)}
-                  disabled={isSaving}
-                  className="px-3 py-1.5 rounded-md text-primary-foreground bg-primary hover:bg-primary/90 transition-colors flex items-center gap-1 text-xs"
-                  title="Save changes"
-                >
-                  <Check className="h-3.5 w-3.5" />
-                  Save
-                </button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="inline-flex">
+                      <button
+                        type="button"
+                        onClick={handleCancelEdit}
+                        disabled={isSaving}
+                        className="px-3 py-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors text-xs disabled:pointer-events-none"
+                      >
+                        Cancel
+                      </button>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>Cancel editing</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="inline-flex">
+                      <button
+                        type="button"
+                        onClick={() => openFile && handleSaveEdit(openFile)}
+                        disabled={isSaving}
+                        className="px-3 py-1.5 rounded-md text-primary-foreground bg-primary hover:bg-primary/90 transition-colors flex items-center gap-1 text-xs disabled:pointer-events-none"
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                        Save
+                      </button>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>Save changes</TooltipContent>
+                </Tooltip>
               </>
             ) : (
               <>
-                <button
-                  type="button"
-                  onClick={() =>
-                    openFile?.content && handleCopy(openFile.content)
-                  }
-                  className="px-3 py-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5 text-xs"
-                  title="Copy to clipboard"
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                  Copy
-                </button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        openFile?.content && handleCopy(openFile.content)
+                      }
+                      className="px-3 py-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5 text-xs"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                      Copy
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>Copy to clipboard</TooltipContent>
+                </Tooltip>
                 {!disabled && sessionId && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      openFile?.content !== undefined &&
-                      handleStartEdit(openFile.content)
-                    }
-                    className="px-3 py-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5 text-xs"
-                    title="Edit content"
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                    Edit
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          openFile?.content !== undefined &&
+                          handleStartEdit(openFile.content)
+                        }
+                        className="px-3 py-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5 text-xs"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                        Edit
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>Edit content</TooltipContent>
+                  </Tooltip>
                 )}
               </>
             )}

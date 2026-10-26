@@ -144,7 +144,7 @@ fn clear_stale_pending_cancel_before_send(session_id: &str) {
 }
 
 fn codex_execution_mode_instruction(execution_mode: Option<&str>) -> Option<&'static str> {
-    match execution_mode.unwrap_or("plan") {
+    match execution_mode.unwrap_or("build") {
         "build" | "supervised" | "auto" => Some(
             "You are in BUILD MODE. Start implementing immediately. \
              This current BUILD MODE instruction supersedes any earlier plan-mode \
@@ -169,7 +169,7 @@ fn codex_execution_mode_instruction(execution_mode: Option<&str>) -> Option<&'st
 }
 
 fn codex_default_global_system_prompt(execution_mode: Option<&str>) -> String {
-    match execution_mode.unwrap_or("plan") {
+    match execution_mode.unwrap_or("build") {
         "build" | "yolo" | "supervised" | "auto" => CODEX_DEFAULT_NOT_PLAN_MODE_PROMPT.to_string(),
         _ => CODEX_DEFAULT_PLAN_MODE_PROMPT.to_string(),
     }
@@ -447,8 +447,12 @@ fn default_execution_mode_for_worktree(
     }
 }
 
-/// Workflow policy for a new session: worktree/preference default, or Plan when
-/// the backend does not support that default.
+/// Workflow policy for a new session.
+///
+/// Uses the worktree or preference default when that backend supports it.
+/// Plan is opt-in, so a saved Plan default and any unsupported policy fall
+/// through to Build, then Full access. Cursor has no Build mode, so that
+/// fallback is Full access rather than Plan.
 pub(crate) fn default_execution_policy(
     app: &AppHandle,
     worktree_id: &str,
@@ -457,11 +461,20 @@ pub(crate) fn default_execution_policy(
 ) -> String {
     let policy = default_execution_mode_for_worktree(app, worktree_id, preferences_default)
         .unwrap_or_else(|| "yolo".to_string());
-    if validate_execution_policy(&policy, backend).is_ok() {
-        policy
-    } else {
-        "plan".to_string()
+    implement_execution_policy(&policy, backend)
+}
+
+/// New-session policy that never selects Plan.
+pub(crate) fn implement_execution_policy(policy: &str, backend: &Backend) -> String {
+    if policy != "plan" && validate_execution_policy(policy, backend).is_ok() {
+        return policy.to_string();
     }
+    for candidate in ["build", "yolo", "supervised", "auto"] {
+        if validate_execution_policy(candidate, backend).is_ok() {
+            return candidate.to_string();
+        }
+    }
+    "yolo".to_string()
 }
 
 /// Global system prompt for a session: server projects use the server prompt instead.
@@ -1185,6 +1198,18 @@ pub async fn create_session(
                 .as_ref()
                 .and_then(|prefs| default_model_for_backend(&backend_enum, prefs));
         }
+        session.provider_account_id = preferences.as_ref().and_then(|prefs| {
+            let backend_name = match &backend_enum {
+                Backend::Codex => "codex",
+                Backend::Claude => "claude",
+                _ => return None,
+            };
+            crate::provider_accounts::default_account_id_for(
+                &prefs.provider_accounts,
+                &prefs.default_provider_accounts,
+                backend_name,
+            )
+        });
         let session_id = session.id.clone();
 
         sessions.sessions.push(session.clone());
@@ -6357,6 +6382,7 @@ pub async fn set_session_backend(
 ) -> Result<(), String> {
     log::trace!("Setting backend for session {session_id}: {backend}");
 
+    let preferences = crate::load_preferences_sync(&app).ok();
     with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
         if let Some(session) = sessions.find_session_mut(&session_id) {
             session.backend = match backend.as_str() {
@@ -6372,6 +6398,13 @@ pub async fn set_session_backend(
                 "muse" => super::types::Backend::Muse,
                 _ => super::types::Backend::Claude,
             };
+            session.provider_account_id = preferences.as_ref().and_then(|prefs| {
+                crate::provider_accounts::default_account_id_for(
+                    &prefs.provider_accounts,
+                    &prefs.default_provider_accounts,
+                    &backend,
+                )
+            });
             log::trace!("Backend selection saved");
             Ok(())
         } else {
@@ -6409,7 +6442,7 @@ pub fn codex_goal_set(
     let thread_id = codex_thread_id_for_session(&app, &worktree_id, &worktree_path, &session_id)?;
 
     if let Some(tid) = thread_id {
-        super::codex_server::ensure_running(&app)?;
+        super::codex_server::ensure_running_for_session(&app, &session_id)?;
         let params = codex_goal_set_params(&tid, trimmed);
         let result = super::codex_server::send_request("thread/goal/set", params);
         super::codex_server::release_usage();
@@ -6436,7 +6469,7 @@ pub fn codex_goal_get(
     let thread_id = codex_thread_id_for_session(&app, &worktree_id, &worktree_path, &session_id)?;
 
     let goal = if let Some(tid) = thread_id {
-        super::codex_server::ensure_running(&app)?;
+        super::codex_server::ensure_running_for_session(&app, &session_id)?;
         let response = super::codex_server::send_request(
             "thread/goal/get",
             serde_json::json!({ "threadId": tid }),
@@ -6471,7 +6504,7 @@ pub fn codex_goal_clear(
     let thread_id = codex_thread_id_for_session(&app, &worktree_id, &worktree_path, &session_id)?;
 
     if let Some(tid) = thread_id {
-        super::codex_server::ensure_running(&app)?;
+        super::codex_server::ensure_running_for_session(&app, &session_id)?;
         let result = super::codex_server::send_request(
             "thread/goal/clear",
             serde_json::json!({ "threadId": tid }),
@@ -11226,6 +11259,37 @@ mod tests {
             );
         }
         assert!(validate_execution_policy("build", &Backend::Cursor).is_err());
+    }
+
+    #[test]
+    fn new_sessions_start_in_an_implement_mode() {
+        assert_eq!(implement_execution_policy("yolo", &Backend::Claude), "yolo");
+        assert_eq!(
+            implement_execution_policy("build", &Backend::Claude),
+            "build"
+        );
+        assert_eq!(
+            implement_execution_policy("supervised", &Backend::Claude),
+            "supervised"
+        );
+        assert_eq!(
+            implement_execution_policy("plan", &Backend::Claude),
+            "build"
+        );
+        assert_eq!(implement_execution_policy("plan", &Backend::Cursor), "yolo");
+        assert_eq!(
+            implement_execution_policy("build", &Backend::Cursor),
+            "yolo"
+        );
+        assert_eq!(
+            implement_execution_policy("supervised", &Backend::Cursor),
+            "yolo"
+        );
+        assert_eq!(implement_execution_policy("unknown", &Backend::Pi), "build");
+        assert_eq!(
+            implement_execution_policy("unknown", &Backend::Cursor),
+            "yolo"
+        );
     }
 
     #[test]

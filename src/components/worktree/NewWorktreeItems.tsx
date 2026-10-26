@@ -121,19 +121,26 @@ function LabelPills({
   ))
 }
 
-/** "#123 opened 3d ago by octocat" */
+/** "owner/name #123 opened 3d ago by octocat" */
 function OpenedMeta({
   number,
   createdAt,
   author,
+  source,
 }: {
   number: number
   createdAt: string
   author?: string
+  source?: string
 }) {
   const time = Date.parse(createdAt)
   return (
     <>
+      {source && (
+        <>
+          <span className="text-foreground/70">{source}</span>{' '}
+        </>
+      )}
       #{number}
       {!Number.isNaN(time) && ` opened ${formatRelative(time / 1000)}`}
       {author && (
@@ -159,6 +166,7 @@ export interface IssueItemProps {
   onInvestigate: (background: boolean) => void
   onPreview: () => void
   onLabelClick?: (label: string) => void
+  showSource?: boolean
 }
 
 export function IssueItem({
@@ -174,6 +182,7 @@ export function IssueItem({
   onInvestigate,
   onPreview,
   onLabelClick,
+  showSource = false,
 }: IssueItemProps) {
   return (
     <div
@@ -186,7 +195,9 @@ export function IssueItem({
         <ItemSelectCheckbox
           checked={isChecked}
           disabled={isCreating}
-          ariaLabel={`Select issue #${issue.number}`}
+          ariaLabel={`Select issue #${issue.number}${
+            showSource && issue.repo ? ` from ${issue.repo}` : ''
+          }`}
           onCheckedChange={onCheckedChange}
         />
       )}
@@ -223,6 +234,7 @@ export function IssueItem({
             number={issue.number}
             createdAt={issue.created_at}
             author={issue.author?.login}
+            source={showSource ? issue.repo : undefined}
           />
         </div>
       </div>
@@ -259,6 +271,7 @@ export interface PRItemProps {
   onStack: (background: boolean) => void
   onPreview: () => void
   onLabelClick?: (label: string) => void
+  showSource?: boolean
 }
 
 export function PRItem({
@@ -276,6 +289,7 @@ export function PRItem({
   onStack,
   onPreview,
   onLabelClick,
+  showSource = false,
 }: PRItemProps) {
   const busy = isCreating || isStacking
   return (
@@ -289,7 +303,9 @@ export function PRItem({
         <ItemSelectCheckbox
           checked={isChecked}
           disabled={busy}
-          ariaLabel={`Select PR #${pr.number}`}
+          ariaLabel={`Select PR #${pr.number}${
+            showSource && pr.repo ? ` from ${pr.repo}` : ''
+          }`}
           onCheckedChange={onCheckedChange}
         />
       )}
@@ -330,6 +346,7 @@ export function PRItem({
             number={pr.number}
             createdAt={pr.created_at}
             author={pr.author?.login}
+            source={showSource ? pr.repo : undefined}
           />
         </div>
       </div>
@@ -377,6 +394,7 @@ export function PRItem({
 
 export interface BranchItemProps {
   branch: string
+  remote?: string
   index: number
   isSelected: boolean
   isCreating: boolean
@@ -386,6 +404,7 @@ export interface BranchItemProps {
 
 export function BranchItem({
   branch,
+  remote,
   index,
   isSelected,
   isCreating,
@@ -416,6 +435,11 @@ export function BranchItem({
       >
         <span className="text-sm truncate">{branch}</span>
       </button>
+      {remote && (
+        <span className="shrink-0 rounded-full border border-border px-1.5 py-px text-[11px] font-medium text-muted-foreground">
+          {remote}
+        </span>
+      )}
     </div>
   )
 }

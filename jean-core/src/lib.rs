@@ -70,6 +70,7 @@ mod pi_cli;
 mod platform;
 mod prerequisites;
 mod projects;
+mod provider_accounts;
 mod server_update;
 mod terminal;
 mod ui_client_state;
@@ -326,6 +327,12 @@ pub struct AppPreferences {
     pub custom_codex_providers: Vec<CodexProviderProfile>, // Codex custom model_provider profiles
     #[serde(default)]
     pub default_codex_provider: Option<String>, // Default Codex provider profile name (None = built-in)
+    /// Named Claude/Codex logins. Auth lives in per-account config directories.
+    #[serde(default)]
+    pub provider_accounts: Vec<provider_accounts::ProviderAccount>,
+    /// Default account id for new sessions, keyed by backend ("claude", "codex").
+    #[serde(default)]
+    pub default_provider_accounts: std::collections::HashMap<String, String>,
     #[serde(default)]
     pub custom_pi_providers: Vec<PiProviderProfile>, // PI custom providers (index; disk = models.json)
     #[serde(default)]
@@ -733,6 +740,16 @@ fn default_close_confirm_bypass_modifier() -> String {
 
 fn default_execution_mode() -> String {
     "yolo".to_string()
+}
+
+/// Plan is opt-in per session. A saved "always plan" preference would put
+/// every new session into Plan, so rewrite it to Build on load.
+fn migrate_plan_default_execution_mode(preferences: &mut AppPreferences) -> bool {
+    if preferences.default_execution_mode == "plan" {
+        preferences.default_execution_mode = "build".to_string();
+        return true;
+    }
+    false
 }
 
 fn default_backend() -> String {
@@ -3344,6 +3361,8 @@ impl Default for AppPreferences {
             default_provider: None,
             custom_codex_providers: Vec::new(),
             default_codex_provider: None,
+            provider_accounts: Vec::new(),
+            default_provider_accounts: std::collections::HashMap::new(),
             custom_pi_providers: Vec::new(),
             favorite_models: Vec::new(),
             favorite_package_scripts: Vec::new(),
@@ -3822,6 +3841,7 @@ pub fn load_preferences_sync(app: &AppHandle) -> Result<AppPreferences, String> 
     // preference-file compatibility, but never honor an old disabled value.
     preferences.jean_mcp_enabled = true;
     preferences.magic_prompts.migrate_defaults();
+    migrate_plan_default_execution_mode(&mut preferences);
     migrate_final_review_preferences(&mut preferences, &raw_preferences);
     maybe_auto_select_system_cli_preferences(app, &mut preferences, Some(&raw_preferences));
     Ok(preferences)
@@ -3880,6 +3900,7 @@ async fn load_preferences(app: AppHandle) -> Result<AppPreferences, String> {
         }
         Ok(_) => {}
     }
+    needs_resave |= migrate_plan_default_execution_mode(&mut preferences);
     if let Some(new_model) = migrate_default_claude_model(&preferences.selected_model) {
         preferences.selected_model = new_model.to_string();
         needs_resave = true;

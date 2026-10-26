@@ -4,6 +4,26 @@ import { closeLeftSidebarOnMobile } from '@/store/ui-store'
 import type { LabelData } from '@/types/chat'
 import type { Project, WorktreeSortMode } from '@/types/projects'
 
+/** Add or remove ids. Returns null when the set would not change. */
+function withMembership(
+  current: Set<string>,
+  ids: readonly string[],
+  expanded: boolean
+): Set<string> | null {
+  const next = new Set(current)
+  let changed = false
+  for (const id of ids) {
+    if (expanded) {
+      if (next.has(id)) continue
+      next.add(id)
+      changed = true
+    } else if (next.delete(id)) {
+      changed = true
+    }
+  }
+  return changed ? next : null
+}
+
 export interface ProjectCanvasSettings {
   worktreeSortMode?: WorktreeSortMode
   pinnedLabels?: LabelData[]
@@ -96,6 +116,9 @@ interface ProjectsUIState {
   collapseAllFolders: () => void
   expandAllProjects: (ids: string[]) => void
   collapseAllProjects: () => void
+  setFoldersExpanded: (ids: readonly string[], expanded: boolean) => void
+  setProjectsExpanded: (ids: readonly string[], expanded: boolean) => void
+  setWorktreesExpanded: (ids: readonly string[], expanded: boolean) => void
 
   setAddProjectDialogOpen: (
     open: boolean,
@@ -497,6 +520,48 @@ export const useProjectsStore = create<ProjectsUIState>()(
               : { expandedProjectIds: new Set<string>() },
           undefined,
           'collapseAllProjects'
+        ),
+
+      setFoldersExpanded: (ids, expanded) =>
+        set(
+          state => {
+            const expandedFolderIds = withMembership(
+              state.expandedFolderIds,
+              ids,
+              expanded
+            )
+            return expandedFolderIds ? { expandedFolderIds } : state
+          },
+          undefined,
+          'setFoldersExpanded'
+        ),
+
+      setProjectsExpanded: (ids, expanded) =>
+        set(
+          state => {
+            const expandedProjectIds = withMembership(
+              state.expandedProjectIds,
+              ids,
+              expanded
+            )
+            return expandedProjectIds ? { expandedProjectIds } : state
+          },
+          undefined,
+          'setProjectsExpanded'
+        ),
+
+      setWorktreesExpanded: (ids, expanded) =>
+        set(
+          state => {
+            const expandedWorktreeIds = withMembership(
+              state.expandedWorktreeIds,
+              ids,
+              expanded
+            )
+            return expandedWorktreeIds ? { expandedWorktreeIds } : state
+          },
+          undefined,
+          'setWorktreesExpanded'
         ),
 
       // Dialog actions

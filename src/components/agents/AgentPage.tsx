@@ -25,6 +25,11 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import {
   useAgentWorkdir,
@@ -334,19 +339,24 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
               <AgentSettings agent={agent} />
             )}
           </div>
-          <label
-            className="flex shrink-0 cursor-pointer items-center gap-2 border-t px-4 py-2.5 text-xs text-muted-foreground select-none hover:text-foreground"
-            title="Show tasks, subagents, activity, memory, settings, and tool activity in chat"
-          >
-            <Checkbox
-              checked={advanced}
-              onCheckedChange={value =>
-                useUIStore.getState().setAgentsAdvanced(value === true)
-              }
-              aria-label="Advanced"
-            />
-            Advanced
-          </label>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <label className="flex shrink-0 cursor-pointer items-center gap-2 border-t px-4 py-2.5 text-xs text-muted-foreground select-none hover:text-foreground">
+                <Checkbox
+                  checked={advanced}
+                  onCheckedChange={value =>
+                    useUIStore.getState().setAgentsAdvanced(value === true)
+                  }
+                  aria-label="Advanced"
+                />
+                Advanced
+              </label>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-72">
+              Show tasks, subagents, activity, memory, settings, and tool
+              activity in chat
+            </TooltipContent>
+          </Tooltip>
         </aside>
       )}
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>

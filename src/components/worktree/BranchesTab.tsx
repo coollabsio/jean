@@ -7,12 +7,17 @@ import {
   TooltipContent,
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import {
+  worktreeBranchCheckoutRef,
+  type RemoteBranch,
+} from '@/lib/remote-worktree-sources'
 import { BranchItem } from './NewWorktreeItems'
 
 export interface BranchesTabProps {
   searchQuery: string
   setSearchQuery: (query: string) => void
-  branches: string[]
+  branches: RemoteBranch[]
+  remoteCount: number
   isLoading: boolean
   isRefetching: boolean
   error: Error | null
@@ -28,6 +33,7 @@ export function BranchesTab({
   searchQuery,
   setSearchQuery,
   branches,
+  remoteCount,
   isLoading,
   isRefetching,
   error,
@@ -113,17 +119,21 @@ export function BranchesTab({
 
         {!isLoading && !error && branches.length > 0 && (
           <div className="py-1">
-            {branches.map((branch, index) => (
-              <BranchItem
-                key={branch}
-                branch={branch}
-                index={index}
-                isSelected={index === selectedIndex}
-                isCreating={creatingFromBranch === branch}
-                onMouseEnter={() => setSelectedIndex(index)}
-                onClick={bg => onSelectBranch(branch, bg)}
-              />
-            ))}
+            {branches.map((branch, index) => {
+              const checkoutRef = worktreeBranchCheckoutRef(branch, remoteCount)
+              return (
+                <BranchItem
+                  key={branch.qualified || branch.name}
+                  branch={branch.name}
+                  remote={remoteCount > 1 ? branch.remote : undefined}
+                  index={index}
+                  isSelected={index === selectedIndex}
+                  isCreating={creatingFromBranch === checkoutRef}
+                  onMouseEnter={() => setSelectedIndex(index)}
+                  onClick={bg => onSelectBranch(checkoutRef, bg)}
+                />
+              )
+            })}
           </div>
         )}
       </ScrollArea>
