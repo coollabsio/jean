@@ -338,7 +338,10 @@ Additional systems (no dedicated docs yet):
   a Jean terminal session running the backend's native resume command. Resumable
   Jean chat sessions can likewise be duplicated into a separate native-client
   terminal session from the session-tab context menu; the original chat session
-  remains unchanged.
+  remains unchanged. When an OpenCode chat run fails with a thread error, the
+  live session id is persisted to metadata before the registry entry that holds
+  it is cleaned up, so the next send resumes the context the server may still be
+  processing instead of starting a fresh conversation.
 
   Native PI terminal sessions receive a generated `--session-id` when created,
   persist that ID as `pi_session_id`, and reconnect with `pi --session <id>`.
