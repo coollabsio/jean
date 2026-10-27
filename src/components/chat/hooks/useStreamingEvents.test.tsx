@@ -2,7 +2,10 @@ import { createElement, type PropsWithChildren } from 'react'
 import { renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import useStreamingEvents from './useStreamingEvents'
+import { toast } from 'sonner'
+import useStreamingEvents, {
+  formatBackendRetryToast,
+} from './useStreamingEvents'
 import { useChatStore } from '@/store/chat-store'
 import { preferencesQueryKeys } from '@/services/preferences'
 import { SEND_MESSAGE_MUTATION_KEY } from '@/services/chat'
@@ -2822,5 +2825,124 @@ describe('useStreamingEvents completion hydration', () => {
       'get_session',
       expect.anything()
     )
+  })
+})
+
+describe('useStreamingEvents backend retry', () => {
+  beforeEach(() => {
+    setupListenMock()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('formats the retry number and the wait', () => {
+    expect(
+      formatBackendRetryToast(
+        { attempt: 2, max_attempts: 8, delay_ms: 30_000 },
+        ''
+      )
+    ).toBe('Provider rate limited, retry 2/8 in 30s')
+    expect(
+      formatBackendRetryToast(
+        { attempt: 5, max_attempts: 8, delay_ms: 300_000 },
+        'proj / wt / chat'
+      )
+    ).toBe('Provider rate limited: proj / wt / chat, retry 5/8 in 5 min')
+  })
+
+  it('shows one replaceable toast per session for each retry', async () => {
+    const info = vi.spyOn(toast, 'info').mockImplementation(() => 'id')
+    const queryClient = createQueryClient()
+    renderHook(() => useStreamingEvents({ queryClient }), {
+      wrapper: createWrapper(queryClient),
+    })
+    await waitFor(() =>
+      expect(registeredListeners.has('chat:backend_retry')).toBe(true)
+    )
+
+    registeredListeners.get('chat:backend_retry')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        backend: 'opencode',
+        attempt: 1,
+        max_attempts: 8,
+        delay_ms: 7_000,
+        reason: 'Rate limit exceeded',
+      },
+    })
+
+    expect(info).toHaveBeenCalledWith(
+      'Provider rate limited, retry 1/8 in 7s',
+      {
+        id: 'backend-retry-session-1',
+        description: 'Rate limit exceeded',
+        duration: 8_000,
+      }
+    )
+  })
+
+  it('dismisses the retry toast when the run ends', async () => {
+    const dismiss = vi.spyOn(toast, 'dismiss').mockImplementation(() => 'id')
+    const queryClient = createQueryClient()
+    renderHook(() => useStreamingEvents({ queryClient }), {
+      wrapper: createWrapper(queryClient),
+    })
+    await waitFor(() =>
+      expect(registeredListeners.has('chat:error')).toBe(true)
+    )
+
+    registeredListeners.get('chat:error')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        error: 'Rate limited',
+      },
+    })
+
+    expect(dismiss).toHaveBeenCalledWith('backend-retry-session-1')
+  })
+
+  it('dismisses the retry toast on chat:done', async () => {
+    const dismiss = vi.spyOn(toast, 'dismiss').mockImplementation(() => 'id')
+    const queryClient = createQueryClient()
+    renderHook(() => useStreamingEvents({ queryClient }), {
+      wrapper: createWrapper(queryClient),
+    })
+    await waitFor(() => expect(registeredListeners.has('chat:done')).toBe(true))
+
+    registeredListeners.get('chat:done')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+      },
+    })
+
+    expect(dismiss).toHaveBeenCalledWith('backend-retry-session-1')
+  })
+
+  it('dismisses the retry toast on chat:cancelled', async () => {
+    const dismiss = vi.spyOn(toast, 'dismiss').mockImplementation(() => 'id')
+    const queryClient = createQueryClient()
+    renderHook(() => useStreamingEvents({ queryClient }), {
+      wrapper: createWrapper(queryClient),
+    })
+    await waitFor(() =>
+      expect(registeredListeners.has('chat:cancelled')).toBe(true)
+    )
+
+    registeredListeners.get('chat:cancelled')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        undo_send: false,
+        emitted_at_ms: Date.now(),
+        run_id: null,
+      },
+    })
+
+    expect(dismiss).toHaveBeenCalledWith('backend-retry-session-1')
   })
 })

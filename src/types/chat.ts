@@ -627,6 +627,21 @@ export interface CompactedEvent {
 }
 
 /**
+ * Event payload for chat:backend_retry: the backend waits before resending a
+ * turn that hit a provider rate limit.
+ */
+export interface BackendRetryEvent {
+  session_id: string
+  worktree_id: string
+  backend: string
+  /** 1-based retry number */
+  attempt: number
+  max_attempts: number
+  delay_ms: number
+  reason: string
+}
+
+/**
  * Event payload for errors from Rust
  */
 export interface ErrorEvent {
