@@ -5,6 +5,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use chrono::Utc;
 use tauri::AppHandle;
 
 use super::config::{ensure_cli_dir, get_cli_binary_path, get_cli_dir, resolve_cli_binary};
@@ -609,6 +610,26 @@ fn load_codex_auth_from_keychain() -> Option<CodexAuthFile> {
     parse_auth_payload(&payload)
 }
 
+/// Normalize a potentially corrupt `last_refresh` (epoch-seconds string) to RFC 3339.
+fn normalize_codex_auth_last_refresh(auth: &mut CodexAuthFile) -> bool {
+    let changed = match auth.last_refresh.as_ref() {
+        Some(s) if s.chars().all(|c| c.is_ascii_digit()) => {
+            if let Ok(secs) = s.parse::<i64>() {
+                auth.last_refresh = Some(
+                    chrono::DateTime::from_timestamp(secs, 0)
+                        .map(|dt| dt.to_rfc3339())
+                        .unwrap_or_else(|| Utc::now().to_rfc3339()),
+                );
+                true
+            } else {
+                false
+            }
+        }
+        _ => false,
+    };
+    changed
+}
+
 fn load_codex_auth_for_binary(
     binary_path: Option<&str>,
 ) -> Result<(CodexAuthSource, CodexAuthFile), String> {
@@ -621,12 +642,17 @@ fn load_codex_auth_for_binary(
 
         let content = std::fs::read_to_string(&path)
             .map_err(|e| format!("Failed to read Codex auth file {}: {e}", path.display()))?;
-        let auth: CodexAuthFile = serde_json::from_str(&content).map_err(|e| {
+        let mut auth: CodexAuthFile = serde_json::from_str(&content).map_err(|e| {
             format!(
                 "Failed to parse Codex auth file JSON ({}): {e}",
                 path.display()
             )
         })?;
+        let path_clone = path.clone();
+        if normalize_codex_auth_last_refresh(&mut auth) {
+            // Recover files Jean previously wrote with an epoch-string timestamp.
+            let _ = persist_codex_auth(&CodexAuthSource::File(path_clone), &auth);
+        }
         return Ok((CodexAuthSource::File(path), auth));
     }
 
@@ -891,12 +917,7 @@ async fn refresh_codex_access_token(
         tokens.id_token = Some(id_token);
     }
     auth.tokens = Some(tokens);
-    auth.last_refresh = Some(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs().to_string())
-            .unwrap_or_else(|_| "0".to_string()),
-    );
+    auth.last_refresh = Some(Utc::now().to_rfc3339());
 
     if let Err(e) = persist_codex_auth(auth_source, auth) {
         log::warn!("Codex token refresh succeeded but could not persist auth: {e}");
@@ -3112,5 +3133,44 @@ mod tests {
             Some("rate_limit_reached")
         );
         assert_eq!(snapshot.fetched_at, 1_771_450_000);
+    }
+
+    #[test]
+    fn codex_auth_last_refresh_is_rfc3339() {
+        let mut auth = CodexAuthFile::default();
+        auth.last_refresh = Some(Utc::now().to_rfc3339());
+        let serialized = serde_json::to_string(&auth).expect("serialize");
+        let parsed = serde_json::from_str::<CodexAuthFile>(&serialized).expect("deserialize");
+        let ts = parsed.last_refresh.expect("last_refresh present");
+        assert!(
+            ts.ends_with('Z') || ts.contains('+'),
+            "expected RFC 3339 timestamp ending with Z or offset, got: {}",
+            ts
+        );
+        // Verify it parses as chrono DateTime<Utc> (mirrors Codex AuthDotJson)
+        let dt = chrono::DateTime::parse_from_rfc3339(&ts)
+            .expect("parse as DateTime<Utc>");
+        assert!((dt.timestamp() - Utc::now().timestamp()).abs() <= 2, "timestamp too far from now");
+    }
+
+    #[test]
+    fn codex_auth_normalize_epoch_string_last_refresh() {
+        let mut auth = CodexAuthFile::default();
+        auth.last_refresh = Some("1792949367".to_string());
+        assert!(normalize_codex_auth_last_refresh(&mut auth));
+        let ts = auth.last_refresh.expect("normalized");
+        assert!(!ts.chars().all(|c| c.is_ascii_digit()), "must not be pure digits: {}", ts);
+        assert!(ts.contains('T'), "must contain date-time separator: {}", ts);
+        // Must parse as RFC 3339
+        let dt = chrono::DateTime::parse_from_rfc3339(&ts).expect("parse normalized");
+        assert_eq!(dt.timestamp(), 1792949367);
+    }
+
+    #[test]
+    fn codex_auth_normalize_already_rfc3339_is_no_op() {
+        let mut auth = CodexAuthFile::default();
+        auth.last_refresh = Some("2026-10-25T17:29:27Z".to_string());
+        assert!(!normalize_codex_auth_last_refresh(&mut auth));
+        assert_eq!(auth.last_refresh.as_ref().unwrap(), "2026-10-25T17:29:27Z");
     }
 }
