@@ -60,13 +60,7 @@ function agent(overrides: Partial<AgentSummary>): AgentSummary {
 }
 
 describe('agentStatusLabel', () => {
-  it('puts approvals before other states', () => {
-    expect(
-      agentStatusLabel(agent({ status: 'working', pendingApprovals: 2 }))
-    ).toBe('Needs approval (2)')
-  })
-
-  it('shows work, waiting, budget and followed sessions', () => {
+  it('shows work, waiting and budget', () => {
     expect(agentStatusLabel(agent({ status: 'working' }))).toBe('Working')
     expect(
       agentStatusLabel(agent({ status: 'working', runningTasks: 2 }))
@@ -80,13 +74,9 @@ describe('agentStatusLabel', () => {
     expect(agentStatusLabel(agent({ budgetReached: true }))).toBe(
       'Hourly limit reached'
     )
-    expect(agentStatusLabel(agent({ activeDelegations: 1 }))).toBe(
-      'Following 1 session'
-    )
-    expect(agentStatusLabel(agent({ activeDelegations: 3 }))).toBe(
-      'Following 3 sessions'
-    )
-    expect(agentStatusLabel(agent({}))).toBeNull()
+    expect(
+      agentStatusLabel(agent({ pendingApprovals: 2, activeDelegations: 3 }))
+    ).toBeNull()
   })
 })
 

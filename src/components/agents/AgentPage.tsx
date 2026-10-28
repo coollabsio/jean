@@ -46,7 +46,7 @@ import {
   visibleAgentTabs,
   type AgentTab,
 } from './agents'
-import { AgentActivity, PendingApprovals } from './AgentActivity'
+import { AgentActivity } from './AgentActivity'
 import { AgentMemoryView } from './AgentMemoryView'
 import { AgentTasks } from './AgentTasks'
 import { AgentSchedules } from './AgentSchedules'
@@ -151,16 +151,14 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
     { id: 'tasks', label: 'Runs', badge: agent.runningTasks, muted: true },
     { id: 'subagents', label: 'Agent types' },
     { id: 'schedules', label: 'Schedules' },
-    // Pending approvals show as a banner above the chat, not as a badge here
+    // Pending approvals show in the chat, not as a badge here
     { id: 'activity', label: 'Activity' },
     { id: 'memory', label: 'Memory' },
     { id: 'settings', label: 'Settings' },
   ]
   const tabs = allTabs.filter(item => shownTabs.includes(item.id))
   const needsUser =
-    agent.unreadNotifications > 0 ||
-    agent.pendingApprovals > 0 ||
-    agent.status === 'waiting'
+    agent.unreadNotifications > 0 || agent.status === 'waiting'
   const statusLabel = agentStatusLabel(agent)
 
   return (
@@ -212,11 +210,6 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
               <AgentUpdatesButton agent={agent} workdir={workdir} />
             </div>
           </div>
-          {agent.pendingApprovals > 0 && (
-            <div className="pointer-events-auto -mt-3 bg-background">
-              <PendingApprovals agentId={agent.id} />
-            </div>
-          )}
         </div>
         {error ? (
           <div

@@ -85,8 +85,6 @@ export function agentSubtitle(agent: AgentSummary): string {
 
 /** Short status text for an agent row and header; null when idle. */
 export function agentStatusLabel(agent: AgentSummary): string | null {
-  if (agent.pendingApprovals > 0)
-    return `Needs approval (${agent.pendingApprovals})`
   if (agent.unreadNotifications > 0)
     return `${agent.unreadNotifications} new notification${agent.unreadNotifications === 1 ? '' : 's'}`
   if (agent.status === 'working')
@@ -95,8 +93,6 @@ export function agentStatusLabel(agent: AgentSummary): string | null {
       : 'Working'
   if (agent.status === 'waiting') return 'Waiting for you'
   if (agent.budgetReached) return 'Hourly limit reached'
-  if (agent.activeDelegations > 0)
-    return `Following ${agent.activeDelegations} session${agent.activeDelegations === 1 ? '' : 's'}`
   return null
 }
 

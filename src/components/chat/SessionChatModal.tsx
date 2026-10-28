@@ -1188,7 +1188,7 @@ export const SessionChatModal = memo(function SessionChatModal({
                       {gitBadges}
                     </div>
                   ) : (
-                    <div className="hidden shrink-0 items-center @xl/header:flex">
+                    <div className="hidden shrink-0 items-center gap-2 @xl/header:flex">
                       {gitBadges}
                     </div>
                   )}

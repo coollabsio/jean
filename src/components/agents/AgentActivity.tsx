@@ -85,17 +85,20 @@ const DENY = 'Deny'
 
 function useDecide(approval: AgentApproval) {
   const decide = useDecideAgentApproval()
-  const run = (approve: boolean) =>
+  const run = (approve: boolean) => {
+    // Approving runs the tool before the reply comes back (a pull request can take a while)
+    const id = toast.loading(approve ? 'Approved. Running…' : 'Denying…')
     decide.mutate(
       { agentId: approval.agentId, approvalId: approval.id, approve },
       {
         onSuccess: result =>
           result.status === 'failed'
-            ? toast.error(`It failed: ${result.result}`)
-            : toast.success(approve ? 'Approved' : 'Denied'),
-        onError: e => toast.error(`Failed: ${e}`),
+            ? toast.error(`It failed: ${result.result}`, { id })
+            : toast.success(approve ? 'Approved' : 'Denied', { id }),
+        onError: e => toast.error(`Failed: ${e}`, { id }),
       }
     )
+  }
   return { run, isPending: decide.isPending }
 }
 
@@ -204,33 +207,15 @@ function ApprovalQuestion({ approval }: { approval: AgentApproval }) {
       disabled={decide.isPending}
       onSend={answer => decide.run(answer === APPROVE)}
     >
+      {decide.isPending && (
+        <p className="mt-2 text-xs text-muted-foreground">Running…</p>
+      )}
       {approval.status === 'failed' && (
         <p className="mt-2 text-xs text-destructive">
           It failed: {approval.result ?? 'unknown error'}
         </p>
       )}
     </AgentQuestionCard>
-  )
-}
-
-/** Pending approvals above the agent chat. */
-export function PendingApprovals({ agentId }: { agentId: string }) {
-  const { data } = useAgentDetails(agentId)
-  const pending = data?.approvals.filter(a => a.status === 'pending') ?? []
-  if (pending.length === 0) return null
-  return (
-    <div className="shrink-0 border-b bg-warning/5 px-4 py-3">
-      <div className="mx-auto flex max-w-3xl flex-col gap-2">
-        <p className="text-xs font-medium text-warning">
-          The agent waits for your approval
-        </p>
-        <AgentList className="bg-background">
-          {pending.map(approval => (
-            <ApprovalRow key={approval.id} approval={approval} />
-          ))}
-        </AgentList>
-      </div>
-    </div>
   )
 }
 
