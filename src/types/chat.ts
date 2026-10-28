@@ -627,8 +627,8 @@ export interface CompactedEvent {
 }
 
 /**
- * Event payload for chat:backend_retry: the backend waits before resending a
- * turn that hit a provider rate limit.
+ * Event payload for chat:backend_retry: the backend waits `delay_ms` before it
+ * retries a failed provider request (rate limit, overload).
  */
 export interface BackendRetryEvent {
   session_id: string
@@ -636,7 +636,6 @@ export interface BackendRetryEvent {
   backend: string
   /** 1-based retry number */
   attempt: number
-  max_attempts: number
   delay_ms: number
   reason: string
 }

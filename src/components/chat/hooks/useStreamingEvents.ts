@@ -179,15 +179,15 @@ export const backendRetryToastId = (sessionId: string) =>
   `backend-retry-${sessionId}`
 
 export function formatBackendRetryToast(
-  event: Pick<BackendRetryEvent, 'attempt' | 'max_attempts' | 'delay_ms'>,
+  event: Pick<BackendRetryEvent, 'attempt' | 'delay_ms'>,
   label: string
 ): string {
   const seconds = Math.max(1, Math.round(event.delay_ms / 1000))
   const wait = seconds < 60 ? `${seconds}s` : `${Math.round(seconds / 60)} min`
-  const retry = `retry ${event.attempt}/${event.max_attempts} in ${wait}`
+  const retry = `retry ${event.attempt} in ${wait}`
   return label
-    ? `Provider rate limited: ${label}, ${retry}`
-    : `Provider rate limited, ${retry}`
+    ? `Provider request failed: ${label}, ${retry}`
+    : `Provider request failed, ${retry}`
 }
 
 /**
@@ -2568,8 +2568,8 @@ export default function useStreamingEvents({
       })
     })
 
-    // A rate-limit backoff can last minutes with no output; without this the
-    // run looks hung. One toast id per session so each retry replaces the last.
+    // A provider backoff (rate limit, overload) can last minutes with no
+    // output; without this the run looks hung. One toast id per session so each retry replaces the last.
     // It stays for the whole backoff and closes when the run ends.
     const unlistenBackendRetry = listen<BackendRetryEvent>(
       'chat:backend_retry',

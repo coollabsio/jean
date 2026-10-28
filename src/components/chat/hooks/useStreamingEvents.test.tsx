@@ -2838,18 +2838,19 @@ describe('useStreamingEvents backend retry', () => {
   })
 
   it('formats the retry number and the wait', () => {
+    expect(formatBackendRetryToast({ attempt: 2, delay_ms: 30_000 }, '')).toBe(
+      'Provider request failed, retry 2 in 30s'
+    )
     expect(
       formatBackendRetryToast(
-        { attempt: 2, max_attempts: 8, delay_ms: 30_000 },
-        ''
-      )
-    ).toBe('Provider rate limited, retry 2/8 in 30s')
-    expect(
-      formatBackendRetryToast(
-        { attempt: 5, max_attempts: 8, delay_ms: 300_000 },
+        { attempt: 5, delay_ms: 300_000 },
         'proj / wt / chat'
       )
-    ).toBe('Provider rate limited: proj / wt / chat, retry 5/8 in 5 min')
+    ).toBe('Provider request failed: proj / wt / chat, retry 5 in 5 min')
+    // `next` already passed: OpenCode retries now.
+    expect(formatBackendRetryToast({ attempt: 1, delay_ms: 0 }, '')).toBe(
+      'Provider request failed, retry 1 in 1s'
+    )
   })
 
   it('shows one replaceable toast per session for each retry', async () => {
@@ -2868,14 +2869,13 @@ describe('useStreamingEvents backend retry', () => {
         worktree_id: 'worktree-1',
         backend: 'opencode',
         attempt: 1,
-        max_attempts: 8,
         delay_ms: 7_000,
         reason: 'Rate limit exceeded',
       },
     })
 
     expect(info).toHaveBeenCalledWith(
-      'Provider rate limited, retry 1/8 in 7s',
+      'Provider request failed, retry 1 in 7s',
       {
         id: 'backend-retry-session-1',
         description: 'Rate limit exceeded',
