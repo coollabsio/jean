@@ -1144,7 +1144,7 @@ export const SessionChatModal = memo(function SessionChatModal({
                     isMobile && 'flex-1'
                   )}
                 >
-                  {/* Mobile: menu sits right after the title; the title keeps priority and git badges hide when they do not fit */}
+                  {/* Menu sits right after the title; git badges follow it. On mobile the title keeps priority and git badges hide when they do not fit */}
                   <div
                     className={cn(
                       isMobile ? 'flex min-w-0 items-center gap-2' : 'contents'
@@ -1176,7 +1176,7 @@ export const SessionChatModal = memo(function SessionChatModal({
                           ? 'Base Session'
                           : (worktree?.name ?? 'Worktree')}
                     </h2>
-                    {isMobile && worktreeMenu}
+                    {worktreeMenu}
                   </div>
                   {isMobile ? (
                     // Mobile: badges wrap onto a clipped second line when they
@@ -1191,7 +1191,6 @@ export const SessionChatModal = memo(function SessionChatModal({
                       {gitBadges}
                     </div>
                   )}
-                  {!isMobile && worktreeMenu}
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
                   {isMobile && (
