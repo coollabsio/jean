@@ -138,9 +138,6 @@ export function ProjectsSidebar() {
   const [connectionsOpen, setConnectionsOpen] = useState(false)
   const activeTab = useProjectsStore(state => state.sidebarActiveTab)
   const searchQuery = useProjectsStore(state => state.sidebarSearchQuery)
-  const [footerActionsEl, setFooterActionsEl] = useState<HTMLDivElement | null>(
-    null
-  )
   const serverSnapshots = useServerConnectionSnapshots()
   const serverIds = useMemo(
     () => [...new Set(projects.map(projectServerId))],
@@ -407,19 +404,9 @@ export function ProjectsSidebar() {
             <RecentWorktreesList
               projects={visibleProjects}
               searchQuery={searchQuery}
-              footerActionsContainer={footerActionsEl}
             />
           </div>
         )}
-      </div>
-      {/* Glassy footer floats over the list (only when it has buttons); only its buttons take clicks */}
-      <div
-        className={`pointer-events-none absolute inset-x-0 bottom-0 z-20 flex items-center justify-between has-[button]:bg-sidebar/30 has-[button]:backdrop-blur-sm ${showServerMenu ? 'px-2 py-0.5' : 'px-2 pt-0.5 pb-[max(0.125rem,env(safe-area-inset-bottom))]'}`}
-      >
-        <div
-          ref={setFooterActionsEl}
-          className="flex min-w-0 flex-1 justify-center [&>*]:pointer-events-auto"
-        />
       </div>
     </div>
   )

@@ -1081,12 +1081,11 @@ export function GitDiffModal({
         <Kbd className="hidden sm:inline-flex">
           {DIFF_TYPE_SHORTCUTS[segment.value]}
         </Kbd>
-        {activeDiffType === segment.value &&
-          (segment.value === 'uncommitted'
-            ? diffStats(uncommittedAdded, uncommittedRemoved)
-            : segment.value === 'branch'
-              ? diffStats(branchAdded, branchRemoved)
-              : null)}
+        {segment.value === 'uncommitted'
+          ? diffStats(uncommittedAdded, uncommittedRemoved)
+          : segment.value === 'branch'
+            ? diffStats(branchAdded, branchRemoved)
+            : null}
       </>
     ),
   }))

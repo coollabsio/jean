@@ -231,6 +231,69 @@ describe('hydrateRunningSnapshot', () => {
     ).toEqual(['tool-1', 'tool-2', 'tool-3'])
   })
 
+  it('shows a steered prompt once when live and snapshot place it differently', () => {
+    // Claude host steers render when accepted, but the run log records them
+    // when the CLI consumes them (after later tool calls).
+    useChatStore.setState({
+      streamingContentBlocks: {
+        'session-1': [
+          { type: 'tool_use', tool_call_id: 'tool-1' },
+          { type: 'user_input', text: 'also remove the indicators' },
+          { type: 'tool_use', tool_call_id: 'tool-2' },
+          { type: 'user_input', text: 'not consumed yet' },
+        ],
+      },
+    })
+
+    const snapshot = assistantMessage({
+      content_blocks: [
+        { type: 'tool_use', tool_call_id: 'tool-1' },
+        { type: 'tool_use', tool_call_id: 'tool-2' },
+        { type: 'user_input', text: 'also remove the indicators' },
+        { type: 'tool_use', tool_call_id: 'tool-3' },
+      ],
+    })
+    // Every session open hydrates again.
+    hydrateRunningSnapshot('session-1', snapshot)
+    hydrateRunningSnapshot('session-1', snapshot)
+
+    expect(useChatStore.getState().streamingContentBlocks['session-1']).toEqual(
+      [
+        ...(snapshot.content_blocks ?? []),
+        { type: 'user_input', text: 'not consumed yet' },
+      ]
+    )
+  })
+
+  it('keeps a snapshot steer when live blocks extend past it', () => {
+    useChatStore.setState({
+      streamingContentBlocks: {
+        'session-1': [
+          { type: 'tool_use', tool_call_id: 'tool-1' },
+          { type: 'tool_use', tool_call_id: 'tool-2' },
+        ],
+      },
+    })
+
+    hydrateRunningSnapshot(
+      'session-1',
+      assistantMessage({
+        content_blocks: [
+          { type: 'tool_use', tool_call_id: 'tool-1' },
+          { type: 'user_input', text: 'steer' },
+        ],
+      })
+    )
+
+    expect(useChatStore.getState().streamingContentBlocks['session-1']).toEqual(
+      [
+        { type: 'tool_use', tool_call_id: 'tool-1' },
+        { type: 'user_input', text: 'steer' },
+        { type: 'tool_use', tool_call_id: 'tool-2' },
+      ]
+    )
+  })
+
   it('does not append an older live prefix to a newer snapshot', () => {
     useChatStore.setState({
       sendingSessionIds: { 'session-1': true },

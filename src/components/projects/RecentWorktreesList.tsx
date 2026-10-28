@@ -6,7 +6,6 @@ import {
   useRef,
   useState,
 } from 'react'
-import { createPortal } from 'react-dom'
 import {
   keepPreviousData,
   useQuery,
@@ -15,6 +14,7 @@ import {
 import {
   AlertTriangle,
   BellDot,
+  ChevronRight,
   Plus,
   Server,
   Thumbtack,
@@ -43,7 +43,6 @@ import {
   setRecentSessionPinned,
   useRecentSessionPins,
 } from '@/services/recent-session-pins'
-import { fetchWorktreesStatus } from '@/services/git-status'
 import type { WorktreeSessions } from '@/types/chat'
 import type { Project, RecentWorktreeItem } from '@/types/projects'
 import { isUnreadSession } from '@/components/unread/unread-utils'
@@ -58,8 +57,6 @@ interface RecentWorktreesListProps {
   projects: Project[]
   /** Filters the loaded rows by session, project or worktree name. */
   searchQuery?: string
-  /** Sidebar footer slot for the "Show more" actions (next to Settings). */
-  footerActionsContainer?: HTMLElement | null
 }
 
 export function formatRecentActivity(
@@ -121,7 +118,6 @@ export function sortRecentRows(
 export function RecentWorktreesList({
   projects,
   searchQuery = '',
-  footerActionsContainer,
 }: RecentWorktreesListProps) {
   const isMobile = useIsMobile()
   const queryClient = useQueryClient()
@@ -141,6 +137,7 @@ export function RecentWorktreesList({
   const pinnedSessionIds = useRecentSessionPins(projects)
   const [limit, setLimit] = useState(INITIAL_RECENT_LIMIT)
   const [showSnoozed, setShowSnoozed] = useState(false)
+  const [workingExpanded, setWorkingExpanded] = useState(true)
   const shortcutsEnabled = isNativeApp() && !isMobile
   const showShortcutHints = useModifierHintsVisible(
     isModOnlyHeld,
@@ -176,7 +173,9 @@ export function RecentWorktreesList({
     .slice(0, limit)
     .some(row => isSnoozedSession(row.lastActivityAt))
   const pinned = useMemo(() => new Set(pinnedSessionIds), [pinnedSessionIds])
-  const displayedRows = useMemo(() => {
+  // Unpinned running sessions move to their own Working shelf, and snoozed
+  // sessions go below it. Pinned sessions stay in the pinned group.
+  const { listRows, workingRows, snoozedRows } = useMemo(() => {
     const visibleRows = rows.filter(
       row =>
         (showSnoozed ||
@@ -189,15 +188,24 @@ export function RecentWorktreesList({
           row.worktree.name
         )
     )
-    return sortRecentRows(
-      visibleRows,
-      pinned,
-      row =>
-        getRecentSessionStatus(row.session, {
-          sending: sendingSessionIds[row.session.id] ?? false,
-          waiting: waitingForInputSessionIds[row.session.id] ?? false,
-        }).tone === 'working'
-    )
+    const isRunning = (row: RecentWorktreeItem) =>
+      getRecentSessionStatus(row.session, {
+        sending: sendingSessionIds[row.session.id] ?? false,
+        waiting: waitingForInputSessionIds[row.session.id] ?? false,
+      }).tone === 'working'
+    const groups = {
+      listRows: [] as RecentWorktreeItem[],
+      workingRows: [] as RecentWorktreeItem[],
+      snoozedRows: [] as RecentWorktreeItem[],
+    }
+    for (const row of sortRecentRows(visibleRows, pinned, isRunning)) {
+      const isPinned = pinned.has(row.session.id)
+      if (!isPinned && isRunning(row)) groups.workingRows.push(row)
+      else if (!isPinned && isSnoozedSession(row.lastActivityAt))
+        groups.snoozedRows.push(row)
+      else groups.listRows.push(row)
+    }
+    return groups
   }, [
     pinned,
     rows,
@@ -206,6 +214,19 @@ export function RecentWorktreesList({
     sendingSessionIds,
     waitingForInputSessionIds,
   ])
+  // A collapsed shelf still shows the open session, like t3code.
+  const visibleWorkingRows = useMemo(
+    () =>
+      workingExpanded
+        ? workingRows
+        : workingRows.filter(row => row.session.id === selectedSessionId),
+    [selectedSessionId, workingExpanded, workingRows]
+  )
+  // Visual order, used by Cmd+Arrow navigation and Cmd+1-9 shortcuts.
+  const displayedRows = useMemo(
+    () => [...listRows, ...visibleWorkingRows, ...snoozedRows],
+    [listRows, visibleWorkingRows, snoozedRows]
+  )
   const serverProjectIds = useMemo(
     () =>
       new Set(
@@ -213,22 +234,6 @@ export function RecentWorktreesList({
       ),
     [projects]
   )
-  const recentProjectKey = useMemo(
-    () => [...new Set(rows.map(row => row.projectId))].sort().join('\0'),
-    [rows]
-  )
-
-  useEffect(() => {
-    if (!recentProjectKey) return
-    void Promise.allSettled(
-      recentProjectKey
-        .split('\0')
-        .map(projectId =>
-          fetchWorktreesStatus(projectId).catch(() => undefined)
-        )
-    )
-  }, [recentProjectKey])
-
   const handleOpen = useCallback(
     (row: RecentWorktreeItem) => {
       const worktreeId = row.worktree.id
@@ -393,13 +398,144 @@ export function RecentWorktreesList({
       )}
     </>
   )
+  const hasFooterActions =
+    hiddenCount > 0 || (snoozedBoundaryLoaded && !showSnoozed)
+  const renderRow = (
+    row: RecentWorktreeItem,
+    index: number,
+    previous?: RecentWorktreeItem
+  ) => {
+    const isCurrent = row.session.id === selectedSessionId
+    const activity = formatRecentActivity(row.lastActivityAt)
+    const activityLabel =
+      activity === 'now' ? 'active now' : `active ${activity} ago`
+    const status = getRecentSessionStatus(row.session, {
+      sending: sendingSessionIds[row.session.id] ?? false,
+      waiting: waitingForInputSessionIds[row.session.id] ?? false,
+    })
+    const statusClassName =
+      status.tone === 'waiting'
+        ? 'text-warning'
+        : status.tone === 'failed'
+          ? 'text-destructive'
+          : 'text-muted-foreground'
+    const isWorking = status.tone === 'working'
+    const isUnread = isUnreadSession(row.session)
+    const isPinned = pinned.has(row.session.id)
+    const isServer = serverProjectIds.has(row.projectId)
+    const showPinnedSeparator =
+      !isPinned && !!previous && pinned.has(previous.session.id)
+    return (
+      <li key={row.session.id} className="group">
+        {showPinnedSeparator && (
+          <div
+            role="separator"
+            aria-hidden="true"
+            className="mx-1 mb-2 border-t border-border/20"
+          />
+        )}
+        <div
+          className={`relative flex w-full cursor-pointer flex-col gap-y-1 rounded-lg py-2.5 pl-3 pr-3 text-left transition-[background-color,box-shadow,color] hover:bg-muted/30 hover:text-foreground has-[:focus-visible]:ring-1 has-[:focus-visible]:ring-ring ${isCurrent ? 'bg-muted/50 text-foreground shadow' : 'bg-transparent text-muted-foreground'}`}
+          onClick={() => handleOpen(row)}
+        >
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label={isPinned ? 'Unpin session' : 'Pin session'}
+                className={`absolute -left-1.5 -top-1.5 z-10 flex size-5 items-center justify-center transition-opacity hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring md:opacity-0 md:focus-visible:opacity-100 md:group-hover:opacity-100 md:group-focus-within:opacity-100 ${isPinned ? 'text-foreground' : 'text-muted-foreground'}`}
+                onClick={event => {
+                  event.stopPropagation()
+                  void setRecentSessionPinned(
+                    queryClient,
+                    row.session.id,
+                    !isPinned
+                  )
+                }}
+              >
+                <Thumbtack size={11} weight={isPinned ? 'Filled' : 'Outline'} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {isPinned ? 'Unpin session' : 'Pin session'}
+            </TooltipContent>
+          </Tooltip>
+          <button
+            ref={element => {
+              if (element) rowRefs.current.set(row.session.id, element)
+              else rowRefs.current.delete(row.session.id)
+            }}
+            type="button"
+            aria-current={isCurrent ? 'page' : undefined}
+            aria-label={`${row.session.name}, ${isServer ? 'server ' : ''}${row.projectName}, ${row.worktree.name}, ${status.label}${isUnread ? ', unread' : ''}, ${activityLabel}`}
+            className="flex w-full flex-col gap-y-1 text-left focus-visible:outline-none"
+          >
+            <span className="flex items-center gap-2">
+              <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
+                {namingSessionIds[row.session.id]
+                  ? 'Generating…'
+                  : row.session.name}
+              </span>
+              <span className="flex shrink-0 items-center justify-end gap-1.5 text-2xs empty:hidden">
+                {isUnread && (
+                  <BellDot
+                    aria-label="Unread session"
+                    className="size-3.5 shrink-0 text-warning"
+                  />
+                )}
+                {isWorking ? (
+                  <WorkingWaveform />
+                ) : (
+                  status.tone !== 'completed' && (
+                    <span className={`font-medium ${statusClassName}`}>
+                      {status.label}
+                    </span>
+                  )
+                )}
+              </span>
+            </span>
+            <span className="flex items-center gap-2">
+              <span className="flex min-w-0 flex-1 items-center gap-1.5 text-2xs">
+                {isServer && (
+                  <span
+                    aria-hidden="true"
+                    className="flex shrink-0 items-center gap-0.5 rounded bg-muted px-1 py-px text-2xs font-medium text-muted-foreground"
+                  >
+                    <Server className="size-2.5" />
+                    Server
+                  </span>
+                )}
+                <span className="min-w-0 truncate">
+                  {row.projectName} · {row.worktree.name}
+                </span>
+              </span>
+              <span className="flex shrink-0 items-center justify-end text-2xs tabular-nums">
+                {showShortcutHints && index < MAX_RECENT_SHORTCUTS ? (
+                  <Kbd className="h-4 px-1 text-2xs">
+                    {formatShortcutDisplay(`mod+${index + 1}`)}
+                  </Kbd>
+                ) : (
+                  <time
+                    dateTime={new Date(row.lastActivityAt * 1000).toISOString()}
+                  >
+                    {activity}
+                  </time>
+                )}
+              </span>
+            </span>
+          </button>
+        </div>
+      </li>
+    )
+  }
+  const listClassName = '@container flex flex-col gap-2 px-2'
 
   return (
     <div
       className="flex h-full min-h-0 flex-1 flex-col overflow-hidden"
       data-testid="recent-worktrees-list"
     >
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         {displayedRows.length === 0 && (
           <div className="px-3 py-6 text-center text-xs text-muted-foreground">
             {searchQuery.trim() ? 'No matching sessions' : 'No recent sessions'}
@@ -407,184 +543,74 @@ export function RecentWorktreesList({
         )}
         <ul
           aria-label="Recent sessions"
-          className={`@container flex flex-col gap-2 px-2 pt-2 ${footerActionsContainer ? 'pb-8' : 'pb-2'}`}
+          className={`${listClassName} pt-2 pb-2`}
         >
-          {displayedRows.map((row, index) => {
-            const isCurrent = row.session.id === selectedSessionId
-            const activity = formatRecentActivity(row.lastActivityAt)
-            const activityLabel =
-              activity === 'now' ? 'active now' : `active ${activity} ago`
-            const status = getRecentSessionStatus(row.session, {
-              sending: sendingSessionIds[row.session.id] ?? false,
-              waiting: waitingForInputSessionIds[row.session.id] ?? false,
-            })
-            const statusClassName =
-              status.tone === 'waiting'
-                ? 'text-warning'
-                : status.tone === 'failed'
-                  ? 'text-destructive'
-                  : 'text-muted-foreground'
-            const isWorking = status.tone === 'working'
-            const isUnread = isUnreadSession(row.session)
-            const isPinned = pinned.has(row.session.id)
-            const isServer = serverProjectIds.has(row.projectId)
-            const showPinnedSeparator =
-              !isPinned &&
-              index > 0 &&
-              pinned.has(displayedRows[index - 1]?.session.id ?? '')
-            return (
-              <li key={row.session.id} className="group">
-                {showPinnedSeparator && (
-                  <div
-                    role="separator"
-                    aria-hidden="true"
-                    className="mx-1 mb-2 border-t border-border/20"
-                  />
-                )}
-                {showSnoozed &&
-                  !isPinned &&
-                  isSnoozedSession(row.lastActivityAt) &&
-                  (index === 0 ||
-                    pinned.has(displayedRows[index - 1]?.session.id ?? '') ||
-                    !isSnoozedSession(
-                      displayedRows[index - 1]?.lastActivityAt ?? 0
-                    )) && (
-                    <div className="px-1 py-1 text-2xs font-medium text-muted-foreground">
-                      Snoozed · inactive for 24 hours
-                    </div>
-                  )}
-                <div
-                  className={`relative flex w-full cursor-pointer flex-col gap-y-1 rounded-lg py-2.5 pl-3 pr-3 text-left transition-[background-color,box-shadow,color] hover:bg-muted/30 hover:text-foreground has-[:focus-visible]:ring-1 has-[:focus-visible]:ring-ring ${isCurrent ? 'bg-muted/50 text-foreground shadow' : 'bg-transparent text-muted-foreground'}`}
-                  onClick={() => handleOpen(row)}
-                >
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        aria-label={isPinned ? 'Unpin session' : 'Pin session'}
-                        className={`absolute -left-1.5 -top-1.5 z-10 flex size-5 items-center justify-center transition-opacity hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring md:opacity-0 md:focus-visible:opacity-100 md:group-hover:opacity-100 md:group-focus-within:opacity-100 ${isPinned ? 'text-foreground' : 'text-muted-foreground'}`}
-                        onClick={event => {
-                          event.stopPropagation()
-                          void setRecentSessionPinned(
-                            queryClient,
-                            row.session.id,
-                            !isPinned
-                          )
-                        }}
-                      >
-                        <Thumbtack
-                          size={11}
-                          weight={isPinned ? 'Filled' : 'Outline'}
-                        />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {isPinned ? 'Unpin session' : 'Pin session'}
-                    </TooltipContent>
-                  </Tooltip>
-                  <button
-                    ref={element => {
-                      if (element) rowRefs.current.set(row.session.id, element)
-                      else rowRefs.current.delete(row.session.id)
-                    }}
-                    type="button"
-                    aria-current={isCurrent ? 'page' : undefined}
-                    aria-label={`${row.session.name}, ${isServer ? 'server ' : ''}${row.projectName}, ${row.worktree.name}, ${status.label}${isUnread ? ', unread' : ''}, ${activityLabel}`}
-                    className="flex w-full flex-col gap-y-1 text-left focus-visible:outline-none"
-                  >
-                    <span className="flex items-center gap-2">
-                      <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
-                        {namingSessionIds[row.session.id]
-                          ? 'Generating…'
-                          : row.session.name}
-                      </span>
-                      <span className="flex shrink-0 items-center justify-end gap-1.5 text-2xs empty:hidden">
-                        {isUnread && (
-                          <BellDot
-                            aria-label="Unread session"
-                            className="size-3.5 shrink-0 text-warning"
-                          />
-                        )}
-                        {isWorking ? (
-                          <WorkingWaveform />
-                        ) : (
-                          status.tone !== 'completed' && (
-                            <span className={`font-medium ${statusClassName}`}>
-                              {status.label}
-                            </span>
-                          )
-                        )}
-                      </span>
-                    </span>
-                    <span className="flex items-center gap-2">
-                      <span className="flex min-w-0 flex-1 items-center gap-1.5 text-2xs">
-                        {isServer && (
-                          <span
-                            aria-hidden="true"
-                            className="flex shrink-0 items-center gap-0.5 rounded bg-muted px-1 py-px text-2xs font-medium text-muted-foreground"
-                          >
-                            <Server className="size-2.5" />
-                            Server
-                          </span>
-                        )}
-                        <span className="min-w-0 truncate">
-                          {row.projectName} · {row.worktree.name}
-                        </span>
-                      </span>
-                      <span className="flex shrink-0 items-center justify-end gap-2 text-2xs tabular-nums">
-                        {(row.added > 0 || row.removed > 0) && (
-                          <span className="hidden gap-1 font-medium @[15rem]:flex">
-                            <span className="text-success">+{row.added}</span>
-                            <span className="text-destructive">
-                              -{row.removed}
-                            </span>
-                          </span>
-                        )}
-                        {showShortcutHints && index < MAX_RECENT_SHORTCUTS ? (
-                          <Kbd className="h-4 px-1 text-2xs">
-                            {formatShortcutDisplay(`mod+${index + 1}`)}
-                          </Kbd>
-                        ) : (
-                          <time
-                            dateTime={new Date(
-                              row.lastActivityAt * 1000
-                            ).toISOString()}
-                          >
-                            {activity}
-                          </time>
-                        )}
-                      </span>
-                    </span>
-                  </button>
-                </div>
-              </li>
-            )
-          })}
+          {listRows.map((row, index) =>
+            renderRow(row, index, listRows[index - 1])
+          )}
         </ul>
-      </div>
-      {footerActionsContainer &&
-        createPortal(footerActions, footerActionsContainer)}
-      {(failedCount > 0 ||
-        (!footerActionsContainer &&
-          (hiddenCount > 0 || (snoozedBoundaryLoaded && !showSnoozed)))) && (
-        <div className="shrink-0 border-t border-border/20 p-2">
-          {!footerActionsContainer && footerActions}
-          {failedCount > 0 && (
-            <div
-              role="status"
-              className="flex items-center justify-center gap-1 text-2xs text-warning"
-            >
-              <AlertTriangle className="size-3" /> Some recent sessions could
-              not load.{' '}
+        {/* Shelves and paging actions sit at the bottom of a short list and
+            scroll with a long one. */}
+        <div className="mt-auto pb-[env(safe-area-inset-bottom)]">
+          {workingRows.length > 0 && (
+            <section aria-label="Working sessions" className="pb-2">
               <button
                 type="button"
-                className="underline"
-                onClick={() => void query.refetch()}
+                aria-expanded={workingExpanded}
+                className="flex h-8 w-full items-center gap-1 px-3 text-2xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                onClick={() => setWorkingExpanded(value => !value)}
               >
-                Retry
+                <ChevronRight
+                  className={`size-3 transition-transform ${workingExpanded ? 'rotate-90' : ''}`}
+                />
+                Working
+                <span className="ml-auto font-normal tabular-nums">
+                  {workingRows.length}
+                </span>
               </button>
-            </div>
+              <ul className={listClassName}>
+                {visibleWorkingRows.map((row, index) =>
+                  renderRow(row, listRows.length + index)
+                )}
+              </ul>
+            </section>
           )}
+          {snoozedRows.length > 0 && (
+            <section aria-label="Snoozed sessions" className="pb-2">
+              <div className="px-3 py-1 text-2xs font-medium text-muted-foreground">
+                Snoozed · inactive for 24 hours
+              </div>
+              <ul className={listClassName}>
+                {snoozedRows.map((row, index) =>
+                  renderRow(
+                    row,
+                    listRows.length + visibleWorkingRows.length + index
+                  )
+                )}
+              </ul>
+            </section>
+          )}
+          {hasFooterActions && (
+            <div className="flex justify-center px-2 pb-2">{footerActions}</div>
+          )}
+        </div>
+      </div>
+      {failedCount > 0 && (
+        <div className="shrink-0 border-t border-border/20 p-2">
+          <div
+            role="status"
+            className="flex items-center justify-center gap-1 text-2xs text-warning"
+          >
+            <AlertTriangle className="size-3" /> Some recent sessions could not
+            load.{' '}
+            <button
+              type="button"
+              className="underline"
+              onClick={() => void query.refetch()}
+            >
+              Retry
+            </button>
+          </div>
         </div>
       )}
     </div>

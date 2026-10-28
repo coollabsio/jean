@@ -10,8 +10,8 @@ describe('ProjectsSidebar server filter', () => {
 
     expect(source).toContain('<ServersList')
     expect(source).toContain('<RecentWorktreesList')
-    expect(source).toContain('footerActionsContainer={footerActionsEl}')
-    expect(source).toContain('ref={setFooterActionsEl}')
+    // Recent paging actions scroll with the list, not in a fixed footer.
+    expect(source).not.toContain('footerActionsContainer')
     expect(source).toContain('state => state.sidebarActiveTab')
     expect(source).toContain('Add server')
     expect(source).not.toContain("activeTab === 'servers'")
@@ -95,14 +95,12 @@ describe('ProjectsSidebar server filter', () => {
     expect(source).not.toContain('sectionIndex > 0')
   })
 
-  it('adds bottom safe-area spacing to the footer in web access', () => {
+  it('adds bottom safe-area spacing below the Recent list actions', () => {
     const source = readFileSync(
-      'src/components/projects/ProjectsSidebar.tsx',
+      'src/components/projects/RecentWorktreesList.tsx',
       'utf8'
     )
 
-    expect(source).toContain(
-      "showServerMenu ? 'px-2 py-0.5' : 'px-2 pt-0.5 pb-[max(0.125rem,env(safe-area-inset-bottom))]'"
-    )
+    expect(source).toContain('mt-auto pb-[env(safe-area-inset-bottom)]')
   })
 })

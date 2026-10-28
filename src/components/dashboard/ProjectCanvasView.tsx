@@ -1695,6 +1695,14 @@ export function ProjectCanvasView({
   // Git diff modal (CMD+G on canvas)
   const [canvasDiffRequest, setCanvasDiffRequest] =
     useState<DiffRequest | null>(null)
+  const canvasDiffWorktree = canvasDiffRequest
+    ? worktreeSections.find(
+        s => s.worktree.id === canvasDiffRequest.worktreeId
+      )?.worktree
+    : undefined
+  const { data: canvasDiffGitStatus } = useGitStatus(
+    canvasDiffRequest?.worktreeId ?? null
+  )
 
   // Sync canvas-level git diff modal open state to UI store (blocks execute_run keybinding)
   useEffect(() => {
@@ -3706,6 +3714,26 @@ export function ProjectCanvasView({
         <GitDiffModal
           diffRequest={canvasDiffRequest}
           onClose={() => setCanvasDiffRequest(null)}
+          uncommittedStats={{
+            added:
+              canvasDiffGitStatus?.uncommitted_added ??
+              canvasDiffWorktree?.cached_uncommitted_added ??
+              0,
+            removed:
+              canvasDiffGitStatus?.uncommitted_removed ??
+              canvasDiffWorktree?.cached_uncommitted_removed ??
+              0,
+          }}
+          branchStats={{
+            added:
+              canvasDiffGitStatus?.branch_diff_added ??
+              canvasDiffWorktree?.cached_branch_diff_added ??
+              0,
+            removed:
+              canvasDiffGitStatus?.branch_diff_removed ??
+              canvasDiffWorktree?.cached_branch_diff_removed ??
+              0,
+          }}
         />
       </Suspense>
 

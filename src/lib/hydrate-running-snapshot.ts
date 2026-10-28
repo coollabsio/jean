@@ -54,20 +54,51 @@ function blocksSharePrefix(
 
 function mergeSnapshotBlocks(
   snapshot: ContentBlock[],
-  live: ContentBlock[]
+  liveWithSteers: ContentBlock[]
 ): ContentBlock[] {
+  // Steered prompts can sit at a different place live than in the snapshot
+  // (Claude shows a steer when the host accepts it, the run log records it
+  // when the CLI consumes it). Compare both sides without steers so the order
+  // difference does not break the merge. The snapshot keeps its steers; live
+  // steers the snapshot does not have yet go at the end.
+  const snapshotSteers = snapshot.flatMap(block =>
+    block.type === 'user_input' ? [block.text] : []
+  )
+  const pendingSteers: ContentBlock[] = []
+  const live = liveWithSteers.filter(block => {
+    if (block.type !== 'user_input') return true
+    const index = snapshotSteers.indexOf(block.text)
+    if (index >= 0) snapshotSteers.splice(index, 1)
+    else pendingSteers.push(block)
+    return false
+  })
+  const snapshotCore = snapshot.filter(block => block.type !== 'user_input')
+
   // A refreshed snapshot and the live stream often share their beginning.
   // Keep the longer sequence instead of appending the shorter one twice.
-  if (blocksSharePrefix(snapshot, live)) return snapshot
-  if (blocksSharePrefix(live, snapshot)) return live
+  if (blocksSharePrefix(snapshotCore, live)) {
+    return [...snapshot, ...pendingSteers]
+  }
+  if (blocksSharePrefix(live, snapshotCore)) {
+    // Live extends the snapshot: take the (possibly longer) live version of
+    // the last snapshot block, then the live blocks after it.
+    const lastCore = snapshot.lastIndexOf(snapshotCore.at(-1) as ContentBlock)
+    return [
+      ...snapshot.slice(0, lastCore),
+      ...live.slice(snapshotCore.length - 1, snapshotCore.length),
+      ...snapshot.slice(lastCore + 1),
+      ...live.slice(snapshotCore.length),
+      ...pendingSteers,
+    ]
+  }
 
-  const maxOverlap = Math.min(snapshot.length, live.length)
+  const maxOverlap = Math.min(snapshotCore.length, live.length)
   let overlap = 0
 
   for (let size = maxOverlap; size > 0; size--) {
-    const snapshotStart = snapshot.length - size
+    const snapshotStart = snapshotCore.length - size
     const matches = live.slice(0, size).every((block, index) => {
-      const snapshotBlock = snapshot[snapshotStart + index]
+      const snapshotBlock = snapshotCore[snapshotStart + index]
       return snapshotBlock ? blocksOverlap(snapshotBlock, block) : false
     })
     if (matches) {
@@ -76,7 +107,10 @@ function mergeSnapshotBlocks(
     }
   }
 
-  return coalesceContentBlocks([...snapshot, ...live.slice(overlap)])
+  return [
+    ...coalesceContentBlocks([...snapshot, ...live.slice(overlap)]),
+    ...pendingSteers,
+  ]
 }
 
 function mergeSnapshotToolCalls(
