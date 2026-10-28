@@ -305,6 +305,9 @@ interface ChatUIState {
   // Sessions where the user expanded the Subagents panel (collapsed by default)
   expandedAgentWidgetSessions: Record<string, boolean>
 
+  // Subagent ids the user dismissed from the Subagents panel, per session
+  dismissedAgentWidgetIds: Record<string, string[]>
+
   // Sessions where the user collapsed the Queued prompts panel (expanded by default)
   collapsedQueuedPromptsSessions: Record<string, boolean>
 
@@ -561,6 +564,7 @@ interface ChatUIState {
   setQuestionsSkipped: (sessionId: string, skipped: boolean) => void
   areQuestionsSkipped: (sessionId: string) => boolean
   setAgentWidgetExpanded: (sessionId: string, expanded: boolean) => void
+  dismissAgentWidget: (sessionId: string, agentIds: string[]) => void
   setQueuedPromptsCollapsed: (sessionId: string, collapsed: boolean) => void
 
   // Actions - Error handling (session-based)
@@ -852,6 +856,7 @@ const SESSION_SCOPED_RECORD_KEYS = [
   'savingContext',
   'skippedQuestionSessions',
   'expandedAgentWidgetSessions',
+  'dismissedAgentWidgetIds',
   'collapsedQueuedPromptsSessions',
   'sessionLabels',
   'codexGoals',
@@ -1021,6 +1026,7 @@ export const useChatStore = create<ChatUIState>()(
       savingContext: {},
       skippedQuestionSessions: {},
       expandedAgentWidgetSessions: {},
+      dismissedAgentWidgetIds: {},
       collapsedQueuedPromptsSessions: {},
       worktreeLoadingOperations: {},
       sessionLabels: {},
@@ -2925,6 +2931,24 @@ export const useChatStore = create<ChatUIState>()(
           },
           undefined,
           'setAgentWidgetExpanded'
+        ),
+
+      // Subagents panel dismissal: hide these agents until a new one appears
+      dismissAgentWidget: (sessionId, agentIds) =>
+        set(
+          state => {
+            const existing = state.dismissedAgentWidgetIds[sessionId] ?? []
+            const added = agentIds.filter(id => !existing.includes(id))
+            if (added.length === 0) return state
+            return {
+              dismissedAgentWidgetIds: {
+                ...state.dismissedAgentWidgetIds,
+                [sessionId]: [...existing, ...added],
+              },
+            }
+          },
+          undefined,
+          'dismissAgentWidget'
         ),
 
       // Queued prompts panel collapsed state (session-based, expanded by default)

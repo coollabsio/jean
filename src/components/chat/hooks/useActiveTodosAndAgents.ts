@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { foldTodoWriteToolCalls, isPlanToolCall } from '@/types/chat'
+import { useChatStore } from '@/store/chat-store'
 import type {
   ToolCall,
   ChatMessage,
@@ -492,9 +493,10 @@ export function useActiveTodosAndAgents({
   }, [activeSessionId, isSending, currentToolCalls, lastAssistantMessage])
 
   // Agent ids shown when the panel was dismissed. Agent ids stay the same
-  // from streaming to the persisted message, but message ids do not.
-  const [dismissedAgentKey, setDismissedAgentKey] = useState<string | null>(
-    null
+  // from streaming to the persisted message, but message ids do not. Kept in
+  // the store so a remount does not show the panel again.
+  const dismissedAgentIds = useChatStore(state =>
+    activeSessionId ? state.dismissedAgentWidgetIds[activeSessionId] : undefined
   )
 
   // Finished turns settle here. A new prompt must not replay their persisted
@@ -538,16 +540,22 @@ export function useActiveTodosAndAgents({
     return mergeSubagents(settledAgents.agents, live)
   }, [activeSessionId, isSending, currentToolCalls, settledAgents])
 
-  const agentKey = activeAgents.map(agent => agent.id).join('\n')
-  // New agents change the key, so the panel shows again. Running agents keep it
-  // visible for live status.
+  // A new agent shows the panel again. Running agents keep it visible for live
+  // status. Compare as a set: streaming can reorder the list or drop an agent
+  // for a moment, and that must not undo the dismissal.
   const isAgentWidgetDismissed =
-    dismissedAgentKey === agentKey &&
-    !activeAgents.some(agent => agent.status === 'in_progress')
-  const dismissAgentWidget = useCallback(
-    () => setDismissedAgentKey(agentKey),
-    [agentKey]
-  )
+    !!dismissedAgentIds &&
+    activeAgents.every(
+      agent =>
+        agent.status !== 'in_progress' && dismissedAgentIds.includes(agent.id)
+    )
+  const dismissAgentWidget = useCallback(() => {
+    if (!activeSessionId) return
+    useChatStore.getState().dismissAgentWidget(
+      activeSessionId,
+      activeAgents.map(agent => agent.id)
+    )
+  }, [activeSessionId, activeAgents])
 
   // Auto-clear todo dismissal on new streaming todos
   useEffect(() => {

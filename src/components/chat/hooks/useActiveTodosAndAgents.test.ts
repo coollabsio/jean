@@ -1,5 +1,6 @@
 import { act, renderHook } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { useChatStore } from '@/store/chat-store'
 import {
   codexAgentCodename,
   codexSubagentDetail,
@@ -412,6 +413,40 @@ describe('useActiveTodosAndAgents', () => {
     // The run ended but the snapshot id was not refreshed yet
     rerender({ isSending: false })
     expect(result.current.activeAgents[1]?.status).toBe('completed')
+  })
+
+  beforeEach(() => {
+    useChatStore.setState({ dismissedAgentWidgetIds: {} })
+  })
+
+  it('keeps the panel dismissed while a prompt streams and after a remount', () => {
+    const first = toolCall('Agent', { id: 'task-1' }, 'Report A')
+    const second = toolCall('Agent', { id: 'task-2' }, 'Report B')
+    const done = [first, second]
+    const render = () =>
+      renderHook(
+        props =>
+          useActiveTodosAndAgents({
+            activeSessionId: 'session-1',
+            lastAssistantMessage: undefined,
+            ...props,
+          }),
+        { initialProps: { isSending: true, currentToolCalls: done } }
+      )
+    const { result, rerender, unmount } = render()
+    act(() => result.current.dismissAgentWidget())
+    expect(result.current.isAgentWidgetDismissed).toBe(true)
+
+    // Streaming reorders the list and drops an agent for a moment
+    rerender({ isSending: true, currentToolCalls: [second, first] })
+    expect(result.current.isAgentWidgetDismissed).toBe(true)
+    rerender({ isSending: true, currentToolCalls: [second] })
+    expect(result.current.isAgentWidgetDismissed).toBe(true)
+    rerender({ isSending: true, currentToolCalls: done })
+    expect(result.current.isAgentWidgetDismissed).toBe(true)
+
+    unmount()
+    expect(render().result.current.isAgentWidgetDismissed).toBe(true)
   })
 
   it('keeps the panel dismissed when the finished turn gets a new message id', () => {
