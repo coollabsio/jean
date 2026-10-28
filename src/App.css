@@ -160,8 +160,8 @@
   --sidebar-accent-foreground: #fafafa;
   --sidebar-border: #323232; /* coolgray-500 */
   --sidebar-ring: #fcd452;
-  --toast-background: #2a2a2a; /* distinct from app bg (#101010) and chat input (#181818) */
-  --toast-border: #3a3a3a;
+  --toast-background: #181818; /* one step above the app bg (#101010) */
+  --toast-border: #262626;
 }
 
 /* Wave animation for vibing indicator */
