@@ -56,6 +56,7 @@ export function serverOpenCommand(
         sshHost: server.host,
         sshPort: server.port ?? undefined,
         sshIdentityFile: server.identity_file ?? undefined,
+        sshForwardAgent: server.forward_agent || undefined,
       },
     }
   }

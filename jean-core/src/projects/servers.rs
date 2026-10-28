@@ -612,6 +612,7 @@ mod tests {
             user: user.map(str::to_string),
             port,
             identity_file: None,
+            forward_agent: false,
             jean_connection_id: None,
             local: false,
         }
@@ -637,6 +638,12 @@ mod tests {
             keyed.ssh_command(),
             "ssh -o BatchMode=yes -o IdentitiesOnly=yes -i '/home/me/.ssh/id work' root@10.0.0.5"
         );
+        let mut forwarding = server(Some("deploy"), Some(2222));
+        forwarding.forward_agent = true;
+        assert_eq!(
+            forwarding.ssh_command(),
+            "ssh -o BatchMode=yes -A -p 2222 deploy@10.0.0.5"
+        );
     }
 
     #[test]
@@ -656,6 +663,7 @@ mod tests {
             user: Some("  ".to_string()),
             port: None,
             identity_file: Some(" ".to_string()),
+            forward_agent: false,
             jean_connection_id: Some(" ".to_string()),
             local: false,
         })

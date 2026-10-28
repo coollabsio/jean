@@ -33,6 +33,10 @@ pub struct ProjectServer {
     /// Private key for `ssh -i` (None = ssh config / agent defaults)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity_file: Option<String>,
+    /// Forward the local SSH agent (`ssh -A`), so commands on the host can
+    /// use local keys (for example `git pull` over SSH)
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub forward_agent: bool,
     /// Legacy: set on old copies of Jean remote connections, which the app now
     /// deletes (a jean-server shows its own local entry instead)
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -66,8 +70,9 @@ impl ProjectServer {
             Some(port) if port != 22 => format!(" -p {port}"),
             _ => String::new(),
         };
+        let forward_agent = if self.forward_agent { " -A" } else { "" };
         format!(
-            "ssh -o BatchMode=yes{identity}{port} {}",
+            "ssh -o BatchMode=yes{forward_agent}{identity}{port} {}",
             self.destination()
         )
     }

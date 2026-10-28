@@ -11,6 +11,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { isNativeApp } from '@/lib/environment'
 import { parseOptionalSshPort } from '@/lib/remote-connections'
@@ -107,6 +108,9 @@ function ServerForm({
   ) {
     keyOptions.push({ path: form.identityFile, label: form.identityFile })
   }
+  const [forwardAgent, setForwardAgent] = useState(
+    project?.server?.forward_agent ?? false
+  )
   const [error, setError] = useState<string | null>(null)
 
   const update = (key: keyof typeof form) => (value: string) =>
@@ -132,6 +136,7 @@ function ServerForm({
               user: form.user.trim() || null,
               port: port ?? null,
               identity_file: form.identityFile || null,
+              forward_agent: forwardAgent,
             },
         serverId: form.runFrom,
         systemPrompt: form.systemPrompt,
@@ -258,6 +263,24 @@ function ServerForm({
                   <code>ssh</code>.
                 </>
               )}
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <label
+              htmlFor="server-forward-agent"
+              className="flex items-center gap-2 text-sm"
+            >
+              <Switch
+                id="server-forward-agent"
+                checked={forwardAgent}
+                onCheckedChange={setForwardAgent}
+              />
+              <span>Forward SSH agent</span>
+            </label>
+            <p className="text-xs text-muted-foreground">
+              Commands on the server can use your local SSH keys (for example,{' '}
+              <code>git pull</code>). Only turn on for servers you trust: their
+              admins can use your keys while you are connected.
             </p>
           </div>
         </>
