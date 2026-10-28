@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { Plus, X } from '@/components/icons/reicon'
+import { AgentIcon } from '@/components/icons/JeanAgentIcon'
 import type { badgeVariants } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -173,6 +174,43 @@ export function AgentPanel({
       {...props}
     >
       {children}
+    </div>
+  )
+}
+
+/** Row of agent faces to pick a color. `jean` shows as "default". */
+export function AgentColorPicker({
+  value,
+  choices,
+  disabled,
+  onChange,
+}: {
+  value: string
+  choices: readonly string[]
+  disabled?: boolean
+  onChange: (color: string) => void
+}) {
+  return (
+    <div className="flex gap-2" role="radiogroup" aria-label="Color">
+      {choices.map(color => (
+        <button
+          key={color}
+          type="button"
+          role="radio"
+          aria-checked={value === color}
+          aria-label={color === 'jean' ? 'default' : color}
+          disabled={disabled}
+          className={cn(
+            'rounded-md p-1 transition-colors disabled:opacity-50',
+            value === color
+              ? 'bg-primary/15 ring-1 ring-primary'
+              : 'hover:bg-muted'
+          )}
+          onClick={() => onChange(color)}
+        >
+          <AgentIcon icon={color} className="size-6" />
+        </button>
+      ))}
     </div>
   )
 }

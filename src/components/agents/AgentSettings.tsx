@@ -9,12 +9,19 @@ import {
 } from './agent-config'
 import { AgentConnectors } from './AgentConnectors'
 import { AgentRunFields } from './AgentRunFields'
-import { AgentPanel, AgentSection, AgentTabBody, SaveFooter } from './agent-ui'
+import {
+  AgentColorPicker,
+  AgentPanel,
+  AgentSection,
+  AgentTabBody,
+  SaveFooter,
+} from './agent-ui'
+import { AGENT_COLOR_CHOICES, JEAN_COLOR_CHOICES } from './agents'
 import { useSavedDraft } from './use-saved-draft'
 
 const sameText = (left: string, right: string) => left === right
 
-/** Role prompt, run configuration, and connectors of an existing agent. */
+/** Color, role prompt, run configuration, and connectors of an agent. */
 export function AgentSettings({ agent }: { agent: AgentSummary }) {
   const updateAgent = useUpdateAgent()
   const saved = draftFromAgent(agent)
@@ -33,6 +40,17 @@ export function AgentSettings({ agent }: { agent: AgentSummary }) {
     )
   }
 
+  const handleColor = (icon: string) => {
+    if (icon === agent.icon) return
+    updateAgent.mutate(
+      { agentId: agent.id, patch: { icon } },
+      {
+        onSuccess: () => toast.success(`${agent.name} color saved`),
+        onError: error => toast.error(`Failed to save color: ${error}`),
+      }
+    )
+  }
+
   const handleSave = () => {
     updateAgent.mutate(
       { agentId: agent.id, patch: agentRunPatch(draft) },
@@ -45,6 +63,17 @@ export function AgentSettings({ agent }: { agent: AgentSummary }) {
 
   return (
     <AgentTabBody>
+      <AgentSection
+        title="Color"
+        description="Shown on the agent's face, chat bubbles, and links."
+      >
+        <AgentColorPicker
+          value={agent.icon}
+          choices={agent.builtin ? JEAN_COLOR_CHOICES : AGENT_COLOR_CHOICES}
+          disabled={updateAgent.isPending}
+          onChange={handleColor}
+        />
+      </AgentSection>
       <AgentSection
         title="Role prompt"
         description="Instructions the agent follows in every chat and wake-up."
