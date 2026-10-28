@@ -1,3 +1,5 @@
+import { stripMentionRefs } from './agent-mentions'
+
 /** Regex to extract image paths from message content */
 const IMAGE_ATTACHMENT_REGEX =
   /\[Image attached: (.+?) - Use the Read tool to view this image\]/g
@@ -214,9 +216,13 @@ export function stripSkillMarkers(content: string): string {
 
 /** Strip all attachment markers from message content */
 export function stripAllMarkers(content: string): string {
-  return stripSkillMarkers(
-    stripDirectoryMentionMarkers(
-      stripFileMentionMarkers(stripTextFileMarkers(stripImageMarkers(content)))
+  return stripMentionRefs(
+    stripSkillMarkers(
+      stripDirectoryMentionMarkers(
+        stripFileMentionMarkers(
+          stripTextFileMarkers(stripImageMarkers(content))
+        )
+      )
     )
   )
 }

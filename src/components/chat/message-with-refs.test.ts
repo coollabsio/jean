@@ -20,6 +20,34 @@ function queuedMessage(overrides: Partial<QueuedMessage>): QueuedMessage {
 }
 
 describe('buildMessageWithRefs', () => {
+  it('adds one context line per agent chat mention', () => {
+    // Same input and output as the jean-core queued message test
+    const message = buildMessageWithRefs(
+      queuedMessage({
+        message: 'Ask @Reviewer about @coolify on @home',
+        mentions: [
+          { type: 'agent', id: 'reviewer-1', name: 'Reviewer' },
+          {
+            type: 'project',
+            id: 'p-9',
+            name: 'coolify',
+            serverName: 'Home',
+          },
+          {
+            type: 'remote_jean',
+            id: 'srv-1',
+            name: 'home',
+            url: 'https://home.example',
+          },
+        ],
+      })
+    )
+
+    expect(message).toBe(
+      'Ask @Reviewer about @coolify on @home\n\n[Mentioned agent: Reviewer (agentId: reviewer-1)]\n[Mentioned project: coolify (projectId: p-9, on remote Jean: Home)]\n[Mentioned remote Jean: home (serverId: srv-1, url: https://home.example)]'
+    )
+  })
+
   it('adds a natural default prompt for image-only messages', () => {
     const message = buildMessageWithRefs(
       queuedMessage({

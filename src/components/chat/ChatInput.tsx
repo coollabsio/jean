@@ -37,6 +37,8 @@ import {
 } from './context-mention-investigation'
 import type { WorktreeFile } from '@/types/chat'
 import { SlashPopover, type SlashPopoverHandle } from './SlashPopover'
+import { AgentMentionPopover } from './AgentMentionPopover'
+import type { MentionCandidate } from './agent-mentions'
 import {
   ContextMentionPopover,
   type ContextMentionPopoverHandle,
@@ -94,6 +96,11 @@ interface ChatInputProps {
   investigatePRPrompt?: string | null
   /** Single-line pill style for the simple agent chat */
   pill?: boolean
+  /**
+   * Agent chats: `@` picks from these (agents, remote Jeans, projects)
+   * instead of files. Undefined keeps the file picker.
+   */
+  mentionCandidates?: MentionCandidate[]
 }
 
 export const ChatInput = memo(function ChatInput({
@@ -120,6 +127,7 @@ export const ChatInput = memo(function ChatInput({
   investigateIssuePrompt,
   investigatePRPrompt,
   pill = false,
+  mentionCandidates,
 }: ChatInputProps) {
   const isMobile = useIsMobile()
   const { data: preferences } = usePreferences()
@@ -1073,6 +1081,37 @@ export const ChatInput = memo(function ChatInput({
     [activeSessionId, atTriggerIndex, inputRef, resizeTextarea]
   )
 
+  // Handle agent/project/remote Jean selection from the agent chat @ popover
+  const handleMentionSelect = useCallback(
+    (candidate: MentionCandidate) => {
+      const triggerIndex = atTriggerIndex
+      const input = inputRef.current
+      if (triggerIndex !== null && input) {
+        const currentValue = valueRef.current
+        const cursorPos = input.selectionStart ?? currentValue.length
+        const inserted = `@${candidate.token} `
+        const newValue = `${currentValue.slice(0, triggerIndex)}${inserted}${currentValue.slice(cursorPos)}`
+        input.value = newValue
+        valueRef.current = newValue
+        if (activeSessionId) {
+          useChatStore.getState().setInputDraft(activeSessionId, newValue)
+        }
+        resizeTextarea()
+        setShowHint(false)
+        onHasValueChangeRef.current?.(true)
+        const newCursorPos = triggerIndex + inserted.length
+        requestAnimationFrame(() =>
+          inputRef.current?.setSelectionRange(newCursorPos, newCursorPos)
+        )
+      }
+      setFileMentionOpen(false)
+      setAtTriggerIndex(null)
+      setFileMentionQuery('')
+      input?.focus()
+    },
+    [activeSessionId, atTriggerIndex, inputRef, resizeTextarea]
+  )
+
   const contextMentionToken = useCallback((item: ContextMentionItem) => {
     switch (item.type) {
       case 'issue':
@@ -1462,18 +1501,31 @@ export const ChatInput = memo(function ChatInput({
         </span>
       )}
 
-      {/* File mention popover (@ mentions) */}
-      <FileMentionPopover
-        worktreePath={activeWorktreePath ?? null}
-        currentProjectId={activeProjectId ?? null}
-        open={fileMentionOpen}
-        onOpenChange={setFileMentionOpen}
-        onSelectFile={handleFileSelect}
-        searchQuery={fileMentionQuery}
-        anchorPosition={fileMentionAnchor}
-        containerWidth={fileMentionAnchor?.containerWidth}
-        handleRef={fileMentionHandleRef}
-      />
+      {/* @ mentions: agents/projects/remote Jeans in agent chats, else files */}
+      {mentionCandidates ? (
+        <AgentMentionPopover
+          candidates={mentionCandidates}
+          open={fileMentionOpen}
+          onOpenChange={setFileMentionOpen}
+          onSelect={handleMentionSelect}
+          searchQuery={fileMentionQuery}
+          anchorPosition={fileMentionAnchor}
+          containerWidth={fileMentionAnchor?.containerWidth}
+          handleRef={fileMentionHandleRef}
+        />
+      ) : (
+        <FileMentionPopover
+          worktreePath={activeWorktreePath ?? null}
+          currentProjectId={activeProjectId ?? null}
+          open={fileMentionOpen}
+          onOpenChange={setFileMentionOpen}
+          onSelectFile={handleFileSelect}
+          searchQuery={fileMentionQuery}
+          anchorPosition={fileMentionAnchor}
+          containerWidth={fileMentionAnchor?.containerWidth}
+          handleRef={fileMentionHandleRef}
+        />
+      )}
 
       {/* Context mention popover (# issues, PRs, security, Linear) */}
       <ContextMentionPopover

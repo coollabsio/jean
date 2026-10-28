@@ -225,6 +225,7 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
               worktreeId={agent.worktreeId}
               worktreePath={workdir}
               workingLabel={advanced ? undefined : `${agent.name} is working`}
+              agentChat
             />
           </Suspense>
         ) : (

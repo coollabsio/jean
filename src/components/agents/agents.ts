@@ -14,6 +14,9 @@ export const AGENT_COLOR_CHOICES = [
   'yellow',
 ] as const
 
+/** Colors Jean can pick: its crowned default first, then the others. */
+export const JEAN_COLOR_CHOICES = ['jean', ...AGENT_COLOR_CHOICES] as const
+
 /** Agent by ID, or the first agent (Jean) when the ID is unknown. */
 export function findAgent(
   agents: AgentSummary[] | undefined,
