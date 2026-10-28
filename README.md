@@ -24,7 +24,7 @@ For more information, take a look at [jean.build](https://jean.build).
 
 <table>
 <tr>
-<td><img src="screenshots/recent-sessions.webp" width="400" alt="Recent tab with sessions from many projects, next to parallel session tabs" /><br /><sub><b>Recent sessions & parallel agents</b></sub></td>
+<td><img src="screenshots/recent-sessions.webp" width="400" alt="Agent session with a recap, next to a second session tab" /><br /><sub><b>Parallel sessions with recaps</b></sub></td>
 <td><img src="screenshots/terminal.webp" width="400" alt="Terminal panel next to an agent session" /><br /><sub><b>Built-in terminal</b></sub></td>
 </tr>
 <tr>
