@@ -46,7 +46,6 @@ import {
   GitBranch,
   GitBranchPlus,
   GitPullRequestArrow,
-  GitMerge,
   ShieldAlert,
   Code,
   ExternalLink,
@@ -521,7 +520,6 @@ function WorktreePrChip({
   return (
     <button
       type="button"
-      title={title}
       aria-label={title}
       disabled={!prUrl}
       onClick={e => {
@@ -533,15 +531,9 @@ function WorktreePrChip({
         display?.className ?? 'text-muted-foreground'
       )}
     >
-      {status === 'merged' ? (
-        <GitMerge className="h-3 w-3" />
-      ) : (
-        <GitPullRequestArrow className="h-3 w-3" />
-      )}
-      #{worktree.pr_number}
-      {checks && (
-        <span className={cn('size-1.5 rounded-full', checks.className)} />
-      )}
+      <span>#{worktree.pr_number}</span>
+      {display && <span>· {display.label}</span>}
+      {checks && <span className={checks.className}>· {checks.label}</span>}
     </button>
   )
 }

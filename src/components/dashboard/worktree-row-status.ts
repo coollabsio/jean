@@ -27,11 +27,11 @@ export function getCheckStatusDisplay(status: CheckStatus): {
 } {
   switch (status) {
     case 'success':
-      return { label: 'Checks passed', className: 'bg-success' }
+      return { label: 'Checks passed', className: 'text-success' }
     case 'pending':
-      return { label: 'Checks running', className: 'bg-warning' }
+      return { label: 'Checks running', className: 'text-warning' }
     case 'failure':
     case 'error':
-      return { label: 'Checks failing', className: 'bg-destructive' }
+      return { label: 'Checks failing', className: 'text-destructive' }
   }
 }
