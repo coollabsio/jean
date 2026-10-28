@@ -115,6 +115,22 @@ export function parseInlineNumberedQuestion(
   }
 }
 
+/**
+ * Text without the inline question when it asks the same question as `asked`
+ * (the buttons show it). Otherwise the text as it is.
+ */
+export function withoutInlineQuestion(
+  text: string,
+  asked: InlineQuestion
+): string {
+  const parsed = parseInlineNumberedQuestion(text)
+  const same =
+    parsed?.question === asked.question &&
+    parsed.options.length === asked.options.length &&
+    parsed.options.every((option, index) => option === asked.options[index])
+  return same && parsed ? parsed.rest : text
+}
+
 /** User reply for a picked option: its number and text. */
 export function inlineQuestionAnswer(options: string[], index: number): string {
   return `${index + 1}. ${options[index] ?? ''}`

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   inlineQuestionAnswer,
   parseInlineNumberedQuestion,
+  withoutInlineQuestion,
 } from './inline-question-utils'
 
 describe('parseInlineNumberedQuestion', () => {
@@ -79,5 +80,22 @@ describe('parseInlineNumberedQuestion', () => {
 describe('inlineQuestionAnswer', () => {
   it('sends the number and the option text', () => {
     expect(inlineQuestionAnswer(['Alpha', 'Beta'], 1)).toBe('2. Beta')
+  })
+})
+
+describe('withoutInlineQuestion', () => {
+  const text = 'Done.\n\nDo you want it?\nReply with a number:\n1. Yes\n2. No'
+  const asked = parseInlineNumberedQuestion(text)!
+
+  it('removes the question that the buttons show', () => {
+    expect(withoutInlineQuestion(text, asked)).toBe('Done.')
+  })
+
+  it('keeps the text when it asks a different question', () => {
+    const other = 'Pick one?\nReply with a number:\n1. A\n2. B'
+    expect(withoutInlineQuestion(other, asked)).toBe(other)
+    expect(withoutInlineQuestion('No question here', asked)).toBe(
+      'No question here'
+    )
   })
 })

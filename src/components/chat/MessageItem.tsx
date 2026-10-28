@@ -5,7 +5,10 @@ import { Copy } from '@/components/icons/reicon'
 import { toast } from 'sonner'
 import { PILL_BUBBLE_CLASS, ReplyBubble } from './ReplyBubble'
 import { ChatContinuedNotice } from './ChatContinuedNotice'
-import { parseInlineNumberedQuestion } from './inline-question-utils'
+import {
+  parseInlineNumberedQuestion,
+  withoutInlineQuestion,
+} from './inline-question-utils'
 import { InlineQuestionOptions } from './InlineQuestionOptions'
 import { cn } from '@/lib/utils'
 import { normalizePath } from '@/lib/path-utils'
@@ -319,6 +322,13 @@ export const MessageItem = memo(function MessageItem({
   // (the streaming section handles rendering those)
   const skipToolCalls =
     isSending && isLastMessage && message.role === 'assistant'
+  const shownInlineQuestion =
+    inlineQuestion && onSendAnswer && !skipToolCalls ? inlineQuestion : null
+  // The question buttons replace the same question in the text
+  const withoutShownQuestion = (text: string) =>
+    shownInlineQuestion
+      ? withoutInlineQuestion(text, shownInlineQuestion)
+      : text
   const shouldRenderTimeline =
     message.role === 'assistant' &&
     !!message.content_blocks &&
@@ -718,7 +728,9 @@ export const MessageItem = memo(function MessageItem({
                                   messageId={message.id}
                                   sessionId={sessionId}
                                 >
-                                  {item.text}
+                                  {item.key === lastVisibleTextKey
+                                    ? withoutShownQuestion(item.text)
+                                    : item.text}
                                 </Markdown>
                                 {item.key === lastVisibleTextKey &&
                                   durationBadge}
@@ -968,7 +980,7 @@ export const MessageItem = memo(function MessageItem({
                     messageId={message.id}
                     sessionId={sessionId}
                   >
-                    {displayContent}
+                    {withoutShownQuestion(displayContent)}
                   </Markdown>
                   {!fallbackPrePlanText && durationBadge}
                 </>
@@ -1001,10 +1013,10 @@ export const MessageItem = memo(function MessageItem({
         </>
       )}
 
-      {inlineQuestion && onSendAnswer && !skipToolCalls && (
+      {shownInlineQuestion && onSendAnswer && (
         <InlineQuestionOptions
-          question={inlineQuestion.question}
-          options={inlineQuestion.options}
+          question={shownInlineQuestion.question}
+          options={shownInlineQuestion.options}
           disabled={isSending}
           onSend={onSendAnswer}
         />
