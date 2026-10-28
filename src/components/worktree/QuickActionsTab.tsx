@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   Check,
   ChevronsUpDown,
@@ -126,21 +126,24 @@ export function QuickActionsTab({
 
   // Keep selection in sync when the project default arrives/changes, and when
   // the fetched branch list no longer includes the current selection.
-  useEffect(() => {
-    setSelectedBaseBranch(prev => {
-      if (defaultBranch && (!prev || prev === defaultBranch)) {
-        return defaultBranch
-      }
-      if (prev && branches.length > 0 && !branches.includes(prev)) {
-        return defaultBranch && branches.includes(defaultBranch)
-          ? defaultBranch
-          : (branches[0] ?? prev)
-      }
-      if (!prev && defaultBranch) return defaultBranch
-      if (!prev && branches.length > 0) return branches[0] ?? ''
-      return prev
-    })
-  }, [defaultBranch, branches])
+  // Adjusted during render; the resolution is idempotent so it converges.
+  const resolvedBaseBranch = (() => {
+    const prev = selectedBaseBranch
+    if (defaultBranch && (!prev || prev === defaultBranch)) {
+      return defaultBranch
+    }
+    if (prev && branches.length > 0 && !branches.includes(prev)) {
+      return defaultBranch && branches.includes(defaultBranch)
+        ? defaultBranch
+        : (branches[0] ?? prev)
+    }
+    if (!prev && defaultBranch) return defaultBranch
+    if (!prev && branches.length > 0) return branches[0] ?? ''
+    return prev
+  })()
+  if (resolvedBaseBranch !== selectedBaseBranch) {
+    setSelectedBaseBranch(resolvedBaseBranch)
+  }
 
   const effectiveBaseBranch = selectedBaseBranch || defaultBranch || undefined
 

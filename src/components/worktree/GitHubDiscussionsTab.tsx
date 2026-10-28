@@ -211,6 +211,7 @@ function DiscussionItem({
 }) {
   const createdAt = Date.parse(discussion.createdAt)
   return (
+    // react-doctor-disable-next-line react-doctor/no-static-element-interactions -- pointer mirror of useNewWorktreeKeyboard arrow/Enter list navigation
     <div
       data-item-index={index}
       onMouseEnter={onMouseEnter}

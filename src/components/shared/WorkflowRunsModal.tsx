@@ -826,6 +826,7 @@ export function WorkflowRunsModal() {
             >
               <div className="space-y-1 pb-2">
                 {displayedRuns.map((run, index) => (
+                  // react-doctor-disable-next-line react-doctor/no-static-element-interactions, react-doctor/click-events-have-key-events -- pointer mirror of the modal's arrow/Enter keyboard navigation over focusedIndex
                   <div
                     key={run.databaseId}
                     ref={el => {

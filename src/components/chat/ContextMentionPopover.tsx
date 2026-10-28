@@ -219,6 +219,26 @@ export function ContextMentionPopover({
   const listRef = useRef<HTMLDivElement>(null)
   const [selectedIndex, setSelectedIndex] = useState(0)
 
+  // Prop-driven resets, adjusted during render so the stale list position
+  // never paints. Local filter changes (menuSearch, includeClosed) reset in
+  // their own event handlers.
+  const [resetDeps, setResetDeps] = useState({ open, searchQuery, projectPath })
+  if (
+    resetDeps.open !== open ||
+    resetDeps.searchQuery !== searchQuery ||
+    resetDeps.projectPath !== projectPath
+  ) {
+    setResetDeps({ open, searchQuery, projectPath })
+    if (open) {
+      setSelectedIndex(0)
+      setActiveTab('all')
+      if (!resetDeps.open) {
+        setMenuSearch('')
+        setCheckedItems(new Map())
+      }
+    }
+  }
+
   // Tabs narrow the list to one section. Search always covers every
   // section: typing switches back to "All".
   const currentTab = groups.some(group => group.id === activeTab)
@@ -267,54 +287,43 @@ export function ContextMentionPopover({
       if (key.startsWith(prefix)) loadedLimits.delete(key)
     }
     setLimitsVersion(version => version + 1)
-    const results = await Promise.allSettled([
-      queryClient.invalidateQueries(
-        {
-          predicate: ({ queryKey }) =>
-            Boolean(projectPath) &&
-            queryKey[0] === 'github' &&
-            queryKey[2] === projectPath &&
-            githubContextQueries.has(String(queryKey[1])),
-        },
-        { throwOnError: true }
-      ),
-      queryClient.invalidateQueries(
-        {
-          predicate: ({ queryKey }) =>
-            Boolean(projectId) &&
-            queryKey[0] === 'linear' &&
-            queryKey[2] === projectId &&
-            linearContextQueries.has(String(queryKey[1])),
-        },
-        { throwOnError: true }
-      ),
-    ])
-    setIsRefreshing(false)
-    // Linear is optional: a missing/invalid key is not a refresh failure
-    const failure = results.find(
-      (result): result is PromiseRejectedResult =>
-        result.status === 'rejected' && !isLinearAuthError(result.reason)
-    )
-    if (failure) {
-      toast.error(`Failed to refresh context links: ${failure.reason}`)
+    try {
+      const results = await Promise.allSettled([
+        queryClient.invalidateQueries(
+          {
+            predicate: ({ queryKey }) =>
+              Boolean(projectPath) &&
+              queryKey[0] === 'github' &&
+              queryKey[2] === projectPath &&
+              githubContextQueries.has(String(queryKey[1])),
+          },
+          { throwOnError: true }
+        ),
+        queryClient.invalidateQueries(
+          {
+            predicate: ({ queryKey }) =>
+              Boolean(projectId) &&
+              queryKey[0] === 'linear' &&
+              queryKey[2] === projectId &&
+              linearContextQueries.has(String(queryKey[1])),
+          },
+          { throwOnError: true }
+        ),
+      ])
+      // Linear is optional: a missing/invalid key is not a refresh failure
+      const failure = results.find(
+        (result): result is PromiseRejectedResult =>
+          result.status === 'rejected' && !isLinearAuthError(result.reason)
+      )
+      if (failure) {
+        toast.error(`Failed to refresh context links: ${failure.reason}`)
+      }
+    } finally {
+      setIsRefreshing(false)
     }
   }, [projectId, projectPath, queryClient])
 
   const resetListPosition = useCallback(() => setSelectedIndex(0), [])
-
-  // Prop-driven resets. Local filter changes (menuSearch, includeClosed)
-  // reset in their own event handlers to avoid chaining effects.
-  useEffect(() => {
-    if (!open) return
-    resetListPosition()
-    setActiveTab('all')
-  }, [open, searchQuery, projectPath, resetListPosition])
-
-  useEffect(() => {
-    if (!open) return
-    setMenuSearch('')
-    setCheckedItems(new Map())
-  }, [open])
 
   const toggleChecked = useCallback(
     (item: ContextMentionItem, checked: boolean) => {

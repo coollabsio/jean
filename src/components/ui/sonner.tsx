@@ -71,6 +71,7 @@ function ToastGestureDismiss({ position }: Pick<ToasterProps, 'position'>) {
     positionRef.current = position
   }, [position])
 
+  // react-doctor-disable-next-line react-doctor/effect-needs-cleanup -- wheel timeout is cleared via resetWheelState() in the returned cleanup
   useEffect(() => {
     const resetWheelState = () => {
       const state = wheelStateRef.current

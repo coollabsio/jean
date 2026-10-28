@@ -313,20 +313,18 @@ function PluginCard({
         { pluginName: plugin.id }
       )
       setStatus(result)
+      onInstalledChange(plugin.id, result.installed)
     } catch {
       setStatus({ installed: false, version: null })
+      onInstalledChange(plugin.id, false)
     } finally {
       setChecking(false)
     }
-  }, [plugin.id])
+  }, [plugin.id, onInstalledChange])
 
   React.useEffect(() => {
     checkStatus()
   }, [checkStatus])
-
-  useEffect(() => {
-    if (status) onInstalledChange(plugin.id, status.installed)
-  }, [status, plugin.id, onInstalledChange])
 
   const handleInstall = useCallback(async () => {
     setInstalling(true)

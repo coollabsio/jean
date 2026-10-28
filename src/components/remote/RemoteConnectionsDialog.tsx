@@ -303,6 +303,7 @@ export function RemoteConnectionsDialog({
     }
   }, [open, installing, native])
 
+  // react-doctor-disable-next-line react-doctor/no-set-state-after-await-in-effect -- post-await setTunnelStatus is gated by the `disposed` flag set in cleanup
   useEffect(() => {
     if (!open || !native) return
     let disposed = false

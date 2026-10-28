@@ -243,6 +243,7 @@ function OnboardingDialogContent({
 
   const [selectedBackends, setSelectedBackends] = useState<AIBackend[]>([])
   // Preselect detected backends once statuses for the current target load.
+  // react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers -- state change re-runs the preselect effect; a ref would not
   const [needsPreselect, setNeedsPreselect] = useState(false)
   // Remote setup just finished; decide where to go once its statuses load.
   const [pendingRemoteCheck, setPendingRemoteCheck] = useState(false)

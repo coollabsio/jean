@@ -738,6 +738,7 @@ export function useInitProject() {
  * Used when user selects a folder that is not a git repository
  */
 export function useInitGitInFolder() {
+  // react-doctor-disable-next-line react-doctor/query-mutation-missing-invalidation -- git init before project exists; caller owns cache updates
   return useMutation({
     mutationFn: async (path: string): Promise<string> => {
       if (!isTauri()) {
@@ -2199,6 +2200,7 @@ export function useCloseBaseSessionClean() {
  * Works in both native (uses tauri-plugin-opener) and web (uses window.open)
  */
 export function useOpenBranchOnGitHub() {
+  // react-doctor-disable-next-line react-doctor/query-mutation-missing-invalidation -- opens a browser URL; no cached data changes
   return useMutation({
     mutationFn: async ({
       repoPath,
@@ -2325,6 +2327,7 @@ export function useProjectRemotes(
  * Hook to open a worktree in Finder
  */
 export function useOpenWorktreeInFinder() {
+  // react-doctor-disable-next-line react-doctor/query-mutation-missing-invalidation -- opens the OS file manager; no cached data changes
   return useMutation({
     mutationFn: async (worktreePath: string): Promise<void> => {
       if (!isTauri()) {
@@ -2357,6 +2360,7 @@ export function useOpenWorktreeInFinder() {
  * Hook to open a project's worktrees folder in Finder
  */
 export function useOpenProjectWorktreesFolder() {
+  // react-doctor-disable-next-line react-doctor/query-mutation-missing-invalidation -- opens the OS file manager; no cached data changes
   return useMutation({
     mutationFn: async (projectId: string): Promise<void> => {
       if (!isTauri()) {
@@ -2385,6 +2389,7 @@ export function useOpenProjectWorktreesFolder() {
  * Hook to open a worktree in Terminal
  */
 export function useOpenWorktreeInTerminal() {
+  // react-doctor-disable-next-line react-doctor/query-mutation-missing-invalidation -- opens a terminal; no cached data changes
   return useMutation({
     mutationFn: async ({
       worktreePath,
@@ -2419,6 +2424,7 @@ export function useOpenWorktreeInTerminal() {
  * Hook to open a worktree in Editor
  */
 export function useOpenWorktreeInEditor() {
+  // react-doctor-disable-next-line react-doctor/query-mutation-missing-invalidation -- opens an editor; no cached data changes
   return useMutation({
     mutationFn: async ({
       worktreePath,
@@ -2682,6 +2688,7 @@ export function useCommitChanges() {
 export function useOpenProjectOnGitHub() {
   const queryClient = useQueryClient()
 
+  // react-doctor-disable-next-line react-doctor/query-mutation-missing-invalidation -- opens a browser URL; no cached data changes
   return useMutation({
     mutationFn: async (projectId: string): Promise<void> => {
       if (!isTauri()) {

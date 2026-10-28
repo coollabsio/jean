@@ -245,8 +245,10 @@ async function refetchCheck(
   auth: AuthQuery,
   fallback: CliCheck
 ): Promise<CliCheck> {
-  const status = await refetchStatus()
-  const authResult = await auth.refetch()
+  const [status, authResult] = await Promise.all([
+    refetchStatus(),
+    auth.refetch(),
+  ])
   return {
     installed: status?.data?.installed ?? fallback.installed,
     authenticated: authResult?.data

@@ -139,7 +139,9 @@ function specKey(tunnel: SshTunnelSettings): string {
   ])
 }
 
-function startArgs(connection: RemoteConnection & { sshTunnel: SshTunnelSettings }) {
+function startArgs(
+  connection: RemoteConnection & { sshTunnel: SshTunnelSettings }
+) {
   const tunnel = connection.sshTunnel
   return {
     profileId: connection.id,
@@ -182,7 +184,9 @@ export async function hydrateSshSecrets(profileIds?: string[]): Promise<void> {
 
 export async function refreshSshTunnelStatus(): Promise<void> {
   if (!isNativeApp()) return
-  const listed = await invokeDesktop<SshTunnelRuntime[]>('list_ssh_tunnel_status')
+  const listed = await invokeDesktop<SshTunnelRuntime[]>(
+    'list_ssh_tunnel_status'
+  )
   statuses.clear()
   for (const status of listed) applyStatus(status)
   notify()
@@ -196,7 +200,9 @@ export async function reconcileSshTunnels(): Promise<void> {
 async function reconcileOnce(): Promise<void> {
   if (!isNativeApp()) return
   const profileIds = new Set(
-    getRemoteConnections().filter(isSshConnection).map(profile => profile.id)
+    getRemoteConnections()
+      .filter(isSshConnection)
+      .map(profile => profile.id)
   )
   let listed: SshTunnelRuntime[] = []
   try {
@@ -217,6 +223,7 @@ async function reconcileOnce(): Promise<void> {
     ) {
       if (!profile) failedSpecKeys.delete(status.profileId)
       try {
+        // react-doctor-disable-next-line react-doctor/async-await-in-loop -- stop must finish before the secret is deleted; tunnels reconcile in order
         await invokeDesktop('stop_ssh_tunnel', { profileId: status.profileId })
       } catch {
         // The supervisor is already stopped.
@@ -246,6 +253,7 @@ async function reconcileOnce(): Promise<void> {
     const key = specKey(profile.sshTunnel)
     if (failedSpecKeys.get(profile.id) === key) continue
     try {
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- tunnel starts are rate-limited and record per-profile failures
       const status = await invokeDesktop<SshTunnelRuntime>(
         'start_ssh_tunnel',
         startArgs(profile)
@@ -289,10 +297,13 @@ export async function startSshTunnelEvents(): Promise<void> {
   if (!isNativeApp() || eventsStarted) return
   eventsStarted = true
   const { listen } = await import('@tauri-apps/api/event')
-  unlistenEvents = await listen<SshTunnelRuntime>('ssh-tunnel:status', event => {
-    applyStatus(event.payload)
-    notify()
-  })
+  unlistenEvents = await listen<SshTunnelRuntime>(
+    'ssh-tunnel:status',
+    event => {
+      applyStatus(event.payload)
+      notify()
+    }
+  )
 }
 
 export function stopSshTunnelEvents(): void {

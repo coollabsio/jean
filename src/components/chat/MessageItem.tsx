@@ -1027,6 +1027,7 @@ export const MessageItem = memo(function MessageItem({
     >
       {message.role === 'user' ? (
         <div className="group flex max-w-[85%] min-w-0 flex-col items-end gap-1 sm:max-w-[70%]">
+          {/* react-doctor-disable-next-line react-doctor/no-static-element-interactions, react-doctor/click-events-have-key-events -- touch-only tap reveal; fine pointers/keyboard reveal details via group-hover/focus-within */}
           <div
             onClick={handleUserBubbleClick}
             className={cn(

@@ -119,6 +119,7 @@ export function questionAnswerText(
   question: AgentQuestion,
   selected: string[]
 ): string {
+  // react-doctor-disable-next-line react-doctor/js-set-map-lookups -- question options are a handful of strings
   const chosen = question.options.filter(o => selected.includes(o))
   return question.multiple
     ? chosen.map(o => `- ${o}`).join('\n')
@@ -132,6 +133,7 @@ export function selectedOptions(
 ): string[] {
   const text = answer.trim()
   const lines = text.split('\n').map(line => line.replace(/^- /, '').trim())
+  // react-doctor-disable-next-line react-doctor/js-set-map-lookups -- question options are a handful of strings
   return question.options.filter(o => o === text || lines.includes(o))
 }
 

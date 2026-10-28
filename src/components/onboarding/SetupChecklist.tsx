@@ -297,12 +297,19 @@ export function SetupChecklist({
         const state = states[cli]
         const isActive = active === cli
         const Icon =
-          cli === 'gh' ? Github : cli === 'glab' ? GitLabIcon : getBackendIcon(cli)
+          cli === 'gh'
+            ? Github
+            : cli === 'glab'
+              ? GitLabIcon
+              : getBackendIcon(cli)
         const rowLabel =
-          cli === 'gh' || cli === 'glab' ? flow.label : getBackendPlainLabel(cli)
+          cli === 'gh' || cli === 'glab'
+            ? flow.label
+            : getBackendPlainLabel(cli)
         const canSkip =
           state !== 'ready' &&
           (cli === 'gh' || cli === 'glab' || backends.length > 1)
+        // react-doctor-disable-next-line react-doctor/js-set-map-lookups -- fixed handful of CLI ids
         const waiting = interactive.includes(cli) && !isActive
         const cursorMissing = cli === 'cursor' && state === 'missing'
 

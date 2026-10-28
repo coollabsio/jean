@@ -131,11 +131,12 @@ export function PlanDialog({
     }
   }, [isOpen, originalContent])
 
-  // Reset edit mode when dialog closes
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+  // Reset edit mode when dialog closes (adjusted during render)
+  const [prevIsOpen, setPrevIsOpen] = useState(isOpen)
+  if (prevIsOpen !== isOpen) {
+    setPrevIsOpen(isOpen)
     if (!isOpen) setIsEditMode(false)
-  }, [isOpen])
+  }
 
   // Track dialog open state in UIStore to block canvas keybindings
   useEffect(() => {

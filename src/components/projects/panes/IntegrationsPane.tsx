@@ -1,6 +1,6 @@
 import { SettingsSection } from '@/components/preferences/SettingsSection'
 import { InlineField } from '@/components/preferences/InlineField'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Loader2, RefreshCw, RotateCcw } from '@/components/icons/reicon'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -127,7 +127,10 @@ export function IntegrationsPane({ projectId }: { projectId: string }) {
   const sentryAuthTokenChanged =
     localSentryAuthToken !== null &&
     localSentryAuthToken !== (project?.sentry_auth_token ?? '')
-  const assignedLinks = project ? assignedSentryProjects(project) : []
+  const assignedLinks = useMemo(
+    () => (project ? assignedSentryProjects(project) : []),
+    [project]
+  )
 
   const handleSaveSentryAuthToken = useCallback(async () => {
     if (localSentryAuthToken === null) return

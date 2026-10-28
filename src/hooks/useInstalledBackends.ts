@@ -260,9 +260,10 @@ export function useBackendAuthStatuses(options?: { enabled?: boolean }) {
     devin: [devin, devinAuth],
   } as const
   const authQueriesRef = useRef(authQueries)
+  // Latest-ref sync: intentionally runs after every render (authQueries is rebuilt each render).
   useLayoutEffect(() => {
     authQueriesRef.current = authQueries
-  }, [authQueries])
+  })
 
   /**
    * Re-probe one backend's auth, bypassing the cached result. A cached `false`

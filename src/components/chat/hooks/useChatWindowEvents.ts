@@ -154,6 +154,7 @@ export function useChatWindowEvents({
     if (isAtBottom) {
       scrollToBottom()
     }
+    // react-doctor-disable-next-line react-doctor/exhaustive-deps -- intentional: isAtBottom changes must not re-trigger scroll (see comment above)
   }, [
     session?.messages.length,
     currentStreamingContentBlocks.length,

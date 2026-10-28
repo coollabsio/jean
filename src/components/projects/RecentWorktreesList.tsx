@@ -153,10 +153,14 @@ export function RecentWorktreesList({
     [projects]
   )
 
-  useEffect(() => {
+  // Reset paging when the project set changes (adjusted during render so the
+  // stale limit never reaches the query)
+  const [prevProjectKey, setPrevProjectKey] = useState(projectKey)
+  if (prevProjectKey !== projectKey) {
+    setPrevProjectKey(projectKey)
     setLimit(INITIAL_RECENT_LIMIT)
     setShowSnoozed(false)
-  }, [projectKey])
+  }
 
   const query = useQuery({
     // Selection only changes the highlighted row. Keep it out of the query so
@@ -307,16 +311,18 @@ export function RecentWorktreesList({
 
   // Cmd/Ctrl+1-9 is matched in useMainWindowEventListeners, which dispatches
   // this event only while the Recent list is visible.
+  const onOpenByIndex = useEffectEvent((event: Event) => {
+    const index = (event as CustomEvent<{ index: number }>).detail?.index
+    const row = index === undefined ? undefined : displayedRows[index]
+    if (row) handleOpen(row)
+  })
+
   useEffect(() => {
-    const onOpenByIndex = (event: Event) => {
-      const index = (event as CustomEvent<{ index: number }>).detail?.index
-      const row = index === undefined ? undefined : displayedRows[index]
-      if (row) handleOpen(row)
-    }
-    window.addEventListener('open-recent-session-by-index', onOpenByIndex)
+    const listener = (event: Event) => onOpenByIndex(event)
+    window.addEventListener('open-recent-session-by-index', listener)
     return () =>
-      window.removeEventListener('open-recent-session-by-index', onOpenByIndex)
-  }, [displayedRows, handleOpen])
+      window.removeEventListener('open-recent-session-by-index', listener)
+  }, [])
 
   if (query.isPending && projects.length > 0) {
     return (
@@ -434,6 +440,7 @@ export function RecentWorktreesList({
             className="mx-1 mb-2 border-t border-border/20"
           />
         )}
+        {/* react-doctor-disable-next-line react-doctor/no-static-element-interactions -- enlarges the hit area; the nested labelled row <button> bubbles its keyboard click here */}
         <div
           className={`relative flex w-full cursor-pointer flex-col gap-y-1 rounded-lg py-2.5 pl-3 pr-3 text-left transition-[background-color,box-shadow,color] hover:bg-muted/30 hover:text-foreground has-[:focus-visible]:ring-1 has-[:focus-visible]:ring-ring ${isCurrent ? 'bg-muted/50 text-foreground shadow' : 'bg-transparent text-muted-foreground'}`}
           onClick={() => handleOpen(row)}

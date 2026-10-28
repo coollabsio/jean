@@ -31,7 +31,7 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
   const header = (
     <div>
       <div className="flex flex-wrap items-center gap-3">
-        <h3 className="text-base font-medium text-foreground">
+        <h3 className="text-base font-semibold tracking-tight text-foreground">
           {collapsible ? (
             <CollapsibleTrigger className="inline-flex items-center gap-1.5 text-left">
               <ChevronRight
@@ -61,7 +61,7 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
 
   if (!collapsible) {
     return (
-      <section id={anchorId} className="min-w-0 space-y-4 not-first:pt-4">
+      <section id={anchorId} className="min-w-0 space-y-4 not-first:border-t not-first:border-border/60 not-first:pt-6">
         {header}
         {body}
       </section>
@@ -73,7 +73,7 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
       id={anchorId}
       open={open}
       onOpenChange={setOpen}
-      className="min-w-0 space-y-4 not-first:pt-4"
+      className="min-w-0 space-y-4 not-first:border-t not-first:border-border/60 not-first:pt-6"
     >
       {header}
       {/* Mounted while closed so Settings search can find and open it. */}

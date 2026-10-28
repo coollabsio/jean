@@ -186,6 +186,7 @@ export function IssueItem({
   showSource = false,
 }: IssueItemProps) {
   return (
+    // react-doctor-disable-next-line react-doctor/no-static-element-interactions -- pointer mirror of the parent modal's arrow/Enter list navigation (useNewWorktreeKeyboard/useLoadContextKeyboard)
     <div
       data-item-index={index}
       onMouseEnter={onMouseEnter}
@@ -294,6 +295,7 @@ export function PRItem({
 }: PRItemProps) {
   const busy = isCreating || isStacking
   return (
+    // react-doctor-disable-next-line react-doctor/no-static-element-interactions -- pointer mirror of the parent modal's arrow/Enter list navigation (useNewWorktreeKeyboard/useLoadContextKeyboard)
     <div
       data-item-index={index}
       onMouseEnter={onMouseEnter}

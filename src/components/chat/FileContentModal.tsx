@@ -188,6 +188,7 @@ export function FileContentModal({
         if (signal.cancelled) return
         setError(err instanceof Error ? err.message : String(err))
       } finally {
+        // react-doctor-disable-next-line react-doctor/no-loading-flag-reset-outside-finally -- reset is in finally; cancelled guard hands flag ownership to the newer load
         if (!signal.cancelled) setIsLoading(false)
       }
     },
@@ -220,6 +221,7 @@ export function FileContentModal({
         setError(err instanceof Error ? err.message : String(err))
         setImageError(true)
       } finally {
+        // react-doctor-disable-next-line react-doctor/no-loading-flag-reset-outside-finally -- reset is in finally; cancelled guard hands flag ownership to the newer load
         if (!signal.cancelled) setIsLoading(false)
       }
     },

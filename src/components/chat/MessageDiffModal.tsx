@@ -458,6 +458,7 @@ export function MessageDiffModal({
   )
 
   // No query invalidation: opens file in OS editor only (no app cache change)
+  // react-doctor-disable-next-line react-doctor/query-mutation-missing-invalidation -- opens a file in the OS editor; no cached data changes
   const openFileMutation = useMutation({
     mutationFn: () =>
       invokeForOptionalServer(serverId, 'open_file_in_default_app', {

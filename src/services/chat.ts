@@ -2165,6 +2165,7 @@ export function useSetSessionModel() {
  * Hook to set the backend for a session
  */
 export function useSetSessionBackend() {
+  // react-doctor-disable-next-line react-doctor/query-mutation-missing-invalidation -- caller chains setSessionModel, which invalidates
   return useMutation({
     mutationFn: async ({
       worktreeId,

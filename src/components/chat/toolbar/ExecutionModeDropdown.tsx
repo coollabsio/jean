@@ -103,6 +103,7 @@ export function ExecutionModeDropdown({
     ? (rememberedPermission ?? (sessionId ? 'build' : 'yolo'))
     : permissionModeForExecution(executionMode)
   const supported = getSupportedPermissionModes(backend).filter(
+    // react-doctor-disable-next-line react-doctor/js-set-map-lookups -- at most three execution modes
     mode => !availableModes || availableModes.includes(mode)
   )
   const planAvailable = !availableModes || availableModes.includes('plan')

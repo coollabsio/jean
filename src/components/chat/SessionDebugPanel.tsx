@@ -90,7 +90,7 @@ export function SessionDebugPanel({
       console.error('Failed to copy:', error)
       toast.error(`Failed to copy: ${error}`)
     }
-  }, [debugInfo, providerDisplay, sessionId, selectedModel])
+  }, [debugInfo, providerDisplay, sessionId, selectedBackend, selectedModel])
 
   if (!debugInfo) {
     return null

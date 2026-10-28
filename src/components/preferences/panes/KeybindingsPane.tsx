@@ -141,6 +141,7 @@ export const KeybindingsPane: React.FC<KeybindingsPaneProps> = ({
     }
   }, [])
 
+  // react-doctor-disable-next-line react-doctor/no-derived-state-effect -- scrolls to a search target and shows a highlight that a timer clears
   useEffect(() => {
     if (!searchTargetAction) return
 
@@ -148,6 +149,7 @@ export const KeybindingsPane: React.FC<KeybindingsPaneProps> = ({
     const target = document.getElementById(targetId)
     target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
 
+    // react-doctor-disable-next-line react-doctor/no-derived-state -- transient highlight that a timer clears; not derivable from searchTargetAction alone
     setHighlightedAction(searchTargetAction)
     if (highlightTimeoutRef.current) {
       clearTimeout(highlightTimeoutRef.current)

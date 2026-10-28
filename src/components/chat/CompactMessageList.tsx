@@ -1260,6 +1260,7 @@ export const CompactMessageList = memo(
                   {replyItems.map((reply, index) =>
                     reply.type === 'text' ? (
                       <ReplyBubbles
+                        // react-doctor-disable-next-line react-doctor/no-array-index-as-key -- text groups are derived in stream order and only append; messageId is positional too
                         key={`text-${index}`}
                         parts={reply.texts}
                         messageId={

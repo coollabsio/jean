@@ -63,6 +63,7 @@ export async function startCodeReviewsSequentially<T>(
   // Sequential: each startReview may depend on prior session id / job setup
   for (const config of configs) {
     try {
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- reviews share a session id and must start in order
       await startReview(config)
     } catch (error) {
       errors.push(error)

@@ -547,6 +547,7 @@ export function useActiveTodosAndAgents({
     !!dismissedAgentIds &&
     activeAgents.every(
       agent =>
+        // react-doctor-disable-next-line react-doctor/js-set-map-lookups -- per-session subagent list is small
         agent.status !== 'in_progress' && dismissedAgentIds.includes(agent.id)
     )
   const dismissAgentWidget = useCallback(() => {

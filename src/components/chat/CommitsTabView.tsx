@@ -677,6 +677,7 @@ export function CommitsTabView({
             ) : (
               <>
                 {commits.map(commit => (
+                  // react-doctor-disable-next-line react-doctor/no-static-element-interactions, react-doctor/click-events-have-key-events -- pointer mirror of the focusable listbox's handleCommitListKeyDown navigation
                   <div
                     key={commit.sha}
                     onClick={() => handleSelectCommit(commit.sha)}

@@ -1182,6 +1182,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     }
   }, [])
 
+  // react-doctor-disable-next-line react-doctor/no-derived-state-effect -- scrolls to a search target and shows a highlight that a timer clears
   useEffect(() => {
     if (
       !searchTargetPromptKey ||
@@ -1191,6 +1192,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     }
 
     setSelectedKey(searchTargetPromptKey)
+    // react-doctor-disable-next-line react-doctor/no-derived-state -- transient highlight that a timer clears; not derivable from searchTargetPromptKey alone
     setHighlightedKey(searchTargetPromptKey)
 
     const targetElement = document.getElementById(

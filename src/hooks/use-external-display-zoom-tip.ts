@@ -7,7 +7,9 @@ import { useClientZoom } from '@/lib/client-zoom'
 export const EXTERNAL_DISPLAY_ZOOM_TIP_TOAST_ID = 'external-display-zoom-tip'
 
 /** 1× (and near-1× fractional) displays where page zoom softens text most. */
-export function isLowDensityDisplay(devicePixelRatio = window.devicePixelRatio): boolean {
+export function isLowDensityDisplay(
+  devicePixelRatio = window.devicePixelRatio
+): boolean {
   return devicePixelRatio > 0 && devicePixelRatio <= 1.01
 }
 
@@ -34,6 +36,7 @@ export function useExternalDisplayZoomTip() {
   const patchPreferences = usePatchPreferences()
   const shownRef = useRef(false)
 
+  const hasPreferences = preferences != null
   const zoomSeed = useMemo(
     () =>
       preferences
@@ -47,11 +50,14 @@ export function useExternalDisplayZoomTip() {
       preferences?.zoom_level,
       preferences?.mobile_zoom_level,
       preferences?.sync_zoom_levels,
-      preferences == null,
+      hasPreferences,
     ]
   )
-  const { zoom_level: zoomLevel, sync_zoom_levels: syncZoomLevels, updateZoom } =
-    useClientZoom(zoomSeed)
+  const {
+    zoom_level: zoomLevel,
+    sync_zoom_levels: syncZoomLevels,
+    updateZoom,
+  } = useClientZoom(zoomSeed)
   const hasSeenTip = preferences?.has_seen_external_display_zoom_tip ?? false
 
   useEffect(() => {

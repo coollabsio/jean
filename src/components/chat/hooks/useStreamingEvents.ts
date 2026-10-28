@@ -139,16 +139,23 @@ function sanitizeCancelledContentBlocks(
   )
 }
 
+/**
+ * Replace the cached session with the backend copy. When `accept` rejects the
+ * fetched session, the cache is left untouched and no refetch is triggered.
+ */
 async function hydrateCompletedSessionFromBackend(
   queryClient: QueryClient,
   sessionId: string,
-  worktreeId: string
+  worktreeId: string,
+  accept?: (session: Session) => boolean
 ): Promise<Session | null> {
-  const worktreePath = useChatStore.getState().worktreePaths[worktreeId]
-  if (!worktreePath) {
+  const invalidateSession = () =>
     queryClient.invalidateQueries({
       queryKey: chatQueryKeys.session(sessionId),
     })
+  const worktreePath = useChatStore.getState().worktreePaths[worktreeId]
+  if (!worktreePath) {
+    if (!accept) invalidateSession()
     return null
   }
 
@@ -158,18 +165,17 @@ async function hydrateCompletedSessionFromBackend(
       worktreeId,
       worktreePath,
     })
+    if (accept && !accept(session)) return null
     queryClient.setQueryData(chatQueryKeys.session(sessionId), session)
+    invalidateSession()
     return session
   } catch (error) {
     console.error(
       '[useStreamingEvents] Failed to hydrate completed session from backend:',
       error
     )
+    invalidateSession()
     return null
-  } finally {
-    queryClient.invalidateQueries({
-      queryKey: chatQueryKeys.session(sessionId),
-    })
   }
 }
 
@@ -2216,27 +2222,30 @@ export default function useStreamingEvents({
               queryKey: chatQueryKeys.sessions(resolvedWorktreeId),
             })
             if (shouldHydrateCancelledFromBackend) {
+              // Only output of the cancelled turn counts. A reply from an
+              // earlier turn must not retract the restored draft. Without
+              // such output, keep the local undo: the backend still shows the
+              // prompt until its worker finishes the cancel, so applying that
+              // copy makes the prompt reappear and then vanish again.
+              const hasCancelledTurnOutput = (session: Session) => {
+                const lastMessage = session.messages.at(-1)
+                return (
+                  lastMessage?.role === 'assistant' &&
+                  !priorAssistantIds.has(lastMessage.id) &&
+                  hasMeaningfulAssistantPayload(
+                    lastMessage.content,
+                    lastMessage.content_blocks,
+                    lastMessage.tool_calls
+                  )
+                )
+              }
               void hydrateCompletedSessionFromBackend(
                 queryClient,
                 session_id,
-                resolvedWorktreeId
+                resolvedWorktreeId,
+                hasCancelledTurnOutput
               ).then(session => {
-                // Only output of the cancelled turn counts. A reply from an
-                // earlier turn must not retract the restored draft.
-                const lastMessage = session?.messages.at(-1)
-                const assistant =
-                  lastMessage?.role === 'assistant' ? lastMessage : undefined
-                if (
-                  !assistant ||
-                  priorAssistantIds.has(assistant.id) ||
-                  !hasMeaningfulAssistantPayload(
-                    assistant.content,
-                    assistant.content_blocks,
-                    assistant.tool_calls
-                  )
-                ) {
-                  return
-                }
+                if (!session) return
 
                 // A backend can persist output before its stream reaches the
                 // client. In that case, keep the persisted turn and retract only

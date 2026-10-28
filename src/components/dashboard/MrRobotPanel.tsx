@@ -363,6 +363,7 @@ export function MrRobotPanel({
         {status?.activity?.length ? (
           <ul className="max-h-48 space-y-2 overflow-y-auto text-xs">
             {status.activity.map((entry, index) => (
+              // react-doctor-disable-next-line react-doctor/no-array-index-as-key -- stateless text rows; timestamps can collide so the index disambiguates
               <li key={`${entry.at}-${index}`} className="break-words">
                 <span className="text-muted-foreground">
                   {formatRobotTime(entry.at, now)} ·{' '}

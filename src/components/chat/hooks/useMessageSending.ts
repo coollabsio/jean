@@ -286,6 +286,7 @@ export function useMessageSending({
       preferences?.ai_language,
       preferences?.magic_prompts?.parallel_execution,
       resolveCustomProfile,
+      inputRef,
     ]
   )
 
@@ -838,6 +839,18 @@ export function useMessageSending({
       queryClient,
       refetchAuth,
       sendMessageNow,
+      inputRef,
+      mentionCandidatesRef,
+      selectedBackendRef,
+      selectedProviderRef,
+      executionModeRef,
+      selectedThinkingLevelRef,
+      useAdaptiveThinkingRef,
+      isCodexBackendRef,
+      selectedModelRef,
+      selectedEffortLevelRef,
+      mcpServersDataRef,
+      enabledMcpServersRef,
     ]
   )
 

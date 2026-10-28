@@ -163,6 +163,7 @@ export function StandaloneTerminalSurface({
   }, [terminalId])
 
   return (
+    // react-doctor-disable-next-line react-doctor/no-static-element-interactions -- container mousedown only forwards focus to the xterm emulator, not an interaction target
     <div
       ref={rootRef}
       data-terminal-id={terminalId}

@@ -500,8 +500,10 @@ export async function invokeForServer<T>(
     }
   }
 
-  const { invokeOnServer } = await import('./server-connections')
-  const { stripServerScope } = await import('./server-command-routing')
+  const [{ invokeOnServer }, { stripServerScope }] = await Promise.all([
+    import('./server-connections'),
+    import('./server-command-routing'),
+  ])
   const serverArgs = stripServerScope(serverId, args)
   let value: T
   try {

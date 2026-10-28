@@ -1,0 +1,5 @@
+{
+  "ignore": {
+    "files": ["src-tauri/src/browser/react_grab.global.js"]
+  }
+}

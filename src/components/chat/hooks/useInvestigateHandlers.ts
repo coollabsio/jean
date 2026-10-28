@@ -1071,6 +1071,7 @@ export function useInvestigateHandlers({
       for (const prompt of prompts) {
         let session: Session
         try {
+          // react-doctor-disable-next-line react-doctor/async-await-in-loop -- sessions must be created in order; see comment above
           session = await createSession.mutateAsync({
             worktreeId,
             worktreePath,

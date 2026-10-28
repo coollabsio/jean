@@ -31,6 +31,8 @@ import { useQueryClient } from '@tanstack/react-query'
 import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import type { BlockedImportPath, UnmanagedWorktree } from '@/types/projects'
 
+const EMPTY_BLOCKED_PATHS: BlockedImportPath[] = []
+
 function errorText(error: unknown): string {
   if (error instanceof Error) return error.message
   return String(error)
@@ -85,7 +87,8 @@ export function ImportExistingWorktreeDialog() {
 
   const { data, isLoading, isError, error, refetch, isFetching } =
     useUnmanagedWorktrees(projectId, open)
-  const blockedPaths: BlockedImportPath[] = data?.blockedPaths ?? []
+  const blockedPaths: BlockedImportPath[] =
+    data?.blockedPaths ?? EMPTY_BLOCKED_PATHS
 
   useEffect(() => {
     const handler = (event: Event) => {
@@ -205,6 +208,7 @@ export function ImportExistingWorktreeDialog() {
           continue
         }
         try {
+          // react-doctor-disable-next-line react-doctor/async-await-in-loop -- git worktree imports on one repo must not run concurrently
           await importWorktree.mutateAsync({ projectId, path })
         } catch {
           failed.add(path)

@@ -70,6 +70,7 @@ export function NewAgentDialog({
   // New agents can run on any online server that has Agents turned on
   const enabledServers = useAgentsEnabledServers()
   const servers = useSessionServerSources().filter(
+    // react-doctor-disable-next-line react-doctor/js-set-map-lookups -- list of configured servers is tiny
     source => source.online && enabledServers.includes(source.serverId)
   )
   // null = follow the sidebar's server filter until the user picks one

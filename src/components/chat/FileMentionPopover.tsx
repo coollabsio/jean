@@ -130,17 +130,21 @@ export function FileMentionPopover({
     [scopes, selectedRootPath]
   )
 
-  // On open, reset scope and invalidate so newly added files appear.
-  // Invalidate in the same place we set selectedRootPath to avoid effect chains.
-  useEffect(() => {
-    if (!open) return
-    setSelectedRootPath(worktreePath)
-    setSelectedIndex(0)
-    if (worktreePath) {
-      queryClient.invalidateQueries({
-        queryKey: fileQueryKeys.worktreeFiles(worktreePath),
-      })
+  // On open, reset scope (adjusted during render so the stale scope never
+  // paints) and invalidate so newly added files appear.
+  const [resetDeps, setResetDeps] = useState({ open, worktreePath })
+  if (resetDeps.open !== open || resetDeps.worktreePath !== worktreePath) {
+    setResetDeps({ open, worktreePath })
+    if (open) {
+      setSelectedRootPath(worktreePath)
+      setSelectedIndex(0)
     }
+  }
+  useEffect(() => {
+    if (!open || !worktreePath) return
+    queryClient.invalidateQueries({
+      queryKey: fileQueryKeys.worktreeFiles(worktreePath),
+    })
   }, [open, worktreePath, queryClient])
 
   // Filter files based on search query (fuzzy match)

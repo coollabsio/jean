@@ -2714,6 +2714,7 @@ export function useMessageHandlers({
       scrollToBottom,
       sendMessageMutate,
       inputRef,
+      executionModeRef,
     ]
   )
 

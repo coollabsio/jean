@@ -69,6 +69,7 @@ export const AppearancePane: React.FC = () => {
 
   // Zoom is client-local (issue #622) — not written to shared AppPreferences.
   // Commit-only slider updates avoid flickering the webview during drag.
+  const hasPreferences = preferences != null
   const zoomSeed = useMemo(
     () =>
       preferences
@@ -82,7 +83,7 @@ export const AppearancePane: React.FC = () => {
       preferences?.zoom_level,
       preferences?.mobile_zoom_level,
       preferences?.sync_zoom_levels,
-      preferences == null,
+      hasPreferences,
     ]
   )
   const {

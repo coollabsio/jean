@@ -235,6 +235,7 @@ const UIStatePersistence = memo(function UIStatePersistence({
   useClientViewStatePersistence(isInitialized)
 
   useEffect(() => {
+    // react-doctor-disable-next-line react-doctor/no-pass-data-to-parent -- intentional isolation leaf: keeps persistence hook re-renders out of MainWindow; only the one-time isInitialized flip is reported
     onInitializedChange(isInitialized)
   }, [isInitialized, onInitializedChange])
 

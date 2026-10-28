@@ -148,7 +148,22 @@ export function usePendingAttachments({
         sendMessageNow(queuedMessage)
       }
     },
-    [activeSessionId, activeWorktreeId, activeWorktreePath, sendMessageNow]
+    [
+      activeSessionId,
+      activeWorktreeId,
+      activeWorktreePath,
+      sendMessageNow,
+      selectedModelRef,
+      selectedProviderRef,
+      executionModeRef,
+      selectedThinkingLevelRef,
+      useAdaptiveThinkingRef,
+      isCodexBackendRef,
+      selectedBackendRef,
+      selectedEffortLevelRef,
+      mcpServersDataRef,
+      enabledMcpServersRef,
+    ]
   )
 
   return {

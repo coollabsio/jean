@@ -150,6 +150,7 @@ export function TerminalStatusIndicator({
       <TooltipContent>
         <div className="flex flex-col gap-0.5">
           {tooltipLines.map((line, index) => (
+            // react-doctor-disable-next-line react-doctor/no-array-index-as-key -- static, stateless tooltip lines that may repeat
             <span key={index} className="text-xs">
               {line}
             </span>

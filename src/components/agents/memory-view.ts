@@ -29,6 +29,12 @@ export const EMPTY_MEMORY_FILTERS: MemorySearchFilters = {
 }
 
 const DATE_INPUT = /^(\d{4})-(\d{2})-(\d{2})$/
+const JOURNAL_DAY_FORMAT = new Intl.DateTimeFormat('en-GB', {
+  weekday: 'short',
+  day: 'numeric',
+  month: 'short',
+  year: 'numeric',
+})
 
 /** Start or end of a local calendar day, as unix seconds. */
 export function dateInputToUnix(
@@ -191,12 +197,7 @@ export function journalDayLabel(day: string, now = new Date()): string {
     Number(match[2]) - 1,
     Number(match[3])
   )
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  }).formatToParts(date)
+  const parts = JOURNAL_DAY_FORMAT.formatToParts(date)
   const part = (type: Intl.DateTimeFormatPartTypes) =>
     parts.find(item => item.type === type)?.value ?? ''
   const label = `${part('weekday')} ${part('day')} ${part('month')}`

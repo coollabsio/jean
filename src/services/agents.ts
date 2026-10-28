@@ -412,6 +412,7 @@ async function invokeAgent<T>(
 export function useAgentsList(enabledServerIds: string[]) {
   const native = isNativeApp()
   const sources = useSessionServerSources().filter(source =>
+    // react-doctor-disable-next-line react-doctor/js-set-map-lookups -- list of configured servers is tiny
     enabledServerIds.includes(source.serverId)
   )
   const enabled = sources.length > 0

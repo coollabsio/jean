@@ -318,13 +318,20 @@ export function ReviewResultsPanel({
     row?.scrollIntoView?.({ block: 'nearest' })
   }, [])
 
-  // Default-select all fixable findings when results/reviewer change
-  useEffect(() => {
+  // Default-select all fixable findings when results/reviewer change.
+  // State is adjusted during render so stale selections never paint; focus
+  // stays in an effect because it touches the DOM.
+  const resetKey = `${sessionId}\u0000${effectiveReviewKey}\u0000${fixableIndices.join(',')}`
+  const [prevResetKey, setPrevResetKey] = useState<string | null>(null)
+  if (prevResetKey !== resetKey) {
+    setPrevResetKey(resetKey)
     setSelected(new Set(fixableIndices))
     setExpanded(new Set())
     setActiveIndex(0)
+  }
+  useEffect(() => {
     requestAnimationFrame(() => focusActiveRow(0))
-  }, [sessionId, effectiveReviewKey, fixableIndices.join(','), focusActiveRow]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [resetKey, focusActiveRow])
 
   const handleReviewSelect = useCallback((key: string) => {
     setSelectedReviewKey(key)
@@ -650,6 +657,7 @@ export function ReviewResultsPanel({
                 const lineInfo = finding.line ? `:${finding.line}` : ''
 
                 return (
+                  // react-doctor-disable-next-line react-doctor/no-static-element-interactions -- pointer mirror of the panel's handlePanelKeyDown roving navigation; checkbox/expand are real controls
                   <div
                     key={getReviewFindingKey(finding, originalIndex)}
                     ref={node => {

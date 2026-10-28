@@ -43,7 +43,7 @@
         "clsx": "^2.1.1",
         "cmdk": "^1.1.1",
         "diff": "^8.0.3",
-        "dompurify": "^3.4.16",
+        "dompurify": "^3.4.17",
         "fuse.js": "^7.1.0",
         "ghostty-web": "^0.4.0",
         "pele": "1.6.0",

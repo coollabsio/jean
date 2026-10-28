@@ -74,6 +74,7 @@ export function useZoom() {
 
   // Zoom is client-local (localStorage) so remote Jean clients and the host
   // shell do not overwrite each other via shared AppPreferences (issue #622).
+  const hasPreferences = preferences != null
   const zoomSeed = useMemo(
     () =>
       preferences
@@ -88,7 +89,7 @@ export function useZoom() {
       preferences?.mobile_zoom_level,
       preferences?.sync_zoom_levels,
       // preferences identity when still loading → null seed
-      preferences == null,
+      hasPreferences,
     ]
   )
 

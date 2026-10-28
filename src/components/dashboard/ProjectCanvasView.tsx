@@ -46,6 +46,7 @@ import {
   GitBranch,
   GitBranchPlus,
   GitPullRequestArrow,
+  GitMerge,
   ShieldAlert,
   Code,
   ExternalLink,
@@ -177,6 +178,15 @@ import {
 import { TerminalStatusIndicator } from '@/hooks/useWorktreeTerminalStatus'
 import { usePreferences } from '@/services/preferences'
 import { DEFAULT_KEYBINDINGS, formatShortcutDisplay } from '@/types/keybindings'
+import type { CheckStatus, PrDisplayStatus } from '@/types/pr-status'
+import { usePrStatus } from '@/services/pr-status'
+import { getPrStatusDisplay } from '@/components/chat/toolbar/toolbar-utils'
+import { openExternal } from '@/lib/platform'
+import {
+  getCheckStatusDisplay,
+  isStaleActivity,
+  toMilliseconds,
+} from './worktree-row-status'
 import { CloseWorktreeDialog } from '@/components/chat/CloseWorktreeDialog'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { hasBackendTransport } from '@/lib/environment'
@@ -424,12 +434,7 @@ function isLabelFilterTabItem(
 
 function formatRelativeTime(timestamp?: number): string | null {
   if (!timestamp) return null
-  // Some timestamps are stored in seconds; normalize to milliseconds.
-  const normalizedTimestamp =
-    timestamp > 0 && timestamp < 1_000_000_000_000
-      ? timestamp * 1000
-      : timestamp
-  const diffMs = Date.now() - normalizedTimestamp
+  const diffMs = Date.now() - toMilliseconds(timestamp)
   if (diffMs < 0) return 'just now'
   const minuteMs = 60_000
   const hourMs = 60 * minuteMs
@@ -489,6 +494,81 @@ function createStableSectionCardsCache(): (
     cache.set(worktreeId, cards)
     return cards
   }
+}
+
+function WorktreePrChip({
+  worktree,
+  isVisible,
+}: {
+  worktree: Worktree
+  isVisible: boolean
+}) {
+  const { data: prStatus } = usePrStatus(isVisible ? worktree.id : null)
+  if (!worktree.pr_number) return null
+  const prUrl = worktree.pr_url
+  const status =
+    prStatus?.display_status ??
+    (worktree.cached_pr_status as PrDisplayStatus | undefined)
+  const checkStatus =
+    prStatus?.check_status ??
+    (worktree.cached_check_status as CheckStatus | undefined)
+  const display = status ? getPrStatusDisplay(status) : null
+  const checks = checkStatus ? getCheckStatusDisplay(checkStatus) : null
+  const title = [`PR #${worktree.pr_number}`, display?.label, checks?.label]
+    .filter(Boolean)
+    .join(' · ')
+
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      disabled={!prUrl}
+      onClick={e => {
+        e.stopPropagation()
+        if (prUrl) void openExternal(prUrl)
+      }}
+      className={cn(
+        'inline-flex shrink-0 items-center gap-1 text-xs tabular-nums leading-none transition-opacity enabled:cursor-pointer enabled:hover:opacity-70',
+        display?.className ?? 'text-muted-foreground'
+      )}
+    >
+      {status === 'merged' ? (
+        <GitMerge className="h-3 w-3" />
+      ) : (
+        <GitPullRequestArrow className="h-3 w-3" />
+      )}
+      #{worktree.pr_number}
+      {checks && (
+        <span className={cn('size-1.5 rounded-full', checks.className)} />
+      )}
+    </button>
+  )
+}
+
+function WorktreeStatusGlyph({
+  runningCount,
+  waitingCount,
+}: {
+  runningCount: number
+  waitingCount: number
+}) {
+  return (
+    <span className="inline-flex w-4 shrink-0 items-center justify-center">
+      {runningCount > 0 ? (
+        <WorkingWaveform label={`${runningCount} running`} />
+      ) : waitingCount > 0 ? (
+        <span
+          role="img"
+          aria-label={`${waitingCount} waiting`}
+          title={`${waitingCount} waiting`}
+          className="size-1.5 rounded-full bg-warning"
+        />
+      ) : (
+        <span className="size-1 rounded-full bg-muted-foreground/30" />
+      )}
+    </span>
+  )
 }
 
 const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
@@ -606,15 +686,19 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
     onSetLabels?.(worktree)
   }, [onSetLabels, worktree])
 
-  const handleDiffClick = useCallback(() => {
-    onDiffClick?.(
-      getCanvasDiffRequest(
-        worktree,
-        defaultBranch,
-        isBase ? 'uncommitted' : 'branch'
+  const handleDiffClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      onDiffClick?.(
+        getCanvasDiffRequest(
+          worktree,
+          defaultBranch,
+          isBase ? 'uncommitted' : 'branch'
+        )
       )
-    )
-  }, [onDiffClick, isBase, worktree, defaultBranch])
+    },
+    [onDiffClick, isBase, worktree, defaultBranch]
+  )
 
   const sessionMetrics = useMemo(
     () => (cards && cards.length > 0 ? getSessionMetrics(cards) : null),
@@ -640,13 +724,21 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
     displayBranch,
     worktreeName: worktree.name,
     stackedBaseBranch,
-    prNumber: worktree.pr_number,
     securityAlertNumber: worktree.security_alert_number,
     advisoryGhsaId: worktree.advisory_ghsa_id,
   })
   const worktreeLabels = getWorktreeLabels(worktree)
   const waitingCount = sessionMetrics?.waitingCount ?? 0
   const runningCount = sessionMetrics?.runningCount ?? 0
+  const isStale =
+    !isBase &&
+    runningCount === 0 &&
+    waitingCount === 0 &&
+    isStaleActivity([
+      sessionMetrics?.latestActivityAt,
+      worktree.last_opened_at,
+      worktree.created_at,
+    ])
   // Secondary details show on hover, focus or keyboard selection. Touch
   // devices have no hover, so they keep the details visible.
   const revealClass = cn(
@@ -667,6 +759,10 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
             ? 'cursor-pointer hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60'
             : 'cursor-pointer px-2 -mx-2 py-1 hover:bg-muted/50'),
         isSelected && onRowClick && 'border-border/40 bg-muted/35',
+        showDetails &&
+          isStale &&
+          !isSelected &&
+          'opacity-55 hover:opacity-100 focus-within:opacity-100',
         disableTextSelection && 'select-none'
       )}
       style={disableTextSelection ? { WebkitTouchCallout: 'none' } : undefined}
@@ -700,12 +796,18 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
               {formatShortcutDisplay(`mod+${shortcutNumber}`)}
             </kbd>
           )}
+          {showDetails && (
+            <WorktreeStatusGlyph
+              runningCount={runningCount}
+              waitingCount={waitingCount}
+            />
+          )}
           <span className="flex min-w-0 flex-1 flex-col gap-1 sm:flex-row sm:items-center sm:gap-1.5">
             <span className="flex min-w-0 items-center gap-1.5">
               <span className="min-w-0 flex-1 truncate">
                 {isBase ? 'Base Session' : worktree.name}
               </span>
-              {waitingCount > 0 && (
+              {!showDetails && waitingCount > 0 && (
                 <span
                   role="img"
                   aria-label={`${waitingCount} waiting`}
@@ -713,7 +815,7 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
                   className="size-1.5 shrink-0 rounded-full bg-warning"
                 />
               )}
-              {runningCount > 0 && (
+              {!showDetails && runningCount > 0 && (
                 <WorkingWaveform label={`${runningCount} running`} />
               )}
               {showBranchBadge && (
@@ -740,13 +842,6 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
                       )}
                     </>
                   )}
-                  {worktree.pr_number && (
-                    <>
-                      <span className="text-border">·</span>
-                      <GitPullRequestArrow className="h-2.5 w-2.5" />#
-                      {worktree.pr_number}
-                    </>
-                  )}
                   {worktree.security_alert_number && (
                     <>
                       <span className="text-border">·</span>
@@ -765,22 +860,6 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
                   )}
                 </span>
               )}
-              <span
-                className={cn(
-                  'inline-flex items-center rounded px-1.5 py-0.5 font-normal hover:bg-muted/50',
-                  revealClass
-                )}
-                onClick={e => e.stopPropagation()}
-              >
-                <GitStatusBadges
-                  behindCount={behindCount}
-                  unpushedCount={unpushedCount}
-                  diffAdded={diffAdded}
-                  diffRemoved={diffRemoved}
-                  onSync={handleSync}
-                  onDiffClick={handleDiffClick}
-                />
-              </span>
             </span>
             {showBranchBadge && (
               <span className="inline-flex max-w-full items-center gap-1 self-start rounded border border-border/50 px-1.5 py-0.5 text-2xs font-normal text-muted-foreground sm:hidden">
@@ -799,13 +878,6 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
                         #{stackedOnPR.number}
                       </>
                     )}
-                  </>
-                )}
-                {worktree.pr_number && (
-                  <>
-                    <span className="text-border">·</span>
-                    <GitPullRequestArrow className="h-2.5 w-2.5 shrink-0" />#
-                    {worktree.pr_number}
                   </>
                 )}
                 {worktree.security_alert_number && (
@@ -850,13 +922,8 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
               )}
             </span>
           )}
-          {showDetails && sessionMetrics && (
-            <div
-              className={cn(
-                'ml-auto flex shrink-0 flex-wrap items-center justify-end gap-1.5 text-xs text-muted-foreground',
-                revealClass
-              )}
-            >
+          {showDetails && (
+            <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-3 text-xs text-muted-foreground">
               {uniqueSessionLabels.map(label => (
                 <span
                   key={label.name}
@@ -869,9 +936,22 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
                   {label.name}
                 </span>
               ))}
-              {lastActivity && (
-                <span className="rounded px-2 py-0.5">{lastActivity}</span>
-              )}
+              <span className="inline-flex justify-end sm:min-w-16">
+                <WorktreePrChip worktree={worktree} isVisible={isVisible} />
+              </span>
+              <span className="inline-flex justify-end font-normal sm:min-w-24">
+                <GitStatusBadges
+                  behindCount={behindCount}
+                  unpushedCount={unpushedCount}
+                  diffAdded={diffAdded}
+                  diffRemoved={diffRemoved}
+                  onSync={handleSync}
+                  onDiffClick={handleDiffClick}
+                />
+              </span>
+              <span className="text-right tabular-nums sm:min-w-14">
+                {lastActivity}
+              </span>
               {isVisible && (
                 <TerminalStatusIndicator
                   worktreeId={worktree.id}
@@ -1696,9 +1776,8 @@ export function ProjectCanvasView({
   const [canvasDiffRequest, setCanvasDiffRequest] =
     useState<DiffRequest | null>(null)
   const canvasDiffWorktree = canvasDiffRequest
-    ? worktreeSections.find(
-        s => s.worktree.id === canvasDiffRequest.worktreeId
-      )?.worktree
+    ? worktreeSections.find(s => s.worktree.id === canvasDiffRequest.worktreeId)
+        ?.worktree
     : undefined
   const { data: canvasDiffGitStatus } = useGitStatus(
     canvasDiffRequest?.worktreeId ?? null
@@ -1773,15 +1852,19 @@ export function ProjectCanvasView({
 
   // Listen for focus-canvas-search event
   useEffect(() => {
+    let focusTimer: ReturnType<typeof setTimeout> | undefined
     const handleFocusSearch = () => {
       if (isMobile) {
         setIsMobileSearchOpen(true)
       }
-      setTimeout(() => searchInputRef.current?.focus(), 0)
+      clearTimeout(focusTimer)
+      focusTimer = setTimeout(() => searchInputRef.current?.focus(), 0)
     }
     window.addEventListener('focus-canvas-search', handleFocusSearch)
-    return () =>
+    return () => {
       window.removeEventListener('focus-canvas-search', handleFocusSearch)
+      clearTimeout(focusTimer)
+    }
   }, [isMobile])
 
   // Auto-focus search input when mobile search overlay opens
@@ -2038,6 +2121,7 @@ export function ProjectCanvasView({
 
   // A server has no worktree list: always show its base session chat.
   const isServer = !!project.server
+  // react-doctor-disable-next-line react-doctor/no-effect-chain -- reacts to server project data loading and the modal closing; no local event handler owns this
   useEffect(() => {
     if (!isServer || selectedWorktreeModal) return
     const base = readyWorktrees.find(isBaseSession)

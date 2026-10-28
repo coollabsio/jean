@@ -1426,6 +1426,97 @@ describe('useStreamingEvents cancellation sanitization', () => {
     )
   })
 
+  it('does not show the prompt again while the backend still finalizes a no-output cancel', async () => {
+    const queryClient = createQueryClient()
+    const wrapper = createWrapper(queryClient)
+    const userMessage = {
+      id: 'current-user',
+      session_id: 'session-1',
+      role: 'user',
+      content: 'stop me',
+      timestamp: 3,
+      tool_calls: [],
+    }
+    const baseSession = {
+      id: 'session-1',
+      name: 'Test',
+      order: 0,
+      created_at: 1,
+      updated_at: 1,
+    }
+    // Before the worker finishes, the cancelled run still renders its prompt
+    // and an empty placeholder reply.
+    const finalizingSession = {
+      ...baseSession,
+      messages: [
+        userMessage,
+        {
+          id: 'pending-run-1',
+          session_id: 'session-1',
+          role: 'assistant',
+          content: '',
+          timestamp: 4,
+          tool_calls: [],
+          cancelled: true,
+        },
+      ],
+    }
+
+    mockInvoke.mockImplementation((command: string) => {
+      if (command === 'list_pending_wakeups') return Promise.resolve([])
+      if (command === 'get_session') return Promise.resolve(finalizingSession)
+      return Promise.resolve(undefined)
+    })
+
+    queryClient.setQueryData(['chat', 'session', 'session-1'], {
+      ...baseSession,
+      messages: [userMessage],
+    })
+
+    useChatStore.setState({
+      streamingContents: {},
+      streamingContentBlocks: {},
+      streamingThinkingContent: {},
+      activeToolCalls: {},
+      sendingSessionIds: { 'session-1': true },
+      sendStartedAt: { 'session-1': 1000 },
+      sessionWorktreeMap: { 'session-1': 'worktree-1' },
+      worktreePaths: { 'worktree-1': '/tmp/worktree' },
+      lastSentMessages: { 'session-1': 'stop me' },
+      inputDrafts: { 'session-1': '' },
+    })
+
+    renderHook(() => useStreamingEvents({ queryClient }), { wrapper })
+
+    await waitFor(() =>
+      expect(registeredListeners.has('chat:cancelled')).toBe(true)
+    )
+
+    registeredListeners.get('chat:cancelled')?.({
+      payload: {
+        session_id: 'session-1',
+        worktree_id: 'worktree-1',
+        undo_send: false,
+        emitted_at_ms: 2000,
+      },
+    })
+
+    await waitFor(() =>
+      expect(mockInvoke).toHaveBeenCalledWith('get_session', {
+        sessionId: 'session-1',
+        worktreeId: 'worktree-1',
+        worktreePath: '/tmp/worktree',
+      })
+    )
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    const session = queryClient.getQueryData<{
+      messages: { id: string }[]
+    }>(['chat', 'session', 'session-1'])
+    expect(session?.messages).toEqual([])
+    expect(useChatStore.getState().inputDrafts['session-1']).toBe('stop me')
+  })
+
   it('hydrates a persisted cancelled turn without restoring the sent prompt', async () => {
     const queryClient = createQueryClient()
     const wrapper = createWrapper(queryClient)

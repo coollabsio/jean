@@ -1985,6 +1985,7 @@ export const codexDefaultModelOptions: {
   { value: 'gpt-5.4-mini-fast', label: 'GPT 5.4 Mini Fast' },
   ...codexModelOptions.filter(
     option =>
+      // react-doctor-disable-next-line react-doctor/js-set-map-lookups -- runs once at module load over a short model list
       ![
         'gpt-6.1-sol',
         'gpt-6.1-terra',

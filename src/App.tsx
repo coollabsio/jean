@@ -1206,6 +1206,7 @@ function App() {
   ])
 
   // Show feature tour after CLI onboarding completes (first launch or manual trigger)
+  // react-doctor-disable-next-line react-doctor/effect-needs-cleanup -- tourTimer is cleared in the returned cleanup
   useEffect(() => {
     let wasOpen = useUIStore.getState().onboardingOpen
     let tourTimer: ReturnType<typeof setTimeout> | undefined

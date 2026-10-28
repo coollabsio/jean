@@ -3,22 +3,23 @@ import { useVisibilityAwareTicker } from '@/hooks/useVisibilityAwareTicker'
 import { formatDuration } from '../time-utils'
 
 export function useElapsedTime(startTime: number | null): string | null {
-  const [elapsed, setElapsed] = useState<number | null>(null)
+  // Tagged with the startTime it was measured against, so a changed or
+  // cleared startTime never shows a stale value.
+  const [measured, setMeasured] = useState<{
+    startTime: number
+    elapsed: number
+  } | null>(null)
   const updateElapsed = useCallback(() => {
     if (startTime == null) return
-    setElapsed(Date.now() - startTime)
+    setMeasured({ startTime, elapsed: Date.now() - startTime })
   }, [startTime])
 
   useEffect(() => {
-    if (startTime == null) {
-      setElapsed(null)
-    } else {
-      setElapsed(Date.now() - startTime)
-    }
-  }, [startTime])
+    updateElapsed()
+  }, [updateElapsed])
 
   useVisibilityAwareTicker(startTime != null, updateElapsed)
 
-  if (elapsed == null) return null
-  return formatDuration(elapsed)
+  if (startTime == null || measured?.startTime !== startTime) return null
+  return formatDuration(measured.elapsed)
 }

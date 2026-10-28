@@ -584,6 +584,14 @@ export function MagicModal() {
     customInvestigateBackend
   )} · ${formatModelLabel(customInvestigateBackend, customInvestigateModel)}`
 
+  const handleInvestigateDialogOpenChange = useCallback((open: boolean) => {
+    setInvestigateDialogOpen(open)
+    if (!open) {
+      setInvestigateSelectionMode('settings-default')
+      setInvestigateType(null)
+    }
+  }, [])
+
   const dispatchInvestigateCommand = useCallback(() => {
     if (!investigateType) return
     const detail =
@@ -598,20 +606,14 @@ export function MagicModal() {
           }
         : { command: 'investigate', type: investigateType }
     window.dispatchEvent(new CustomEvent('magic-command', { detail }))
-    setInvestigateDialogOpen(false)
+    handleInvestigateDialogOpenChange(false)
   }, [
     investigateType,
     investigateSelectionMode,
     customInvestigateBackend,
     customInvestigateModel,
+    handleInvestigateDialogOpenChange,
   ])
-
-  useEffect(() => {
-    if (!investigateDialogOpen) {
-      setInvestigateSelectionMode('settings-default')
-      setInvestigateType(null)
-    }
-  }, [investigateDialogOpen])
 
   useEffect(() => {
     if (!investigateDefaults || investigateSelectionMode === 'custom') return
@@ -2012,7 +2014,6 @@ ${resolveInstructions}`
       hasSentryContexts,
       hasPrContexts,
       hasAdvisoryContexts,
-      activeSessionId,
       worktree?.path,
       worktree?.pr_number,
       detectLinkPrForCurrentBranch,
@@ -2289,7 +2290,7 @@ ${resolveInstructions}`
 
       <Dialog
         open={investigateDialogOpen}
-        onOpenChange={setInvestigateDialogOpen}
+        onOpenChange={handleInvestigateDialogOpenChange}
       >
         <DialogContent
           ref={investigateContentRef}
@@ -2411,7 +2412,7 @@ ${resolveInstructions}`
             <DialogFooter>
               <Button
                 variant="outline"
-                onClick={() => setInvestigateDialogOpen(false)}
+                onClick={() => handleInvestigateDialogOpenChange(false)}
               >
                 Cancel
               </Button>

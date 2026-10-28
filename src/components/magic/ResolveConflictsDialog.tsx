@@ -351,11 +351,10 @@ export function ResolveConflictsDialog({
     [getResolveModelOptions]
   )
 
-  useEffect(() => {
-    if (!open) {
-      setResolveSelectionMode('settings-default')
-    }
-  }, [open])
+  // Reset when closed (adjusted during render)
+  if (!open && resolveSelectionMode !== 'settings-default') {
+    setResolveSelectionMode('settings-default')
+  }
 
   useEffect(() => {
     const nextBackend = installedBackends.includes(resolveDefaults.backend)

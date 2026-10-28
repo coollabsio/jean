@@ -330,13 +330,16 @@ export function useToolbarHandlers({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mutate is stable, refs used for IDs
   }, [])
 
-  const handleToggleMcpServer = useCallback((serverName: string) => {
-    const sessionId = activeSessionIdRef.current
-    if (!sessionId) return
-    useChatStore
-      .getState()
-      .toggleMcpServer(sessionId, serverName, enabledMcpServersRef.current)
-  }, [])
+  const handleToggleMcpServer = useCallback(
+    (serverName: string) => {
+      const sessionId = activeSessionIdRef.current
+      if (!sessionId) return
+      useChatStore
+        .getState()
+        .toggleMcpServer(sessionId, serverName, enabledMcpServersRef.current)
+    },
+    [activeSessionIdRef, enabledMcpServersRef]
+  )
 
   const handleOpenProjectSettings = useCallback(() => {
     if (!worktreeProjectId) return

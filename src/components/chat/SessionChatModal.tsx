@@ -1170,13 +1170,11 @@ export const SessionChatModal = memo(function SessionChatModal({
                           </span>
                         </span>
                       )}
-                      {isServer ? (
-                        project?.name
-                      ) : isBase ? (
-                        'Base Session'
-                      ) : (
-                        (worktree?.name ?? 'Worktree')
-                      )}
+                      {isServer
+                        ? project?.name
+                        : isBase
+                          ? 'Base Session'
+                          : (worktree?.name ?? 'Worktree')}
                     </h2>
                     {isMobile && worktreeMenu}
                   </div>

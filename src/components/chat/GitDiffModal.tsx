@@ -371,6 +371,7 @@ export function GitDiffModal({
         if (!isCurrent()) return
         setError(err instanceof Error ? err.message : String(err))
       } finally {
+        // react-doctor-disable-next-line react-doctor/no-unowned-async-error-clear -- guarded by isCurrent() request-id ownership check
         if (isCurrent()) setIsLoading(false)
       }
     },
@@ -882,6 +883,7 @@ export function GitDiffModal({
   }, [])
 
   // Keyboard navigation for file list
+  // react-doctor-disable-next-line react-doctor/effect-needs-cleanup -- switchTimeoutRef is cleared on each re-arm and by the unmount cleanup effect
   useEffect(() => {
     if (!diffRequest || filteredFiles.length === 0) return
 
@@ -1105,6 +1107,7 @@ export function GitDiffModal({
       gitDiffSelectedFiles.has(file.fileName)
 
     const fileButton = (
+      // react-doctor-disable-next-line react-doctor/no-static-element-interactions, react-doctor/click-events-have-key-events -- pointer mirror of the modal's document-level arrow/j/k file navigation
       <div
         data-index={index}
         onClick={() => handleSelectFile(index)}
@@ -1198,6 +1201,7 @@ export function GitDiffModal({
       gitDiffSelectedFiles.has(file.fileName)
 
     return (
+      // react-doctor-disable-next-line react-doctor/no-static-element-interactions, react-doctor/click-events-have-key-events -- pointer mirror of the modal's document-level arrow/j/k file navigation
       <div
         key={file.key}
         data-index={index}

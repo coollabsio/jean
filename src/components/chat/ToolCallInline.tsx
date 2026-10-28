@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useMemo, useState } from 'react'
 import { useChatStore } from '@/store/chat-store'
 import { useVisibilityAwareTicker } from '@/hooks/useVisibilityAwareTicker'
 import {
@@ -1033,7 +1033,7 @@ function SubThinkingItem({ thinking }: SubThinkingItemProps) {
 
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-      <div className="rounded border border-border/30 bg-muted/20">
+      <div className="rounded bg-muted/20">
         <CollapsibleTrigger className={TOOL_CALL_SUB_ROW_CLASS}>
           <Brain className="h-3 w-3 shrink-0 text-muted-foreground" />
           <span className="font-medium shrink-0 whitespace-nowrap">
@@ -1091,7 +1091,7 @@ const SubToolItem = memo(function SubToolItem({
 
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-      <div className="rounded border border-border/30 bg-muted/20">
+      <div className="rounded bg-muted/20">
         <CollapsibleTrigger asChild>
           <div className={TOOL_CALL_SUB_ROW_CLASS}>
             <span className="shrink-0 [&>svg]:h-3 [&>svg]:w-3">{icon}</span>
@@ -1574,9 +1574,8 @@ function useWakeupRemaining(fireAtUnix: number | undefined): number | null {
     []
   )
 
-  useEffect(() => {
-    if (!fireAtUnix) setNowUnix(null)
-  }, [fireAtUnix])
+  // Drop the stale clock when the wakeup clears (adjusted during render)
+  if (!fireAtUnix && nowUnix !== null) setNowUnix(null)
 
   useVisibilityAwareTicker(!!fireAtUnix, updateNow)
 
@@ -2162,7 +2161,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
             <div className="space-y-2">
               {edits.map((edit, idx) => (
                 <InlineFileDiff
-                  // Edits have no stable id; order is fixed for a tool call.
+                  // react-doctor-disable-next-line react-doctor/no-array-index-as-key -- edits have no stable id; order is fixed for a tool call
                   key={`${idx}:${edit.old_string?.slice(0, 32) ?? ''}`}
                   filePath={filePath}
                   oldString={edit.old_string ?? ''}

@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useEffectEvent,
   useMemo,
   useRef,
   useState,
@@ -492,10 +493,11 @@ export function ReviewCommentsDialog() {
   )
 
   // Reset selection cursor when the visible list identity changes
+  const onFocusFirstRow = useEffectEvent(() => focusActiveRow(0))
   useEffect(() => {
     setActiveIndex(0)
-    requestAnimationFrame(() => focusActiveRow(0))
-  }, [tab, inlineFilter, focusActiveRow])
+    requestAnimationFrame(() => onFocusFirstRow())
+  }, [tab, inlineFilter])
 
   const toggleAll = useCallback(() => {
     if (tab === 'inline') {
@@ -525,7 +527,7 @@ export function ReviewCommentsDialog() {
     filteredInlineIndexes,
     selected,
     conversationSelected.size,
-    conversationItems.length,
+    conversationItems,
   ])
 
   const buildPrompt = useCallback(
@@ -876,6 +878,7 @@ export function ReviewCommentsDialog() {
                     const isActive = safeActiveIndex === rowIndex
 
                     return (
+                      // react-doctor-disable-next-line react-doctor/no-static-element-interactions -- pointer mirror of handleDialogKeyDown roving arrow navigation
                       <div
                         key={index}
                         ref={node => {
@@ -1018,6 +1021,7 @@ export function ReviewCommentsDialog() {
                         : `review:${item.data.author.login}:${item.data.submittedAt ?? ''}:${item.data.state}:${body.slice(0, 80)}`
 
                     return (
+                      // react-doctor-disable-next-line react-doctor/no-static-element-interactions -- pointer mirror of handleDialogKeyDown roving arrow navigation
                       <div
                         key={conversationKey}
                         ref={node => {

@@ -716,12 +716,15 @@ const ChatWindowContent = memo(function ChatWindowContent({
     autoReconnectingRef.current = new Set()
   }
   const autoReconnecting = autoReconnectingRef.current
-  const [terminalReconnectError, setTerminalReconnectError] = useState<
-    string | null
-  >(null)
-  useEffect(() => {
-    setTerminalReconnectError(null)
-  }, [deferredSessionId])
+  // Keyed by session so switching sessions hides the previous session's error
+  // without a reset effect.
+  const [terminalReconnectErrorState, setTerminalReconnectErrorState] =
+    useState<{ sessionId: string; message: string } | null>(null)
+  const terminalReconnectError =
+    terminalReconnectErrorState &&
+    terminalReconnectErrorState.sessionId === deferredSessionId
+      ? terminalReconnectErrorState.message
+      : null
   useEffect(() => {
     if (!deferredSessionId || !session || !activeWorktreeId) return
     // `primarySurface`/`sessionTerminalId` are keyed on `activeSessionId`, while
@@ -737,7 +740,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
 
     const sessionId = deferredSessionId
     autoReconnecting.add(sessionId)
-    setTerminalReconnectError(null)
+    setTerminalReconnectErrorState(null)
     void reconnectNativeCliSession(session, activeWorktreeId, {
       openModal: false,
       showToast: false,
@@ -745,13 +748,15 @@ const ChatWindowContent = memo(function ChatWindowContent({
     })
       .catch(error => {
         logger.error('Auto-reconnect of terminal session failed', { error })
-        setTerminalReconnectError(
-          error instanceof Error ? error.message : String(error)
-        )
+        setTerminalReconnectErrorState({
+          sessionId,
+          message: error instanceof Error ? error.message : String(error),
+        })
       })
       .finally(() => {
         autoReconnecting.delete(sessionId)
       })
+    // react-doctor-disable-next-line react-doctor/exhaustive-deps -- autoReconnecting is a lazily-initialized ref Set with a stable identity
   }, [
     deferredSessionId,
     session,
@@ -1696,6 +1701,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
       for (const message of messages) {
         let newSession: Session
         try {
+          // react-doctor-disable-next-line react-doctor/async-await-in-loop -- sessions must be created in order; see comment above
           newSession = await createSession.mutateAsync({
             worktreeId: activeWorktreeId,
             worktreePath: activeWorktreePath,

@@ -22,6 +22,7 @@ export function MessageTiming({
   const hasTime = timestamp > 0
 
   return (
+    // react-doctor-disable-next-line react-doctor/no-static-element-interactions, react-doctor/click-events-have-key-events -- touch-only visual toggle; the time text is always in the DOM for assistive tech
     <span
       className={hasTime ? 'cursor-pointer' : undefined}
       onClick={hasTime ? () => setShowTime(v => !v) : undefined}

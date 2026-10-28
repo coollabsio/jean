@@ -46,7 +46,7 @@ export function InlineField({
         )}
       >
         <div className="flex items-center gap-1.5">
-          <Label htmlFor={htmlFor} className="text-sm text-foreground">
+          <Label htmlFor={htmlFor} className="text-sm font-normal text-foreground">
             {label}
           </Label>
           {help && (

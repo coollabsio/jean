@@ -52,13 +52,13 @@ export function MobileLeftSidebar({
   const [openedByDrag, setOpenedByDrag] = useState(false)
   const width = useDrawerWidth()
 
-  useEffect(() => {
-    if (isDragging) {
-      setOpenedByDrag(true)
-    } else if (!open) {
-      setOpenedByDrag(false)
-    }
-  }, [isDragging, open])
+  // Adjusted during render so the open animation is suppressed on the same
+  // frame the drag starts.
+  if (isDragging) {
+    if (!openedByDrag) setOpenedByDrag(true)
+  } else if (!open && openedByDrag) {
+    setOpenedByDrag(false)
+  }
 
   return (
     <Sheet

@@ -170,6 +170,7 @@ async function loadServerPins(
       id => parseServerResourceKey(id)?.serverId === serverId
     )
   for (const sessionId of localPins) {
+    // react-doctor-disable-next-line react-doctor/async-await-in-loop -- each pin call returns the full pin list; writes must be ordered
     pins = await pinOnServer(serverId, sessionId, true)
     await setLocalPin(queryClient, sessionId, false)
   }

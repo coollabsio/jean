@@ -32,6 +32,7 @@ export function ReplyBubbles({
   return (
     <div className="flex flex-col gap-1.5">
       {parts.map((part, index) => (
+        // react-doctor-disable-next-line react-doctor/no-array-index-as-key -- streamed parts only append; Markdown state keys off the positional messageId
         <ReplyBubble key={index}>
           <Markdown
             streaming={streaming && index === parts.length - 1}

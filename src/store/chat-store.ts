@@ -2938,6 +2938,7 @@ export const useChatStore = create<ChatUIState>()(
         set(
           state => {
             const existing = state.dismissedAgentWidgetIds[sessionId] ?? []
+            // react-doctor-disable-next-line react-doctor/js-set-map-lookups -- per-session subagent list is small
             const added = agentIds.filter(id => !existing.includes(id))
             if (added.length === 0) return state
             return {

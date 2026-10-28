@@ -141,7 +141,7 @@ export function CheckpointsTabView({
   const { theme } = useTheme()
   const isMobile = useIsMobile()
   const { data: preferences } = usePreferences()
-  const [selectedId, setSelectedId] = useState<string | null>(
+  const [requestedSelectedId, setSelectedId] = useState<string | null>(
     initialCheckpointId ?? null
   )
   const [diff, setDiff] = useState<GitDiff | null>(null)
@@ -179,21 +179,24 @@ export function CheckpointsTabView({
     staleTime: 5_000,
   })
 
-  useEffect(() => {
-    if (checkpoints.length === 0) {
-      setSelectedId(null)
-      return
+  // Fall back to the initial checkpoint, then the newest one, when the
+  // requested selection is missing from the loaded list.
+  const selectedId = useMemo(() => {
+    if (checkpoints.length === 0) return null
+    if (
+      requestedSelectedId &&
+      checkpoints.some(c => c.id === requestedSelectedId)
+    ) {
+      return requestedSelectedId
     }
-    if (selectedId && checkpoints.some(c => c.id === selectedId)) return
     if (
       initialCheckpointId &&
       checkpoints.some(c => c.id === initialCheckpointId)
     ) {
-      setSelectedId(initialCheckpointId)
-      return
+      return initialCheckpointId
     }
-    setSelectedId(checkpoints[0]?.id ?? null)
-  }, [checkpoints, selectedId, initialCheckpointId])
+    return checkpoints[0]?.id ?? null
+  }, [checkpoints, requestedSelectedId, initialCheckpointId])
 
   const selected = useMemo(
     () => checkpoints.find(c => c.id === selectedId) ?? null,

@@ -971,9 +971,17 @@ where
     // Load current index and hydrate sessions from metadata.
     let mut index = load_index_internal(app, worktree_id)?;
     let mut hydrated_sessions = Vec::new();
+    // Sessions as loaded from metadata. Unchanged ones are not written back:
+    // every write fsyncs, and rewriting all sessions of a large worktree made
+    // each mutation (create, cancel, state update) take about a second.
+    let mut original_sessions = std::collections::HashMap::new();
     for entry in &index.sessions {
         let session = if let Some(metadata) = load_metadata_internal(app, &entry.id)? {
-            metadata.to_session()
+            let session = metadata.to_session();
+            if let Ok(value) = serde_json::to_value(&session) {
+                original_sessions.insert(entry.id.clone(), value);
+            }
+            session
         } else {
             // No metadata found - create minimal session from index entry
             // Use resolved backend from preferences instead of hardcoded Claude
@@ -1105,8 +1113,14 @@ where
 
     save_index_internal(app, &index)?;
 
-    // Save metadata for each session
+    // Save metadata for each changed session
     for session in &sessions.sessions {
+        let unchanged = original_sessions
+            .get(&session.id)
+            .is_some_and(|original| serde_json::to_value(session).ok().as_ref() == Some(original));
+        if unchanged {
+            continue;
+        }
         let lock = get_metadata_lock(&session.id);
         let _guard = lock.lock().unwrap();
 
@@ -1420,6 +1434,35 @@ mod tests {
         assert_eq!(restored.worktree_id, "new-base");
         assert_eq!(metadata.worktree_id, "new-base");
         assert_eq!(metadata.codex_thread_id.as_deref(), Some("resume-thread"));
+    }
+
+    #[test]
+    fn with_sessions_mut_only_writes_changed_sessions() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = AppHandle::new(temp.path().to_path_buf(), temp.path().to_path_buf()).unwrap();
+        let (renamed_id, other_id) = with_sessions_mut(&app, "", "wt", |sessions| {
+            let other = Session::new("Other".to_string(), 1, super::super::types::Backend::Claude);
+            let ids = (sessions.sessions[0].id.clone(), other.id.clone());
+            sessions.sessions.push(other);
+            Ok(ids)
+        })
+        .unwrap();
+
+        with_sessions_mut(&app, "", "wt", |sessions| {
+            // A run writer updates the other session while this mutation runs.
+            let mut metadata = load_metadata_internal(&app, &other_id).unwrap().unwrap();
+            metadata.claude_session_id = Some("written-by-run".to_string());
+            save_metadata_internal(&app, &metadata).unwrap();
+
+            sessions.find_session_mut(&renamed_id).unwrap().name = "Renamed".to_string();
+            Ok(())
+        })
+        .unwrap();
+
+        let renamed = load_metadata(&app, &renamed_id).unwrap().unwrap();
+        let other = load_metadata(&app, &other_id).unwrap().unwrap();
+        assert_eq!(renamed.name, "Renamed");
+        assert_eq!(other.claude_session_id.as_deref(), Some("written-by-run"));
     }
 
     #[test]

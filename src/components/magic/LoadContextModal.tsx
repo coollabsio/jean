@@ -174,12 +174,12 @@ export function LoadContextModal({
     onTabChange: setActiveTab,
   })
 
-  // Track the previous open state to detect when modal opens
-  const prevOpenRef = useRef(false)
-
-  // Determine default tab and reset state when modal opens/closes
-  useEffect(() => {
-    if (open && !prevOpenRef.current) {
+  // Determine default tab and reset state when modal opens (adjusted during
+  // render so the previous open's tab/search never paints)
+  const [prevOpen, setPrevOpen] = useState(false)
+  if (open !== prevOpen) {
+    setPrevOpen(open)
+    if (open) {
       // Dynamic default tab based on loaded data
       if (data.hasLoadedIssueContexts) {
         setActiveTab('issues')
@@ -202,7 +202,15 @@ export function LoadContextModal({
       setIncludeClosed(false)
       setSelectedIndex(0)
       handlers.resetState()
+    }
+  }
 
+  // Track the previous open state to detect when modal opens
+  const prevOpenRef = useRef(false)
+
+  // Refresh caches when modal opens/closes
+  useEffect(() => {
+    if (open && !prevOpenRef.current) {
       // Invalidate caches to fetch fresh data
       if (worktreePath) {
         queryClient.invalidateQueries({
@@ -278,21 +286,7 @@ export function LoadContextModal({
     }
 
     prevOpenRef.current = open
-  }, [
-    open,
-    worktreePath,
-    activeSessionId,
-    projectId,
-    queryClient,
-    data.hasLoadedIssueContexts,
-    data.hasLoadedPRContexts,
-    data.hasLoadedSecurityContexts,
-    data.hasLoadedAdvisoryContexts,
-    data.hasLoadedLinearContexts,
-    data.hasLoadedSentryContexts,
-    data.hasAttachedContexts,
-    handlers.resetState,
-  ])
+  }, [open, worktreePath, activeSessionId, projectId, queryClient])
 
   // Focus search input when tab changes
   useEffect(() => {
@@ -301,19 +295,18 @@ export function LoadContextModal({
     }
   }, [open, activeTab])
 
-  // Reset selection and search when switching tabs
-  useEffect(() => {
+  // Reset selection and search when switching tabs (adjusted during render)
+  const [prevActiveTab, setPrevActiveTab] = useState(activeTab)
+  if (prevActiveTab !== activeTab) {
+    setPrevActiveTab(activeTab)
     setSelectedIndex(0)
     setSearchQuery('')
-  }, [activeTab])
+  }
 
   // Reset to a safe tab when the current one is hidden (e.g. Security on GitLab).
+  // Adjusted during render; the activeTab guard keeps it from looping.
   const activeTabAvailable = displayTabs.some(tab => tab.id === activeTab)
-  useEffect(() => {
-    if (!activeTabAvailable) {
-      setActiveTab('issues')
-    }
-  }, [activeTabAvailable])
+  if (!activeTabAvailable && activeTab !== 'issues') setActiveTab('issues')
 
   // Focus edit input when editing starts
   useEffect(() => {
@@ -321,7 +314,7 @@ export function LoadContextModal({
       handlers.editInputRef.current.focus()
       handlers.editInputRef.current.select()
     }
-  }, [handlers.editingFilename])
+  }, [handlers.editingFilename, handlers.editInputRef])
 
   // Clear editing state when modal closes
   useEffect(() => {

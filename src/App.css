@@ -544,11 +544,13 @@
     }
   }
 
-  /* Links should always have pointer cursor */
+  /* Links and enabled buttons should always have pointer cursor */
   a,
   .select-text a,
   .select-text a *,
-  .select-text code[data-file-path] {
+  .select-text code[data-file-path],
+  .select-text button:enabled,
+  .select-text button:enabled * {
     cursor: pointer !important;
   }
 

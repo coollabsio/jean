@@ -329,28 +329,43 @@ export function BackendModelPickerContent({
 
   const showSidebar = sidebarBackends.length > 1
 
-  // Clear search only when the picker opens — not on every sidebarBackends
-  // identity change (that array is rebuilt often and wiping search mid-type
-  // left Cmd+F acting on the unfiltered first catalog row).
-  useEffect(() => {
-    if (!open) return
-    setSearch('')
-  }, [open])
-
-  // Sync active backend with locked selection / when picker opens.
-  // Never leave activeBackend on an uninstalled backend (empty model list).
-  useEffect(() => {
-    if (!open) return
-    if (isLocked) {
-      setActiveBackend(selectedBackend)
-      return
+  // Adjusted during render (not in effects) so stale search / backend never
+  // paint. Null on mount so the first render syncs like an effect would.
+  const [syncDeps, setSyncDeps] = useState<{
+    open: boolean
+    isLocked: boolean
+    selectedBackend: CliBackend
+    sidebarBackendsKey: string
+  } | null>(null)
+  // Compare by content: the array identity can change on every render.
+  const sidebarBackendsKey = sidebarBackends.join('\u0000')
+  if (
+    syncDeps?.open !== open ||
+    syncDeps.isLocked !== isLocked ||
+    syncDeps.selectedBackend !== selectedBackend ||
+    syncDeps.sidebarBackendsKey !== sidebarBackendsKey
+  ) {
+    const justOpened = open && !syncDeps?.open
+    setSyncDeps({ open, isLocked, selectedBackend, sidebarBackendsKey })
+    if (open) {
+      // Clear search only when the picker opens — not on every
+      // sidebarBackends identity change (that array is rebuilt often and
+      // wiping search mid-type left Cmd+F acting on the unfiltered first
+      // catalog row).
+      if (justOpened) setSearch('')
+      // Sync active backend with locked selection / when picker opens.
+      // Never leave activeBackend on an uninstalled backend (empty model list).
+      if (isLocked) {
+        setActiveBackend(selectedBackend)
+      } else {
+        setActiveBackend(prev => {
+          if (sidebarBackends.includes(prev)) return prev
+          if (sidebarBackends.includes(selectedBackend)) return selectedBackend
+          return sidebarBackends[0] ?? selectedBackend
+        })
+      }
     }
-    setActiveBackend(prev => {
-      if (sidebarBackends.includes(prev)) return prev
-      if (sidebarBackends.includes(selectedBackend)) return selectedBackend
-      return sidebarBackends[0] ?? selectedBackend
-    })
-  }, [open, isLocked, selectedBackend, sidebarBackends])
+  }
 
   const activeSection = useMemo(
     () =>

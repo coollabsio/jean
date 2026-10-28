@@ -30,25 +30,26 @@ export function FilePathCopyRow({
   pathClassName,
   iconOnly = false,
 }: FilePathCopyRowProps) {
-  const [copied, setCopied] = useState(false)
+  // Tracks which path was copied, so a path change drops the checkmark
+  // without a reset effect.
+  const [copiedPath, setCopiedPath] = useState<string | null>(null)
+  const copied = copiedPath === filePath
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pathRef = useRef(filePath)
 
   useEffect(() => {
     pathRef.current = filePath
-    setCopied(false)
-    if (timeoutRef.current !== null) {
-      clearTimeout(timeoutRef.current)
-      timeoutRef.current = null
-    }
+  }, [filePath])
 
-    return () => {
+  useEffect(
+    () => () => {
       if (timeoutRef.current !== null) {
         clearTimeout(timeoutRef.current)
         timeoutRef.current = null
       }
-    }
-  }, [filePath])
+    },
+    []
+  )
 
   const handleCopy = useCallback(async () => {
     const path = filePath
@@ -56,12 +57,12 @@ export function FilePathCopyRow({
       await copyToClipboard(path)
       toast.success('Copied file path to clipboard')
       if (pathRef.current !== path) return
-      setCopied(true)
+      setCopiedPath(path)
       if (timeoutRef.current !== null) {
         clearTimeout(timeoutRef.current)
       }
       timeoutRef.current = setTimeout(() => {
-        setCopied(false)
+        setCopiedPath(null)
         timeoutRef.current = null
       }, COPIED_RESET_MS)
     } catch (err) {

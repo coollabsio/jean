@@ -1042,6 +1042,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   const stored = preferences?.default_backend ?? 'claude'
   const installedBackendOptions = useMemo(
     () =>
+      // react-doctor-disable-next-line react-doctor/js-set-map-lookups -- fixed handful of backends
       backendOptions.filter(option => installedBackends.includes(option.value)),
     [installedBackends]
   )

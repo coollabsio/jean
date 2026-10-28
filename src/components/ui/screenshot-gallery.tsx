@@ -87,6 +87,7 @@ export function ScreenshotGallery({
           const moreCount = index === tiles.length - 1 ? hidden : 0
           return (
             <button
+              // react-doctor-disable-next-line react-doctor/no-array-index-as-key -- tiles are a fixed slice of the message; paths may repeat
               key={`${index}-${path}`}
               type="button"
               onClick={() => setOpenIndex(index)}

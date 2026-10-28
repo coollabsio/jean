@@ -85,9 +85,13 @@ export function AgentMentionPopover({
     Math.max(0, items.length - 1)
   )
 
-  useEffect(() => {
+  // Reset the highlight when the popover opens or the query changes, adjusted
+  // during render so the stale highlight never paints.
+  const [resetDeps, setResetDeps] = useState({ open, searchQuery })
+  if (resetDeps.open !== open || resetDeps.searchQuery !== searchQuery) {
+    setResetDeps({ open, searchQuery })
     if (open) setSelectedIndex(0)
-  }, [open, searchQuery])
+  }
 
   const handleSelect = useCallback(
     (candidate: MentionCandidate) => {

@@ -177,6 +177,7 @@ export async function copyImageToClipboard(src: string): Promise<void> {
   if (!inline) {
     const response = await fetch(src)
     if (!response.ok) throw new Error('Failed to load image')
+    // react-doctor-disable-next-line react-doctor/no-create-object-url-without-revoke -- revoked in the finally block below
     url = URL.createObjectURL(await response.blob())
   }
   try {

@@ -348,6 +348,9 @@ export function usePlanDialogApproval({
       mcpServersDataRef,
       enabledMcpServersRef,
       markAtBottom,
+      yoloBackendRef,
+      buildBackendRef,
+      selectedBackendRef,
     ]
   )
 

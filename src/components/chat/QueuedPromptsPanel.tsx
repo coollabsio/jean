@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useRef, useState } from 'react'
 import { Clock, Paperclip, Pencil, Play, X } from '@/components/icons/reicon'
 import {
   Collapsible,
@@ -70,22 +70,20 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
   const editingId = useChatStore(
     state => state.editingQueuedMessageIds[sessionId] ?? null
   )
-  const listRef = useRef<HTMLDivElement>(null)
-  const rowRefs = useRef<(HTMLDivElement | null)[]>([])
+  const listRef = useRef<HTMLUListElement>(null)
+  const rowRefs = useRef<(HTMLLIElement | null)[]>([])
 
-  // Clamp selection when the queue shrinks (auto-send / cross-client removal)
-  useEffect(() => {
-    if (selectedIndex > messages.length - 1) {
-      setSelectedIndex(Math.max(0, messages.length - 1))
-    }
-  }, [messages.length, selectedIndex])
+  // Clamp selection when the queue shrinks (auto-send / cross-client removal).
+  // Adjusted during render so the out-of-range index never paints.
+  const maxSelectedIndex = Math.max(0, messages.length - 1)
+  if (selectedIndex > maxSelectedIndex) setSelectedIndex(maxSelectedIndex)
 
   const scrollRowIntoView = useCallback((index: number) => {
     rowRefs.current[index]?.scrollIntoView({ block: 'nearest' })
   }, [])
 
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLDivElement>) => {
+    (e: React.KeyboardEvent<HTMLUListElement>) => {
       if (messages.length === 0) return
       switch (e.key) {
         case 'ArrowDown': {
@@ -160,9 +158,8 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
           </CollapsibleTrigger>
         </div>
         <CollapsibleContent>
-          <div
+          <ul
             ref={listRef}
-            role="list"
             aria-label="Queued prompts"
             tabIndex={0}
             onKeyDown={handleKeyDown}
@@ -173,13 +170,13 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
               const attachments = attachmentCount(msg)
               const isEditing = editingId === msg.id
               return (
-                <div
+                // react-doctor-disable-next-line react-doctor/click-events-have-key-events, react-doctor/no-noninteractive-element-interactions -- pointer mirror of the focusable list's arrow-key selection (handleKeyDown)
+                <li
                   key={msg.id}
                   id={`queued-prompt-${index}`}
                   ref={el => {
                     rowRefs.current[index] = el
                   }}
-                  role="listitem"
                   aria-current={isSelected ? 'true' : undefined}
                   onClick={() => setSelectedIndex(index)}
                   className={cn(
@@ -294,10 +291,10 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
                       </>
                     )}
                   </div>
-                </div>
+                </li>
               )
             })}
-          </div>
+          </ul>
         </CollapsibleContent>
       </div>
     </Collapsible>

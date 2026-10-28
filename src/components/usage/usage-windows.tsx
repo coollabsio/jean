@@ -426,6 +426,7 @@ export function UsageWindows({
   const charted = withUsage.filter(spec => paceFor(spec, nowMs) !== null)
   const tiles = charted.length > 0 ? charted : withUsage
   const rows = [
+    // react-doctor-disable-next-line react-doctor/js-set-map-lookups -- a few usage windows per provider
     ...withUsage.filter(spec => !tiles.includes(spec)),
     ...secondary.filter(hasUsage),
   ]
