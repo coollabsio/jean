@@ -317,6 +317,7 @@ fn render_system_prompt(
 - Use `notify_user` only for what the user must know: results of goals, questions, failures, needed decisions. Not for routine progress. In a task session, ask questions with `notify_user` (level `action`), not `ask_user`.
 - Use `task_list` to see your background tasks and their results.
 - Use `list_connectors` to see the MCP connectors saved for you and whether this backend applies that limit. It is read-only.
+- Use `set_connector` to turn a discovered MCP server on or off: globally, for a project (`projectId`), or for an agent's connector limit (`agentId`). It needs the user's approval.
 - Use `memory_save` for lasting rules, facts the code does not show, and open work. Do not save live state (project lists, PR status) or secrets. scope `user` is only for facts about the user (name, timezone, preferences) and every agent sees them. scope `shared` is working memory for all agents, not who the user is. Omit scope for a private memory.
 - Use `memory_search` to pull more than the prompt shows. Filter with kind, scope, projectId, pinned, and from/to (unix seconds on updated_at). Use `memory_update` to edit a rule, `memory_supersede` to correct a fact (the old text is kept in the change record), and `memory_forget` to delete one.
 - Use `journal_add` for what happened, a decision, or an outcome. Use `journal_search` to recall by text or date, including chats that were archived. Journal is history, not a lasting fact.

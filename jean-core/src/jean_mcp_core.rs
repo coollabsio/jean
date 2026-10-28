@@ -46,6 +46,7 @@ const RATE_LIMITED_TOOLS: &[&str] = &[
     "remove_project",
     "run_review",
     "send_chat_message",
+    "set_connector",
     "set_session_model",
     "set_session_settings",
     "start_run_environment",
@@ -238,6 +239,7 @@ fn tool_registry_core() -> Value {
         {"name":"clone_project","description":"Clone a remote git repository to a local path and add it as a Jean project. Returns the created project.","inputSchema":{"type":"object","properties":{"url":{"type":"string","description":"Git remote URL to clone (https or ssh)."},"path":{"type":"string","description":"Absolute local path where the repo should be cloned."},"parentId":{"type":"string","description":"Optional Jean folder/project parent id for nesting in the project list."}},"required":["url","path"],"additionalProperties":false}},
         {"name":"init_project","description":"Create a new git repository at path (creating the directory if needed) and add it as a Jean project. Use add_project instead when the path is already a git repo. Returns the created project.","inputSchema":{"type":"object","properties":{"path":{"type":"string","description":"Absolute path for the new project directory."},"parentId":{"type":"string","description":"Optional Jean folder/project parent id for nesting in the project list."}},"required":["path"],"additionalProperties":false}},
         {"name":"remove_project","description":"Remove a project from Jean (same as the UI \"Remove project\"). Repository files on disk are kept. Fails if the project has worktrees. Does not remove folders. Needs user approval.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"}},"required":["projectId"],"additionalProperties":false}},
+        {"name":"set_connector","description":"Turn a discovered MCP server (connector) on or off, like the MCP Servers switches in settings. scope global: the default servers for new sessions. scope project (projectId): the project's own server list; enable on a project without a list starts one with only this server. scope agent (agentId): the agent's connector limit; enable on an agent without a limit starts one with only this server. Disable fails when no list is saved. backend and name identify the server (the backend's own MCP config, as listed in settings). Does not add or edit server definitions and never returns server config. Needs user approval.","inputSchema":{"type":"object","properties":{"scope":{"type":"string","enum":["global","project","agent"]},"action":{"type":"string","enum":["enable","disable"]},"backend":{"type":"string","description":"CLI backend that owns the server, for example claude or codex."},"name":{"type":"string","description":"Server name in that backend's MCP config."},"projectId":{"type":"string","description":"Required for scope project."},"agentId":{"type":"string","description":"Required for scope agent."}},"required":["scope","action","backend","name"],"additionalProperties":false}},
         {"name":"list_worktrees","description":"List all worktrees for a project.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"}},"required":["projectId"],"additionalProperties":false}},
         {"name":"get_worktree","description":"Get a single worktree by id (path, branch, status, etc.).","inputSchema":{"type":"object","properties":{"worktreeId":{"type":"string"}},"required":["worktreeId"],"additionalProperties":false}},
         {"name":"get_project_context","description":"Get project-level context needed by orchestration agents: project settings, linked projects, default branch/backend, and worktree counts. Does not read arbitrary repo files.","inputSchema":{"type":"object","properties":{"projectId":{"type":"string"}},"required":["projectId"],"additionalProperties":false}},
@@ -622,6 +624,9 @@ async fn run_tool(
             .await
             .map_err(ToolError::internal)
         }
+        "set_connector" => crate::agents::connectors::set_connector(app, &args)
+            .await
+            .map_err(ToolError::internal),
         "remove_project" => {
             let project_id = require_str(&args, "projectId")?;
             dispatch_command(app, "remove_project", json!({ "projectId": project_id }))
@@ -4229,6 +4234,20 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"F
             update_worktree_labels["inputSchema"]["required"],
             json!(["worktreeId", "action"])
         );
+    }
+
+    #[test]
+    fn set_connector_is_registered_rate_limited_and_needs_approval() {
+        let tools = tool_registry();
+        let tool = find_tool(&tools, "set_connector");
+        assert_eq!(
+            tool["inputSchema"]["required"],
+            json!(["scope", "action", "backend", "name"])
+        );
+        assert!(RATE_LIMITED_TOOLS.contains(&"set_connector"));
+        assert!(crate::agents::mcp::APPROVAL_TOOLS.contains(&"set_connector"));
+        // Not an agent-only tool: an approved call replays through run_tool.
+        assert!(!crate::agents::mcp::is_agent_tool("set_connector"));
     }
 
     #[test]

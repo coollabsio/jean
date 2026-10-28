@@ -59,6 +59,19 @@ export function describeApproval(
           : 'Update agent'
     return `${verb} ${who}`
   }
+  if (approval.tool === 'set_connector') {
+    const verb = text('action') === 'disable' ? 'Disable' : 'Enable'
+    const scope = text('scope')
+    const where =
+      scope === 'global'
+        ? 'for all sessions'
+        : scope === 'project'
+          ? targetName
+            ? `for project ${targetName}`
+            : 'for a project'
+          : 'for an agent'
+    return `${verb} MCP server ${text('backend')}:${text('name')} ${where}`
+  }
   // A deleted worktree has no name to look up: fall back to its folder name
   const target =
     targetName ?? text('worktreePath').split(/[\\/]/).filter(Boolean).pop()
