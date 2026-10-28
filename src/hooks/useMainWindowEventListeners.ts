@@ -835,6 +835,10 @@ function executeKeybindingAction(
       window.dispatchEvent(new CustomEvent('approve-plan-yolo'))
       break
     }
+    case 'deny_permission':
+      logger.debug('Keybinding: deny_permission')
+      window.dispatchEvent(new CustomEvent('deny-permission'))
+      break
     case 'approve_plan_clear_context': {
       logger.debug('Keybinding: approve_plan_clear_context')
       const planDialogOpenClear = useUIStore.getState().planDialogOpen

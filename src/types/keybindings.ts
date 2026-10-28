@@ -21,6 +21,7 @@ export type KeybindingAction =
   | 'cycle_execution_mode'
   | 'approve_plan'
   | 'approve_plan_yolo'
+  | 'deny_permission'
   | 'approve_plan_clear_context'
   | 'approve_plan_clear_context_build'
   | 'approve_plan_worktree_build'
@@ -86,6 +87,7 @@ export const DEFAULT_KEYBINDINGS: KeybindingsMap = {
   // Full access stays on Y, with the clear-context (shift) and worktree (alt)
   // variants. Bare mod+y is redo in text fields on Windows and Linux (#777).
   approve_plan_yolo: 'mod+shift+alt+y',
+  deny_permission: 'mod+shift+backspace',
   approve_plan_clear_context: 'mod+shift+y',
   approve_plan_clear_context_build: 'mod+shift+enter',
   approve_plan_worktree_build: 'mod+alt+enter',
@@ -236,6 +238,13 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
     label: 'Approve plan (Full access)',
     description: 'Approve the current plan with Full access',
     default_shortcut: 'mod+shift+alt+y',
+    category: 'chat',
+  },
+  {
+    action: 'deny_permission',
+    label: 'Deny tool permission',
+    description: 'Deny the pending tool permission request',
+    default_shortcut: 'mod+shift+backspace',
     category: 'chat',
   },
   {

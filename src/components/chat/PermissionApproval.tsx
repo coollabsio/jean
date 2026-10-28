@@ -1,8 +1,7 @@
-import { useState, useCallback, useMemo, useEffect } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import { Button } from '@/components/ui/button'
 import { ApprovalCard } from './ApprovalCard'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Label } from '@/components/ui/label'
+import { ApprovalShortcutKbd, useApprovalShortcuts } from './approval-shortcuts'
 import { ChevronRight, CheckCircle2 } from '@/components/icons/reicon'
 import {
   Collapsible,
@@ -167,65 +166,22 @@ export function PermissionApproval({
     return denials.filter((_, i) => keep.has(i))
   }, [denials])
 
-  const [selectedIndices, setSelectedIndices] = useState<Set<number>>(
-    () => new Set(uniqueDenials.map((_, i) => i)) // All selected by default
-  )
   const [isExpanded, setIsExpanded] = useState(false)
 
-  const toggleSelection = useCallback((index: number) => {
-    setSelectedIndices(prev => {
-      const next = new Set(prev)
-      if (next.has(index)) {
-        next.delete(index)
-      } else {
-        next.add(index)
-      }
-      return next
-    })
-  }, [])
-
   const handleApprove = useCallback(() => {
-    const patterns = uniqueDenials.flatMap((denial, i) =>
-      selectedIndices.has(i) ? [formatToolPattern(denial)] : []
-    )
-    onApprove(sessionId, patterns)
-  }, [sessionId, uniqueDenials, selectedIndices, onApprove])
+    onApprove(sessionId, uniqueDenials.map(formatToolPattern))
+  }, [sessionId, uniqueDenials, onApprove])
 
   const handleApproveYolo = useCallback(() => {
-    const patterns = uniqueDenials.flatMap((denial, i) =>
-      selectedIndices.has(i) ? [formatToolPattern(denial)] : []
-    )
-    onApproveYolo?.(sessionId, patterns)
-  }, [sessionId, uniqueDenials, selectedIndices, onApproveYolo])
+    onApproveYolo?.(sessionId, uniqueDenials.map(formatToolPattern))
+  }, [sessionId, uniqueDenials, onApproveYolo])
 
-  // Listen for CMD+ENTER to approve (same event as answer-question)
-  useEffect(() => {
-    if (readOnly) return
-
-    const handleAnswerQuestion = () => {
-      if (selectedIndices.size > 0) {
-        handleApprove()
-      }
-    }
-
-    window.addEventListener('answer-question', handleAnswerQuestion)
-    return () =>
-      window.removeEventListener('answer-question', handleAnswerQuestion)
-  }, [readOnly, selectedIndices.size, handleApprove])
-
-  // Listen for CMD+Y to approve with Full access
-  useEffect(() => {
-    if (readOnly || !onApproveYolo) return
-
-    const handler = () => {
-      if (selectedIndices.size > 0) {
-        handleApproveYolo()
-      }
-    }
-
-    window.addEventListener('approve-plan-yolo', handler)
-    return () => window.removeEventListener('approve-plan-yolo', handler)
-  }, [readOnly, selectedIndices.size, handleApproveYolo, onApproveYolo])
+  useApprovalShortcuts({
+    enabled: !readOnly,
+    onApprove: handleApprove,
+    onApproveYolo: onApproveYolo ? handleApproveYolo : undefined,
+    onDeny: onDeny ? () => onDeny(sessionId) : undefined,
+  })
 
   // Read-only collapsed view (after approval)
   if (readOnly && approvedPatterns) {
@@ -266,24 +222,16 @@ export function PermissionApproval({
   return (
     <ApprovalCard
       title={`Claude wants to use ${uniqueDenials.length} tool${uniqueDenials.length !== 1 ? 's' : ''}`}
-      description="Select which tools to allow."
       actions={
         <>
-          <Button
-            size="sm"
-            onClick={handleApprove}
-            disabled={selectedIndices.size === 0}
-          >
+          <Button size="sm" onClick={handleApprove}>
             Approve
+            <ApprovalShortcutKbd action="approve_plan" />
           </Button>
           {onApproveYolo && (
-            <Button
-              size="sm"
-              variant="destructive"
-              onClick={handleApproveYolo}
-              disabled={selectedIndices.size === 0}
-            >
+            <Button size="sm" variant="destructive" onClick={handleApproveYolo}>
               Approve (Full access)
+              <ApprovalShortcutKbd action="approve_plan_yolo" />
             </Button>
           )}
           {onDeny && (
@@ -293,36 +241,26 @@ export function PermissionApproval({
               onClick={() => onDeny(sessionId)}
             >
               Deny
+              <ApprovalShortcutKbd action="deny_permission" />
             </Button>
           )}
         </>
       }
     >
       <div className="space-y-3">
-        {uniqueDenials.map((denial, index) => {
+        {uniqueDenials.map(denial => {
           const command = getToolCommand(denial)
           return (
-            <div key={denial.tool_use_id} className="flex items-start gap-2.5">
-              <Checkbox
-                id={`permission-${sessionId}-${index}`}
-                checked={selectedIndices.has(index)}
-                onCheckedChange={() => toggleSelection(index)}
-                className="mt-0.5"
-              />
-              <Label
-                htmlFor={`permission-${sessionId}-${index}`}
-                className="block min-w-0 flex-1 cursor-pointer"
-              >
-                <div className="font-medium">{denial.tool_name}</div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  {getToolDescription(denial)}
-                </div>
-                {command && (
-                  <pre className="mt-2 overflow-x-auto rounded bg-background px-3 py-2 font-mono text-xs">
-                    {command}
-                  </pre>
-                )}
-              </Label>
+            <div key={denial.tool_use_id} className="min-w-0">
+              <div className="font-medium">{denial.tool_name}</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {getToolDescription(denial)}
+              </div>
+              {command && (
+                <pre className="mt-2 rounded bg-background px-3 py-2 font-mono text-xs whitespace-pre-wrap break-all">
+                  {command}
+                </pre>
+              )}
             </div>
           )
         })}
