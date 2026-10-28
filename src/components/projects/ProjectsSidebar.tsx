@@ -291,7 +291,6 @@ export function ProjectsSidebar() {
                       aria-label="Filter projects by server"
                       className="flex h-7 w-full items-center gap-2 rounded-md border border-transparent bg-transparent px-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                     >
-                      <Server className="size-3.5" />
                       <span className="min-w-0 flex-1 truncate text-left">
                         {selectedServerLabel}
                       </span>
@@ -425,7 +424,7 @@ export function ProjectsSidebar() {
       </div>
       {/* Glassy footer floats over the list (only when it has buttons); only its buttons take clicks */}
       <div
-        className={`pointer-events-none absolute inset-x-0 bottom-0 z-20 flex items-center justify-between has-[button]:bg-sidebar/30 has-[button]:backdrop-blur-sm dark:has-[button]:bg-[#0b0b0b]/30 ${showServerMenu ? 'px-2 py-0.5' : 'px-2 pt-0.5 pb-[max(0.125rem,env(safe-area-inset-bottom))]'}`}
+        className={`pointer-events-none absolute inset-x-0 bottom-0 z-20 flex items-center justify-between has-[button]:bg-sidebar/30 has-[button]:backdrop-blur-sm ${showServerMenu ? 'px-2 py-0.5' : 'px-2 pt-0.5 pb-[max(0.125rem,env(safe-area-inset-bottom))]'}`}
       >
         <div
           ref={setFooterActionsEl}

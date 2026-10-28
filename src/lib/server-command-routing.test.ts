@@ -396,10 +396,9 @@ describe('server command routing', () => {
     })
   })
 
-  it('scopes the next active session id returned by close and archive', () => {
+  it('scopes the next active session id returned by close', () => {
     expect(decorateServerResult('r1', 'close_session', 's2')).toBe('r1:s2')
-    expect(decorateServerResult('r1', 'archive_session', 's2')).toBe('r1:s2')
-    expect(decorateServerResult('r1', 'archive_session', null)).toBeNull()
+    expect(decorateServerResult('r1', 'close_session', null)).toBeNull()
   })
 
   it('decorates background investigation session and worktree identities', () => {

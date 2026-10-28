@@ -124,7 +124,6 @@ export const ChatToolbar = memo(function ChatToolbar({
   loadedSentryContexts,
   attachedSavedContexts,
   onOpenMagicModal,
-  onSaveContext,
   onLoadContext,
   onCommit,
   onCommitAndPush,
@@ -522,7 +521,6 @@ export const ChatToolbar = memo(function ChatToolbar({
                 hasSentryContexts={loadedSentryContexts.length > 0}
                 hasPrContexts={loadedPRContexts.length > 0}
                 hasAdvisoryContexts={loadedAdvisoryContexts.length > 0}
-                onSaveContext={onSaveContext}
                 onLoadContext={onLoadContext}
                 onCommit={onCommit}
                 onCommitAndPush={onCommitAndPush}

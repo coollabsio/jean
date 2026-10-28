@@ -145,8 +145,8 @@ export function ContextsTab({
             No saved contexts or sessions available.
             <br />
             <span className="text-sm">
-              Use &quot;Save Context&quot; for a summary, or inject another
-              session as an MCP pointer from this tab.
+              Sessions with messages appear here to inject as an MCP pointer or
+              summarize into a saved context.
             </span>
           </div>
         ) : (

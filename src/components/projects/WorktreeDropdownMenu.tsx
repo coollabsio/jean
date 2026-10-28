@@ -1,6 +1,5 @@
 import {
   Activity,
-  Archive,
   AlertCircle,
   CircleDot,
   Code,
@@ -130,7 +129,7 @@ export function WorktreeDropdownMenu({
     handleOpenInFinder,
     handleOpenInTerminal,
     handleOpenInEditor,
-    handleArchiveOrClose,
+    handleClose,
     handleDelete,
   } = useWorktreeMenuActions({ worktree, projectId })
   const isMobile = useIsMobile()
@@ -534,21 +533,12 @@ export function WorktreeDropdownMenu({
 
           <DropdownMenuSeparator />
 
-          <DropdownMenuItem onClick={handleArchiveOrClose}>
-            {isBase ? (
-              <>
-                <X className="mr-2 h-4 w-4" />
-                Close Session
-              </>
-            ) : (
-              <>
-                <Archive className="mr-2 h-4 w-4" />
-                Archive Worktree
-              </>
-            )}
-          </DropdownMenuItem>
-
-          {!isBase && (
+          {isBase ? (
+            <DropdownMenuItem onClick={handleClose}>
+              <X className="mr-2 h-4 w-4" />
+              Close Session
+            </DropdownMenuItem>
+          ) : (
             <DropdownMenuItem onClick={() => setShowDeleteConfirm(true)}>
               <Trash2 className="mr-2 h-4 w-4 text-destructive" />
               Delete Worktree

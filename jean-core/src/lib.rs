@@ -224,14 +224,10 @@ pub struct AppPreferences {
     /// so a preferences round-trip does not drop the marker.
     #[serde(default)]
     pub applied_keybinding_migrations: Vec<String>,
-    #[serde(default = "default_archive_retention_days")]
-    pub archive_retention_days: u32, // Days to keep archived items before auto-cleanup (0 = disabled)
     #[serde(default = "default_syntax_theme_dark")]
     pub syntax_theme_dark: String, // Syntax highlighting theme for dark mode
     #[serde(default = "default_syntax_theme_light")]
     pub syntax_theme_light: String, // Syntax highlighting theme for light mode
-    #[serde(default = "default_compact_chat_view_enabled")]
-    pub compact_chat_view_enabled: bool, // Collapse intermediate tool calls into single ticker line
     #[serde(default = "default_sidebar_hover_open_enabled")]
     pub sidebar_hover_open_enabled: bool, // Temporarily reveal collapsed sidebar from left edge
     #[serde(default = "default_keep_ai_servers_warm")]
@@ -280,14 +276,8 @@ pub struct AppPreferences {
     pub http_server_localhost_only: bool, // Legacy fallback when no explicit bind host is set
     #[serde(default = "default_http_server_token_required")]
     pub http_server_token_required: bool, // Require token for web access (default true)
-    #[serde(default = "default_removal_behavior")]
-    pub removal_behavior: String, // What happens when closing sessions/worktrees: archive, delete
-    #[serde(default = "default_auto_save_context")]
-    pub auto_save_context: bool, // Auto-save context after each session completion
     #[serde(default = "default_auto_pull_base_branch")]
     pub auto_pull_base_branch: bool, // Auto-pull base branch before creating a new worktree
-    #[serde(default = "default_auto_archive_on_pr_merged")]
-    pub auto_archive_on_pr_merged: bool, // Auto-archive worktrees when their PR is merged
     #[serde(default)]
     pub debug_mode_enabled: bool, // Show debug panel in chat sessions (default: false)
     #[serde(default)]
@@ -336,10 +326,6 @@ pub struct AppPreferences {
     pub fast_mode_models: Vec<String>, // Model keys ("backend:baseModel") with fast tier last enabled
     #[serde(default = "default_canvas_layout")]
     pub canvas_layout: String, // Canvas display mode: grid or list
-    #[serde(default = "default_confirm_session_close")]
-    pub confirm_session_close: bool, // Show confirmation dialog before closing sessions/worktrees
-    #[serde(default = "default_close_confirm_bypass_modifier")]
-    pub close_confirm_bypass_modifier: String, // Modifier that skips the close confirmation ("none" disables)
     #[serde(default = "default_execution_mode")]
     pub default_execution_mode: String, // Default workflow/permission policy for new sessions
     #[serde(default = "default_backend")]
@@ -390,8 +376,6 @@ pub struct AppPreferences {
     pub kimi_auto_steer_enabled: bool,
     #[serde(default, alias = "gemini_auto_steer_enabled")]
     pub antigravity_auto_steer_enabled: bool,
-    #[serde(default)]
-    pub close_original_on_clear_context: bool, // Close original session when using Clear Context and yolo (default: true)
     #[serde(default)]
     pub build_model: Option<String>, // Model override for plan approval (build mode), None = use session model
     #[serde(default)]
@@ -444,8 +428,6 @@ pub struct AppPreferences {
     pub commandcode_cli_source: String, // Command Code CLI source: "jean" (managed) or "path" (system PATH)
     #[serde(default = "default_cli_source")]
     pub coderabbit_cli_source: String, // CodeRabbit CLI source: "jean" (managed) or "path" (system PATH)
-    #[serde(default)]
-    pub expand_tool_calls_by_default: bool, // Expand all tool call collapsibles by default (default: false)
     #[serde(default)]
     pub window_vibrancy: bool, // macOS window vibrancy effect (high GPU cost, default false)
     #[serde(default = "default_finished_session_animation_enabled")]
@@ -673,10 +655,6 @@ fn default_keybindings() -> std::collections::HashMap<String, String> {
     map
 }
 
-fn default_archive_retention_days() -> u32 {
-    7 // Keep archived items for 7 days by default
-}
-
 fn default_syntax_theme_dark() -> String {
     "vitesse-black".to_string()
 }
@@ -687,10 +665,6 @@ fn default_syntax_theme_light() -> String {
 
 fn default_file_edit_mode() -> String {
     "inline".to_string() // Default to Jean's Pierre inline editor
-}
-
-fn default_compact_chat_view_enabled() -> bool {
-    true // Enabled by default
 }
 
 fn default_sidebar_hover_open_enabled() -> bool {
@@ -715,14 +689,6 @@ fn default_auto_update_ai_backends() -> bool {
 
 fn default_canvas_layout() -> String {
     "list".to_string()
-}
-
-fn default_confirm_session_close() -> bool {
-    true // Enabled by default
-}
-
-fn default_close_confirm_bypass_modifier() -> String {
-    "none".to_string() // Off by default — closing stays behind the confirmation dialog
 }
 
 fn default_execution_mode() -> String {
@@ -1805,19 +1771,7 @@ mod tests {
     }
 }
 
-fn default_removal_behavior() -> String {
-    "delete".to_string()
-}
-
-fn default_auto_save_context() -> bool {
-    false // Disabled by default
-}
-
 fn default_auto_pull_base_branch() -> bool {
-    true // Enabled by default
-}
-
-fn default_auto_archive_on_pr_merged() -> bool {
     true // Enabled by default
 }
 
@@ -3321,10 +3275,8 @@ impl Default for AppPreferences {
             font_weight: default_font_weight(),
             keybindings: default_keybindings(),
             applied_keybinding_migrations: Vec::new(),
-            archive_retention_days: default_archive_retention_days(),
             syntax_theme_dark: default_syntax_theme_dark(),
             syntax_theme_light: default_syntax_theme_light(),
-            compact_chat_view_enabled: default_compact_chat_view_enabled(),
             sidebar_hover_open_enabled: default_sidebar_hover_open_enabled(),
             keep_ai_servers_warm: default_keep_ai_servers_warm(),
             magic_prompts: MagicPrompts::default(),
@@ -3349,10 +3301,7 @@ impl Default for AppPreferences {
             http_server_bind_host: None,
             http_server_localhost_only: true, // Default to localhost-only for security
             http_server_token_required: default_http_server_token_required(),
-            removal_behavior: default_removal_behavior(),
-            auto_save_context: default_auto_save_context(),
             auto_pull_base_branch: default_auto_pull_base_branch(),
-            auto_archive_on_pr_merged: default_auto_archive_on_pr_merged(),
             debug_mode_enabled: false,
             agents_enabled: false,
             default_effort_level: default_effort_level(),
@@ -3378,8 +3327,6 @@ impl Default for AppPreferences {
             favorite_base_branches: Vec::new(),
             fast_mode_models: Vec::new(),
             canvas_layout: default_canvas_layout(),
-            confirm_session_close: default_confirm_session_close(),
-            close_confirm_bypass_modifier: default_close_confirm_bypass_modifier(),
             default_execution_mode: default_execution_mode(),
             default_backend: default_backend(),
             default_new_session_kind: default_new_session_kind(),
@@ -3405,7 +3352,6 @@ impl Default for AppPreferences {
             grok_auto_steer_enabled: default_grok_auto_steer(),
             kimi_auto_steer_enabled: false,
             antigravity_auto_steer_enabled: false,
-            close_original_on_clear_context: true,
             build_model: None,
             yolo_model: None,
             build_backend: None,
@@ -3432,7 +3378,6 @@ impl Default for AppPreferences {
             pi_cli_source: default_cli_source(),
             commandcode_cli_source: default_cli_source(),
             coderabbit_cli_source: default_cli_source(),
-            expand_tool_calls_by_default: false,
             window_vibrancy: false,
             finished_session_animation_enabled: default_finished_session_animation_enabled(),
             terminal_background: default_terminal_background(),
@@ -4115,7 +4060,6 @@ const CLIENT_ONLY_PREFERENCE_KEYS: &[&str] = &[
     "applied_keybinding_migrations",
     "syntax_theme_dark",
     "syntax_theme_light",
-    "compact_chat_view_enabled",
     "file_edit_mode",
     "waiting_sound",
     "review_sound",
@@ -4127,9 +4071,6 @@ const CLIENT_ONLY_PREFERENCE_KEYS: &[&str] = &[
     "zoom_level",
     "mobile_zoom_level",
     "sync_zoom_levels",
-    "confirm_session_close",
-    "close_confirm_bypass_modifier",
-    "expand_tool_calls_by_default",
     "window_vibrancy",
     "finished_session_animation_enabled",
     "terminal_background",
@@ -5420,6 +5361,18 @@ pub fn initialize_runtime(context: &RuntimeContext) -> Result<(), String> {
         Ok(()) => agents::start(context.clone()),
         Err(error) => log::error!("Agents are unavailable: {error}"),
     }
+
+    // Closed sessions stay on disk for DELETED_ITEM_RETENTION_DAYS. Purge once
+    // now and then daily, for the desktop app and the headless server alike.
+    let purge_context = context.clone();
+    async_runtime::spawn(async move {
+        loop {
+            if let Err(error) = projects::cleanup_deleted_items(purge_context.clone()).await {
+                log::warn!("Deleted-item purge failed: {error}");
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(24 * 60 * 60)).await;
+        }
+    });
 
     let cleanup_context = context.clone();
     async_runtime::spawn_blocking(move || {

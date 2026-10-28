@@ -266,7 +266,6 @@ describe('magic prompt preference resolvers', () => {
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).not.toContain(
       '### 7. Autonomous Bug Fixing'
     )
-    expect(defaultPreferences.compact_chat_view_enabled).toBe(true)
   })
 
   it('prefers explicit backend overrides', () => {

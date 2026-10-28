@@ -37,10 +37,10 @@ import type {
   DependabotAlert,
   RepositoryAdvisory,
 } from '@/types/github'
-import type { TabId, Tab } from './NewWorktreeModal'
+import type { TabId, Tab } from './new-worktree-tabs'
 
 // Re-export TABS for use in SessionTabBar
-export { TABS } from './NewWorktreeModal'
+export { TABS } from './new-worktree-tabs'
 
 export function SessionTabBar({
   activeTab,

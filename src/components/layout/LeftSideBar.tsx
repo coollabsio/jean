@@ -12,12 +12,7 @@ interface LeftSideBarProps {
 export function LeftSideBar({ children, className }: LeftSideBarProps) {
   const showAgents = useShowAgents()
   return (
-    <div
-      className={cn(
-        'flex h-full flex-col bg-sidebar dark:bg-[#0b0b0b]',
-        className
-      )}
-    >
+    <div className={cn('flex h-full flex-col bg-sidebar', className)}>
       <SidebarTabs />
       {/* Panels size themselves with h-full; this box gives them the rest */}
       <div className="flex min-h-0 flex-1 flex-col">

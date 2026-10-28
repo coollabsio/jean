@@ -200,7 +200,6 @@ function formatMagicModalOpencodeLabel(value: string): string {
 
 /** Keyboard shortcut to option ID mapping */
 const KEY_TO_OPTION: Record<string, MagicOption> = {
-  s: 'save-context',
   j: 'inject-session',
   k: 'linked-projects',
   w: 'fork-session',
@@ -247,7 +246,7 @@ export function MagicModal() {
   const investigateContentRef = useRef<HTMLDivElement>(null)
   const hasInitializedRef = useRef(false)
   const [selectedOption, setSelectedOption] =
-    useState<MagicMenuOption>('save-context')
+    useState<MagicMenuOption>('inject-session')
   const [investigateDialogOpen, setInvestigateDialogOpen] = useState(false)
   const [investigateType, setInvestigateType] =
     useState<InvestigateType | null>(null)
@@ -365,7 +364,7 @@ export function MagicModal() {
   const handleOpenChange = useCallback(
     (open: boolean) => {
       if (open && !hasInitializedRef.current) {
-        setSelectedOption(isOnCanvas ? 'commit' : 'save-context')
+        setSelectedOption(isOnCanvas ? 'commit' : 'inject-session')
         hasInitializedRef.current = true
       }
       setMagicModalOpen(open)
@@ -940,33 +939,23 @@ export function MagicModal() {
             })
             toast.success(result.message, { id: mergePrToastId })
 
-            // Archive or delete the worktree (same as auto-archive on merge)
-            const shouldDelete = preferences?.removal_behavior === 'delete'
-            const action = shouldDelete ? 'Deleting' : 'Archiving'
-            const cleanupToastId = toast.loading(`${action} worktree...`)
+            const cleanupToastId = toast.loading('Deleting worktree...')
             try {
-              await invoke(
-                shouldDelete ? 'delete_worktree' : 'archive_worktree',
-                {
-                  worktreeId: selectedWorktreeId,
-                }
-              )
+              await invoke('delete_worktree', {
+                worktreeId: selectedWorktreeId,
+              })
               queryClient.invalidateQueries({
                 queryKey: projectsQueryKeys.worktrees(worktree.project_id),
               })
               triggerImmediateGitPoll()
               if (worktree.project_id) fetchWorktreesStatus(worktree.project_id)
-              const pastAction = shouldDelete ? 'Deleted' : 'Archived'
-              toast.success(`${pastAction} "${worktree.name}"`, {
+              toast.success(`Deleted "${worktree.name}"`, {
                 id: cleanupToastId,
               })
             } catch (cleanupError) {
-              toast.error(
-                `Failed to ${action.toLowerCase()} worktree: ${cleanupError}`,
-                {
-                  id: cleanupToastId,
-                }
-              )
+              toast.error(`Failed to delete worktree: ${cleanupError}`, {
+                id: cleanupToastId,
+              })
             }
           } catch (error) {
             toast.error(`Failed to merge PR: ${error}`, { id: mergePrToastId })

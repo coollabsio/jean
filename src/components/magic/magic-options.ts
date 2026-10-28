@@ -2,7 +2,6 @@ import {
   ArrowDownToLine,
   ArrowDownUp,
   ArrowUpToLine,
-  BookmarkPlus,
   Bug,
   CircleDot,
   Eye,
@@ -26,7 +25,6 @@ import {
  */
 
 export type MagicOption =
-  | 'save-context'
   | 'load-context'
   | 'inject-session'
   | 'linked-projects'
@@ -116,12 +114,6 @@ export function buildMagicColumns(hasOpenPr: boolean): MagicColumns {
     {
       header: 'Context',
       options: [
-        {
-          id: 'save-context',
-          label: 'Save Context',
-          icon: BookmarkPlus,
-          key: 'S',
-        },
         {
           id: 'inject-session',
           label: 'Inject Context',

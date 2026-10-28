@@ -47,13 +47,9 @@ import {
   useClearSessionHistory,
   useRenameSession,
   reconnectNativeCliSession,
+  useCloseSession,
 } from '@/services/chat'
 import { usePreferences } from '@/services/preferences'
-import {
-  hasCloseConfirmBypassModifier,
-  readCloseBypassDetail,
-} from '@/lib/confirm-bypass'
-import { parseServerResourceKey } from '@/lib/server-resource'
 import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import { usePackageScripts, type PackageScript } from '@/services/projects'
 import { useGitHubPRs } from '@/services/github'
@@ -98,7 +94,6 @@ import {
 import { WorktreeDropdownMenu } from '@/components/projects/WorktreeDropdownMenu'
 import { SessionContextMenuItems } from './SessionContextMenuItems'
 import { LabelModal } from './LabelModal'
-import { useSessionArchive } from './hooks/useSessionArchive'
 import { useOpenInNativeClient } from './hooks/useOpenInNativeClient'
 import { useIsMobile } from '@/hooks/use-mobile'
 import {
@@ -365,9 +360,6 @@ export const SessionChatModal = memo(function SessionChatModal({
     [activeSessionGone, missingActiveSession, sessions]
   )
   const showSessionTabs = tabSessions.length > 0 || !!currentSessionId
-  const serverId = parseServerResourceKey(worktreeId)?.serverId
-  const { data: preferences } = usePreferences(serverId)
-  const bypassModifier = preferences?.close_confirm_bypass_modifier
   const { data: packageScripts = [] } = usePackageScripts(worktreePath)
   const modalTerminalDockMode = useTerminalStore(
     state => state.modalTerminalDockMode
@@ -594,12 +586,12 @@ export const SessionChatModal = memo(function SessionChatModal({
     }
   }, [])
 
-  // Session archive/delete handlers
-  const { handleArchiveSession, handleDeleteSession } = useSessionArchive({
-    worktreeId,
-    worktreePath,
-    removalBehavior: preferences?.removal_behavior,
-  })
+  const { mutate: closeSession } = useCloseSession()
+  const handleDeleteSession = useCallback(
+    (sessionId: string) =>
+      closeSession({ worktreeId, worktreePath, sessionId }),
+    [closeSession, worktreeId, worktreePath]
+  )
 
   // Select the visually adjacent session after closing a tab.
   // Uses the sorted tab order (what the user sees) rather than backend storage order.
@@ -636,35 +628,22 @@ export const SessionChatModal = memo(function SessionChatModal({
     setCloseConfirmOpen(false)
   }, [])
 
-  // Close (delete or archive per removal behavior) or explicitly archive a
-  // session tab, asking for confirmation first.
+  // Delete a session tab, asking for confirmation first.
   const removeSessionTab = useCallback(
-    (
-      session: Session,
-      options: { archive?: boolean; bypassConfirm?: boolean } = {}
-    ) => {
-      const { archive = false, bypassConfirm = false } = options
+    (session: Session) => {
       const activeSessions = tabSessions.filter(s => !s.archived_at)
       const sessionIsEmpty = isSessionEmpty(
         session,
         useChatStore.getState().inputDrafts
       )
-      // Confirm any non-empty session when preference is on (default). Only
-      // confirming the last tab allowed held/cascade closes to wipe chats
-      // without a prompt (issue #56). Empty sessions (no messages and no
-      // unsent draft) close immediately.
-      const needsConfirm =
-        !bypassConfirm &&
-        preferences?.confirm_session_close !== false &&
-        !sessionIsEmpty
+      // Confirm any non-empty session. Only confirming the last tab allowed
+      // held/cascade closes to wipe chats without a prompt (issue #56). Empty
+      // sessions (no messages and no unsent draft) close immediately.
+      const needsConfirm = !sessionIsEmpty
 
       const action = () => {
         if (activeSessions.length > 1) {
           selectVisualNeighbor(session.id)
-        }
-        if (archive) {
-          handleArchiveSession(session.id)
-          return
         }
         // The mutation selects the backend-created empty session after success
         // when this was the last session.
@@ -672,20 +651,14 @@ export const SessionChatModal = memo(function SessionChatModal({
       }
 
       if (needsConfirm) {
-        setCloseConfirmMode(archive ? 'session-archive' : 'session')
+        setCloseConfirmMode('session')
         pendingCloseAction.current = action
         setCloseConfirmOpen(true)
       } else {
         action()
       }
     },
-    [
-      tabSessions,
-      handleArchiveSession,
-      handleDeleteSession,
-      preferences?.confirm_session_close,
-      selectVisualNeighbor,
-    ]
+    [tabSessions, handleDeleteSession, selectVisualNeighbor]
   )
 
   const handleTabAuxClick = useCallback(
@@ -693,27 +666,20 @@ export const SessionChatModal = memo(function SessionChatModal({
       if (e.button !== 1) return
       e.preventDefault()
       e.stopPropagation()
-      removeSessionTab(session, {
-        bypassConfirm: hasCloseConfirmBypassModifier(e, bypassModifier),
-      })
+      removeSessionTab(session)
     },
-    [removeSessionTab, bypassModifier]
+    [removeSessionTab]
   )
 
   useEffect(() => {
     if (!isOpen) return
     const handler = (e: Event) => {
       e.stopImmediatePropagation()
-      const bypassConfirm = readCloseBypassDetail(e)
       const activeSessions = tabSessions.filter(s => !s.archived_at)
       if (activeSessions.length === 0) {
         const closeWorktree = () => {
           onRequestCloseWorktree()
           onClose()
-        }
-        if (bypassConfirm) {
-          closeWorktree()
-          return
         }
         setCloseConfirmMode('worktree')
         pendingCloseAction.current = closeWorktree
@@ -734,11 +700,7 @@ export const SessionChatModal = memo(function SessionChatModal({
       const sessionIsEmpty =
         !currentSession ||
         isSessionEmpty(currentSession, useChatStore.getState().inputDrafts)
-      if (
-        !bypassConfirm &&
-        preferences?.confirm_session_close !== false &&
-        !sessionIsEmpty
-      ) {
+      if (!sessionIsEmpty) {
         setCloseConfirmMode('session')
         pendingCloseAction.current = action
         setCloseConfirmOpen(true)
@@ -759,7 +721,6 @@ export const SessionChatModal = memo(function SessionChatModal({
     currentSessionId,
     handleDeleteSession,
     selectVisualNeighbor,
-    preferences?.confirm_session_close,
     onRequestCloseWorktree,
     onClose,
   ])
@@ -1412,13 +1373,7 @@ export const SessionChatModal = memo(function SessionChatModal({
                                 tooltip={'Remove session'}
                                 onClick={e => {
                                   e.stopPropagation()
-                                  removeSessionTab(session, {
-                                    bypassConfirm:
-                                      hasCloseConfirmBypassModifier(
-                                        e,
-                                        bypassModifier
-                                      ),
-                                  })
+                                  removeSessionTab(session)
                                 }}
                                 className="ml-0.5 opacity-60 sm:opacity-0 sm:group-hover/tab:opacity-60 hover:!opacity-100"
                                 size="xs"
@@ -1447,9 +1402,6 @@ export const SessionChatModal = memo(function SessionChatModal({
                                 session,
                                 worktreeId
                               )
-                            }
-                            onArchive={() =>
-                              removeSessionTab(session, { archive: true })
                             }
                             onDelete={() => removeSessionTab(session)}
                           />

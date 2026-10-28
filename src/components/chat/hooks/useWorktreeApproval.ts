@@ -13,7 +13,7 @@ import {
   chatQueryKeys,
 } from '@/services/chat'
 import { invoke, listen } from '@/lib/transport'
-import { archiveOriginalPlanSession } from './plan-approval-state'
+import { closeOriginalPlanSession } from './plan-approval-state'
 import type {
   EffortLevel,
   Session,
@@ -522,15 +522,13 @@ export function useWorktreeApproval({
         backend,
       })
 
-      // Optionally archive the original session (keeps history restorable)
-      if (preferences?.close_original_on_clear_context) {
-        archiveOriginalPlanSession({
-          queryClient,
-          worktreeId,
-          worktreePath,
-          sessionId,
-        })
-      }
+      // The plan now lives in the new session
+      closeOriginalPlanSession({
+        queryClient,
+        worktreeId,
+        worktreePath,
+        sessionId,
+      })
     },
     [worktreeId, worktreePath, projectId, queryClient, preferences, sendMessage]
   )

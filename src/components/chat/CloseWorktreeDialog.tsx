@@ -8,14 +8,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { usePreferences } from '@/services/preferences'
-import { useUIStore } from '@/store/ui-store'
-import { closeConfirmBypassLabel } from '@/lib/confirm-bypass'
-import { isNativeApp } from '@/lib/environment'
-import { useIsMobile } from '@/hooks/use-mobile'
 
-// 'session' follows the removal behavior preference; 'session-archive' always archives.
-export type CloseConfirmMode = 'worktree' | 'session' | 'session-archive'
+export type CloseConfirmMode = 'worktree' | 'session'
 
 interface CloseWorktreeDialogProps {
   open: boolean
@@ -52,31 +46,13 @@ function CloseWorktreeDialogContent({
   branchName,
   mode = 'worktree',
 }: CloseWorktreeDialogProps) {
-  const { data: preferences } = usePreferences()
-  const isMobile = useIsMobile()
-  const bypassLabel = closeConfirmBypassLabel(
-    preferences?.close_confirm_bypass_modifier
-  )
-  const isArchiveOnly = mode === 'session-archive'
-  // The explicit "Archive Session" menu action never reads the bypass modifier.
-  const showBypassHint =
-    isNativeApp() && !isMobile && !isArchiveOnly && bypassLabel !== null
-  const isDelete =
-    !isArchiveOnly && (preferences?.removal_behavior ?? 'delete') === 'delete'
-  const isSession = mode !== 'worktree'
-  const title = isSession
-    ? isDelete
-      ? 'Delete session?'
-      : 'Archive session?'
-    : isDelete
-      ? 'Delete worktree?'
-      : 'Archive & close worktree?'
-
+  const isSession = mode === 'session'
+  const title = isSession ? 'Delete session?' : 'Delete worktree?'
   const description = isSession
-    ? `This will ${isDelete ? 'permanently delete' : 'archive'} this session.`
+    ? 'This will delete this session. Deleted sessions are removed from disk after 30 days.'
     : branchName
-      ? `This will ${isDelete ? 'permanently delete' : 'archive and close'} the "${branchName}" worktree and all its sessions.`
-      : `This will ${isDelete ? 'permanently delete' : 'archive and close'} the worktree and all its sessions.`
+      ? `This will permanently delete the "${branchName}" worktree and all its sessions.`
+      : 'This will permanently delete the worktree and all its sessions.'
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -92,44 +68,16 @@ function CloseWorktreeDialogContent({
       >
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
-          <AlertDialogDescription asChild>
-            <div className="space-y-2">
-              <p>{description}</p>
-              {isDelete && (
-                <p className="text-xs text-muted-foreground">
-                  Removal behavior is set to delete.{' '}
-                  <button
-                    type="button"
-                    className="underline hover:text-foreground transition-colors"
-                    onClick={() => {
-                      onOpenChange(false)
-                      useUIStore.getState().openPreferencesPane('general')
-                    }}
-                  >
-                    Change in Settings
-                  </button>
-                </p>
-              )}
-              {showBypassHint && (
-                <p className="text-xs text-muted-foreground">
-                  Hold {bypassLabel} while closing to skip this confirmation.
-                </p>
-              )}
-            </div>
-          </AlertDialogDescription>
+          <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction
             autoFocus
             onClick={onConfirm}
-            variant={isDelete ? 'destructive' : undefined}
+            variant="destructive"
           >
-            {isDelete
-              ? 'Delete'
-              : isArchiveOnly
-                ? 'Archive'
-                : 'Archive & Close'}
+            Delete
             <kbd className="ml-1.5 text-xs opacity-70">↵</kbd>
           </AlertDialogAction>
         </AlertDialogFooter>

@@ -16,7 +16,7 @@ export interface SessionScrollSnapshot {
    */
   isFollowingTail: boolean
   /**
-   * VirtualizedMessageList window size (messages rendered from the end).
+   * Message window size (messages rendered from the end).
    * Restoring this is required so a user who scrolled far up still has the
    * older messages mounted when they return.
    */
@@ -58,8 +58,7 @@ export function updateSessionScrollState(
   const prev = snapshots.get(sessionId)
   snapshots.set(sessionId, {
     scrollTop: Math.max(0, partial.scrollTop ?? prev?.scrollTop ?? 0),
-    isFollowingTail:
-      partial.isFollowingTail ?? prev?.isFollowingTail ?? true,
+    isFollowingTail: partial.isFollowingTail ?? prev?.isFollowingTail ?? true,
     visibleCount: Math.max(
       DEFAULT_VISIBLE_COUNT,
       partial.visibleCount ?? prev?.visibleCount ?? DEFAULT_VISIBLE_COUNT

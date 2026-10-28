@@ -133,7 +133,6 @@ export interface SessionCardProps {
   card: SessionCardData
   isSelected: boolean
   onSelect: () => void
-  onArchive: () => void
   onDelete: () => void
   onApprove?: () => void
   onYolo?: () => void

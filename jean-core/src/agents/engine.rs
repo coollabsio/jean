@@ -6,9 +6,9 @@
 //! 3. Due schedules queue updates.
 //! 4. Updates with a target session go there; updates without one start a
 //!    new task session (background work, apart from the user's chat).
-//! 5. Long chats are archived and continue in a new chat. The end is saved
+//! 5. Long chats are closed and continue in a new chat. The end is saved
 //!    as carry-over and a shorter copy is stored as a journal entry. Old task
-//!    sessions are archived, then deleted.
+//!    sessions are closed, then purged.
 
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
@@ -37,11 +37,11 @@ const CHAT_ROTATE_MESSAGES: u32 = 40;
 const CHAT_ROTATE_IDLE_SECS: u64 = 10 * 60;
 /// Characters of the old chat's end carried into the new chat's prompt.
 const CARRY_OVER_CHARS: usize = 6000;
-/// Finished task sessions are archived after this, deleted after the next.
+/// Finished task sessions are closed after this, purged after the next.
 /// Test override: `JEAN_AGENT_TASK_ARCHIVE_SECS`.
 const TASK_ARCHIVE_AFTER_SECS: i64 = 3 * 86_400;
 const TASK_DELETE_AFTER_SECS: i64 = 30 * 86_400;
-/// Timestamped session/archive event keys only dedup repeats of one emit.
+/// Timestamped session event keys only dedup repeats of one emit.
 const EVENT_KEY_RETENTION_SECS: i64 = 86_400;
 const MAINTENANCE_INTERVAL_SECS: i64 = 60;
 static LAST_MAINTENANCE: AtomicI64 = AtomicI64::new(0);
@@ -89,18 +89,6 @@ pub fn start(app: AppHandle) {
         log::warn!("[Agents] requeue failed: {e}");
     }
 
-    {
-        let listener_app = app.clone();
-        app.listen("worktree:archived", move |event| {
-            let Ok(payload) = serde_json::from_str::<Value>(event.payload()) else {
-                return;
-            };
-            let Some((key, context)) = worktree_archived_trigger(&payload, db::now()) else {
-                return;
-            };
-            emit_schedule_trigger(&listener_app, "worktree_archived", &key, &context);
-        });
-    }
     {
         let listener_app = app.clone();
         app.listen("pr:status-update", move |event| {
@@ -185,21 +173,6 @@ pub(crate) fn session_event_key(
         Some(run_id) => format!("session:{session_id}:{kind}:{run_id}"),
         None => format!("session:{session_id}:{kind}:{at}"),
     }
-}
-
-pub(crate) fn worktree_archived_trigger(payload: &Value, at: i64) -> Option<(String, String)> {
-    let id = payload.get("id").and_then(Value::as_str)?;
-    if id.is_empty() {
-        return None;
-    }
-    let project_id = payload
-        .get("project_id")
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    Some((
-        format!("archive:{id}:{at}"),
-        format!("Worktree {id} in project {project_id} was archived."),
-    ))
 }
 
 pub(crate) fn pr_merged_trigger(payload: &Value) -> Option<(String, String)> {
@@ -470,14 +443,9 @@ pub(crate) async fn home_session(
     agent: &db::Agent,
 ) -> Result<(crate::chat::types::Session, String), String> {
     let path = super::agent_workdir(app, &agent.id)?;
-    let sessions = crate::chat::get_sessions(
-        app.clone(),
-        agent.worktree_id.clone(),
-        path.clone(),
-        None,
-        None,
-    )
-    .await?;
+    let sessions =
+        crate::chat::get_sessions(app.clone(), agent.worktree_id.clone(), path.clone(), None)
+            .await?;
     let mut session = sessions
         .active_session_id
         .as_deref()
@@ -1086,7 +1054,7 @@ fn task_title_for(kind: &str) -> &'static str {
     }
 }
 
-/// Rotate long idle chats and archive or delete old task sessions.
+/// Rotate long idle chats and close or purge old task sessions.
 async fn maintenance(app: &AppHandle) -> Result<bool, String> {
     let mut changed = false;
     for agent in super::with_db(app, |conn| db::list_agents(conn))? {
@@ -1101,10 +1069,10 @@ async fn maintenance(app: &AppHandle) -> Result<bool, String> {
         let worktree_id = db::agent_tasks_worktree_id(&task.agent_id);
         let path = super::agent_workdir(app, &task.agent_id)?;
         if let Err(e) =
-            crate::chat::archive_session(app.clone(), worktree_id, path, task.session_id.clone())
+            crate::chat::close_session(app.clone(), worktree_id, path, task.session_id.clone())
                 .await
         {
-            log::warn!("[Agents] archive of task {} failed: {e}", task.id);
+            log::warn!("[Agents] close of task {} failed: {e}", task.id);
         }
         super::with_db(app, |conn| db::mark_task_archived(conn, task.id))?;
         changed = true;
@@ -1113,13 +1081,7 @@ async fn maintenance(app: &AppHandle) -> Result<bool, String> {
     for task in super::with_db(app, |conn| db::archived_tasks_before(conn, delete_before))? {
         let worktree_id = db::agent_tasks_worktree_id(&task.agent_id);
         let path = super::agent_workdir(app, &task.agent_id)?;
-        let _ = crate::chat::delete_archived_session(
-            app.clone(),
-            worktree_id,
-            path,
-            task.session_id.clone(),
-        )
-        .await;
+        let _ = crate::chat::purge_session(app, &worktree_id, &path, &task.session_id);
         super::with_db(app, |conn| db::delete_task(conn, task.id))?;
         changed = true;
     }
@@ -1157,7 +1119,6 @@ async fn rotate_chat_if_long(app: &AppHandle, agent: &db::Agent) -> Result<bool,
         app.clone(),
         agent.worktree_id.clone(),
         path.clone(),
-        None,
         Some(true),
     )
     .await?;
@@ -1230,7 +1191,7 @@ async fn rotate_chat_if_long(app: &AppHandle, agent: &db::Agent) -> Result<bool,
         log::warn!("[Agents] {} rotation journal not saved: {e}", agent.id);
         None
     });
-    crate::chat::archive_session(
+    crate::chat::close_session(
         app.clone(),
         agent.worktree_id.clone(),
         path.clone(),
@@ -1435,13 +1396,7 @@ mod tests {
     }
 
     #[test]
-    fn archived_and_merged_payloads_become_trigger_keys() {
-        let archived = serde_json::json!({"id": "wt-1", "project_id": "proj"});
-        let (key, context) = worktree_archived_trigger(&archived, 50).unwrap();
-        assert_eq!(key, "archive:wt-1:50");
-        assert!(context.contains("wt-1"));
-        assert!(worktree_archived_trigger(&serde_json::json!({"id": ""}), 1).is_none());
-
+    fn merged_payloads_become_trigger_keys() {
         let merged = serde_json::json!({"state": "merged", "worktree_id": "wt-1", "pr_number": 12});
         let (key, context) = pr_merged_trigger(&merged).unwrap();
         assert_eq!(key, "pr:wt-1:12");

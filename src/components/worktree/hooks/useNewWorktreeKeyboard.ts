@@ -1,5 +1,5 @@
 import { useCallback, useEffect } from 'react'
-import type { TabId } from '../NewWorktreeModal'
+import { GITHUB_ONLY_TABS, TABS, type TabId } from '../new-worktree-tabs'
 import type {
   GitHubIssue,
   GitHubPullRequest,
@@ -131,48 +131,12 @@ export function useNewWorktreeKeyboard({
 
       // Tab shortcuts (Cmd+key)
       if (e.metaKey || e.ctrlKey) {
-        if (key === '1') {
+        const tab = TABS.find(t => t.key === key)
+        if (tab) {
           e.preventDefault()
-          setActiveTab('quick')
-          return
-        }
-        if (key === '2') {
-          e.preventDefault()
-          setActiveTab('issues')
-          return
-        }
-        if (key === '3') {
-          e.preventDefault()
-          setActiveTab('prs')
-          return
-        }
-        if (key === '4') {
-          e.preventDefault()
-          // Security tab is hidden for GitLab projects — ignore its shortcut.
-          if (githubOnlyTabsEnabled) {
-            setActiveTab('security')
-          }
-          return
-        }
-        if (key === '5') {
-          e.preventDefault()
-          setActiveTab('branches')
-          return
-        }
-        if (key === '6') {
-          e.preventDefault()
-          setActiveTab('linear')
-          return
-        }
-        if (key === '7') {
-          e.preventDefault()
-          setActiveTab('sentry')
-          return
-        }
-        if (key === '8') {
-          e.preventDefault()
-          if (githubOnlyTabsEnabled) {
-            setActiveTab('discussions')
+          // GitHub-only tabs are hidden for GitLab; ignore their shortcut.
+          if (githubOnlyTabsEnabled || !GITHUB_ONLY_TABS.has(tab.id)) {
+            setActiveTab(tab.id)
           }
           return
         }

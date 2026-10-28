@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDownUp, ChevronDown } from '@/components/icons/reicon'
+import { ArrowDownUp } from '@/components/icons/reicon'
+import { DisclosureChevron } from './DisclosureChevron'
 import {
   convertFileSrc,
   convertProjectFileSrc,
@@ -332,12 +333,7 @@ export function ProjectTreeItem({
                   )}
                   onClick={handleChevronClick}
                 >
-                  <ChevronDown
-                    className={cn(
-                      'size-3 transition-transform',
-                      isExpanded && 'rotate-180'
-                    )}
-                  />
+                  <DisclosureChevron open={isExpanded} className="size-3" />
                 </button>
               )}
             </span>

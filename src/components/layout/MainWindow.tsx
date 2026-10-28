@@ -135,11 +135,6 @@ const CloneProjectModal = lazy(() =>
     default: mod.CloneProjectModal,
   }))
 )
-const ArchivedModal = lazy(() =>
-  import('@/components/archive/ArchivedModal').then(mod => ({
-    default: mod.ArchivedModal,
-  }))
-)
 const ReleaseNotesDialog = lazy(() =>
   import('@/components/magic/ReleaseNotesDialog').then(mod => ({
     default: mod.ReleaseNotesDialog,
@@ -172,10 +167,6 @@ const CloseWorktreeDialog = lazy(() =>
 )
 import { Toaster } from '@/components/ui/sonner'
 import { MobileLeftSidebar } from './MobileLeftSidebar'
-import {
-  SIDEBAR_RAIL_WIDTH,
-  SidebarTabRail,
-} from '@/components/projects/SidebarTabRail'
 import { useShowAgents } from '@/components/agents/agents-feature'
 import { AgentsTitleSync, resolveWindowTitle } from './window-title'
 import { BrowserSidePane } from '@/components/browser/BrowserSidePane'
@@ -195,8 +186,6 @@ import { useCloseSessionOrWorktreeKeybinding } from '@/services/chat'
 import { useUIStatePersistence } from '@/hooks/useUIStatePersistence'
 import { useClientViewStatePersistence } from '@/hooks/useClientViewStatePersistence'
 import { useSessionStatePersistence } from '@/hooks/useSessionStatePersistence'
-import { useRestoreLastArchived } from '@/hooks/useRestoreLastArchived'
-import { useArchiveCleanup } from '@/hooks/useArchiveCleanup'
 import { usePrWorktreeSweep } from '@/hooks/usePrWorktreeSweep'
 import {
   useAppFocusTracking,
@@ -216,8 +205,6 @@ import { usePreferences } from '@/services/preferences'
 
 // Left sidebar resize constraints (pixels)
 const MIN_SIDEBAR_WIDTH = 150
-// Agents sidebar can shrink to a column of agent icons
-const MIN_AGENTS_SIDEBAR_WIDTH = 72
 const MAX_SIDEBAR_WIDTH = 500
 // File browser sidebar resize constraints (pixels)
 const MIN_FILE_BROWSER_WIDTH = 180
@@ -261,10 +248,8 @@ export function MainWindow() {
     useToasterOffset()
   const leftSidebarVisible = useUIStore(state => state.leftSidebarVisible)
   const showAgents = useShowAgents()
-  // Agents and projects keep their own sidebar width
-  const leftSidebarSize = useUIStore(state =>
-    showAgents ? state.agentsSidebarSize : state.leftSidebarSize
-  )
+  // One width for every sidebar tab (Projects, Recent, Agents)
+  const leftSidebarSize = useUIStore(state => state.leftSidebarSize)
   const setLeftSidebarVisible = useUIStore(state => state.setLeftSidebarVisible)
   const fileBrowserVisible = useUIStore(state => state.fileBrowserVisible)
   const fileBrowserSize = useUIStore(state => state.fileBrowserSize)
@@ -433,21 +418,6 @@ export function MainWindow() {
     handleConfirmRequired
   )
 
-  // Handle restore-last-archived keybinding
-  useRestoreLastArchived()
-
-  // Archive modal state (triggered by command palette or sidebar button)
-  const [archivedModalOpen, setArchivedModalOpen] = useState(false)
-  useEffect(() => {
-    const handler = () => setArchivedModalOpen(true)
-    window.addEventListener('command:open-archived-modal', handler)
-    return () =>
-      window.removeEventListener('command:open-archived-modal', handler)
-  }, [])
-
-  // Auto-cleanup old archived items on startup
-  useArchiveCleanup()
-
   // Sync all worktrees with open PRs to backend for sweep polling
   usePrWorktreeSweep(projects)
 
@@ -479,7 +449,6 @@ export function MainWindow() {
       e.preventDefault()
       const startX = e.clientX
       const startWidth = leftSidebarSize
-      const minWidth = showAgents ? MIN_AGENTS_SIDEBAR_WIDTH : MIN_SIDEBAR_WIDTH
       let currentWidth = startWidth
 
       const handleMouseMove = (moveEvent: MouseEvent) => {
@@ -487,7 +456,7 @@ export function MainWindow() {
         const delta = moveEvent.clientX - startX
         currentWidth = Math.min(
           MAX_SIDEBAR_WIDTH,
-          Math.max(minWidth, startWidth + delta)
+          Math.max(MIN_SIDEBAR_WIDTH, startWidth + delta)
         )
         // Update DOM directly for smooth resize (no React re-render)
         if (sidebarRef.current) {
@@ -499,15 +468,13 @@ export function MainWindow() {
         document.removeEventListener('mousemove', handleMouseMove)
         document.removeEventListener('mouseup', handleMouseUp)
         // Commit final width to Zustand state
-        const ui = useUIStore.getState()
-        if (showAgents) ui.setAgentsSidebarSize(currentWidth)
-        else ui.setLeftSidebarSize(currentWidth)
+        useUIStore.getState().setLeftSidebarSize(currentWidth)
       }
 
       document.addEventListener('mousemove', handleMouseMove)
       document.addEventListener('mouseup', handleMouseUp)
     },
-    [leftSidebarSize, showAgents]
+    [leftSidebarSize]
   )
 
   const handleFileBrowserResizeStart = useCallback(
@@ -573,7 +540,6 @@ export function MainWindow() {
   const shouldRenderServerDialog = useRetainedMount(serverDialogOpen)
   const shouldRenderGitInitModal = useRetainedMount(gitInitModalOpen)
   const shouldRenderCloneProjectModal = useRetainedMount(cloneModalOpen)
-  const shouldRenderArchivedModal = useRetainedMount(archivedModalOpen)
   const shouldRenderCloseWorktreeDialog = useRetainedMount(closeConfirmOpen)
   const shouldRenderNewSessionModeModal = useRetainedMount(
     newSessionModeTarget !== null
@@ -624,9 +590,9 @@ export function MainWindow() {
         contentInset={
           isMobile || !isInitialized
             ? 0
-            : // tab rail + sidebar + 1px resize handle
-              SIDEBAR_RAIL_WIDTH +
-              (leftSidebarVisible ? leftSidebarSize + 1 : 0)
+            : leftSidebarVisible
+              ? leftSidebarSize + 1 // sidebar + 1px resize handle
+              : 0
         }
         className="absolute top-0 left-0 right-0"
       />
@@ -636,21 +602,6 @@ export function MainWindow() {
 
       {/* Main Content Area */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Desktop: always-visible vertical tab rail for the left sidebar */}
-        {!isMobile && isInitialized && (
-          // Border starts below the title bar so it never crosses its buttons
-          // Collapsed: blend with the main window. Expanded: match the sidebar.
-          <div
-            className={cn(
-              'h-full shrink-0 pt-8',
-              leftSidebarVisible
-                ? 'bg-sidebar dark:bg-[#0b0b0b]'
-                : 'bg-background'
-            )}
-          >
-            <SidebarTabRail className="h-full border-r border-border/40" />
-          </div>
-        )}
         <SidebarHoverPreview
           enabled={
             !isMobile &&
@@ -672,7 +623,7 @@ export function MainWindow() {
           <SidebarWidthProvider value={leftSidebarSize}>
             <div
               ref={sidebarRef}
-              className="h-full overflow-hidden bg-sidebar pt-8 dark:bg-[#0b0b0b]"
+              className="h-full overflow-hidden bg-sidebar pt-8"
               style={{ width: leftSidebarSize }}
             >
               <Suspense fallback={null}>
@@ -911,14 +862,6 @@ export function MainWindow() {
       {shouldRenderCloneProjectModal && (
         <Suspense fallback={null}>
           <CloneProjectModal />
-        </Suspense>
-      )}
-      {shouldRenderArchivedModal && (
-        <Suspense fallback={null}>
-          <ArchivedModal
-            open={archivedModalOpen}
-            onOpenChange={setArchivedModalOpen}
-          />
         </Suspense>
       )}
       {shouldRenderCloseWorktreeDialog && (

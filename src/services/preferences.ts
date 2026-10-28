@@ -29,8 +29,6 @@ const MIGRATED_KEYBINDINGS: Partial<
   open_model_dropdown: 'alt+m', // Changed to 'mod+shift+m' (macOS dead key fix)
   open_thinking_dropdown: 'alt+e', // Changed to 'mod+shift+e' (macOS dead key fix)
   toggle_browser: 'mod+alt+b', // Changed to 'mod+shift+backquote'
-  // Changed to free CMD+SHIFT+T, then corrected to the serializer's modifier order.
-  restore_last_archived: ['mod+shift+t', 'mod+alt+shift+t'],
   // Changed so Cmd+1-9 can open Recent sessions and Cmd+Arrow switches tabs.
   next_session: 'mod+alt+arrowright',
   previous_session: 'mod+alt+arrowleft',

@@ -127,7 +127,7 @@ interface UseGitOperationsReturn {
   handleCodeRabbitPrReview: () => Promise<void>
   /** Validates and shows merge options dialog */
   handleMerge: () => Promise<void>
-  /** Merges open PR on GitHub then archives/deletes worktree */
+  /** Merges open PR on GitHub then deletes the worktree */
   handleMergePr: () => Promise<void>
   /** Detects existing merge conflicts and opens resolution session */
   handleResolveConflicts: (override?: InvestigateOverride) => Promise<void>
@@ -1100,7 +1100,7 @@ export function useGitOperations({
     setShowMergeDialog(true)
   }, [activeWorktreeId, worktree])
 
-  // Handle Merge PR - merges open PR on GitHub then archives/deletes worktree
+  // Handle Merge PR - merges open PR on GitHub then deletes the worktree
   const handleMergePr = useCallback(async () => {
     if (!activeWorktreeId || !worktree) return
     if (!worktree.pr_number) {
@@ -1115,33 +1115,24 @@ export function useGitOperations({
       })
       toast.success(result.message, { id: mergePrToastId })
 
-      // Archive or delete the worktree (same as auto-archive on merge)
-      const shouldDelete = preferences?.removal_behavior === 'delete'
-      const action = shouldDelete ? 'Deleting' : 'Archiving'
-      const cleanupToastId = toast.loading(`${action} worktree...`)
+      const cleanupToastId = toast.loading('Deleting worktree...')
       try {
-        await invoke(shouldDelete ? 'delete_worktree' : 'archive_worktree', {
-          worktreeId: activeWorktreeId,
-        })
+        await invoke('delete_worktree', { worktreeId: activeWorktreeId })
         queryClient.invalidateQueries({
           queryKey: projectsQueryKeys.worktrees(worktree.project_id),
         })
         triggerImmediateGitPoll()
         if (worktree.project_id) fetchWorktreesStatus(worktree.project_id)
-        const pastAction = shouldDelete ? 'Deleted' : 'Archived'
-        toast.success(`${pastAction} "${worktree.name}"`, {
+        toast.success(`Deleted "${worktree.name}"`, { id: cleanupToastId })
+      } catch (cleanupError) {
+        toast.error(`Failed to delete worktree: ${cleanupError}`, {
           id: cleanupToastId,
         })
-      } catch (cleanupError) {
-        toast.error(
-          `Failed to ${action.toLowerCase()} worktree: ${cleanupError}`,
-          { id: cleanupToastId }
-        )
       }
     } catch (error) {
       toast.error(`Failed to merge PR: ${error}`, { id: mergePrToastId })
     }
-  }, [activeWorktreeId, worktree, preferences?.removal_behavior, queryClient])
+  }, [activeWorktreeId, worktree, queryClient])
 
   // Handle Resolve Conflicts - detects existing merge conflicts and opens resolution session
   const handleResolveConflicts = useCallback(

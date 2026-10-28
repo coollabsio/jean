@@ -59,11 +59,11 @@ describe('isReusableWorkflowInvestigationSession', () => {
     ).toBe(false)
   })
 
-  it('reuses an unarchived empty chat session', () => {
+  it('reuses an empty chat session that is not deleted', () => {
     expect(isReusableWorkflowInvestigationSession(session())).toBe(true)
   })
 
-  it('does not reuse non-empty or archived chat sessions', () => {
+  it('does not reuse non-empty or deleted chat sessions', () => {
     expect(
       isReusableWorkflowInvestigationSession(session({ message_count: 1 }))
     ).toBe(false)
@@ -93,12 +93,9 @@ describe('resolveOpenWorkflowWorktree', () => {
 
   it('prefers the active worktree path when one is globally active', () => {
     expect(
-      resolveOpenWorkflowWorktree(
-        'worktree-1',
-        '/repo/worktree',
-        'base-1',
-        [[baseSession]]
-      )
+      resolveOpenWorkflowWorktree('worktree-1', '/repo/worktree', 'base-1', [
+        [baseSession],
+      ])
     ).toEqual({ id: 'worktree-1', path: '/repo/worktree' })
   })
 })

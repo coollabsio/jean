@@ -281,7 +281,7 @@ export function JeanJsonPane({
           </InlineField>
           <InlineField
             label="Teardown"
-            description="Runs before a worktree is deleted or archived"
+            description="Runs before a worktree is deleted"
             htmlFor="teardown-script"
             layout="stacked"
           >

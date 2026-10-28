@@ -667,7 +667,6 @@ async fn init_handler(
                                     app,
                                     worktree_id.clone(),
                                     wt.path,
-                                    None,
                                     Some(true),
                                 )
                                 .await

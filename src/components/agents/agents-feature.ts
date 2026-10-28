@@ -8,7 +8,7 @@ import { useSessionServerSources } from '@/services/multi-server-sessions'
 import { useUIStore } from '@/store/ui-store'
 import { LOCAL_SERVER_ID } from '@/types/server-resource'
 
-// Kept apart from agents.ts so layout code (tab rail, sidebar) does not load
+// Kept apart from agents.ts so layout code (sidebar tabs, sidebar) does not load
 // the agents service.
 
 /** Server IDs with Agents on, local first. Remote settings that are still

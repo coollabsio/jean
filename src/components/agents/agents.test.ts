@@ -139,7 +139,7 @@ describe('describeApproval', () => {
     const approval: AgentApproval = {
       id: 1,
       agentId: 'jean',
-      tool: 'permanently_delete_worktree',
+      tool: 'delete_worktree',
       args: { worktreeId: 'wt-1' },
       status: 'pending',
       result: null,
@@ -147,9 +147,9 @@ describe('describeApproval', () => {
     }
     // Names, never IDs
     expect(describeApproval(approval, 'feature-x')).toBe(
-      'Permanently delete worktree feature-x'
+      'Delete worktree feature-x'
     )
-    expect(describeApproval(approval)).toBe('Permanently delete a worktree')
+    expect(describeApproval(approval)).toBe('Delete a worktree')
     expect(
       describeApproval({
         ...approval,

@@ -1432,7 +1432,6 @@ pub fn wake_budget_remaining(
 pub const EVENT_TRIGGERS: &[&str] = &[
     "session_finished",
     "session_failed",
-    "worktree_archived",
     "pr_merged",
     "approval_resolved",
 ];
@@ -1452,7 +1451,7 @@ pub struct Schedule {
     pub last_run_at: Option<i64>,
     pub cron: Option<String>,
     pub timezone: Option<String>,
-    /// session_finished | session_failed | worktree_archived | pr_merged | approval_resolved
+    /// session_finished | session_failed | pr_merged | approval_resolved
     pub event: Option<String>,
     pub paused: bool,
 }

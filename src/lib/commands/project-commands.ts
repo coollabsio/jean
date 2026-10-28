@@ -2,8 +2,6 @@ import {
   FolderPlus,
   Bug,
   Keyboard,
-  Archive,
-  ArchiveRestore,
   Settings,
   RefreshCw,
   BellDot,
@@ -148,32 +146,6 @@ export const projectCommands: AppCommand[] = [
         onboardingDismissed: false,
         onboardingStartStep: null,
       })
-    },
-  },
-
-  {
-    id: 'open-archive',
-    label: 'Open Archive',
-    description: 'View archived worktrees and sessions',
-    icon: Archive,
-    group: 'projects',
-    keywords: ['archive', 'archived', 'trash', 'deleted', 'removed'],
-
-    execute: context => {
-      context.openArchivedModal()
-    },
-  },
-
-  {
-    id: 'restore-last-archived',
-    label: 'Restore Last Archived',
-    description: 'Restore the most recently archived item',
-    icon: ArchiveRestore,
-    group: 'projects',
-    keywords: ['archive', 'restore', 'undo', 'unarchive', 'recover'],
-
-    execute: context => {
-      context.restoreLastArchived()
     },
   },
 

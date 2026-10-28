@@ -231,7 +231,6 @@ const handleBackgroundOperation = useCallback(async () => {
 
 **Current background operations using this pattern:**
 
-- `handleSaveContext` - saves context with AI summarization
 - `handleOpenPr` - creates PR with AI-generated title/body
 - `handleCommit` - creates commit with AI-generated message
 - `handleReview` - runs AI code review

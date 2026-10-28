@@ -34,10 +34,11 @@ pub mod types;
 pub mod wakeup;
 
 pub(crate) use commands::default_model_for_backend;
+pub(crate) use commands::purge_session;
 pub use commands::*;
 pub use mcp_auth::*;
 pub use native_history::*;
-pub use storage::{preserve_base_sessions, restore_base_sessions, with_sessions_mut};
+pub use storage::{preserve_base_sessions, restore_base_sessions};
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 

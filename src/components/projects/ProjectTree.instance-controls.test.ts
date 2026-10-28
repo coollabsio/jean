@@ -9,10 +9,9 @@ describe('project instance controls', () => {
     )
 
     expect(source).toContain('data-testid="instance-title-actions"')
+    expect(source).toContain('!areAllProjectsExpanded')
     expect(source).toContain(
-      'setProjectExpanded(item.id, !areAllProjectsExpanded)'
+      '<DisclosureChevron open={areAllProjectsExpanded} />'
     )
-    expect(source).toContain('<ChevronUp className="size-3.5" />')
-    expect(source).toContain('<ChevronDown className="size-3.5" />')
   })
 })

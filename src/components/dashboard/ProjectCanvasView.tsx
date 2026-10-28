@@ -167,10 +167,8 @@ import { useWorktreeApproval } from '@/components/chat/hooks/useWorktreeApproval
 import { useCanvasKeyboardNav } from '@/components/chat/hooks/useCanvasKeyboardNav'
 import { useCanvasShortcutEvents } from '@/components/chat/hooks/useCanvasShortcutEvents'
 import {
-  useArchiveWorktree,
   useDeleteWorktree,
   useCloseBaseSessionClean,
-  useCloseBaseSessionArchive,
 } from '@/services/projects'
 import { TerminalStatusIndicator } from '@/hooks/useWorktreeTerminalStatus'
 import { usePreferences } from '@/services/preferences'
@@ -179,7 +177,6 @@ import { CloseWorktreeDialog } from '@/components/chat/CloseWorktreeDialog'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { hasBackendTransport } from '@/lib/environment'
 import { consumeWebReloadState } from '@/lib/web-reload-state'
-import { readCloseBypassDetail } from '@/lib/confirm-bypass'
 import { useLatestRef } from '@/hooks/useLatestRef'
 import {
   shouldDisableWorktreeTextSelection,
@@ -692,7 +689,7 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
       className={cn(
         'group relative border border-transparent transition-colors',
         showDetails
-          ? 'mb-1 rounded-md px-3 py-2'
+          ? 'mb-0.5 rounded-md px-3 py-1.5'
           : 'mb-0.5 flex items-center gap-2',
         onRowClick &&
           (showDetails
@@ -871,68 +868,63 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
               )}
             </span>
           )}
+          {showDetails && sessionMetrics && (
+            <div
+              className={cn(
+                'ml-auto flex shrink-0 flex-wrap items-center justify-end gap-1.5 text-xs text-muted-foreground',
+                revealClass
+              )}
+            >
+              {sessionMetrics.waitingCount > 0 && (
+                <span className="rounded bg-warning px-2 py-0.5 text-warning-foreground">
+                  {sessionMetrics.waitingCount} waiting
+                </span>
+              )}
+              {sessionMetrics.planningCount > 0 && (
+                <span className="rounded bg-info/10 px-2 py-0.5 text-info">
+                  {sessionMetrics.planningCount} planning
+                </span>
+              )}
+              {sessionMetrics.buildingCount > 0 && (
+                <span className="rounded bg-info/10 px-2 py-0.5 text-info">
+                  {sessionMetrics.buildingCount} building
+                </span>
+              )}
+              {sessionMetrics.yoloCount > 0 && (
+                <span className="rounded bg-destructive/10 px-2 py-0.5 text-destructive">
+                  {sessionMetrics.yoloCount} full access
+                </span>
+              )}
+              {sessionMetrics.reviewCount > 0 && (
+                <span className="rounded bg-success/10 px-2 py-0.5 text-success">
+                  {sessionMetrics.reviewCount} review
+                </span>
+              )}
+              {uniqueSessionLabels.map(label => (
+                <span
+                  key={label.name}
+                  className="rounded px-2 py-0.5 text-2xs font-medium"
+                  style={{
+                    backgroundColor: label.color,
+                    color: getLabelTextColor(label.color),
+                  }}
+                >
+                  {label.name}
+                </span>
+              ))}
+              {lastActivity && (
+                <span className="rounded px-2 py-0.5">{lastActivity}</span>
+              )}
+              {isVisible && (
+                <TerminalStatusIndicator
+                  worktreeId={worktree.id}
+                  iconSize="h-3 w-3"
+                  variant="summary"
+                />
+              )}
+            </div>
+          )}
         </div>
-        {showDetails && sessionMetrics && (
-          <div
-            className={cn(
-              'flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground',
-              revealClass
-            )}
-          >
-            {sessionMetrics.waitingCount > 0 && (
-              <span className="rounded bg-warning px-2 py-0.5 text-warning-foreground">
-                {sessionMetrics.waitingCount} waiting
-              </span>
-            )}
-            {sessionMetrics.planningCount > 0 && (
-              <span className="rounded bg-info/10 px-2 py-0.5 text-info">
-                {sessionMetrics.planningCount} planning
-              </span>
-            )}
-            {sessionMetrics.buildingCount > 0 && (
-              <span className="rounded bg-info/10 px-2 py-0.5 text-info">
-                {sessionMetrics.buildingCount} building
-              </span>
-            )}
-            {sessionMetrics.yoloCount > 0 && (
-              <span className="rounded bg-destructive/10 px-2 py-0.5 text-destructive">
-                {sessionMetrics.yoloCount} full access
-              </span>
-            )}
-            {sessionMetrics.reviewCount > 0 && (
-              <span className="rounded bg-success/10 px-2 py-0.5 text-success">
-                {sessionMetrics.reviewCount} review
-              </span>
-            )}
-            {uniqueSessionLabels.map(label => (
-              <span
-                key={label.name}
-                className="rounded px-2 py-0.5 text-2xs font-medium"
-                style={{
-                  backgroundColor: label.color,
-                  color: getLabelTextColor(label.color),
-                }}
-              >
-                {label.name}
-              </span>
-            ))}
-            {lastActivity && (
-              <span className="rounded px-2 py-0.5">{lastActivity}</span>
-            )}
-            {isVisible && (
-              <TerminalStatusIndicator
-                worktreeId={worktree.id}
-                iconSize="h-3 w-3"
-                variant="summary"
-              />
-            )}
-            {onRowClick && (
-              <span className="ml-auto hidden text-2xs opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 sm:inline-flex">
-                Press Enter to open
-              </span>
-            )}
-          </div>
-        )}
       </div>
     </div>
   )
@@ -1796,11 +1788,8 @@ export function ProjectCanvasView({
       projectId: projectId ?? null,
     })
 
-  // Archive mutations - need to handle per-worktree
-  const archiveWorktree = useArchiveWorktree()
   const deleteWorktree = useDeleteWorktree()
   const closeBaseSessionClean = useCloseBaseSessionClean()
-  const closeBaseSessionArchive = useCloseBaseSessionArchive()
 
   const closeWorktreeDirectly = useCallback(
     (worktreeId: string) => {
@@ -1808,32 +1797,15 @@ export function ProjectCanvasView({
       const wt = visibleWorktrees.find(w => w.id === worktreeId)
       if (!wt) return
       if (isBaseSession(wt)) {
-        if (preferences?.removal_behavior === 'delete') {
-          closeBaseSessionClean.mutate({
-            worktreeId: wt.id,
-            projectId: project.id,
-          })
-        } else {
-          closeBaseSessionArchive.mutate({
-            worktreeId: wt.id,
-            projectId: project.id,
-          })
-        }
-      } else if (preferences?.removal_behavior === 'delete') {
-        deleteWorktree.mutate({ worktreeId: wt.id, projectId: project.id })
+        closeBaseSessionClean.mutate({
+          worktreeId: wt.id,
+          projectId: project.id,
+        })
       } else {
-        archiveWorktree.mutate({ worktreeId: wt.id, projectId: project.id })
+        deleteWorktree.mutate({ worktreeId: wt.id, projectId: project.id })
       }
     },
-    [
-      project,
-      visibleWorktrees,
-      preferences?.removal_behavior,
-      archiveWorktree,
-      deleteWorktree,
-      closeBaseSessionClean,
-      closeBaseSessionArchive,
-    ]
+    [project, visibleWorktrees, deleteWorktree, closeBaseSessionClean]
   )
 
   // Stable callbacks for the memoized SessionChatModal. The latest modal
@@ -1890,7 +1862,7 @@ export function ProjectCanvasView({
     }
   }, [selectedWorktreeModal])
 
-  // Close modal when worktree is deleted/archived (e.g. PR merged)
+  // Close modal when worktree is deleted (e.g. PR merged)
   useEffect(() => {
     const handleCloseModal = (e: CustomEvent<{ worktreeId: string }>) => {
       if (selectedWorktreeModal?.worktreeId === e.detail.worktreeId) {
@@ -2001,7 +1973,7 @@ export function ProjectCanvasView({
     }
   }, [selectedWorktreeModal, flatCards, selectedIndex, activeFilterTab])
 
-  // Keep a valid selection when the selected item disappears (archive/delete/close).
+  // Keep a valid selection when the selected item disappears (delete/close).
   // In list layout this prefers the previous row, matching expected canvas behavior.
   // Skip while search is active — transient empty search results should not erase selection memory.
   useEffect(() => {
@@ -2896,8 +2868,6 @@ export function ProjectCanvasView({
       // Consume the event to prevent the legacy useCloseSessionOrWorktreeKeybinding fallback
       e.stopImmediatePropagation()
 
-      const bypassConfirm = readCloseBypassDetail(e)
-
       // No modal open — close the worktree of the selected card
       if (selectedIndex !== null && flatCards[selectedIndex]) {
         const item = flatCards[selectedIndex]
@@ -2906,14 +2876,10 @@ export function ProjectCanvasView({
         const section = worktreeSections.find(
           s => s.worktree.id === item.worktreeId
         )
-        if (bypassConfirm || preferences?.confirm_session_close === false) {
-          closeWorktreeDirectly(item.worktreeId)
-        } else {
-          setCloseWorktreeTarget({
-            worktreeId: item.worktreeId,
-            branchName: section?.worktree.branch,
-          })
-        }
+        setCloseWorktreeTarget({
+          worktreeId: item.worktreeId,
+          branchName: section?.worktree.branch,
+        })
       }
     }
 
@@ -2930,14 +2896,7 @@ export function ProjectCanvasView({
         handleCloseSessionOrWorktree,
         { capture: true }
       )
-  }, [
-    selectedWorktreeModal,
-    selectedIndex,
-    flatCards,
-    worktreeSections,
-    preferences?.confirm_session_close,
-    closeWorktreeDirectly,
-  ])
+  }, [selectedWorktreeModal, selectedIndex, flatCards, worktreeSections])
 
   // Listen for create-new-session event to handle CMD+T / picker shortcut
   useEffect(() => {

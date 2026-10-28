@@ -1,7 +1,6 @@
 import { useState, useCallback } from 'react'
 import { isBaseSession, type Worktree } from '@/types/projects'
 import {
-  useArchiveWorktree,
   useCloseBaseSession,
   useDeleteWorktree,
   useOpenWorktreeInFinder,
@@ -24,7 +23,6 @@ export function useWorktreeMenuActions({
   projectId,
 }: UseWorktreeMenuActionsProps) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
-  const archiveWorktree = useArchiveWorktree()
   const closeBaseSession = useCloseBaseSession()
   const deleteWorktree = useDeleteWorktree()
   const openInFinder = useOpenWorktreeInFinder()
@@ -79,23 +77,13 @@ export function useWorktreeMenuActions({
     })
   }, [openInEditor, worktree.path, preferences?.editor])
 
-  const handleArchiveOrClose = useCallback(() => {
+  const handleClose = useCallback(() => {
     if (isBase) {
       closeBaseSession.mutate({ worktreeId: worktree.id, projectId })
-    } else if (preferences?.removal_behavior === 'delete') {
-      deleteWorktree.mutate({ worktreeId: worktree.id, projectId })
     } else {
-      archiveWorktree.mutate({ worktreeId: worktree.id, projectId })
+      deleteWorktree.mutate({ worktreeId: worktree.id, projectId })
     }
-  }, [
-    isBase,
-    closeBaseSession,
-    archiveWorktree,
-    deleteWorktree,
-    worktree.id,
-    projectId,
-    preferences?.removal_behavior,
-  ])
+  }, [isBase, closeBaseSession, deleteWorktree, worktree.id, projectId])
 
   const handleDelete = useCallback(
     (skipTeardown = false) => {
@@ -125,7 +113,7 @@ export function useWorktreeMenuActions({
     handleOpenInFinder,
     handleOpenInTerminal,
     handleOpenInEditor,
-    handleArchiveOrClose,
+    handleClose,
     handleDelete,
   }
 }

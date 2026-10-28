@@ -188,7 +188,7 @@ impl BackgroundTaskManager {
             last_usage_poll_time: Arc::new(AtomicU64::new(now_unix_secs())),
             usage_poll_in_flight: Arc::new(AtomicBool::new(false)),
             // Initialize to "now" so startup does not trigger an immediate cleanup
-            // (the startup cleanup in cleanup_old_archives already handles that).
+            // (the startup run of cleanup_deleted_items already handles that).
             last_cleanup_poll_time: Arc::new(AtomicU64::new(now_unix_secs())),
             // Initialize to 0 so the first tick fires promptly after startup,
             // allowing any wakeups that expired while the app was closed to run.

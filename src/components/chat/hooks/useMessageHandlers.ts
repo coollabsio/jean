@@ -50,7 +50,7 @@ import type {
   WorktreeCreateErrorEvent,
 } from '@/types/projects'
 import {
-  archiveOriginalPlanSession,
+  closeOriginalPlanSession,
   clearPlanApprovalTransientState,
 } from './plan-approval-state'
 import type { ApprovalModelOverride } from '../ApprovalModelSubmenu'
@@ -1418,16 +1418,14 @@ export function useMessageHandlers({
         backend: resolvedBackend,
       })
 
-      // Optionally archive the original session (keeps history restorable)
-      if (prefs?.close_original_on_clear_context) {
-        archiveOriginalPlanSession({
-          queryClient,
-          worktreeId,
-          worktreePath,
-          sessionId,
-          replacementSessionId: newSession.id,
-        })
-      }
+      // The plan now lives in the new session
+      closeOriginalPlanSession({
+        queryClient,
+        worktreeId,
+        worktreePath,
+        sessionId,
+        replacementSessionId: newSession.id,
+      })
     },
     [
       activeSessionIdRef,
@@ -1633,16 +1631,14 @@ export function useMessageHandlers({
         backend: resolvedBackend,
       })
 
-      // Optionally archive the original session (keeps history restorable)
-      if (prefs?.close_original_on_clear_context) {
-        archiveOriginalPlanSession({
-          queryClient,
-          worktreeId,
-          worktreePath,
-          sessionId,
-          replacementSessionId: newSession.id,
-        })
-      }
+      // The plan now lives in the new session
+      closeOriginalPlanSession({
+        queryClient,
+        worktreeId,
+        worktreePath,
+        sessionId,
+        replacementSessionId: newSession.id,
+      })
     },
     [
       activeSessionIdRef,
@@ -1956,15 +1952,13 @@ export function useMessageHandlers({
         backend: resolvedBackend,
       })
 
-      // Optionally archive the original session (keeps history restorable)
-      if (prefs?.close_original_on_clear_context) {
-        archiveOriginalPlanSession({
-          queryClient,
-          worktreeId,
-          worktreePath,
-          sessionId,
-        })
-      }
+      // The plan now lives in the new session
+      closeOriginalPlanSession({
+        queryClient,
+        worktreeId,
+        worktreePath,
+        sessionId,
+      })
     },
     [
       activeSessionIdRef,
@@ -2248,15 +2242,13 @@ export function useMessageHandlers({
         backend: resolvedBackend,
       })
 
-      // Optionally archive the original session (keeps history restorable)
-      if (prefs?.close_original_on_clear_context) {
-        archiveOriginalPlanSession({
-          queryClient,
-          worktreeId,
-          worktreePath,
-          sessionId,
-        })
-      }
+      // The plan now lives in the new session
+      closeOriginalPlanSession({
+        queryClient,
+        worktreeId,
+        worktreePath,
+        sessionId,
+      })
     },
     [
       activeSessionIdRef,

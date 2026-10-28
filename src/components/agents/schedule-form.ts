@@ -13,7 +13,6 @@ const RUN_AT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/
 export const SCHEDULE_EVENTS: { id: ScheduleEvent; label: string }[] = [
   { id: 'session_finished', label: 'Session finished' },
   { id: 'session_failed', label: 'Session failed' },
-  { id: 'worktree_archived', label: 'Worktree archived' },
   { id: 'pr_merged', label: 'Pull request merged' },
   { id: 'approval_resolved', label: 'Approval resolved' },
 ]

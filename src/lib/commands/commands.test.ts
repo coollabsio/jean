@@ -84,12 +84,7 @@ const createMockContext = (): CommandContext => ({
   runScript: vi.fn(),
 
   // Context
-  saveContext: vi.fn(),
   loadContext: vi.fn(),
-
-  // Archive
-  openArchivedModal: vi.fn(),
-  restoreLastArchived: vi.fn(),
 
   // Unread
   openUnreadSessions: vi.fn(),

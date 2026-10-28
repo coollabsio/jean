@@ -24,7 +24,6 @@ interface MobileToolbarMenuProps {
   hasPrContexts: boolean
   hasAdvisoryContexts?: boolean
 
-  onSaveContext: () => void
   onLoadContext: () => void
   onCommit: () => void
   onCommitAndPush: () => void
@@ -45,7 +44,6 @@ export function MobileToolbarMenu({
   hasSentryContexts = false,
   hasPrContexts,
   hasAdvisoryContexts = false,
-  onSaveContext,
   onLoadContext,
   onCommit,
   onCommitAndPush,
@@ -75,7 +73,6 @@ export function MobileToolbarMenu({
   // Record over every menu option: a new shared item fails typecheck here
   // until it gets a mobile handler.
   const handlers: Record<MagicMenuOption, () => void> = {
-    'save-context': onSaveContext,
     'inject-session': onLoadContext,
     'linked-projects': () =>
       useUIStore.getState().setLinkedProjectsModalOpen(true),

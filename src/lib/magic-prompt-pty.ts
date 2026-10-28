@@ -18,7 +18,7 @@ import { useUIStore } from '@/store/ui-store'
  *
  * Left on their existing paths because they create or operate on something
  * other than the current session's prompt:
- * - Save Context, Inject Context, Linked Projects, Fork Session
+ * - Inject Context, Linked Projects, Fork Session
  * - Commit, Commit & Push, Revert, Pull, Push, Sync
  * - Create/Open PR, Link PR, Generate PR Description, Review, PR Comments,
  *   Merge PR

@@ -15,7 +15,9 @@ import {
   PanelLeftClose,
   PanelRight,
   PanelRightClose,
+  Settings,
 } from '@/components/icons/reicon'
+import { Kbd } from '@/components/ui/kbd'
 import { usePreferences } from '@/services/preferences'
 import { formatShortcutDisplay, DEFAULT_KEYBINDINGS } from '@/types/keybindings'
 import { isNativeApp } from '@/lib/environment'
@@ -56,6 +58,10 @@ export function TitleBar({
     (preferences?.keybindings?.toggle_left_sidebar ||
       DEFAULT_KEYBINDINGS.toggle_left_sidebar) as string
   )
+  const settingsShortcut = formatShortcutDisplay(
+    (preferences?.keybindings?.open_preferences ||
+      DEFAULT_KEYBINDINGS.open_preferences) as string
+  )
   const fileBrowserShortcut = formatShortcutDisplay(
     (preferences?.keybindings?.toggle_file_browser ||
       DEFAULT_KEYBINDINGS.toggle_file_browser) as string
@@ -78,8 +84,8 @@ export function TitleBar({
         className
       )}
     >
-      {/* Desktop: Jean logo above the 36px sidebar tab rail (macOS native
-          uses this corner for the traffic lights) */}
+      {/* Desktop: Jean logo in the left corner (macOS native uses this
+          corner for the traffic lights) */}
       {!isMobile && !(native && isClientMacOS) && (
         <div className="pointer-events-none absolute inset-y-0 left-0 flex w-9 items-center justify-center pt-1">
           <img
@@ -110,7 +116,7 @@ export function TitleBar({
                 ? 'mac-titlebar-actions'
                 : isMobile
                   ? 'pl-2 pt-1'
-                  : 'pl-9 pt-1' // Start after the 36px sidebar tab rail
+                  : 'pl-9 pt-1' // Start after the 36px logo
             )}
           >
             <Tooltip>
@@ -138,6 +144,26 @@ export function TitleBar({
                 <kbd className="ml-1 text-[0.625rem] opacity-60">
                   {sidebarShortcut}
                 </kbd>
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  onClick={() => useUIStore.getState().togglePreferences()}
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label="Open Settings"
+                  data-testid="titlebar-settings"
+                  className="rounded-none text-foreground/70 hover:text-foreground"
+                >
+                  <Settings className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                Settings{' '}
+                <Kbd modHint className="ml-1">
+                  {settingsShortcut}
+                </Kbd>
               </TooltipContent>
             </Tooltip>
           </div>

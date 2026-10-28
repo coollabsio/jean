@@ -710,24 +710,9 @@ export function useCommandContext(
     window.dispatchEvent(new CustomEvent('command:run-script'))
   }, [])
 
-  // Context - Save current session context
-  const saveContext = useCallback(() => {
-    window.dispatchEvent(new CustomEvent('command:save-context'))
-  }, [])
-
   // Context - Load context (opens modal)
   const loadContext = useCallback(() => {
     window.dispatchEvent(new CustomEvent('command:load-context'))
-  }, [])
-
-  // Archive - Open archived modal
-  const openArchivedModal = useCallback(() => {
-    window.dispatchEvent(new CustomEvent('command:open-archived-modal'))
-  }, [])
-
-  // Archive - Restore last archived
-  const restoreLastArchived = useCallback(() => {
-    window.dispatchEvent(new CustomEvent('restore-last-archived'))
   }, [])
 
   // Unread sessions
@@ -985,12 +970,7 @@ export function useCommandContext(
       runScript,
 
       // Context
-      saveContext,
       loadContext,
-
-      // Archive
-      openArchivedModal,
-      restoreLastArchived,
 
       // Unread
       openUnreadSessions,
@@ -1053,10 +1033,7 @@ export function useCommandContext(
       runAIReview,
       openTerminalPanel,
       runScript,
-      saveContext,
       loadContext,
-      openArchivedModal,
-      restoreLastArchived,
       openUnreadSessions,
       toggleDebugMode,
       copySessionDebugDetails,

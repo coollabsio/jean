@@ -99,7 +99,6 @@ export interface ChatToolbarProps {
 
   /** Undefined hides magic commands (server sessions) */
   onOpenMagicModal?: () => void
-  onSaveContext: () => void
   onLoadContext: () => void
   onCommit: () => void
   onCommitAndPush: () => void

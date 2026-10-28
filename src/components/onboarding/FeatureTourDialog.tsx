@@ -15,7 +15,7 @@ import { isNativeApp } from '@/lib/environment'
 
 const MAGIC_MENU_FEATURES = [
   'Commit, push, and open pull requests',
-  'Save context, create recaps, and resolve conflicts',
+  'Inject context, create recaps, and resolve conflicts',
   'Review, merge, and investigate issues',
 ] as const
 

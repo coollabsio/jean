@@ -1,8 +1,8 @@
 import { memo, useCallback, useState, useRef, useEffect, useMemo } from 'react'
-import type { MouseEvent } from 'react'
 import { StatusIndicator } from '@/components/ui/status-indicator'
 import type { IndicatorStatus } from '@/components/ui/status-indicator'
-import { ArrowDownUp, ChevronDown } from '@/components/icons/reicon'
+import { ArrowDownUp } from '@/components/icons/reicon'
+import { DisclosureChevron } from './DisclosureChevron'
 import { MiddleTruncate } from '@/components/ui/middle-truncate'
 import { cn } from '@/lib/utils'
 import { isBaseSession, type Worktree } from '@/types/projects'
@@ -22,16 +22,10 @@ import { LabelModal } from '@/components/chat/LabelModal'
 import { SidebarSessionContextMenu } from './SidebarSessionContextMenu'
 import { StatusGroupContextMenu } from './StatusGroupContextMenu'
 import { visibleWorktreeIds } from './sidebar-context-menu'
-import { useSessionArchive } from '@/components/chat/hooks/useSessionArchive'
 import { middleClickClose } from '@/lib/middle-click'
-import { hasCloseConfirmBypassModifier } from '@/lib/confirm-bypass'
-import {
-  decideWorktreeMiddleClose,
-  decideSessionMiddleClose,
-  isSessionEmpty,
-} from './worktree-close-decision'
+import { isSessionEmpty } from './worktree-close-decision'
 import { useRenameWorktree, useWorktrees } from '@/services/projects'
-import { useRenameSession, useSessions } from '@/services/chat'
+import { useCloseSession, useRenameSession, useSessions } from '@/services/chat'
 import { isAskUserQuestion, isPlanToolCall, type Session } from '@/types/chat'
 import {
   createSessionCardDataCache,
@@ -63,8 +57,8 @@ interface WorktreeSessionListProps {
   isSelected: boolean
   isNarrowSidebar: boolean
   onSessionSelect: (sessionId: string) => void
-  onSessionMiddleClose: (session: Session, e: MouseEvent) => void
-  onSessionRemove: (session: Session, options: { archive: boolean }) => void
+  onSessionMiddleClose: (session: Session) => void
+  onSessionRemove: (session: Session) => void
 }
 
 /**
@@ -237,12 +231,7 @@ const WorktreeSessionList = memo(function WorktreeSessionList({
                   worktreePath={worktreePath}
                   onRename={handleStartRename}
                   onLabel={setLabelSessionId}
-                  onArchive={session =>
-                    onSessionRemove(session, { archive: true })
-                  }
-                  onDelete={session =>
-                    onSessionRemove(session, { archive: false })
-                  }
+                  onDelete={onSessionRemove}
                 >
                   <button
                     type="button"
@@ -251,8 +240,8 @@ const WorktreeSessionList = memo(function WorktreeSessionList({
                       e.stopPropagation()
                       onSessionSelect(card.session.id)
                     }}
-                    {...middleClickClose(e =>
-                      onSessionMiddleClose(card.session, e)
+                    {...middleClickClose(() =>
+                      onSessionMiddleClose(card.session)
                     )}
                   >
                     <StatusIndicator
@@ -357,16 +346,20 @@ export const WorktreeItem = memo(function WorktreeItem({
 
   // Canonical worktree actions — computed once here and passed to
   // WorktreeContextMenu so the hook isn't run twice per row. The middle-click
-  // close reuses `handleArchiveOrClose` (same as the context menu).
+  // close reuses `handleClose` (same as the context menu).
   const menuActions = useWorktreeMenuActions({ worktree, projectId })
-  const { handleArchiveOrClose, preferences } = menuActions
+  const { handleClose } = menuActions
 
-  // Delete/archive a single conversation (session) respecting removal_behavior.
-  const { handleArchiveSession, handleDeleteSession } = useSessionArchive({
-    worktreeId: worktree.id,
-    worktreePath: worktree.path,
-    removalBehavior: preferences?.removal_behavior,
-  })
+  const { mutate: closeSession } = useCloseSession()
+  const handleDeleteSession = useCallback(
+    (sessionId: string) =>
+      closeSession({
+        worktreeId: worktree.id,
+        worktreePath: worktree.path,
+        sessionId,
+      }),
+    [closeSession, worktree.id, worktree.path]
+  )
 
   // Confirmation dialog shared by middle-click close of a worktree or a
   // conversation — mirrors the canvas/session-tab "validation" flow. Stores the
@@ -649,88 +642,23 @@ export const WorktreeItem = memo(function WorktreeItem({
     selectWorktree,
   ])
 
-  // Middle-click closes the worktree, mirroring the canvas/session-tab close —
-  // including the confirmation dialog when `confirm_session_close` is enabled.
-  const handleWorktreeMiddleClose = useCallback(
-    (e: MouseEvent) => {
-      if (
-        decideWorktreeMiddleClose(
-          preferences?.confirm_session_close,
-          hasCloseConfirmBypassModifier(
-            e,
-            preferences?.close_confirm_bypass_modifier
-          )
-        ) === 'confirm'
-      ) {
-        setCloseConfirm({ mode: 'worktree' })
-      } else {
-        handleArchiveOrClose()
-      }
-    },
-    [
-      preferences?.confirm_session_close,
-      preferences?.close_confirm_bypass_modifier,
-      handleArchiveOrClose,
-    ]
-  )
+  // Middle-click closes the worktree, mirroring the canvas/session-tab close,
+  // always behind the confirmation dialog.
+  const handleWorktreeMiddleClose = useCallback(() => {
+    setCloseConfirm({ mode: 'worktree' })
+  }, [])
 
-  // Middle-click on a conversation row deletes it, mirroring the session-tab
-  // middle-click: validate only when removing the last session of the worktree.
-  const handleSessionMiddleClose = useCallback(
-    (session: Session, e: MouseEvent) => {
-      // The row is rendered from sessionsData, so the count is reliable here.
-      const activeSessionCount = (sessionsData?.sessions ?? []).filter(
-        s => !s.archived_at
-      ).length
-      const decision = decideSessionMiddleClose({
-        activeSessionCount,
-        sessionIsEmpty: isSessionEmpty(
-          session,
-          useChatStore.getState().inputDrafts
-        ),
-        confirmSessionClose: preferences?.confirm_session_close,
-        bypassConfirm: hasCloseConfirmBypassModifier(
-          e,
-          preferences?.close_confirm_bypass_modifier
-        ),
-      })
-      if (decision === 'confirm') {
+  // Middle-click or "Delete Session" on a conversation row, mirroring the
+  // session tab: non-empty sessions confirm first, empty ones close at once.
+  const handleSessionRemove = useCallback(
+    (session: Session) => {
+      if (isSessionEmpty(session, useChatStore.getState().inputDrafts)) {
+        handleDeleteSession(session.id)
+      } else {
         setCloseConfirm({ mode: 'session', sessionId: session.id })
-      } else {
-        handleDeleteSession(session.id)
       }
     },
-    [
-      sessionsData?.sessions,
-      handleDeleteSession,
-      preferences?.confirm_session_close,
-      preferences?.close_confirm_bypass_modifier,
-    ]
-  )
-
-  // Archive/Delete from the session context menu, with the same confirmation
-  // rule as the session tab menu: confirm any non-empty session.
-  const handleSessionMenuRemove = useCallback(
-    (session: Session, { archive }: { archive: boolean }) => {
-      const needsConfirm =
-        preferences?.confirm_session_close !== false &&
-        !isSessionEmpty(session, useChatStore.getState().inputDrafts)
-      if (needsConfirm) {
-        setCloseConfirm({
-          mode: archive ? 'session-archive' : 'session',
-          sessionId: session.id,
-        })
-      } else if (archive) {
-        handleArchiveSession(session.id)
-      } else {
-        handleDeleteSession(session.id)
-      }
-    },
-    [
-      preferences?.confirm_session_close,
-      handleArchiveSession,
-      handleDeleteSession,
-    ]
+    [handleDeleteSession]
   )
 
   const handleDoubleClick = useCallback(
@@ -891,12 +819,7 @@ export const WorktreeItem = memo(function WorktreeItem({
                 className="flex size-4 shrink-0 items-center justify-center rounded opacity-0 transition-opacity group-hover:opacity-50 hover:!opacity-100 hover:bg-accent-foreground/10"
                 onClick={handleChevronClick}
               >
-                <ChevronDown
-                  className={cn(
-                    'size-3 transition-transform',
-                    isExpanded && 'rotate-180'
-                  )}
-                />
+                <DisclosureChevron open={isExpanded} className="size-3" />
               </button>
             </span>
           )}
@@ -978,8 +901,8 @@ export const WorktreeItem = memo(function WorktreeItem({
           isSelected={isSelected}
           isNarrowSidebar={isNarrowSidebar}
           onSessionSelect={handleSessionSelect}
-          onSessionMiddleClose={handleSessionMiddleClose}
-          onSessionRemove={handleSessionMenuRemove}
+          onSessionMiddleClose={handleSessionRemove}
+          onSessionRemove={handleSessionRemove}
         />
       )}
 
@@ -992,12 +915,10 @@ export const WorktreeItem = memo(function WorktreeItem({
           const intent = closeConfirm
           setCloseConfirm(null)
           if (!intent) return
-          if (intent.mode === 'session-archive' && intent.sessionId) {
-            handleArchiveSession(intent.sessionId)
-          } else if (intent.mode === 'session' && intent.sessionId) {
+          if (intent.mode === 'session' && intent.sessionId) {
             handleDeleteSession(intent.sessionId)
           } else {
-            handleArchiveOrClose()
+            handleClose()
           }
         }}
         branchName={worktree.branch}

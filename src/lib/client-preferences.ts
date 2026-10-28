@@ -3,7 +3,6 @@ import {
   type ClientPreferences,
 } from '@/types/client-preferences'
 import { defaultPreferences, type AppPreferences } from '@/types/preferences'
-import { resolveCloseConfirmBypassModifier } from '@/lib/confirm-bypass'
 
 export const CLIENT_PREFERENCES_STORAGE_KEY = 'jean-client-preferences-v1'
 export const CLIENT_PREFERENCES_CHANGED_EVENT =
@@ -50,9 +49,6 @@ function normalize(
   )
   next.ui_font_size = clamp(finiteNumber(next.ui_font_size, 14), 10, 24)
   next.chat_font_size = clamp(finiteNumber(next.chat_font_size, 14), 10, 24)
-  next.close_confirm_bypass_modifier = resolveCloseConfirmBypassModifier(
-    next.close_confirm_bypass_modifier
-  )
   next.applied_keybinding_migrations = Array.isArray(
     next.applied_keybinding_migrations
   )

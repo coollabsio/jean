@@ -22,7 +22,6 @@ export interface ClientViewState {
   pinned_recent_session_ids: string[]
   left_sidebar_visible: boolean
   left_sidebar_size: number
-  agents_sidebar_size: number
   file_browser_visible: boolean
   file_browser_size: number
   right_sidebar_visible: boolean
@@ -69,7 +68,6 @@ export const defaultClientViewState: ClientViewState = {
   pinned_recent_session_ids: [],
   left_sidebar_visible: false,
   left_sidebar_size: 250,
-  agents_sidebar_size: 250,
   file_browser_visible: false,
   file_browser_size: 280,
   right_sidebar_visible: false,
@@ -227,7 +225,6 @@ function parseClientViewState(value: unknown): ClientViewState {
   }
   for (const key of [
     'left_sidebar_size',
-    'agents_sidebar_size',
     'file_browser_size',
     'terminal_height',
     'modal_terminal_width',

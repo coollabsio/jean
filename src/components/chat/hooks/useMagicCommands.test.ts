@@ -7,7 +7,6 @@ function renderUseMagicCommands(
   overrides: Partial<Parameters<typeof useMagicCommands>[0]> = {}
 ) {
   const handlers: Parameters<typeof useMagicCommands>[0] = {
-    handleSaveContext: vi.fn(),
     handleLoadContext: vi.fn(),
     handleLinkedProjects: vi.fn(),
     handleForkSession: vi.fn(),

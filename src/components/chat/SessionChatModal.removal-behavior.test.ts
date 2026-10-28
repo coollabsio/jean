@@ -94,9 +94,6 @@ describe('SessionChatModal removal behavior', () => {
 
     expect(removeSessionTab).toBeTruthy()
     expect(removeSessionTab).toContain('handleDeleteSession(session.id)')
-    expect(removeSessionTab).not.toMatch(
-      /else\s*\{[\s\S]*?selectVisualNeighbor\(session\.id\)[\s\S]*?handleArchiveSession\(session\.id\)/
-    )
   })
 
   it('confirms non-empty session tab close even when other tabs remain (issue #56)', () => {
@@ -106,11 +103,7 @@ describe('SessionChatModal removal behavior', () => {
     const removeSessionTab =
       start === -1 || end === -1 ? '' : source.slice(start, end)
 
-    expect(removeSessionTab).toContain('needsConfirm')
-    // Tolerate Prettier's line breaks in the inlined gate.
-    expect(removeSessionTab).toMatch(
-      /preferences\?\.confirm_session_close !== false &&\s*!sessionIsEmpty/
-    )
+    expect(removeSessionTab).toContain('const needsConfirm = !sessionIsEmpty')
     // Confirm gate wraps the action for every non-empty tab (not only last).
     expect(removeSessionTab).toMatch(
       /if \(needsConfirm\) \{[\s\S]*?pendingCloseAction\.current = action/
@@ -136,22 +129,13 @@ describe('SessionChatModal removal behavior', () => {
   it('creates and opens an empty session after the last session is removed', () => {
     const commandSource = readSource('jean-core/src/chat/commands.rs')
     const closeStart = commandSource.indexOf('pub async fn close_session(')
-    const closeEnd = commandSource.indexOf(
-      'pub async fn archive_session(',
-      closeStart
-    )
-    const archiveEnd = commandSource.indexOf(
-      'pub async fn unarchive_session(',
-      closeEnd
-    )
+    const closeEnd = commandSource.indexOf('pub async fn', closeStart + 1)
     const closeSession = commandSource.slice(closeStart, closeEnd)
-    const archiveSession = commandSource.slice(closeEnd, archiveEnd)
 
-    for (const command of [closeSession, archiveSession]) {
-      expect(command).toContain('if new_active.is_none()')
-      expect(command).toContain('let session = create_session(')
-      expect(command).toContain('return Ok(Some(session.id))')
-    }
+    expect(closeStart).toBeGreaterThan(-1)
+    expect(closeSession).toContain('if new_active.is_none()')
+    expect(closeSession).toContain('let session = create_session(')
+    expect(closeSession).toContain('return Ok(Some(session.id))')
   })
 
   it('asks to close the worktree when Cmd+W is pressed with no sessions', () => {

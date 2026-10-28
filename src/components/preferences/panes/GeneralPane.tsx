@@ -177,10 +177,7 @@ import {
   backendOptions,
   getTerminalOptions,
   getEditorOptions,
-  archiveRetentionOptions,
-  removalBehaviorOptions,
   notificationSoundOptions,
-  type RemovalBehavior,
   type ClaudeModel,
   getClaudeModelOptionsForProvider,
   type CodexModel,
@@ -201,10 +198,7 @@ import {
   type OpenInDefault,
   newSessionKindOptions,
   type NewSessionKind,
-  CLOSE_CONFIRM_BYPASS_MODIFIERS,
-  type CloseConfirmBypassModifier,
 } from '@/types/preferences'
-import { closeConfirmBypassLabel } from '@/lib/confirm-bypass'
 import {
   COMMANDCODE_MODEL_OPTIONS,
   CURSOR_MODEL_OPTIONS,
@@ -254,20 +248,6 @@ import {
   resolveDefaultModelForBackend,
   resolvePiDefaultModel,
 } from '@/lib/session-defaults'
-
-interface CleanupResult {
-  deleted_worktrees: number
-  deleted_sessions: number
-  deleted_orphan_indexes?: number
-}
-
-// Module-level is safe: closeConfirmBypassLabel reads `isClientMacOS`, itself a
-// module-level const derived from `navigator`, so it is settled at import time.
-const BYPASS_MODIFIER_LABELS: Record<CloseConfirmBypassModifier, string> = {
-  shift: closeConfirmBypassLabel('shift') ?? 'Shift',
-  alt: closeConfirmBypassLabel('alt') ?? 'Alt',
-  none: 'Off',
-}
 
 type PreferencesPaneScope =
   | 'general'
@@ -368,8 +348,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   const isWebAccessView = !isNativeApp()
   const webAccessSoundsEnabled = preferences?.web_access_sounds_enabled ?? true
   const soundsEnabledInCurrentView = !isWebAccessView || webAccessSoundsEnabled
-  const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false)
-  const [isDeleting, setIsDeleting] = useState(false)
   const [deleteCliTarget, setDeleteCliTarget] = useState<
     | 'claude'
     | 'codex'
@@ -690,47 +668,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   // Use global ui-store for CLI modals
   const openCliUpdateModal = useUIStore(state => state.openCliUpdateModal)
   const openCliLoginModal = useUIStore(state => state.openCliLoginModal)
-
-  const handleDeleteAllArchives = useCallback(async () => {
-    setIsDeleting(true)
-    const toastId = toast.loading('Deleting all archives...')
-
-    try {
-      const result = await invoke<CleanupResult>('delete_all_archives')
-
-      // Invalidate archive queries to refresh UI
-      queryClient.invalidateQueries({ queryKey: ['archived-worktrees'] })
-      queryClient.invalidateQueries({ queryKey: ['all-archived-sessions'] })
-
-      const parts: string[] = []
-      if (result.deleted_worktrees > 0) {
-        parts.push(
-          `${result.deleted_worktrees} worktree${result.deleted_worktrees === 1 ? '' : 's'}`
-        )
-      }
-      if (result.deleted_sessions > 0) {
-        parts.push(
-          `${result.deleted_sessions} session${result.deleted_sessions === 1 ? '' : 's'}`
-        )
-      }
-      if ((result.deleted_orphan_indexes ?? 0) > 0) {
-        parts.push(
-          `${result.deleted_orphan_indexes} orphaned session index file${result.deleted_orphan_indexes === 1 ? '' : 's'}`
-        )
-      }
-
-      if (parts.length > 0) {
-        toast.success(`Deleted ${parts.join(' and ')}`, { id: toastId })
-      } else {
-        toast.info('No archives to delete', { id: toastId })
-      }
-    } catch (error) {
-      toast.error(`Failed to delete archives: ${error}`, { id: toastId })
-    } finally {
-      setIsDeleting(false)
-      setShowDeleteAllDialog(false)
-    }
-  }, [queryClient])
 
   const handleModelChange = (value: ClaudeModel) => {
     if (preferences) {
@@ -1464,13 +1401,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   const handleAutoSessionNamingChange = (checked: boolean) => {
     if (preferences) {
       patchPreferences.mutate({ auto_session_naming: checked })
-    }
-  }
-
-  const handleArchiveRetentionChange = (value: string) => {
-    const days = parseInt(value, 10)
-    if (preferences && !isNaN(days)) {
-      patchPreferences.mutate({ archive_retention_days: days })
     }
   }
 
@@ -4260,22 +4190,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   }}
                 />
               </InlineField>
-
-              <InlineField
-                label="Auto-save context"
-                description="Automatically save session context after each AI response"
-              >
-                <Switch
-                  checked={preferences?.auto_save_context ?? false}
-                  onCheckedChange={checked => {
-                    if (preferences) {
-                      patchPreferences.mutate({
-                        auto_save_context: checked,
-                      })
-                    }
-                  }}
-                />
-              </InlineField>
             </div>
           </SettingsSection>
 
@@ -4285,141 +4199,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
           >
             <div className="space-y-4">
               <BrowserDefaultHostField preferences={preferences} />
-            </div>
-          </SettingsSection>
-
-          <SettingsSection
-            title="Archive"
-            anchorId="pref-general-section-archive"
-          >
-            <div className="space-y-4">
-              <InlineField
-                label="Confirm before closing"
-                description="Show confirmation dialog when closing sessions or worktrees"
-              >
-                <Switch
-                  checked={preferences?.confirm_session_close ?? true}
-                  onCheckedChange={checked => {
-                    if (preferences) {
-                      patchPreferences.mutate({
-                        confirm_session_close: checked,
-                      })
-                    }
-                  }}
-                />
-              </InlineField>
-
-              <InlineField
-                label="Skip close confirmation"
-                description="Hold this key while closing to skip the dialog"
-              >
-                <Select
-                  value={preferences?.close_confirm_bypass_modifier ?? 'none'}
-                  onValueChange={(value: CloseConfirmBypassModifier) => {
-                    if (preferences) {
-                      patchPreferences.mutate({
-                        close_confirm_bypass_modifier: value,
-                      })
-                    }
-                  }}
-                  disabled={patchPreferences.isPending}
-                >
-                  <SelectTrigger className="w-full sm:w-48">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CLOSE_CONFIRM_BYPASS_MODIFIERS.map(modifier => (
-                      <SelectItem key={modifier} value={modifier}>
-                        {BYPASS_MODIFIER_LABELS[modifier]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </InlineField>
-
-              <InlineField
-                label="Archive original session on clear context"
-                description="When a plan is approved with Clear context or in a new worktree"
-                help="You can restore it from archived sessions."
-              >
-                <Switch
-                  checked={preferences?.close_original_on_clear_context ?? true}
-                  onCheckedChange={checked => {
-                    if (preferences) {
-                      patchPreferences.mutate({
-                        close_original_on_clear_context: checked,
-                      })
-                    }
-                  }}
-                />
-              </InlineField>
-
-              <InlineField
-                label="Removal behavior"
-                description="What happens when closing sessions or worktrees"
-              >
-                <Select
-                  value={preferences?.removal_behavior ?? 'delete'}
-                  onValueChange={(value: RemovalBehavior) => {
-                    if (preferences) {
-                      patchPreferences.mutate({
-                        removal_behavior: value,
-                      })
-                    }
-                  }}
-                >
-                  <SelectTrigger className="w-full sm:w-80">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {removalBehaviorOptions.map(option => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </InlineField>
-
-              <InlineField
-                label="Auto-archive on PR merge"
-                description="Archive worktrees when their PR is merged"
-              >
-                <Switch
-                  checked={preferences?.auto_archive_on_pr_merged ?? true}
-                  onCheckedChange={checked => {
-                    if (preferences) {
-                      patchPreferences.mutate({
-                        auto_archive_on_pr_merged: checked,
-                      })
-                    }
-                  }}
-                />
-              </InlineField>
-
-              <InlineField
-                label="Auto-delete archives"
-                description="Delete archived items older than this"
-              >
-                <Select
-                  value={String(preferences?.archive_retention_days ?? 30)}
-                  onValueChange={handleArchiveRetentionChange}
-                >
-                  <SelectTrigger className="w-full sm:w-80">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {archiveRetentionOptions.map(option => (
-                      <SelectItem
-                        key={option.value}
-                        value={String(option.value)}
-                      >
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </InlineField>
             </div>
           </SettingsSection>
 
@@ -5039,20 +4818,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 </Button>
               </InlineField>
             )}
-
-            <InlineField
-              label="Delete all archives"
-              description="Permanently delete all archived worktrees and sessions"
-            >
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => setShowDeleteAllDialog(true)}
-                disabled={isDeleting}
-              >
-                Delete All
-              </Button>
-            </InlineField>
           </SettingsSection>
 
           <div
@@ -5096,32 +4861,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
           </div>
         </>
       )}
-
-      <AlertDialog
-        open={showDeleteAllDialog}
-        onOpenChange={setShowDeleteAllDialog}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete all archives?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will permanently delete all archived worktrees and sessions,
-              including their git branches and worktree directories. This action
-              cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDeleteAllArchives}
-              disabled={isDeleting}
-              variant="destructive"
-            >
-              {isDeleting ? 'Deleting...' : 'Delete All'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       <AlertDialog
         open={deleteCliTarget !== null}

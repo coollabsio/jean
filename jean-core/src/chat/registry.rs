@@ -1046,7 +1046,7 @@ pub fn cancel_process(
 /// Cancel a running Claude process only if one is actively registered.
 /// Unlike `cancel_process`, this does NOT add to PENDING_CANCELS and does NOT emit
 /// `chat:cancelled` when the session is idle. Safe to call on idle sessions during
-/// close/archive operations to avoid spurious "Request cancelled" events.
+/// close operations to avoid spurious "Request cancelled" events.
 pub fn cancel_process_if_running(
     app: &AppHandle,
     session_id: &str,

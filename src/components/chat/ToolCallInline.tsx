@@ -1,5 +1,4 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
-import { usePreferences } from '@/services/preferences'
 import { useChatStore } from '@/store/chat-store'
 import { useVisibilityAwareTicker } from '@/hooks/useVisibilityAwareTicker'
 import {
@@ -604,7 +603,7 @@ function formatCodexWebSearchExpanded(
 // Single source of truth for tool call row layout. Bump min-h-9/px-2.5 here, all rows update.
 // min-h ensures consistent baseline regardless of inline-content height (pill vs no-pill).
 export const TOOL_CALL_ROW_CLASS =
-  'tool-call-row flex min-h-9 w-full items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-muted/50 select-none min-w-0'
+  'tool-call-row flex min-h-9 w-full items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-muted-foreground bg-muted/30 hover:bg-muted/50 select-none min-w-0'
 
 export const TOOL_CALL_SUB_ROW_CLASS =
   'tool-call-row flex min-h-7 w-full items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground/80 hover:bg-muted/30 select-none min-w-0'
@@ -640,10 +639,9 @@ export const ToolCallInline = memo(function ToolCallInline({
   isStreaming,
   isIncomplete,
 }: ToolCallInlineProps) {
-  const { data: preferences } = usePreferences()
   const [isOpen, setIsOpen] = useRememberedExpansion(
     `tool:${toolCall.id}`,
-    preferences?.expand_tool_calls_by_default ?? false
+    false
   )
   // Builds JSON/diff content, so only recompute when the tool call changes
   const { icon, label, detail, filePath, expandedContent } = useMemo(
@@ -757,10 +755,9 @@ export const TaskCallInline = memo(function TaskCallInline({
   isStreaming,
   isIncomplete,
 }: TaskCallInlineProps) {
-  const { data: preferences } = usePreferences()
   const [isOpen, setIsOpen] = useRememberedExpansion(
     `task:${taskToolCall.id}`,
-    preferences?.expand_tool_calls_by_default ?? false
+    false
   )
   const input = taskToolCall.input as Record<string, unknown>
   const subagentType = input.subagent_type as string | undefined
@@ -945,16 +942,12 @@ export const StackedGroup = memo(function StackedGroup({
   isStreaming,
   isIncomplete,
 }: StackedGroupProps) {
-  const { data: preferences } = usePreferences()
   const firstItem = items[0]
   const groupKey =
     firstItem?.type === 'thinking'
       ? firstItem.key
       : (firstItem?.tool.id ?? 'empty')
-  const [isOpen, setIsOpen] = useRememberedExpansion(
-    `stack:${groupKey}`,
-    preferences?.expand_tool_calls_by_default ?? false
-  )
+  const [isOpen, setIsOpen] = useRememberedExpansion(`stack:${groupKey}`, false)
 
   // Count thinking blocks and tools for summary
   let thinkingCount = 0
@@ -1036,19 +1029,11 @@ interface SubThinkingItemProps {
  * Similar style to SubToolItem but for thinking content
  */
 function SubThinkingItem({ thinking }: SubThinkingItemProps) {
-  const { data: preferences } = usePreferences()
-  const [isOpen, setIsOpen] = useState(
-    preferences?.expand_tool_calls_by_default ?? false
-  )
+  const [isOpen, setIsOpen] = useState(false)
 
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-      <div
-        className={cn(
-          'rounded border border-border/30 bg-background/50',
-          isOpen && 'bg-muted/30'
-        )}
-      >
+      <div className="rounded border border-border/30 bg-muted/20">
         <CollapsibleTrigger className={TOOL_CALL_SUB_ROW_CLASS}>
           <Brain className="h-3 w-3 shrink-0 text-muted-foreground" />
           <span className="font-medium shrink-0 whitespace-nowrap">
@@ -1086,10 +1071,9 @@ const SubToolItem = memo(function SubToolItem({
   toolCall,
   onFileClick,
 }: SubToolItemProps) {
-  const { data: preferences } = usePreferences()
   const [isOpen, setIsOpen] = useRememberedExpansion(
     `subtool:${toolCall.id}`,
-    preferences?.expand_tool_calls_by_default ?? false
+    false
   )
   // Builds JSON/diff content, so only recompute when the tool call changes
   const { icon, label, detail, filePath, expandedContent } = useMemo(
@@ -1107,12 +1091,7 @@ const SubToolItem = memo(function SubToolItem({
 
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-      <div
-        className={cn(
-          'rounded border border-border/30 bg-background/50',
-          isOpen && 'bg-muted/30'
-        )}
-      >
+      <div className="rounded border border-border/30 bg-muted/20">
         <CollapsibleTrigger asChild>
           <div className={TOOL_CALL_SUB_ROW_CLASS}>
             <span className="shrink-0 [&>svg]:h-3 [&>svg]:w-3">{icon}</span>

@@ -2,13 +2,12 @@ import { Trash2 } from '@/components/icons/reicon'
 import { toast } from 'sonner'
 import { invoke } from '@/lib/transport'
 import type { AppCommand } from './types'
-import type { AppPreferences } from '@/types/preferences'
 
 interface CleanupResult {
   deleted_worktrees: number
   deleted_sessions: number
   deleted_contexts: number
-  deleted_orphan_indexes?: number
+  deleted_orphan_indexes: number
 }
 
 export const maintenanceCommands: AppCommand[] = [
@@ -26,25 +25,20 @@ export const maintenanceCommands: AppCommand[] = [
       'storage',
       'disk',
     ],
-    async execute(context) {
+    async execute() {
       const toastId = toast.loading('Cleaning up orphaned session data...')
 
       try {
-        const prefs = context.queryClient.getQueryData<AppPreferences>([
-          'preferences',
-        ])
-        const retentionDays = prefs?.archive_retention_days ?? 30
-
         const [result, combinedDeleted] = await Promise.all([
-          invoke<CleanupResult>('cleanup_old_archives', { retentionDays }),
+          invoke<CleanupResult>('cleanup_deleted_items'),
           invoke<number>('cleanup_combined_contexts'),
         ])
 
         const total =
           result.deleted_worktrees +
           result.deleted_sessions +
-          (result.deleted_contexts ?? 0) +
-          (result.deleted_orphan_indexes ?? 0) +
+          result.deleted_contexts +
+          result.deleted_orphan_indexes +
           combinedDeleted
 
         if (total > 0) {
@@ -64,7 +58,7 @@ export const maintenanceCommands: AppCommand[] = [
               `${result.deleted_contexts} context${result.deleted_contexts === 1 ? '' : 's'}`
             )
           }
-          if ((result.deleted_orphan_indexes ?? 0) > 0) {
+          if (result.deleted_orphan_indexes > 0) {
             parts.push(
               `${result.deleted_orphan_indexes} orphaned session index file${result.deleted_orphan_indexes === 1 ? '' : 's'}`
             )
@@ -74,13 +68,6 @@ export const maintenanceCommands: AppCommand[] = [
               `${combinedDeleted} combined-context file${combinedDeleted === 1 ? '' : 's'}`
             )
           }
-
-          context.queryClient.invalidateQueries({
-            queryKey: ['archived-worktrees'],
-          })
-          context.queryClient.invalidateQueries({
-            queryKey: ['all-archived-sessions'],
-          })
 
           toast.success(`Cleaned up ${parts.join(' and ')}`, { id: toastId })
         } else {

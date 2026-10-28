@@ -214,7 +214,7 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
   }, [open])
 
   // Prune deleted sessions from the open snapshot. A session removed from the
-  // live ['all-sessions'] data (closed/archived/worktree deleted) is dropped,
+  // live ['all-sessions'] data (closed/worktree deleted) is dropped,
   // while a row that merely flipped status stays present in `entries` — so this
   // does not reintroduce the mid-interaction yank the snapshot prevents.
   useEffect(() => {

@@ -443,18 +443,6 @@ pub async fn dispatch_command(
             crate::projects::fetch_worktrees_status(app.clone(), project_id).await?;
             to_value(())
         }
-        "archive_worktree" => {
-            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
-            crate::projects::archive_worktree(app.clone(), worktree_id).await?;
-            emit_cache_invalidation(app, &["projects"]);
-            Ok(Value::Null)
-        }
-        "unarchive_worktree" => {
-            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
-            let result = crate::projects::unarchive_worktree(app.clone(), worktree_id).await?;
-            emit_cache_invalidation(app, &["projects"]);
-            to_value(result)
-        }
         "rename_worktree" => {
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
             let new_name: String = field(&args, "newName", "new_name")?;
@@ -1265,15 +1253,12 @@ pub async fn dispatch_command(
         "get_sessions" => {
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
             let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
-            let include_archived: Option<bool> =
-                field_opt(&args, "includeArchived", "include_archived")?;
             let include_message_counts: Option<bool> =
                 field_opt(&args, "includeMessageCounts", "include_message_counts")?;
             let result = crate::chat::get_sessions(
                 app.clone(),
                 worktree_id,
                 worktree_path,
-                include_archived,
                 include_message_counts,
             )
             .await?;
@@ -1282,15 +1267,8 @@ pub async fn dispatch_command(
         "list_sessions_summary" => {
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
             let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
-            let include_archived: Option<bool> =
-                field_opt(&args, "includeArchived", "include_archived")?;
-            let result = crate::chat::list_sessions_summary(
-                app.clone(),
-                worktree_id,
-                worktree_path,
-                include_archived,
-            )
-            .await?;
+            let result =
+                crate::chat::list_sessions_summary(app.clone(), worktree_id, worktree_path).await?;
             to_value(result)
         }
         "get_session_status" => {
@@ -1856,12 +1834,10 @@ pub async fn dispatch_command(
             let result = crate::chat::check_resumable_sessions(app.clone()).await?;
             to_value(result)
         }
-        "cleanup_old_archives" => {
-            let retention_days: u32 = field(&args, "retentionDays", "retention_days")?;
-            let result = crate::projects::cleanup_old_archives(app.clone(), retention_days).await?;
+        "cleanup_deleted_items" => {
+            let result = crate::projects::cleanup_deleted_items(app.clone()).await?;
             to_value(result)
         }
-
         "cleanup_combined_contexts" => {
             let result = crate::projects::cleanup_combined_contexts(app.clone()).await?;
             to_value(result)
@@ -1972,16 +1948,6 @@ pub async fn dispatch_command(
             emit_cache_invalidation(app, &["projects"]);
             Ok(Value::Null)
         }
-        "close_base_session_archive" => {
-            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
-            crate::projects::close_base_session_archive(app.clone(), worktree_id).await?;
-            emit_cache_invalidation(app, &["projects"]);
-            Ok(Value::Null)
-        }
-        "list_archived_worktrees" => {
-            let result = crate::projects::list_archived_worktrees(app.clone()).await?;
-            to_value(result)
-        }
         "import_worktree" => {
             let project_id: String = field(&args, "projectId", "project_id")?;
             let path: String = from_field(&args, "path")?;
@@ -1992,16 +1958,6 @@ pub async fn dispatch_command(
         "list_unmanaged_worktrees" => {
             let project_id: String = field(&args, "projectId", "project_id")?;
             let result = crate::projects::list_unmanaged_worktrees(app.clone(), project_id).await?;
-            to_value(result)
-        }
-        "permanently_delete_worktree" => {
-            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
-            crate::projects::permanently_delete_worktree(app.clone(), worktree_id).await?;
-            emit_cache_invalidation(app, &["projects"]);
-            Ok(Value::Null)
-        }
-        "delete_all_archives" => {
-            let result = crate::projects::delete_all_archives(app.clone()).await?;
             to_value(result)
         }
         "open_worktree_in_finder" => {
@@ -2516,71 +2472,6 @@ pub async fn dispatch_command(
             emit_cache_invalidation(app, &["sessions"]);
             Ok(Value::Null)
         }
-        "archive_session" => {
-            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
-            let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
-            let session_id: String = field(&args, "sessionId", "session_id")?;
-            let result =
-                crate::chat::archive_session(app.clone(), worktree_id, worktree_path, session_id)
-                    .await?;
-            to_value(result)
-        }
-        "unarchive_session" => {
-            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
-            let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
-            let session_id: String = field(&args, "sessionId", "session_id")?;
-            let result =
-                crate::chat::unarchive_session(app.clone(), worktree_id, worktree_path, session_id)
-                    .await?;
-            emit_cache_invalidation(app, &["sessions"]);
-            to_value(result)
-        }
-        "restore_session_with_base" => {
-            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
-            let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
-            let session_id: String = field(&args, "sessionId", "session_id")?;
-            let project_id: String = field(&args, "projectId", "project_id")?;
-            let result = crate::chat::restore_session_with_base(
-                app.clone(),
-                worktree_id,
-                worktree_path,
-                session_id,
-                project_id,
-            )
-            .await?;
-            emit_cache_invalidation(app, &["sessions", "projects"]);
-            to_value(result)
-        }
-        "delete_archived_session" => {
-            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
-            let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
-            let session_id: String = field(&args, "sessionId", "session_id")?;
-            crate::chat::delete_archived_session(
-                app.clone(),
-                worktree_id,
-                worktree_path,
-                session_id,
-            )
-            .await?;
-            emit_cache_invalidation(app, &["sessions"]);
-            Ok(Value::Null)
-        }
-        "list_archived_sessions" => {
-            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
-            let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
-            let result =
-                crate::chat::list_archived_sessions(app.clone(), worktree_id, worktree_path)
-                    .await?;
-            to_value(result)
-        }
-        "list_all_archived_sessions" => {
-            let result = crate::chat::list_all_archived_sessions(app.clone()).await?;
-            to_value(result)
-        }
-
-        // =====================================================================
-        // Images & Pasted Text
-        // =====================================================================
         "save_pasted_image" => {
             let data: String = from_field(&args, "data")?;
             let mime_type: String = field(&args, "mimeType", "mime_type")?;

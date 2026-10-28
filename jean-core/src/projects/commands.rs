@@ -47,10 +47,9 @@ use super::sentry_issues::{
 use super::storage::{get_project_worktrees_dir, load_projects_data, save_projects_data};
 use super::types::{
     JeanConfig, MergeType, Project, ProjectAutoFixSettings, ProjectListItem, SessionType, Worktree,
-    WorktreeArchivedEvent, WorktreeBranchExistsEvent, WorktreeCreateErrorEvent,
-    WorktreeCreatedEvent, WorktreeCreatingEvent, WorktreeDeleteErrorEvent, WorktreeDeletedEvent,
-    WorktreeDeletingEvent, WorktreeOrigin, WorktreePathExistsEvent,
-    WorktreePermanentlyDeletedEvent, WorktreeSetupCompleteEvent, WorktreeUnarchivedEvent,
+    WorktreeBranchExistsEvent, WorktreeCreateErrorEvent, WorktreeCreatedEvent,
+    WorktreeCreatingEvent, WorktreeDeleteErrorEvent, WorktreeDeletedEvent, WorktreeDeletingEvent,
+    WorktreeOrigin, WorktreePathExistsEvent, WorktreeSetupCompleteEvent,
 };
 use super::unmanaged_worktrees::{
     blocked_import_paths, list_unmanaged_from_repo, main_checkout_path_from_porcelain,
@@ -1027,8 +1026,8 @@ pub async fn clone_project(
 }
 
 /// Remove a project
-/// Only blocks if there are active (non-archived) worktrees.
-/// Automatically cleans up archived worktrees and their sessions.
+/// Only blocks if there are active worktrees. Worktrees archived by an older
+/// Jean (`archived_at` set) are cleaned up along with their sessions.
 pub async fn remove_project(app: AppHandle, project_id: String) -> Result<(), String> {
     log::trace!("Removing project: {project_id}");
 
@@ -1038,7 +1037,6 @@ pub async fn remove_project(app: AppHandle, project_id: String) -> Result<(), St
         return Err("Cannot remove: this is a folder, not a project.".to_string());
     }
 
-    // Check if project has active (non-archived) worktrees
     let has_active_worktrees = data
         .worktrees
         .iter()
@@ -1050,7 +1048,7 @@ pub async fn remove_project(app: AppHandle, project_id: String) -> Result<(), St
         );
     }
 
-    // Collect archived worktrees for this project to clean up
+    // Legacy archived worktrees for this project are dropped with the project.
     let archived_worktree_ids: Vec<String> = data
         .worktrees
         .iter()
@@ -1275,7 +1273,6 @@ pub async fn bootstrap_project(
                     app,
                     worktree_id.clone(),
                     worktree_path,
-                    None,       // include_archived
                     Some(true), // include_message_counts
                 )
                 .await
@@ -1662,7 +1659,6 @@ fn prepare_forked_session(
     forked.updated_at = created_at;
     forked.last_opened_at = Some(created_at);
     forked.archived_at = None;
-    forked.archived_by_base_close = None;
     forked.session_naming_completed = false;
     clear_session_runtime_state(&mut forked);
     forked
@@ -1698,7 +1694,6 @@ fn prepare_forked_metadata(
     metadata.muse_session_id = None;
     metadata.session_naming_completed = false;
     metadata.archived_at = None;
-    metadata.archived_by_base_close = None;
     metadata.pending_permission_denials.clear();
     metadata.pending_codex_permission_requests.clear();
     metadata.pending_opencode_permission_requests.clear();
@@ -2151,14 +2146,6 @@ pub async fn create_worktree(
             if worktree_path.exists() {
                 log::trace!("Background: Path already exists: {worktree_path_clone}");
 
-                // Check if this path matches an archived worktree
-                let archived_info = load_projects_data(&app_clone).ok().and_then(|data| {
-                    data.worktrees
-                        .iter()
-                        .find(|w| w.path == worktree_path_clone && w.archived_at.is_some())
-                        .map(|w| (w.id.clone(), w.name.clone()))
-                });
-
                 // Generate a suggested alternative name with random suffix
                 // Must check both storage AND git branches (branch may exist from previously deleted worktree)
                 let suggested_name = {
@@ -2171,14 +2158,11 @@ pub async fn create_worktree(
                     )
                 };
 
-                // Emit path_exists event with archived worktree info if available
                 let path_exists_event = WorktreePathExistsEvent {
                     id: worktree_id_clone.clone(),
                     project_id: project_id_clone.clone(),
                     path: worktree_path_clone.clone(),
                     suggested_name,
-                    archived_worktree_id: archived_info.as_ref().map(|(id, _)| id.clone()),
-                    archived_worktree_name: archived_info.map(|(_, name)| name),
                     issue_context: issue_context_clone.clone(),
                     pr_context: pr_context_clone.clone(),
                     security_context: security_context_clone.clone(),
@@ -3182,14 +3166,6 @@ pub async fn create_worktree_from_existing_branch(
             if worktree_path.exists() {
                 log::trace!("Background: Path already exists: {worktree_path_clone}");
 
-                // Check if this path matches an archived worktree
-                let archived_info = load_projects_data(&app_clone).ok().and_then(|data| {
-                    data.worktrees
-                        .iter()
-                        .find(|w| w.path == worktree_path_clone && w.archived_at.is_some())
-                        .map(|w| (w.id.clone(), w.name.clone()))
-                });
-
                 // Generate a suggested alternative name with random suffix
                 let suggested_name = {
                     let data = load_projects_data(&app_clone).ok();
@@ -3201,14 +3177,11 @@ pub async fn create_worktree_from_existing_branch(
                     )
                 };
 
-                // Emit path_exists event with archived worktree info if available
                 let path_exists_event = WorktreePathExistsEvent {
                     id: worktree_id_clone.clone(),
                     project_id: project_id_clone.clone(),
                     path: worktree_path_clone.clone(),
                     suggested_name,
-                    archived_worktree_id: archived_info.as_ref().map(|(id, _)| id.clone()),
-                    archived_worktree_name: archived_info.map(|(_, name)| name),
                     issue_context: issue_context_clone.clone(),
                     pr_context: pr_context_clone.clone(),
                     security_context: security_context_clone.clone(),
@@ -3648,16 +3621,6 @@ pub async fn checkout_pr(
         .ok_or_else(|| format!("Project not found: {project_id}"))?
         .clone();
 
-    // Check if there's an archived worktree for this PR — restore it instead of creating a new one
-    if let Some(archived_wt) = data.worktrees.iter().find(|w| {
-        w.project_id == project_id && w.pr_number == Some(pr_number) && w.archived_at.is_some()
-    }) {
-        let worktree_id = archived_wt.id.clone();
-        log::info!("[checkout_pr] Found archived worktree {worktree_id} for PR #{pr_number}, attempting unarchive");
-        return unarchive_worktree(app, worktree_id).await;
-    }
-    log::info!("[checkout_pr] No archived worktree found for PR #{pr_number}, creating new");
-
     // Fetch PR details from GitHub (for context and worktree naming)
     let pr_detail = get_github_pr(app.clone(), project.path.clone(), pr_number, None).await?;
     // Persist the same PR link fields as create/link PR so magic actions
@@ -3683,7 +3646,7 @@ pub async fn checkout_pr(
     let worktree_name = generate_pr_worktree_name(pr_number, &pr_detail.head_ref_name);
     log::info!("[checkout_pr] Generated base worktree name: '{worktree_name}'");
 
-    // Remove any archived worktree records for this PR from data so they don't
+    // Drop legacy archived worktree records for this PR from data so they don't
     // interfere with name dedup. The background thread will clean up leftover
     // git worktrees/branches/directories.
     let project_worktrees_dir =
@@ -3693,7 +3656,7 @@ pub async fn checkout_pr(
     });
     if had_archived {
         log::info!(
-            "[checkout_pr] Removing archived worktree records for PR #{pr_number} from data"
+            "[checkout_pr] Removing legacy archived worktree records for PR #{pr_number} from data"
         );
         data.worktrees.retain(|w| {
             !(w.project_id == project_id
@@ -3848,7 +3811,7 @@ pub async fn checkout_pr(
             log::trace!("Background: Creating worktree for PR #{pr_number}");
 
             // Clean up leftover directory from a previous checkout of this PR
-            // (e.g. permanently_delete_worktree's background cleanup hasn't finished yet)
+            // (e.g. delete_worktree's background cleanup hasn't finished yet)
             let dir_exists_before = std::path::Path::new(&worktree_path_clone).exists();
             log::info!("[checkout_pr bg] worktree_path={worktree_path_clone}, dir_exists={dir_exists_before}");
             if dir_exists_before {
@@ -4267,8 +4230,7 @@ pub async fn delete_worktree(
             .and_then(|config| config.scripts.teardown)
     };
 
-    // Remove from storage SYNCHRONOUSLY to avoid race conditions with other operations
-    // (e.g., archive/unarchive could be overwritten if we save in background thread)
+    // Remove from storage SYNCHRONOUSLY so a concurrent save cannot resurrect the record
     let mut data = load_projects_data(&app)?;
     data.remove_worktree(&worktree_id);
     save_projects_data(&app, &data)?;
@@ -4522,21 +4484,6 @@ pub async fn create_base_session(app: AppHandle, project_id: String) -> Result<W
     match crate::chat::restore_base_sessions(&app, &project_id, &session.id) {
         Ok(Some(_)) => {
             log::trace!("Restored preserved sessions for base session");
-            // Unarchive all sessions — they were archived by close_base_session_archive
-            // but the user is reopening the base session, so they should be active again
-            let wt_path = session.path.clone();
-            let wt_id = session.id.clone();
-            if let Err(e) = crate::chat::with_sessions_mut(&app, &wt_path, &wt_id, |sessions| {
-                for s in &mut sessions.sessions {
-                    if s.archived_by_base_close == Some(true) {
-                        s.archived_at = None;
-                        s.archived_by_base_close = None;
-                    }
-                }
-                Ok(())
-            }) {
-                log::warn!("Failed to unarchive restored sessions: {e}");
-            }
         }
         Ok(None) => {
             log::trace!("No preserved sessions to restore");
@@ -4557,23 +4504,15 @@ pub async fn create_base_session(app: AppHandle, project_id: String) -> Result<W
 /// Close a base branch session (removes record only, no git operations)
 /// Preserves the sessions file so it can be restored when the base session is reopened
 pub async fn close_base_session(app: AppHandle, worktree_id: String) -> Result<(), String> {
-    log::info!("[BASE_CLOSE] close_base_session (preserve, no archive) called for {worktree_id}");
-    close_base_session_internal(&app, &worktree_id, true, false).await
+    log::info!("[BASE_CLOSE] close_base_session (preserve) called for {worktree_id}");
+    close_base_session_internal(&app, &worktree_id, true).await
 }
 
 /// Close a base branch session without preserving sessions (clean close)
 /// Deletes the sessions file entirely so the base session starts fresh on reopen
 pub async fn close_base_session_clean(app: AppHandle, worktree_id: String) -> Result<(), String> {
     log::info!("[BASE_CLOSE] close_base_session_clean called for {worktree_id}");
-    close_base_session_internal(&app, &worktree_id, false, false).await
-}
-
-/// Close a base branch session, archiving all non-archived sessions first.
-/// Sets archived_at on each session and preserves the sessions file so they
-/// appear in the Archive modal.
-pub async fn close_base_session_archive(app: AppHandle, worktree_id: String) -> Result<(), String> {
-    log::info!("[BASE_CLOSE] close_base_session_archive called for {worktree_id}");
-    close_base_session_internal(&app, &worktree_id, true, true).await
+    close_base_session_internal(&app, &worktree_id, false).await
 }
 
 /// Internal implementation for closing a base session
@@ -4581,9 +4520,10 @@ async fn close_base_session_internal(
     app: &AppHandle,
     worktree_id: &str,
     preserve_sessions: bool,
-    archive_sessions: bool,
 ) -> Result<(), String> {
-    log::info!("[BASE_CLOSE] Closing base session: {worktree_id} (preserve_sessions: {preserve_sessions}, archive_sessions: {archive_sessions})");
+    log::info!(
+        "[BASE_CLOSE] Closing base session: {worktree_id} (preserve_sessions: {preserve_sessions})"
+    );
 
     let mut data = load_projects_data(app)?;
 
@@ -4603,46 +4543,7 @@ async fn close_base_session_internal(
         worktree.path
     );
 
-    // Archive all non-archived sessions before closing
-    if archive_sessions {
-        let worktree_path = worktree.path.clone();
-        let wt_id = worktree_id.to_string();
-        log::info!("[BASE_CLOSE] Archiving sessions for worktree_id={wt_id}, path={worktree_path}");
-        let archive_result = crate::chat::with_sessions_mut(
-            app,
-            &worktree_path,
-            &wt_id,
-            |sessions| {
-                let ts = now();
-                let mut archived_count = 0u32;
-                let total = sessions.sessions.len();
-                for session in &mut sessions.sessions {
-                    log::info!(
-                        "[BASE_CLOSE] Session '{}' (id={}): archived_at={:?}",
-                        session.name,
-                        session.id,
-                        session.archived_at
-                    );
-                    if session.archived_at.is_none() {
-                        session.archived_at = Some(ts);
-                        session.archived_by_base_close = Some(true);
-                        archived_count += 1;
-                        log::info!("[BASE_CLOSE] -> Archived session '{}'", session.name);
-                    }
-                }
-                log::info!("[BASE_CLOSE] Archived {archived_count}/{total} sessions in base session {wt_id}");
-                Ok(archived_count)
-            },
-        );
-        match &archive_result {
-            Ok(count) => log::info!("[BASE_CLOSE] Archive result: Ok({count})"),
-            Err(e) => log::warn!("[BASE_CLOSE] Failed to archive sessions: {e}"),
-        }
-    } else {
-        log::info!("[BASE_CLOSE] Skipping session archival (archive_sessions=false)");
-    }
-
-    if preserve_sessions || archive_sessions {
+    if preserve_sessions {
         // Preserve the sessions file before removing the worktree
         // This renames {worktree_id}.json to base-{project_id}.json
         log::info!(
@@ -4696,124 +4597,6 @@ async fn close_base_session_internal(
 
     log::trace!("Successfully closed base session: {}", worktree.name);
     Ok(())
-}
-
-// =============================================================================
-// Archive Commands
-// =============================================================================
-
-/// Archive a worktree (keeps git worktree/branch on disk, just hides from UI)
-///
-/// Unlike delete_worktree, this does NOT remove the git worktree or branch.
-/// It only marks the worktree as archived by setting archived_at timestamp.
-///
-/// Note: Base sessions cannot be archived - use close_base_session instead.
-pub async fn archive_worktree(app: AppHandle, worktree_id: String) -> Result<(), String> {
-    log::trace!("Archiving worktree: {worktree_id}");
-
-    // Cancel any running Claude processes for this worktree
-    crate::chat::registry::cancel_processes_for_worktree(&app, &worktree_id);
-
-    let mut data = load_projects_data(&app)?;
-
-    let worktree = data
-        .find_worktree_mut(&worktree_id)
-        .ok_or_else(|| format!("Worktree not found: {worktree_id}"))?;
-
-    // Base sessions cannot be archived - they should be closed instead
-    if worktree.session_type == SessionType::Base {
-        return Err(
-            "Base sessions cannot be archived. Use close_base_session instead.".to_string(),
-        );
-    }
-
-    // Check if already archived
-    if worktree.archived_at.is_some() {
-        return Err("Worktree is already archived".to_string());
-    }
-
-    let project_id = worktree.project_id.clone();
-
-    // Set archived timestamp
-    worktree.archived_at = Some(now());
-
-    // Save the updated data
-    save_projects_data(&app, &data)?;
-
-    // Emit archived event
-    let event = WorktreeArchivedEvent {
-        id: worktree_id.clone(),
-        project_id,
-    };
-    if let Err(e) = app.emit_all("worktree:archived", &event) {
-        log::error!("Failed to emit worktree:archived event: {e}");
-    }
-
-    log::trace!("Successfully archived worktree: {worktree_id}");
-    Ok(())
-}
-
-/// Unarchive a worktree (restore to UI)
-///
-/// Validates that the git worktree and branch still exist on disk.
-pub async fn unarchive_worktree(app: AppHandle, worktree_id: String) -> Result<Worktree, String> {
-    log::trace!("Unarchiving worktree: {worktree_id}");
-
-    let mut data = load_projects_data(&app)?;
-
-    let worktree = data
-        .find_worktree_mut(&worktree_id)
-        .ok_or_else(|| format!("Worktree not found: {worktree_id}"))?;
-
-    // Verify it's archived
-    if worktree.archived_at.is_none() {
-        return Err("Worktree is not archived".to_string());
-    }
-
-    // For non-base sessions, validate git worktree still exists
-    if worktree.session_type != SessionType::Base {
-        let path = std::path::Path::new(&worktree.path);
-        if !path.exists() {
-            return Err(format!(
-                "Git worktree directory no longer exists: {}. The worktree may need to be permanently deleted.",
-                worktree.path
-            ));
-        }
-    }
-
-    // Clear archived timestamp
-    worktree.archived_at = None;
-
-    let restored_worktree = worktree.clone();
-
-    // Save the updated data
-    save_projects_data(&app, &data)?;
-
-    // Emit unarchived event
-    let event = WorktreeUnarchivedEvent {
-        worktree: restored_worktree.clone(),
-    };
-    if let Err(e) = app.emit_all("worktree:unarchived", &event) {
-        log::error!("Failed to emit worktree:unarchived event: {e}");
-    }
-
-    log::trace!("Successfully unarchived worktree: {worktree_id}");
-    Ok(restored_worktree)
-}
-
-/// List all archived worktrees across all projects
-pub async fn list_archived_worktrees(app: AppHandle) -> Result<Vec<Worktree>, String> {
-    log::trace!("Listing all archived worktrees");
-
-    let data = load_projects_data(&app)?;
-    let archived = data
-        .worktrees
-        .iter()
-        .filter(|w| w.archived_at.is_some())
-        .cloned()
-        .collect();
-
-    Ok(archived)
 }
 
 /// Import an existing git worktree directory into Jean
@@ -4985,128 +4768,6 @@ pub async fn list_unmanaged_worktrees(
         .collect();
 
     list_unmanaged_from_repo(&project_path, &tracked_paths)
-}
-
-/// Permanently delete an archived worktree (removes git worktree/branch from disk)
-///
-/// This is the "true delete" that removes the worktree from disk.
-/// Only works on archived worktrees to prevent accidental deletion.
-pub async fn permanently_delete_worktree(
-    app: AppHandle,
-    worktree_id: String,
-) -> Result<(), String> {
-    log::trace!("Permanently deleting archived worktree: {worktree_id}");
-
-    let data = load_projects_data(&app)?;
-
-    // Already gone from storage (e.g. its folder was deleted outside Jean): nothing to do.
-    let Some(worktree) = data.find_worktree(&worktree_id).cloned() else {
-        log::warn!("Worktree {worktree_id} not found in storage, treating delete as done");
-        return Ok(());
-    };
-
-    // Verify it's archived
-    if worktree.archived_at.is_none() {
-        return Err(
-            "Only archived worktrees can be permanently deleted. Archive it first.".to_string(),
-        );
-    }
-
-    let project = data
-        .find_project(&worktree.project_id)
-        .ok_or_else(|| format!("Project not found: {}", worktree.project_id))?
-        .clone();
-
-    // Remove from storage SYNCHRONOUSLY to avoid race conditions with other operations
-    // (e.g., archive/unarchive could be overwritten if we save in background thread)
-    let mut data = load_projects_data(&app)?;
-    data.remove_worktree(&worktree_id);
-    save_projects_data(&app, &data)?;
-    log::trace!("Worktree removed from storage: {worktree_id}");
-
-    // Drop Jean-managed fork remotes for this PR when nothing else needs them.
-    cleanup_unused_pr_remotes(
-        &data,
-        &worktree_id,
-        &project.path,
-        worktree.pr_push_remote.as_deref(),
-        Some(worktree.branch.as_str()),
-    );
-
-    // Collect session IDs for cleanup before the index file is deleted
-    let session_ids: Vec<String> =
-        crate::chat::storage::load_sessions(&app, &worktree.path, &worktree.id)
-            .map(|ws| ws.sessions.iter().map(|s| s.id.clone()).collect())
-            .unwrap_or_default();
-
-    // Clone values for background thread
-    let app_clone = app.clone();
-    let worktree_id_clone = worktree_id.clone();
-    let project_id_clone = worktree.project_id.clone();
-    let project_path = project.path.clone();
-    let worktree_path = worktree.path.clone();
-    let worktree_branch = worktree.branch.clone();
-    let worktree_name = worktree.name.clone();
-    let is_base_session = worktree.session_type == SessionType::Base;
-
-    // Spawn background thread for git operations and cleanup only
-    // Storage is already updated, so git failures won't corrupt other data
-    thread::spawn(move || {
-        // Only remove git worktree/branch for non-base sessions
-        if !is_base_session {
-            log::trace!("Background: Removing git worktree at {worktree_path}");
-
-            // Remove the git worktree (ignore errors if already gone)
-            if let Err(e) = git::remove_worktree(&project_path, &worktree_path) {
-                log::warn!("Background: Failed to remove worktree (may already be deleted): {e}");
-            }
-
-            log::trace!("Background: Deleting branch {worktree_branch}");
-
-            // Delete the branch (ignore errors if already gone)
-            if let Err(e) = git::delete_branch(&project_path, &worktree_branch) {
-                log::warn!("Background: Failed to delete branch (may already be deleted): {e}");
-            }
-        }
-
-        // Delete the sessions file for this worktree
-        if let Ok(app_data_dir) = app_clone.path().app_data_dir() {
-            let sessions_file = app_data_dir
-                .join("sessions")
-                .join(format!("{worktree_id_clone}.json"));
-            if sessions_file.exists() {
-                if let Err(e) = std::fs::remove_file(&sessions_file) {
-                    log::warn!("Failed to delete sessions file: {e}");
-                } else {
-                    log::trace!("Deleted sessions file for worktree: {worktree_id_clone}");
-                }
-            }
-        }
-
-        // Delete session data and its pasted attachments, then clean up context files.
-        for sid in &session_ids {
-            if let Err(e) = crate::chat::storage::delete_session_data(&app_clone, sid) {
-                log::warn!("Failed to delete session data {sid}: {e}");
-            }
-            crate::chat::storage::cleanup_combined_context_files(&app_clone, sid);
-        }
-
-        // Emit success event
-        log::trace!("Background: Worktree permanently deleted: {worktree_name}");
-        let event = WorktreePermanentlyDeletedEvent {
-            id: worktree_id_clone,
-            project_id: project_id_clone,
-        };
-        if let Err(e) = app_clone.emit_all("worktree:permanently_deleted", &event) {
-            log::error!("Failed to emit worktree:permanently_deleted event: {e}");
-        }
-    });
-
-    log::trace!(
-        "Permanent deletion started in background for worktree: {}",
-        worktree.name
-    );
-    Ok(())
 }
 
 /// Open a project's worktrees folder in the system file explorer
@@ -13025,7 +12686,7 @@ pub async fn fetch_and_merge_base(
     })
 }
 
-/// Result of the archive cleanup operation
+/// Result of the deleted-item purge
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CleanupResult {
     pub deleted_worktrees: u32,
@@ -13034,78 +12695,49 @@ pub struct CleanupResult {
     pub deleted_orphan_indexes: u32,
 }
 
-/// Cleanup archived worktrees and sessions older than the specified retention period
-///
-/// This command runs on app startup to automatically clean up old archives.
-/// Set retention_days to 0 to disable archive retention cleanup; orphan janitors still run.
-pub async fn cleanup_old_archives(
-    app: AppHandle,
-    retention_days: u32,
-) -> Result<CleanupResult, String> {
-    // If retention is 0, archive retention cleanup is disabled.
-    if retention_days == 0 {
-        log::trace!(
-            "Archive retention cleanup is disabled (retention_days = 0); running orphan janitors"
-        );
-        let deleted_orphan_indexes =
-            crate::chat::storage::cleanup_orphaned_session_indexes(&app).unwrap_or(0);
-        let _ = crate::chat::storage::cleanup_orphaned_session_data(&app);
-        let _ = crate::chat::storage::cleanup_orphaned_combined_contexts(&app);
-        return Ok(CleanupResult {
-            deleted_worktrees: 0,
-            deleted_sessions: 0,
-            deleted_contexts: 0,
-            deleted_orphan_indexes,
-        });
-    }
+/// Days a closed session stays on disk before `cleanup_deleted_items` purges it.
+pub const DELETED_ITEM_RETENTION_DAYS: u64 = 30;
 
-    log::trace!("Running archive cleanup with {retention_days} day retention");
+/// Purge sessions closed more than `DELETED_ITEM_RETENTION_DAYS` ago, then run
+/// the orphan janitors. Scheduled by `initialize_runtime` at startup and daily.
+pub async fn cleanup_deleted_items(app: AppHandle) -> Result<CleanupResult, String> {
+    log::trace!("Purging items deleted more than {DELETED_ITEM_RETENTION_DAYS} days ago");
 
-    let cutoff = now() - (retention_days as u64 * 86400);
+    let cutoff = now().saturating_sub(DELETED_ITEM_RETENTION_DAYS * 86400);
     let mut deleted_worktrees = 0u32;
     let mut deleted_sessions = 0u32;
 
-    // --- Clean up old archived worktrees ---
+    // Nothing archives worktrees any more. This pass only drains worktrees that
+    // an older Jean archived (`archived_at` set) once they pass the cutoff.
     let data = load_projects_data(&app)?;
-
-    // Find worktrees to delete
     let worktrees_to_delete: Vec<_> = data
         .worktrees
         .iter()
         .filter(|w| {
-            if let Some(archived_at) = w.archived_at {
-                archived_at < cutoff
-            } else {
-                false
-            }
+            w.archived_at
+                .is_some_and(|archived_at| archived_at < cutoff)
         })
         .cloned()
         .collect();
 
     for worktree in worktrees_to_delete {
         log::trace!(
-            "Deleting old archived worktree: {} (archived {} days ago)",
+            "Deleting legacy archived worktree: {} (archived {} days ago)",
             worktree.name,
             (now() - worktree.archived_at.unwrap_or(0)) / 86400
         );
 
-        // Find the project for this worktree
         let project = data.find_project(&worktree.project_id);
 
-        // Remove from storage
         let mut current_data = load_projects_data(&app)?;
         current_data.remove_worktree(&worktree.id);
         save_projects_data(&app, &current_data)?;
 
-        // Perform git cleanup if we have project info and it's not a base session
         if let Some(proj) = project {
             if worktree.session_type != SessionType::Base {
-                // Remove git worktree (ignore errors if already gone)
                 if let Err(e) = git::remove_worktree(&proj.path, &worktree.path) {
                     log::warn!("Failed to remove worktree (may be gone): {e}");
                 }
-
-                // Delete branch (ignore errors if already gone)
                 if let Err(e) = git::delete_branch(&proj.path, &worktree.branch) {
                     log::warn!("Failed to delete branch (may be gone): {e}");
                 }
@@ -13118,7 +12750,6 @@ pub async fn cleanup_old_archives(
                 .map(|ws| ws.sessions.iter().map(|s| s.id.clone()).collect())
                 .unwrap_or_default();
 
-        // Delete session data directories and combined-context files
         for sid in &session_ids {
             if let Err(e) = crate::chat::storage::delete_session_data(&app, sid) {
                 log::warn!("Failed to delete session data for {sid}: {e}");
@@ -13126,11 +12757,7 @@ pub async fn cleanup_old_archives(
             crate::chat::storage::cleanup_combined_context_files(&app, sid);
         }
 
-        // Delete the sessions index file
-        if let Ok(app_data_dir) = app.path().app_data_dir() {
-            let sessions_file = app_data_dir
-                .join("sessions")
-                .join(format!("{}.json", worktree.id));
+        if let Ok(sessions_file) = crate::chat::storage::get_sessions_path(&app, &worktree.id) {
             if sessions_file.exists() {
                 if let Err(e) = std::fs::remove_file(&sessions_file) {
                     log::warn!("Failed to delete sessions file: {e}");
@@ -13141,62 +12768,34 @@ pub async fn cleanup_old_archives(
         deleted_worktrees += 1;
     }
 
-    // --- Clean up old archived sessions (in non-archived worktrees) ---
-    // We need to iterate through all worktrees and check their sessions
+    // --- Purge sessions deleted before the cutoff (in active worktrees) ---
     let data = load_projects_data(&app)?;
 
     for worktree in &data.worktrees {
-        // Skip archived worktrees - they were handled above (or will be deleted entirely)
         if worktree.archived_at.is_some() {
             continue;
         }
 
-        // Atomically clean up old archived sessions, collecting removed IDs
-        let worktree_path = worktree.path.clone();
-        let worktree_id = worktree.id.clone();
-        let removed_ids = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
-        let removed_ids_clone = removed_ids.clone();
-        let result =
-            crate::chat::with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
-                let original_count = sessions.sessions.len();
-                let mut removed_count = 0;
-
-                // Remove sessions that are archived and older than cutoff
-                sessions.sessions.retain(|s| {
-                    if let Some(archived_at) = s.archived_at {
-                        if archived_at < cutoff {
-                            log::trace!(
-                                "Deleting old archived session: {} (archived {} days ago)",
-                                s.name,
-                                (now() - archived_at) / 86400
-                            );
-                            removed_ids_clone.lock().unwrap().push(s.id.clone());
-                            removed_count += 1;
-                            return false; // Remove this session
-                        }
-                    }
-                    true // Keep this session
-                });
-
-                if sessions.sessions.len() < original_count {
-                    Ok(removed_count)
-                } else {
-                    Ok(0)
+        let expired: Vec<(String, String)> =
+            match crate::chat::storage::load_sessions(&app, &worktree.path, &worktree.id) {
+                Ok(ws) => ws
+                    .sessions
+                    .iter()
+                    .filter(|s| s.archived_at.is_some_and(|deleted_at| deleted_at < cutoff))
+                    .map(|s| (s.id.clone(), s.name.clone()))
+                    .collect(),
+                Err(e) => {
+                    log::warn!("Skipping purge for worktree {}: {e}", worktree.id);
+                    continue;
                 }
-            });
+            };
 
-        // Delete session data directories and combined-context files for removed sessions
-        if let Ok(ids) = removed_ids.lock() {
-            for sid in ids.iter() {
-                if let Err(e) = crate::chat::storage::delete_session_data(&app, sid) {
-                    log::warn!("Failed to delete session data for {sid}: {e}");
-                }
-                crate::chat::storage::cleanup_combined_context_files(&app, sid);
+        for (session_id, name) in expired {
+            log::trace!("Purging deleted session: {name} ({session_id})");
+            match crate::chat::purge_session(&app, &worktree.id, &worktree.path, &session_id) {
+                Ok(()) => deleted_sessions += 1,
+                Err(e) => log::warn!("Failed to purge session {session_id}: {e}"),
             }
-        }
-
-        if let Ok(count) = result {
-            deleted_sessions += count;
         }
     }
 
@@ -13205,18 +12804,18 @@ pub async fn cleanup_old_archives(
         crate::chat::storage::cleanup_orphaned_session_indexes(&app).unwrap_or(0);
 
     // --- Clean up orphaned session data directories ---
-    // Background janitor only — not archive-related, not user-facing.
     let _ = crate::chat::storage::cleanup_orphaned_session_data(&app);
 
     // --- Clean up orphaned context files ---
     let deleted_contexts =
-        super::github_issues::cleanup_orphaned_contexts(&app, retention_days as u64).unwrap_or(0);
+        super::github_issues::cleanup_orphaned_contexts(&app, DELETED_ITEM_RETENTION_DAYS)
+            .unwrap_or(0);
 
     // --- Clean up orphaned combined-context files ---
     let _ = crate::chat::storage::cleanup_orphaned_combined_contexts(&app);
 
     log::trace!(
-        "Archive cleanup complete: deleted {} worktrees, {} sessions, {} contexts, and {} orphan indexes",
+        "Deleted-item purge complete: {} worktrees, {} sessions, {} contexts, and {} orphan indexes",
         deleted_worktrees,
         deleted_sessions,
         deleted_contexts,
@@ -13237,162 +12836,6 @@ pub async fn cleanup_old_archives(
 /// by any worktree index file. Returns the number of deleted files.
 pub async fn cleanup_combined_contexts(app: AppHandle) -> Result<u32, String> {
     crate::chat::storage::cleanup_orphaned_combined_contexts(&app)
-}
-
-/// Delete ALL archived worktrees and sessions (manual cleanup)
-///
-/// This permanently deletes all archived items including:
-/// - Archived worktrees (including git worktrees and branches)
-/// - Archived sessions in non-archived worktrees
-pub async fn delete_all_archives(app: AppHandle) -> Result<CleanupResult, String> {
-    log::trace!("Deleting all archived items");
-
-    let mut deleted_worktrees = 0u32;
-    let mut deleted_sessions = 0u32;
-
-    // --- Delete all archived worktrees ---
-    let data = load_projects_data(&app)?;
-
-    // Find all archived worktrees
-    let worktrees_to_delete: Vec<_> = data
-        .worktrees
-        .iter()
-        .filter(|w| w.archived_at.is_some())
-        .cloned()
-        .collect();
-
-    for worktree in worktrees_to_delete {
-        log::trace!("Deleting archived worktree: {}", worktree.name);
-
-        // Find the project for this worktree
-        let project = data.find_project(&worktree.project_id);
-
-        // Remove from storage
-        let mut current_data = load_projects_data(&app)?;
-        current_data.remove_worktree(&worktree.id);
-        save_projects_data(&app, &current_data)?;
-
-        // Perform git cleanup if we have project info and it's not a base session
-        if let Some(proj) = project {
-            if worktree.session_type != SessionType::Base {
-                // Remove git worktree (ignore errors if already gone)
-                if let Err(e) = git::remove_worktree(&proj.path, &worktree.path) {
-                    log::warn!("Failed to remove worktree (may be gone): {e}");
-                }
-
-                // Delete branch (ignore errors if already gone)
-                if let Err(e) = git::delete_branch(&proj.path, &worktree.branch) {
-                    log::warn!("Failed to delete branch (may be gone): {e}");
-                }
-            }
-        }
-
-        // Collect session IDs before deleting the index so we can clean up data dirs
-        let session_ids: Vec<String> =
-            crate::chat::storage::load_sessions(&app, &worktree.path, &worktree.id)
-                .map(|ws| ws.sessions.iter().map(|s| s.id.clone()).collect())
-                .unwrap_or_default();
-
-        // Delete session data directories and combined-context files
-        for sid in &session_ids {
-            if let Err(e) = crate::chat::storage::delete_session_data(&app, sid) {
-                log::warn!("Failed to delete session data for {sid}: {e}");
-            }
-            crate::chat::storage::cleanup_combined_context_files(&app, sid);
-        }
-
-        // Delete the sessions index file
-        if let Ok(app_data_dir) = app.path().app_data_dir() {
-            let sessions_file = app_data_dir
-                .join("sessions")
-                .join(format!("{}.json", worktree.id));
-            if sessions_file.exists() {
-                if let Err(e) = std::fs::remove_file(&sessions_file) {
-                    log::warn!("Failed to delete sessions file: {e}");
-                }
-            }
-        }
-
-        deleted_worktrees += 1;
-    }
-
-    // --- Delete all archived sessions (in non-archived worktrees) ---
-    let data = load_projects_data(&app)?;
-
-    for worktree in &data.worktrees {
-        // Skip archived worktrees - they were handled above
-        if worktree.archived_at.is_some() {
-            continue;
-        }
-
-        // Atomically delete all archived sessions, collecting removed IDs
-        let worktree_path = worktree.path.clone();
-        let worktree_id = worktree.id.clone();
-        let removed_ids = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
-        let removed_ids_clone = removed_ids.clone();
-        let result =
-            crate::chat::with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
-                let original_count = sessions.sessions.len();
-                let mut removed_count = 0;
-
-                // Remove all archived sessions
-                sessions.sessions.retain(|s| {
-                    if s.archived_at.is_some() {
-                        log::trace!("Deleting archived session: {}", s.name);
-                        removed_ids_clone.lock().unwrap().push(s.id.clone());
-                        removed_count += 1;
-                        return false; // Remove this session
-                    }
-                    true // Keep this session
-                });
-
-                if sessions.sessions.len() < original_count {
-                    Ok(removed_count)
-                } else {
-                    Ok(0)
-                }
-            });
-
-        // Delete session data directories and combined-context files for removed sessions
-        if let Ok(ids) = removed_ids.lock() {
-            for sid in ids.iter() {
-                if let Err(e) = crate::chat::storage::delete_session_data(&app, sid) {
-                    log::warn!("Failed to delete session data for {sid}: {e}");
-                }
-                crate::chat::storage::cleanup_combined_context_files(&app, sid);
-            }
-        }
-
-        if let Ok(count) = result {
-            deleted_sessions += count;
-        }
-    }
-
-    // Also clean up orphaned contexts (pass 0 for retention_days to clean all orphans)
-    let deleted_contexts = super::github_issues::cleanup_orphaned_contexts(&app, 0).unwrap_or(0);
-
-    // Clean up orphaned session index files, then orphaned session data
-    let deleted_orphan_indexes =
-        crate::chat::storage::cleanup_orphaned_session_indexes(&app).unwrap_or(0);
-    let _ = crate::chat::storage::cleanup_orphaned_session_data(&app);
-
-    // Clean up orphaned combined-context files
-    let _ = crate::chat::storage::cleanup_orphaned_combined_contexts(&app);
-
-    log::trace!(
-        "Deleted all archives: {} worktrees, {} sessions, {} contexts, and {} orphan indexes",
-        deleted_worktrees,
-        deleted_sessions,
-        deleted_contexts,
-        deleted_orphan_indexes
-    );
-
-    Ok(CleanupResult {
-        deleted_worktrees,
-        deleted_sessions,
-        deleted_contexts,
-        deleted_orphan_indexes,
-    })
 }
 
 // =============================================================================
@@ -17161,5 +16604,69 @@ mod import_worktree_tests {
 
     fn root_join(fixture: &Fixture, name: &str) -> PathBuf {
         fixture.repo.parent().expect("parent").join(name)
+    }
+}
+
+#[cfg(test)]
+mod cleanup_deleted_items_tests {
+    use super::*;
+    use crate::chat::types::{Session, SessionIndexEntry, SessionMetadata};
+
+    fn deleted_session(app: &AppHandle, worktree_id: &str, name: &str, deleted_at: u64) -> String {
+        let mut session = Session::new(name.to_string(), 0, crate::chat::types::Backend::Claude);
+        session.archived_at = Some(deleted_at);
+        let mut metadata = SessionMetadata::new(
+            session.id.clone(),
+            worktree_id.to_string(),
+            name.to_string(),
+            0,
+        );
+        metadata.archived_at = Some(deleted_at);
+        crate::chat::storage::save_metadata(app, &metadata).unwrap();
+        crate::chat::storage::with_index_mut(app, worktree_id, |index| {
+            index
+                .sessions
+                .push(SessionIndexEntry::from_session(&session));
+            Ok(())
+        })
+        .unwrap();
+        session.id
+    }
+
+    #[tokio::test]
+    async fn purges_sessions_deleted_over_thirty_days_ago_and_keeps_recent_ones() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = AppHandle::new(temp.path().to_path_buf(), temp.path().to_path_buf()).unwrap();
+        let worktree: Worktree = serde_json::from_value(serde_json::json!({
+            "id": "wt-1", "project_id": "project", "name": "base",
+            "path": temp.path().to_string_lossy(), "branch": "main",
+            "created_at": 1, "session_type": "base"
+        }))
+        .unwrap();
+        save_projects_data(
+            &app,
+            &super::super::types::ProjectsData {
+                projects: vec![],
+                worktrees: vec![worktree],
+            },
+        )
+        .unwrap();
+        crate::chat::storage::save_empty_index(&app, "wt-1").unwrap();
+
+        let old_id = deleted_session(&app, "wt-1", "old", now() - 31 * 86400);
+        let young_id = deleted_session(&app, "wt-1", "young", now() - 86400);
+        let old_dir = crate::chat::storage::get_session_dir(&app, &old_id).unwrap();
+        let young_dir = crate::chat::storage::get_session_dir(&app, &young_id).unwrap();
+        assert!(old_dir.join("metadata.json").exists());
+
+        let result = cleanup_deleted_items(app.clone()).await.unwrap();
+
+        assert_eq!(result.deleted_sessions, 1);
+        assert_eq!(result.deleted_worktrees, 0);
+        let index = crate::chat::storage::load_index(&app, "wt-1").unwrap();
+        let ids: Vec<&str> = index.sessions.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, vec![young_id.as_str()]);
+        assert!(!old_dir.exists(), "purged session data dir still exists");
+        assert!(young_dir.join("metadata.json").exists());
     }
 }

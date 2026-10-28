@@ -474,7 +474,7 @@ describe('MagicModal manual PR link', () => {
     expect(within(mobileMenu).getByText('Context')).toBeInTheDocument()
     expect(within(mobileMenu).getByText('Pull Request')).toBeInTheDocument()
     expect(
-      within(mobileMenu).getByRole('button', { name: 'Save Context' })
+      within(mobileMenu).getByRole('button', { name: 'Inject Context' })
     ).toHaveClass('min-h-12')
     expect(mobileMenu.querySelector('kbd')).not.toBeInTheDocument()
   })

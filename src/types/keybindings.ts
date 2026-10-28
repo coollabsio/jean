@@ -25,7 +25,6 @@ export type KeybindingAction =
   | 'approve_plan_clear_context_build'
   | 'approve_plan_worktree_build'
   | 'approve_plan_worktree_yolo'
-  | 'restore_last_archived'
   | 'focus_canvas_search'
   | 'toggle_terminal'
   | 'toggle_browser'
@@ -91,7 +90,6 @@ export const DEFAULT_KEYBINDINGS: KeybindingsMap = {
   approve_plan_clear_context_build: 'mod+shift+enter',
   approve_plan_worktree_build: 'mod+alt+enter',
   approve_plan_worktree_yolo: 'mod+alt+y',
-  restore_last_archived: 'mod+shift+alt+t',
   focus_canvas_search: 'slash',
   toggle_terminal: 'mod+backquote',
   toggle_browser: 'mod+shift+backquote',
@@ -276,13 +274,6 @@ export const KEYBINDING_DEFINITIONS: KeybindingDefinition[] = [
     label: 'New worktree',
     description: 'Create a new worktree in the current project',
     default_shortcut: 'mod+n',
-    category: 'navigation',
-  },
-  {
-    action: 'restore_last_archived',
-    label: 'Restore archived',
-    description: 'Restore the most recently archived worktree or session',
-    default_shortcut: 'mod+shift+alt+t',
     category: 'navigation',
   },
   {

@@ -14,11 +14,4 @@ describe('TitleBar file-browser placement', () => {
     expect(source).toContain('<PanelRight className="size-3.5" />')
     expect(source).not.toContain('<FolderTree')
   })
-
-  it('does not keep Settings in the title bar', () => {
-    const source = readFileSync('src/components/titlebar/TitleBar.tsx', 'utf8')
-
-    expect(source).not.toContain('commandContext.openPreferences')
-    expect(source).not.toContain('<Settings className="size-3.5" />')
-  })
 })

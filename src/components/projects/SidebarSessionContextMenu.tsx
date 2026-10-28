@@ -17,7 +17,6 @@ interface SidebarSessionContextMenuProps {
   worktreePath: string
   onRename: (session: Session) => void
   onLabel: (sessionId: string) => void
-  onArchive: (session: Session) => void
   onDelete: (session: Session) => void
   children: ReactNode
 }
@@ -43,7 +42,6 @@ function SidebarSessionContextMenuContent({
   worktreePath,
   onRename,
   onLabel,
-  onArchive,
   onDelete,
 }: Omit<SidebarSessionContextMenuProps, 'children'>) {
   const hasLabel = useChatStore(state => !!state.sessionLabels[session.id])
@@ -64,7 +62,6 @@ function SidebarSessionContextMenuContent({
         onToggleLabel={() => onLabel(session.id)}
         onOpenInNativeClient={() => openInNativeClient(session)}
         onReconnect={() => void reconnectNativeCliSession(session, worktreeId)}
-        onArchive={() => onArchive(session)}
         onDelete={() => onDelete(session)}
       />
     </ContextMenuContent>

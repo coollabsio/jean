@@ -62,10 +62,6 @@ export function describeApproval(
     targetName ?? text('worktreePath').split(/[\\/]/).filter(Boolean).pop()
   const labels: Record<string, [string, string]> = {
     delete_worktree: ['Delete worktree', 'Delete a worktree'],
-    permanently_delete_worktree: [
-      'Permanently delete worktree',
-      'Permanently delete a worktree',
-    ],
     push_worktree: ['Push worktree', 'Push a worktree'],
     merge_pull_request: [
       'Merge the pull request of',

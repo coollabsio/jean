@@ -1,4 +1,6 @@
-import { Settings, X } from '@/components/icons/reicon'
+import type { ComponentType } from 'react'
+import { Folder, History, Settings, X } from '@/components/icons/reicon'
+import { AgentsIcon } from '@/components/icons/AgentsIcon'
 import { useAgentsEnabled } from '@/components/agents/agents-feature'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -9,10 +11,14 @@ import { suppressSidebarChromeContextMenu } from './sidebar-context-menu'
 
 type SidebarView = 'projects' | 'recent' | 'agents'
 
-const VIEWS: { view: SidebarView; label: string }[] = [
-  { view: 'projects', label: 'Projects' },
-  { view: 'recent', label: 'Recent' },
-  { view: 'agents', label: 'Agents' },
+const VIEWS: {
+  view: SidebarView
+  label: string
+  Icon: ComponentType<{ className?: string }>
+}[] = [
+  { view: 'projects', label: 'Projects', Icon: Folder },
+  { view: 'recent', label: 'Recent', Icon: History },
+  { view: 'agents', label: 'Agents', Icon: AgentsIcon },
 ]
 
 // Projects/Recent live in the projects store, Agents in the UI store's
@@ -42,7 +48,7 @@ export function SidebarTabs() {
 
   return (
     <div
-      className="flex h-10 shrink-0 items-center gap-1 px-3 pt-1"
+      className="@container flex h-10 shrink-0 items-center gap-1 px-3 pt-1"
       onContextMenu={suppressSidebarChromeContextMenu}
     >
       <div
@@ -50,26 +56,29 @@ export function SidebarTabs() {
         role="tablist"
         aria-label="Sidebar view"
       >
-        {views.map(({ view, label }) => (
+        {views.map(({ view, label, Icon }) => (
           <button
             key={view}
             type="button"
             role="tab"
             aria-selected={active === view}
             className={cn(
-              'h-7 min-w-0 flex-1 truncate rounded-md px-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+              'flex h-7 min-w-0 flex-1 items-center justify-center truncate rounded-md px-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
               active === view
                 ? 'bg-muted text-foreground'
                 : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
             )}
             title={label}
+            aria-label={label}
             onClick={() => selectView(view)}
           >
-            {label}
+            {/* Very narrow sidebars show icons only */}
+            <Icon className="size-4 shrink-0 @[11rem]:hidden" />
+            <span className="hidden truncate @[11rem]:inline">{label}</span>
           </button>
         ))}
       </div>
-      {/* Mobile has no tab rail: Settings and close live in this row */}
+      {/* Desktop has Settings in the title bar; mobile keeps it and close here */}
       {isMobile && (
         <>
           <Button

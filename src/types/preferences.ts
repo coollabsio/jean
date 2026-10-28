@@ -1295,19 +1295,6 @@ export function resolveMagicPromptBackend(
   ) as CliBackend | null
 }
 
-/** Modifier held while closing to skip the confirmation dialog ('none' disables). */
-export type CloseConfirmBypassModifier = 'shift' | 'alt' | 'none'
-
-export const CLOSE_CONFIRM_BYPASS_MODIFIERS = [
-  'shift',
-  'alt',
-  'none',
-] as const satisfies readonly CloseConfirmBypassModifier[]
-
-/** Off by default: closing stays behind the confirmation dialog until opted out. */
-export const DEFAULT_CLOSE_CONFIRM_BYPASS_MODIFIER: CloseConfirmBypassModifier =
-  'none'
-
 // Types that match the Rust AppPreferences struct
 // Only contains settings that should be persisted to disk
 // Note: Field names use snake_case to match Rust struct exactly
@@ -1335,10 +1322,8 @@ export interface AppPreferences {
   keybindings: KeybindingsMap // User-configurable keyboard shortcuts
   /** One-shot keybinding migrations already applied for this client. */
   applied_keybinding_migrations?: string[]
-  archive_retention_days: number // Days to keep archived items (0 = never delete)
   syntax_theme_dark: SyntaxTheme // Syntax highlighting theme for dark mode
   syntax_theme_light: SyntaxTheme // Syntax highlighting theme for light mode
-  compact_chat_view_enabled: boolean // Collapse intermediate tool calls/replies into a single ticker line, only showing the latest activity
   sidebar_hover_open_enabled?: boolean // Temporarily reveal the collapsed desktop sidebar from the left screen edge
   keep_ai_servers_warm?: boolean // Keep Codex/OpenCode servers alive briefly between requests
   magic_prompts: MagicPrompts // Customizable prompts for AI-powered features
@@ -1361,10 +1346,7 @@ export interface AppPreferences {
   http_server_auto_start: boolean // Auto-start HTTP server on launch
   http_server_localhost_only: boolean // Legacy localhost-only fallback when no bind host is set
   http_server_token_required: boolean // Require token for web access (default true)
-  removal_behavior: RemovalBehavior // What happens when closing sessions/worktrees: 'archive' or 'delete'
-  auto_save_context: boolean // Auto-save context after each session completion
   auto_pull_base_branch: boolean // Auto-pull base branch before creating a new worktree
-  auto_archive_on_pr_merged: boolean // Auto-archive worktrees when their PR is merged
   debug_mode_enabled: boolean // Show debug panel in chat sessions
   agents_enabled?: boolean // Experimental: show the Agents tab
   default_enabled_mcp_servers: string[] // MCP server names enabled by default (empty = none)
@@ -1397,8 +1379,6 @@ export interface AppPreferences {
   favorite_base_branches?: string[]
   fast_mode_models: string[] // Model keys ("backend:baseModel") with fast tier last enabled
 
-  confirm_session_close: boolean // Show confirmation dialog before closing sessions/worktrees
-  close_confirm_bypass_modifier: CloseConfirmBypassModifier // Modifier that skips the close confirmation ('none' disables)
   default_execution_mode: ExecutionMode // Default workflow/permission policy for new sessions
   default_backend: CliBackend // Default CLI backend for new sessions
   default_new_session_kind: NewSessionKind // Default action for CMD+T: 'chat', 'terminal', or a CLI backend
@@ -1425,7 +1405,6 @@ export interface AppPreferences {
   kimi_auto_steer_enabled?: boolean // Reserved for Kimi Code steering support
   devin_auto_steer_enabled?: boolean // Reserved for Devin steering support
   antigravity_auto_steer_enabled?: boolean // Reserved until Antigravity headless mode supports steering
-  close_original_on_clear_context: boolean // Close original session when using Clear Context and yolo (default: true)
   build_model: string | null // Model override for plan approval (build mode), null = use session model
   yolo_model: string | null // Model override for yolo plan approval, null = use session model
   build_backend: string | null // Backend override for plan approval (build mode), null = use session backend
@@ -1454,7 +1433,6 @@ export interface AppPreferences {
   wsl_enabled: boolean // Route commands through WSL
   wsl_distro: string // WSL distro name, e.g. "Ubuntu"
   coderabbit_cli_source?: 'jean' | 'path' // CodeRabbit CLI source: 'jean' (managed) or 'path' (system PATH)
-  expand_tool_calls_by_default: boolean // Expand all tool call collapsibles by default
   window_vibrancy: boolean // macOS window vibrancy effect (high GPU cost, default false)
   /** Bell ring animation on the finished-sessions titlebar badge (default true) */
   finished_session_animation_enabled?: boolean
@@ -2453,36 +2431,6 @@ export const terminalFontOptions: { value: TerminalFont; label: string }[] = [
   { value: 'system', label: 'System Monospace' },
 ]
 
-// Removal behavior options - what happens when closing sessions/worktrees
-export type RemovalBehavior = 'archive' | 'delete'
-
-export const removalBehaviorOptions: {
-  value: RemovalBehavior
-  label: string
-  description: string
-}[] = [
-  {
-    value: 'archive',
-    label: 'Archive',
-    description: 'Soft-delete; can be restored later',
-  },
-  {
-    value: 'delete',
-    label: 'Delete',
-    description: 'Permanently delete; cannot be undone',
-  },
-]
-
-// Archive retention options (days) - how long to keep archived items
-export const archiveRetentionOptions: { value: number; label: string }[] = [
-  { value: 0, label: 'Never (keep forever)' },
-  { value: 7, label: '7 days' },
-  { value: 14, label: '14 days' },
-  { value: 30, label: '30 days' },
-  { value: 60, label: '60 days' },
-  { value: 90, label: '90 days' },
-]
-
 // Syntax highlighting themes (from shiki bundled themes)
 export type SyntaxTheme =
   | 'vitesse-black'
@@ -2568,10 +2516,8 @@ export const defaultPreferences: AppPreferences = {
   font_weight: FONT_WEIGHT_DEFAULT,
   keybindings: DEFAULT_KEYBINDINGS,
   applied_keybinding_migrations: [],
-  archive_retention_days: 7,
   syntax_theme_dark: 'vitesse-black',
   syntax_theme_light: 'github-light',
-  compact_chat_view_enabled: true, // Default: enabled
   sidebar_hover_open_enabled: false, // Default: off (opt-in)
   keep_ai_servers_warm: true, // Default: enabled for faster follow-up requests
   magic_prompts: DEFAULT_MAGIC_PROMPTS,
@@ -2594,10 +2540,7 @@ export const defaultPreferences: AppPreferences = {
   http_server_auto_start: false,
   http_server_localhost_only: true, // Default to localhost-only for security
   http_server_token_required: true, // Default: require token for security
-  removal_behavior: 'delete', // Default: delete (permanent)
-  auto_save_context: false, // Default: disabled
   auto_pull_base_branch: true, // Default: enabled
-  auto_archive_on_pr_merged: true, // Default: enabled
   debug_mode_enabled: false, // Default: disabled
   agents_enabled: false, // Default: disabled (experimental)
   default_enabled_mcp_servers: [], // Default: no MCP servers enabled
@@ -2621,8 +2564,6 @@ export const defaultPreferences: AppPreferences = {
   favorite_package_scripts: [],
   favorite_base_branches: [],
   fast_mode_models: [],
-  confirm_session_close: true, // Default: enabled (show confirmation)
-  close_confirm_bypass_modifier: DEFAULT_CLOSE_CONFIRM_BYPASS_MODIFIER, // Default: off — closing always confirms until opted out
   default_execution_mode: 'yolo', // Default: Full access
   default_backend: 'claude', // Default: Claude
   default_new_session_kind: 'chat', // Default: Jean Chat for CMD+T
@@ -2649,7 +2590,6 @@ export const defaultPreferences: AppPreferences = {
   kimi_auto_steer_enabled: false,
   devin_auto_steer_enabled: false,
   antigravity_auto_steer_enabled: false,
-  close_original_on_clear_context: true, // Default: enabled
   build_model: null, // Default: use session model
   yolo_model: null, // Default: use session model
   build_backend: null, // Default: use session backend
@@ -2678,7 +2618,6 @@ export const defaultPreferences: AppPreferences = {
   wsl_enabled: false, // Default: native Windows
   wsl_distro: '', // Default: empty
   coderabbit_cli_source: 'jean', // Default: Jean-managed
-  expand_tool_calls_by_default: false, // Default: collapsed
   window_vibrancy: false, // Default: disabled (high GPU cost)
   finished_session_animation_enabled: true, // Default: bell ring on finished-sessions badge
   terminal_background: 'auto',

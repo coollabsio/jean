@@ -43,9 +43,9 @@ function JeanConfigWizardContent() {
 
   const [setupScript, setSetupScript] = useState('')
   const [teardownScript, setTeardownScript] = useState('')
-  const [runScripts, setRunScripts] = useState<
-    { id: string; value: string }[]
-  >(() => [{ id: generateId(), value: '' }])
+  const [runScripts, setRunScripts] = useState<{ id: string; value: string }[]>(
+    () => [{ id: generateId(), value: '' }]
+  )
   const [ports, setPorts] = useState<
     { id: string; port: string; label: string; host: string }[]
   >([])
@@ -145,8 +145,8 @@ function JeanConfigWizardContent() {
                   is created (e.g. installing dependencies)
                 </li>
                 <li>
-                  <strong>Teardown</strong> runs before a worktree is
-                  deleted/archived (e.g. stopping services)
+                  <strong>Teardown</strong> runs before a worktree is deleted
+                  (e.g. stopping services)
                 </li>
                 <li>
                   <strong>Run</strong> launches your dev server via the run
@@ -241,10 +241,7 @@ function JeanConfigWizardContent() {
               size="sm"
               className="h-11 text-xs sm:h-7"
               onClick={() =>
-                setRunScripts([
-                  ...runScripts,
-                  { id: generateId(), value: '' },
-                ])
+                setRunScripts([...runScripts, { id: generateId(), value: '' }])
               }
             >
               <Plus className="mr-1 h-3 w-3" />
@@ -300,9 +297,7 @@ function JeanConfigWizardContent() {
                   variant="ghost"
                   size="icon"
                   className="size-11 shrink-0 sm:size-8"
-                  onClick={() =>
-                    setPorts(ports.filter(p => p.id !== entry.id))
-                  }
+                  onClick={() => setPorts(ports.filter(p => p.id !== entry.id))}
                 >
                   <X className="h-3.5 w-3.5" />
                 </Button>

@@ -181,7 +181,6 @@ import {
 import { useShowTableInChat } from './hooks/useShowTableInChat'
 import type { ApprovalModelOverride } from './ApprovalModelSubmenu'
 import { resolveApprovalLabel } from './approval-label-utils'
-import { StreamingMessage } from './StreamingMessage'
 import { CompactStreamingTicker } from './CompactStreamingTicker'
 import { CompactMessageList } from './CompactMessageList'
 import {
@@ -198,10 +197,7 @@ import {
   isSteerCapableBackend,
 } from '@/lib/backend-auto-steer'
 import { ErrorBanner } from './ErrorBanner'
-import {
-  VirtualizedMessageList,
-  type VirtualizedMessageListHandle,
-} from './VirtualizedMessageList'
+import type { MessageListHandle } from './message-list-handle'
 import { RecentContexts } from './RecentContexts'
 import {
   buildPromptAttachmentMetadata,
@@ -1473,9 +1469,9 @@ const ChatWindowContent = memo(function ChatWindowContent({
     []
   )
 
-  const virtualizedListRef = useRef<VirtualizedMessageListHandle>(null)
+  const virtualizedListRef = useRef<MessageListHandle>(null)
 
-  // Ref for approve button (passed to VirtualizedMessageList)
+  // Ref for approve button (passed to CompactMessageList)
   const approveButtonRef = useRef<HTMLButtonElement>(null)
   const triggerChatAttachRef = useRef<(() => void) | null>(null)
 
@@ -2058,20 +2054,9 @@ const ChatWindowContent = memo(function ChatWindowContent({
     return () => document.removeEventListener('keydown', handleGlobalCancel)
   }, [isSending, handleCancel])
 
-  // Context operations hook - handles save/load context
-  const {
-    handleLoadContext,
-    handleSaveContext,
-    loadContextModalOpen,
-    setLoadContextModalOpen,
-  } = useContextOperations({
-    activeSessionId,
-    activeWorktreeId,
-    activeWorktreePath,
-    worktree,
-    queryClient,
-    preferences,
-  })
+  // Context operations hook - handles load context
+  const { handleLoadContext, loadContextModalOpen, setLoadContextModalOpen } =
+    useContextOperations()
 
   // Window event listeners are called after useMessageHandlers (needs plan approval handlers)
 
@@ -2233,7 +2218,6 @@ const ChatWindowContent = memo(function ChatWindowContent({
 
   // Listen for magic-command events from MagicModal
   useMagicCommands({
-    handleSaveContext,
     handleLoadContext,
     handleLinkedProjects,
     handleForkSession,
@@ -2430,7 +2414,6 @@ const ChatWindowContent = memo(function ChatWindowContent({
     currentQueuedMessages,
     preferences,
     patchPreferences,
-    handleSaveContext,
     handleLoadContext,
     runScripts,
     hasPendingPlanApproval,
@@ -2589,8 +2572,6 @@ const ChatWindowContent = memo(function ChatWindowContent({
 
   // Simple agent chat uses a single-line pill composer
   const pillComposer = Boolean(workingLabel)
-  const compactView =
-    (preferences?.compact_chat_view_enabled ?? true) || pillComposer
   const compactHistoryWindow = useMemo(
     () => getCurrentPromptWindow(messages),
     [messages]
@@ -2632,7 +2613,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
   }, [isCompactHistoryExpanded, scrollViewportRef])
   const handleShowTableInChat = useShowTableInChat({
     sessionId: deferredSessionId,
-    isCompact: compactView,
+    isCompact: true,
     compactStartIndex: compactHistoryWindow.startIndex,
     isCompactHistoryExpanded,
     onExpandCompactHistory: handleShowHiddenCompactPrompts,
@@ -2883,160 +2864,89 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                       projectId={worktree?.project_id}
                                     />
                                   )}
-                                {compactView ? (
-                                  <CompactMessageList
-                                    ref={virtualizedListRef}
-                                    hideToolActivity={Boolean(workingLabel)}
-                                    onSendAnswer={sendMagicPrompt}
-                                    messages={compactMessages}
-                                    scrollContainerRef={scrollViewportRef}
-                                    totalMessages={compactMessages.length}
-                                    lastPlanMessageIndex={
-                                      compactLastPlanMessageIndex
-                                    }
-                                    sessionId={deferredSessionId ?? ''}
-                                    worktreePath={activeWorktreePath ?? ''}
-                                    worktreeId={activeWorktreeId ?? null}
-                                    approveShortcut={approveShortcut}
-                                    approveShortcutYolo={approveShortcutYolo}
-                                    approveShortcutClearContext={
-                                      approveShortcutClearContext
-                                    }
-                                    approveShortcutClearContextBuild={
-                                      approveShortcutClearContextBuild
-                                    }
-                                    approveButtonRef={approveButtonRef}
-                                    isSending={isSending}
-                                    onPlanApproval={
-                                      isCursorBackend
-                                        ? handleClearContextApprovalBuild
-                                        : handlePlanApproval
-                                    }
-                                    onPlanApprovalYolo={
-                                      isCursorBackend
-                                        ? handleClearContextApproval
-                                        : handlePlanApprovalYolo
-                                    }
-                                    onClearContextApproval={
-                                      handleClearContextApproval
-                                    }
-                                    onClearContextApprovalBuild={
-                                      handleClearContextApprovalBuild
-                                    }
-                                    onWorktreeBuildApproval={
-                                      worktree?.project_id
-                                        ? handleWorktreeBuildApproval
-                                        : undefined
-                                    }
-                                    onWorktreeYoloApproval={
-                                      worktree?.project_id
-                                        ? handleWorktreeYoloApproval
-                                        : undefined
-                                    }
-                                    onQuestionAnswer={
-                                      handleResolvedQuestionAnswer
-                                    }
-                                    onQuestionSkip={handleResolvedQuestionSkip}
-                                    onFileClick={setViewingFilePath}
-                                    onFixFinding={handleFixFinding}
-                                    onFixAllFindings={handleFixAllFindings}
-                                    isQuestionAnswered={isQuestionAnswered}
-                                    getSubmittedAnswers={getSubmittedAnswers}
-                                    areQuestionsSkipped={areQuestionsSkipped}
-                                    isFindingFixed={isFindingFixed}
-                                    onCopyToInput={handleCopyToInput}
-                                    shouldScrollToBottom={isAtBottom}
-                                    onScrollToBottomHandled={
-                                      handleScrollToBottomHandled
-                                    }
-                                    completedDurationMs={completedDurationMs}
-                                    hasOlderOnDisk={!zenMode && hasOlderOnDisk}
-                                    isLoadingOlder={loadOlderMessages.isPending}
-                                    onLoadOlderRuns={
-                                      zenMode ? undefined : handleLoadOlderRuns
-                                    }
-                                    loadedRunStartIndex={loadedRunStartIndex}
-                                    hiddenPromptCount={
-                                      zenMode || isCompactHistoryExpanded
-                                        ? 0
-                                        : compactHistoryWindow.hiddenPromptCount
-                                    }
-                                    onShowHiddenPrompts={
-                                      zenMode
-                                        ? undefined
-                                        : handleShowHiddenCompactPrompts
-                                    }
-                                  />
-                                ) : (
-                                  <VirtualizedMessageList
-                                    ref={virtualizedListRef}
-                                    onSendAnswer={sendMagicPrompt}
-                                    messages={messages}
-                                    scrollContainerRef={scrollViewportRef}
-                                    totalMessages={messages.length}
-                                    lastPlanMessageIndex={lastPlanMessageIndex}
-                                    sessionId={deferredSessionId ?? ''}
-                                    worktreePath={activeWorktreePath ?? ''}
-                                    worktreeId={activeWorktreeId ?? null}
-                                    approveShortcut={approveShortcut}
-                                    approveShortcutYolo={approveShortcutYolo}
-                                    approveShortcutClearContext={
-                                      approveShortcutClearContext
-                                    }
-                                    approveShortcutClearContextBuild={
-                                      approveShortcutClearContextBuild
-                                    }
-                                    approveButtonRef={approveButtonRef}
-                                    isSending={isSending}
-                                    onPlanApproval={
-                                      isCursorBackend
-                                        ? handleClearContextApprovalBuild
-                                        : handlePlanApproval
-                                    }
-                                    onPlanApprovalYolo={
-                                      isCursorBackend
-                                        ? handleClearContextApproval
-                                        : handlePlanApprovalYolo
-                                    }
-                                    onClearContextApproval={
-                                      handleClearContextApproval
-                                    }
-                                    onClearContextApprovalBuild={
-                                      handleClearContextApprovalBuild
-                                    }
-                                    onWorktreeBuildApproval={
-                                      worktree?.project_id
-                                        ? handleWorktreeBuildApproval
-                                        : undefined
-                                    }
-                                    onWorktreeYoloApproval={
-                                      worktree?.project_id
-                                        ? handleWorktreeYoloApproval
-                                        : undefined
-                                    }
-                                    onQuestionAnswer={
-                                      handleResolvedQuestionAnswer
-                                    }
-                                    onQuestionSkip={handleResolvedQuestionSkip}
-                                    onFileClick={setViewingFilePath}
-                                    onFixFinding={handleFixFinding}
-                                    onFixAllFindings={handleFixAllFindings}
-                                    isQuestionAnswered={isQuestionAnswered}
-                                    getSubmittedAnswers={getSubmittedAnswers}
-                                    areQuestionsSkipped={areQuestionsSkipped}
-                                    isFindingFixed={isFindingFixed}
-                                    onCopyToInput={handleCopyToInput}
-                                    shouldScrollToBottom={isAtBottom}
-                                    onScrollToBottomHandled={
-                                      handleScrollToBottomHandled
-                                    }
-                                    completedDurationMs={completedDurationMs}
-                                    hasOlderOnDisk={hasOlderOnDisk}
-                                    isLoadingOlder={loadOlderMessages.isPending}
-                                    onLoadOlderRuns={handleLoadOlderRuns}
-                                    loadedRunStartIndex={loadedRunStartIndex}
-                                  />
-                                )}
+                                <CompactMessageList
+                                  ref={virtualizedListRef}
+                                  hideToolActivity={Boolean(workingLabel)}
+                                  onSendAnswer={sendMagicPrompt}
+                                  messages={compactMessages}
+                                  scrollContainerRef={scrollViewportRef}
+                                  totalMessages={compactMessages.length}
+                                  lastPlanMessageIndex={
+                                    compactLastPlanMessageIndex
+                                  }
+                                  sessionId={deferredSessionId ?? ''}
+                                  worktreePath={activeWorktreePath ?? ''}
+                                  worktreeId={activeWorktreeId ?? null}
+                                  approveShortcut={approveShortcut}
+                                  approveShortcutYolo={approveShortcutYolo}
+                                  approveShortcutClearContext={
+                                    approveShortcutClearContext
+                                  }
+                                  approveShortcutClearContextBuild={
+                                    approveShortcutClearContextBuild
+                                  }
+                                  approveButtonRef={approveButtonRef}
+                                  isSending={isSending}
+                                  onPlanApproval={
+                                    isCursorBackend
+                                      ? handleClearContextApprovalBuild
+                                      : handlePlanApproval
+                                  }
+                                  onPlanApprovalYolo={
+                                    isCursorBackend
+                                      ? handleClearContextApproval
+                                      : handlePlanApprovalYolo
+                                  }
+                                  onClearContextApproval={
+                                    handleClearContextApproval
+                                  }
+                                  onClearContextApprovalBuild={
+                                    handleClearContextApprovalBuild
+                                  }
+                                  onWorktreeBuildApproval={
+                                    worktree?.project_id
+                                      ? handleWorktreeBuildApproval
+                                      : undefined
+                                  }
+                                  onWorktreeYoloApproval={
+                                    worktree?.project_id
+                                      ? handleWorktreeYoloApproval
+                                      : undefined
+                                  }
+                                  onQuestionAnswer={
+                                    handleResolvedQuestionAnswer
+                                  }
+                                  onQuestionSkip={handleResolvedQuestionSkip}
+                                  onFileClick={setViewingFilePath}
+                                  onFixFinding={handleFixFinding}
+                                  onFixAllFindings={handleFixAllFindings}
+                                  isQuestionAnswered={isQuestionAnswered}
+                                  getSubmittedAnswers={getSubmittedAnswers}
+                                  areQuestionsSkipped={areQuestionsSkipped}
+                                  isFindingFixed={isFindingFixed}
+                                  onCopyToInput={handleCopyToInput}
+                                  shouldScrollToBottom={isAtBottom}
+                                  onScrollToBottomHandled={
+                                    handleScrollToBottomHandled
+                                  }
+                                  completedDurationMs={completedDurationMs}
+                                  hasOlderOnDisk={!zenMode && hasOlderOnDisk}
+                                  isLoadingOlder={loadOlderMessages.isPending}
+                                  onLoadOlderRuns={
+                                    zenMode ? undefined : handleLoadOlderRuns
+                                  }
+                                  loadedRunStartIndex={loadedRunStartIndex}
+                                  hiddenPromptCount={
+                                    zenMode || isCompactHistoryExpanded
+                                      ? 0
+                                      : compactHistoryWindow.hiddenPromptCount
+                                  }
+                                  onShowHiddenPrompts={
+                                    zenMode
+                                      ? undefined
+                                      : handleShowHiddenCompactPrompts
+                                  }
+                                />
                               </>
                             )}
                             {/* Streaming response + elapsed timer in one wrapper to avoid space-y-4 gap */}
@@ -3046,8 +2956,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                   currentToolCalls.length > 0 ||
                                   streamingContent.trim().length > 0) &&
                                   ((!workingLabel && !isUpdateTurnStreaming) ||
-                                    currentToolCalls.some(needsUserInput)) &&
-                                  (compactView ? (
+                                    currentToolCalls.some(needsUserInput)) && (
                                     <CompactStreamingTicker
                                       sessionId={activeSessionId}
                                       contentBlocks={
@@ -3068,28 +2977,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                       areQuestionsSkipped={areQuestionsSkipped}
                                       onCopySteeredText={handleCopySteeredText}
                                     />
-                                  ) : (
-                                    <StreamingMessage
-                                      sessionId={activeSessionId}
-                                      contentBlocks={
-                                        currentStreamingContentBlocks
-                                      }
-                                      toolCalls={currentToolCalls}
-                                      streamingContent={streamingContent}
-                                      onQuestionAnswer={
-                                        handleResolvedQuestionAnswer
-                                      }
-                                      onQuestionSkip={
-                                        handleResolvedQuestionSkip
-                                      }
-                                      onFileClick={setViewingFilePath}
-                                      worktreePath={activeWorktreePath}
-                                      isQuestionAnswered={isQuestionAnswered}
-                                      getSubmittedAnswers={getSubmittedAnswers}
-                                      areQuestionsSkipped={areQuestionsSkipped}
-                                      onCopySteeredText={handleCopySteeredText}
-                                    />
-                                  ))}
+                                  )}
                                 {quietStreamingParts.length > 0 &&
                                   !isUpdateTurnStreaming &&
                                   !currentToolCalls.some(needsUserInput) && (
@@ -3341,8 +3229,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                 onClearGoal={handleClearGoal}
                               />
                             )}
-                            {compactView &&
-                              !zenMode &&
+                            {!zenMode &&
                               !isCompactHistoryExpanded &&
                               compactHistoryWindow.hiddenPromptCount > 0 && (
                                 <Tooltip>
@@ -3465,7 +3352,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
                             ref={formRef}
                             onSubmit={handleSubmit}
                             className={cn(
-                              'relative overflow-hidden border-t border-border bg-card transition-[background-color,box-shadow] duration-150 sm:rounded-lg sm:border',
+                              'relative overflow-hidden border-t border-border/30 bg-card transition-[background-color,border-color,box-shadow] duration-150 focus-within:border-border/60 sm:rounded-lg sm:border dark:bg-[color-mix(in_oklab,var(--background),white_3%)]',
                               pillComposer &&
                                 'mx-2 mb-4 rounded-[22px] border sm:mx-0 sm:mb-3 sm:rounded-[22px]',
                               activeSessionId &&
@@ -3786,7 +3673,6 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                         ? undefined
                                         : handleOpenMagicModal
                                     }
-                                    onSaveContext={handleSaveContext}
                                     onLoadContext={handleLoadContext}
                                     onCommit={handleCommit}
                                     onCommitAndPush={

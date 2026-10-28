@@ -80,7 +80,6 @@ describe('ChatStore', () => {
       compactingSessions: {},
       reviewingSessions: {},
       sessionLabels: {},
-      savingContext: {},
       skippedQuestionSessions: {},
     })
   })
@@ -1435,7 +1434,6 @@ describe('ChatStore', () => {
         'sessionStatusOverrides',
         'planFilePaths',
         'pendingPlanMessageIds',
-        'savingContext',
         'skippedQuestionSessions',
         'sessionLabels',
         'codexGoals',
@@ -1878,20 +1876,6 @@ describe('ChatStore', () => {
       clearLastCompaction('session-1')
 
       expect(getLastCompaction('session-1')).toBeUndefined()
-    })
-  })
-
-  describe('save context tracking', () => {
-    it('sets and checks saving context', () => {
-      const { setSavingContext, isSavingContext } = useChatStore.getState()
-
-      expect(isSavingContext('session-1')).toBe(false)
-
-      setSavingContext('session-1', true)
-      expect(isSavingContext('session-1')).toBe(true)
-
-      setSavingContext('session-1', false)
-      expect(isSavingContext('session-1')).toBe(false)
     })
   })
 

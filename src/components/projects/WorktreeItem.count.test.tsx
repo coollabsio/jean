@@ -27,6 +27,7 @@ vi.mock('@/services/git-status', () => ({
 vi.mock('@/services/chat', () => ({
   useSessions: () => ({ data: { sessions: mocks.sessions } }),
   useRenameSession: () => ({ mutate: vi.fn() }),
+  useCloseSession: () => ({ mutate: vi.fn() }),
 }))
 vi.mock('@/services/projects', () => ({
   useRenameWorktree: () => ({ mutate: vi.fn() }),
@@ -40,13 +41,9 @@ vi.mock('@/components/chat/session-card-utils', () => ({
   groupCardsByStatus: () => [],
   statusConfig: {},
 }))
-vi.mock('@/components/chat/hooks/useSessionArchive', () => ({
-  useSessionArchive: () => ({ handleDeleteSession: vi.fn() }),
-}))
 vi.mock('./useWorktreeMenuActions', () => ({
   useWorktreeMenuActions: () => ({
-    handleArchiveOrClose: vi.fn(),
-    preferences: {},
+    handleClose: vi.fn(),
   }),
 }))
 vi.mock('./WorktreeContextMenu', () => ({

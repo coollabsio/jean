@@ -349,10 +349,8 @@ export interface Session {
   selected_permission_mode?: PermissionMode
   /** Whether session naming has been attempted for this session */
   session_naming_completed?: boolean
-  /** Unix timestamp when session was archived (undefined = not archived) */
+  /** Unix timestamp when the session was deleted (undefined = live). Purged after 30 days. */
   archived_at?: number
-  /** Whether this session was archived by the base close operation (vs user action) */
-  archived_by_base_close?: boolean
 
   // ========================================================================
   // Session-specific UI state (moved from ui-state.json)
@@ -487,19 +485,6 @@ export interface LoadedMessages {
   messages: ChatMessage[]
   total_runs: number
   loaded_run_start_index: number
-}
-
-/**
- * An archived session with its worktree context
- * Used for displaying archived sessions in the ArchivedModal
- */
-export interface ArchivedSessionEntry {
-  session: Session
-  worktree_id: string
-  worktree_name: string
-  worktree_path: string
-  project_id: string
-  project_name: string
 }
 
 /**

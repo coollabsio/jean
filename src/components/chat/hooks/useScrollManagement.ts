@@ -7,7 +7,7 @@ import {
   useState,
 } from 'react'
 import type { RefObject } from 'react'
-import type { VirtualizedMessageListHandle } from '../VirtualizedMessageList'
+import type { MessageListHandle } from '../message-list-handle'
 import type { ChatMessage } from '@/types/chat'
 import { useIsMobile } from '@/hooks/use-mobile'
 import {
@@ -21,7 +21,7 @@ interface UseScrollManagementOptions {
   /** Messages array for finding findings index */
   messages: ChatMessage[] | undefined
   /** Ref to virtualized list for scrolling to specific message index */
-  virtualizedListRef: RefObject<VirtualizedMessageListHandle | null>
+  virtualizedListRef: RefObject<MessageListHandle | null>
   /**
    * Session whose transcript is currently displayed (deferred session id).
    * Used as the key for per-session scroll restoration (issue #594).
@@ -157,9 +157,9 @@ export function useScrollManagement({
   // Bounds deferred restores so an unreachable scrollTop cannot latch forever
   // and permanently disable tail-following (PR #605 review).
   const pendingRestoreAttemptsRef = useRef(0)
-  const pendingRestoreRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null
-  )
+  const pendingRestoreRetryTimerRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null)
 
   const clearPendingRestoreRetry = useCallback(() => {
     if (pendingRestoreRetryTimerRef.current != null) {
@@ -228,7 +228,10 @@ export function useScrollManagement({
       isAtBottomRef.current = false
       setIsAtBottom(false)
     }
-    rememberScroll(viewport?.scrollTop ?? lastKnownScrollRef.current.scrollTop, false)
+    rememberScroll(
+      viewport?.scrollTop ?? lastKnownScrollRef.current.scrollTop,
+      false
+    )
   }, [rememberScroll, syncIsAtBottom])
 
   // Cleanup scroll timeout on unmount
@@ -427,7 +430,10 @@ export function useScrollManagement({
       userScrollUpUntilRef.current = Date.now() + 1000
       setIsAtBottom(false)
 
-      const maxScroll = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
+      const maxScroll = Math.max(
+        0,
+        viewport.scrollHeight - viewport.clientHeight
+      )
       const targetTop = Math.min(Math.max(0, saved.scrollTop), maxScroll)
       viewport.scrollTop = targetTop
       lastScrollTopRef.current = targetTop
@@ -479,7 +485,7 @@ export function useScrollManagement({
   // it is necessarily at the bottom. This clears stale "scrolled away" state
   // without changing behavior for genuinely scrollable chats.
   // Also re-applies a pending non-tail restore once the message list grows tall
-  // enough (e.g. VirtualizedMessageList expands its visible window).
+  // enough (e.g. the message list expands its visible window).
   //
   // Pending restores are bounded: if a saved scrollTop never becomes reachable
   // (history cleared, run trimmed, messages compacted), retry only up to
@@ -771,19 +777,10 @@ export function useScrollManagement({
     if (!contentReady || !activeSessionId) return
 
     const messagesJustLoaded = prevLength === 0 && currentLength > 0
-    if (
-      becameReady ||
-      messagesJustLoaded ||
-      pendingRestoreRef.current
-    ) {
+    if (becameReady || messagesJustLoaded || pendingRestoreRef.current) {
       applySessionScrollState(activeSessionId)
     }
-  }, [
-    contentReady,
-    messages?.length,
-    activeSessionId,
-    applySessionScrollState,
-  ])
+  }, [contentReady, messages?.length, activeSessionId, applySessionScrollState])
 
   // [Tier 1] Handle scroll events — findings visibility removed (handled by IntersectionObserver)
   const handleScroll = useCallback(
@@ -833,7 +830,7 @@ export function useScrollManagement({
     [contentReady, rememberScroll]
   )
 
-  // Handle scroll-to-bottom completion from VirtualizedMessageList
+  // Handle scroll-to-bottom completion from the message list
   const handleScrollToBottomHandled = useCallback(() => {
     isFollowingTailRef.current = true
     userScrollUpUntilRef.current = 0
@@ -841,7 +838,10 @@ export function useScrollManagement({
     setIsAtBottom(true)
     pendingRestoreRef.current = false
     const viewport = scrollViewportRef.current
-    rememberScroll(viewport?.scrollTop ?? lastKnownScrollRef.current.scrollTop, true)
+    rememberScroll(
+      viewport?.scrollTop ?? lastKnownScrollRef.current.scrollTop,
+      true
+    )
   }, [rememberScroll])
 
   // [Tier 4] Scroll to bottom helper — uses scrollend event instead of 350ms timeout.
@@ -920,7 +920,7 @@ export function useScrollManagement({
   )
 
   // Mark scroll state as "at bottom" without performing any physical scroll.
-  // Used when sending a message so VirtualizedMessageList's gentle scrollIntoView
+  // Used when sending a message so the message list's gentle scrollIntoView
   // handles the actual scrolling.
   const markAtBottom = useCallback(() => {
     isFollowingTailRef.current = true
@@ -929,7 +929,10 @@ export function useScrollManagement({
     setIsAtBottom(true)
     pendingRestoreRef.current = false
     const viewport = scrollViewportRef.current
-    rememberScroll(viewport?.scrollTop ?? lastKnownScrollRef.current.scrollTop, true)
+    rememberScroll(
+      viewport?.scrollTop ?? lastKnownScrollRef.current.scrollTop,
+      true
+    )
   }, [rememberScroll])
 
   // Begin a user-initiated keyboard scroll.

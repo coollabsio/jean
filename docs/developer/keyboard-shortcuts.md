@@ -31,7 +31,6 @@ preferences pane.
 | `cycle_execution_mode`      | `Shift+Tab`       | Cycle through Plan/Build/Yolo modes     |
 | `approve_plan`              | `Cmd+Enter`       | Approve plan or answer question         |
 | `approve_plan_yolo`         | `Cmd+Shift+Alt+Y` | Approve the current plan with Full access |
-| `restore_last_archived`     | `Cmd+Shift+Alt+T` | Restore most recently archived item     |
 
 **Note:** `Cmd` on Mac, `Ctrl` on Windows/Linux.
 
@@ -75,7 +74,6 @@ export type KeybindingAction =
   | 'previous_worktree'
   | 'cycle_execution_mode'
   | 'approve_plan'
-  | 'restore_last_archived'
 
 // Shortcut string format: "mod+key" or "mod+shift+key"
 export type ShortcutString = string
@@ -107,7 +105,6 @@ export const DEFAULT_KEYBINDINGS: KeybindingsMap = {
   previous_worktree: 'mod+alt+arrowup',
   cycle_execution_mode: 'shift+tab',
   approve_plan: 'mod+enter',
-  restore_last_archived: 'mod+shift+alt+t',
 }
 ```
 
@@ -400,44 +397,13 @@ fn default_keybindings() -> std::collections::HashMap<String, String> {
 6. **Use `mod` prefix**: Allows cross-platform compatibility
 7. **Provide feedback**: Use notifications or UI changes to confirm execution
 
-## Close-confirmation bypass modifier
+## Close confirmation
 
-Holding a modifier while closing a session or worktree skips the
-`CloseWorktreeDialog` confirmation. The modifier is the client-only preference
-`close_confirm_bypass_modifier` (`'shift' | 'alt' | 'none'`, default `'none'` —
-off, closing always confirms until opted out), configured in Settings → General
-→ Archive, directly under the "Confirm before closing" switch. It never changes
-what closing does — only whether the dialog appears first — so it is a second,
-narrower gate layered on `confirm_session_close`.
-
-Any stored value is coerced to a known member by
-`resolveCloseConfirmBypassModifier` in `src/lib/confirm-bypass.ts` — the single
-validation point. Both `hasCloseConfirmBypassModifier` and
-`closeConfirmBypassLabel` route through it, and `normalize()` in
-`src/lib/client-preferences.ts` coerces on every round-trip, so a hand-edited
-localStorage entry or a web-access client cannot store an unknown value (a bad
-value falls back to the default and renders no empty-label hint).
-
-Mouse surfaces (tab X, middle-clicks) read the modifier straight off the
-`MouseEvent` via `hasCloseConfirmBypassModifier` in `src/lib/confirm-bypass.ts`.
-
-The keyboard path (Cmd/Ctrl+W) needs extra care: `eventToShortcutString`
-serializes a held Shift into a different string (`mod+shift+w`), which is not the
-`mod+w` binding and would otherwise be a dead key. `resolveShortcutWithBypass` in
-`src/hooks/useMainWindowEventListeners.ts` does a strip-and-retry: if the raw
-shortcut matches nothing, it strips the configured modifier and retries, and
-**accepts the retry only when it resolves to `close_session_or_worktree`**. A
-general strip-and-retry would let a held modifier shadow unrelated bindings. The
-bypass flag then rides in the `close-session-or-worktree` CustomEvent detail,
-read through `readCloseBypassDetail` by the three listeners (global fallback,
-canvas, session modal).
-
-When a side or modal terminal is focused, the shortcut is remapped to close the
-active terminal tab (keyed off the resolved action, not the raw string), so the
-bypass is a no-op there by design — terminal tabs have no confirmation dialog.
-`'mod'` is deliberately not an option: `Cmd/Ctrl+W` already serializes to the
-bound `mod+w`, so the strip-and-retry would never run and the keyboard path could
-not honor it.
+Closing a worktree, or a session that has messages or an unsent draft, always
+shows `CloseWorktreeDialog` first. This applies to Cmd/Ctrl+W, the tab X button,
+middle-clicks, and the session menu. No preference or held modifier skips the
+dialog. Empty sessions close at once (`isSessionEmpty` in
+`src/components/projects/worktree-close-decision.ts`).
 
 ## Shift+Enter in the embedded terminal
 

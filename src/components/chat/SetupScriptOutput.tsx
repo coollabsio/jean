@@ -40,21 +40,20 @@ export function SetupScriptOutput({
     <Collapsible open={isExpanded} onOpenChange={setIsExpanded}>
       <div
         className={cn(
-          'my-2 min-w-0 rounded border font-mono text-sm',
-          result.success
-            ? 'border-muted bg-muted/30'
-            : 'border-destructive/30 bg-destructive/10'
+          'group my-1 min-w-0 rounded-md text-xs',
+          // Success is a quiet status line; only failures get a tinted box
+          !result.success && 'bg-destructive/10'
         )}
       >
         <div className="flex min-w-0 items-center">
-          <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left hover:bg-muted/50">
+          <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1 text-left hover:bg-muted/30">
             <ChevronRight
               className={cn(
-                'h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200',
+                'size-3 shrink-0 text-muted-foreground transition-transform duration-200',
                 isExpanded && 'rotate-90'
               )}
             />
-            <StatusIcon className={cn('h-4 w-4 shrink-0', statusColor)} />
+            <StatusIcon className={cn('size-3.5 shrink-0', statusColor)} />
             <span className="min-w-0 flex-1 truncate text-muted-foreground">
               {statusText}
             </span>
@@ -62,14 +61,14 @@ export function SetupScriptOutput({
           <button
             type="button"
             onClick={onDismiss}
-            className="mr-2 shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+            className="mr-1 shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100"
             aria-label="Dismiss setup script status"
           >
-            <X className="h-4 w-4" />
+            <X className="size-3.5" />
           </button>
         </div>
         <CollapsibleContent>
-          <div className="border-t border-muted px-4 py-3">
+          <div className="mt-1 ml-5 rounded-md bg-muted/20 px-3 py-2">
             <div className="mb-2 text-xs text-muted-foreground">
               <span className="opacity-60">workdir:</span> {result.worktreePath}
             </div>

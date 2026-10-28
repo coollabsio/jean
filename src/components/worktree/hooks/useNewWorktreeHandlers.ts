@@ -20,7 +20,7 @@ import type {
 import type { LinearIssue, LinearIssueDetail } from '@/types/linear'
 import type { SentryIssue, SentryIssueContext } from '@/types/sentry'
 import type { useNewWorktreeData } from './useNewWorktreeData'
-import type { TabId } from '../NewWorktreeModal'
+import type { TabId } from '../new-worktree-tabs'
 import type { SecuritySelection } from '../SecurityAlertsTab'
 import { reportBulkInvestigateResults } from '../bulkInvestigateUtils'
 import {

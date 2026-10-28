@@ -15,14 +15,14 @@ Checkpoints are stored **per worktree** (not per session). Multiple sessions on 
 
 Restore is layered so concurrent sessions do not silently clobber each other:
 
-| Mode | Behavior |
-| --- | --- |
-| **Analyze** | Classifies each turn path as `clean`, `conflictedLaterActivity`, `conflictedWorkingTree`, or `binaryOrUnreadable` using later checkpoints’ `filesChanged` and end-snapshot vs working tree. |
-| **Clean only** | Deterministically restores only clean paths from `start_commit` (requires **Approve**). |
-| **Force turn files** | Restores every path this turn changed (may overwrite later session edits; requires **Approve**). |
-| **AI-assisted** | For conflicted text files, builds a 3-way prompt (`BASE` / `A_END` / `CURRENT`), proposes write/delete/skip per path; user previews, then **Request approval** → **Approve**. Clean paths still restore deterministically. |
-| **Full worktree** | Destructive `read-tree -u --reset` + `clean -fd` to the start snapshot (requires **Approve**). |
-| **Single file** | Checkpoints tab per-file restore also requires **Approve**. |
+| Mode                 | Behavior                                                                                                                                                                                                                   |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Analyze**          | Classifies each turn path as `clean`, `conflictedLaterActivity`, `conflictedWorkingTree`, or `binaryOrUnreadable` using later checkpoints’ `filesChanged` and end-snapshot vs working tree.                                |
+| **Clean only**       | Deterministically restores only clean paths from `start_commit` (requires **Approve**).                                                                                                                                    |
+| **Force turn files** | Restores every path this turn changed (may overwrite later session edits; requires **Approve**).                                                                                                                           |
+| **AI-assisted**      | For conflicted text files, builds a 3-way prompt (`BASE` / `A_END` / `CURRENT`), proposes write/delete/skip per path; user previews, then **Request approval** → **Approve**. Clean paths still restore deterministically. |
+| **Full worktree**    | Destructive `read-tree -u --reset` + `clean -fd` to the start snapshot (requires **Approve**).                                                                                                                             |
+| **Single file**      | Checkpoints tab per-file restore also requires **Approve**.                                                                                                                                                                |
 
 **No restore mutates the worktree until the user explicitly approves.**
 
@@ -32,19 +32,19 @@ layout (safe-area aware) with full-width stacked actions.
 
 ## Commands
 
-| Command | Purpose |
-| --- | --- |
-| `list_ai_checkpoints` | List checkpoints for a worktree (newest first) |
-| `get_ai_checkpoint` | Fetch one checkpoint |
-| `get_ai_checkpoint_diff` | Diff `start→end` (`scope: "turn"`) or `start→working tree` (`scope: "current"`) |
-| `analyze_ai_checkpoint_restore` | Classify turn paths for safe restore |
-| `restore_ai_checkpoint_turn` | Turn-scoped restore (`mode`: `cleanOnly` \| `allTurnFiles`) |
-| `propose_ai_checkpoint_restore` | AI 3-way proposal for conflicted paths (no writes) |
-| `apply_ai_checkpoint_restore_proposal` | Apply accepted AI proposals (+ optional clean paths) |
-| `restore_ai_checkpoint` | Full worktree restore |
-| `restore_ai_checkpoint_file` | Single-file restore |
-| `delete_ai_checkpoint` | Drop metadata + ref |
-| `finalize_ai_checkpoint` | Manual finalize (auto on run complete) |
+| Command                                | Purpose                                                                         |
+| -------------------------------------- | ------------------------------------------------------------------------------- |
+| `list_ai_checkpoints`                  | List checkpoints for a worktree (newest first)                                  |
+| `get_ai_checkpoint`                    | Fetch one checkpoint                                                            |
+| `get_ai_checkpoint_diff`               | Diff `start→end` (`scope: "turn"`) or `start→working tree` (`scope: "current"`) |
+| `analyze_ai_checkpoint_restore`        | Classify turn paths for safe restore                                            |
+| `restore_ai_checkpoint_turn`           | Turn-scoped restore (`mode`: `cleanOnly` \| `allTurnFiles`)                     |
+| `propose_ai_checkpoint_restore`        | AI 3-way proposal for conflicted paths (no writes)                              |
+| `apply_ai_checkpoint_restore_proposal` | Apply accepted AI proposals (+ optional clean paths)                            |
+| `restore_ai_checkpoint`                | Full worktree restore                                                           |
+| `restore_ai_checkpoint_file`           | Single-file restore                                                             |
+| `delete_ai_checkpoint`                 | Drop metadata + ref                                                             |
+| `finalize_ai_checkpoint`               | Manual finalize (auto on run complete)                                          |
 
 All commands are registered in `jean-core/src/http_server/dispatch.rs` (native + web access).
 
@@ -63,7 +63,7 @@ All commands are registered in `jean-core/src/http_server/dispatch.rs` (native +
 - Run metadata: `RunEntry.checkpoint_id`
 - Frontend: `src/services/checkpoints.ts`, `src/types/checkpoints.ts`,
   `CheckpointsTabView.tsx`, `CheckpointRestoreDialog.tsx`,
-  `CheckpointTurnRestoreButton.tsx`, `EditedFilesDisplay.tsx`, `MessageItem.tsx`
+  `CheckpointTurnRestoreButton.tsx`, `MessageItem.tsx`
 
 ## Constraints
 

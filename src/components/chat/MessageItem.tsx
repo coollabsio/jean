@@ -37,7 +37,6 @@ import { SkillBadge } from './SkillBadge'
 import { ToolCallsDisplay } from './ToolCallsDisplay'
 import { ExitPlanModeButton } from './ExitPlanModeButton'
 import { Button } from '@/components/ui/button'
-import { EditedFilesDisplay } from './EditedFilesDisplay'
 import {
   CheckpointTurnRestoreButton,
   isUserTurnFinished,
@@ -204,8 +203,6 @@ interface MessageItemProps {
   hideApproveButtons?: boolean
   /** Hide the built-in cancelled marker when a parent compact row renders it externally */
   hideCancelledIndicator?: boolean
-  /** Hide the edited-files summary when a compact parent renders it outside. */
-  hideEditedFiles?: boolean
   /** Duration of this assistant message in ms (computed from user→assistant timestamp delta) */
   durationMs?: number | null
   /** Render the assistant reply in a bubble (agent chat) */
@@ -254,7 +251,6 @@ export const MessageItem = memo(function MessageItem({
   onCopyToInput,
   hideApproveButtons,
   hideCancelledIndicator,
-  hideEditedFiles = false,
   durationMs,
   bubble = false,
   hideSettingsBadges = false,
@@ -384,22 +380,6 @@ export const MessageItem = memo(function MessageItem({
     if (message.role !== 'user' || !getMessages) return false
     return turnHasFileEdits(getMessages(), messageIndex)
   }, [message.role, getMessages, messageIndex])
-
-  // The last assistant message of a finished turn also lists the turn
-  // checkpoint's changes made without file tools (e.g. Bash edits).
-  const turnUserMessageId = useMemo(() => {
-    if (message.role !== 'assistant' || !worktreeId || !getMessages) {
-      return undefined
-    }
-    const messages = getMessages()
-    const next = messages[messageIndex + 1]
-    if (next ? next.role !== 'user' : isSending) return undefined
-    for (let i = messageIndex - 1; i >= 0; i--) {
-      const previous = messages[i]
-      if (previous?.role === 'user') return previous.id
-    }
-    return undefined
-  }, [message.role, worktreeId, getMessages, messageIndex, isSending])
 
   const showSettingsBadges = !hideSettingsBadges && Boolean(message.model)
 
@@ -1042,22 +1022,6 @@ export const MessageItem = memo(function MessageItem({
         />
       )}
 
-      {/* Show edited files at the bottom of assistant messages */}
-      {message.role === 'assistant' &&
-        ((message.tool_calls?.length ?? 0) > 0 || turnUserMessageId) &&
-        !hideEditedFiles &&
-        !skipToolCalls && (
-          <EditedFilesDisplay
-            toolCalls={message.tool_calls}
-            worktreePath={worktreePath}
-            getMessages={getMessages}
-            messageIndex={messageIndex}
-            serverId={messageServerId === 'local' ? undefined : messageServerId}
-            worktreeId={worktreeId ?? undefined}
-            turnUserMessageId={turnUserMessageId}
-          />
-        )}
-
       {message.cancelled && !hideCancelledIndicator && (
         <span className="text-xs text-muted-foreground/50 italic">
           (cancelled)
@@ -1087,7 +1051,7 @@ export const MessageItem = memo(function MessageItem({
                     // Attachments: the bubble color, a bit darker
                     '[&_[data-attachments]>*]:border-transparent [&_[data-attachments]>*]:bg-[color-mix(in_oklab,var(--bubble-bg)_80%,black)]'
                   )
-                : 'min-w-0 break-words [overflow-wrap:anywhere] rounded-lg border border-border bg-muted/20 px-3 py-2 text-foreground'
+                : 'min-w-0 break-words [overflow-wrap:anywhere] rounded-lg border border-border/20 bg-muted/20 px-3 py-2 text-foreground'
             )}
           >
             {messageBoxContent}
@@ -1117,7 +1081,6 @@ export const MessageItem = memo(function MessageItem({
                     userMessageId={message.id}
                     worktreeId={worktreeId}
                     hasFileEdits
-                    variant="userBubble"
                     className="mt-0"
                   />
                 )}

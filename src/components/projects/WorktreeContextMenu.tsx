@@ -1,5 +1,4 @@
 import {
-  Archive,
   Code,
   FolderOpen,
   Play,
@@ -65,7 +64,7 @@ export function WorktreeContextMenu({
     handleOpenInFinder,
     handleOpenInTerminal,
     handleOpenInEditor,
-    handleArchiveOrClose,
+    handleClose,
     handleDelete,
   } = actions
 
@@ -126,21 +125,12 @@ export function WorktreeContextMenu({
 
         <ContextMenuSeparator />
 
-        <ContextMenuItem onClick={handleArchiveOrClose}>
-          {isBase ? (
-            <>
-              <X className="mr-2 h-4 w-4" />
-              Close Session
-            </>
-          ) : (
-            <>
-              <Archive className="mr-2 h-4 w-4" />
-              Archive Worktree
-            </>
-          )}
-        </ContextMenuItem>
-
-        {!isBase && (
+        {isBase ? (
+          <ContextMenuItem onClick={handleClose}>
+            <X className="mr-2 h-4 w-4" />
+            Close Session
+          </ContextMenuItem>
+        ) : (
           <ContextMenuItem onClick={() => setShowDeleteConfirm(true)}>
             <Trash2 className="mr-2 h-4 w-4 text-destructive" />
             Delete Worktree

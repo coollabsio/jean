@@ -1,15 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import {
-  Zap,
-  CircleDot,
-  GitPullRequest,
-  Shield,
-  GitBranch,
-  Sentry,
-  MessagesSquare,
-} from '@/components/icons/reicon'
-import { LinearIcon } from '@/components/icons/LinearIcon'
-import type { LucideIcon } from '@/components/icons/reicon'
 import { useGhLogin } from '@/hooks/useGhLogin'
 import { usePreferences } from '@/services/preferences'
 import {
@@ -38,6 +27,7 @@ import { useNewWorktreeData } from './hooks/useNewWorktreeData'
 import { useNewWorktreeHandlers } from './hooks/useNewWorktreeHandlers'
 import { useNewWorktreeKeyboard } from './hooks/useNewWorktreeKeyboard'
 import { SessionTabBar } from './NewWorktreeItems'
+import { GITHUB_ONLY_TABS, TABS, type TabId } from './new-worktree-tabs'
 import { QuickActionsTab } from './QuickActionsTab'
 import { GitHubIssuesTab } from './GitHubIssuesTab'
 import { GitHubPRsTab } from './GitHubPRsTab'
@@ -47,35 +37,6 @@ import { LinearIssuesTab } from './LinearIssuesTab'
 import { SentryIssuesTab } from './SentryIssuesTab'
 import { GitHubDiscussionsTab } from './GitHubDiscussionsTab'
 import { IssuePreviewModal } from './IssuePreviewModal'
-
-export type TabId =
-  | 'quick'
-  | 'issues'
-  | 'prs'
-  | 'security'
-  | 'branches'
-  | 'linear'
-  | 'sentry'
-  | 'discussions'
-
-export interface Tab {
-  id: TabId
-  label: string
-  key: string
-  icon: LucideIcon
-}
-
-// eslint-disable-next-line react-refresh/only-export-components
-export const TABS: Tab[] = [
-  { id: 'quick', label: 'Actions', key: '1', icon: Zap },
-  { id: 'issues', label: 'Issues', key: '2', icon: CircleDot },
-  { id: 'prs', label: 'PRs', key: '3', icon: GitPullRequest },
-  { id: 'security', label: 'Security', key: '4', icon: Shield },
-  { id: 'branches', label: 'Branches', key: '5', icon: GitBranch },
-  { id: 'linear', label: 'Linear', key: '6', icon: LinearIcon },
-  { id: 'sentry', label: 'Sentry', key: '7', icon: Sentry },
-  { id: 'discussions', label: 'Discussions', key: '8', icon: MessagesSquare },
-]
 
 export function NewWorktreeModal() {
   const selectedProjectId = useProjectsStore(state => state.selectedProjectId)
@@ -145,9 +106,7 @@ function NewWorktreeModalContent() {
   // them for GitLab.
   const githubOnlyTabsEnabled = provider !== 'gitlab'
   const displayTabs = TABS.filter(
-    tab =>
-      (tab.id !== 'security' && tab.id !== 'discussions') ||
-      githubOnlyTabsEnabled
+    tab => !GITHUB_ONLY_TABS.has(tab.id) || githubOnlyTabsEnabled
   ).map(tab =>
     tab.id === 'prs' ? { ...tab, label: labels.pullRequestsShort } : tab
   )

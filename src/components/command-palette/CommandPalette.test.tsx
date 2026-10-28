@@ -235,8 +235,9 @@ describe('CommandPalette projects', () => {
     expect(projectRows[0]?.getAttribute('data-value')).not.toBe(
       projectRows[1]?.getAttribute('data-value')
     )
-    expect(screen.getAllByText('Open on Local')).not.toHaveLength(0)
-    expect(screen.getAllByText('Open on Build server')).not.toHaveLength(0)
+    // Only projects from another server get a server badge
+    expect(screen.queryByText('Local')).not.toBeInTheDocument()
+    expect(screen.getAllByText('Build server')).not.toHaveLength(0)
   })
 
   it('does not show a redundant Local server label in Web Access', () => {
@@ -244,8 +245,8 @@ describe('CommandPalette projects', () => {
 
     render(<CommandPalette />)
 
-    expect(screen.queryByText('Open on Local')).not.toBeInTheDocument()
-    expect(screen.queryByText('Open on Build server')).not.toBeInTheDocument()
+    expect(screen.queryByText('Local')).not.toBeInTheDocument()
+    expect(screen.queryByText('Build server')).not.toBeInTheDocument()
   })
 
   it('shows projects from the active instance first before and after filtering', () => {
@@ -265,7 +266,7 @@ describe('CommandPalette projects', () => {
 
     expect(
       visibleProjectNames().map(name =>
-        name?.replace(/^./, '').replace(/Open on .*/, '')
+        name?.replace(/^./, '').replace(/(Active|Build) server$/, '')
       )
     ).toEqual(['Active Tool', 'Build Tool', 'Local Tool'])
   })
@@ -369,7 +370,8 @@ describe('CommandPalette agents', () => {
 
     const row = screen.getByText('Reviewer').closest('[cmdk-item]')
     expect(row?.closest('[cmdk-group]')).toHaveTextContent(/^Agents/)
-    expect(row).toHaveTextContent('Reviews PRs · Build server')
+    expect(row).toHaveTextContent('Build server')
+    expect(row).not.toHaveTextContent('Reviews PRs')
 
     fireEvent.click(row as Element)
 

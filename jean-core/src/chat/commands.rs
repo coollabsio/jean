@@ -16,13 +16,13 @@ use super::registry::{
 };
 use super::run_log;
 use super::storage::{
-    cleanup_combined_context_files, delete_session_data, get_base_index_path, get_data_dir,
-    get_index_path, get_session_dir, load_index, load_metadata, load_sessions, save_metadata,
+    cleanup_combined_context_files, delete_session_data, get_data_dir, get_index_path,
+    get_session_dir, load_index, load_metadata, load_sessions, save_metadata,
     with_existing_metadata_mut, with_index_mut, with_metadata_mut, with_sessions_mut,
 };
 use super::types::{
     AllSessionsEntry, AllSessionsResponse, Backend, ChatMessage, ClaudeContext, EffortLevel,
-    LabelData, MessageRole, RunStatus, Session, SessionUnreadSummary, ThinkingLevel, WorktreeIndex,
+    LabelData, MessageRole, RunStatus, Session, SessionUnreadSummary, ThinkingLevel,
     WorktreeSessions,
 };
 use crate::claude_cli::resolve_cli_binary;
@@ -655,22 +655,17 @@ fn finish_bulk_update<T, E>(
 // Session Management Commands
 // ============================================================================
 
-/// Get all sessions for a worktree (for tab bar display)
-/// By default, archived sessions are filtered out
+/// Get all sessions for a worktree (for tab bar display).
+/// Deleted sessions (`archived_at` set) are never returned.
 pub async fn get_sessions(
     app: AppHandle,
     worktree_id: String,
     worktree_path: String,
-    include_archived: Option<bool>,
     include_message_counts: Option<bool>,
 ) -> Result<WorktreeSessions, String> {
     log::trace!("Getting sessions for worktree: {worktree_id}");
     let mut sessions = load_sessions(&app, &worktree_path, &worktree_id)?;
-
-    // Filter out archived sessions unless explicitly requested
-    if !include_archived.unwrap_or(false) {
-        sessions.sessions.retain(|s| s.archived_at.is_none());
-    }
+    sessions.sessions.retain(|s| s.archived_at.is_none());
 
     // Optionally populate message counts from metadata (efficient alternative to loading full messages)
     if include_message_counts.unwrap_or(false) {
@@ -712,14 +707,12 @@ pub async fn list_sessions_summary(
     app: AppHandle,
     worktree_id: String,
     worktree_path: String,
-    include_archived: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     let sessions = load_sessions(&app, &worktree_path, &worktree_id)?;
-    let include_archived = include_archived.unwrap_or(false);
     let session_summaries: Vec<serde_json::Value> = sessions
         .sessions
         .into_iter()
-        .filter(|session| include_archived || session.archived_at.is_none())
+        .filter(|session| session.archived_at.is_none())
         .map(|session| {
             serde_json::json!({
                 "id": session.id,
@@ -1087,7 +1080,6 @@ pub async fn create_session(
         return Err("Native session IDs are only valid for terminal sessions".to_string());
     }
 
-    // Archived worktrees must be restored before creating new sessions.
     ensure_worktree_not_archived(&worktree_id, worktree_archived_at(&app, &worktree_id))?;
 
     let preferences = crate::load_preferences(app.clone()).await.ok();
@@ -2092,9 +2084,14 @@ fn is_pending_plan_tool_call(tc: &crate::chat::types::ToolCall) -> bool {
         && !is_unavailable_tool_error(tc.output.as_deref())
 }
 
-/// Close/delete a session tab
-/// Returns the new active session ID (if any)
-/// Also cleans up any pasted images and text files associated with the session
+/// Close a session tab. This is a soft delete.
+///
+/// The session disappears from the UI immediately. Its history stays on disk
+/// with `archived_at` set to now (the field name is historical; it holds the
+/// deletion time) and `cleanup_deleted_items` purges it after
+/// `DELETED_ITEM_RETENTION_DAYS`. A session with no messages is removed from
+/// the index and from disk right away.
+/// Returns the new active session ID (if any).
 pub async fn close_session(
     app: AppHandle,
     worktree_id: String,
@@ -2103,44 +2100,39 @@ pub async fn close_session(
 ) -> Result<Option<String>, String> {
     log::trace!("Closing session: {session_id}");
 
-    let sessions = load_sessions(&app, &worktree_path, &worktree_id)?;
-    if sessions.find_session(&session_id).is_none() {
-        return Err(format!("Session not found: {session_id}"));
-    }
-
     // Cancel only if a process is actively running — avoids spurious chat:cancelled events
     // for idle sessions (e.g. those waiting for plan approval during clear-context flows).
     let _ = cancel_process_if_running(&app, &session_id, &worktree_id);
 
-    // Delete session data (outside lock - separate directory)
-    if let Err(e) = delete_session_data(&app, &session_id) {
-        log::warn!("Failed to delete session data: {e}");
-    }
+    // Load messages from NDJSON to check if session has content (outside lock - read-only)
+    let messages = run_log::load_session_messages(&app, &session_id).unwrap_or_default();
+    let should_delete = messages.is_empty();
 
-    // Clean up context references for this session
-    if let Err(e) =
-        crate::projects::github_issues::cleanup_issue_contexts_for_session(&app, &session_id)
-    {
-        log::warn!("Failed to cleanup issue/PR contexts for session: {e}");
-    }
-    if let Err(e) =
-        crate::projects::saved_contexts::cleanup_saved_contexts_for_session(&app, &session_id)
-    {
-        log::warn!("Failed to cleanup saved contexts for session: {e}");
-    }
-
-    // Clean up combined-context files for this session
-    cleanup_combined_context_files(&app, &session_id);
-
-    // Now atomically modify the sessions file
     let new_active = with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
-        // Find index before removal to support deterministic neighbor selection.
         let session_index = sessions.sessions.iter().position(|s| s.id == session_id);
 
-        // Remove the session
-        sessions.sessions.retain(|s| s.id != session_id);
+        let session = sessions
+            .find_session(&session_id)
+            .ok_or_else(|| format!("Session not found: {session_id}"))?;
+
+        if session.archived_at.is_some() {
+            return Err("Session is already deleted".to_string());
+        }
+
+        if should_delete {
+            log::trace!("Session has 0 messages, removing it outright: {session_id}");
+            if let Some(idx) = session_index {
+                sessions.sessions.remove(idx);
+            }
+        } else {
+            let session = sessions
+                .find_session_mut(&session_id)
+                .ok_or_else(|| format!("Session not found: {session_id}"))?;
+            session.archived_at = Some(now());
+        }
 
         // If we closed the active session, select nearest visible tab: left then right.
+        // A soft-deleted session stays at its index but is skipped by the neighbor search.
         if sessions.active_session_id.as_deref() == Some(&session_id) {
             sessions.active_session_id = match session_index {
                 Some(idx) => find_neighbor_non_archived_session_id(&sessions.sessions, idx),
@@ -2152,17 +2144,17 @@ pub async fn close_session(
             };
         }
 
-        // If non-archived sessions remain but active is unset, pick the first.
+        // If live sessions remain but active is unset, pick the first.
         // The command creates a new empty session after this write when none remain.
-        let first_non_archived = sessions
+        let first_live = sessions
             .sessions
             .iter()
             .find(|s| s.archived_at.is_none())
             .map(|s| s.id.clone());
-        if first_non_archived.is_none() {
+        if first_live.is_none() {
             sessions.active_session_id = None;
         } else if sessions.active_session_id.is_none() {
-            sessions.active_session_id = first_non_archived;
+            sessions.active_session_id = first_live;
         }
 
         log::trace!(
@@ -2172,6 +2164,10 @@ pub async fn close_session(
         Ok(sessions.active_session_id.clone())
     })?;
 
+    if should_delete {
+        purge_session_files(&app, &session_id);
+    }
+
     if new_active.is_none() {
         let session = create_session(
             app.clone(),
@@ -2193,175 +2189,49 @@ pub async fn close_session(
     Ok(new_active)
 }
 
-/// Archive a session tab (hide from UI but keep messages)
-/// Sessions with 0 messages are deleted instead of archived.
-/// Returns the new active session ID (if any)
-pub async fn archive_session(
-    app: AppHandle,
-    worktree_id: String,
-    worktree_path: String,
-    session_id: String,
-) -> Result<Option<String>, String> {
-    log::trace!("Archiving session: {session_id}");
+/// Remove a session from its worktree index and delete its data on disk.
+///
+/// Used by the retention purge and by the agents engine. Safe to repeat: a
+/// session already gone from the index still has its files removed.
+pub(crate) fn purge_session(
+    app: &AppHandle,
+    worktree_id: &str,
+    worktree_path: &str,
+    session_id: &str,
+) -> Result<(), String> {
+    log::trace!("Purging deleted session: {session_id}");
 
-    // Cancel only if a process is actively running — avoids spurious chat:cancelled events
-    // for idle sessions (e.g. those waiting for plan approval during clear-context flows).
-    let _ = cancel_process_if_running(&app, &session_id, &worktree_id);
-
-    // Load messages from NDJSON to check if session has content (outside lock - read-only)
-    let messages = run_log::load_session_messages(&app, &session_id).unwrap_or_default();
-    let should_delete = messages.is_empty();
-
-    let new_active = with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
-        // Find the index before archiving/deleting
-        let session_index = sessions.sessions.iter().position(|s| s.id == session_id);
-
-        // Find the session
-        let session = sessions
-            .find_session(&session_id)
-            .ok_or_else(|| format!("Session not found: {session_id}"))?;
-
-        // Check if already archived
-        if session.archived_at.is_some() {
-            return Err("Session is already archived".to_string());
-        }
-
-        if should_delete {
-            log::trace!("Session has 0 messages, deleting instead of archiving: {session_id}");
-            if let Some(idx) = session_index {
-                sessions.sessions.remove(idx);
-            }
-        } else {
-            // Set archived timestamp
-            let session = sessions
-                .find_session_mut(&session_id)
-                .ok_or_else(|| format!("Session not found: {session_id}"))?;
-            session.archived_at = Some(now());
-        }
-
-        // Determine new active session if the archived/deleted one was active
-        let new_active = if sessions.active_session_id.as_deref() == Some(&session_id) {
-            if let Some(idx) = session_index {
-                let mut candidate = None;
-                let search_idx = if should_delete {
-                    idx.saturating_sub(1)
-                } else {
-                    idx
-                };
-                for i in (0..=search_idx).rev() {
-                    if sessions
-                        .sessions
-                        .get(i)
-                        .is_some_and(|s| s.archived_at.is_none())
-                    {
-                        candidate = sessions.sessions.get(i).map(|s| s.id.clone());
-                        break;
-                    }
-                }
-                if candidate.is_none() {
-                    let start_idx = if should_delete { idx } else { idx + 1 };
-                    for i in start_idx..sessions.sessions.len() {
-                        if sessions
-                            .sessions
-                            .get(i)
-                            .is_some_and(|s| s.archived_at.is_none())
-                        {
-                            candidate = sessions.sessions.get(i).map(|s| s.id.clone());
-                            break;
-                        }
-                    }
-                }
-                candidate
-            } else {
-                sessions
-                    .sessions
-                    .iter()
-                    .find(|s| s.archived_at.is_none())
-                    .map(|s| s.id.clone())
-            }
-        } else {
-            sessions.active_session_id.clone()
-        };
-        sessions.active_session_id = new_active;
-
-        // If non-archived sessions remain but active is unset, pick the first.
-        // The command creates a new empty session after this write when none remain.
-        let first_non_archived = sessions
-            .sessions
-            .iter()
-            .find(|s| s.archived_at.is_none())
-            .map(|s| s.id.clone());
-        if first_non_archived.is_none() {
-            sessions.active_session_id = None;
-        } else if sessions.active_session_id.is_none() {
-            sessions.active_session_id = first_non_archived;
-        }
-
-        if should_delete {
-            log::trace!(
-                "Session deleted (0 messages), new active: {:?}",
-                sessions.active_session_id
-            );
-        } else {
-            log::trace!(
-                "Session archived, new active: {:?}",
-                sessions.active_session_id
-            );
-        }
-        Ok(sessions.active_session_id.clone())
+    with_sessions_mut(app, worktree_path, worktree_id, |sessions| {
+        sessions.sessions.retain(|s| s.id != session_id);
+        Ok(())
     })?;
 
-    if new_active.is_none() {
-        let session = create_session(
-            app.clone(),
-            worktree_id,
-            worktree_path,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        )
-        .await?;
-        return Ok(Some(session.id));
+    purge_session_files(app, session_id);
+    Ok(())
+}
+
+/// Delete a session's data directory and every context file that references it.
+fn purge_session_files(app: &AppHandle, session_id: &str) {
+    if let Err(e) = delete_session_data(app, session_id) {
+        log::warn!("Failed to delete session data: {e}");
     }
-
-    emit_sessions_cache_invalidation(&app);
-    Ok(new_active)
+    if let Err(e) =
+        crate::projects::github_issues::cleanup_issue_contexts_for_session(app, session_id)
+    {
+        log::warn!("Failed to cleanup issue/PR contexts for session: {e}");
+    }
+    if let Err(e) =
+        crate::projects::saved_contexts::cleanup_saved_contexts_for_session(app, session_id)
+    {
+        log::warn!("Failed to cleanup saved contexts for session: {e}");
+    }
+    cleanup_combined_context_files(app, session_id);
 }
 
-/// Unarchive a session (restore it to the session list)
-pub async fn unarchive_session(
-    app: AppHandle,
-    worktree_id: String,
-    worktree_path: String,
-    session_id: String,
-) -> Result<Session, String> {
-    log::trace!("Unarchiving session: {session_id}");
-
-    with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
-        let session = sessions
-            .find_session_mut(&session_id)
-            .ok_or_else(|| format!("Session not found: {session_id}"))?;
-
-        if session.archived_at.is_none() {
-            return Err("Session is not archived".to_string());
-        }
-
-        session.archived_at = None;
-        let restored_session = session.clone();
-
-        log::trace!("Session unarchived: {session_id}");
-        Ok(restored_session)
-    })
-}
-
-/// Reject execution against an archived session or its parent worktree.
+/// Reject execution against a deleted session or an inactive worktree.
 ///
-/// Archived workspaces may have incomplete post-cleanup state (missing scripts,
-/// removed paths), so agents/UI must unarchive explicitly before running again.
+/// Deleted sessions wait on disk for the retention purge; worktrees with
+/// `archived_at` set were archived by an older Jean and are no longer active.
 pub fn ensure_session_can_run(
     session_id: &str,
     session_archived_at: Option<u64>,
@@ -2370,25 +2240,25 @@ pub fn ensure_session_can_run(
 ) -> Result<(), String> {
     if session_archived_at.is_some() {
         return Err(format!(
-            "Session is archived and cannot run. Unarchive the session first (sessionId: {session_id})."
+            "Session was deleted and cannot run (sessionId: {session_id})."
         ));
     }
     if worktree_archived_at.is_some() {
         return Err(format!(
-            "Worktree is archived and cannot run sessions. Unarchive the worktree first (worktreeId: {worktree_id})."
+            "Worktree is no longer active and cannot run sessions (worktreeId: {worktree_id})."
         ));
     }
     Ok(())
 }
 
-/// Reject mutations that require an active (non-archived) worktree.
+/// Reject mutations that require an active worktree.
 pub fn ensure_worktree_not_archived(
     worktree_id: &str,
     worktree_archived_at: Option<u64>,
 ) -> Result<(), String> {
     if worktree_archived_at.is_some() {
         return Err(format!(
-            "Worktree is archived. Unarchive it first (worktreeId: {worktree_id})."
+            "Worktree is no longer active (worktreeId: {worktree_id})."
         ));
     }
     Ok(())
@@ -2399,318 +2269,6 @@ pub fn worktree_archived_at(app: &AppHandle, worktree_id: &str) -> Option<u64> {
     load_projects_data(app)
         .ok()
         .and_then(|data| data.find_worktree(worktree_id).and_then(|w| w.archived_at))
-}
-
-/// Response from restoring a session with base session recreation
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct RestoreSessionWithBaseResponse {
-    /// The restored session
-    pub session: Session,
-    /// The worktree (either existing or newly created base session)
-    pub worktree: crate::projects::types::Worktree,
-}
-
-/// Restore an archived session, recreating the base session if needed
-///
-/// This command handles the case where:
-/// 1. The session belongs to a base session that was closed (worktree record removed)
-/// 2. We need to recreate the base session and migrate the sessions to it
-pub async fn restore_session_with_base(
-    app: AppHandle,
-    worktree_id: String,
-    worktree_path: String,
-    session_id: String,
-    project_id: String,
-) -> Result<RestoreSessionWithBaseResponse, String> {
-    log::trace!("Restoring session with base session check: {session_id}");
-
-    // Load projects data to check if worktree exists
-    let mut projects_data = load_projects_data(&app)?;
-
-    // Check if the worktree exists
-    if let Some(existing) = projects_data.find_worktree(&worktree_id) {
-        // Worktree exists - just unarchive the session
-        log::trace!("Worktree exists, unarchiving session normally");
-        let existing_worktree = existing.clone();
-
-        let restored_session = with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
-            let session = sessions
-                .find_session_mut(&session_id)
-                .ok_or_else(|| format!("Session not found: {session_id}"))?;
-
-            if session.archived_at.is_none() {
-                return Err("Session is not archived".to_string());
-            }
-
-            session.archived_at = None;
-            Ok(session.clone())
-        })?;
-
-        return Ok(RestoreSessionWithBaseResponse {
-            session: restored_session,
-            worktree: existing_worktree,
-        });
-    }
-
-    // Worktree doesn't exist - check if this is a base session path
-    let project = projects_data
-        .find_project(&project_id)
-        .ok_or_else(|| format!("Project not found: {project_id}"))?
-        .clone();
-
-    if worktree_path != project.path {
-        return Err(
-            "Worktree not found and path doesn't match project (not a base session)".to_string(),
-        );
-    }
-
-    log::trace!("Recreating base session for project: {}", project.name);
-
-    // Create new base session
-    let new_worktree = crate::projects::types::Worktree {
-        id: uuid::Uuid::new_v4().to_string(),
-        project_id: project_id.clone(),
-        name: project.default_branch.clone(),
-        path: project.path.clone(),
-        branch: project.default_branch.clone(),
-        base_branch: None,
-        base_remote: None,
-        created_at: now(),
-        setup_output: None,
-        setup_script: None,
-        setup_success: None,
-        session_type: SessionType::Base,
-        pr_number: None,
-        pr_url: None,
-        issue_number: None,
-        linear_issue_identifier: None,
-        security_alert_number: None,
-        security_alert_url: None,
-        advisory_ghsa_id: None,
-        advisory_url: None,
-        cached_pr_status: None,
-        cached_check_status: None,
-        cached_behind_count: None,
-        cached_ahead_count: None,
-        cached_status_at: None,
-        cached_uncommitted_added: None,
-        cached_uncommitted_removed: None,
-        cached_branch_diff_added: None,
-        cached_branch_diff_removed: None,
-        cached_base_branch_ahead_count: None,
-        cached_base_branch_behind_count: None,
-        cached_worktree_ahead_count: None,
-        cached_unpushed_count: None,
-        pr_push_remote: None,
-        pr_push_branch: None,
-        order: 0,
-        origin: None,
-        labels: Vec::new(),
-        label: None,
-        archived_at: None,
-        last_opened_at: None,
-    };
-
-    projects_data.add_worktree(new_worktree.clone());
-    crate::projects::storage::save_projects_data(&app, &projects_data)?;
-
-    // Restore preserved base sessions file (base-{project_id}.json -> {new_worktree_id}.json)
-    // This is needed because close_base_session_archive renamed the index file
-    let _restored_index =
-        crate::chat::storage::restore_base_sessions(&app, &project_id, &new_worktree.id)?;
-
-    // Atomically unarchive the target session within the restored sessions
-    let restored_session = with_sessions_mut(&app, &worktree_path, &new_worktree.id, |sessions| {
-        let session = sessions
-            .find_session_mut(&session_id)
-            .ok_or_else(|| format!("Session not found: {session_id}"))?;
-
-        if session.archived_at.is_none() {
-            return Err("Session is not archived".to_string());
-        }
-
-        session.archived_at = None;
-        Ok(session.clone())
-    })?;
-
-    log::trace!("Base session recreated and sessions migrated");
-
-    Ok(RestoreSessionWithBaseResponse {
-        session: restored_session,
-        worktree: new_worktree,
-    })
-}
-
-/// Permanently delete an archived session
-pub async fn delete_archived_session(
-    app: AppHandle,
-    worktree_id: String,
-    worktree_path: String,
-    session_id: String,
-) -> Result<(), String> {
-    log::trace!("Permanently deleting archived session: {session_id}");
-
-    with_sessions_mut(&app, &worktree_path, &worktree_id, |sessions| {
-        let session_idx = sessions
-            .sessions
-            .iter()
-            .position(|s| s.id == session_id)
-            .ok_or_else(|| format!("Session not found: {session_id}"))?;
-
-        if sessions.sessions[session_idx].archived_at.is_none() {
-            return Err("Cannot delete non-archived session. Archive it first.".to_string());
-        }
-
-        sessions.sessions.remove(session_idx);
-        Ok(())
-    })?;
-
-    // Delete session data directory (outside lock - separate directory)
-    if let Err(e) = delete_session_data(&app, &session_id) {
-        log::warn!("Failed to delete session data: {e}");
-    }
-
-    // Clean up context references
-    if let Err(e) =
-        crate::projects::github_issues::cleanup_issue_contexts_for_session(&app, &session_id)
-    {
-        log::warn!("Failed to cleanup issue/PR contexts for session: {e}");
-    }
-    if let Err(e) =
-        crate::projects::saved_contexts::cleanup_saved_contexts_for_session(&app, &session_id)
-    {
-        log::warn!("Failed to cleanup saved contexts for session: {e}");
-    }
-
-    // Clean up combined-context files for this session
-    cleanup_combined_context_files(&app, &session_id);
-
-    log::trace!("Archived session permanently deleted: {session_id}");
-    Ok(())
-}
-
-/// List archived sessions for a worktree
-pub async fn list_archived_sessions(
-    app: AppHandle,
-    worktree_id: String,
-    worktree_path: String,
-) -> Result<Vec<Session>, String> {
-    log::trace!("Listing archived sessions for worktree: {worktree_id}");
-
-    let sessions = load_sessions(&app, &worktree_path, &worktree_id)?;
-
-    let archived: Vec<Session> = sessions
-        .sessions
-        .into_iter()
-        .filter(|s| s.archived_at.is_some())
-        .collect();
-
-    log::trace!("Found {} archived sessions", archived.len());
-    Ok(archived)
-}
-
-/// An archived session with its worktree context
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct ArchivedSessionEntry {
-    pub session: Session,
-    pub worktree_id: String,
-    pub worktree_name: String,
-    pub worktree_path: String,
-    pub project_id: String,
-    pub project_name: String,
-}
-
-/// List all archived sessions across all worktrees (including archived worktrees)
-pub async fn list_all_archived_sessions(
-    app: AppHandle,
-) -> Result<Vec<ArchivedSessionEntry>, String> {
-    log::trace!("Listing all archived sessions across all worktrees");
-
-    let projects_data = load_projects_data(&app)?;
-    let mut entries = Vec::new();
-
-    for project in &projects_data.projects {
-        // Get ALL worktrees (including archived) to find their archived sessions
-        let worktrees: Vec<_> = projects_data
-            .worktrees_for_project(&project.id)
-            .into_iter()
-            .collect();
-
-        for worktree in worktrees {
-            match load_sessions(&app, &worktree.path, &worktree.id) {
-                Ok(sessions_data) => {
-                    // Filter to archived sessions only
-                    for session in sessions_data.sessions {
-                        if session.archived_at.is_some() {
-                            entries.push(ArchivedSessionEntry {
-                                session,
-                                worktree_id: worktree.id.clone(),
-                                worktree_name: worktree.name.clone(),
-                                worktree_path: worktree.path.clone(),
-                                project_id: project.id.clone(),
-                                project_name: project.name.clone(),
-                            });
-                        }
-                    }
-                }
-                Err(e) => {
-                    log::warn!(
-                        "Failed to load sessions for worktree {}: {}",
-                        worktree.id,
-                        e
-                    );
-                }
-            }
-        }
-
-        // Also check preserved base session files (base-{project_id}.json)
-        // These are created when a base session is closed with archiving
-        if let Ok(base_path) = get_base_index_path(&app, &project.id) {
-            if base_path.exists() {
-                if let Ok(contents) = std::fs::read_to_string(&base_path) {
-                    if let Ok(index) = serde_json::from_str::<WorktreeIndex>(&contents) {
-                        for entry in &index.sessions {
-                            if entry.archived_at.is_some() {
-                                // Load full session metadata
-                                let session =
-                                    if let Ok(Some(metadata)) = load_metadata(&app, &entry.id) {
-                                        let mut s = metadata.to_session();
-                                        // Ensure archived_at from index is preserved
-                                        if s.archived_at.is_none() {
-                                            s.archived_at = entry.archived_at;
-                                        }
-                                        s
-                                    } else {
-                                        // No metadata — build a minimal Session from index entry
-                                        let mut s = Session::new(
-                                            entry.name.clone(),
-                                            entry.order,
-                                            Backend::default(),
-                                        );
-                                        s.id = entry.id.clone();
-                                        s.message_count = Some(entry.message_count);
-                                        s.archived_at = entry.archived_at;
-                                        s
-                                    };
-
-                                entries.push(ArchivedSessionEntry {
-                                    session,
-                                    worktree_id: index.worktree_id.clone(),
-                                    worktree_name: format!("{} (base)", project.name),
-                                    worktree_path: project.path.clone(),
-                                    project_id: project.id.clone(),
-                                    project_name: project.name.clone(),
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    log::trace!("Found {} archived sessions total", entries.len());
-    Ok(entries)
 }
 
 /// Reorder session tabs
@@ -3027,7 +2585,7 @@ pub async fn send_chat_message(
         sessions.sessions.iter().map(|s| &s.id).collect::<Vec<_>>()
     );
 
-    // Guard: never execute against archived sessions/worktrees (MCP, UI, queue).
+    // Guard: never execute against deleted sessions or inactive worktrees (MCP, UI, queue).
     // Check before any side effects (naming tasks, chat:sending events).
     if let Some(session) = sessions.find_session(&session_id) {
         if let Err(e) = ensure_session_can_run(
@@ -12546,35 +12104,36 @@ plugin:tools:search: npx -y search-mcp - ✘ Failed to connect";
     }
 
     #[test]
-    fn ensure_session_can_run_rejects_archived_session() {
+    fn ensure_session_can_run_rejects_deleted_session() {
         let err = ensure_session_can_run("sess-1", Some(123), "wt-1", None).unwrap_err();
-        assert!(err.contains("Session is archived"));
-        assert!(err.contains("sess-1"));
-        assert!(err.contains("Unarchive"));
+        assert_eq!(
+            err,
+            "Session was deleted and cannot run (sessionId: sess-1)."
+        );
     }
 
     #[test]
-    fn ensure_session_can_run_rejects_archived_worktree() {
+    fn ensure_session_can_run_rejects_inactive_worktree() {
         let err = ensure_session_can_run("sess-1", None, "wt-1", Some(456)).unwrap_err();
-        assert!(err.contains("Worktree is archived"));
-        assert!(err.contains("wt-1"));
-        assert!(err.contains("Unarchive"));
+        assert_eq!(
+            err,
+            "Worktree is no longer active and cannot run sessions (worktreeId: wt-1)."
+        );
     }
 
     #[test]
-    fn ensure_session_can_run_prefers_session_archive_error() {
-        // When both are archived, surface the session-level error first so the
-        // caller knows which unarchive tool to use.
+    fn ensure_session_can_run_prefers_session_error() {
         let err = ensure_session_can_run("sess-1", Some(1), "wt-1", Some(2)).unwrap_err();
-        assert!(err.contains("Session is archived"));
-        assert!(!err.contains("Worktree is archived"));
+        assert_eq!(
+            err,
+            "Session was deleted and cannot run (sessionId: sess-1)."
+        );
     }
 
     #[test]
-    fn ensure_worktree_not_archived_rejects_archived() {
+    fn ensure_worktree_not_archived_rejects_inactive() {
         let err = ensure_worktree_not_archived("wt-1", Some(99)).unwrap_err();
-        assert!(err.contains("Worktree is archived"));
-        assert!(err.contains("wt-1"));
+        assert_eq!(err, "Worktree is no longer active (worktreeId: wt-1).");
         assert!(ensure_worktree_not_archived("wt-1", None).is_ok());
     }
 

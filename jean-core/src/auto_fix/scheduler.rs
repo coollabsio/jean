@@ -673,7 +673,7 @@ async fn run_auto_fix_scan(app: &AppHandle) {
         record_activity(&project.id, summary, None);
         let open_issue_numbers: HashSet<u32> = issues.iter().map(|issue| issue.number).collect();
         // Worktrees whose issue closed or no longer matches the label filters are
-        // not archived (they may hold uncommitted work), but they stop using
+        // left in place (they may hold uncommitted work), but they stop using
         // capacity, their investigation is stopped, and they never go to yolo.
         let inactive_worktree_ids: HashSet<String> =
             closed_auto_fix_issue_worktree_ids(&project_worktrees, &open_issue_numbers)
@@ -937,7 +937,7 @@ fn investigation_stop_action(
     InvestigationStopAction::None
 }
 
-/// True when no non-archived session ever ran or queued a message, i.e. the
+/// True when no live session ever ran or queued a message, i.e. the
 /// investigation was never started for this worktree.
 fn worktree_needs_investigation(sessions: &[crate::chat::types::Session]) -> bool {
     sessions
@@ -2040,7 +2040,7 @@ mod tests {
     }
 
     #[test]
-    fn selects_only_open_auto_fix_worktrees_with_closed_issues_for_archive() {
+    fn selects_only_open_auto_fix_worktrees_with_closed_issues_as_inactive() {
         let open_issue_numbers = HashSet::from([1, 3]);
         let worktrees = vec![
             test_worktree("auto-open", Some(1), Some(WorktreeOrigin::AutoFix), None),
@@ -2061,7 +2061,7 @@ mod tests {
     }
 
     #[test]
-    fn selects_auto_fix_worktrees_whose_issue_is_no_longer_label_eligible_for_archive() {
+    fn selects_auto_fix_worktrees_whose_issue_is_no_longer_label_eligible_as_inactive() {
         let issues = vec![
             AutoFixIssueCandidate {
                 number: 1,

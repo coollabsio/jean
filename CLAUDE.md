@@ -317,7 +317,6 @@ const [isLoading, setIsLoading] = useState(false)
 
 **Current background operations using this pattern:**
 
-- `handleSaveContext` in `ChatWindow.tsx` - saves context with AI summarization
 - `handleOpenPr` in `ChatWindow.tsx` - creates PR with AI-generated title/body
 - `handleCommit` in `ChatWindow.tsx` - creates commit with AI-generated message (uses `create_commit_with_ai` command with JSON schema)
 - `handleReview` in `ChatWindow.tsx` - runs AI code review, stores results in Zustand/UI state, shows in ReviewResultsPanel (uses `run_review_with_ai` command with JSON schema)

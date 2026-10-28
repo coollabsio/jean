@@ -4,7 +4,7 @@ import type { QuestionAnswer, ToolCall } from '@/types/chat'
 import { ToolCallsDisplay } from './ToolCallsDisplay'
 
 vi.mock('@/services/preferences', () => ({
-  usePreferences: () => ({ data: { expand_tool_calls_by_default: false } }),
+  usePreferences: () => ({ data: {} }),
 }))
 
 describe('ToolCallsDisplay', () => {

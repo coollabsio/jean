@@ -37,9 +37,6 @@ import type {
   WorktreeDeletingEvent,
   WorktreeDeletedEvent,
   WorktreeDeleteErrorEvent,
-  WorktreeArchivedEvent,
-  WorktreeUnarchivedEvent,
-  WorktreePermanentlyDeletedEvent,
   WorktreePathExistsEvent,
   WorktreeBranchExistsEvent,
   WorktreeSetupCompleteEvent,
@@ -1023,13 +1020,12 @@ export function useCreateWorktree() {
     onSuccess: (worktree, { projectId, background: isBackground }) => {
       const shouldAutoOpen = !isBackground
       // Check if this worktree was already resolved by an event handler
-      // (e.g. unarchive_worktree emits worktree:unarchived which sets status: 'ready')
       const existing = queryClient.getQueryData<Worktree[]>(
         projectsQueryKeys.worktrees(projectId)
       )
       const existingEntry = existing?.find(w => w.id === worktree.id)
       if (existingEntry?.status === 'ready') {
-        logger.info('Worktree already ready (unarchived), skipping pending', {
+        logger.info('Worktree already ready, skipping pending', {
           id: worktree.id,
           name: worktree.name,
         })
@@ -1244,11 +1240,13 @@ export function useCreateWorktreeFromExistingBranch() {
  */
 export function useCreateWorktreeKeybinding() {
   useEffect(() => {
-    const handleCreateWorktree = async () => {
-      // Import dynamically to avoid circular dependency
-      const { useUIStore } = await import('@/store/ui-store')
-      const { setNewWorktreeModalOpen } = useUIStore.getState()
-      setNewWorktreeModalOpen(true)
+    const handleCreateWorktree = () => {
+      // The modal needs a target project; without one it renders empty.
+      if (!useProjectsStore.getState().selectedProjectId) {
+        toast.info('Select a project first')
+        return
+      }
+      useUIStore.getState().setNewWorktreeModalOpen(true)
     }
 
     window.addEventListener('create-new-worktree', handleCreateWorktree)
@@ -1257,7 +1255,7 @@ export function useCreateWorktreeKeybinding() {
   }, [])
 }
 
-/** Shared post-ready logic for both new and unarchived worktrees */
+/** Shared post-ready logic for ready worktrees */
 function handleWorktreeReady(
   worktree: Worktree,
   queryClient: ReturnType<typeof useQueryClient>,
@@ -1757,78 +1755,6 @@ export function useWorktreeEvents() {
     )
 
     // =========================================================================
-    // Archive events
-    // =========================================================================
-
-    // Listen for successful archive
-    unlistenPromises.push(
-      listen<WorktreeArchivedEvent>('worktree:archived', event => {
-        const { id, project_id } = event.payload
-        logger.info('Worktree archived', { id })
-        clearLocalWorktreeState(id, queryClient)
-
-        // Remove worktree from cache (archived worktrees are filtered out)
-        queryClient.setQueryData<Worktree[]>(
-          projectsQueryKeys.worktrees(project_id),
-          old => {
-            if (!old) return []
-            return old.filter(w => w.id !== id)
-          }
-        )
-        invalidateProjectLists(queryClient)
-
-        // Clear chat if this worktree was active
-        const { activeWorktreeId, clearActiveWorktree } =
-          useChatStore.getState()
-        if (activeWorktreeId === id) {
-          clearActiveWorktree()
-        }
-
-        // Clear selection if this worktree was selected
-        const { selectedWorktreeId, selectWorktree } =
-          useProjectsStore.getState()
-        if (selectedWorktreeId === id) {
-          selectWorktree(null)
-        }
-      })
-    )
-
-    // Listen for successful unarchive
-    unlistenPromises.push(
-      listen<WorktreeUnarchivedEvent>('worktree:unarchived', event => {
-        const { worktree } = event.payload
-        logger.info('Worktree unarchived', { id: worktree.id })
-
-        handleWorktreeReady(worktree, queryClient)
-        queryClient.invalidateQueries({ queryKey: ['archived-worktrees'] })
-      })
-    )
-
-    // Listen for permanent deletion
-    unlistenPromises.push(
-      listen<WorktreePermanentlyDeletedEvent>(
-        'worktree:permanently_deleted',
-        event => {
-          const { id, project_id } = event.payload
-          logger.info('Worktree permanently deleted', { id })
-          clearLocalWorktreeState(id, queryClient)
-
-          // Invalidate archived worktrees query
-          queryClient.invalidateQueries({ queryKey: ['archived-worktrees'] })
-
-          // Also remove from main cache just in case
-          queryClient.setQueryData<Worktree[]>(
-            projectsQueryKeys.worktrees(project_id),
-            old => {
-              if (!old) return []
-              return old.filter(w => w.id !== id)
-            }
-          )
-        }
-      )
-    )
-
-    // =========================================================================
     // Generic worktree change notification (for backend-created worktrees)
     // =========================================================================
 
@@ -1854,27 +1780,11 @@ export function useWorktreeEvents() {
           return
         }
 
-        const { path, archived_worktree_id, archived_worktree_name } =
-          event.payload
-
-        if (archived_worktree_id) {
-          logger.warn('Path conflict with archived worktree', {
-            path,
-            archivedName: archived_worktree_name,
-            archivedId: archived_worktree_id,
-          })
-          toast.error(
-            `Path conflict with archived worktree "${archived_worktree_name}"`,
-            {
-              description: 'Restore it or permanently delete it first.',
-            }
-          )
-        } else {
-          logger.warn('Path conflict with unknown directory', { path })
-          toast.error('Worktree path already exists', {
-            description: `Remove directory manually: ${path}`,
-          })
-        }
+        const { path } = event.payload
+        logger.warn('Path conflict with unknown directory', { path })
+        toast.error('Worktree path already exists', {
+          description: `Remove directory manually: ${path}`,
+        })
       })
     )
 
@@ -2047,111 +1957,6 @@ export function useDeleteWorktree() {
   })
 }
 
-// ============================================================================
-// Archive Operations
-// ============================================================================
-
-/**
- * Hook to archive a worktree
- * Archives the worktree (hides from UI) but keeps git worktree/branch on disk
- */
-export function useArchiveWorktree() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: async ({
-      worktreeId,
-      projectId,
-    }: {
-      worktreeId: string
-      projectId: string
-    }): Promise<{ worktreeId: string; projectId: string }> => {
-      if (!isTauri()) {
-        throw new Error('Not in Tauri context')
-      }
-
-      logger.debug('Archiving worktree', { worktreeId })
-      await invoke('archive_worktree', { worktreeId })
-      logger.info('Worktree archived')
-      return { worktreeId, projectId }
-    },
-    onSuccess: ({ worktreeId, projectId }) => {
-      // Remove worktree from cache (event listener will also do this)
-      queryClient.setQueryData<Worktree[]>(
-        projectsQueryKeys.worktrees(projectId),
-        old => {
-          if (!old) return []
-          return old.filter(w => w.id !== worktreeId)
-        }
-      )
-
-      // Invalidate archived worktrees query so it shows up immediately
-      queryClient.invalidateQueries({ queryKey: ['archived-worktrees'] })
-
-      // Invalidate archived sessions query (worktree's sessions are also archived)
-      queryClient.invalidateQueries({ queryKey: ['all-archived-sessions'] })
-
-      // Cleanup terminal instances for this worktree
-      clearLocalWorktreeState(worktreeId, queryClient)
-
-      // Clear chat if this worktree was active
-      const { activeWorktreeId, clearActiveWorktree } = useChatStore.getState()
-      if (activeWorktreeId === worktreeId) {
-        clearActiveWorktree()
-      }
-
-      // Clear selection if this worktree was selected
-      const { selectedWorktreeId, selectWorktree } = useProjectsStore.getState()
-      if (selectedWorktreeId === worktreeId) {
-        selectWorktree(null)
-      }
-
-      toast.success('Worktree archived')
-    },
-    onError: error => {
-      const message = error instanceof Error ? error.message : String(error)
-      logger.error('Failed to archive worktree', { error })
-      toast.error('Failed to archive worktree', { description: message })
-    },
-  })
-}
-
-/**
- * Hook to unarchive a worktree
- * Restores the worktree to the UI
- */
-export function useUnarchiveWorktree() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: async (worktreeId: string): Promise<Worktree> => {
-      if (!isTauri()) {
-        throw new Error('Not in Tauri context')
-      }
-
-      logger.debug('Unarchiving worktree', { worktreeId })
-      const worktree = await invoke<Worktree>('unarchive_worktree', {
-        worktreeId,
-      })
-      logger.info('Worktree unarchived', { worktree })
-      return worktree
-    },
-    onSuccess: () => {
-      // Note: Worktree is added to cache by the event listener for 'worktree:unarchived'
-      // Invalidate archived queries
-      queryClient.invalidateQueries({ queryKey: ['archived-worktrees'] })
-      queryClient.invalidateQueries({ queryKey: ['all-archived-sessions'] })
-
-      toast.success('Worktree restored')
-    },
-    onError: error => {
-      const message = error instanceof Error ? error.message : String(error)
-      logger.error('Failed to unarchive worktree', { error })
-      toast.error('Failed to restore worktree', { description: message })
-    },
-  })
-}
-
 /**
  * Hook to import an existing worktree directory
  * Used when a directory exists but isn't tracked by Jean
@@ -2227,57 +2032,6 @@ export function useUnmanagedWorktrees(
       return parseUnmanagedWorktreeListing(listing)
     },
     enabled: enabled && !!projectId,
-  })
-}
-
-/**
- * Hook to list all archived worktrees
- */
-export function useArchivedWorktrees() {
-  return useQuery({
-    queryKey: ['archived-worktrees'],
-    queryFn: async (): Promise<Worktree[]> => {
-      if (!isTauri()) {
-        return []
-      }
-
-      logger.debug('Listing archived worktrees')
-      const worktrees = await invoke<Worktree[]>('list_archived_worktrees')
-      logger.debug('Got archived worktrees', { count: worktrees.length })
-      return worktrees
-    },
-    staleTime: 1000 * 60, // 1 minute
-  })
-}
-
-/**
- * Hook to permanently delete an archived worktree
- * This actually removes the git worktree and branch from disk
- */
-export function usePermanentlyDeleteWorktree() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: async (worktreeId: string): Promise<string> => {
-      if (!isTauri()) {
-        throw new Error('Not in Tauri context')
-      }
-
-      logger.debug('Permanently deleting worktree', { worktreeId })
-      await invoke('permanently_delete_worktree', { worktreeId })
-      logger.info('Worktree permanently deleted')
-      return worktreeId
-    },
-    onSuccess: () => {
-      // Invalidate archived worktrees query (event listener will also handle this)
-      queryClient.invalidateQueries({ queryKey: ['archived-worktrees'] })
-      toast.success('Worktree permanently deleted')
-    },
-    onError: error => {
-      const message = error instanceof Error ? error.message : String(error)
-      logger.error('Failed to permanently delete worktree', { error })
-      toast.error('Failed to delete worktree', { description: message })
-    },
   })
 }
 
@@ -2435,56 +2189,6 @@ export function useCloseBaseSessionClean() {
             ? error
             : 'Unknown error occurred'
       logger.error('Failed to close session (clean)', { error })
-      toast.error('Failed to close session', { description: message })
-    },
-  })
-}
-
-export function useCloseBaseSessionArchive() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: async ({
-      worktreeId,
-    }: {
-      worktreeId: string
-      projectId: string
-    }): Promise<void> => {
-      if (!isTauri()) {
-        throw new Error('Not in Tauri context')
-      }
-
-      logger.debug('Closing base session (archive)', { worktreeId })
-      await invoke('close_base_session_archive', { worktreeId })
-      logger.info('Base session closed (archive)')
-    },
-    onSuccess: (_, { projectId, worktreeId }) => {
-      queryClient.invalidateQueries({
-        queryKey: projectsQueryKeys.worktrees(projectId),
-      })
-
-      // Invalidate archived sessions query so they show up immediately
-      queryClient.invalidateQueries({ queryKey: ['all-archived-sessions'] })
-
-      // Cleanup terminal instances for this worktree
-      clearLocalWorktreeState(worktreeId, queryClient)
-
-      // Clear chat if the closed session was active
-      const { activeWorktreeId, clearActiveWorktree } = useChatStore.getState()
-      if (activeWorktreeId === worktreeId) {
-        clearActiveWorktree()
-      }
-
-      toast.success('Session archived & closed')
-    },
-    onError: error => {
-      const message =
-        error instanceof Error
-          ? error.message
-          : typeof error === 'string'
-            ? error
-            : 'Unknown error occurred'
-      logger.error('Failed to close session (archive)', { error })
       toast.error('Failed to close session', { description: message })
     },
   })

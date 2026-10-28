@@ -12,7 +12,6 @@ const mocks = vi.hoisted(() => ({
     messages: []
     message_count?: number
   }[],
-  archive: vi.fn(),
   remove: vi.fn(),
   rename: vi.fn(),
 }))
@@ -34,6 +33,7 @@ vi.mock('@/services/git-status', () => ({
 vi.mock('@/services/chat', () => ({
   useSessions: () => ({ data: { sessions: mocks.sessions } }),
   useRenameSession: () => ({ mutate: mocks.rename }),
+  useCloseSession: () => ({ mutate: mocks.remove }),
   useCreateSession: () => ({ mutate: vi.fn(), isPending: false }),
   canReconnectSession: () => false,
   reconnectNativeCliSession: vi.fn(),
@@ -64,16 +64,9 @@ vi.mock('@/components/chat/session-card-utils', () => ({
   getResumeCommand: () => null,
   buildNativeClientSessionInput: () => null,
 }))
-vi.mock('@/components/chat/hooks/useSessionArchive', () => ({
-  useSessionArchive: () => ({
-    handleArchiveSession: mocks.archive,
-    handleDeleteSession: mocks.remove,
-  }),
-}))
 vi.mock('./useWorktreeMenuActions', () => ({
   useWorktreeMenuActions: () => ({
-    handleArchiveOrClose: vi.fn(),
-    preferences: { confirm_session_close: true },
+    handleClose: vi.fn(),
   }),
 }))
 vi.mock('./WorktreeContextMenu', () => ({
@@ -129,6 +122,17 @@ function renderExpanded() {
   )
 }
 
+function closeArgs(sessionId: string) {
+  return { worktreeId: 'wt-1', worktreePath: '/tmp/feature', sessionId }
+}
+
+function middleClick(element: HTMLElement, init: MouseEventInit = {}) {
+  fireEvent(
+    element,
+    new MouseEvent('auxclick', { bubbles: true, button: 1, ...init })
+  )
+}
+
 describe('WorktreeItem session context menu', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -147,7 +151,6 @@ describe('WorktreeItem session context menu', () => {
       'Rename',
       'Add Label',
       'Copy Session ID',
-      'Archive Session',
       'Delete Session',
     ]) {
       expect(screen.getByRole('menuitem', { name: item })).toBeInTheDocument()
@@ -163,17 +166,52 @@ describe('WorktreeItem session context menu', () => {
     expect(mocks.remove).not.toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: 'confirm session' }))
 
-    expect(mocks.remove).toHaveBeenCalledWith('s1')
+    expect(mocks.remove).toHaveBeenCalledWith(closeArgs('s1'))
   })
 
-  it('archives an empty session without confirmation', async () => {
+  it('confirms a middle-click close of a non-empty session, even with Shift or Alt held', () => {
+    renderExpanded()
+
+    middleClick(screen.getByText('Busy chat'), { shiftKey: true, altKey: true })
+
+    expect(mocks.remove).not.toHaveBeenCalled()
+    expect(
+      screen.getByRole('button', { name: 'confirm session' })
+    ).toBeInTheDocument()
+  })
+
+  it('deletes an empty session on middle-click without confirmation', () => {
+    renderExpanded()
+
+    middleClick(screen.getByText('Empty chat'))
+
+    expect(mocks.remove).toHaveBeenCalledWith(closeArgs('s2'))
+    expect(
+      screen.queryByRole('button', { name: 'confirm session' })
+    ).not.toBeInTheDocument()
+  })
+
+  it('confirms a middle-click close of the worktree, even with Shift held', () => {
+    renderExpanded()
+
+    middleClick(screen.getByText('feature'), { shiftKey: true })
+
+    expect(
+      screen.getByRole('button', { name: 'confirm worktree' })
+    ).toBeInTheDocument()
+  })
+
+  it('deletes an empty session from the menu without confirmation', async () => {
     const user = userEvent.setup()
     renderExpanded()
 
     fireEvent.contextMenu(screen.getByText('Empty chat'))
-    await user.click(screen.getByRole('menuitem', { name: 'Archive Session' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Delete Session' }))
 
-    expect(mocks.archive).toHaveBeenCalledWith('s2')
+    expect(mocks.remove).toHaveBeenCalledWith(closeArgs('s2'))
+    expect(
+      screen.queryByRole('button', { name: 'confirm session' })
+    ).not.toBeInTheDocument()
   })
 
   it('expands every project worktree from a status header', async () => {

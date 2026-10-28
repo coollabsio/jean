@@ -98,7 +98,7 @@ const TagInput = React.forwardRef<HTMLDivElement, TagInputProps>(
         role="group"
         aria-label="Tags"
         className={cn(
-          'border-input placeholder:text-muted-foreground focus-within:border-ring focus-within:ring-ring/50 flex min-h-9 w-full rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] focus-within:ring-[3px] md:text-sm',
+          'border-input placeholder:text-muted-foreground focus-within:border-foreground/25 flex min-h-9 w-full rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] md:text-sm',
           disabled && 'cursor-not-allowed opacity-50',
           className
         )}

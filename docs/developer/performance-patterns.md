@@ -182,7 +182,7 @@ projects is not retained indefinitely.
 
 ### Session and worktree state cleanup
 
-Closing or archiving a session must remove every session-keyed record in the
+Closing a session must remove every session-keyed record in the
 chat store, including drafts, streaming blocks, queues, permissions, review
 results, model settings, and status flags. Worktree lifecycle cleanup also
 removes session-to-worktree mappings, paths, loading state, terminal metadata,

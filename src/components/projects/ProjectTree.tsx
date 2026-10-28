@@ -17,7 +17,7 @@ import {
   extractInstruction,
   type Instruction,
 } from '@atlaskit/pragmatic-drag-and-drop-hitbox/list-item'
-import { ChevronDown, ChevronUp } from '@/components/icons/reicon'
+import { DisclosureChevron } from './DisclosureChevron'
 import { SectionHeaderContextMenu } from './SectionHeaderContextMenu'
 import { SidebarEmptySpaceMenu } from './SidebarEmptySpaceMenu'
 import { isContextMenuNearElement } from './sidebar-context-menu'
@@ -852,11 +852,7 @@ export function ProjectTree({
                   aria-expanded={showFolders}
                   disabled={searching}
                 >
-                  {showFolders ? (
-                    <ChevronUp className="size-3.5" />
-                  ) : (
-                    <ChevronDown className="size-3.5" />
-                  )}
+                  <DisclosureChevron open={showFolders} />
                 </button>
               </div>
             </SectionHeaderContextMenu>
@@ -940,11 +936,7 @@ export function ProjectTree({
                               : `${actionLabel} all projects on ${section.title}`
                           }
                         >
-                          {areAllProjectsExpanded ? (
-                            <ChevronUp className="size-3.5" />
-                          ) : (
-                            <ChevronDown className="size-3.5" />
-                          )}
+                          <DisclosureChevron open={areAllProjectsExpanded} />
                         </button>
                       </TooltipTrigger>
                       <TooltipContent>{actionLabel} all</TooltipContent>

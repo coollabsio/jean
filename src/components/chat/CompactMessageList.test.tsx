@@ -419,49 +419,6 @@ describe('CompactMessageList', () => {
     ).toBeVisible()
   })
 
-  it('shows edited files after an externally surfaced recap', () => {
-    renderCompact([
-      message('user-1', 'user', 100, 'make the change'),
-      message(
-        'assistant-1',
-        'assistant',
-        104,
-        'Done.\n\n## Recap\n\nChanged chat UI.',
-        {
-          tool_calls: [
-            {
-              id: 'tool-1',
-              name: 'FileChange',
-              input: [
-                {
-                  path: 'src/components/chat/CompactMessageList.tsx',
-                  diff: '@@ -1 +1 @@\n-old\n+new\n',
-                },
-              ],
-            },
-          ],
-          content_blocks: [
-            { type: 'tool_use', tool_call_id: 'tool-1' },
-            { type: 'text', text: 'Done.\n\n## Recap\n\nChanged chat UI.' },
-          ],
-        }
-      ),
-    ])
-
-    const recapHeading = screen.getByText('Recap')
-    const editedFiles = screen.getByRole('button', { name: 'Edited 1 file' })
-
-    expect(editedFiles).toBeVisible()
-    fireEvent.click(screen.getByRole('button', { name: /1 step/ }))
-    expect(
-      screen.getAllByRole('button', { name: 'Edited 1 file' })
-    ).toHaveLength(1)
-    expect(
-      recapHeading.compareDocumentPosition(editedFiles) &
-        Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy()
-  })
-
   it('shows options of a question in a text-only reply as buttons', () => {
     const onSendAnswer = vi.fn()
     const text =
@@ -537,69 +494,6 @@ describe('CompactMessageList', () => {
     expect(
       screen.queryByRole('button', { name: /^1\.\s?Grid$/ })
     ).not.toBeInTheDocument()
-  })
-
-  it('shows edited files after surfaced latest text when recap is absent', () => {
-    renderCompact([
-      message('user-1', 'user', 100, 'make the change'),
-      message('assistant-1', 'assistant', 104, 'Changed chat UI.', {
-        tool_calls: [
-          {
-            id: 'tool-1',
-            name: 'FileChange',
-            input: [
-              {
-                path: 'src/components/chat/CompactMessageList.tsx',
-                diff: '@@ -1 +1 @@\n-old\n+new\n',
-              },
-            ],
-          },
-        ],
-        content_blocks: [
-          { type: 'tool_use', tool_call_id: 'tool-1' },
-          { type: 'text', text: 'Changed chat UI.' },
-        ],
-      }),
-    ])
-
-    const latestText = screen.getAllByText('Changed chat UI.').at(-1)
-    const editedFiles = screen.getByRole('button', { name: 'Edited 1 file' })
-
-    expect(editedFiles).toBeVisible()
-    expect(latestText).toBeDefined()
-    if (!latestText) throw new Error('Expected changed chat UI text to render')
-    expect(
-      latestText.compareDocumentPosition(editedFiles) &
-        Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy()
-  })
-
-  it('keeps edited files visible when the response is cancelled', () => {
-    renderCompact([
-      message('user-1', 'user', 100, 'make the change'),
-      message('assistant-1', 'assistant', 104, '', {
-        cancelled: true,
-        tool_calls: [
-          {
-            id: 'tool-1',
-            name: 'FileChange',
-            input: [
-              {
-                path: 'src/components/chat/CompactMessageList.tsx',
-                diff: '@@ -1 +1 @@\n-old\n+new\n',
-              },
-            ],
-          },
-        ],
-        content_blocks: [{ type: 'tool_use', tool_call_id: 'tool-1' }],
-      }),
-    ])
-
-    expect(screen.getByText('(cancelled)')).toBeVisible()
-    const editedFiles = screen.getByRole('button', { name: 'Edited 1 file' })
-    expect(editedFiles).toBeVisible()
-    fireEvent.click(editedFiles)
-    expect(screen.getByText('CompactMessageList.tsx')).toBeVisible()
   })
 
   it('summarizes fragmented PI text deltas as one meaningful line', () => {

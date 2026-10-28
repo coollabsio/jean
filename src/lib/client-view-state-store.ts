@@ -40,7 +40,6 @@ export function captureClientViewState(): ClientViewState {
     pinned_recent_session_ids: projects.pinnedRecentSessionIds,
     left_sidebar_visible: ui.leftSidebarVisible,
     left_sidebar_size: ui.leftSidebarSize,
-    agents_sidebar_size: ui.agentsSidebarSize,
     file_browser_visible: ui.fileBrowserVisible,
     file_browser_size: ui.fileBrowserSize,
     right_sidebar_visible: ui.rightSidebarVisible,
@@ -101,7 +100,6 @@ export function applyClientViewState(state: ClientViewState): void {
   useUIStore.setState({
     leftSidebarVisible: state.left_sidebar_visible,
     leftSidebarSize: state.left_sidebar_size,
-    agentsSidebarSize: state.agents_sidebar_size,
     fileBrowserVisible: state.file_browser_visible,
     fileBrowserSize: state.file_browser_size,
     rightSidebarVisible: state.right_sidebar_visible,

@@ -1828,7 +1828,7 @@ export async function disposeTerminal(terminalId: string): Promise<void> {
 
 /**
  * Dispose all terminals for a worktree.
- * Used when worktree is deleted/archived/closed.
+ * Used when worktree is deleted/closed.
  * Stops PTY processes and cleans up embedded terminal instances.
  */
 export function disposeAllWorktreeTerminals(worktreeId: string): void {

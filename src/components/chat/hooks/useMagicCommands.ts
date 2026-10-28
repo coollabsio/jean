@@ -18,7 +18,6 @@ export interface InvestigateOverride {
 }
 
 interface MagicCommandHandlers {
-  handleSaveContext: () => void
   handleLoadContext: () => void
   handleLinkedProjects: () => void
   handleForkSession: () => void
@@ -64,7 +63,6 @@ interface UseMagicCommandsOptions extends MagicCommandHandlers {
  * The modal ChatWindow (inside SessionChatModal) will handle events instead.
  */
 export function useMagicCommands({
-  handleSaveContext,
   handleLoadContext,
   handleLinkedProjects,
   handleForkSession,
@@ -90,7 +88,6 @@ export function useMagicCommands({
 }: UseMagicCommandsOptions): void {
   // Store handlers in ref so event listener always has access to current versions
   const handlersRef = useRef<MagicCommandHandlers>({
-    handleSaveContext,
     handleLoadContext,
     handleLinkedProjects,
     handleForkSession,
@@ -117,7 +114,6 @@ export function useMagicCommands({
   // useLayoutEffect runs synchronously after render, ensuring refs are updated before effects
   useLayoutEffect(() => {
     handlersRef.current = {
-      handleSaveContext,
       handleLoadContext,
       handleLinkedProjects,
       handleForkSession,
@@ -162,9 +158,6 @@ export function useMagicCommands({
       const { command, ...rest } = e.detail
       const handlers = handlersRef.current
       switch (command) {
-        case 'save-context':
-          handlers.handleSaveContext()
-          break
         case 'load-context':
         case 'inject-session':
           // Inject Context opens the context picker on the Sessions list.

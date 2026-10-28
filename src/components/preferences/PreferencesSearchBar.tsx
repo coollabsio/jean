@@ -77,8 +77,8 @@ export const PreferencesSearchBar: React.FC<PreferencesSearchBarProps> = ({
         <div
           className={
             isDesktop
-              ? 'flex h-9 w-full items-center gap-2 rounded-md border border-input bg-background px-2.5 text-sm focus-within:ring-1 focus-within:ring-ring focus-within:border-ring transition-colors'
-              : 'flex h-9 w-full items-center gap-2 rounded-md border border-input bg-background px-3 text-sm focus-within:ring-1 focus-within:ring-ring focus-within:border-ring transition-colors'
+              ? 'flex h-9 w-full items-center gap-2 rounded-md border border-input bg-background px-2.5 text-sm focus-within:border-foreground/25 transition-colors'
+              : 'flex h-9 w-full items-center gap-2 rounded-md border border-input bg-background px-3 text-sm focus-within:border-foreground/25 transition-colors'
           }
         >
           <Search className="size-3.5 shrink-0 text-muted-foreground" />

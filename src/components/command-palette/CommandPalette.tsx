@@ -14,8 +14,9 @@ import {
   useAgentsEnabledServers,
   useShowAgents,
 } from '@/components/agents/agents-feature'
-import { useAgentsList, type AgentSummary } from '@/services/agents'
+import { useAgentsList } from '@/services/agents'
 import { AgentIcon } from '@/components/icons/JeanAgentIcon'
+import { Badge } from '@/components/ui/badge'
 import { useProjectsStore } from '@/store/projects-store'
 import {
   convertFileSrc,
@@ -57,12 +58,6 @@ interface ProjectCommand {
   accessedAt: number
   keywords: string[]
   execute: () => void
-}
-
-/** Agent row label: agents on other servers show the server name. */
-function agentDescription(agent: AgentSummary, multiServer: boolean) {
-  const base = agent.description || 'Open agent'
-  return multiServer ? `${base} · ${agent.serverName}` : base
 }
 
 export function CommandPalette() {
@@ -123,10 +118,12 @@ export function CommandPalette() {
         return {
           id: `goto-project-${project.id}`,
           label: project.name,
+          // Server badge beside the name; SSH servers show their target
           description: isServer
-            ? serverSubtitle(project)
-            : native
-              ? `Open on ${project.serverName ?? 'Local'}`
+            ? serverSubtitle(project) || undefined
+            : native &&
+                (project.serverId ?? LOCAL_SERVER_ID) !== LOCAL_SERVER_ID
+              ? project.serverName
               : undefined,
           serverName: project.serverName ?? 'Local',
           avatarUrl: project.avatar_path
@@ -286,12 +283,10 @@ export function CommandPalette() {
   const renderProjectItem = (cmd: ProjectCommand) => (
     <CommandItem
       key={cmd.id}
-      value={`${cmd.id} ${cmd.label} ${cmd.description ?? ''}`}
+      value={`${cmd.id} ${cmd.label} ${cmd.serverName}`}
       onSelect={() => handleCommandSelect(cmd.id)}
-      className="group items-start"
     >
-      {/* One line tall so the icon centers on the label's first line */}
-      <span className="flex h-lh shrink-0 items-center leading-snug">
+      <span className="flex shrink-0 items-center">
         {cmd.isServer ? (
           <Server className="size-4 text-muted-foreground" />
         ) : cmd.avatarUrl ? (
@@ -306,14 +301,12 @@ export function CommandPalette() {
           </span>
         )}
       </span>
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="truncate leading-snug">{cmd.label}</span>
-        {cmd.description && (
-          <span className="hidden text-xs leading-snug text-muted-foreground group-data-[selected=true]:block">
-            {cmd.description}
-          </span>
-        )}
-      </div>
+      <span className="min-w-0 truncate">{cmd.label}</span>
+      {cmd.description && (
+        <Badge variant="subtle" className="max-w-[45%] shrink truncate">
+          {cmd.description}
+        </Badge>
+      )}
     </CommandItem>
   )
 
@@ -324,17 +317,14 @@ export function CommandPalette() {
           key={agent.id}
           value={`agent-${agent.id} ${agent.name} ${agent.serverName}`}
           onSelect={() => handleAgentSelect(agent.id)}
-          className="items-start"
         >
-          <span className="flex h-lh shrink-0 items-center leading-snug">
-            <AgentIcon icon={agent.icon} className="size-4" />
-          </span>
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className="truncate leading-snug">{agent.name}</span>
-            <span className="truncate text-xs leading-snug text-muted-foreground">
-              {agentDescription(agent, multiServerAgents)}
-            </span>
-          </div>
+          <AgentIcon icon={agent.icon} className="size-4 shrink-0" />
+          <span className="min-w-0 truncate">{agent.name}</span>
+          {multiServerAgents && (
+            <Badge variant="subtle" className="max-w-[45%] shrink truncate">
+              {agent.serverName}
+            </Badge>
+          )}
         </CommandItem>
       ))}
     </CommandGroup>

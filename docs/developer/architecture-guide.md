@@ -446,10 +446,10 @@ Additional systems (no dedicated docs yet):
   `TERMINAL_SESSIONS`. Don't remove the `uiStateInitialized` guard without
   re-checking the race.
 
-- **Background Tasks** - Git/PR polling with focus-aware intervals (`src-tauri/src/background_tasks/`); Auto Fix (Mr. Robot) issue polling/planning/yolo handoff and scheduler active-hours window via `chrono` local time with midnight-crossing support (`jean-core/src/auto_fix/`). Scans list only issue numbers + labels; worktrees are never auto-archived; closed/ineligible ones stop using capacity, get their queued or running plan-mode investigation stopped, and never go to yolo; failed starts/yolo runs give up after 3 attempts; GitHub rate limits defer the project 15 min. Runtime status (last scan, errors, failed issues) is in memory and exposed via `get_auto_fix_status` / `clear_auto_fix_failures`. See [Mr. Robot workspace](./mr-robot.md) for the canvas controls, preview, activity, and view separation.
+- **Background Tasks** - Git/PR polling with focus-aware intervals (`src-tauri/src/background_tasks/`); Auto Fix (Mr. Robot) issue polling/planning/yolo handoff and scheduler active-hours window via `chrono` local time with midnight-crossing support (`jean-core/src/auto_fix/`). Scans list only issue numbers + labels; worktrees are never auto-deleted; closed/ineligible ones stop using capacity, get their queued or running plan-mode investigation stopped, and never go to yolo; failed starts/yolo runs give up after 3 attempts; GitHub rate limits defer the project 15 min. Runtime status (last scan, errors, failed issues) is in memory and exposed via `get_auto_fix_status` / `clear_auto_fix_failures`. See [Mr. Robot workspace](./mr-robot.md) for the canvas controls, preview, activity, and view separation.
 - **HTTP Server** - Tauri-free Axum server + WebSocket from `jean-core`; `src-server` provides the standalone Tokio adapter. See [server-architecture.md](./server-architecture.md).
 - **Diagnostics** - CPU/memory monitoring panel (`src-tauri/src/diagnostics/`)
-- **MCP** - Model Context Protocol server integration with per-project overrides (`src/services/mcp.ts`). First-party **Jean MCP** (`jean-core/src/jean_mcp_core.rs`) exposes project/worktree/session tools, usage + session model controls (`get_usage`, `set_session_model`), Run-command / panel-command dev environments (`get_run_environments`: running state, worktree/base session, startup command, ports, URL), plus the ship loop: `create_commit`, `push_worktree`, `detect_open_pr`, `link_worktree_pr`, `unlink_worktree_pr`, `create_pull_request`, `merge_pull_request`, `run_review` (thin wrappers over existing project commands). MCP `create_session` reuses an empty, idle chat session in the worktree before it creates another session; terminal, queued, running, archived, or previously used sessions are never reused. PR tools resolve repository paths from Jean's worktree ID; creation and linking persist the PR number and URL on the worktree.
+- **MCP** - Model Context Protocol server integration with per-project overrides (`src/services/mcp.ts`). First-party **Jean MCP** (`jean-core/src/jean_mcp_core.rs`) exposes project/worktree/session tools, usage + session model controls (`get_usage`, `set_session_model`), Run-command / panel-command dev environments (`get_run_environments`: running state, worktree/base session, startup command, ports, URL), plus the ship loop: `create_commit`, `push_worktree`, `detect_open_pr`, `link_worktree_pr`, `unlink_worktree_pr`, `create_pull_request`, `merge_pull_request`, `run_review` (thin wrappers over existing project commands). MCP `create_session` reuses an empty, idle chat session in the worktree before it creates another session; terminal, queued, running, closed, or previously used sessions are never reused. PR tools resolve repository paths from Jean's worktree ID; creation and linking persist the PR number and URL on the worktree.
 - **Model Catalog** - CDN-driven model lists and reasoning capabilities with bundled offline fallback ([model-catalog.md](./model-catalog.md))
 - **CLI Management** - Claude CLI, Codex CLI, Cursor CLI, OpenCode, PI, Command Code, Grok, Kimi Code, Antigravity, Muse, and gh CLI installation/versioning (backend-specific modules under `src-tauri/src/`)
 
@@ -486,14 +486,13 @@ Kimi Code-specific notes:
 ```
 MainWindow (Top-level orchestrator)
 ├── DevModeBanner (dev-only overlay)
-├── TitleBar (Window controls + toolbar)
-├── SidebarTabRail (Desktop column, 48px, holds the Settings gear)
+├── TitleBar (Window controls + toolbar, Settings gear on desktop)
 ├── LeftSideBar (Collapsible, pixel-resizable)
 │   ├── SidebarTabs (Projects | Recent | Agents)
 │   └── ProjectsSidebar → ProjectTree → WorktreeList per project, or AgentsSidebar
 ├── MainWindowContent (Primary content area)
 │   ├── ChatWindow (when worktree selected — always shows chat view)
-│   │   ├── Chat view (VirtualizedMessageList + ChatInput + ChatToolbar)
+│   │   ├── Chat view (CompactMessageList + ChatInput + ChatToolbar)
 │   │   ├── Full-screen terminal surface (optional primary worktree surface)
 │   │   ├── TerminalPanel (integrated PTY terminal)
 │   │   └── ReviewResultsPanel (AI code review findings)
@@ -511,7 +510,7 @@ MainWindow (Top-level orchestrator)
     ├── MagicModal / ReleaseNotesDialog / UpdatePrDialog
     ├── NewWorktreeModal / BranchConflictDialog
     ├── AddProjectDialog / GitInitModal
-    ├── ArchivedModal / CloseWorktreeDialog / QuitConfirmationDialog
+    ├── CloseWorktreeDialog / QuitConfirmationDialog
     └── Toaster (Notifications)
 ```
 
@@ -559,7 +558,6 @@ Use these shared primitives instead of one-off styling:
 ```
 src/
 ├── components/
-│   ├── archive/           # ArchivedModal
 │   ├── chat/              # ChatWindow + 50 files, 12 extracted hooks in chat/hooks/
 │   ├── command-palette/   # CommandPalette (cmdk-based)
 │   ├── commit/            # CommitModal
@@ -578,8 +576,6 @@ src/
 │   ├── useUIStatePersistence.ts      # Persist UI state to disk
 │   ├── useSessionStatePersistence.ts # Persist session state to disk
 │   ├── useMainWindowEventListeners.ts # Global keyboard/event handlers
-│   ├── useArchiveCleanup.ts          # Auto-cleanup old archived items
-│   ├── useAutoArchiveOnMerge.ts      # Archive worktrees when PRs merge
 │   ├── usePrWorktreeSweep.ts         # Sync PR worktrees for polling
 │   ├── useCliVersionCheck.ts         # CLI version monitoring
 │   ├── useTerminal.ts                # PTY terminal lifecycle
@@ -663,6 +659,18 @@ src-tauri/src/
     ├── process.rs         # silent_command() - prevents Windows console flash
     └── shell.rs           # Default shell detection
 ```
+
+### Session deletion and purge
+
+Closing a session is a soft delete. The session leaves the UI at once, but its
+data stays on disk for 30 days (`DELETED_ITEM_RETENTION_DAYS`, not
+configurable). There is no restore UI. The persisted `archived_at` field on a
+session keeps its old name and now means "deleted at". `cleanup_deleted_items`
+in `jean-core/src/projects/commands.rs` purges expired sessions. The backend
+runs it at startup and every 24 hours from `initialize_runtime` in
+`jean-core/src/lib.rs`. Worktrees archived by an older Jean release are purged
+30 days after their archive time. Closing a worktree deletes the git worktree
+and its branch immediately.
 
 ## Performance Patterns
 

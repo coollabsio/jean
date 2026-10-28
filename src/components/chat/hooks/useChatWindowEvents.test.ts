@@ -76,7 +76,6 @@ describe('useChatWindowEvents worktree approval shortcuts', () => {
       patchPreferences: {
         mutate: vi.fn(),
       },
-      handleSaveContext: vi.fn(),
       handleLoadContext: vi.fn(),
       runScripts: [],
       hasPendingPlanApproval: true,

@@ -83,7 +83,6 @@ import { useServerUpdateCheck } from './hooks/useServerUpdateCheck'
 import { useCodexCodeModeHostRepair } from './hooks/useCodexCodeModeHostRepair'
 import { useServerQuerySync } from './hooks/useServerQuerySync'
 import { useBackgroundInvestigation } from './hooks/useBackgroundInvestigation'
-import { useAutoArchiveOnMerge } from './hooks/useAutoArchiveOnMerge'
 import { useMagicPromptAutoDefaults } from './hooks/useMagicPromptAutoDefaults'
 import useStreamingEvents from './components/chat/hooks/useStreamingEvents'
 import { hydrateRunningSnapshot } from './lib/hydrate-running-snapshot'
@@ -927,9 +926,6 @@ function App() {
   // Headless background investigation - starts investigations on background
   // worktrees (CMD+Click) without opening the session modal
   useBackgroundInvestigation()
-
-  // Auto-archive worktrees when their PR is merged (if enabled in preferences)
-  useAutoArchiveOnMerge()
 
   // One-time: detect installed backends and set magic prompt defaults accordingly
   useMagicPromptAutoDefaults()

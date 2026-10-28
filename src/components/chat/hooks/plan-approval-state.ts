@@ -22,15 +22,11 @@ export function clearPlanApprovalTransientState(sessionId: string) {
 }
 
 /**
- * Hide the original planning session after its plan was forwarded to a new
- * session (Clear context / new worktree approval).
- *
- * Always archives instead of honoring `removal_behavior: 'delete'`: the
- * planning conversation is still useful history and must stay restorable
- * from archived sessions (issue #795). A toast with a Restore action tells
- * the user where the planning conversation went.
+ * Close the original planning session after its plan was forwarded to a new
+ * session (Clear context / new worktree approval). `close_session` soft-deletes
+ * it; the backend purges deleted sessions after 30 days.
  */
-export function archiveOriginalPlanSession({
+export function closeOriginalPlanSession({
   queryClient,
   worktreeId,
   worktreePath,
@@ -60,35 +56,14 @@ export function archiveOriginalPlanSession({
     }
   )
 
-  // cancel_process_if_running (used by archive) safely skips idle sessions,
-  // and with_sessions_mut uses a per-worktree mutex so there's no file-level race.
-  const invalidateSessions = () =>
-    queryClient.invalidateQueries({
-      queryKey: chatQueryKeys.sessions(worktreeId),
-    })
-
-  invoke('archive_session', { worktreeId, worktreePath, sessionId })
+  invoke('close_session', { worktreeId, worktreePath, sessionId })
     .then(() => {
-      invalidateSessions()
-      toast('Planning session archived', {
-        action: {
-          label: 'Restore',
-          onClick: () => {
-            invoke('unarchive_session', { worktreeId, worktreePath, sessionId })
-              .then(() => {
-                invalidateSessions()
-                toast.success('Session restored')
-              })
-              .catch(err =>
-                toast.error('Failed to restore session', {
-                  description: String(err),
-                })
-              )
-          },
-        },
+      queryClient.invalidateQueries({
+        queryKey: chatQueryKeys.sessions(worktreeId),
       })
+      toast('Planning session closed')
     })
     .catch(err =>
-      console.error('[plan-approval] Failed to archive original session:', err)
+      console.error('[plan-approval] Failed to close original session:', err)
     )
 }

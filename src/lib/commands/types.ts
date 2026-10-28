@@ -93,12 +93,7 @@ export interface CommandContext {
   runScript: () => void
 
   // Context
-  saveContext: () => void
   loadContext: () => void
-
-  // Archive
-  openArchivedModal: () => void
-  restoreLastArchived: () => void
 
   // Unread
   openUnreadSessions: () => void

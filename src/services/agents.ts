@@ -147,7 +147,6 @@ export type ScheduleKind = 'once' | 'interval' | 'cron' | 'event'
 export type ScheduleEvent =
   | 'session_finished'
   | 'session_failed'
-  | 'worktree_archived'
   | 'pr_merged'
   | 'approval_resolved'
 

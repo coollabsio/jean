@@ -181,11 +181,7 @@ describe('GeneralPane settings structure', () => {
       'src/components/preferences/panes/BrowserDefaultHostField.tsx',
       'utf8'
     )
-    const browserIndex = source.indexOf('title="Browser"')
-    const archiveIndex = source.indexOf('title="Archive"')
-
-    expect(browserIndex).toBeGreaterThan(-1)
-    expect(browserIndex).toBeLessThan(archiveIndex)
+    expect(source).toContain('title="Browser"')
     expect(source).toContain('anchorId="pref-general-section-browser"')
     expect(source).toContain(
       '<BrowserDefaultHostField preferences={preferences} />'
@@ -262,7 +258,6 @@ describe('GeneralPane settings structure', () => {
       'debug_mode_enabled',
       'agents_enabled',
       "invoke('open_log_directory')",
-      'label="Delete all archives"',
     ]) {
       expect(advanced, expected).toContain(expected)
     }

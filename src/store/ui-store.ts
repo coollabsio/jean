@@ -123,7 +123,7 @@ export interface MinimizedCliUpdate {
   progress: number | null
 }
 
-/** Top-level Jean feature selected in the sidebar tab rail */
+/** Top-level Jean feature selected in the sidebar tabs */
 export type RailSection = 'workspace' | 'agents'
 
 interface UIState {
@@ -143,7 +143,6 @@ interface UIState {
   agentUpdatesSeenAt: Record<string, number>
   leftSidebarSize: number // Width in pixels, persisted across sessions
   /** Agents sidebar width in pixels; can shrink to an icon column */
-  agentsSidebarSize: number
   /** File browser (worktree explorer) visibility */
   fileBrowserVisible: boolean
   /** File browser width in pixels, persisted across sessions */
@@ -270,7 +269,6 @@ interface UIState {
   markAgentUpdatesSeen: (agentId: string, timestamp: number) => void
   setAgentUpdatesSeenAt: (seenAt: Record<string, number>) => void
   setLeftSidebarSize: (size: number) => void
-  setAgentsSidebarSize: (size: number) => void
   leftSidebarSwipe: {
     isDragging: boolean
     dragOffset: number
@@ -446,7 +444,6 @@ export const useUIStore = create<UIState>()(
       agentsAdvanced: false,
       agentUpdatesSeenAt: {},
       leftSidebarSize: 250, // Default width in pixels
-      agentsSidebarSize: 250,
       leftSidebarSwipe: {
         isDragging: false,
         dragOffset: 0,
@@ -663,16 +660,6 @@ export const useUIStore = create<UIState>()(
             state.leftSidebarSize === size ? state : { leftSidebarSize: size },
           undefined,
           'setLeftSidebarSize'
-        ),
-
-      setAgentsSidebarSize: size =>
-        set(
-          state =>
-            state.agentsSidebarSize === size
-              ? state
-              : { agentsSidebarSize: size },
-          undefined,
-          'setAgentsSidebarSize'
         ),
 
       setLeftSidebarSwipe: swipe =>

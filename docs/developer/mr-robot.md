@@ -16,7 +16,7 @@ numbers, or session status.
 - `get_recent_worktrees` excludes automation before sorting and pagination.
   The frontend also filters responses from older servers. Explicit pins do not
   override this boundary.
-- Keep the complete worktree query cache intact. Mr. Robot, archive, deletion,
+- Keep the complete worktree query cache intact. Mr. Robot, deletion,
   chat recovery, and background jobs still need those resources.
 
 ## Status and actions

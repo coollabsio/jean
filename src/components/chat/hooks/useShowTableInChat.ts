@@ -12,7 +12,7 @@ import {
 } from '@/lib/pinned-table-reveal'
 import { useChatStore } from '@/store/chat-store'
 import type { ChatMessage, Session } from '@/types/chat'
-import type { VirtualizedMessageListHandle } from '../VirtualizedMessageList'
+import type { MessageListHandle } from '../message-list-handle'
 
 interface ShowTableInChatOptions {
   sessionId: string | null | undefined
@@ -21,7 +21,7 @@ interface ShowTableInChatOptions {
   compactStartIndex: number
   isCompactHistoryExpanded: boolean
   onExpandCompactHistory: () => void
-  listRef: RefObject<VirtualizedMessageListHandle | null>
+  listRef: RefObject<MessageListHandle | null>
   /** Stop auto-scroll to bottom so it does not undo the jump to the table */
   stopFollowingTail: () => void
 }

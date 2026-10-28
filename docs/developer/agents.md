@@ -19,7 +19,7 @@ SQLite). Migrations are a list in `agents/db.rs` (`MIGRATIONS`, tracked with
 | `agents` | Definitions. Jean (`jean`, built-in) is seeded on every start. |
 | `delegations` | "Session S works for agent A". `origin_session_id` = the agent session that sent the work. Status: `active`, `waiting`, `done`, `failed`, `cancelled`. |
 | `events` | Queued updates for an agent (`delegation`, `schedule`, `approval`, `message`). `target_session_id` = where it goes; empty = a new task. |
-| `tasks` | One row per task session (background work): status, one-line result, archive state. |
+| `tasks` | One row per task session (background work): status, one-line result, closed state (`archived_at`). |
 | `notifications` | `notify_user` messages (inbox, toast). |
 | `wakes` | One row per wake-up, for the hourly budget (`max_wakes_per_hour`). |
 | `schedules` | One-shot, interval (`every_secs`), cron, and event routines. |
@@ -38,7 +38,7 @@ no worktree record. Each agent has two:
 
 | Worktree ID | Holds |
 |---|---|
-| `__jean_agent__` / `__agent_<id>__` | The chat with the user (current chat + archived old chats) |
+| `__jean_agent__` / `__agent_<id>__` | The chat with the user (current chat + closed old chats) |
 | `__agent_tasks_<id>__` | Task sessions: one per schedule run, agent request, or follow-up without an origin |
 
 Both run in the agent's scratch folder: `{app_data}/jean-agent` or
@@ -136,13 +136,13 @@ tick (every 5s, or nudge())
   │    event routines are queued by listeners, not by this tick
   ├─ deliver (not paused, within the hourly budget):
   │    ├─ target set ──► "[Jean agent update]" into that session when idle
-  │    │                 (an archived old chat forwards to the current chat)
+  │    │                 (a closed old chat forwards to the current chat)
   │    └─ no target ──► new task session (max 2 running per agent)
   └─ maintenance (every 60s):
-       ├─ chat ≥ 40 messages and idle 10 min ──► new chat, old one archived,
+       ├─ chat ≥ 40 messages and idle 10 min ──► new chat, old one closed,
        │                                        end saved as carry_over, shorter
        │                                        copy stored as a journal entry
-       └─ finished tasks: archive after 3 days, delete 30 days later
+       └─ finished tasks: close after 3 days, purge 30 days later
 ```
 
 Test overrides (environment, for isolated test servers only):
@@ -217,7 +217,7 @@ delivered early. These routines do not add a hop. If the woken task calls
 `message_agent`, that call still uses `MAX_AGENT_HOPS`.
 
 The same occurrence is stored in `schedule_event_keys`, so a merged PR does
-not queue twice. Session and archive keys include the second they happened,
+not queue twice. Session keys include the second they happened,
 so each run of a session is a new occurrence. Changing the event type clears those
 keys. Pausing does not.
 
@@ -225,7 +225,6 @@ keys. Pausing does not.
 |---|---|---|
 | `session_finished` | `chat:done` | The session belongs to an agent (chat or task) or is an active delegation. Those already wake their agent, and a routine on them would loop. |
 | `session_failed` | `chat:error` | Same exclusion. `chat:cancelled` is not a trigger. |
-| `worktree_archived` | `worktree:archived` | The payload has no worktree id. |
 | `pr_merged` | `pr:status-update` whose `state` is `merged` | The same worktree and PR number already woke this routine. Open and closed PRs do not match. |
 | `approval_resolved` | `decide_approval`, after the result is queued back to the requesting session | The approval id already woke this routine. |
 

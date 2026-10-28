@@ -89,7 +89,6 @@ function renderChatToolbar(props: Partial<ChatToolbarProps> = {}) {
     loadedSentryContexts: [],
     attachedSavedContexts: [],
     onOpenMagicModal: vi.fn(),
-    onSaveContext: vi.fn(),
     onLoadContext: vi.fn(),
     onCommit: vi.fn(),
     onCommitAndPush: vi.fn(),
@@ -137,7 +136,7 @@ describe('ChatToolbar pending questions', () => {
     await user.click(screen.getByRole('button', { name: /more actions/i }))
 
     expect(screen.queryByText('Magic')).not.toBeInTheDocument()
-    expect(screen.getByText('Save Context')).toBeInTheDocument()
+    expect(screen.getByText('Inject Context')).toBeInTheDocument()
     expect(onOpenMagicModal).not.toHaveBeenCalled()
 
     await user.keyboard('{Escape}')

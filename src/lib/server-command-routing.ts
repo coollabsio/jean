@@ -214,7 +214,6 @@ function scopedId(serverId: ServerId, resourceId: unknown): unknown {
 
 const EVENT_RESOURCE_KEYS = new Set([
   ...ROUTED_ARGUMENT_KEYS,
-  'archived_worktree_id',
   'parent_session_id',
 ])
 
@@ -354,22 +353,16 @@ export function decorateServerResult<T>(
       'get_worktree',
       'create_worktree',
       'rename_worktree',
-      'unarchive_worktree',
       'create_base_session',
     ].includes(command)
   ) {
     return decorateWorktree(serverId, value) as T
   }
-  if (command === 'list_archived_worktrees' && Array.isArray(value)) {
-    return value.map(item => decorateWorktree(serverId, item)) as T
-  }
-  if (
-    ['get_session', 'create_session', 'unarchive_session'].includes(command)
-  ) {
+  if (['get_session', 'create_session'].includes(command)) {
     return decorateSession(serverId, value) as T
   }
-  // These return the next active session id (or null) as a bare string.
-  if (command === 'close_session' || command === 'archive_session') {
+  // Returns the next active session id (or null) as a bare string.
+  if (command === 'close_session') {
     return scopedId(serverId, value) as T
   }
   if (
@@ -383,9 +376,6 @@ export function decorateServerResult<T>(
       sessionId: scopedId(serverId, result.sessionId),
       worktreeId: scopedId(serverId, result.worktreeId),
     } as T
-  }
-  if (command === 'list_archived_sessions' && Array.isArray(value)) {
-    return value.map(item => decorateSession(serverId, item)) as T
   }
   if (
     (command === 'list_all_sessions' || command === 'list_unread_sessions') &&

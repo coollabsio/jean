@@ -18,7 +18,7 @@ import { useChatStore } from '@/store/chat-store'
 import { chatQueryKeys } from '@/services/chat'
 import type { WorktreeSessions } from '@/types/chat'
 import {
-  archiveOriginalPlanSession,
+  closeOriginalPlanSession,
   clearPlanApprovalTransientState,
 } from './plan-approval-state'
 
@@ -60,7 +60,7 @@ describe('clearPlanApprovalTransientState', () => {
   })
 })
 
-describe('archiveOriginalPlanSession', () => {
+describe('closeOriginalPlanSession', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
@@ -73,11 +73,11 @@ describe('archiveOriginalPlanSession', () => {
     } as unknown as WorktreeSessions)
   }
 
-  it('archives (never deletes) the planning session so history survives (#795)', async () => {
+  it('closes the planning session and moves the active session to the replacement', async () => {
     const queryClient = new QueryClient()
     seedSessions(queryClient)
 
-    archiveOriginalPlanSession({
+    closeOriginalPlanSession({
       queryClient,
       worktreeId: 'wt',
       worktreePath: '/tmp/wt',
@@ -85,59 +85,27 @@ describe('archiveOriginalPlanSession', () => {
       replacementSessionId: 'exec',
     })
 
-    expect(mockInvoke).toHaveBeenCalledWith('archive_session', {
+    expect(mockInvoke).toHaveBeenCalledWith('close_session', {
       worktreeId: 'wt',
       worktreePath: '/tmp/wt',
       sessionId: 'plan',
     })
-    expect(mockInvoke).not.toHaveBeenCalledWith(
-      'close_session',
-      expect.anything()
-    )
     const data = queryClient.getQueryData<WorktreeSessions>(
       chatQueryKeys.sessions('wt')
     )
     expect(data?.sessions.map(s => s.id)).toEqual(['exec'])
     expect(data?.active_session_id).toBe('exec')
-  })
-
-  it('offers a Restore action that unarchives the planning session', async () => {
-    const queryClient = new QueryClient()
-    seedSessions(queryClient)
-
-    archiveOriginalPlanSession({
-      queryClient,
-      worktreeId: 'wt',
-      worktreePath: '/tmp/wt',
-      sessionId: 'plan',
-    })
-
-    await vi.waitFor(() => expect(mockToast).toHaveBeenCalled())
-    const [message, options] = mockToast.mock.calls[0] as [
-      string,
-      { action: { label: string; onClick: () => void } },
-    ]
-    expect(message).toBe('Planning session archived')
-    expect(options.action.label).toBe('Restore')
-
-    options.action.onClick()
-
-    expect(mockInvoke).toHaveBeenCalledWith('unarchive_session', {
-      worktreeId: 'wt',
-      worktreePath: '/tmp/wt',
-      sessionId: 'plan',
-    })
     await vi.waitFor(() =>
-      expect(mockToast.success).toHaveBeenCalledWith('Session restored')
+      expect(mockToast).toHaveBeenCalledWith('Planning session closed')
     )
   })
 
-  it('does not offer Restore when archiving fails', async () => {
+  it('does not toast when closing fails', async () => {
     mockInvoke.mockRejectedValueOnce(new Error('boom'))
     const queryClient = new QueryClient()
     seedSessions(queryClient)
 
-    archiveOriginalPlanSession({
+    closeOriginalPlanSession({
       queryClient,
       worktreeId: 'wt',
       worktreePath: '/tmp/wt',
@@ -152,7 +120,7 @@ describe('archiveOriginalPlanSession', () => {
     const queryClient = new QueryClient()
     seedSessions(queryClient)
 
-    archiveOriginalPlanSession({
+    closeOriginalPlanSession({
       queryClient,
       worktreeId: 'wt',
       worktreePath: '/tmp/wt',

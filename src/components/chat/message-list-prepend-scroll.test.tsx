@@ -2,7 +2,6 @@ import type { ReactNode } from 'react'
 import { fireEvent, render, screen } from '@/test/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CompactMessageList } from './CompactMessageList'
-import { VirtualizedMessageList } from './VirtualizedMessageList'
 import type {
   ChatMessage,
   Question,
@@ -106,64 +105,6 @@ function ScrollContainer({ children }: { children: ReactNode }) {
 }
 
 describe('older message prepend scroll restoration', () => {
-  it('keeps the same normal-list message at the same viewport offset after loading older runs', () => {
-    const scrollContainerRef = { current: null as HTMLDivElement | null }
-    const onLoadOlderRuns = vi.fn()
-    const currentMessages = [
-      message('user-current'),
-      message('assistant-current'),
-    ]
-
-    const { rerender } = render(
-      <ScrollContainer>
-        <VirtualizedMessageList
-          {...baseProps}
-          messages={currentMessages}
-          scrollContainerRef={scrollContainerRef}
-          totalMessages={currentMessages.length}
-          hasOlderOnDisk
-          onLoadOlderRuns={onLoadOlderRuns}
-          loadedRunStartIndex={1}
-        />
-      </ScrollContainer>
-    )
-    const container = screen.getByTestId('scroll-container') as HTMLDivElement
-    scrollContainerRef.current = container
-    container.scrollTop = 250
-    rectTopByMessageId.set('user-current', 140)
-    rectTopByMessageId.set('assistant-current', 230)
-
-    fireEvent.click(
-      screen.getByRole('button', { name: /load older messages/i })
-    )
-
-    expect(onLoadOlderRuns).toHaveBeenCalledTimes(1)
-
-    rectTopByMessageId.set('user-current', 360)
-    rectTopByMessageId.set('assistant-current', 450)
-    const prependedMessages = [
-      message('user-older'),
-      message('assistant-older'),
-      ...currentMessages,
-    ]
-
-    rerender(
-      <ScrollContainer>
-        <VirtualizedMessageList
-          {...baseProps}
-          messages={prependedMessages}
-          scrollContainerRef={scrollContainerRef}
-          totalMessages={prependedMessages.length}
-          hasOlderOnDisk={false}
-          onLoadOlderRuns={onLoadOlderRuns}
-          loadedRunStartIndex={0}
-        />
-      </ScrollContainer>
-    )
-
-    expect(container.scrollTop).toBe(470)
-  })
-
   it('keeps the same compact-list message at the same viewport offset after loading older runs', () => {
     const scrollContainerRef = { current: null as HTMLDivElement | null }
     const onLoadOlderRuns = vi.fn()

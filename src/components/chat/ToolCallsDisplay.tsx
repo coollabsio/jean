@@ -1,5 +1,4 @@
 import { memo, useState, useCallback } from 'react'
-import { usePreferences } from '@/services/preferences'
 import type { ToolCall, Question, QuestionAnswer } from '@/types/chat'
 import {
   getAskUserQuestions,
@@ -102,10 +101,7 @@ export const ToolCallsDisplay = memo(function ToolCallsDisplay({
   onQuestionSkip,
   areQuestionsSkipped,
 }: ToolCallsDisplayProps) {
-  const { data: preferences } = usePreferences()
-  const [expanded, setExpanded] = useState(
-    defaultExpanded ?? preferences?.expand_tool_calls_by_default ?? false
-  )
+  const [expanded, setExpanded] = useState(defaultExpanded ?? false)
 
   // Memoized toggle handler
   const handleToggle = useCallback(() => {
@@ -114,7 +110,6 @@ export const ToolCallsDisplay = memo(function ToolCallsDisplay({
 
   // Separate special tools from regular tools
   // Note: plan approval tools are handled separately outside this component (after content)
-  // Note: Edit tools are handled by EditedFilesDisplay at the bottom of the message
   const questionTools = toolCalls.filter(isAskUserQuestion)
   const otherTools = toolCalls.filter(
     t => !isAskUserQuestion(t) && !isPlanToolCall(t)

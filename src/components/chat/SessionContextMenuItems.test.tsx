@@ -49,7 +49,6 @@ function renderMenu(
           resumeCommand={null}
           onRename={vi.fn()}
           onToggleLabel={vi.fn()}
-          onArchive={vi.fn()}
           onDelete={vi.fn()}
           {...props}
         />
@@ -74,7 +73,6 @@ describe('SessionContextMenuItems', () => {
       'Rename',
       'Add Label',
       'Copy Session ID',
-      'Archive Session',
       'Delete Session',
     ])
   })
@@ -96,7 +94,6 @@ describe('SessionContextMenuItems', () => {
       'Native Resume Command',
       'Reconnect',
       'Copy Session ID',
-      'Archive Session',
       'Delete Session',
     ])
   })

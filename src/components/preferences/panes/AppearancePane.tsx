@@ -390,38 +390,6 @@ export const AppearancePane: React.FC = () => {
           </InlineField>
 
           <InlineField
-            label="Compact chat view"
-            description="Show only the last prompt and answer by default"
-          >
-            <Switch
-              aria-label="Compact chat view"
-              checked={preferences?.compact_chat_view_enabled ?? true}
-              onCheckedChange={checked =>
-                patchPreferences.mutate({
-                  compact_chat_view_enabled: checked,
-                })
-              }
-              disabled={patchPreferences.isPending}
-            />
-          </InlineField>
-
-          <InlineField
-            label="Expand tool calls by default"
-            description="Expand tool call details in chat"
-          >
-            <Switch
-              aria-label="Expand tool calls by default"
-              checked={preferences?.expand_tool_calls_by_default ?? false}
-              onCheckedChange={checked =>
-                patchPreferences.mutate({
-                  expand_tool_calls_by_default: checked,
-                })
-              }
-              disabled={patchPreferences.isPending}
-            />
-          </InlineField>
-
-          <InlineField
             label="Terminal background"
             description="Pick a background color for the terminal panel"
           >

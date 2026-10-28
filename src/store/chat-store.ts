@@ -186,7 +186,7 @@ interface ChatUIState {
   // Pending/fired/cancelled ScheduleWakeup entries keyed by tool_call_id
   // so ToolCallInline can render a live countdown + status indicator.
   scheduledWakeups: Record<string, ScheduledWakeupState>
-  // Session ownership for scheduled wakeups, allowing close/archive cleanup.
+  // Session ownership for scheduled wakeups, allowing close cleanup.
   scheduledWakeupSessionIds: Record<string, string>
 
   // Answered questions per session (to make them read-only after answering)
@@ -295,9 +295,6 @@ interface ChatUIState {
 
   // Pending plan message IDs per session (persisted)
   pendingPlanMessageIds: Record<string, string | null>
-
-  // Sessions currently generating context in the background
-  savingContext: Record<string, boolean>
 
   // Sessions where user skipped questions (auto-skip all subsequent questions)
   skippedQuestionSessions: Record<string, boolean>
@@ -753,7 +750,7 @@ interface ChatUIState {
   /** Atomically clear streaming state after an error, mark as reviewing */
   failSession: (sessionId: string) => void
 
-  // Actions - Unified session state cleanup (for close/archive)
+  // Actions - Unified session state cleanup (for close)
   clearSessionState: (
     sessionId: string,
     options?: { removeReferences?: boolean }
@@ -768,10 +765,6 @@ interface ChatUIState {
     sessionId: string
   ) => { timestamp: number; trigger: string } | undefined
   clearLastCompaction: (sessionId: string) => void
-
-  // Actions - Save context tracking
-  setSavingContext: (sessionId: string, saving: boolean) => void
-  isSavingContext: (sessionId: string) => boolean
 
   // Actions - Worktree loading operations (commit, pr, review, merge, pull)
   setWorktreeLoading: (worktreeId: string, operation: string) => void
@@ -853,7 +846,6 @@ const SESSION_SCOPED_RECORD_KEYS = [
   'sessionStatusOverrides',
   'planFilePaths',
   'pendingPlanMessageIds',
-  'savingContext',
   'skippedQuestionSessions',
   'expandedAgentWidgetSessions',
   'dismissedAgentWidgetIds',
@@ -1023,7 +1015,6 @@ export const useChatStore = create<ChatUIState>()(
       sessionStatusOverrides: {},
       planFilePaths: {},
       pendingPlanMessageIds: {},
-      savingContext: {},
       skippedQuestionSessions: {},
       expandedAgentWidgetSessions: {},
       dismissedAgentWidgetIds: {},
@@ -4089,7 +4080,7 @@ export const useChatStore = create<ChatUIState>()(
           'failSession'
         ),
 
-      // Unified session state cleanup (for close/archive)
+      // Unified session state cleanup (for close)
       clearSessionState: (sessionId, options) =>
         set(
           state => {
@@ -4251,23 +4242,6 @@ export const useChatStore = create<ChatUIState>()(
           undefined,
           'clearLastCompaction'
         ),
-
-      // Save context tracking
-      setSavingContext: (sessionId, saving) =>
-        set(
-          state => ({
-            savingContext: saving
-              ? { ...state.savingContext, [sessionId]: true }
-              : (() => {
-                  const { [sessionId]: _, ...rest } = state.savingContext
-                  return rest
-                })(),
-          }),
-          undefined,
-          'setSavingContext'
-        ),
-
-      isSavingContext: sessionId => get().savingContext[sessionId] ?? false,
 
       // Worktree loading operations (commit, pr, review, merge, pull)
       setWorktreeLoading: (worktreeId, operation) =>

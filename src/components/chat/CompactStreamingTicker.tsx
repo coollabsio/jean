@@ -13,8 +13,6 @@ import {
   TOOL_CALL_DETAIL_PILL_CLASS,
   summarizeToolCall,
 } from './ToolCallInline'
-import { EditedFilesDisplay } from './EditedFilesDisplay'
-import { parseServerResourceKey } from '@/lib/server-resource'
 import { StreamingMessage } from './StreamingMessage'
 import { SteeredPromptGroup } from './SteeredPromptGroup'
 import {
@@ -214,10 +212,8 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
     streamingContent,
     onCopySteeredText,
     worktreePath,
-    sessionId,
     showLoadingIndicator = true,
   } = props
-  const ownerServerId = parseServerResourceKey(sessionId)?.serverId
   const [isOpen, setIsOpen] = useState(false)
 
   // Keyed on toolCalls only so these keep a stable identity across
@@ -455,17 +451,11 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
                 contentBlocks={activityBlocks}
                 toolCalls={activityToolCalls}
                 streamingContent={hasPlan ? '' : streamingContent}
-                hideEditedFiles
               />
             </div>
           </CollapsibleContent>
         </div>
       </Collapsible>
-      <EditedFilesDisplay
-        toolCalls={activityToolCalls}
-        worktreePath={worktreePath}
-        serverId={ownerServerId === 'local' ? undefined : ownerServerId}
-      />
       {hasPlan && (
         <StreamingMessage
           {...props}

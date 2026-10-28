@@ -67,7 +67,7 @@ vi.mock('./useWorktreeMenuActions', () => ({
     handleOpenInFinder: vi.fn(),
     handleOpenInTerminal: vi.fn(),
     handleOpenInEditor: vi.fn(),
-    handleArchiveOrClose: vi.fn(),
+    handleClose: vi.fn(),
     handleDelete: vi.fn(),
   }),
 }))

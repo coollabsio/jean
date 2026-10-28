@@ -41,7 +41,7 @@ vi.mock('@/services/chat', () => ({
           worktree_id: 'wt-b',
           sessions: [
             { id: 's-b1', name: 'Chat' },
-            { id: 's-b2', name: 'Archived', archived_at: 1 },
+            { id: 's-b2', name: 'Deleted', archived_at: 1 },
             { id: 's-b3', name: 'Current' },
           ],
         },
@@ -93,7 +93,7 @@ describe('useContextLinkUsage', () => {
     expect(result.current.getMatches({ type: 'pr', id: 7 })[0]?.sessionId).toBe(
       's-b1'
     )
-    // Archived sessions do not count
+    // Deleted sessions do not count
     expect(result.current.getMatches({ type: 'issue', id: 30 })).toEqual([])
     // Linear identifiers match case-insensitively
     expect(

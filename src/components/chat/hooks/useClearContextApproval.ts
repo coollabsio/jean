@@ -12,7 +12,7 @@ import {
   chatQueryKeys,
 } from '@/services/chat'
 import { invoke } from '@/lib/transport'
-import { archiveOriginalPlanSession } from './plan-approval-state'
+import { closeOriginalPlanSession } from './plan-approval-state'
 import type {
   EffortLevel,
   Session,
@@ -443,16 +443,14 @@ export function useClearContextApproval({
         backend,
       })
 
-      // Optionally archive the original session (keeps history restorable)
-      if (preferences?.close_original_on_clear_context) {
-        archiveOriginalPlanSession({
-          queryClient,
-          worktreeId,
-          worktreePath,
-          sessionId,
-          replacementSessionId: newSession.id,
-        })
-      }
+      // The plan now lives in the new session
+      closeOriginalPlanSession({
+        queryClient,
+        worktreeId,
+        worktreePath,
+        sessionId,
+        replacementSessionId: newSession.id,
+      })
     },
     [
       worktreeId,

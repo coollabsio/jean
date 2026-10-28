@@ -10,7 +10,6 @@ import { toast } from 'sonner'
 import { logger } from '@/lib/logger'
 import { generateId } from '@/lib/uuid'
 import { disposeTerminal } from '@/lib/terminal-instances'
-import { readCloseBypassDetail } from '@/lib/confirm-bypass'
 import {
   beginSessionStateHydration,
   endSessionStateHydration,
@@ -18,7 +17,6 @@ import {
 import type {
   AllSessionsResponse,
   SessionSearchResponse,
-  ArchivedSessionEntry,
   ChatMessage,
   ChatHistory,
   LoadedMessages,
@@ -37,8 +35,6 @@ import type {
 } from '@/types/chat'
 import { isTauri, projectsQueryKeys } from '@/services/projects'
 import { hasBackendTransport } from '@/lib/environment'
-import { preferencesQueryKeys } from '@/services/preferences'
-import type { AppPreferences } from '@/types/preferences'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import { useTerminalStore } from '@/store/terminal-store'
@@ -125,7 +121,7 @@ export function cleanupSessionTerminalForRemovedSession(
 /**
  * Optimistically drop a session from the ['all-sessions'] cache so the
  * finished-session bell (UnreadBell / useUnreadCount) updates instantly when a
- * session is closed or archived. Invalidation still runs afterwards to
+ * session is closed. Invalidation still runs afterwards to
  * reconcile with the backend.
  */
 export function removeSessionFromAllSessionsCache(
@@ -1286,296 +1282,10 @@ export function useCloseSession() {
 }
 
 /**
- * Hook to archive a session tab (hide from UI but keep messages)
- * Returns the new active session ID (if any)
- */
-export function useArchiveSession() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: async ({
-      worktreeId,
-      worktreePath,
-      sessionId,
-    }: {
-      worktreeId: string
-      worktreePath: string
-      sessionId: string
-    }): Promise<string | null> => {
-      if (!isTauri()) {
-        throw new Error('Not in Tauri context')
-      }
-
-      logger.debug('Archiving session', { sessionId })
-      const newActiveId = await invoke<string | null>('archive_session', {
-        worktreeId,
-        worktreePath,
-        sessionId,
-      })
-      logger.info('Session archived', { newActiveId })
-      return newActiveId
-    },
-    onSuccess: (newActiveId, { worktreeId, sessionId }) => {
-      queryClient.invalidateQueries({
-        queryKey: chatQueryKeys.sessions(worktreeId),
-      })
-
-      // Invalidate archived sessions query so it shows up immediately
-      queryClient.invalidateQueries({ queryKey: ['all-archived-sessions'] })
-
-      // Drop from the finished-session bell (reads from ['all-sessions']).
-      removeSessionFromAllSessionsCache(queryClient, sessionId)
-      queryClient.invalidateQueries({
-        queryKey: chatQueryKeys.unreadSessionCount(),
-      })
-      queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
-
-      // Clear all session-scoped state
-      useChatStore
-        .getState()
-        .clearSessionState(sessionId, { removeReferences: true })
-      clearSessionScrollState(sessionId)
-      cleanupSessionTerminalForRemovedSession(worktreeId, sessionId)
-
-      // Switch to the new active session — but only if the caller hasn't already
-      // picked a neighbor (e.g. SessionChatModal sets it based on visual tab order)
-      if (newActiveId) {
-        const currentActive =
-          useChatStore.getState().activeSessionIds[worktreeId]
-        if (!currentActive || currentActive === sessionId) {
-          useChatStore.getState().setActiveSession(worktreeId, newActiveId)
-        }
-      } else {
-        // Keep the worktree modal open and let it render its empty state.
-        useChatStore.setState(state => {
-          if (!(worktreeId in state.activeSessionIds)) return state
-          const { [worktreeId]: _removed, ...rest } = state.activeSessionIds
-          return { activeSessionIds: rest }
-        })
-      }
-    },
-    onError: error => {
-      if (isWsDisconnectError(error)) return
-      const message = error instanceof Error ? error.message : String(error)
-      logger.error('Failed to archive session', { error })
-      toast.error('Failed to archive session', { description: message })
-    },
-  })
-}
-
-/**
- * Hook to unarchive a session (restore it to the session list)
- */
-export function useUnarchiveSession() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: async ({
-      worktreeId,
-      worktreePath,
-      sessionId,
-    }: {
-      worktreeId: string
-      worktreePath: string
-      sessionId: string
-    }): Promise<Session> => {
-      if (!isTauri()) {
-        throw new Error('Not in Tauri context')
-      }
-
-      logger.debug('Unarchiving session', { sessionId })
-      const session = await invoke<Session>('unarchive_session', {
-        worktreeId,
-        worktreePath,
-        sessionId,
-      })
-      logger.info('Session unarchived', { sessionId })
-      return session
-    },
-    onSuccess: (_, { worktreeId }) => {
-      queryClient.invalidateQueries({
-        queryKey: chatQueryKeys.sessions(worktreeId),
-      })
-      toast.success('Session restored')
-    },
-    onError: error => {
-      if (isWsDisconnectError(error)) return
-      const message = error instanceof Error ? error.message : String(error)
-      logger.error('Failed to unarchive session', { error })
-      toast.error('Failed to restore session', { description: message })
-    },
-  })
-}
-
-/** Response from restore_session_with_base */
-interface RestoreSessionWithBaseResponse {
-  session: Session
-  worktree: Worktree
-}
-
-/**
- * Hook to restore a session, recreating the base session if needed
- *
- * This handles the case where a session belongs to a closed base session.
- * It will recreate the base session and migrate all sessions to it.
- */
-export function useRestoreSessionWithBase() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: async ({
-      worktreeId,
-      worktreePath,
-      sessionId,
-      projectId,
-    }: {
-      worktreeId: string
-      worktreePath: string
-      sessionId: string
-      projectId: string
-    }): Promise<RestoreSessionWithBaseResponse> => {
-      if (!isTauri()) {
-        throw new Error('Not in Tauri context')
-      }
-
-      logger.debug('Restoring session with base', { sessionId, projectId })
-      const response = await invoke<RestoreSessionWithBaseResponse>(
-        'restore_session_with_base',
-        {
-          worktreeId,
-          worktreePath,
-          sessionId,
-          projectId,
-        }
-      )
-      logger.info('Session restored with base', {
-        sessionId,
-        worktreeId: response.worktree.id,
-      })
-      return response
-    },
-    onSuccess: (response, { worktreeId }) => {
-      // Invalidate queries for both old and new worktree IDs
-      queryClient.invalidateQueries({
-        queryKey: chatQueryKeys.sessions(worktreeId),
-      })
-      if (response.worktree.id !== worktreeId) {
-        queryClient.invalidateQueries({
-          queryKey: chatQueryKeys.sessions(response.worktree.id),
-        })
-      }
-      // Invalidate worktrees to show the restored base session
-      queryClient.invalidateQueries({
-        queryKey: projectsQueryKeys.worktrees(response.worktree.project_id),
-      })
-      toast.success('Session restored')
-    },
-    onError: error => {
-      if (isWsDisconnectError(error)) return
-      const message = error instanceof Error ? error.message : String(error)
-      logger.error('Failed to restore session with base', { error })
-      toast.error('Failed to restore session', { description: message })
-    },
-  })
-}
-
-/**
- * Hook to permanently delete an archived session
- */
-export function useDeleteArchivedSession() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: async ({
-      worktreeId,
-      worktreePath,
-      sessionId,
-    }: {
-      worktreeId: string
-      worktreePath: string
-      sessionId: string
-    }): Promise<void> => {
-      if (!isTauri()) {
-        throw new Error('Not in Tauri context')
-      }
-
-      logger.debug('Deleting archived session', { sessionId })
-      await invoke('delete_archived_session', {
-        worktreeId,
-        worktreePath,
-        sessionId,
-      })
-      logger.info('Archived session deleted', { sessionId })
-    },
-    onSuccess: (_, { worktreeId }) => {
-      queryClient.invalidateQueries({
-        queryKey: chatQueryKeys.sessions(worktreeId),
-      })
-      toast.success('Session permanently deleted')
-    },
-    onError: error => {
-      if (isWsDisconnectError(error)) return
-      const message = error instanceof Error ? error.message : String(error)
-      logger.error('Failed to delete archived session', { error })
-      toast.error('Failed to delete session', { description: message })
-    },
-  })
-}
-
-/**
- * Hook to list archived sessions for a worktree
- */
-export function useArchivedSessions(
-  worktreeId: string | null,
-  worktreePath: string | null
-) {
-  return useQuery({
-    queryKey: [...chatQueryKeys.sessions(worktreeId ?? ''), 'archived'],
-    queryFn: async (): Promise<Session[]> => {
-      if (!isTauri() || !worktreeId || !worktreePath) {
-        return []
-      }
-
-      logger.debug('Listing archived sessions', { worktreeId })
-      const sessions = await invoke<Session[]>('list_archived_sessions', {
-        worktreeId,
-        worktreePath,
-      })
-      logger.debug('Got archived sessions', { count: sessions.length })
-      return sessions
-    },
-    enabled: !!worktreeId && !!worktreePath,
-    staleTime: 1000 * 60, // 1 minute
-  })
-}
-
-/**
- * Hook to list all archived sessions across all active worktrees
- */
-export function useAllArchivedSessions() {
-  return useQuery({
-    queryKey: ['all-archived-sessions'],
-    queryFn: async (): Promise<ArchivedSessionEntry[]> => {
-      if (!isTauri()) {
-        return []
-      }
-
-      logger.debug('Listing all archived sessions')
-      const sessions = await invoke<ArchivedSessionEntry[]>(
-        'list_all_archived_sessions'
-      )
-      logger.debug('Got all archived sessions', { count: sessions.length })
-      return sessions
-    },
-    staleTime: 1000 * 60, // 1 minute
-  })
-}
-
-/**
  * Hook to handle the CMD+W keybinding for closing session or worktree.
  *
  * Listens for 'close-session-or-worktree' custom event and either:
- * - Removes the current session (archive or delete based on removal_behavior preference)
+ * - Deletes the current session (the backend purges it after 30 days)
  * - When closing the last session, navigates to canvas instead of deleting the worktree
  */
 export function useCloseSessionOrWorktreeKeybinding(
@@ -1584,7 +1294,6 @@ export function useCloseSessionOrWorktreeKeybinding(
     mode?: 'worktree' | 'session'
   ) => void
 ) {
-  const archiveSession = useArchiveSession()
   const closeSession = useCloseSession()
   const queryClient = useQueryClient()
 
@@ -1593,14 +1302,14 @@ export function useCloseSessionOrWorktreeKeybinding(
       useChatStore.getState()
 
     if (!activeWorktreeId || !activeWorktreePath) {
-      logger.warn('Cannot archive session: no active worktree')
+      logger.warn('Cannot close session: no active worktree')
       return
     }
 
     const activeSessionId = getActiveSession(activeWorktreeId)
 
     if (!activeSessionId) {
-      logger.warn('Cannot archive session: no active session')
+      logger.warn('Cannot close session: no active session')
       return
     }
 
@@ -1610,60 +1319,32 @@ export function useCloseSessionOrWorktreeKeybinding(
     )
 
     if (!sessionsData) {
-      logger.warn('Cannot archive session: no sessions data in cache')
+      logger.warn('Cannot close session: no sessions data in cache')
       return
     }
 
-    // Filter to non-archived sessions
-    const activeSessions = sessionsData.sessions.filter(s => !s.archived_at)
-    const sessionCount = activeSessions.length
+    // Deleted sessions keep archived_at until the backend purges them
+    const sessionCount = sessionsData.sessions.filter(
+      s => !s.archived_at
+    ).length
 
-    // Read removal behavior preference from cache
-    const preferences = queryClient.getQueryData<AppPreferences>(
-      preferencesQueryKeys.preferences()
-    )
-    const shouldDelete = preferences?.removal_behavior === 'delete'
-
-    // Close the current session (archive or delete)
-    if (shouldDelete) {
-      logger.debug('Deleting session', {
-        sessionId: activeSessionId,
-        sessionCount,
-      })
-      closeSession.mutate({
-        worktreeId: activeWorktreeId,
-        worktreePath: activeWorktreePath,
-        sessionId: activeSessionId,
-      })
-    } else {
-      logger.debug('Archiving session', {
-        sessionId: activeSessionId,
-        sessionCount,
-      })
-      archiveSession.mutate({
-        worktreeId: activeWorktreeId,
-        worktreePath: activeWorktreePath,
-        sessionId: activeSessionId,
-      })
-    }
-  }, [archiveSession, closeSession, queryClient])
+    logger.debug('Deleting session', {
+      sessionId: activeSessionId,
+      sessionCount,
+    })
+    closeSession.mutate({
+      worktreeId: activeWorktreeId,
+      worktreePath: activeWorktreePath,
+      sessionId: activeSessionId,
+    })
+  }, [closeSession, queryClient])
 
   useEffect(() => {
-    const handleCloseSessionOrWorktree = (e: Event) => {
+    const handleCloseSessionOrWorktree = () => {
       // Skip when session modal is open — SessionChatModal handles CMD+W in that case
       if (useUIStore.getState().sessionChatModalOpen) return
 
-      const bypassConfirm = readCloseBypassDetail(e)
-
-      // Check if confirmation is required
-      const preferences = queryClient.getQueryData<AppPreferences>(
-        preferencesQueryKeys.preferences()
-      )
-      if (
-        !bypassConfirm &&
-        preferences?.confirm_session_close !== false &&
-        onConfirmRequired
-      ) {
+      if (onConfirmRequired) {
         // Find branch name and session count for the dialog
         const { activeWorktreeId } = useChatStore.getState()
         if (activeWorktreeId) {

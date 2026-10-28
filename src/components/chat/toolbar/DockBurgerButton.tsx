@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  Archive,
   BarChart3,
   Command,
   Menu,
@@ -103,14 +102,6 @@ export function DockBurgerButton({ className }: DockBurgerButtonProps = {}) {
         >
           <Plus className="mr-2 h-4 w-4" />
           Add Project
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() =>
-            window.dispatchEvent(new CustomEvent('command:open-archived-modal'))
-          }
-        >
-          <Archive className="mr-2 h-4 w-4" />
-          Archives
         </DropdownMenuItem>
         <DropdownMenuItem
           onClick={() => useUIStore.getState().setCommandPaletteOpen(true)}

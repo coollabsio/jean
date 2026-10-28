@@ -39,7 +39,6 @@ interface UseChatWindowEventsParams {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   patchPreferences: { mutate: (prefs: any) => void }
   // Context operations
-  handleSaveContext: () => void
   handleLoadContext: () => void
   // Run scripts
   runScripts: string[]
@@ -81,7 +80,6 @@ export function useChatWindowEvents({
   currentQueuedMessages,
   preferences,
   patchPreferences,
-  handleSaveContext,
   handleLoadContext,
   runScripts,
   hasPendingPlanApproval,
@@ -326,24 +324,21 @@ export function useChatWindowEvents({
     return () => window.removeEventListener('cancel-prompt', handler)
   }, [isModal]) // isModal is constant for the lifetime of ChatWindow
 
-  // Context commands (save/load/run-script)
+  // Context commands (load/run-script)
   useEffect(() => {
-    const handleSave = () => handleSaveContext()
     const handleLoad = () => handleLoadContext()
     const handleRun = () => {
       const first = runScripts[0]
       if (!activeWorktreeId || !first) return
       useTerminalStore.getState().startRun(activeWorktreeId, first)
     }
-    window.addEventListener('command:save-context', handleSave)
     window.addEventListener('command:load-context', handleLoad)
     window.addEventListener('command:run-script', handleRun)
     return () => {
-      window.removeEventListener('command:save-context', handleSave)
       window.removeEventListener('command:load-context', handleLoad)
       window.removeEventListener('command:run-script', handleRun)
     }
-  }, [handleSaveContext, handleLoadContext, activeWorktreeId, runScripts])
+  }, [handleLoadContext, activeWorktreeId, runScripts])
 
   // Toggle debug mode
   useEffect(() => {

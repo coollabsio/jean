@@ -17,7 +17,6 @@ export {
   AlertCircle,
   AlertTriangle,
   Archive,
-  ArchiveDown,
   ArrowDown,
   ArrowLeft,
   ArrowRight,
@@ -150,7 +149,6 @@ export {
   XSquare,
 } from 'reicon-react'
 
-export { ArchiveDown as ArchiveRestore } from 'reicon-react'
 export { Download as ArrowDownToLine } from 'reicon-react'
 export { Refresh as ArrowDownUp } from 'reicon-react'
 export { SortDownUp as ArrowUpDown } from 'reicon-react'

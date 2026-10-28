@@ -1,13 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import {
-  ChevronDown,
-  ChevronUp,
-  Pencil,
-  Server,
-  Shield,
-  Trash2,
-} from '@/components/icons/reicon'
+import { Pencil, Shield, Trash2 } from '@/components/icons/reicon'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,6 +17,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { DisclosureChevron } from '../DisclosureChevron'
 import { cn } from '@/lib/utils'
 import { openServerProject, useRemoveServerProject } from '@/services/projects'
 import { useProjectsStore } from '@/store/projects-store'
@@ -108,11 +102,7 @@ export function ServersList({ servers, searchQuery }: ServersListProps) {
               aria-expanded={showServers}
               disabled={Boolean(searchQuery)}
             >
-              {showServers ? (
-                <ChevronUp className="size-3.5" />
-              ) : (
-                <ChevronDown className="size-3.5" />
-              )}
+              <DisclosureChevron open={showServers} />
             </button>
           </div>
           {showServers && (
@@ -128,14 +118,15 @@ export function ServersList({ servers, searchQuery }: ServersListProps) {
                         selectedProjectId === project.id && 'bg-muted'
                       )}
                     >
-                      <Server className="size-3.5 shrink-0 text-muted-foreground" />
                       <span className="flex min-w-0 flex-1 flex-col">
                         <span className="truncate text-sm">{project.name}</span>
-                        <span className="truncate text-[0.6875rem] text-muted-foreground">
-                          {serverSubtitle(project)}
-                        </span>
+                        {serverSubtitle(project) && (
+                          <span className="truncate text-2xs text-muted-foreground">
+                            {serverSubtitle(project)}
+                          </span>
+                        )}
                         {usesAdminUser(project) && (
-                          <span className="truncate text-[0.6875rem] text-warning">
+                          <span className="truncate text-2xs text-warning">
                             Uses root · set up a restricted user
                           </span>
                         )}

@@ -66,7 +66,7 @@ export function resolveSweepBaseBranch(
  * background sweep polling. Should be mounted at the app root level.
  *
  * Subscribes to query cache changes so the list updates when worktrees
- * are created, archived, or get new PRs.
+ * are created, deleted, or get new PRs.
  */
 export function usePrWorktreeSweep(projects: Project[] | undefined) {
   const queryClient = useQueryClient()

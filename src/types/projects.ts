@@ -334,7 +334,7 @@ export interface Worktree {
   order: number
   /** Origin/category for this worktree */
   origin?: WorktreeOrigin
-  /** Unix timestamp when worktree was archived (undefined = not archived) */
+  /** Unix timestamp when the worktree was deleted (undefined = live) */
   archived_at?: number
   /** Unix timestamp when worktree was last opened/viewed by the user */
   last_opened_at?: number
@@ -421,27 +421,6 @@ export interface WorktreeDeleteErrorEvent {
   error: string
 }
 
-// =============================================================================
-// Worktree Archive Events (from Rust backend)
-// =============================================================================
-
-/** Event payload when worktree is archived */
-export interface WorktreeArchivedEvent {
-  id: string
-  project_id: string
-}
-
-/** Event payload when worktree is unarchived (restored) */
-export interface WorktreeUnarchivedEvent {
-  worktree: Worktree
-}
-
-/** Event payload when worktree is permanently deleted */
-export interface WorktreePermanentlyDeletedEvent {
-  id: string
-  project_id: string
-}
-
 /** Event payload when worktree path already exists */
 export interface WorktreePathExistsEvent {
   /** The pending worktree ID that failed */
@@ -452,10 +431,6 @@ export interface WorktreePathExistsEvent {
   path: string
   /** Suggested alternative name (with incremented suffix) */
   suggested_name: string
-  /** If the path matches an archived worktree, its ID (for restore option) */
-  archived_worktree_id?: string
-  /** Name of the archived worktree (for display) */
-  archived_worktree_name?: string
   /** Issue context to use when creating a new worktree with the suggested name */
   issue_context?: {
     number: number
