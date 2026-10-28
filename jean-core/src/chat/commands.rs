@@ -5567,6 +5567,15 @@ pub async fn send_chat_message(
         }
         Err(_) => {
             log::info!("[SendChat] EXIT session={session_id} reason=thread_panic");
+            // Before the cleanup below, which drops the registry entry it reads.
+            if opencode_cancel_flag.is_some() {
+                persist_opencode_session_id_after_error(
+                    &app,
+                    &worktree_path,
+                    &worktree_id,
+                    &session_id,
+                );
+            }
             super::registry::cleanup_owned_session_registrations(
                 &session_id,
                 None,
@@ -12700,16 +12709,10 @@ plugin:tools:search: npx -y search-mcp - ✘ Failed to connect";
         let worktree_id = "wt-opencode-no-registry";
         let index = crate::chat::storage::load_index(&app, worktree_id).unwrap();
         let session_id = index.sessions[0].id.clone();
-        // No cancel flag or session id registered — the function must return
-        // early without writing metadata.
+
         persist_opencode_session_id_after_error(&app, "/tmp/wt", worktree_id, &session_id);
 
-        // No metadata should have been saved because the early return happened
-        // before with_sessions_mut was called.
         let metadata = crate::chat::storage::load_metadata(&app, &session_id).unwrap();
-        match metadata {
-            Some(m) => assert_eq!(m.opencode_session_id, None),
-            None => {}
-        }
+        assert!(metadata.and_then(|m| m.opencode_session_id).is_none());
     }
 }
