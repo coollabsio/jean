@@ -616,24 +616,4 @@ describe('StreamingMessage', () => {
     expect(screen.getByText('please also test this')).toBeVisible()
     expect(screen.getByText('Working…')).toBeVisible()
   })
-
-  it('copies steered prompts while streaming', () => {
-    const onCopySteeredText = vi.fn()
-
-    render(
-      <StreamingMessage
-        {...baseProps}
-        onCopySteeredText={onCopySteeredText}
-        contentBlocks={[
-          { type: 'text', text: 'Before steer' },
-          { type: 'user_input', text: 'copy the live steer' },
-        ]}
-      />
-    )
-
-    screen.getByRole('button', { name: 'Copy steered prompt' }).click()
-
-    expect(onCopySteeredText).toHaveBeenCalledTimes(1)
-    expect(onCopySteeredText).toHaveBeenCalledWith('copy the live steer')
-  })
 })

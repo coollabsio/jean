@@ -637,38 +637,6 @@ describe('MessageItem', () => {
     })
   })
 
-  it('copies steered prompts rendered in full native messages', () => {
-    const onCopyToInput = vi.fn()
-
-    render(
-      <MessageItem
-        {...baseProps}
-        onCopyToInput={onCopyToInput}
-        message={{
-          ...baseMessage,
-          id: 'assistant-steered',
-          content: '',
-          tool_calls: [],
-          content_blocks: [
-            { type: 'text', text: 'Before steer' },
-            { type: 'user_input', text: 'copy this steered prompt' },
-            { type: 'text', text: 'After steer' },
-          ],
-        }}
-      />
-    )
-
-    screen.getByRole('button', { name: 'Copy steered prompt' }).click()
-
-    expect(onCopyToInput).toHaveBeenCalledTimes(1)
-    expect(onCopyToInput).toHaveBeenCalledWith(
-      expect.objectContaining({
-        role: 'user',
-        content: 'copy this steered prompt',
-      })
-    )
-  })
-
   it('constrains long user prompts so mobile viewports do not clip the left edge', () => {
     const longUrl =
       'https://github.com/coollabsio/jean/actions/runs/30667035760'

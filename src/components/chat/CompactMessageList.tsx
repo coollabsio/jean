@@ -1210,24 +1210,6 @@ export const CompactMessageList = memo(
                   <SteeredPromptGroup
                     texts={item.texts}
                     worktreePath={worktreePath}
-                    onCopyText={
-                      onCopyToInput
-                        ? text =>
-                            onCopyToInput({
-                              id: `${item.messageId}-steered-copy`,
-                              session_id:
-                                messages[item.globalIndex]?.session_id ??
-                                sessionId,
-                              role: 'user',
-                              content: text,
-                              timestamp:
-                                messages[item.globalIndex]?.timestamp ??
-                                Date.now(),
-                              content_blocks: [],
-                              tool_calls: [],
-                            })
-                        : undefined
-                    }
                   />
                 </div>
               )

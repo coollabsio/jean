@@ -405,21 +405,6 @@ export const MessageItem = memo(function MessageItem({
       .catch(() => toast.error('Failed to copy response'))
   }, [assistantResponse])
 
-  const handleCopySteeredText = useCallback(
-    (text: string) => {
-      onCopyToInput?.({
-        id: `${message.id}-steered-copy`,
-        session_id: message.session_id,
-        role: 'user',
-        content: text,
-        timestamp: message.timestamp,
-        content_blocks: [],
-        tool_calls: [],
-      })
-    },
-    [message.id, message.session_id, message.timestamp, onCopyToInput]
-  )
-
   // Content for the message box (shared between user and assistant)
   const {
     resolvedPlan,
@@ -749,11 +734,6 @@ export const MessageItem = memo(function MessageItem({
                                   messageServerId === 'local'
                                     ? undefined
                                     : messageServerId
-                                }
-                                onCopyText={
-                                  onCopyToInput
-                                    ? handleCopySteeredText
-                                    : undefined
                                 }
                               />
                             )

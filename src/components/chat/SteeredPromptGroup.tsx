@@ -1,11 +1,5 @@
 import { memo } from 'react'
-import { Copy } from '@/components/icons/reicon'
 import { normalizePath } from '@/lib/path-utils'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
 import { ImageLightbox } from './ImageLightbox'
 import { TextFileLightbox } from './TextFileLightbox'
 import { FileMentionBadge } from './FileMentionBadge'
@@ -26,12 +20,10 @@ import {
  */
 export const SteeredPromptGroup = memo(function SteeredPromptGroup({
   texts,
-  onCopyText,
   worktreePath,
   serverId,
 }: {
   texts: string[]
-  onCopyText?: (text: string) => void
   worktreePath?: string
   serverId?: string
 }) {
@@ -57,24 +49,8 @@ export const SteeredPromptGroup = memo(function SteeredPromptGroup({
           return (
             <div
               key={textKey}
-              className="relative group/steered min-w-0 px-3 py-2 text-foreground break-words [overflow-wrap:anywhere]"
+              className="min-w-0 px-3 py-2 text-foreground break-words [overflow-wrap:anywhere]"
             >
-              {onCopyText && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      aria-label="Copy steered prompt"
-                      onClick={() => onCopyText(text)}
-                      className="absolute right-full top-2 mr-1 p-1 rounded cursor-pointer text-muted-foreground/0 [@media(pointer:coarse)]:text-muted-foreground/60 hover:text-muted-foreground hover:bg-muted/50 group-hover/steered:text-muted-foreground/50 transition-colors"
-                    >
-                      <Copy className="h-3.5 w-3.5" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>Copy to clipboard</TooltipContent>
-                </Tooltip>
-              )}
-
               {imagePaths.length > 0 && (
                 <div className="flex flex-wrap gap-2 mb-2">
                   {imagePaths.map((path, idx) => (

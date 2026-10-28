@@ -85,8 +85,6 @@ interface StreamingMessageProps {
   ) => QuestionAnswer[] | undefined
   /** Check if questions are being skipped for this session */
   areQuestionsSkipped: (sessionId: string) => boolean
-  /** Callback to copy a steered user prompt */
-  onCopySteeredText?: (text: string) => void
 }
 
 /**
@@ -105,7 +103,6 @@ export const StreamingMessage = memo(function StreamingMessage({
   isQuestionAnswered,
   getSubmittedAnswers,
   areQuestionsSkipped,
-  onCopySteeredText,
 }: StreamingMessageProps) {
   const displayBlocks = useMemo(
     () => restoreOmittedStreamingPrefix(streamingContent, contentBlocks),
@@ -305,7 +302,6 @@ export const StreamingMessage = memo(function StreamingMessage({
                                       <SteeredPromptGroup
                                         texts={item.texts}
                                         worktreePath={worktreePath}
-                                        onCopyText={onCopySteeredText}
                                       />
                                     )
                                   case 'task':

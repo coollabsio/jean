@@ -656,41 +656,4 @@ describe('CompactMessageList', () => {
           Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
   })
-
-  it('copies each steered prompt', () => {
-    const onCopyToInput = vi.fn()
-
-    renderCompact(
-      [
-        message('user-1', 'user', 100, 'hello'),
-        message('assistant-1', 'assistant', 104, 'All received', {
-          content_blocks: [
-            { type: 'user_input', text: 'first queued prompt' },
-            { type: 'user_input', text: 'second queued prompt' },
-          ],
-        }),
-      ],
-      { onCopyToInput }
-    )
-
-    const copyButtons = screen.getAllByRole('button', {
-      name: 'Copy steered prompt',
-    })
-
-    expect(copyButtons).toHaveLength(2)
-
-    const secondCopyButton = copyButtons[1]
-    if (!secondCopyButton) {
-      throw new Error('Expected second copy button')
-    }
-    fireEvent.click(secondCopyButton)
-
-    expect(onCopyToInput).toHaveBeenCalledTimes(1)
-    expect(onCopyToInput).toHaveBeenCalledWith(
-      expect.objectContaining({
-        role: 'user',
-        content: 'second queued prompt',
-      })
-    )
-  })
 })

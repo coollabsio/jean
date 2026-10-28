@@ -137,7 +137,7 @@ export function RecentWorktreesList({
   const pinnedSessionIds = useRecentSessionPins(projects)
   const [limit, setLimit] = useState(INITIAL_RECENT_LIMIT)
   const [showSnoozed, setShowSnoozed] = useState(false)
-  const [workingExpanded, setWorkingExpanded] = useState(true)
+  const [workingExpanded, setWorkingExpanded] = useState(false)
   const shortcutsEnabled = isNativeApp() && !isMobile
   const showShortcutHints = useModifierHintsVisible(
     isModOnlyHeld,
