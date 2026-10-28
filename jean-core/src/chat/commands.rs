@@ -2536,6 +2536,27 @@ pub async fn trigger_terminal_session_naming(
 // Chat Commands (now session-based)
 // ============================================================================
 
+/// Keeps the live OpenCode session id of a run that failed: the server may
+/// still finish the turn, and the next send must resume that context.
+fn persist_opencode_session_id_after_error(
+    app: &tauri::AppHandle,
+    worktree_path: &str,
+    worktree_id: &str,
+    session_id: &str,
+) {
+    let Some(sid) = super::registry::get_opencode_session_id(session_id) else {
+        return;
+    };
+    if let Err(save_err) = with_sessions_mut(app, worktree_path, worktree_id, |sessions| {
+        if let Some(session) = sessions.find_session_mut(session_id) {
+            persist_salvaged_resume_id(session, &Backend::Opencode, &sid);
+        }
+        Ok(())
+    }) {
+        log::warn!("Failed to persist OpenCode session id after error: {save_err}");
+    }
+}
+
 // Persist a salvaged resume/session ID onto the correct backend field.
 // Used by the thread-error/thread-panic recovery paths so the next send can
 // resume the conversation instead of starting fresh.
@@ -5070,6 +5091,15 @@ pub async fn send_chat_message(
             // this send. Prefer ownership-aware cleanup so a follow-up send that
             // started after cancel is not clobbered (#329).
             log::info!("[SendChat] EXIT session={session_id} reason=thread_error error={e}");
+            // Before the cleanup below, which drops the registry entry it reads.
+            if opencode_cancel_flag.is_some() {
+                persist_opencode_session_id_after_error(
+                    &app,
+                    &worktree_path,
+                    &worktree_id,
+                    &session_id,
+                );
+            }
             super::registry::cleanup_owned_session_registrations(
                 &session_id,
                 None,
@@ -5146,6 +5176,15 @@ pub async fn send_chat_message(
         }
         Err(_) => {
             log::info!("[SendChat] EXIT session={session_id} reason=thread_panic");
+            // Before the cleanup below, which drops the registry entry it reads.
+            if opencode_cancel_flag.is_some() {
+                persist_opencode_session_id_after_error(
+                    &app,
+                    &worktree_path,
+                    &worktree_id,
+                    &session_id,
+                );
+            }
             super::registry::cleanup_owned_session_registrations(
                 &session_id,
                 None,
@@ -12310,5 +12349,53 @@ plugin:tools:search: npx -y search-mcp - ✘ Failed to connect";
         let text = "a".repeat(250);
         let preview = truncate_error_preview(&text, 200);
         assert_eq!(preview, format!("{}...", "a".repeat(200)));
+    }
+
+    #[test]
+    fn failed_opencode_run_keeps_its_live_session_id() {
+        let _guard = super::super::registry::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let temp = tempfile::tempdir().unwrap();
+        let app =
+            tauri::AppHandle::new(temp.path().to_path_buf(), temp.path().to_path_buf()).unwrap();
+        let worktree_id = "wt-opencode-error";
+        let index = crate::chat::storage::load_index(&app, worktree_id).unwrap();
+        let session_id = index.sessions[0].id.clone();
+        super::super::registry::register_cancel_flag(
+            session_id.clone(),
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        );
+        super::super::registry::update_cancel_flag_context(
+            &session_id,
+            "ses_live".to_string(),
+            "/tmp/wt".to_string(),
+        );
+
+        persist_opencode_session_id_after_error(&app, "/tmp/wt", worktree_id, &session_id);
+        super::super::registry::cleanup_session_registrations(&session_id);
+
+        let metadata = crate::chat::storage::load_metadata(&app, &session_id)
+            .unwrap()
+            .expect("metadata saved");
+        assert_eq!(metadata.opencode_session_id.as_deref(), Some("ses_live"));
+    }
+
+    #[test]
+    fn persist_opencode_session_id_is_noop_without_registry_entry() {
+        let _guard = super::super::registry::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let temp = tempfile::tempdir().unwrap();
+        let app =
+            tauri::AppHandle::new(temp.path().to_path_buf(), temp.path().to_path_buf()).unwrap();
+        let worktree_id = "wt-opencode-no-registry";
+        let index = crate::chat::storage::load_index(&app, worktree_id).unwrap();
+        let session_id = index.sessions[0].id.clone();
+
+        persist_opencode_session_id_after_error(&app, "/tmp/wt", worktree_id, &session_id);
+
+        let metadata = crate::chat::storage::load_metadata(&app, &session_id).unwrap();
+        assert!(metadata.and_then(|m| m.opencode_session_id).is_none());
     }
 }
