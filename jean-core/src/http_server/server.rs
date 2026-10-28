@@ -1,7 +1,11 @@
 use axum::{
     body::{Body, Bytes},
-    extract::{ws::WebSocketUpgrade, DefaultBodyLimit, Path as AxumPath, Query, State},
+    extract::{
+        ws::WebSocketUpgrade, ConnectInfo, DefaultBodyLimit, Path as AxumPath, Query, Request,
+        State,
+    },
     http::{header, HeaderMap, HeaderValue, StatusCode, Uri},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
@@ -31,6 +35,8 @@ struct AppState {
     token_required: bool,
     localhost_only: bool,
     dist_path: std::path::PathBuf,
+    sessions: Arc<super::session::WebSessions>,
+    cookie_name: String,
 }
 
 /// Server handle for shutdown coordination.
@@ -235,21 +241,35 @@ pub async fn start_server(
     // Resolve the dist directory at runtime for static file serving
     let dist_path = resolve_dist_path(&app);
 
+    let addr = SocketAddr::new(bind_ip, port);
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .map_err(|e| format!("Failed to bind to {bind_host}:{port}: {e}"))?;
+
+    let local_addr = listener
+        .local_addr()
+        .map_err(|e| format!("Failed to get local address: {e}"))?;
+
+    let sessions_path = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data directory: {e}"))?
+        .join("web-sessions.json");
+
     let state = AppState {
         app: app.clone(),
         token: token.clone(),
         token_required,
         localhost_only,
         dist_path: dist_path.clone(),
+        sessions: Arc::new(super::session::WebSessions::load(sessions_path)),
+        cookie_name: super::session::cookie_name(local_addr.port()),
     };
 
     let cors = cors_layer_from_env();
 
-    let router = Router::new()
-        .route("/healthz", get(health_handler))
-        .route("/readyz", get(ready_handler))
+    let protected = Router::new()
         .route("/ws", get(ws_handler))
-        .route("/api/auth", get(auth_handler))
         .route("/api/commit-jobs", post(start_commit_job_handler))
         .route(
             "/api/pasted-files",
@@ -259,19 +279,18 @@ pub async fn start_server(
         .route("/api/version", get(version_handler))
         .route("/api/files/{*filepath}", get(file_handler))
         .route("/api/project-files/{*filepath}", get(project_file_handler))
+        .route_layer(middleware::from_fn_with_state(state.clone(), require_auth));
+
+    let router = Router::new()
+        .route("/healthz", get(health_handler))
+        .route("/readyz", get(ready_handler))
+        .route("/api/auth", get(auth_handler))
+        .route("/api/logout", post(logout_handler))
+        .merge(protected)
         .fallback(get(static_handler))
         .layer(CompressionLayer::new().br(true).gzip(true))
         .layer(cors)
         .with_state(state);
-
-    let addr = SocketAddr::new(bind_ip, port);
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .map_err(|e| format!("Failed to bind to {bind_host}:{port}: {e}"))?;
-
-    let local_addr = listener
-        .local_addr()
-        .map_err(|e| format!("Failed to get local address: {e}"))?;
 
     let url = format_http_url(&display_host_for_bind_ip(bind_ip), local_addr.port());
 
@@ -290,13 +309,16 @@ pub async fn start_server(
         log::info!(
             "HTTP server listening on {local_addr} (bind_host: {bind_host_for_log}, localhost_only: {localhost_only})"
         );
-        axum::serve(listener, router)
-            .with_graceful_shutdown(async {
-                let _ = shutdown_rx.await;
-                log::info!("HTTP server shutting down");
-            })
-            .await
-            .unwrap_or_else(|e| log::error!("HTTP server error: {e}"));
+        axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .with_graceful_shutdown(async {
+            let _ = shutdown_rx.await;
+            log::info!("HTTP server shutting down");
+        })
+        .await
+        .unwrap_or_else(|e| log::error!("HTTP server error: {e}"));
         if let Some(ws) = app_for_shutdown.try_state::<WsBroadcaster>() {
             ws.set_active(false);
         }
@@ -373,19 +395,7 @@ async fn ready_handler(State(state): State<AppState>) -> Response {
 }
 
 /// WebSocket upgrade handler with token auth.
-async fn ws_handler(
-    ws: WebSocketUpgrade,
-    headers: HeaderMap,
-    Query(params): Query<WsAuth>,
-    State(state): State<AppState>,
-) -> Response {
-    // Validate token (skip if token not required)
-    if state.token_required
-        && !request_is_authorized(params.token.as_deref(), &headers, &state.token)
-    {
-        return (StatusCode::UNAUTHORIZED, "Invalid token").into_response();
-    }
-
+async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
     // Get broadcast receiver for this client
     let broadcaster = state.app.try_state::<WsBroadcaster>();
     let event_rx = match broadcaster {
@@ -399,54 +409,196 @@ async fn ws_handler(
     ws.on_upgrade(move |socket| handle_ws_connection(socket, app, event_rx))
 }
 
-/// Token validation endpoint. Returns 200 with { ok: true } on success,
-/// or 401 with { ok: false, error: "..." } on failure.
+/// How a request proved access.
+#[derive(Debug, PartialEq)]
+enum AuthMethod {
+    Token,
+    Cookie,
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
+}
+
+fn first_header_value(headers: &HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(name)?
+        .to_str()
+        .ok()?
+        .split(',')
+        .next()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+}
+
+/// Whether a browser `Origin` may use cookie auth. Cookies are sent
+/// automatically, so other sites must not be able to ride on them (CSRF and
+/// cross-site WebSocket hijacking). A missing `Origin` is a same-origin GET or
+/// a non-browser client.
+fn origin_allows_cookie_auth(headers: &HeaderMap) -> bool {
+    let Some(origin) = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok()) else {
+        return true;
+    };
+    let allowed_raw = std::env::var("JEAN_ALLOWED_ORIGINS").unwrap_or_default();
+    if allowed_raw.trim() == "*"
+        || allowed_raw
+            .split(',')
+            .any(|allowed| allowed.trim().trim_end_matches('/') == origin)
+    {
+        return true;
+    }
+    let Some(origin_host) = origin
+        .split_once("://")
+        .map(|(_, rest)| rest.trim_end_matches('/').to_ascii_lowercase())
+        .filter(|host| !host.is_empty())
+    else {
+        return false;
+    };
+    first_header_value(headers, "host").as_deref() == Some(origin_host.as_str())
+        || first_header_value(headers, "x-forwarded-host").as_deref() == Some(origin_host.as_str())
+}
+
+/// Check the access token (query or Bearer) or the session cookie.
+fn authorize(
+    state: &AppState,
+    ip: IpAddr,
+    headers: &HeaderMap,
+    query_token: Option<&str>,
+) -> Result<AuthMethod, Response> {
+    if let Some(token) = token_from_query_or_bearer(query_token, headers) {
+        let now = std::time::Instant::now();
+        if state.sessions.is_rate_limited(ip, now) {
+            return Err((StatusCode::TOO_MANY_REQUESTS, "Too many failed attempts").into_response());
+        }
+        if auth::validate_token(&token, &state.token) {
+            return Ok(AuthMethod::Token);
+        }
+        state.sessions.record_failure(ip, now);
+        return Err((StatusCode::UNAUTHORIZED, "Invalid token").into_response());
+    }
+
+    let session_valid = super::session::cookie_value(headers, &state.cookie_name)
+        .is_some_and(|id| state.sessions.validate(&id, &state.token, unix_now()));
+    if !session_valid {
+        return Err((StatusCode::UNAUTHORIZED, "Invalid token").into_response());
+    }
+    if !origin_allows_cookie_auth(headers) {
+        return Err((StatusCode::FORBIDDEN, "Origin not allowed").into_response());
+    }
+    Ok(AuthMethod::Cookie)
+}
+
+fn query_token(uri: &Uri) -> Option<String> {
+    Query::<WsAuth>::try_from_uri(uri).ok()?.0.token
+}
+
+async fn require_auth(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if state.token_required {
+        let token = query_token(request.uri());
+        if let Err(response) = authorize(&state, peer.ip(), request.headers(), token.as_deref()) {
+            return response;
+        }
+    }
+    next.run(request).await
+}
+
+fn with_cookie(mut response: Response, cookie: &str) -> Response {
+    if let Ok(value) = HeaderValue::from_str(cookie) {
+        response.headers_mut().append(header::SET_COOKIE, value);
+    }
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
+}
+
+/// Sign-in endpoint. A valid access token starts a cookie session for
+/// same-origin browsers; a valid cookie keeps the browser signed in.
+/// Returns 200 with { ok: true }, or 401/429 with { ok: false, error }.
 async fn auth_handler(
     headers: HeaderMap,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Query(params): Query<WsAuth>,
     State(state): State<AppState>,
 ) -> Response {
     let build_info = read_web_build_info(&state.dist_path).await;
-
-    // If token not required, always return success
-    if !state.token_required {
-        return Json(serde_json::json!({
-            "ok": true,
-            "token_required": false,
-            "webBuildId": build_info.web_build_id,
-            "appVersion": build_info.app_version,
-        }))
-        .into_response();
-    }
-
-    if request_is_authorized(params.token.as_deref(), &headers, &state.token) {
+    let ok_body = || {
         Json(serde_json::json!({
             "ok": true,
+            "token_required": state.token_required,
             "webBuildId": build_info.web_build_id,
             "appVersion": build_info.app_version,
         }))
         .into_response()
-    } else {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({ "ok": false, "error": "Invalid token" })),
-        )
-            .into_response()
+    };
+
+    if !state.token_required {
+        return ok_body();
+    }
+
+    match authorize(&state, peer.ip(), &headers, params.token.as_deref()) {
+        // Cross-origin clients (the desktop app's remote connections) keep
+        // using the token and cannot use a SameSite cookie, so no session.
+        Ok(AuthMethod::Token) if origin_allows_cookie_auth(&headers) => {
+            let id = state.sessions.create(&state.token, unix_now());
+            with_cookie(
+                ok_body(),
+                &super::session::session_cookie(&state.cookie_name, &id),
+            )
+        }
+        Ok(AuthMethod::Token) => ok_body(),
+        Ok(AuthMethod::Cookie) => {
+            // Refresh the cookie's Max-Age; the server-side expiry slides too.
+            let id = super::session::cookie_value(&headers, &state.cookie_name).unwrap_or_default();
+            with_cookie(
+                ok_body(),
+                &super::session::session_cookie(&state.cookie_name, &id),
+            )
+        }
+        Err(response) => {
+            let status = response.status();
+            let error = if status == StatusCode::TOO_MANY_REQUESTS {
+                "Too many failed attempts. Wait a minute and try again."
+            } else if status == StatusCode::FORBIDDEN {
+                "Origin not allowed"
+            } else {
+                "Invalid token"
+            };
+            (
+                status,
+                Json(serde_json::json!({ "ok": false, "error": error })),
+            )
+                .into_response()
+        }
     }
 }
 
+/// Sign this browser out: revoke its session and clear the cookie.
+async fn logout_handler(headers: HeaderMap, State(state): State<AppState>) -> Response {
+    if !origin_allows_cookie_auth(&headers) {
+        return (StatusCode::FORBIDDEN, "Origin not allowed").into_response();
+    }
+    if let Some(id) = super::session::cookie_value(&headers, &state.cookie_name) {
+        state.sessions.revoke(&id);
+    }
+    with_cookie(
+        StatusCode::NO_CONTENT.into_response(),
+        &super::session::expired_cookie(&state.cookie_name),
+    )
+}
+
 async fn start_commit_job_handler(
-    headers: HeaderMap,
-    Query(params): Query<WsAuth>,
     State(state): State<AppState>,
     Json(request): Json<StartCommitJobRequest>,
 ) -> Response {
-    if state.token_required
-        && !request_is_authorized(params.token.as_deref(), &headers, &state.token)
-    {
-        return (StatusCode::UNAUTHORIZED, "Invalid token").into_response();
-    }
-
     match crate::projects::start_commit_job(
         state.app,
         request.worktree_path,
@@ -476,34 +628,17 @@ struct SavePastedFileQuery {
 /// Save a raw file upload. Large attachments use this route instead of the
 /// WebSocket, because one base64 WS message over 16 MiB closes the socket.
 async fn save_pasted_file_handler(
-    headers: HeaderMap,
     Query(params): Query<SavePastedFileQuery>,
     State(state): State<AppState>,
     body: Bytes,
 ) -> Response {
-    if state.token_required
-        && !request_is_authorized(params.token.as_deref(), &headers, &state.token)
-    {
-        return (StatusCode::UNAUTHORIZED, "Invalid token").into_response();
-    }
-
     match crate::chat::save_pasted_file_bytes(&state.app, &body, &params.filename) {
         Ok(result) => Json(result).into_response(),
         Err(error) => (StatusCode::BAD_REQUEST, error).into_response(),
     }
 }
 
-async fn version_handler(
-    headers: HeaderMap,
-    Query(params): Query<WsAuth>,
-    State(state): State<AppState>,
-) -> Response {
-    if state.token_required
-        && !request_is_authorized(params.token.as_deref(), &headers, &state.token)
-    {
-        return (StatusCode::UNAUTHORIZED, "Invalid token").into_response();
-    }
-
+async fn version_handler(State(state): State<AppState>) -> Response {
     Json(read_web_build_info(&state.dist_path).await).into_response()
 }
 
@@ -574,18 +709,7 @@ async fn load_active_sessions_windowed(
 /// user lands on (project list + currently-selected project's worktrees +
 /// windowed messages for the focused session). Additional data is lazy-loaded
 /// by the frontend via TanStack Query hooks when the user navigates.
-async fn init_handler(
-    headers: HeaderMap,
-    Query(params): Query<WsAuth>,
-    State(state): State<AppState>,
-) -> Response {
-    // Validate token (skip if token not required)
-    if state.token_required
-        && !request_is_authorized(params.token.as_deref(), &headers, &state.token)
-    {
-        return (StatusCode::UNAUTHORIZED, "Invalid token").into_response();
-    }
-
+async fn init_handler(Query(params): Query<WsAuth>, State(state): State<AppState>) -> Response {
     // Fetch base (always-included) data in parallel
     let client_id = params.client_id.clone();
     let (projects_result, preferences_result, ui_state_result) = tokio::join!(
@@ -995,17 +1119,8 @@ fn mime_from_extension(path: &std::path::Path) -> &'static str {
 /// that Tauri's asset:// protocol would serve in native mode.
 async fn file_handler(
     AxumPath(filepath): AxumPath<String>,
-    headers: HeaderMap,
-    Query(params): Query<WsAuth>,
     State(state): State<AppState>,
 ) -> Response {
-    // Validate token
-    if state.token_required
-        && !request_is_authorized(params.token.as_deref(), &headers, &state.token)
-    {
-        return (StatusCode::UNAUTHORIZED, "Invalid token").into_response();
-    }
-
     // Resolve app data directory
     let app_data_dir = match state.app.path().app_data_dir() {
         Ok(dir) => dir,
@@ -1068,15 +1183,6 @@ fn resolve_app_data_file_path(
     }
 }
 
-fn validate_token(params: &WsAuth, headers: &HeaderMap, state: &AppState) -> Result<(), Response> {
-    if state.token_required
-        && !request_is_authorized(params.token.as_deref(), headers, &state.token)
-    {
-        return Err((StatusCode::UNAUTHORIZED, "Invalid token").into_response());
-    }
-    Ok(())
-}
-
 fn canonicalize_known_project_roots(app: &AppHandle) -> Result<Vec<std::path::PathBuf>, Response> {
     let data = crate::projects::storage::load_projects_data(app).map_err(|e| {
         log::warn!("Failed to load projects for project file request: {e}");
@@ -1111,14 +1217,9 @@ fn path_is_in_known_roots(path: &std::path::Path, roots: &[std::path::PathBuf]) 
 /// `?download=true`, any absolute file path is allowed.
 async fn project_file_handler(
     AxumPath(filepath): AxumPath<String>,
-    headers: HeaderMap,
     Query(params): Query<WsAuth>,
     State(state): State<AppState>,
 ) -> Response {
-    if let Err(response) = validate_token(&params, &headers, &state) {
-        return response;
-    }
-
     let requested = std::path::PathBuf::from(&filepath);
     if !requested.is_absolute() {
         return (StatusCode::BAD_REQUEST, "Expected absolute file path").into_response();
@@ -1390,12 +1491,6 @@ fn token_from_query_or_bearer(query_token: Option<&str>, headers: &HeaderMap) ->
         .map(ToOwned::to_owned)
 }
 
-fn request_is_authorized(query_token: Option<&str>, headers: &HeaderMap, expected: &str) -> bool {
-    token_from_query_or_bearer(query_token, headers)
-        .as_deref()
-        .is_some_and(|provided| auth::validate_token(provided, expected))
-}
-
 pub fn list_bind_host_options() -> Vec<BindHostOption> {
     let mut seen = HashSet::from([
         "127.0.0.1".to_string(),
@@ -1512,12 +1607,13 @@ pub async fn get_server_status(app: AppHandle) -> ServerStatus {
 
 #[cfg(test)]
 mod tests {
+    use super::StatusCode;
     use super::{
-        attachment_disposition, bind_host_option_label, bind_host_option_rank,
+        attachment_disposition, authorize, bind_host_option_label, bind_host_option_rank,
         display_host_for_bind_ip, display_ip_for_bind_ip_with_candidates,
         embedded_asset_path_for_request, format_http_url, is_tailscale_ipv4, parse_bind_ip,
-        path_is_in_known_roots, static_cache_control, token_from_query_or_bearer,
-        validate_bind_host,
+        path_is_in_known_roots, static_cache_control, token_from_query_or_bearer, unix_now,
+        validate_bind_host, AppHandle, AppState, Arc, AuthMethod,
     };
     use axum::http::{HeaderMap, HeaderValue};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -1558,6 +1654,155 @@ mod tests {
             token_from_query_or_bearer(None, &headers),
             Some("secret-token".to_string())
         );
+    }
+
+    fn test_state(dir: &std::path::Path) -> AppState {
+        AppState {
+            app: AppHandle::new(dir.to_path_buf(), dir.to_path_buf()).unwrap(),
+            token: "secret".to_string(),
+            token_required: true,
+            localhost_only: false,
+            dist_path: dir.to_path_buf(),
+            sessions: Arc::new(crate::http_server::session::WebSessions::load(
+                dir.join("web-sessions.json"),
+            )),
+            cookie_name: crate::http_server::session::cookie_name(3456),
+        }
+    }
+
+    fn headers_with(pairs: &[(&'static str, &str)]) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        for (name, value) in pairs {
+            headers.append(*name, HeaderValue::from_str(value).unwrap());
+        }
+        headers
+    }
+
+    const IP: IpAddr = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
+
+    #[test]
+    fn authorize_accepts_token_and_cookie_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = test_state(dir.path());
+        assert_eq!(
+            authorize(&state, IP, &HeaderMap::new(), Some("secret")).unwrap(),
+            AuthMethod::Token
+        );
+
+        let id = state.sessions.create("secret", unix_now());
+        let cookie = format!("jean_session_3456={id}");
+        let headers = headers_with(&[
+            ("cookie", &cookie),
+            ("host", "192.168.1.20:3456"),
+            ("origin", "http://192.168.1.20:3456"),
+        ]);
+        assert_eq!(
+            authorize(&state, IP, &headers, None).unwrap(),
+            AuthMethod::Cookie
+        );
+        assert!(authorize(&state, IP, &HeaderMap::new(), None).is_err());
+    }
+
+    #[test]
+    fn authorize_rejects_cookie_from_other_origin() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = test_state(dir.path());
+        let id = state.sessions.create("secret", unix_now());
+        let cookie = format!("jean_session_3456={id}");
+        let cross_site = headers_with(&[
+            ("cookie", &cookie),
+            ("host", "192.168.1.20:3456"),
+            ("origin", "https://evil.example"),
+        ]);
+        let response = authorize(&state, IP, &cross_site, None).unwrap_err();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        let proxied = headers_with(&[
+            ("cookie", &cookie),
+            ("host", "127.0.0.1:3456"),
+            ("x-forwarded-host", "jean.example.com"),
+            ("origin", "https://jean.example.com"),
+        ]);
+        assert!(authorize(&state, IP, &proxied, None).is_ok());
+    }
+
+    #[test]
+    fn authorize_rate_limits_failed_tokens_even_when_next_is_valid() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = test_state(dir.path());
+        for _ in 0..10 {
+            let response = authorize(&state, IP, &HeaderMap::new(), Some("guess")).unwrap_err();
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        }
+        let response = authorize(&state, IP, &HeaderMap::new(), Some("secret")).unwrap_err();
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[tokio::test]
+    async fn browser_signs_in_once_then_uses_cookie_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = AppHandle::new(dir.path().to_path_buf(), dir.path().to_path_buf()).unwrap();
+        let handle =
+            super::start_server(app, 0, "secret".to_string(), "127.0.0.1".to_string(), true)
+                .await
+                .unwrap();
+        let base = format!("http://127.0.0.1:{}", handle.port);
+        let client = reqwest::Client::new();
+
+        let version = format!("{base}/api/version");
+        let denied = client.get(&version).send().await.unwrap();
+        assert_eq!(denied.status(), 401);
+
+        let login = client
+            .get(format!("{base}/api/auth?token=secret"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(login.status(), 200);
+        let set_cookie = login
+            .headers()
+            .get("set-cookie")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert!(set_cookie.starts_with(&format!("jean_session_{}=", handle.port)));
+        assert!(set_cookie.contains("HttpOnly"));
+        let cookie = set_cookie.split(';').next().unwrap().to_string();
+
+        let with_cookie = client
+            .get(&version)
+            .header("cookie", &cookie)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(with_cookie.status(), 200);
+
+        let cross_site = client
+            .get(&version)
+            .header("cookie", &cookie)
+            .header("origin", "https://evil.example")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(cross_site.status(), 403);
+
+        let logout = client
+            .post(format!("{base}/api/logout"))
+            .header("cookie", &cookie)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(logout.status(), 204);
+        let after_logout = client
+            .get(&version)
+            .header("cookie", &cookie)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(after_logout.status(), 401);
+
+        let _ = handle.shutdown_tx.send(());
     }
 
     #[test]

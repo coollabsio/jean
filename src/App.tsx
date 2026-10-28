@@ -14,6 +14,7 @@ import {
   listen,
   onEstablishedWsDisconnect,
   usesWebSocketBackend,
+  signInToWebAccess,
   type InitialData,
 } from '@/lib/transport'
 import {
@@ -121,11 +122,6 @@ interface AutoFixStoppedEvent {
   error: string
 }
 
-function handleWsAuthTokenSubmit(token: string) {
-  localStorage.setItem('jean-http-token', token)
-  window.location.reload()
-}
-
 /** Sign-in surface for web access mode, shown until the session is authorized. */
 function WsAuthErrorOverlay() {
   const authError = useWsAuthError()
@@ -146,7 +142,7 @@ function WsAuthErrorOverlay() {
         // (remote removed right after a drop), the sign-in form still works —
         // submitting reloads the page, which is how connections recover.
         reason={authReason === 'rejected' ? 'rejected' : 'signed-out'}
-        onTokenSubmit={handleWsAuthTokenSubmit}
+        onTokenSubmit={signInToWebAccess}
       />
     </div>
   )

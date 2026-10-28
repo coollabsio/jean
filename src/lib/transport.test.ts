@@ -274,6 +274,60 @@ describe('transport bootstrap', () => {
     expect(result.current).not.toContain('secret')
   })
 
+  it('exchanges a token link for a session without storing the token', async () => {
+    const transport = await loadTransportModule()
+    window.history.replaceState({}, '', '/?token=link-token&tab=1')
+
+    transport.connectTransport()
+
+    await waitFor(() => expect(MockWebSocket.instances.length).toBe(1))
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('api/auth?token=link-token')
+    )
+    expect(localStorage.setItem).not.toHaveBeenCalled()
+    expect(window.location.search).toBe('?tab=1')
+    window.history.replaceState({}, '', '/')
+  })
+
+  it('migrates a token saved by an older version and deletes it', async () => {
+    vi.mocked(localStorage.getItem).mockImplementation(key =>
+      key === 'jean-http-token' ? 'legacy-token' : null
+    )
+    const transport = await loadTransportModule()
+
+    transport.connectTransport()
+
+    await waitFor(() => expect(MockWebSocket.instances.length).toBe(1))
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('token=legacy-token')
+    )
+    expect(localStorage.removeItem).toHaveBeenCalledWith('jean-http-token')
+    vi.mocked(localStorage.getItem).mockImplementation(() => null)
+  })
+
+  it('reconnects with the session cookie when no token is present', async () => {
+    const transport = await loadTransportModule()
+
+    transport.connectTransport()
+
+    await waitFor(() => expect(MockWebSocket.instances.length).toBe(1))
+    expect(fetch).toHaveBeenCalledWith(expect.not.stringContaining('token='))
+  })
+
+  it('signs out by revoking the server session', async () => {
+    const replace = vi.fn()
+    vi.stubGlobal('location', { ...window.location, replace })
+    const transport = await loadTransportModule()
+
+    await transport.signOutOfWebAccess()
+
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining('api/logout'), {
+      method: 'POST',
+    })
+    expect(localStorage.removeItem).toHaveBeenCalledWith('jean-http-token')
+    expect(replace).toHaveBeenCalled()
+  })
+
   it('classifies a missing web access token as signed out', async () => {
     vi.mocked(fetch).mockResolvedValue({ ok: false } as Response)
     const transport = await loadTransportModule()

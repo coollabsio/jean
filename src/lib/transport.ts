@@ -44,11 +44,37 @@ function getWebBackendBaseUrl(): string {
   return getActiveRemoteConnection()?.url ?? window.location.origin
 }
 
+/**
+ * Where older versions kept the web access token. Read once to migrate the
+ * browser to a session cookie, then deleted. Never written.
+ */
+const LEGACY_WEB_TOKEN_KEY = 'jean-http-token'
+
+/** Remove the access token from browser storage and from the page URL. */
+function forgetBrowserWebToken(): void {
+  localStorage.removeItem(LEGACY_WEB_TOKEN_KEY)
+  const url = new URL(window.location.href)
+  if (!url.searchParams.has('token')) return
+  url.searchParams.delete('token')
+  window.history.replaceState({}, '', url.toString())
+}
+
+/**
+ * Sign this browser in: load the page with `?token=` so the normal connect
+ * flow exchanges it for a session cookie, reports a refused token, and
+ * removes the token from the URL.
+ */
+export function signInToWebAccess(token: string): void {
+  const url = new URL(window.location.href)
+  url.searchParams.set('token', token)
+  window.location.replace(url.toString())
+}
+
 function getWebBackendToken(): string {
   const remote = getActiveRemoteConnection()
   if (remote) return remote.token
   const urlToken = new URLSearchParams(window.location.search).get('token')
-  return urlToken || localStorage.getItem('jean-http-token') || ''
+  return urlToken || localStorage.getItem(LEGACY_WEB_TOKEN_KEY) || ''
 }
 
 function backendUrl(path: string): string {
@@ -917,24 +943,16 @@ export class WsTransport {
       return
 
     const remote = this.config ? null : getActiveRemoteConnection()
-    // Read token from URL query param or localStorage
+    // Browsers sign in once with a `?token=` link (or a token saved by an
+    // older version) and then use the HttpOnly session cookie that
+    // /api/auth sets. Remote connections keep sending their token.
     const urlToken = new URLSearchParams(window.location.search).get('token')
     const token = this.config
       ? this.config.getToken()
       : remote?.token ||
         urlToken ||
-        localStorage.getItem('jean-http-token') ||
+        localStorage.getItem(LEGACY_WEB_TOKEN_KEY) ||
         ''
-
-    // Persist token from URL to localStorage for future page loads
-    if (!remote && urlToken) {
-      localStorage.setItem('jean-http-token', urlToken)
-
-      // Remove token from URL for security (prevent history/bookmark exposure)
-      const url = new URL(window.location.href)
-      url.searchParams.delete('token')
-      window.history.replaceState({}, '', url.toString())
-    }
 
     this._connecting = true
 
@@ -978,11 +996,10 @@ export class WsTransport {
 
     try {
       const res = await this.fetchBackend(authUrl)
+      // The server answered: the token is now either in the session cookie or
+      // refused. Drop it from browser storage and the URL either way.
+      if (!remote) forgetBrowserWebToken()
       if (!res.ok) {
-        // Invalid token — clear it and wait for the user to provide another.
-        if (!remote) {
-          localStorage.removeItem('jean-http-token')
-        }
         this.setAuthError(
           token
             ? "That access token was refused. Check the token in Jean's Web Access settings."
@@ -1694,8 +1711,14 @@ export function useWsAuthReason(): WsAuthReason | null {
  * screen. Only affects this device — the server keeps running and other
  * browsers stay signed in.
  */
-export function signOutOfWebAccess(): void {
-  localStorage.removeItem('jean-http-token')
+export async function signOutOfWebAccess(): Promise<void> {
+  try {
+    await fetch(backendUrl('api/logout'), { method: 'POST' })
+  } catch {
+    // Offline: the cookie stays until it expires, but this device still
+    // returns to the sign-in screen below.
+  }
+  localStorage.removeItem(LEGACY_WEB_TOKEN_KEY)
   // Reload on a bare origin. A bookmarked `?token=...` takes priority over
   // localStorage on boot, so keeping the current URL would sign us straight
   // back in and make the button look broken.

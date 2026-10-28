@@ -949,3 +949,16 @@ Muse authenticates with `META_API_KEY`, a stored API key, or a stored browser se
 Jean's own MCP server is added per session through `session/start` `config.mcpServers` with `mode: "optional"`. `muse serve` refuses that field unless `initialize` requests the `sessionMcp` capability.
 
 To test without a Meta account, start Jean with `JEAN_MUSE_PROVIDER=echo`. The host then runs `muse serve --provider echo`, which replies `echo: <prompt>`. The echo provider never calls tools, so tool calls, approvals, and structured magic-prompt output need a real Meta account to verify.
+
+## Web access authentication
+
+Browsers do not keep the web access token. Code: `jean-core/src/http_server/session.rs` (session store) and `server.rs` (`authorize`, `require_auth`, `auth_handler`, `logout_handler`).
+
+- **Sign-in:** the browser calls `/api/auth?token=…` once, from a `?token=` link, the sign-in form, or a token that an older version saved in `localStorage`. If the request is same-origin, the server sets a cookie `jean_session_<port>` (`HttpOnly`, `SameSite=Lax`, `Path=/`, 30 days). The client then deletes the token from `localStorage` and from the URL.
+- **No `Secure` flag:** web access also runs on plain `http://` (LAN, Tailscale), where browsers drop `Secure` cookies.
+- **Port in the cookie name:** cookies ignore ports, so two Jean servers on one host would otherwise overwrite each other.
+- **Storage:** `<app_data>/web-sessions.json` keeps only SHA-256 hashes of session IDs, so sessions survive restarts. Each session is bound to a hash of the token. Regenerating the token signs out every browser. Expiry slides: 30 days after last use.
+- **Protected routes** go through the `require_auth` middleware. It accepts the token (`?token=` or `Authorization: Bearer`) or the cookie. Remote connections from the desktop app and `JEAN_TOKEN` scripts keep using the token, because their requests are cross-site and cannot use a `SameSite` cookie.
+- **Origin check:** a cookie is accepted only if `Origin` is missing or matches `Host`, `X-Forwarded-Host`, or `JEAN_ALLOWED_ORIGINS`. This blocks CSRF and cross-site WebSocket hijacking.
+- **Rate limit:** 10 failed tokens per IP per minute, then HTTP 429.
+- **Sign out:** `POST /api/logout` revokes the session and clears the cookie.

@@ -24,9 +24,6 @@ describe('startCommitJob', () => {
 
   it('uses a keepalive HTTP request on web access so backgrounding cannot cancel the start', async () => {
     environment.native = false
-    ;(localStorage.getItem as ReturnType<typeof vi.fn>).mockReturnValue(
-      'secret'
-    )
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -60,14 +57,14 @@ describe('startCommitJob', () => {
     )
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/commit-jobs?token=secret',
+      '/api/commit-jobs',
       expect.objectContaining({
         method: 'POST',
         keepalive: true,
       })
     )
     expect(sendBeacon).toHaveBeenCalledWith(
-      '/api/commit-jobs?token=secret',
+      '/api/commit-jobs',
       expect.any(Blob)
     )
     expect(invokeMock).not.toHaveBeenCalledWith(
