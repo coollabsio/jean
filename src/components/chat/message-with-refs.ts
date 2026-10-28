@@ -1,4 +1,5 @@
 import type { QueuedMessage } from '@/types/chat'
+import { formatMentionRefs } from './agent-mentions'
 
 const IMAGE_ONLY_DEFAULT_PROMPT =
   'Please check this image and tell me what is wrong.'
@@ -16,6 +17,11 @@ function fileReferencePath(file: QueuedMessage['pendingFiles'][number]) {
  */
 export function buildMessageWithRefs(queuedMsg: QueuedMessage): string {
   let message = queuedMsg.message
+
+  const mentionRefs = formatMentionRefs(queuedMsg.mentions)
+  if (mentionRefs) {
+    message = message ? `${message}\n\n${mentionRefs}` : mentionRefs
+  }
 
   if (queuedMsg.pendingFiles.length > 0) {
     const fileRefs = queuedMsg.pendingFiles

@@ -18,12 +18,7 @@ import { useAgentsList } from '@/services/agents'
 import { AgentIcon } from '@/components/icons/JeanAgentIcon'
 import { Badge } from '@/components/ui/badge'
 import { useProjectsStore } from '@/store/projects-store'
-import {
-  convertFileSrc,
-  convertProjectFileSrc,
-  convertServerFileSrc,
-  convertServerProjectFileSrc,
-} from '@/lib/transport'
+import { projectAvatarUrl } from '@/lib/project-avatar'
 import { getAllCommands, executeCommand } from '@/lib/commands'
 import { formatShortcutDisplay } from '@/types/keybindings'
 import { isNativeApp } from '@/lib/environment'
@@ -126,20 +121,7 @@ export function CommandPalette() {
               ? project.serverName
               : undefined,
           serverName: project.serverName ?? 'Local',
-          avatarUrl: project.avatar_path
-            ? project.serverId
-              ? convertServerFileSrc(project.serverId, project.avatar_path)
-              : appDataDir
-                ? convertFileSrc(`${appDataDir}/${project.avatar_path}`)
-                : null
-            : project.default_avatar_path
-              ? project.serverId
-                ? convertServerProjectFileSrc(
-                    project.serverId,
-                    project.default_avatar_path
-                  )
-                : convertProjectFileSrc(project.default_avatar_path)
-              : null,
+          avatarUrl: projectAvatarUrl(project, appDataDir),
           avatarFallback: project.name[0]?.toUpperCase() ?? '?',
           isServer,
           group: isServer ? 'servers' : 'projects',

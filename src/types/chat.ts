@@ -1678,6 +1678,23 @@ export interface ReviewFinding {
  * A message waiting in the queue to be sent
  * Captures all settings at the time of queueing so they're preserved
  */
+export type ChatMentionType = 'agent' | 'project' | 'remote_jean'
+
+/**
+ * `@` mention in an agent chat. It only adds context for the agent; it does
+ * not run an action. See `src/components/chat/agent-mentions.ts`.
+ */
+export interface ChatMention {
+  type: ChatMentionType
+  /** Agent ID or project ID on its own server, or the remote Jean's ID */
+  id: string
+  name: string
+  /** Set when the item is on another Jean than the chat */
+  serverName?: string
+  /** Remote Jean URL (remote_jean only) */
+  url?: string
+}
+
 export interface QueuedMessage {
   /** Unique ID for this queued message (for reordering/removal) */
   id: string
@@ -1691,6 +1708,8 @@ export interface QueuedMessage {
   pendingSkills: PendingSkill[]
   /** Snapshot of pending text files at time of queue */
   pendingTextFiles: PendingTextFile[]
+  /** `@` mentions of agents, projects, and remote Jeans (agent chats only) */
+  mentions?: ChatMention[]
   /** Model to use for this message (snapshot at queue time) */
   model: string
   /** Provider profile name to use (snapshot at queue time, null = default) */
@@ -1719,6 +1738,7 @@ export type QueuedMessageEdit = Pick<
   | 'pendingFiles'
   | 'pendingSkills'
   | 'pendingTextFiles'
+  | 'mentions'
 >
 
 // ============================================================================
