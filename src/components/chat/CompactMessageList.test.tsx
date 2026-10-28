@@ -461,6 +461,26 @@ describe('CompactMessageList', () => {
     ).toBeTruthy()
   })
 
+  it('shows options of a question in a text-only reply as buttons', () => {
+    const onSendAnswer = vi.fn()
+    const text =
+      'Pick a name now.\n\n## Recap\n\nPick a name now.\n\nWhat do you want to do next?\nReply with a number:\n1. Suggest names\n2. Keep the name'
+    renderCompact(
+      [
+        message('user-1', 'user', 100, 'rename the app'),
+        message('assistant-1', 'assistant', 104, text, {
+          content_blocks: [{ type: 'text', text }],
+        }),
+      ],
+      { onSendAnswer }
+    )
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /^2\.\s?Keep the name$/ })
+    )
+    expect(onSendAnswer).toHaveBeenCalledWith('2. Keep the name')
+  })
+
   it('shows options of a question in the recap as buttons', () => {
     const onSendAnswer = vi.fn()
     const text =

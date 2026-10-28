@@ -1210,6 +1210,14 @@ async fn refresh_claude_access_token(
     full_data: &mut ClaudeCredentialsFile,
 ) -> Result<Option<String>, String> {
     log::trace!("Claude token refresh: starting");
+    let now_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    if now_secs < CLAUDE_USAGE_COOLDOWN_UNTIL.load(Ordering::Relaxed) {
+        log::trace!("Claude token refresh: skipped during rate-limit cooldown");
+        return Ok(None);
+    }
     let oauth = full_data.claude_ai_oauth.clone().ok_or_else(|| {
         "Claude OAuth credentials missing. Run `claude` to authenticate.".to_string()
     })?;
@@ -1233,13 +1241,25 @@ async fn refresh_claude_access_token(
         .await
         .map_err(|e| format!("Failed to refresh Claude token: {e}"))?;
 
+    // The refresh endpoint rate-limits aggressively. Back off instead of retrying on
+    // every usage fetch, and never report this as an expired login.
+    if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        let cooldown_secs =
+            retry_after_secs(&response).unwrap_or(CLAUDE_USAGE_DEFAULT_COOLDOWN_SECS);
+        CLAUDE_USAGE_COOLDOWN_UNTIL.store(now_secs + cooldown_secs, Ordering::Relaxed);
+        log::info!("Claude token refresh rate-limited (429, cooldown {cooldown_secs}s)");
+        return Ok(None);
+    }
+
     if response.status() == reqwest::StatusCode::UNAUTHORIZED
         || response.status() == reqwest::StatusCode::BAD_REQUEST
     {
         let body = response.json::<Value>().await.unwrap_or(Value::Null);
+        // OAuth bodies use `{"error": "invalid_grant"}`; Anthropic API bodies nest it
+        // as `{"error": {"type": "invalid_grant"}}`.
         let error_code = body
             .get("error")
-            .and_then(|v| v.as_str())
+            .and_then(|v| v.as_str().or_else(|| v.get("type").and_then(Value::as_str)))
             .unwrap_or("token_expired");
         if error_code == "invalid_grant" {
             log::trace!("Claude token refresh: invalid_grant");
@@ -1484,6 +1504,14 @@ fn claude_usage_rate_limited_error() -> String {
     "Claude usage API is rate-limiting requests. Usage updates after your next Claude message, or try again in a few minutes.".to_string()
 }
 
+fn retry_after_secs(response: &reqwest::Response) -> Option<u64> {
+    response
+        .headers()
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.trim().parse::<u64>().ok())
+}
+
 fn claude_usage_request(client: &reqwest::Client, access_token: &str) -> reqwest::RequestBuilder {
     client
         .get(CLAUDE_USAGE_URL)
@@ -1554,13 +1582,28 @@ pub(crate) async fn get_claude_usage_with_source(
         .map_err(|e| format!("Failed to fetch Claude usage: {e}"))?;
 
     if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-        log::trace!(
-            "Claude usage fetch received 401, retrying after refresh (source={request_source})"
-        );
-        if let Some(refreshed_token) =
-            refresh_claude_access_token(&usage_client, &source, &mut credentials).await?
-        {
-            response = claude_usage_request(&usage_client, &refreshed_token)
+        // The Claude CLI rotates tokens on its own; a newer token on disk makes our
+        // own refresh (and its refresh-token rotation) unnecessary.
+        let disk_token = reload_claude_credentials_from_source(&source)
+            .ok()
+            .and_then(|c| oauth_access_token(&c).map(str::to_string))
+            .filter(|t| t != access_token.trim());
+        let retry_token = match disk_token {
+            Some(token) => {
+                log::trace!(
+                    "Claude usage fetch received 401, retrying with rotated token from disk (source={request_source})"
+                );
+                Some(token)
+            }
+            None => {
+                log::trace!(
+                    "Claude usage fetch received 401, retrying after refresh (source={request_source})"
+                );
+                refresh_claude_access_token(&usage_client, &source, &mut credentials).await?
+            }
+        };
+        if let Some(token) = retry_token {
+            response = claude_usage_request(&usage_client, &token)
                 .send()
                 .await
                 .map_err(|e| format!("Failed to fetch Claude usage: {e}"))?;
@@ -1569,12 +1612,8 @@ pub(crate) async fn get_claude_usage_with_source(
 
     // OpenUsage: 429 is common — serve stale cache instead of failing hard / re-login.
     if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-        let cooldown_secs = response
-            .headers()
-            .get(reqwest::header::RETRY_AFTER)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.trim().parse::<u64>().ok())
-            .unwrap_or(CLAUDE_USAGE_DEFAULT_COOLDOWN_SECS);
+        let cooldown_secs =
+            retry_after_secs(&response).unwrap_or(CLAUDE_USAGE_DEFAULT_COOLDOWN_SECS);
         CLAUDE_USAGE_COOLDOWN_UNTIL.store(now_secs + cooldown_secs, Ordering::Relaxed);
         if let Some(stale) = load_stale_cached_claude_usage(now_secs) {
             log::info!(
@@ -1591,6 +1630,10 @@ pub(crate) async fn get_claude_usage_with_source(
         if let Some(stale) = load_stale_cached_claude_usage(now_secs) {
             log::warn!("Claude usage auth failed; serving stale cache (source={request_source})");
             return Ok(stale);
+        }
+        // The refresh was rate-limited, so the login may still be valid.
+        if now_secs < CLAUDE_USAGE_COOLDOWN_UNTIL.load(Ordering::Relaxed) {
+            return Err(claude_usage_rate_limited_error());
         }
         return Err("Claude token expired. Run `claude` to log in again.".to_string());
     }

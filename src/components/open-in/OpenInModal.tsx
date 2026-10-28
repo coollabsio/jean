@@ -14,6 +14,7 @@ import {
   Github,
   GitPullRequest,
   CircleDot,
+  MessagesSquare,
   Globe,
   ShieldAlert,
   Siren,
@@ -48,6 +49,7 @@ import {
 import {
   useLoadedIssueContexts,
   useLoadedPRContexts,
+  useLoadedDiscussionContexts,
   useLoadedSecurityContexts,
   useLoadedAdvisoryContexts,
 } from '@/services/github'
@@ -123,6 +125,10 @@ export function OpenInModal() {
     selectedWorktreeId
   )
   const { data: loadedIssues } = useLoadedIssueContexts(
+    activeSessionId,
+    selectedWorktreeId
+  )
+  const { data: loadedDiscussions } = useLoadedDiscussionContexts(
     activeSessionId,
     selectedWorktreeId
   )
@@ -297,6 +303,17 @@ export function OpenInModal() {
       }
     }
 
+    if (loadedDiscussions) {
+      for (const discussion of loadedDiscussions) {
+        addOption({
+          id: `discussion-${discussion.number}`,
+          label: `Discussion #${discussion.number}`,
+          icon: MessagesSquare,
+          url: `${hostedRepoWebUrl(forgeHost, discussion.repoOwner, discussion.repoName)}/discussions/${discussion.number}`,
+        })
+      }
+    }
+
     if (loadedSecurityAlerts) {
       for (const alert of loadedSecurityAlerts) {
         addOption({
@@ -323,6 +340,7 @@ export function OpenInModal() {
   }, [
     loadedPRs,
     loadedIssues,
+    loadedDiscussions,
     forgeHost,
     forgeLabels.pullRequestShort,
     gitProvider,

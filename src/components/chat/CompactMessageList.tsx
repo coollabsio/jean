@@ -977,6 +977,8 @@ export const CompactMessageList = memo(
             hideCancelledIndicator?: boolean
             hideEditedFiles?: boolean
             bubble?: boolean
+            /** Only for messages shown on their own, not inside a compact row */
+            onSendAnswer?: (text: string) => void
           }
         ) => (
           <MessageItem
@@ -1021,6 +1023,7 @@ export const CompactMessageList = memo(
             bubble={extra.bubble}
             hideSettingsBadges={hideToolActivity}
             durationMs={extra.durationMs}
+            onSendAnswer={extra.onSendAnswer}
           />
         ),
         [
@@ -1297,6 +1300,7 @@ export const CompactMessageList = memo(
                   {renderMessageItem(singleMessage, {
                     hasFollowUpMessage,
                     bubble: hideToolActivity,
+                    onSendAnswer,
                     durationMs: durationFor(
                       singleMessage.globalIndex,
                       singleMessage.message
