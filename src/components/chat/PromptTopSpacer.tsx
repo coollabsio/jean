@@ -38,7 +38,14 @@ export function PromptTopSpacer({
           prompt.getBoundingClientRect().top
         height = Math.max(0, Math.floor(available - tail))
       }
-      spacer.style.height = `${height}px`
+      const next = `${height}px`
+      if (spacer.style.height === next) return
+      const wasAtBottom =
+        viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 2
+      spacer.style.height = next
+      // Re-pin in this frame. The scroll manager re-pins one frame later,
+      // which paints the old position first and flickers on session open.
+      if (wasAtBottom) viewport.scrollTop = viewport.scrollHeight
     }
 
     // The spacer is not observed, so setting its height cannot loop
