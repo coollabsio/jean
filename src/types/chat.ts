@@ -1752,6 +1752,8 @@ export interface QueuedMessage {
   commandAllowedTools?: string[]
   /** Backend to use for this message (snapshot at queue time) */
   backend?: Backend
+  /** Never auto-steer into a running turn; wait for the run to finish */
+  noSteer?: boolean
   /** Timestamp when queued (for display ordering) */
   queuedAt: number
 }

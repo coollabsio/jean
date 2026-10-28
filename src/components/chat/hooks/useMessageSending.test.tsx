@@ -1470,7 +1470,10 @@ describe('useMessageSending Codex auto-steer', () => {
     })
 
     expect(steerClaudeTurn).not.toHaveBeenCalled()
-    expect(persistEnqueue).toHaveBeenCalled()
+    // noSteer keeps the backend queue drain from steering it anyway
+    expect(vi.mocked(persistEnqueue).mock.calls[0]?.[3]).toMatchObject({
+      noSteer: true,
+    })
     expect(useChatStore.getState().messageQueues['session-1']).toHaveLength(1)
   })
 

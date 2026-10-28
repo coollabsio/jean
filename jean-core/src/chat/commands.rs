@@ -10178,7 +10178,9 @@ fn queued_message_is_steerable(msg: &serde_json::Value) -> bool {
 
 fn queued_message_is_steerable_for_backend(msg: &serde_json::Value, backend: &str) -> bool {
     let backend_matches = msg.get("backend").and_then(Value::as_str) == Some(backend);
-    if !backend_matches {
+    // `noSteer`: the user explicitly queued it (primary modifier + Enter).
+    let no_steer = msg.get("noSteer").and_then(Value::as_bool) == Some(true);
+    if !backend_matches || no_steer {
         return false;
     }
 
@@ -11408,6 +11410,18 @@ mod tests {
         assert!(queued_message_is_steerable_for_backend(&claude, "claude"));
         assert!(!queued_message_is_steerable_for_backend(&claude, "pi"));
         assert!(queued_message_supports_any_steering(&claude));
+    }
+
+    #[test]
+    fn queued_message_with_no_steer_is_never_steerable() {
+        let claude = serde_json::json!({
+            "id": "m1",
+            "message": "run after this turn",
+            "backend": "claude",
+            "noSteer": true,
+        });
+        assert!(!queued_message_is_steerable_for_backend(&claude, "claude"));
+        assert!(!queued_message_supports_any_steering(&claude));
     }
 
     #[test]

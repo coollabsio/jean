@@ -807,12 +807,16 @@ export function useMessageSending({
           }
         }
         console.log(`[Send] handleSubmit ENQUEUING (session is sending)`)
-        enqueueMessage(activeSessionId, queuedMessage)
+        // An explicit queue must not be steered by the backend queue drain.
+        const toEnqueue = options?.forceQueue
+          ? { ...queuedMessage, noSteer: true }
+          : queuedMessage
+        enqueueMessage(activeSessionId, toEnqueue)
         persistEnqueue(
           activeWorktreeId,
           activeWorktreePath,
           activeSessionId,
-          queuedMessage
+          toEnqueue
         )
         return
       }
