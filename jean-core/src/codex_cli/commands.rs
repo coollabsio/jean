@@ -1,5 +1,6 @@
 //! Tauri commands for Codex CLI management
 
+use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -609,30 +610,67 @@ fn load_codex_auth_from_keychain() -> Option<CodexAuthFile> {
     parse_auth_payload(&payload)
 }
 
+/// Format a timestamp the way Codex serializes `AuthDotJson.last_refresh`
+/// (chrono `DateTime<Utc>`). Codex rejects the whole auth file if this field
+/// does not parse.
+fn codex_auth_timestamp(dt: DateTime<Utc>) -> String {
+    dt.to_rfc3339_opts(SecondsFormat::AutoSi, true)
+}
+
+/// Older Jean versions wrote `last_refresh` as epoch seconds (issue #880).
+/// Rewrite it as RFC 3339. Returns true when the value changed.
+fn normalize_codex_auth_last_refresh(auth: &mut CodexAuthFile) -> bool {
+    let Some(dt) = auth
+        .last_refresh
+        .as_deref()
+        .filter(|s| s.bytes().all(|b| b.is_ascii_digit()))
+        .and_then(|s| s.parse::<i64>().ok())
+        .and_then(|secs| DateTime::from_timestamp(secs, 0))
+    else {
+        return false;
+    };
+    auth.last_refresh = Some(codex_auth_timestamp(dt));
+    true
+}
+
+/// Repair an auth payload that Jean corrupted before, so Codex can read it again.
+fn repair_codex_auth(source: &CodexAuthSource, auth: &mut CodexAuthFile) {
+    if normalize_codex_auth_last_refresh(auth) {
+        if let Err(e) = persist_codex_auth(source, auth) {
+            log::warn!("Could not repair Codex auth last_refresh: {e}");
+        }
+    }
+}
+
+fn read_codex_auth_file(path: PathBuf) -> Result<(CodexAuthSource, CodexAuthFile), String> {
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read Codex auth file {}: {e}", path.display()))?;
+    let mut auth: CodexAuthFile = serde_json::from_str(&content).map_err(|e| {
+        format!(
+            "Failed to parse Codex auth file JSON ({}): {e}",
+            path.display()
+        )
+    })?;
+    let source = CodexAuthSource::File(path);
+    repair_codex_auth(&source, &mut auth);
+    Ok((source, auth))
+}
+
 fn load_codex_auth_for_binary(
     binary_path: Option<&str>,
 ) -> Result<(CodexAuthSource, CodexAuthFile), String> {
     let auth_paths = get_codex_auth_paths(binary_path);
 
     for path in auth_paths {
-        if !path.exists() {
-            continue;
+        if path.exists() {
+            return read_codex_auth_file(path);
         }
-
-        let content = std::fs::read_to_string(&path)
-            .map_err(|e| format!("Failed to read Codex auth file {}: {e}", path.display()))?;
-        let auth: CodexAuthFile = serde_json::from_str(&content).map_err(|e| {
-            format!(
-                "Failed to parse Codex auth file JSON ({}): {e}",
-                path.display()
-            )
-        })?;
-        return Ok((CodexAuthSource::File(path), auth));
     }
 
     #[cfg(target_os = "macos")]
     {
-        if let Some(auth) = load_codex_auth_from_keychain() {
+        if let Some(mut auth) = load_codex_auth_from_keychain() {
+            repair_codex_auth(&CodexAuthSource::Keychain, &mut auth);
             return Ok((CodexAuthSource::Keychain, auth));
         }
     }
@@ -891,12 +929,7 @@ async fn refresh_codex_access_token(
         tokens.id_token = Some(id_token);
     }
     auth.tokens = Some(tokens);
-    auth.last_refresh = Some(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs().to_string())
-            .unwrap_or_else(|_| "0".to_string()),
-    );
+    auth.last_refresh = Some(codex_auth_timestamp(Utc::now()));
 
     if let Err(e) = persist_codex_auth(auth_source, auth) {
         log::warn!("Codex token refresh succeeded but could not persist auth: {e}");
@@ -3112,5 +3145,71 @@ mod tests {
             Some("rate_limit_reached")
         );
         assert_eq!(snapshot.fetched_at, 1_771_450_000);
+    }
+
+    #[test]
+    fn codex_auth_timestamp_parses_as_codex_datetime() {
+        let now = Utc::now();
+        let ts = codex_auth_timestamp(now);
+        // Codex deserializes last_refresh as chrono DateTime<Utc>, which uses FromStr.
+        let parsed: DateTime<Utc> = ts.parse().expect("Codex can parse last_refresh");
+        assert_eq!(parsed, now);
+        assert!(ts.ends_with('Z'), "expected UTC 'Z' suffix, got {ts}");
+    }
+
+    #[test]
+    fn codex_auth_normalize_epoch_string_last_refresh() {
+        let mut auth = CodexAuthFile {
+            last_refresh: Some("1792949367".to_string()),
+            ..Default::default()
+        };
+        assert!(normalize_codex_auth_last_refresh(&mut auth));
+        assert_eq!(auth.last_refresh.as_deref(), Some("2026-10-25T17:29:27Z"));
+    }
+
+    #[test]
+    fn codex_auth_normalize_leaves_valid_or_unknown_values() {
+        for value in ["2026-10-25T17:29:27Z", "", "not-a-date"] {
+            let mut auth = CodexAuthFile {
+                last_refresh: Some(value.to_string()),
+                ..Default::default()
+            };
+            assert!(!normalize_codex_auth_last_refresh(&mut auth), "{value:?}");
+            assert_eq!(auth.last_refresh.as_deref(), Some(value));
+        }
+        let mut auth = CodexAuthFile::default();
+        assert!(!normalize_codex_auth_last_refresh(&mut auth));
+        assert_eq!(auth.last_refresh, None);
+    }
+
+    #[test]
+    fn read_codex_auth_file_repairs_epoch_last_refresh_on_disk() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("auth.json");
+        std::fs::write(
+            &path,
+            r#"{"auth_mode":"chatgpt","tokens":{"access_token":"a","refresh_token":"r"},"last_refresh":"1792949367"}"#,
+        )
+        .expect("write auth");
+
+        let (_, auth) = read_codex_auth_file(path.clone()).expect("read auth");
+        assert_eq!(auth.last_refresh.as_deref(), Some("2026-10-25T17:29:27Z"));
+
+        let on_disk: Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("reread")).unwrap();
+        assert_eq!(on_disk["last_refresh"], "2026-10-25T17:29:27Z");
+        assert_eq!(on_disk["auth_mode"], "chatgpt");
+        assert_eq!(on_disk["tokens"]["refresh_token"], "r");
+    }
+
+    #[test]
+    fn read_codex_auth_file_does_not_rewrite_valid_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("auth.json");
+        let original = r#"{"last_refresh":"2026-10-25T17:29:27.123456Z"}"#;
+        std::fs::write(&path, original).expect("write auth");
+
+        read_codex_auth_file(path.clone()).expect("read auth");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
     }
 }
