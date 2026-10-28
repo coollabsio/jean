@@ -188,3 +188,27 @@ describe('SlashPopover triggerKind and skill prefixes', () => {
     expect(screen.getByText('$review')).toBeInTheDocument()
   })
 })
+
+describe('SlashPopover list size', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('shows every installed skill when the query is empty', async () => {
+    const skills: ClaudeSkill[] = Array.from({ length: 30 }, (_, i) => ({
+      name: `skill-${i}`,
+      path: `/tmp/.claude/skills/skill-${i}/SKILL.md`,
+    }))
+    useAllBackendSkillsMock.mockReturnValue([
+      { backend: 'claude', label: 'Claude', skills, commands: [] },
+    ])
+    const { SlashPopover } = await import('./SlashPopover')
+
+    render(
+      <SlashPopover {...baseProps} searchQuery="" sessionBackend="claude" />
+    )
+
+    expect(screen.getByText('/skill-0')).toBeInTheDocument()
+    expect(screen.getByText('/skill-29')).toBeInTheDocument()
+  })
+})
