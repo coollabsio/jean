@@ -204,43 +204,50 @@ export const KeyRecorder: React.FC<KeyRecorderProps> = ({
   const hasConflict = !!conflictMessage
 
   return (
-    <div className="flex items-center gap-1.5">
-      <button
-        type="button"
-        ref={buttonRef}
-        onClick={handleClick}
-        disabled={disabled}
-        className={cn(
-          'min-w-24 px-2 py-0 text-xs font-mono rounded border transition-colors',
-          'bg-background hover:bg-accent',
-          isRecording && 'ring-2 ring-primary border-primary bg-accent',
-          hasConflict && 'border-destructive',
-          pendingConflict && 'text-destructive',
-          disabled && 'opacity-50 cursor-not-allowed'
-        )}
-      >
-        {displayText}
-      </button>
+    <div className="flex flex-col items-end gap-0.5">
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          ref={buttonRef}
+          onClick={handleClick}
+          disabled={disabled}
+          className={cn(
+            'h-6 w-32 truncate rounded border px-2 text-center font-mono text-xs transition-colors',
+            'bg-background hover:bg-accent',
+            isRecording && 'ring-2 ring-primary border-primary bg-accent',
+            hasConflict && 'border-destructive',
+            pendingConflict && 'text-destructive',
+            disabled && 'opacity-50 cursor-not-allowed'
+          )}
+        >
+          {displayText}
+        </button>
 
-      {(isModified || pendingConflict) && !isRecording && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-5 w-5"
-              onClick={handleReset}
-              disabled={disabled}
-            >
-              <RotateCcw className="h-3 w-3" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Reset to default</TooltipContent>
-        </Tooltip>
-      )}
+        {/* Fixed slot so shortcut buttons stay aligned with or without reset */}
+        <div className="flex size-5 shrink-0 items-center justify-center">
+          {(isModified || pendingConflict) && !isRecording && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-5"
+                  onClick={handleReset}
+                  disabled={disabled}
+                >
+                  <RotateCcw className="h-3 w-3" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Reset to default</TooltipContent>
+            </Tooltip>
+          )}
+        </div>
+      </div>
 
       {hasConflict && !isRecording && (
-        <span className="text-xs text-destructive">{conflictMessage}</span>
+        <span className="max-w-40 text-right text-xs text-destructive">
+          {conflictMessage}
+        </span>
       )}
     </div>
   )

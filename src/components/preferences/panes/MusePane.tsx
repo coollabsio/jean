@@ -72,6 +72,7 @@ export function MusePane() {
     <div className="w-full space-y-8">
       <SettingsSection
         title="CLI source"
+        anchorId="pref-muse-section-cli"
         actions={
           <CliAuthActions
             installed={installed}
@@ -171,7 +172,10 @@ export function MusePane() {
         )}
       </SettingsSection>
 
-      <SettingsSection title="Default model">
+      <SettingsSection
+        title="Default model"
+        anchorId="pref-muse-section-settings"
+      >
         <InlineField label="Model">
           <Select
             value={selectedModel}

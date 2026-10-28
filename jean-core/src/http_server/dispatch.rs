@@ -3279,14 +3279,14 @@ pub async fn dispatch_command(
             let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
             let session_id: String = field(&args, "sessionId", "session_id")?;
             let message_id: String = field(&args, "messageId", "message_id")?;
-            let message: String = from_field(&args, "message")?;
+            let edit: crate::chat::QueuedMessageEdit = from_field(&args, "edit")?;
             let result = crate::chat::update_queued_message(
                 app.clone(),
                 worktree_id,
                 worktree_path,
                 session_id,
                 message_id,
-                message,
+                edit,
             )
             .await?;
             to_value(result)

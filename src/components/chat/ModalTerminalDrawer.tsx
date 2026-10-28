@@ -136,9 +136,9 @@ export const ModalTerminalDrawer = memo(function ModalTerminalDrawer({
       <div
         className={cn(
           'shrink-0',
-          dockMode === 'left' && 'h-full border-r',
-          dockMode === 'right' && 'h-full border-l',
-          dockMode === 'bottom' && 'w-full border-t'
+          dockMode === 'left' && 'h-full border-r border-border/20',
+          dockMode === 'right' && 'h-full border-l border-border/20',
+          dockMode === 'bottom' && 'w-full border-t border-border/20'
         )}
         style={
           isBottom

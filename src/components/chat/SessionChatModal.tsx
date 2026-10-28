@@ -1159,20 +1159,18 @@ export const SessionChatModal = memo(function SessionChatModal({
                         <span className="text-muted-foreground font-normal">
                           <button
                             type="button"
-                            className="hover:text-foreground transition-colors cursor-pointer text-foreground text-lg font-semibold"
+                            className="hover:text-foreground transition-colors cursor-pointer"
                             onClick={handleClose}
                           >
                             {project.name}
                           </button>
-                          <span className="mx-1.5 text-muted-foreground/50">
-                            ›
+                          <span className="mx-1.5 text-muted-foreground/40">
+                            /
                           </span>
                         </span>
                       )}
                       {isServer ? (
-                        <span className="text-lg font-semibold">
-                          {project?.name}
-                        </span>
+                        project?.name
                       ) : isBase ? (
                         'Base Session'
                       ) : (

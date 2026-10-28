@@ -1,12 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
-import {
-  Check,
-  Clock,
-  Paperclip,
-  Pencil,
-  Play,
-  X,
-} from '@/components/icons/reicon'
+import { Clock, Paperclip, Pencil, Play, X } from '@/components/icons/reicon'
 import {
   Collapsible,
   CollapsibleContent,
@@ -18,7 +11,6 @@ import {
   TooltipContent,
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import { isImeComposingEvent } from '@/lib/ime-composition'
 import { useChatStore } from '@/store/chat-store'
 import type { QueuedMessage } from '@/types/chat'
 import { COMPOSER_SURFACE_CLASS } from './composer-surface'
@@ -30,7 +22,9 @@ interface QueuedPromptsPanelProps {
   isSessionBusy: boolean
   onRemove: (sessionId: string, messageId: string) => void
   onSendNow: (sessionId: string, messageId: string) => void
-  onEdit: (sessionId: string, messageId: string, message: string) => void
+  /** Load the prompt (text + attachments) into the chat input to edit it */
+  onEdit: (sessionId: string, messageId: string) => void
+  onCancelEdit: (sessionId: string) => void
 }
 
 function attachmentCount(msg: QueuedMessage): number {
@@ -50,6 +44,9 @@ function attachmentCount(msg: QueuedMessage): number {
  * - Enter: send the selected prompt immediately
  * - Backspace/Delete: remove the selected prompt
  * - Escape: collapse the panel
+ *
+ * Editing loads the prompt into the chat input, so every attachment kind can
+ * be added or removed there. Submitting the input saves it back in place.
  */
 export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
   sessionId,
@@ -58,6 +55,7 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
   onRemove,
   onSendNow,
   onEdit,
+  onCancelEdit,
 }: QueuedPromptsPanelProps) {
   // Expanded state is remembered per session (collapsed by default)
   const isOpen = useChatStore(
@@ -69,8 +67,9 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
     [sessionId]
   )
   const [selectedIndex, setSelectedIndex] = useState(0)
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editingText, setEditingText] = useState('')
+  const editingId = useChatStore(
+    state => state.editingQueuedMessageIds[sessionId] ?? null
+  )
   const listRef = useRef<HTMLDivElement>(null)
   const rowRefs = useRef<(HTMLDivElement | null)[]>([])
 
@@ -110,14 +109,14 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
         case 'Enter': {
           e.preventDefault()
           const msg = messages[selectedIndex]
-          if (msg) onSendNow(sessionId, msg.id)
+          if (msg && msg.id !== editingId) onSendNow(sessionId, msg.id)
           break
         }
         case 'Backspace':
         case 'Delete': {
           e.preventDefault()
           const msg = messages[selectedIndex]
-          if (msg) onRemove(sessionId, msg.id)
+          if (msg && msg.id !== editingId) onRemove(sessionId, msg.id)
           break
         }
         case 'Escape': {
@@ -129,6 +128,7 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
       }
     },
     [
+      editingId,
       messages,
       selectedIndex,
       sessionId,
@@ -138,24 +138,6 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
       setIsOpen,
     ]
   )
-
-  const startEditing = useCallback((msg: QueuedMessage) => {
-    setEditingId(msg.id)
-    setEditingText(msg.message)
-  }, [])
-
-  const cancelEditing = useCallback(() => {
-    setEditingId(null)
-    setEditingText('')
-  }, [])
-
-  const saveEditing = useCallback(() => {
-    if (!editingId) return
-    const next = editingText.trim()
-    if (!next) return
-    onEdit(sessionId, editingId, next)
-    cancelEditing()
-  }, [cancelEditing, editingId, editingText, onEdit, sessionId])
 
   if (messages.length === 0) return null
 
@@ -211,35 +193,17 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
                   <span className="shrink-0 text-muted-foreground/60 tabular-nums">
                     #{index + 1}
                   </span>
-                  {isEditing ? (
-                    <textarea
-                      aria-label="Queued prompt text"
-                      value={editingText}
-                      onChange={e => setEditingText(e.target.value)}
-                      onClick={e => e.stopPropagation()}
-                      onKeyDown={e => {
-                        e.stopPropagation()
-                        // Don't commit edit when Enter confirms IME composition
-                        if (isImeComposingEvent(e)) {
-                          return
-                        }
-                        if (e.key === 'Escape') {
-                          e.preventDefault()
-                          cancelEditing()
-                        } else if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault()
-                          saveEditing()
-                        }
-                      }}
-                      className="min-h-8 flex-1 resize-none rounded border border-input bg-background px-2 py-1 text-xs text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                      autoFocus
-                    />
-                  ) : (
-                    <span className="min-w-0 flex-1 truncate text-foreground">
-                      {msg.message}
-                    </span>
-                  )}
-                  {attachments > 0 && (
+                  <span
+                    className={cn(
+                      'min-w-0 flex-1 truncate',
+                      isEditing ? 'text-muted-foreground' : 'text-foreground'
+                    )}
+                  >
+                    {isEditing
+                      ? 'Editing in the input below. Submit it to save.'
+                      : msg.message}
+                  </span>
+                  {!isEditing && attachments > 0 && (
                     <span className="flex shrink-0 items-center gap-0.5 rounded bg-muted/50 px-1 py-0.5 text-2xs text-muted-foreground">
                       <Paperclip className="h-2.5 w-2.5" />
                       {attachments}
@@ -257,31 +221,22 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
                     )}
                   >
                     {isEditing ? (
-                      <>
-                        <button
-                          type="button"
-                          aria-label="Save queued prompt"
-                          disabled={!editingText.trim()}
-                          onClick={e => {
-                            e.stopPropagation()
-                            saveEditing()
-                          }}
-                          className="rounded p-0.5 text-muted-foreground hover:bg-primary hover:text-primary-foreground disabled:opacity-40 transition-colors"
-                        >
-                          <Check className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          aria-label="Cancel queued prompt edit"
-                          onClick={e => {
-                            e.stopPropagation()
-                            cancelEditing()
-                          }}
-                          className="rounded p-0.5 text-muted-foreground hover:bg-muted transition-colors"
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </button>
-                      </>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            aria-label="Cancel queued prompt edit"
+                            onClick={e => {
+                              e.stopPropagation()
+                              onCancelEdit(sessionId)
+                            }}
+                            className="rounded p-0.5 text-muted-foreground hover:bg-muted transition-colors"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent>Cancel edit</TooltipContent>
+                      </Tooltip>
                     ) : (
                       <>
                         <Tooltip>
@@ -291,7 +246,7 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
                               aria-label="Edit queued prompt"
                               onClick={e => {
                                 e.stopPropagation()
-                                startEditing(msg)
+                                onEdit(sessionId, msg.id)
                               }}
                               className="rounded p-0.5 text-muted-foreground hover:bg-muted transition-colors"
                             >

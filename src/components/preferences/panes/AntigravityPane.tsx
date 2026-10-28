@@ -82,6 +82,7 @@ export function AntigravityPane() {
     <div className="w-full space-y-8">
       <SettingsSection
         title="CLI source"
+        anchorId="pref-antigravity-section-cli"
         actions={
           <CliAuthActions
             installed={installed}
@@ -186,7 +187,10 @@ export function AntigravityPane() {
         )}
       </SettingsSection>
 
-      <SettingsSection title="Default model">
+      <SettingsSection
+        title="Default model"
+        anchorId="pref-antigravity-section-settings"
+      >
         <InlineField label="Model">
           <Select
             value={

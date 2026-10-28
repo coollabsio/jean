@@ -508,7 +508,7 @@ export function TerminalView({
         {/* Tab bar - fixed height for consistency */}
         <div
           className={cn(
-            'flex items-stretch border-b border-border',
+            'flex items-stretch border-b border-border/20',
             MODAL_TERMINAL_SECONDARY_ROW_CLASS
           )}
         >
@@ -532,7 +532,7 @@ export function TerminalView({
                     e => void handleCloseTerminal(e, terminal.id)
                   )}
                   className={cn(
-                    'group flex shrink-0 items-center gap-1.5 border-r border-border px-3 py-1.5 text-xs transition-colors cursor-pointer',
+                    'group flex shrink-0 items-center gap-1.5 border-r border-border/20 px-3 py-1.5 text-xs transition-colors cursor-pointer',
                     isActive
                       ? 'bg-muted text-foreground'
                       : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',

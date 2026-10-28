@@ -702,10 +702,10 @@ html:not([data-mod-held]) [data-mod-hint] {
     box-shadow: none;
   }
   15% {
-    background-color: color-mix(in srgb, var(--primary) 12%, transparent);
+    background-color: var(--accent);
     box-shadow:
-      0 0 0 8px color-mix(in srgb, var(--primary) 12%, transparent),
-      0 0 0 10px color-mix(in srgb, var(--primary) 25%, transparent);
+      0 0 0 8px var(--accent),
+      0 0 0 9px color-mix(in srgb, var(--foreground) 20%, transparent);
   }
 }
 .settings-search-highlight {

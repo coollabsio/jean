@@ -26,7 +26,9 @@ describe('ProjectsSidebar server filter', () => {
     expect(source).toContain('className="px-1.5 py-2"')
     expect(source).toContain('<DropdownMenuTrigger')
     expect(source).toContain('aria-label="Filter projects by server"')
-    expect(source).toContain(
+    expect(
+      readFileSync('src/components/projects/SidebarSearchField.tsx', 'utf8')
+    ).toContain(
       'border-transparent bg-transparent pl-7 pr-2 text-xs shadow-none focus-visible:border-transparent dark:bg-transparent'
     )
     expect(source).not.toContain('<SelectTrigger')
@@ -64,24 +66,19 @@ describe('ProjectsSidebar server filter', () => {
       'aria-label="Filter projects by server"'
     )
     const search = source.indexOf(
-      'aria-label="Search projects, worktrees and servers"'
+      'label="Search projects, worktrees and servers"'
     )
     const addProject = source.indexOf('aria-label="Add project"')
-    const addWorktree = source.indexOf(
-      'aria-label="Add worktree to selected project"'
-    )
     const projectTree = source.indexOf('<ProjectTree')
 
     expect(serverSelector).toBeGreaterThan(search)
     expect(addProject).toBeGreaterThan(search)
-    expect(addWorktree).toBeGreaterThan(addProject)
-    expect(serverSelector).toBeGreaterThan(addWorktree)
+    expect(serverSelector).toBeGreaterThan(addProject)
     expect(projectTree).toBeGreaterThan(serverSelector)
     expect(source.indexOf('<ServersList')).toBeGreaterThan(serverSelector)
     expect(projectTree).toBeGreaterThan(source.indexOf('<ServersList'))
     expect(source).toContain('<Plus className="size-3.5" />')
-    expect(source).toContain('<GitBranchPlus className="size-3.5" />')
-    expect(source).toContain('disabled={!selectedProjectId}')
+    expect(source).not.toContain('Add worktree to selected project')
     expect(source).toContain('className="flex gap-1 px-3"')
     expect(source).toContain('border-transparent bg-transparent')
     expect(source).toContain('searchQuery={searchQuery}')

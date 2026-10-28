@@ -49,6 +49,7 @@ export function DevinMcpSection() {
   return (
     <SettingsSection
       title="Devin and DeepWiki MCP (optional)"
+      anchorId="pref-mcp-section-devin"
       collapsible
       defaultOpen={false}
     >

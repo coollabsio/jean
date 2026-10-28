@@ -9700,42 +9700,63 @@ pub async fn remove_queued_message(
     Ok(())
 }
 
-/// Update a specific queued message's text by its `id` field.
+/// Edited composer content for a queued message: text plus every attachment kind.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueuedMessageEdit {
+    pub message: String,
+    pub pending_images: Vec<Value>,
+    pub pending_files: Vec<Value>,
+    pub pending_skills: Vec<Value>,
+    pub pending_text_files: Vec<Value>,
+}
+
+/// Replace a queued message's text and attachments by its `id` field.
 /// Returns `false` when the message is no longer queued.
-/// Holds the metadata lock across the entire read-modify-write to prevent TOCTOU races.
-fn update_queued_message_text(
-    queued_messages: &mut [serde_json::Value],
+fn apply_queued_message_edit(
+    queued_messages: &mut [Value],
     message_id: &str,
-    message: &str,
+    edit: &QueuedMessageEdit,
 ) -> bool {
     let Some(queued) = queued_messages
         .iter_mut()
         .find(|queued| queued.get("id").and_then(|value| value.as_str()) == Some(message_id))
+        .and_then(Value::as_object_mut)
     else {
         return false;
     };
 
-    let Some(queued) = queued.as_object_mut() else {
-        return false;
-    };
+    queued.insert("message".to_string(), Value::String(edit.message.clone()));
     queued.insert(
-        "message".to_string(),
-        serde_json::Value::String(message.to_string()),
+        "pendingImages".to_string(),
+        Value::Array(edit.pending_images.clone()),
+    );
+    queued.insert(
+        "pendingFiles".to_string(),
+        Value::Array(edit.pending_files.clone()),
+    );
+    queued.insert(
+        "pendingSkills".to_string(),
+        Value::Array(edit.pending_skills.clone()),
+    );
+    queued.insert(
+        "pendingTextFiles".to_string(),
+        Value::Array(edit.pending_text_files.clone()),
     );
     true
 }
 
+/// Holds the metadata lock across the entire read-modify-write to prevent TOCTOU races.
 pub async fn update_queued_message(
     app: AppHandle,
     _worktree_id: String,
     _worktree_path: String,
     session_id: String,
     message_id: String,
-    message: String,
+    edit: QueuedMessageEdit,
 ) -> Result<bool, String> {
     let (updated, queue) = with_existing_metadata_mut(&app, &session_id, |metadata| {
-        let updated =
-            update_queued_message_text(&mut metadata.queued_messages, &message_id, &message);
+        let updated = apply_queued_message_edit(&mut metadata.queued_messages, &message_id, &edit);
         (updated, metadata.queued_messages.clone())
     })?;
 
@@ -11317,15 +11338,32 @@ mod tests {
     }
 
     #[test]
-    fn queued_message_text_edit_updates_steerable_backends() {
+    fn queued_message_edit_replaces_text_and_attachments() {
         let mut queue = vec![serde_json::json!({
             "id": "m1",
             "message": "original",
             "backend": "codex",
+            "pendingImages": [{ "id": "img-1", "path": "/tmp/a.png" }],
+            "pendingFiles": [],
+            "pendingSkills": [],
+            "pendingTextFiles": [],
         })];
+        let edit: QueuedMessageEdit = serde_json::from_value(serde_json::json!({
+            "message": "edited",
+            "pendingImages": [],
+            "pendingFiles": [{ "id": "f-1", "relativePath": "src/a.ts" }],
+            "pendingSkills": [],
+            "pendingTextFiles": [{ "id": "t-1", "path": "/tmp/t.txt" }],
+        }))
+        .unwrap();
 
-        assert!(update_queued_message_text(&mut queue, "m1", "edited"));
+        assert!(apply_queued_message_edit(&mut queue, "m1", &edit));
         assert_eq!(queue[0]["message"], "edited");
+        assert_eq!(queue[0]["backend"], "codex");
+        assert_eq!(queue[0]["pendingImages"], serde_json::json!([]));
+        assert_eq!(queue[0]["pendingFiles"][0]["id"], "f-1");
+        assert_eq!(queue[0]["pendingTextFiles"][0]["id"], "t-1");
+        assert!(!apply_queued_message_edit(&mut queue, "missing", &edit));
     }
 
     #[test]

@@ -30,6 +30,7 @@ import type {
   EffortLevel,
   LabelData,
   QueuedMessage,
+  QueuedMessageEdit,
   Backend,
   PinnedTable,
 } from '@/types/chat'
@@ -2682,7 +2683,7 @@ export function persistRemoveQueued(
 }
 
 /**
- * Persist a queued message text edit.
+ * Persist a queued message edit (text and attachments).
  * Returns false when the message is no longer queued.
  */
 export async function persistUpdateQueued(
@@ -2690,14 +2691,14 @@ export async function persistUpdateQueued(
   worktreePath: string,
   sessionId: string,
   messageId: string,
-  message: string
+  edit: QueuedMessageEdit
 ): Promise<boolean> {
   return invoke<boolean>('update_queued_message', {
     worktreeId,
     worktreePath,
     sessionId,
     messageId,
-    message,
+    edit,
   })
 }
 

@@ -1,16 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
-  GitBranchPlus,
   FolderPlus,
   Plus,
   AlertTriangle,
   ChevronDown,
-  Search,
   Server,
   Settings2,
 } from '@/components/icons/reicon'
-import { Input } from '@/components/ui/input'
 import { useSidebarWidth } from '@/components/layout/SidebarWidthContext'
 import {
   DropdownMenu,
@@ -38,9 +35,8 @@ import { invoke } from '@/lib/transport'
 import { isServerProject, type Project } from '@/types/projects'
 import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import { useProjectsStore } from '@/store/projects-store'
-import { useUIStore } from '@/store/ui-store'
 import { ProjectTree } from './ProjectTree'
-import { SearchFieldContextMenu } from './SearchFieldContextMenu'
+import { SidebarSearchField } from './SidebarSearchField'
 import { SidebarEmptySpaceMenu } from './SidebarEmptySpaceMenu'
 import { suppressSidebarChromeContextMenu } from './sidebar-context-menu'
 import { RecentWorktreesList } from './RecentWorktreesList'
@@ -141,7 +137,7 @@ export function ProjectsSidebar() {
   )
   const [connectionsOpen, setConnectionsOpen] = useState(false)
   const activeTab = useProjectsStore(state => state.sidebarActiveTab)
-  const [searchQuery, setSearchQuery] = useState('')
+  const searchQuery = useProjectsStore(state => state.sidebarSearchQuery)
   const [footerActionsEl, setFooterActionsEl] = useState<HTMLDivElement | null>(
     null
   )
@@ -186,18 +182,20 @@ export function ProjectsSidebar() {
   }, [setAddProjectDialogOpen])
 
   const handleNewFolder = useCallback(() => {
-    setSearchQuery('')
+    useProjectsStore.getState().setSidebarSearchQuery('')
     createFolder.mutate({ name: 'New Folder' })
   }, [createFolder])
+
+  // The open project canvas handles this (same as the new-session shortcut)
+  const handleNewSession = useCallback(() => {
+    window.dispatchEvent(
+      new CustomEvent('create-new-session', { detail: { intent: 'picker' } })
+    )
+  }, [])
 
   const handleNewServer = useCallback(() => {
     useProjectsStore.getState().setServerDialog({})
   }, [])
-
-  const handleNewWorktree = useCallback(() => {
-    if (!selectedProjectId) return
-    useUIStore.getState().setNewWorktreeModalOpen(true)
-  }, [selectedProjectId])
 
   return (
     <div
@@ -210,19 +208,7 @@ export function ProjectsSidebar() {
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
             <div className="border-b border-border/40 pb-2">
               <div className="flex gap-1 px-3">
-                <div className="relative min-w-0 flex-1">
-                  <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                  <SearchFieldContextMenu>
-                    <Input
-                      type="search"
-                      value={searchQuery}
-                      onChange={event => setSearchQuery(event.target.value)}
-                      placeholder="Search…"
-                      aria-label="Search projects, worktrees and servers"
-                      className="h-8 border-transparent bg-transparent pl-7 pr-2 text-xs shadow-none focus-visible:border-transparent dark:bg-transparent"
-                    />
-                  </SearchFieldContextMenu>
-                </div>
+                <SidebarSearchField label="Search projects, worktrees and servers" />
                 <DropdownMenu>
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -230,14 +216,14 @@ export function ProjectsSidebar() {
                         <button
                           type="button"
                           className="flex size-8 shrink-0 items-center justify-center rounded-md border border-transparent bg-transparent text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                          aria-label="Add project, folder or server"
+                          aria-label="Add project, server or folder"
                         >
                           <Plus className="size-3.5" />
                         </button>
                       </DropdownMenuTrigger>
                     </TooltipTrigger>
                     <TooltipContent>
-                      Add project, folder or server
+                      Add project, server or folder
                     </TooltipContent>
                   </Tooltip>
                   <DropdownMenuContent align="end">
@@ -249,6 +235,11 @@ export function ProjectsSidebar() {
                       <Plus className="size-3.5" />
                       Add project
                     </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={handleNewServer}>
+                      <Server className="size-3.5" />
+                      Add server
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
                     <DropdownMenuItem
                       onSelect={handleNewFolder}
                       disabled={createFolder.isPending}
@@ -256,29 +247,8 @@ export function ProjectsSidebar() {
                       <FolderPlus className="size-3.5" />
                       New folder
                     </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onSelect={handleNewServer}>
-                      <Server className="size-3.5" />
-                      Add server
-                    </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      className="flex size-8 shrink-0 items-center justify-center rounded-md border border-transparent bg-transparent text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
-                      onClick={handleNewWorktree}
-                      disabled={!selectedProjectId}
-                      aria-label="Add worktree to selected project"
-                    >
-                      <GitBranchPlus className="size-3.5" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    Add worktree to selected project
-                  </TooltipContent>
-                </Tooltip>
               </div>
             </div>
             {showServerMenu && (
@@ -416,10 +386,30 @@ export function ProjectsSidebar() {
             )}
           </div>
         ) : (
-          <RecentWorktreesList
-            projects={visibleProjects}
-            footerActionsContainer={footerActionsEl}
-          />
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="flex shrink-0 gap-1 border-b border-border/40 px-3 pb-2">
+              <SidebarSearchField label="Search recent sessions" />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className="flex size-8 shrink-0 items-center justify-center rounded-md border border-transparent bg-transparent text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+                    onClick={handleNewSession}
+                    disabled={!selectedProjectId}
+                    aria-label="New session"
+                  >
+                    <Plus className="size-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>New session</TooltipContent>
+              </Tooltip>
+            </div>
+            <RecentWorktreesList
+              projects={visibleProjects}
+              searchQuery={searchQuery}
+              footerActionsContainer={footerActionsEl}
+            />
+          </div>
         )}
       </div>
       {/* Glassy footer floats over the list (only when it has buttons); only its buttons take clicks */}

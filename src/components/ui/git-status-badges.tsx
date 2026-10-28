@@ -54,10 +54,9 @@ export function GitStatusBadges({
             <button
               type="button"
               onClick={onDiffClick}
-              className="inline-flex shrink-0 cursor-pointer items-center gap-0.5 text-xs font-medium leading-none transition-opacity"
+              className="inline-flex shrink-0 cursor-pointer items-center gap-1 text-xs tabular-nums leading-none hover:opacity-70 transition-opacity"
             >
               <span className="text-success">+{diffAdded}</span>
-              <span className="text-muted-foreground">/</span>
               <span className="text-destructive">-{diffRemoved}</span>
             </button>
           </TooltipTrigger>
@@ -70,10 +69,9 @@ export function GitStatusBadges({
             <button
               type="button"
               onClick={onBranchDiffClick}
-              className="inline-flex shrink-0 cursor-pointer items-center gap-0.5 text-xs font-medium leading-none hover:opacity-70 transition-opacity"
+              className="inline-flex shrink-0 cursor-pointer items-center gap-1 text-xs tabular-nums leading-none hover:opacity-70 transition-opacity"
             >
               <span className="text-success">+{branchDiffAdded}</span>
-              <span className="text-muted-foreground">/</span>
               <span className="text-destructive">-{branchDiffRemoved}</span>
             </button>
           </TooltipTrigger>

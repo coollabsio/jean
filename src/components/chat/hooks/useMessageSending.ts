@@ -45,6 +45,7 @@ import {
   useInstalledBackends,
 } from '@/hooks/useInstalledBackends'
 import { applySessionSettingToSession } from './session-setting-sync'
+import { saveQueuedMessageEdit } from './useQueuedPromptActions'
 import { CODEX_GOAL_TURN_PREFIX } from '../goal-utils'
 
 interface UseMessageSendingParams {
@@ -377,6 +378,33 @@ export function useMessageSending({
       )
         return
       if (!activeSessionId || !activeWorktreeId || !activeWorktreePath) return
+
+      // Editing a queued prompt: save the composer content back into the
+      // queue at the same position instead of sending it.
+      const editingQueuedId =
+        useChatStore.getState().editingQueuedMessageIds[activeSessionId]
+      if (editingQueuedId) {
+        const saved = await saveQueuedMessageEdit(
+          activeSessionId,
+          editingQueuedId,
+          {
+            message: textMessage,
+            pendingImages: images,
+            pendingFiles: files,
+            pendingSkills: skills,
+            pendingTextFiles: textFiles,
+          }
+        )
+        if (saved) {
+          clearInputDraft(activeSessionId)
+          clearPendingImages(activeSessionId)
+          clearPendingFiles(activeSessionId)
+          clearPendingSkills(activeSessionId)
+          clearPendingTextFiles(activeSessionId)
+          clearChatInputState()
+        }
+        return
+      }
 
       // Intercept /login — interactive CLI login is not available inside Jean
       // headless chat (issue #387). Open CliLoginModal instead.

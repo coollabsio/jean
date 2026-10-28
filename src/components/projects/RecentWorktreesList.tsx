@@ -48,6 +48,7 @@ import type { WorktreeSessions } from '@/types/chat'
 import type { Project, RecentWorktreeItem } from '@/types/projects'
 import { isUnreadSession } from '@/components/unread/unread-utils'
 import { getRecentSessionStatus } from './recent-session-status'
+import { matchesSidebarSearch } from './SidebarSearchField'
 
 const INITIAL_RECENT_LIMIT = 10
 const RECENT_PAGE_SIZE = 25
@@ -55,6 +56,8 @@ const SNOOZE_AFTER_SECONDS = 24 * 60 * 60
 
 interface RecentWorktreesListProps {
   projects: Project[]
+  /** Filters the loaded rows by session, project or worktree name. */
+  searchQuery?: string
   /** Sidebar footer slot for the "Show more" actions (next to Settings). */
   footerActionsContainer?: HTMLElement | null
 }
@@ -117,6 +120,7 @@ export function sortRecentRows(
 
 export function RecentWorktreesList({
   projects,
+  searchQuery = '',
   footerActionsContainer,
 }: RecentWorktreesListProps) {
   const isMobile = useIsMobile()
@@ -175,9 +179,15 @@ export function RecentWorktreesList({
   const displayedRows = useMemo(() => {
     const visibleRows = rows.filter(
       row =>
-        showSnoozed ||
-        pinned.has(row.session.id) ||
-        !isSnoozedSession(row.lastActivityAt)
+        (showSnoozed ||
+          pinned.has(row.session.id) ||
+          !isSnoozedSession(row.lastActivityAt)) &&
+        matchesSidebarSearch(
+          searchQuery,
+          row.session.name,
+          row.projectName,
+          row.worktree.name
+        )
     )
     return sortRecentRows(
       visibleRows,
@@ -188,7 +198,14 @@ export function RecentWorktreesList({
           waiting: waitingForInputSessionIds[row.session.id] ?? false,
         }).tone === 'working'
     )
-  }, [pinned, rows, showSnoozed, sendingSessionIds, waitingForInputSessionIds])
+  }, [
+    pinned,
+    rows,
+    searchQuery,
+    showSnoozed,
+    sendingSessionIds,
+    waitingForInputSessionIds,
+  ])
   const serverProjectIds = useMemo(
     () =>
       new Set(
@@ -379,13 +396,13 @@ export function RecentWorktreesList({
 
   return (
     <div
-      className="flex h-full min-h-0 flex-col overflow-hidden"
+      className="flex h-full min-h-0 flex-1 flex-col overflow-hidden"
       data-testid="recent-worktrees-list"
     >
       <div className="min-h-0 flex-1 overflow-y-auto">
         {displayedRows.length === 0 && (
           <div className="px-3 py-6 text-center text-xs text-muted-foreground">
-            No recent sessions
+            {searchQuery.trim() ? 'No matching sessions' : 'No recent sessions'}
           </div>
         )}
         <ul

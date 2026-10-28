@@ -47,7 +47,10 @@ describe('ProjectsSidebar folder creation', () => {
     mocks.readFromClipboard.mockReset()
     mocks.readFromClipboard.mockResolvedValue('pasted')
     mocks.isMobile = false
-    useProjectsStore.setState({ addProjectDialogOpen: false })
+    useProjectsStore.setState({
+      addProjectDialogOpen: false,
+      sidebarSearchQuery: '',
+    })
   })
 
   it('offers New folder in the search-row plus menu', async () => {
@@ -59,11 +62,14 @@ describe('ProjectsSidebar folder creation', () => {
     })
     await user.type(search, 'old search')
     await user.click(
-      screen.getByRole('button', { name: 'Add project, folder or server' })
+      screen.getByRole('button', { name: 'Add project, server or folder' })
     )
     expect(
       screen.getByRole('menuitem', { name: 'Add project' })
     ).toHaveAttribute('data-disabled')
+    expect(
+      screen.getAllByRole('menuitem').map(item => item.textContent?.trim())
+    ).toEqual(['Add project', 'Add server', 'New folder'])
     await user.click(screen.getByRole('menuitem', { name: 'New folder' }))
 
     expect(mocks.createFolder).toHaveBeenCalledWith({ name: 'New Folder' })
@@ -76,7 +82,7 @@ describe('ProjectsSidebar folder creation', () => {
     render(<ProjectsSidebar />)
 
     await user.click(
-      screen.getByRole('button', { name: 'Add project, folder or server' })
+      screen.getByRole('button', { name: 'Add project, server or folder' })
     )
     await user.click(screen.getByRole('menuitem', { name: 'Add server' }))
 
@@ -88,7 +94,7 @@ describe('ProjectsSidebar folder creation', () => {
     render(<ProjectsSidebar />)
 
     const chrome = screen.getByRole('button', {
-      name: 'Add worktree to selected project',
+      name: 'Add project, server or folder',
     })
     expect(
       fireEvent.contextMenu(chrome, { bubbles: true, cancelable: true })

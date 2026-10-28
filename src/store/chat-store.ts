@@ -16,6 +16,7 @@ import {
   type ContentBlock,
   type Todo,
   type QueuedMessage,
+  type QueuedMessageEdit,
   type PermissionDenial,
   type CodexCommandApprovalRequest,
   type CodexPermissionRequest,
@@ -243,6 +244,9 @@ interface ChatUIState {
 
   // Message queues per session (FIFO - messages waiting to be sent)
   messageQueues: Record<string, QueuedMessage[]>
+
+  // Queued message currently loaded into the composer for editing (per session)
+  editingQueuedMessageIds: Record<string, string>
 
   // Execution mode the currently-executing prompt was sent with (per session)
   executingModes: Record<string, ExecutionMode>
@@ -649,8 +653,11 @@ interface ChatUIState {
   updateQueuedMessage: (
     sessionId: string,
     messageId: string,
-    message: string
+    edit: QueuedMessageEdit
   ) => void
+  /** Load a queued message (text + attachments) into the composer to edit it */
+  startEditingQueuedMessage: (sessionId: string, message: QueuedMessage) => void
+  stopEditingQueuedMessage: (sessionId: string) => void
   moveQueuedMessageFront: (sessionId: string, messageId: string) => void
   clearQueue: (sessionId: string) => void
   getQueueLength: (sessionId: string) => number
@@ -830,6 +837,7 @@ const SESSION_SCOPED_RECORD_KEYS = [
   'activeTodos',
   'streamingPlanApprovals',
   'messageQueues',
+  'editingQueuedMessageIds',
   'executingModes',
   'approvedTools',
   'pendingPermissionDenials',
@@ -999,6 +1007,7 @@ export const useChatStore = create<ChatUIState>()(
       fixedFindings: {},
       streamingPlanApprovals: {},
       messageQueues: {},
+      editingQueuedMessageIds: {},
       executingModes: {},
       approvedTools: {},
       pendingPermissionDenials: {},
@@ -2946,9 +2955,7 @@ export const useChatStore = create<ChatUIState>()(
       setQueuedPromptsExpanded: (sessionId, expanded) =>
         set(
           state => {
-            if (
-              !!state.expandedQueuedPromptsSessions[sessionId] === expanded
-            ) {
+            if (!!state.expandedQueuedPromptsSessions[sessionId] === expanded) {
               return state
             }
             if (expanded) {
@@ -3473,23 +3480,62 @@ export const useChatStore = create<ChatUIState>()(
           'removeQueuedMessage'
         ),
 
-      updateQueuedMessage: (sessionId, messageId, message) =>
+      updateQueuedMessage: (sessionId, messageId, edit) =>
         set(
           state => {
             const queue = state.messageQueues[sessionId] ?? []
-            const idx = queue.findIndex(m => m.id === messageId)
-            if (idx === -1 || queue[idx]?.message === message) return state
+            if (!queue.some(m => m.id === messageId)) return state
             return {
               messageQueues: {
                 ...state.messageQueues,
                 [sessionId]: queue.map(m =>
-                  m.id === messageId ? { ...m, message } : m
+                  m.id === messageId ? { ...m, ...edit } : m
                 ),
               },
             }
           },
           undefined,
           'updateQueuedMessage'
+        ),
+
+      startEditingQueuedMessage: (sessionId, message) =>
+        set(
+          state => ({
+            editingQueuedMessageIds: {
+              ...state.editingQueuedMessageIds,
+              [sessionId]: message.id,
+            },
+            inputDrafts: { ...state.inputDrafts, [sessionId]: message.message },
+            pendingImages: {
+              ...state.pendingImages,
+              [sessionId]: message.pendingImages,
+            },
+            pendingFiles: {
+              ...state.pendingFiles,
+              [sessionId]: message.pendingFiles,
+            },
+            pendingSkills: {
+              ...state.pendingSkills,
+              [sessionId]: message.pendingSkills,
+            },
+            pendingTextFiles: {
+              ...state.pendingTextFiles,
+              [sessionId]: message.pendingTextFiles,
+            },
+          }),
+          undefined,
+          'startEditingQueuedMessage'
+        ),
+
+      stopEditingQueuedMessage: sessionId =>
+        set(
+          state => {
+            if (!(sessionId in state.editingQueuedMessageIds)) return state
+            const { [sessionId]: _, ...rest } = state.editingQueuedMessageIds
+            return { editingQueuedMessageIds: rest }
+          },
+          undefined,
+          'stopEditingQueuedMessage'
         ),
 
       moveQueuedMessageFront: (sessionId, messageId) =>

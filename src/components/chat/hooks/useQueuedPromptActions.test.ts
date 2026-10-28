@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
-import { useQueuedPromptActions } from './useQueuedPromptActions'
+import {
+  saveQueuedMessageEdit,
+  useQueuedPromptActions,
+} from './useQueuedPromptActions'
 import { useChatStore } from '@/store/chat-store'
 import {
   cancelChatMessage,
@@ -27,6 +30,10 @@ vi.mock('@/services/chat', () => ({
   steerOpencodeTurn: vi.fn().mockResolvedValue(undefined),
   steerPiTurn: vi.fn().mockResolvedValue(undefined),
   steerClaudeTurn: vi.fn().mockResolvedValue(undefined),
+}))
+
+vi.mock('sonner', () => ({
+  toast: { error: vi.fn() },
 }))
 
 vi.mock('@/lib/logger', () => ({
@@ -75,11 +82,17 @@ describe('useQueuedPromptActions', () => {
       sendingSessionIds: {},
       waitingForInputSessionIds: {},
       selectedBackends: {},
+      editingQueuedMessageIds: {},
+      inputDrafts: {},
+      pendingImages: {},
+      pendingFiles: {},
+      pendingSkills: {},
+      pendingTextFiles: {},
     })
   })
 
   it('removes a queued message locally and persists removal', () => {
-    const { result } = renderHook(() => useQueuedPromptActions())
+    const { result } = renderHook(() => useQueuedPromptActions('session-1'))
 
     act(() => {
       result.current.handleRemoveQueuedMessage('session-1', 'msg-2')
@@ -96,76 +109,129 @@ describe('useQueuedPromptActions', () => {
     )
   })
 
-  it('edits a queued message locally and persists update', async () => {
-    const { result } = renderHook(() => useQueuedPromptActions())
+  it('loads a queued message with its attachments into the composer', () => {
+    const image = { id: 'img-1', path: '/tmp/a.png', filename: 'a.png' }
+    useChatStore.setState({
+      messageQueues: {
+        'session-1': [
+          createMessage('msg-1'),
+          createMessage('msg-2', { pendingImages: [image] }),
+        ],
+      },
+    })
+    const { result } = renderHook(() => useQueuedPromptActions('session-1'))
 
+    act(() => result.current.handleEditQueuedMessage('session-1', 'msg-2'))
+
+    const state = useChatStore.getState()
+    expect(state.editingQueuedMessageIds['session-1']).toBe('msg-2')
+    expect(state.inputDrafts['session-1']).toBe('prompt msg-2')
+    expect(state.pendingImages['session-1']).toEqual([image])
+  })
+
+  it('does not overwrite an unsent composer draft', () => {
+    useChatStore.setState({ inputDrafts: { 'session-1': 'my draft' } })
+    const { result } = renderHook(() => useQueuedPromptActions('session-1'))
+
+    act(() => result.current.handleEditQueuedMessage('session-1', 'msg-2'))
+
+    const state = useChatStore.getState()
+    expect(state.editingQueuedMessageIds['session-1']).toBeUndefined()
+    expect(state.inputDrafts['session-1']).toBe('my draft')
+  })
+
+  it('cancelling an edit clears the composer and keeps the queued message', () => {
+    const { result } = renderHook(() => useQueuedPromptActions('session-1'))
+
+    act(() => result.current.handleEditQueuedMessage('session-1', 'msg-2'))
+    act(() => result.current.handleCancelQueuedEdit('session-1'))
+
+    const state = useChatStore.getState()
+    expect(state.editingQueuedMessageIds['session-1']).toBeUndefined()
+    expect(state.inputDrafts['session-1']).toBeUndefined()
+    expect(state.messageQueues['session-1']?.[1]?.message).toBe('prompt msg-2')
+  })
+
+  it('saves text and attachments in place and ends the edit', async () => {
+    const textFile = {
+      id: 'txt-1',
+      path: '/tmp/t.txt',
+      filename: 't.txt',
+      size: 3,
+      content: 'abc',
+    }
+    const edit = {
+      message: 'updated prompt',
+      pendingImages: [],
+      pendingFiles: [],
+      pendingSkills: [],
+      pendingTextFiles: [textFile],
+    }
+    useChatStore.setState({ editingQueuedMessageIds: { 'session-1': 'msg-2' } })
+
+    let saved = false
     await act(async () => {
-      await result.current.handleEditQueuedMessage(
-        'session-1',
-        'msg-2',
-        'updated prompt'
-      )
+      saved = await saveQueuedMessageEdit('session-1', 'msg-2', edit)
     })
 
-    expect(
-      useChatStore.getState().messageQueues['session-1']?.map(m => m.message)
-    ).toEqual(['prompt msg-1', 'updated prompt', 'prompt msg-3'])
+    expect(saved).toBe(true)
     expect(persistUpdateQueued).toHaveBeenCalledWith(
       'worktree-1',
       '/tmp/worktree-1',
       'session-1',
       'msg-2',
-      'updated prompt'
+      edit
     )
+    const state = useChatStore.getState()
+    expect(state.messageQueues['session-1']?.map(m => m.message)).toEqual([
+      'prompt msg-1',
+      'updated prompt',
+      'prompt msg-3',
+    ])
+    expect(state.messageQueues['session-1']?.[1]?.pendingTextFiles).toEqual([
+      textFile,
+    ])
+    expect(state.editingQueuedMessageIds['session-1']).toBeUndefined()
   })
 
-  it('drops the stale local copy when the queued message was already dequeued', async () => {
+  it('keeps the edit in the composer when the message was already dequeued', async () => {
     vi.mocked(persistUpdateQueued).mockResolvedValue(false)
-    const { result } = renderHook(() => useQueuedPromptActions())
+    useChatStore.setState({ editingQueuedMessageIds: { 'session-1': 'msg-2' } })
 
+    let saved = true
     await act(async () => {
-      await result.current.handleEditQueuedMessage(
-        'session-1',
-        'msg-2',
-        'updated prompt'
-      )
+      saved = await saveQueuedMessageEdit('session-1', 'msg-2', {
+        message: 'updated prompt',
+        pendingImages: [],
+        pendingFiles: [],
+        pendingSkills: [],
+        pendingTextFiles: [],
+      })
     })
 
-    expect(
-      useChatStore.getState().messageQueues['session-1']?.map(m => m.message)
-    ).toEqual(['prompt msg-1', 'prompt msg-3'])
+    expect(saved).toBe(false)
+    const state = useChatStore.getState()
+    expect(state.messageQueues['session-1']?.map(m => m.id)).toEqual([
+      'msg-1',
+      'msg-3',
+    ])
+    expect(state.editingQueuedMessageIds['session-1']).toBeUndefined()
   })
 
-  it('edits queued messages that can be steered while they remain queued', async () => {
-    useChatStore.setState({
-      messageQueues: {
-        'session-1': [createMessage('msg-1', { backend: 'codex' })],
-      },
-    })
-    const { result } = renderHook(() => useQueuedPromptActions())
+  it('ends the edit when the edited message leaves the queue', () => {
+    const { result } = renderHook(() => useQueuedPromptActions('session-1'))
+    act(() => result.current.handleEditQueuedMessage('session-1', 'msg-1'))
 
-    await act(async () => {
-      await result.current.handleEditQueuedMessage(
-        'session-1',
-        'msg-1',
-        'updated prompt'
-      )
-    })
+    act(() => useChatStore.getState().removeQueuedMessage('session-1', 'msg-1'))
 
-    expect(persistUpdateQueued).toHaveBeenCalledWith(
-      'worktree-1',
-      '/tmp/worktree-1',
-      'session-1',
-      'msg-1',
-      'updated prompt'
-    )
-    expect(
-      useChatStore.getState().messageQueues['session-1']?.[0]?.message
-    ).toBe('updated prompt')
+    const state = useChatStore.getState()
+    expect(state.editingQueuedMessageIds['session-1']).toBeUndefined()
+    // The composer keeps the edit so it can be sent as a new prompt
+    expect(state.inputDrafts['session-1']).toBe('prompt msg-1')
   })
 
   it('idle session: promotes the message and force-processes the queue', async () => {
-    const { result } = renderHook(() => useQueuedPromptActions())
+    const { result } = renderHook(() => useQueuedPromptActions('session-1'))
 
     await act(async () => {
       await result.current.handleSendQueuedNow('session-1', 'msg-2')
@@ -186,7 +252,7 @@ describe('useQueuedPromptActions', () => {
 
   it('idle session: aborts when another client already dequeued the message', async () => {
     vi.mocked(persistMoveQueuedFront).mockResolvedValue(false)
-    const { result } = renderHook(() => useQueuedPromptActions())
+    const { result } = renderHook(() => useQueuedPromptActions('session-1'))
 
     await act(async () => {
       await result.current.handleSendQueuedNow('session-1', 'msg-2')
@@ -202,7 +268,7 @@ describe('useQueuedPromptActions', () => {
       sendingSessionIds: { 'session-1': true },
       selectedBackends: { 'session-1': 'codex' },
     })
-    const { result } = renderHook(() => useQueuedPromptActions())
+    const { result } = renderHook(() => useQueuedPromptActions('session-1'))
 
     await act(async () => {
       await result.current.handleSendQueuedNow('session-1', 'msg-2')
@@ -225,7 +291,7 @@ describe('useQueuedPromptActions', () => {
       sendingSessionIds: { 'session-1': true },
       selectedBackends: { 'session-1': 'codex' },
     })
-    const { result } = renderHook(() => useQueuedPromptActions())
+    const { result } = renderHook(() => useQueuedPromptActions('session-1'))
 
     await act(async () => {
       await result.current.handleSendQueuedNow('session-1', 'msg-2')
@@ -250,7 +316,7 @@ describe('useQueuedPromptActions', () => {
       sendingSessionIds: { 'session-1': true },
       selectedBackends: { 'session-1': 'codex' },
     })
-    const { result } = renderHook(() => useQueuedPromptActions())
+    const { result } = renderHook(() => useQueuedPromptActions('session-1'))
 
     await act(async () => {
       await result.current.handleSendQueuedNow('session-1', 'msg-1')
@@ -272,7 +338,7 @@ describe('useQueuedPromptActions', () => {
       sendingSessionIds: { 'session-1': true },
       selectedBackends: { 'session-1': 'pi' },
     })
-    const { result } = renderHook(() => useQueuedPromptActions())
+    const { result } = renderHook(() => useQueuedPromptActions('session-1'))
 
     await act(async () => {
       await result.current.handleSendQueuedNow('session-1', 'msg-2')
@@ -294,7 +360,7 @@ describe('useQueuedPromptActions', () => {
       sendingSessionIds: { 'session-1': true },
       selectedBackends: { 'session-1': 'grok' },
     })
-    const { result } = renderHook(() => useQueuedPromptActions())
+    const { result } = renderHook(() => useQueuedPromptActions('session-1'))
 
     await act(async () => {
       await result.current.handleSendQueuedNow('session-1', 'msg-2')
@@ -317,7 +383,7 @@ describe('useQueuedPromptActions', () => {
       sendingSessionIds: { 'session-1': true },
       selectedBackends: { 'session-1': 'grok' },
     })
-    const { result } = renderHook(() => useQueuedPromptActions())
+    const { result } = renderHook(() => useQueuedPromptActions('session-1'))
 
     await act(async () => {
       await result.current.handleSendQueuedNow('session-1', 'msg-2')
@@ -336,7 +402,7 @@ describe('useQueuedPromptActions', () => {
       sendingSessionIds: { 'session-1': true },
       selectedBackends: { 'session-1': 'pi' },
     })
-    const { result } = renderHook(() => useQueuedPromptActions())
+    const { result } = renderHook(() => useQueuedPromptActions('session-1'))
 
     await act(async () => {
       await result.current.handleSendQueuedNow('session-1', 'msg-2')
@@ -354,7 +420,7 @@ describe('useQueuedPromptActions', () => {
       sendingSessionIds: { 'session-1': true },
       selectedBackends: { 'session-1': 'opencode' },
     })
-    const { result } = renderHook(() => useQueuedPromptActions())
+    const { result } = renderHook(() => useQueuedPromptActions('session-1'))
 
     await act(async () => {
       await result.current.handleSendQueuedNow('session-1', 'msg-2')
@@ -378,7 +444,7 @@ describe('useQueuedPromptActions', () => {
       sendingSessionIds: { 'session-1': true },
       selectedBackends: { 'session-1': 'opencode' },
     })
-    const { result } = renderHook(() => useQueuedPromptActions())
+    const { result } = renderHook(() => useQueuedPromptActions('session-1'))
 
     await act(async () => {
       await result.current.handleSendQueuedNow('session-1', 'msg-2')
@@ -406,7 +472,7 @@ describe('useQueuedPromptActions', () => {
       sendingSessionIds: { 'session-1': true },
       selectedBackends: { 'session-1': 'opencode' },
     })
-    const { result } = renderHook(() => useQueuedPromptActions())
+    const { result } = renderHook(() => useQueuedPromptActions('session-1'))
 
     await act(async () => {
       await result.current.handleSendQueuedNow('session-1', 'msg-1')
@@ -441,7 +507,7 @@ describe('useQueuedPromptActions', () => {
       sendingSessionIds: { 'session-1': true },
       selectedBackends: { 'session-1': 'pi' },
     })
-    const { result } = renderHook(() => useQueuedPromptActions())
+    const { result } = renderHook(() => useQueuedPromptActions('session-1'))
 
     await act(async () => {
       await result.current.handleSendQueuedNow('session-1', 'msg-1')
@@ -470,7 +536,7 @@ describe('useQueuedPromptActions', () => {
       sendingSessionIds: { 'session-1': true },
       selectedBackends: { 'session-1': 'pi' },
     })
-    const { result } = renderHook(() => useQueuedPromptActions())
+    const { result } = renderHook(() => useQueuedPromptActions('session-1'))
 
     await act(async () => {
       await result.current.handleSendQueuedNow('session-1', 'msg-1')
@@ -499,7 +565,7 @@ describe('useQueuedPromptActions', () => {
       sendingSessionIds: { 'session-1': true },
       selectedBackends: { 'session-1': 'grok' },
     })
-    const { result } = renderHook(() => useQueuedPromptActions())
+    const { result } = renderHook(() => useQueuedPromptActions('session-1'))
 
     await act(async () => {
       await result.current.handleSendQueuedNow('session-1', 'msg-1')
@@ -513,40 +579,12 @@ describe('useQueuedPromptActions', () => {
     expect(cancelChatMessage).not.toHaveBeenCalled()
   })
 
-  it('allows editing queued antigravity prompts (no steer API)', async () => {
-    useChatStore.setState({
-      messageQueues: {
-        'session-1': [createMessage('msg-1', { backend: 'antigravity' })],
-      },
-    })
-    const { result } = renderHook(() => useQueuedPromptActions())
-
-    await act(async () => {
-      await result.current.handleEditQueuedMessage(
-        'session-1',
-        'msg-1',
-        'updated antigravity prompt'
-      )
-    })
-
-    expect(persistUpdateQueued).toHaveBeenCalledWith(
-      'worktree-1',
-      '/tmp/worktree-1',
-      'session-1',
-      'msg-1',
-      'updated antigravity prompt'
-    )
-    expect(
-      useChatStore.getState().messageQueues['session-1']?.[0]?.message
-    ).toBe('updated antigravity prompt')
-  })
-
   it('busy antigravity session: promotes to front and cancels instead of steering', async () => {
     useChatStore.setState({
       sendingSessionIds: { 'session-1': true },
       selectedBackends: { 'session-1': 'antigravity' },
     })
-    const { result } = renderHook(() => useQueuedPromptActions())
+    const { result } = renderHook(() => useQueuedPromptActions('session-1'))
 
     await act(async () => {
       await result.current.handleSendQueuedNow('session-1', 'msg-3')
@@ -562,40 +600,12 @@ describe('useQueuedPromptActions', () => {
     expect(cancelChatMessage).toHaveBeenCalledWith('session-1', 'worktree-1')
   })
 
-  it('allows editing queued muse prompts (no steer API)', async () => {
-    useChatStore.setState({
-      messageQueues: {
-        'session-1': [createMessage('msg-1', { backend: 'muse' })],
-      },
-    })
-    const { result } = renderHook(() => useQueuedPromptActions())
-
-    await act(async () => {
-      await result.current.handleEditQueuedMessage(
-        'session-1',
-        'msg-1',
-        'updated muse prompt'
-      )
-    })
-
-    expect(persistUpdateQueued).toHaveBeenCalledWith(
-      'worktree-1',
-      '/tmp/worktree-1',
-      'session-1',
-      'msg-1',
-      'updated muse prompt'
-    )
-    expect(
-      useChatStore.getState().messageQueues['session-1']?.[0]?.message
-    ).toBe('updated muse prompt')
-  })
-
   it('busy muse session: promotes to front and cancels instead of steering', async () => {
     useChatStore.setState({
       sendingSessionIds: { 'session-1': true },
       selectedBackends: { 'session-1': 'muse' },
     })
-    const { result } = renderHook(() => useQueuedPromptActions())
+    const { result } = renderHook(() => useQueuedPromptActions('session-1'))
 
     await act(async () => {
       await result.current.handleSendQueuedNow('session-1', 'msg-3')
@@ -619,7 +629,7 @@ describe('useQueuedPromptActions', () => {
       sendingSessionIds: { 'session-1': true },
       selectedBackends: { 'session-1': 'claude' },
     })
-    const { result } = renderHook(() => useQueuedPromptActions())
+    const { result } = renderHook(() => useQueuedPromptActions('session-1'))
 
     await act(async () => {
       await result.current.handleSendQueuedNow('session-1', 'msg-3')
@@ -649,7 +659,7 @@ describe('useQueuedPromptActions', () => {
       sendingSessionIds: { 'session-1': true },
       selectedBackends: { 'session-1': 'claude' },
     })
-    const { result } = renderHook(() => useQueuedPromptActions())
+    const { result } = renderHook(() => useQueuedPromptActions('session-1'))
 
     await act(async () => {
       await result.current.handleSendQueuedNow('session-1', 'msg-3')
@@ -672,7 +682,7 @@ describe('useQueuedPromptActions', () => {
       sendingSessionIds: { 'session-1': true },
       selectedBackends: { 'session-1': 'claude' },
     })
-    const { result } = renderHook(() => useQueuedPromptActions())
+    const { result } = renderHook(() => useQueuedPromptActions('session-1'))
 
     await act(async () => {
       await result.current.handleSendQueuedNow('session-1', 'msg-3')
@@ -699,7 +709,7 @@ describe('useQueuedPromptActions', () => {
       sendingSessionIds: { 'session-1': true },
       selectedBackends: { 'session-1': 'claude' },
     })
-    const { result } = renderHook(() => useQueuedPromptActions())
+    const { result } = renderHook(() => useQueuedPromptActions('session-1'))
 
     await act(async () => {
       await result.current.handleSendQueuedNow('session-1', 'msg-2')
@@ -718,7 +728,7 @@ describe('useQueuedPromptActions', () => {
       sendingSessionIds: { 'session-1': true },
       selectedBackends: { 'session-1': 'claude' },
     })
-    const { result } = renderHook(() => useQueuedPromptActions())
+    const { result } = renderHook(() => useQueuedPromptActions('session-1'))
 
     await act(async () => {
       await result.current.handleSendQueuedNow('session-1', 'msg-3')
@@ -738,7 +748,7 @@ describe('useQueuedPromptActions', () => {
       sendingSessionIds: { 'session-1': true },
       selectedBackends: { 'session-1': 'claude' },
     })
-    const { result } = renderHook(() => useQueuedPromptActions())
+    const { result } = renderHook(() => useQueuedPromptActions('session-1'))
 
     await act(async () => {
       await result.current.handleSendQueuedNow('session-1', 'msg-2')
@@ -752,7 +762,7 @@ describe('useQueuedPromptActions', () => {
       waitingForInputSessionIds: { 'session-1': true },
       selectedBackends: { 'session-1': 'claude' },
     })
-    const { result } = renderHook(() => useQueuedPromptActions())
+    const { result } = renderHook(() => useQueuedPromptActions('session-1'))
 
     await act(async () => {
       await result.current.handleSendQueuedNow('session-1', 'msg-2')
@@ -769,7 +779,7 @@ describe('useQueuedPromptActions', () => {
   })
 
   it('unknown queued message id is a no-op', async () => {
-    const { result } = renderHook(() => useQueuedPromptActions())
+    const { result } = renderHook(() => useQueuedPromptActions('session-1'))
 
     await act(async () => {
       await result.current.handleSendQueuedNow('session-1', 'unknown')

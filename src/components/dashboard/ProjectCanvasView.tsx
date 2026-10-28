@@ -81,10 +81,12 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
@@ -3061,7 +3063,7 @@ export function ProjectCanvasView({
           <div className="relative grid grid-cols-[auto_1fr_auto] items-center gap-4 px-4 py-2 sm:py-3 border-b border-border/30 sm:min-h-[61px]">
             <div className="flex flex-col shrink-0">
               <div className="flex items-center gap-2">
-                <h2 className="truncate text-lg font-semibold">
+                <h2 className="truncate text-base font-semibold">
                   {project.name}
                 </h2>
                 <DropdownMenu>
@@ -3270,6 +3272,36 @@ export function ProjectCanvasView({
                       Open on {forgeLabels.name}
                     </DropdownMenuItem>
 
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger>
+                        <ArrowUpDown className="h-4 w-4" />
+                        Sort worktrees
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="w-44">
+                        <DropdownMenuRadioGroup
+                          value={worktreeSortMode}
+                          onValueChange={value =>
+                            useProjectsStore
+                              .getState()
+                              .setProjectCanvasWorktreeSortMode(
+                                projectId,
+                                value as WorktreeSortMode
+                              )
+                          }
+                        >
+                          <DropdownMenuRadioItem value="created">
+                            Creation date
+                          </DropdownMenuRadioItem>
+                          <DropdownMenuRadioItem value="last_activity">
+                            Last activity
+                          </DropdownMenuRadioItem>
+                          <DropdownMenuRadioItem value="manual">
+                            Manual
+                          </DropdownMenuRadioItem>
+                        </DropdownMenuRadioGroup>
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+
                     <DropdownMenuSeparator />
 
                     <DropdownMenuItem
@@ -3286,43 +3318,6 @@ export function ProjectCanvasView({
                         </span>
                       )}
                     </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      className="text-muted-foreground"
-                      aria-label="Sort worktrees"
-                    >
-                      <ArrowUpDown className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-48">
-                    <DropdownMenuLabel>Sort worktrees</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuRadioGroup
-                      value={worktreeSortMode}
-                      onValueChange={value =>
-                        useProjectsStore
-                          .getState()
-                          .setProjectCanvasWorktreeSortMode(
-                            projectId,
-                            value as WorktreeSortMode
-                          )
-                      }
-                    >
-                      <DropdownMenuRadioItem value="created">
-                        Creation date
-                      </DropdownMenuRadioItem>
-                      <DropdownMenuRadioItem value="last_activity">
-                        Last activity
-                      </DropdownMenuRadioItem>
-                      <DropdownMenuRadioItem value="manual">
-                        Manual
-                      </DropdownMenuRadioItem>
-                    </DropdownMenuRadioGroup>
                   </DropdownMenuContent>
                 </DropdownMenu>
                 {/* Mobile: magnifier icon inline with badges */}
@@ -3346,7 +3341,8 @@ export function ProjectCanvasView({
               <p className="text-xs text-muted-foreground whitespace-nowrap">
                 {projectSummary.totalReady > 0 ? (
                   <>
-                    {projectSummary.totalReady} worktrees
+                    {projectSummary.totalReady}{' '}
+                    {projectSummary.totalReady === 1 ? 'worktree' : 'worktrees'}
                     {projectSummary.reviewCount > 0 &&
                       ` · ${projectSummary.reviewCount} review`}
                     {projectSummary.waitingCount > 0 &&

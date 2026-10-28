@@ -14,7 +14,12 @@ import {
 } from '@/components/ui/tooltip'
 import { isNativeApp } from '@/lib/environment'
 import { cn } from '@/lib/utils'
+import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
+import {
+  matchesSidebarSearch,
+  SidebarSearchField,
+} from '@/components/projects/SidebarSearchField'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { AgentIcon } from '@/components/icons/JeanAgentIcon'
 import type { AgentSummary } from '@/services/agents'
@@ -93,8 +98,10 @@ function AgentRow({
             aria-current={isSelected ? 'page' : undefined}
             aria-label={agent.name}
             className={cn(
-              'relative flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 @max-[13rem]/agents:justify-center @max-[13rem]/agents:px-0',
-              isSelected ? 'bg-accent text-foreground' : 'hover:bg-accent/50'
+              'relative flex w-full items-center gap-3 rounded-lg border px-2.5 py-2 text-left transition-[background-color,border-color,box-shadow,color] duration-150 @max-[13rem]/agents:justify-center @max-[13rem]/agents:px-0',
+              isSelected
+                ? 'border-border bg-muted/50 text-foreground shadow'
+                : 'border-transparent hover:bg-muted/30'
             )}
             onClick={() => onSelect(agent.id)}
             data-testid={`agent-row-${agent.id}`}
@@ -182,9 +189,14 @@ export function AgentsSidebar() {
   const servers = useMemo(() => agentServers(agents ?? []), [agents])
   // Native app with remote servers: filter and group agents by server
   const showServerFilter = isNativeApp() && servers.length > 1
-  const visibleAgents = showServerFilter
-    ? filterAgentsByServer(agents ?? [], serverFilter)
-    : (agents ?? [])
+  const searchQuery = useProjectsStore(state => state.sidebarSearchQuery)
+  const visibleAgents = (
+    showServerFilter
+      ? filterAgentsByServer(agents ?? [], serverFilter)
+      : (agents ?? [])
+  ).filter(agent =>
+    matchesSidebarSearch(searchQuery, agent.name, agent.description)
+  )
   const groups: [string, string, AgentSummary[]][] =
     showServerFilter && serverFilter === ALL_SERVERS
       ? servers.map(([id, name]) => [
@@ -223,12 +235,13 @@ export function AgentsSidebar() {
       {/* Narrow sidebar (container below 13rem) shows only the agent icons */}
       <div className="@container/agents flex min-w-0 flex-1 flex-col">
         {/* The sidebar tab strip already names this view */}
-        <div className="flex h-9 shrink-0 items-center justify-end px-3 @max-[13rem]/agents:justify-center">
+        <div className="flex shrink-0 items-center gap-1 border-b border-border/40 px-3 pb-2">
+          <SidebarSearchField label="Search agents" />
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type="button"
-                className={cn(ICON_BUTTON, 'size-7')}
+                className={cn(ICON_BUTTON, 'size-8 shrink-0')}
                 onClick={() => setNewAgentOpen(true)}
                 aria-label="New agent"
               >
@@ -239,7 +252,7 @@ export function AgentsSidebar() {
           </Tooltip>
         </div>
         {showServerFilter && (
-          <div className="shrink-0 px-2 pb-2">
+          <div className="shrink-0 px-2 py-2">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
@@ -290,21 +303,28 @@ export function AgentsSidebar() {
           className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pb-3"
           aria-label="Agents"
         >
+          {agents && searchQuery.trim() && visibleAgents.length === 0 && (
+            <p className="px-3 py-6 text-center text-xs text-muted-foreground">
+              No matching agents
+            </p>
+          )}
           {agents &&
-            groups.map(([groupId, groupName, groupAgents]) => (
-              <section key={groupId || 'agents'}>
-                {groupName && (
-                  <h3 className="truncate px-4 pb-1.5 pt-3 text-xs font-medium text-muted-foreground @max-[13rem]/agents:hidden">
-                    {groupName}
-                  </h3>
-                )}
-                <AgentGroup
-                  agents={groupAgents}
-                  selectedId={selected?.id}
-                  onSelect={handleSelect}
-                />
-              </section>
-            ))}
+            groups
+              .filter(([, , groupAgents]) => groupAgents.length > 0)
+              .map(([groupId, groupName, groupAgents]) => (
+                <section key={groupId || 'agents'}>
+                  {groupName && (
+                    <h3 className="truncate px-4 pb-1.5 pt-3 text-xs font-medium text-muted-foreground @max-[13rem]/agents:hidden">
+                      {groupName}
+                    </h3>
+                  )}
+                  <AgentGroup
+                    agents={groupAgents}
+                    selectedId={selected?.id}
+                    onSelect={handleSelect}
+                  />
+                </section>
+              ))}
         </div>
       </div>
       <NewAgentDialog

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import userEvent from '@testing-library/user-event'
 import { render, screen } from '@/test/test-utils'
 import type { AgentSummary } from '@/services/agents'
+import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
 import { AgentsSidebar } from './AgentsSidebar'
 
@@ -65,6 +66,7 @@ describe('AgentsSidebar', () => {
   beforeEach(() => {
     mocks.dialog.mockClear()
     useUIStore.setState({ agentsServerFilter: 'all' })
+    useProjectsStore.setState({ sidebarSearchQuery: '' })
   })
 
   it('lists Jean first and the user agents under "Your agents"', () => {
@@ -87,5 +89,28 @@ describe('AgentsSidebar', () => {
     expect(screen.getAllByRole('button', { name: /agent/i })).toHaveLength(1)
     await userEvent.click(screen.getByRole('button', { name: 'New agent' }))
     expect(screen.getByRole('dialog')).toHaveTextContent('New agent dialog')
+  })
+
+  it('filters agents by the shared sidebar search', async () => {
+    mocks.agents = [
+      agent({}),
+      agent({
+        id: 'reviewer',
+        name: 'Reviewer',
+        description: 'Reviews PRs',
+        builtin: false,
+      }),
+    ]
+    useProjectsStore.setState({ sidebarSearchQuery: 'review' })
+    render(<AgentsSidebar />)
+    expect(
+      screen.getAllByTestId(/^agent-row-/).map(row => row.dataset.testid)
+    ).toEqual(['agent-row-reviewer'])
+
+    const search = screen.getByRole('searchbox', { name: 'Search agents' })
+    await userEvent.clear(search)
+    await userEvent.type(search, 'nobody')
+    expect(screen.queryAllByTestId(/^agent-row-/)).toHaveLength(0)
+    expect(screen.getByText('No matching agents')).toBeInTheDocument()
   })
 })

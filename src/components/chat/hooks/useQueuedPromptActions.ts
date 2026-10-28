@@ -1,4 +1,5 @@
-import { useCallback } from 'react'
+import { useCallback, useEffect } from 'react'
+import { toast } from 'sonner'
 import {
   cancelChatMessage,
   persistMoveQueuedFront,
@@ -18,7 +19,7 @@ import type { AppPreferences } from '@/types/preferences'
 import { buildMessageWithRefs } from '@/components/chat/message-with-refs'
 import { useChatStore } from '@/store/chat-store'
 import { logger } from '@/lib/logger'
-import type { QueuedMessage } from '@/types/chat'
+import type { QueuedMessage, QueuedMessageEdit } from '@/types/chat'
 
 function resolveWorktree(sessionId: string) {
   const { sessionWorktreeMap, worktreePaths } = useChatStore.getState()
@@ -41,9 +42,67 @@ function hasAttachments(msg: QueuedMessage): boolean {
   )
 }
 
+function clearComposer(sessionId: string) {
+  const store = useChatStore.getState()
+  store.clearInputDraft(sessionId)
+  store.clearPendingImages(sessionId)
+  store.clearPendingFiles(sessionId)
+  store.clearPendingSkills(sessionId)
+  store.clearPendingTextFiles(sessionId)
+}
+
 /**
- * Actions for the queued prompts panel: remove a queued prompt, or send a
- * specific queued prompt immediately.
+ * Save the composer content into the queued message being edited, keeping its
+ * queue position. Returns true when saved; the caller then clears the
+ * composer. When the message was already sent, the edit stays in the composer
+ * so the user can send it as a new prompt.
+ */
+export async function saveQueuedMessageEdit(
+  sessionId: string,
+  messageId: string,
+  edit: QueuedMessageEdit
+): Promise<boolean> {
+  const { worktreeId, worktreePath } = resolveWorktree(sessionId)
+  if (!worktreeId || !worktreePath) return false
+
+  const store = useChatStore.getState()
+  try {
+    const updated = await persistUpdateQueued(
+      worktreeId,
+      worktreePath,
+      sessionId,
+      messageId,
+      edit
+    )
+    if (!updated) {
+      // Another client or the queue drain already dequeued it.
+      store.removeQueuedMessage(sessionId, messageId)
+      if (store.editingQueuedMessageIds[sessionId] === messageId) {
+        store.stopEditingQueuedMessage(sessionId)
+        toast.error(QUEUED_EDIT_LOST_MESSAGE)
+      }
+      return false
+    }
+    store.updateQueuedMessage(sessionId, messageId, edit)
+    store.stopEditingQueuedMessage(sessionId)
+    return true
+  } catch (error) {
+    logger.error('Failed to persist queued edit', {
+      error,
+      sessionId,
+      messageId,
+    })
+    toast.error(`Failed to save queued prompt: ${error}`)
+    return false
+  }
+}
+
+const QUEUED_EDIT_LOST_MESSAGE =
+  'The queued prompt was sent before you saved. Your edit stays in the input.'
+
+/**
+ * Actions for the queued prompts panel: remove a queued prompt, edit it in the
+ * composer, or send a specific queued prompt immediately.
  *
  * "Send now" is backend-aware:
  * - Idle session: promote the message to the queue front and let the queue
@@ -54,7 +113,24 @@ function hasAttachments(msg: QueuedMessage): boolean {
  * - Busy other backends: promote to front, cancel the current run — the
  *   queue processor auto-sends the promoted message once the session is idle.
  */
-export function useQueuedPromptActions() {
+export function useQueuedPromptActions(sessionId: string | null | undefined) {
+  // Drop the edit state when the edited prompt leaves the queue (auto-sent,
+  // steered, or removed by another client). The composer keeps the edit.
+  const editingQueuedId = useChatStore(state =>
+    sessionId ? state.editingQueuedMessageIds[sessionId] : undefined
+  )
+  const isEditingStillQueued = useChatStore(
+    state =>
+      !sessionId ||
+      !editingQueuedId ||
+      !!state.messageQueues[sessionId]?.some(m => m.id === editingQueuedId)
+  )
+  useEffect(() => {
+    if (!sessionId || isEditingStillQueued) return
+    useChatStore.getState().stopEditingQueuedMessage(sessionId)
+    toast.error(QUEUED_EDIT_LOST_MESSAGE)
+  }, [sessionId, isEditingStillQueued])
+
   const handleRemoveQueuedMessage = useCallback(
     (sessionId: string, messageId: string) => {
       useChatStore.getState().removeQueuedMessage(sessionId, messageId)
@@ -68,43 +144,37 @@ export function useQueuedPromptActions() {
   )
 
   const handleEditQueuedMessage = useCallback(
-    async (sessionId: string, messageId: string, message: string) => {
-      const trimmed = message.trim()
-      if (!trimmed) return
-
+    (sessionId: string, messageId: string) => {
       const store = useChatStore.getState()
       const msg = store
         .getQueuedMessages(sessionId)
         .find(m => m.id === messageId)
       if (!msg) return
 
-      const { worktreeId, worktreePath } = resolveWorktree(sessionId)
-      if (!worktreeId || !worktreePath) return
-
-      try {
-        const updated = await persistUpdateQueued(
-          worktreeId,
-          worktreePath,
-          sessionId,
-          messageId,
-          trimmed
+      const hasComposerContent =
+        !!store.inputDrafts[sessionId]?.trim() ||
+        store.getPendingImages(sessionId).length > 0 ||
+        store.getPendingFiles(sessionId).length > 0 ||
+        store.getPendingSkills(sessionId).length > 0 ||
+        store.getPendingTextFiles(sessionId).length > 0
+      if (hasComposerContent && !store.editingQueuedMessageIds[sessionId]) {
+        toast.error(
+          'Send or clear the current input before you edit a queued prompt.'
         )
-        if (!updated) {
-          // Another client already dequeued it — drop the stale local copy.
-          store.removeQueuedMessage(sessionId, messageId)
-          return
-        }
-        store.updateQueuedMessage(sessionId, messageId, trimmed)
-      } catch (error) {
-        logger.error('Failed to persist queued edit', {
-          error,
-          sessionId,
-          messageId,
-        })
+        return
       }
+
+      clearComposer(sessionId)
+      store.startEditingQueuedMessage(sessionId, msg)
+      window.dispatchEvent(new CustomEvent('command:focus-chat-input'))
     },
     []
   )
+
+  const handleCancelQueuedEdit = useCallback((sessionId: string) => {
+    useChatStore.getState().stopEditingQueuedMessage(sessionId)
+    clearComposer(sessionId)
+  }, [])
 
   const handleSendQueuedNow = useCallback(
     async (sessionId: string, messageId: string) => {
@@ -208,6 +278,7 @@ export function useQueuedPromptActions() {
   return {
     handleRemoveQueuedMessage,
     handleEditQueuedMessage,
+    handleCancelQueuedEdit,
     handleSendQueuedNow,
   }
 }

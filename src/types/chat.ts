@@ -1711,6 +1711,16 @@ export interface QueuedMessage {
   queuedAt: number
 }
 
+/** Editable part of a queued message: text plus every attachment kind */
+export type QueuedMessageEdit = Pick<
+  QueuedMessage,
+  | 'message'
+  | 'pendingImages'
+  | 'pendingFiles'
+  | 'pendingSkills'
+  | 'pendingTextFiles'
+>
+
 // ============================================================================
 // MCP Server Types
 // ============================================================================

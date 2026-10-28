@@ -1158,31 +1158,40 @@ describe('ChatStore', () => {
       expect(useChatStore.getState().messageQueues['session-1']).toBe(before)
     })
 
-    it('updates a queued message text by id', () => {
+    it('updates a queued message text and attachments by id', () => {
       const { enqueueMessage, updateQueuedMessage, getQueuedMessages } =
         useChatStore.getState()
+      const image = { id: 'img-1', path: '/tmp/a.png', filename: 'a.png' }
 
       enqueueMessage('session-1', createMockMessage('msg-1', 'First'))
       enqueueMessage('session-1', createMockMessage('msg-2', 'Second'))
 
-      updateQueuedMessage('session-1', 'msg-2', 'Updated second')
+      updateQueuedMessage('session-1', 'msg-2', {
+        message: 'Updated second',
+        pendingImages: [image],
+        pendingFiles: [],
+        pendingSkills: [],
+        pendingTextFiles: [],
+      })
 
-      expect(getQueuedMessages('session-1').map(m => m.message)).toEqual([
-        'First',
-        'Updated second',
-      ])
+      const queue = getQueuedMessages('session-1')
+      expect(queue.map(m => m.message)).toEqual(['First', 'Updated second'])
+      expect(queue[1]?.pendingImages).toEqual([image])
     })
 
-    it('queued message update is a no-op for unknown id or unchanged text', () => {
+    it('queued message update is a no-op for unknown id', () => {
       const { enqueueMessage, updateQueuedMessage } = useChatStore.getState()
 
       enqueueMessage('session-1', createMockMessage('msg-1', 'First'))
 
       const before = useChatStore.getState().messageQueues['session-1']
-      updateQueuedMessage('session-1', 'unknown-id', 'Updated')
-      expect(useChatStore.getState().messageQueues['session-1']).toBe(before)
-
-      updateQueuedMessage('session-1', 'msg-1', 'First')
+      updateQueuedMessage('session-1', 'unknown-id', {
+        message: 'Updated',
+        pendingImages: [],
+        pendingFiles: [],
+        pendingSkills: [],
+        pendingTextFiles: [],
+      })
       expect(useChatStore.getState().messageQueues['session-1']).toBe(before)
     })
   })

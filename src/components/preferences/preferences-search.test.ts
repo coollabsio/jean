@@ -20,6 +20,11 @@ const nativeOnlyEntryIds = [
   'web-access-authentication',
 ]
 
+const paneSources = import.meta.glob<string>(
+  ['./panes/*.tsx', '!./panes/*.test.tsx'],
+  { query: '?raw', import: 'default', eager: true }
+)
+
 const setTauriInternals = (enabled: boolean) => {
   if (enabled) {
     Object.defineProperty(window, '__TAURI_INTERNALS__', {
@@ -136,5 +141,46 @@ describe('preferences search index', () => {
     expect(searchPreferenceEntries('screen edge')[0]?.id).toBe(
       'appearance-sidebar'
     )
+  })
+
+  it('indexes every settings section rendered in the panes', () => {
+    const renderedAnchors = Object.values(paneSources).flatMap(source =>
+      [...source.matchAll(/anchorId="(pref-[a-z0-9-]+)"/g)].map(m => m[1])
+    )
+    setTauriInternals(true)
+    const indexed = new Set(getPreferenceSearchEntries().map(e => e.anchorId))
+    setTauriInternals(false)
+    getPreferenceSearchEntries().forEach(e => indexed.add(e.anchorId))
+
+    expect(renderedAnchors.length).toBeGreaterThan(0)
+    expect(renderedAnchors.filter(anchor => !indexed.has(anchor))).toEqual([])
+  })
+
+  it('shows the web access sign-out section only in web access', () => {
+    setTauriInternals(false)
+    expect(searchPreferenceEntries('sign out')[0]?.id).toBe('general-session')
+
+    setTauriInternals(true)
+    expect(
+      getPreferenceSearchEntries().some(entry => entry.id === 'general-session')
+    ).toBe(false)
+  })
+
+  it('finds settings that were missing from the index', () => {
+    setTauriInternals(true)
+
+    expect(searchPreferenceEntries('sentry auth token')[0]?.id).toBe(
+      'integrations-sentry'
+    )
+    expect(searchPreferenceEntries('jean mcp')[0]?.id).toBe('mcp-jean')
+    expect(searchPreferenceEntries('deepwiki')[0]?.id).toBe('mcp-devin')
+    expect(searchPreferenceEntries('bind address')[0]?.id).toBe(
+      'web-access-server'
+    )
+    expect(searchPreferenceEntries('window transparency')[0]?.id).toBe(
+      'appearance-theme'
+    )
+    expect(searchPreferenceEntries('grok model')[0]?.pane).toBe('grok')
+    expect(searchPreferenceEntries('command code')[0]?.pane).toBe('commandcode')
   })
 })

@@ -62,7 +62,7 @@ export function DrawerHeader({
   return (
     <div
       className={cn(
-        'flex shrink-0 items-center justify-between gap-2 border-b px-3',
+        'flex shrink-0 items-center justify-between gap-2 border-b border-border/20 px-3',
         MODAL_TERMINAL_PRIMARY_ROW_CLASS
       )}
     >

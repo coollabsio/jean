@@ -2498,12 +2498,13 @@ const ChatWindowContent = memo(function ChatWindowContent({
     [pendingPlanMessage, handleWorktreeYoloApproval]
   )
 
-  // Queued prompts panel actions (remove / send-now)
+  // Queued prompts panel actions (remove / edit / send-now)
   const {
     handleRemoveQueuedMessage,
     handleEditQueuedMessage,
+    handleCancelQueuedEdit,
     handleSendQueuedNow,
-  } = useQueuedPromptActions()
+  } = useQueuedPromptActions(activeSessionId)
 
   // Pending attachment removal, slash command execution
   const {
@@ -3349,6 +3350,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                 onRemove={handleRemoveQueuedMessage}
                                 onSendNow={handleSendQueuedNow}
                                 onEdit={handleEditQueuedMessage}
+                                onCancelEdit={handleCancelQueuedEdit}
                               />
                             )}
                           {/* Input area - unified container with textarea and toolbar */}
