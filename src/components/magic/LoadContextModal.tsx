@@ -21,6 +21,7 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Markdown } from '@/components/ui/markdown'
 import { cn } from '@/lib/utils'
+import { Kbd } from '@/components/ui/kbd'
 import { usePreferences } from '@/services/preferences'
 import { parseServerResourceKey } from '@/lib/server-resource'
 import { useGhLogin } from '@/hooks/useGhLogin'
@@ -91,8 +92,7 @@ export function LoadContextModal({
   // for this so a GitLab project never flashes the GitHub sign-in prompt.
   const providerResolved = !isProviderLoading
   const labels = providerLabels(provider)
-  const triggerLogin =
-    provider === 'gitlab' ? triggerGlabLogin : triggerGhLogin
+  const triggerLogin = provider === 'gitlab' ? triggerGlabLogin : triggerGhLogin
   const isCliInstalled = provider === 'gitlab' ? isGlabInstalled : isGhInstalled
   // Security (Dependabot/advisories) is GitHub-only; hide it for GitLab.
   const securityTabEnabled = provider !== 'gitlab'
@@ -333,7 +333,7 @@ export function LoadContextModal({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="overflow-hidden p-0 !w-screen !h-dvh !max-w-screen !max-h-none !rounded-none sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-[calc(100vh-4rem)] sm:!rounded-xl font-sans flex flex-col"
+        className="overflow-hidden p-0 !w-screen !h-dvh !max-w-screen !max-h-none !rounded-none sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-[85vh] sm:!rounded-lg font-sans flex flex-col"
         onOpenAutoFocus={e => {
           e.preventDefault()
           searchInputRef.current?.focus()
@@ -341,10 +341,7 @@ export function LoadContextModal({
         onKeyDown={handleKeyDown}
       >
         <DialogHeader className="px-4 pt-5 pb-2">
-          <DialogTitle className="flex items-center gap-2">
-            <FolderOpen className="h-4 w-4" />
-            Load Context
-          </DialogTitle>
+          <DialogTitle>Load Context</DialogTitle>
         </DialogHeader>
 
         {/* Tabs */}
@@ -367,9 +364,9 @@ export function LoadContextModal({
             >
               <tab.icon className="h-4 w-4" />
               <span className="text-xs sm:text-sm">{tab.label}</span>
-              <kbd className="hidden sm:inline ml-0.5 text-xs text-muted-foreground bg-muted px-1 py-0.5 rounded">
+              <Kbd modHint className="ml-0.5">
                 {getModifierSymbol()}+{tab.key}
-              </kbd>
+              </Kbd>
             </button>
           ))}
         </div>
@@ -617,7 +614,7 @@ export function LoadContextModal({
               open={true}
               onOpenChange={() => handlers.setViewingContext(null)}
             >
-              <DialogContent className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none sm:!w-[calc(100vw-8rem)] sm:!max-w-[calc(100vw-8rem)] sm:!h-[calc(100vh-8rem)] sm:!rounded-lg flex flex-col">
+              <DialogContent className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-[85vh] sm:!rounded-lg flex flex-col">
                 <DialogHeader>
                   <DialogTitle className="flex items-center gap-2">
                     {handlers.viewingContext.type === 'security' ? (

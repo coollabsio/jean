@@ -606,11 +606,7 @@ export function IssuePreviewModal({
     type === 'issue' ? number : null,
     repo
   )
-  const prQuery = useGitHubPR(
-    projectPath,
-    type === 'pr' ? number : null,
-    repo
-  )
+  const prQuery = useGitHubPR(projectPath, type === 'pr' ? number : null, repo)
   const securityQuery = useDependabotAlert(
     projectPath,
     type === 'security' ? number : null
@@ -655,14 +651,8 @@ export function IssuePreviewModal({
     type === 'advisory' ? ghsaId : repo ? `${repo}#${number}` : `#${number}`
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={open => {
-        console.log('[DIALOG-DEBUG] Preview onOpenChange', { open })
-        onOpenChange(open)
-      }}
-    >
-      <DialogContent className="!fixed !inset-0 !translate-x-0 !translate-y-0 !w-screen !h-[100dvh] !max-w-none !max-h-none !rounded-none !p-4 sm:!p-6 sm:!inset-auto sm:!top-[50%] sm:!left-[50%] sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:!w-[96vw] sm:!max-w-[96vw] sm:!h-[94dvh] sm:!max-h-[94dvh] sm:!rounded-lg flex flex-col overflow-hidden z-[80] [&>[data-slot=dialog-close]]:top-4 sm:[&>[data-slot=dialog-close]]:top-6">
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="!fixed !inset-0 !translate-x-0 !translate-y-0 !w-screen !h-[100dvh] !max-w-none !max-h-none !rounded-none !p-4 sm:!p-6 sm:!inset-auto sm:!top-[50%] sm:!left-[50%] sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-[85vh] sm:!max-h-[85vh] sm:!rounded-lg flex flex-col overflow-hidden z-[80] [&>[data-slot=dialog-close]]:top-4 sm:[&>[data-slot=dialog-close]]:top-6">
         <DialogHeader className="flex-shrink-0 pr-16 text-left">
           <DialogTitle className="text-lg flex items-center gap-3 min-w-0">
             <span className="truncate">

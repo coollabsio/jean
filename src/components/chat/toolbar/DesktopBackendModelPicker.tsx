@@ -275,7 +275,7 @@ export function DesktopBackendModelPicker({
                   <BackendLabel
                     backend={selectedBackend}
                     className="shrink-0"
-                    badgeClassName="text-[9px] leading-3"
+                    badgeClassName="text-2xs leading-3"
                   />
                   <span className="truncate">· {selectedModelLabel}</span>
                   {onProviderChange && selectedBackend === 'claude' && (
@@ -292,9 +292,7 @@ export function DesktopBackendModelPicker({
                 </span>
               )}
               {keyboardShortcutsEnabled && installedBackends.length > 1 && (
-                <Kbd className="ml-1 hidden 2xl:inline-flex text-[10px]">
-                  Tab
-                </Kbd>
+                <Kbd className="ml-1 hidden 2xl:inline-flex text-2xs">Tab</Kbd>
               )}
               {hasMultipleChoices && (
                 <ChevronsUpDown

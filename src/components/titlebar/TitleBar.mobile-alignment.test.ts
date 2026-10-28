@@ -13,15 +13,4 @@ describe('TitleBar mobile alignment', () => {
       'top-1/2 -translate-x-1/2 -translate-y-1/2 max-w-[50%] px-2 pt-1'
     )
   })
-
-  it('keeps GitHub and Sponsor out of the mobile header', () => {
-    const source = readFileSync(
-      join(process.cwd(), 'src/components/titlebar/TitleBar.tsx'),
-      'utf8'
-    )
-
-    expect(source).toContain('{native && !isMobile && (')
-    expect(source).toContain('{!isMobile && (')
-    expect(source).toContain('{!native && !isMobile && (')
-  })
 })

@@ -131,7 +131,7 @@ describe('MessageItem', () => {
     expect(screen.getByText('Keep only this prompt')).toBeVisible()
     expect(screen.queryByText(/GPT 5.6/i)).not.toBeInTheDocument()
     expect(
-      screen.queryByRole('button', { name: 'Copy message to input' })
+      screen.queryByRole('button', { name: 'Copy prompt' })
     ).not.toBeInTheDocument()
   })
 
@@ -151,7 +151,7 @@ describe('MessageItem', () => {
 
     expect(screen.getByText('Zen response')).toBeVisible()
     expect(
-      screen.queryByRole('button', { name: 'Copy response to clipboard' })
+      screen.queryByRole('button', { name: 'Copy response' })
     ).not.toBeInTheDocument()
   })
 
@@ -598,7 +598,7 @@ describe('MessageItem', () => {
       />
     )
 
-    screen.getByRole('button', { name: 'Copy response to clipboard' }).click()
+    screen.getByRole('button', { name: 'Copy response' }).click()
 
     await waitFor(() => {
       expect(mocks.copyToClipboard).toHaveBeenCalledWith(
@@ -628,7 +628,7 @@ describe('MessageItem', () => {
       />
     )
 
-    screen.getByRole('button', { name: 'Copy response to clipboard' }).click()
+    screen.getByRole('button', { name: 'Copy response' }).click()
 
     await waitFor(() => {
       expect(mocks.copyToClipboard).toHaveBeenCalledWith(

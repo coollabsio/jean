@@ -33,22 +33,7 @@ import {
   AgentTabBody,
   statusTone,
 } from './agent-ui'
-
-/** "5m ago" / "in 2h" for unix seconds. */
-export function formatRelative(unixSeconds: number, now = Date.now()): string {
-  const diff = Math.round(unixSeconds - now / 1000)
-  const abs = Math.abs(diff)
-  const value =
-    abs < 60
-      ? `${abs}s`
-      : abs < 3600
-        ? `${Math.round(abs / 60)}m`
-        : abs < 86_400
-          ? `${Math.round(abs / 3600)}h`
-          : `${Math.round(abs / 86_400)}d`
-  if (abs < 5) return 'now'
-  return diff > 0 ? `in ${value}` : `${value} ago`
-}
+import { formatRelative } from '@/lib/relative-time'
 
 /** One line that says what an approval will do, with names, not IDs. */
 export function describeApproval(
@@ -217,7 +202,7 @@ function ApprovalQuestion({ approval }: { approval: AgentApproval }) {
       onSend={answer => decide.run(answer === APPROVE)}
     >
       {approval.status === 'failed' && (
-        <p className="text-xs text-destructive">
+        <p className="mt-2 text-xs text-destructive">
           It failed: {approval.result ?? 'unknown error'}
         </p>
       )}
@@ -231,9 +216,9 @@ export function PendingApprovals({ agentId }: { agentId: string }) {
   const pending = data?.approvals.filter(a => a.status === 'pending') ?? []
   if (pending.length === 0) return null
   return (
-    <div className="shrink-0 border-b bg-amber-500/5 px-4 py-3">
+    <div className="shrink-0 border-b bg-warning/5 px-4 py-3">
       <div className="mx-auto flex max-w-3xl flex-col gap-2">
-        <p className="text-xs font-medium text-amber-700 dark:text-amber-400">
+        <p className="text-xs font-medium text-warning">
           The agent waits for your approval
         </p>
         <AgentList className="bg-background">

@@ -27,7 +27,7 @@ export function CodexDynamicToolCallRequest({
       }
     >
       <div className="mb-2 text-xs text-muted-foreground">Tool: {toolName}</div>
-      <pre className="overflow-x-auto rounded bg-background/60 p-2 text-[11px] whitespace-pre-wrap break-words">
+      <pre className="overflow-x-auto rounded bg-background/60 p-2 font-mono text-2xs whitespace-pre-wrap break-words">
         {JSON.stringify(request.arguments, null, 2)}
       </pre>
     </ApprovalCard>

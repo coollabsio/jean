@@ -290,7 +290,7 @@ export function ProjectTreeItem({
             />
           ) : (
             <div className="flex size-4 shrink-0 items-center justify-center rounded bg-muted-foreground/20">
-              <span className="text-[10px] font-medium uppercase">
+              <span className="text-2xs font-medium uppercase">
                 {project.name[0]}
               </span>
             </div>
@@ -314,7 +314,7 @@ export function ProjectTreeItem({
             <span className="flex flex-1 items-center gap-0.5 truncate text-sm">
               <span className="truncate">{project.name}</span>
               {isOffline && (
-                <span className="shrink-0 rounded bg-warning/10 px-1 py-0.5 text-[10px] text-warning">
+                <span className="shrink-0 rounded bg-warning/10 px-1 py-0.5 text-2xs text-warning">
                   Offline
                 </span>
               )}
@@ -351,7 +351,7 @@ export function ProjectTreeItem({
                   <button
                     type="button"
                     onClick={handleBaseSync}
-                    className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                    className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-2xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                   >
                     <span className="flex items-center gap-0.5">
                       <ArrowDownUp className="h-3 w-3" />

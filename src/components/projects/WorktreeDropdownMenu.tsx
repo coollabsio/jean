@@ -275,8 +275,8 @@ export function WorktreeDropdownMenu({
         <DropdownMenuTrigger asChild>
           <Button
             variant="ghost"
-            size="icon"
-            className="h-6 w-6 text-muted-foreground hover:text-foreground"
+            size="icon-xs"
+            className="text-muted-foreground hover:text-foreground"
             onClick={e => e.stopPropagation()}
             aria-label="Actions"
           >

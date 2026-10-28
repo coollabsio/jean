@@ -23,12 +23,13 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { Kbd } from '@/components/ui/kbd'
 import { cn } from '@/lib/utils'
 import { ItemSelectCheckbox } from './ItemSelectCheckbox'
 import { ContextLinkBadge } from './ContextLinkBadge'
 import type { ContextLinkMatch } from '@/hooks/useContextLinkUsage'
 import { isNewIssue } from '@/services/github'
-import { formatRelative } from '@/components/agents/AgentActivity'
+import { formatRelative } from '@/lib/relative-time'
 import type {
   GitHubIssue,
   GitHubLabel,
@@ -70,9 +71,9 @@ export function SessionTabBar({
         >
           <tab.icon className="h-4 w-4" />
           <span className="text-xs sm:text-sm">{tab.label}</span>
-          <kbd className="hidden sm:inline ml-0.5 text-xs text-muted-foreground bg-muted px-1 py-0.5 rounded">
+          <Kbd modHint className="ml-0.5">
             {getModifierSymbol()}+{tab.key}
-          </kbd>
+          </Kbd>
         </button>
       ))}
     </div>
@@ -109,7 +110,7 @@ function LabelPills({
         e.stopPropagation()
         onLabelClick?.(label.name)
       }}
-      className="shrink-0 rounded-full px-2 py-px text-[11px] font-medium leading-4"
+      className="shrink-0 rounded-full px-2 py-px text-2xs font-medium leading-4"
       style={{
         backgroundColor: `#${label.color}26`,
         color: `#${label.color}`,
@@ -163,7 +164,7 @@ export interface IssueItemProps {
   onCheckedChange?: (checked: boolean) => void
   onMouseEnter: () => void
   onClick: (background: boolean) => void
-  onInvestigate: (background: boolean) => void
+  onInvestigate?: (background: boolean) => void
   onPreview: () => void
   onLabelClick?: (label: string) => void
   showSource?: boolean
@@ -223,7 +224,7 @@ export function IssueItem({
             {issue.title}
           </button>
           {isNewIssue(issue.created_at) && (
-            <span className="shrink-0 rounded-full bg-success/10 px-1.5 py-px text-[11px] font-medium text-success border border-success/20">
+            <span className="shrink-0 rounded-full bg-success/10 px-1.5 py-px text-2xs font-medium text-success border border-success/20">
               New
             </span>
           )}
@@ -262,13 +263,13 @@ export interface PRItemProps {
   isSelected: boolean
   isCreating: boolean
   contextMatches?: ContextLinkMatch[]
-  isStacking: boolean
+  isStacking?: boolean
   isChecked?: boolean
   onCheckedChange?: (checked: boolean) => void
   onMouseEnter: () => void
   onClick: (background: boolean) => void
-  onInvestigate: (background: boolean) => void
-  onStack: (background: boolean) => void
+  onInvestigate?: (background: boolean) => void
+  onStack?: (background: boolean) => void
   onPreview: () => void
   onLabelClick?: (label: string) => void
   showSource?: boolean
@@ -280,7 +281,7 @@ export function PRItem({
   isSelected,
   isCreating,
   contextMatches,
-  isStacking,
+  isStacking = false,
   isChecked = false,
   onCheckedChange,
   onMouseEnter,
@@ -335,7 +336,7 @@ export function PRItem({
             {pr.title}
           </button>
           {pr.isDraft && (
-            <span className="shrink-0 rounded-full border border-border px-1.5 py-px text-[11px] font-medium text-muted-foreground">
+            <span className="shrink-0 rounded-full border border-border px-1.5 py-px text-2xs font-medium text-muted-foreground">
               Draft
             </span>
           )}
@@ -363,30 +364,31 @@ export function PRItem({
           onPreview={onPreview}
           onInvestigate={onInvestigate}
         />
-        {/* Stack button — new worktree branched off this PR's head */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              onClick={e => {
-                e.stopPropagation()
-                onStack(e.metaKey || e.ctrlKey)
-              }}
-              disabled={busy}
-              aria-label={`New worktree based on ${pr.headRefName}`}
-              className="inline-flex h-6 w-6 items-center justify-center rounded px-1 text-foreground/80 transition-colors hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
-            >
-              {isStacking ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <GitBranchPlus className="h-3.5 w-3.5" />
-              )}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>
-            New worktree based on {pr.headRefName}
-          </TooltipContent>
-        </Tooltip>
+        {onStack && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={e => {
+                  e.stopPropagation()
+                  onStack(e.metaKey || e.ctrlKey)
+                }}
+                disabled={busy}
+                aria-label={`New worktree based on ${pr.headRefName}`}
+                className="inline-flex h-6 w-6 items-center justify-center rounded px-1 text-foreground/80 transition-colors hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                {isStacking ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <GitBranchPlus className="h-3.5 w-3.5" />
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>
+              New worktree based on {pr.headRefName}
+            </TooltipContent>
+          </Tooltip>
+        )}
       </div>
     </div>
   )
@@ -436,7 +438,7 @@ export function BranchItem({
         <span className="text-sm truncate">{branch}</span>
       </button>
       {remote && (
-        <span className="shrink-0 rounded-full border border-border px-1.5 py-px text-[11px] font-medium text-muted-foreground">
+        <span className="shrink-0 rounded-full border border-border px-1.5 py-px text-2xs font-medium text-muted-foreground">
           {remote}
         </span>
       )}
@@ -455,6 +457,20 @@ const SEVERITY_COLORS: Record<string, string> = {
   low: 'bg-info/10 text-info border-info/20',
 }
 
+export function SeverityBadge({ severity }: { severity: string }) {
+  return (
+    <span
+      className={cn(
+        'shrink-0 rounded-full px-1.5 py-0.5 text-2xs font-medium border',
+        SEVERITY_COLORS[severity.toLowerCase()] ??
+          'bg-muted text-muted-foreground border-border'
+      )}
+    >
+      {severity}
+    </span>
+  )
+}
+
 function ItemActions({
   label,
   previewLabel,
@@ -468,9 +484,32 @@ function ItemActions({
   investigateLabel: string
   isCreating: boolean
   onPreview: () => void
-  onInvestigate: (background: boolean) => void
+  onInvestigate?: (background: boolean) => void
 }) {
   const isMobile = useIsMobile()
+
+  const previewButton = (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={previewLabel}
+          onClick={e => {
+            e.stopPropagation()
+            onPreview()
+          }}
+          className="inline-flex h-6 w-6 items-center justify-center rounded px-1 text-foreground/80 transition-colors hover:text-foreground hover:bg-muted"
+        >
+          <Eye className="h-3.5 w-3.5" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>
+        {previewLabel} ({getModifierSymbol()}O)
+      </TooltipContent>
+    </Tooltip>
+  )
+
+  if (!onInvestigate) return previewButton
 
   if (isMobile) {
     return (
@@ -505,24 +544,7 @@ function ItemActions({
 
   return (
     <>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            aria-label={previewLabel}
-            onClick={e => {
-              e.stopPropagation()
-              onPreview()
-            }}
-            className="inline-flex h-6 w-6 items-center justify-center rounded px-1 text-foreground/80 transition-colors hover:text-foreground hover:bg-muted"
-          >
-            <Eye className="h-3.5 w-3.5" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent>
-          {previewLabel} ({getModifierSymbol()}O)
-        </TooltipContent>
-      </Tooltip>
+      {previewButton}
       <Tooltip>
         <TooltipTrigger asChild>
           <button
@@ -557,7 +579,7 @@ export interface SecurityAlertItemProps {
   onCheckedChange?: (checked: boolean) => void
   onMouseEnter: () => void
   onClick: (background: boolean) => void
-  onInvestigate: (background: boolean) => void
+  onInvestigate?: (background: boolean) => void
   onPreview: () => void
 }
 
@@ -574,10 +596,6 @@ export function SecurityAlertItem({
   onInvestigate,
   onPreview,
 }: SecurityAlertItemProps) {
-  const severityClass =
-    SEVERITY_COLORS[alert.severity.toLowerCase()] ??
-    'bg-muted text-muted-foreground border-border'
-
   return (
     <div
       data-item-index={index}
@@ -615,14 +633,7 @@ export function SecurityAlertItem({
         className="flex-1 min-w-0 text-left focus:outline-none disabled:cursor-not-allowed"
       >
         <div className="flex items-center gap-2">
-          <span
-            className={cn(
-              'shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium border',
-              severityClass
-            )}
-          >
-            {alert.severity}
-          </span>
+          <SeverityBadge severity={alert.severity} />
           <span className="text-xs text-muted-foreground">#{alert.number}</span>
           <span className="text-sm font-medium truncate">
             {alert.packageName}
@@ -666,7 +677,7 @@ export interface AdvisoryItemProps {
   onCheckedChange?: (checked: boolean) => void
   onMouseEnter: () => void
   onClick: (background: boolean) => void
-  onInvestigate: (background: boolean) => void
+  onInvestigate?: (background: boolean) => void
   onPreview: () => void
 }
 
@@ -683,10 +694,6 @@ export function AdvisoryItem({
   onInvestigate,
   onPreview,
 }: AdvisoryItemProps) {
-  const severityClass =
-    SEVERITY_COLORS[advisory.severity.toLowerCase()] ??
-    'bg-muted text-muted-foreground border-border'
-
   return (
     <div
       data-item-index={index}
@@ -726,19 +733,12 @@ export function AdvisoryItem({
         className="flex-1 min-w-0 text-left focus:outline-none disabled:cursor-not-allowed"
       >
         <div className="flex items-center gap-2 min-w-0">
-          <span
-            className={cn(
-              'shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium border',
-              severityClass
-            )}
-          >
-            {advisory.severity}
-          </span>
+          <SeverityBadge severity={advisory.severity} />
           <span className="text-sm font-medium truncate">
             {advisory.summary}
           </span>
           {advisory.vulnerabilities.length > 0 && (
-            <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground border border-border">
+            <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-2xs font-medium text-muted-foreground border border-border">
               {advisory.vulnerabilities.length} vuln
               {advisory.vulnerabilities.length !== 1 && 's'}
             </span>

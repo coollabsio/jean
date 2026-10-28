@@ -149,7 +149,7 @@ export function UsageEntryWindows({
 
   if (windows.length === 0) {
     return (
-      <span className={cn('text-[11px] text-muted-foreground', className)}>
+      <span className={cn('text-2xs text-muted-foreground', className)}>
         No usage data
       </span>
     )
@@ -158,7 +158,7 @@ export function UsageEntryWindows({
   return (
     <div
       className={cn(
-        'grid grid-cols-[auto_auto_1fr] gap-x-2 text-[11px] tabular-nums text-muted-foreground',
+        'grid grid-cols-[auto_auto_1fr] gap-x-2 text-2xs tabular-nums text-muted-foreground',
         className
       )}
     >

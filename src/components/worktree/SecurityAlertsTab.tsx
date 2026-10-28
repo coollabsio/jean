@@ -292,7 +292,7 @@ export function SecurityAlertsTab({
                           STATE_DOT_COLORS[alert.state] ?? 'bg-muted-foreground'
                         )}
                       />
-                      <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                      <span className="text-2xs font-medium text-muted-foreground uppercase tracking-wider">
                         {ALERT_STATE_LABELS[alert.state] ?? alert.state}
                       </span>
                     </div>
@@ -338,7 +338,7 @@ export function SecurityAlertsTab({
                             'bg-muted-foreground'
                         )}
                       />
-                      <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                      <span className="text-2xs font-medium text-muted-foreground uppercase tracking-wider">
                         {ADVISORY_STATE_LABELS[advisory.state] ??
                           advisory.state}
                       </span>

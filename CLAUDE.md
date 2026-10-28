@@ -381,12 +381,11 @@ The helpers are defined in `jean-core/src/platform/process.rs` and re-exported v
 **Shared Hooks** (in `src/components/chat/hooks/`):
 
 - `useCanvasKeyboardNav.ts` - Arrow key navigation (up/down), Enter selection
-- `useCanvasShortcutEvents.ts` - Event handlers for `open-plan`, `open-recap`, `approve-plan`, etc.
+- `useCanvasShortcutEvents.ts` - Event handlers for `open-recap`, `approve-plan`, etc.
 - `useCanvasStoreState.ts` - Subscribes to chat store state needed for `SessionCardData`
 
 **Shared Components**:
 
-- `SessionListRow.tsx` - Compact row component for list view
 - `session-card-utils.tsx` - `computeSessionCardData()`, `SessionCardData`, and `SessionCardProps` types
 
 #### Feature Parity: Native, Web Access, and Mobile

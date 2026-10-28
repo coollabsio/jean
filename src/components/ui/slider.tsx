@@ -92,7 +92,7 @@ function Slider({
           <span
             key={tick.value}
             className={cn(
-              'text-[10px] text-muted-foreground min-w-0',
+              'text-2xs text-muted-foreground min-w-0',
               tick.value === value && 'text-foreground font-medium'
             )}
           >

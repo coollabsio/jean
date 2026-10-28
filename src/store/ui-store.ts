@@ -40,10 +40,8 @@ export type PreferencePane =
   | 'terminal'
   | 'magic-prompts'
   | 'mcp-servers'
-  | 'providers'
   | 'usage'
   | 'integrations'
-  | 'experimental'
   | 'web-access'
   | 'opinionated'
 

@@ -604,10 +604,10 @@ function formatCodexWebSearchExpanded(
 // Single source of truth for tool call row layout. Bump min-h-9/px-2.5 here, all rows update.
 // min-h ensures consistent baseline regardless of inline-content height (pill vs no-pill).
 export const TOOL_CALL_ROW_CLASS =
-  'tool-call-row flex min-h-9 w-full items-center gap-1.5 px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-muted/50 select-none min-w-0'
+  'tool-call-row flex min-h-9 w-full items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-muted/50 select-none min-w-0'
 
 export const TOOL_CALL_SUB_ROW_CLASS =
-  'tool-call-row flex min-h-7 w-full items-center gap-1.5 px-2 py-1 text-xs text-muted-foreground/80 hover:bg-muted/30 select-none min-w-0'
+  'tool-call-row flex min-h-7 w-full items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground/80 hover:bg-muted/30 select-none min-w-0'
 
 // Detail pill — sits AFTER label, snug to content (no flex-1 stretch).
 // Always font-sans: .font-mono forces --chat-font-size !important and blows
@@ -665,12 +665,7 @@ export const ToolCallInline = memo(function ToolCallInline({
       onOpenChange={setIsOpen}
       className={cn('min-w-0', className)}
     >
-      <div
-        className={cn(
-          'rounded-md border border-border/50 bg-muted/30 min-w-0',
-          isOpen && 'bg-muted/50'
-        )}
-      >
+      <div className="min-w-0">
         <CollapsibleTrigger asChild>
           <div className={TOOL_CALL_ROW_CLASS}>
             {icon}
@@ -706,7 +701,7 @@ export const ToolCallInline = memo(function ToolCallInline({
           </div>
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <div className="border-t border-border/50 px-3 py-2">
+          <div className="px-3 py-2">
             <div className="whitespace-pre-wrap text-xs text-muted-foreground">
               {expandedContent}
             </div>
@@ -780,12 +775,7 @@ export const TaskCallInline = memo(function TaskCallInline({
       onOpenChange={setIsOpen}
       className={cn('min-w-0', className)}
     >
-      <div
-        className={cn(
-          'rounded-md border border-border/50 bg-muted/30 min-w-0',
-          isOpen && 'bg-muted/50'
-        )}
-      >
+      <div className="min-w-0">
         <CollapsibleTrigger className={TOOL_CALL_ROW_CLASS}>
           <Bot className="h-3.5 w-3.5 shrink-0" />
           <span className="font-medium shrink-0 whitespace-nowrap">
@@ -817,7 +807,7 @@ export const TaskCallInline = memo(function TaskCallInline({
         </CollapsibleTrigger>
         <CollapsibleContent>
           <TaskCallDetails
-            className="border-t border-border/50 px-3 py-2"
+            className="px-3 py-2"
             prompt={prompt}
             report={report}
             subToolCalls={subToolCalls}
@@ -1000,12 +990,7 @@ export const StackedGroup = memo(function StackedGroup({
       onOpenChange={setIsOpen}
       className={cn('min-w-0', className)}
     >
-      <div
-        className={cn(
-          'rounded-md border border-border/50 bg-muted/30 min-w-0',
-          isOpen && 'bg-muted/50'
-        )}
-      >
+      <div className="min-w-0">
         <CollapsibleTrigger className={TOOL_CALL_ROW_CLASS}>
           <Layers className="h-3.5 w-3.5 shrink-0" />
           <span className="font-medium shrink-0 whitespace-nowrap">
@@ -1023,7 +1008,7 @@ export const StackedGroup = memo(function StackedGroup({
           )}
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <div className="border-t border-border/50 px-3 py-2 space-y-1">
+          <div className="px-3 py-2 space-y-1">
             {items.map(item =>
               item.type === 'thinking' ? (
                 <SubThinkingItem key={item.key} thinking={item.thinking} />
@@ -1639,12 +1624,12 @@ function ScheduleWakeupIcon({ toolCallId }: ScheduleWakeupIndicatorProps) {
   const entry = useChatStore(state => state.scheduledWakeups[toolCallId])
   const status = entry?.status ?? 'fired'
   if (status === 'pending') {
-    return <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+    return <Loader2 className="size-3.5 shrink-0 animate-spin" />
   }
   if (status === 'cancelled') {
-    return <XCircle className="h-4 w-4 shrink-0" />
+    return <XCircle className="size-3.5 shrink-0" />
   }
-  return <CheckCircle2 className="h-4 w-4 shrink-0" />
+  return <CheckCircle2 className="size-3.5 shrink-0" />
 }
 
 /** Collapsed-row detail text that live-ticks until fire_at_unix. */
@@ -1676,7 +1661,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
       const offset = input.offset as number | undefined
       const lineInfo = limit ? `${limit} lines` : ''
       return {
-        icon: <FileText className="h-4 w-4 shrink-0" />,
+        icon: <FileText className="size-3.5 shrink-0" />,
         label: lineInfo ? `Read ${lineInfo}` : 'Read',
         detail: filename,
         filePath,
@@ -1692,7 +1677,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
       const oldString = input.old_string as string | undefined
       const newString = input.new_string as string | undefined
       return {
-        icon: <Edit className="h-4 w-4 shrink-0" />,
+        icon: <Edit className="size-3.5 shrink-0" />,
         label: 'Edit',
         detail: filename,
         filePath,
@@ -1713,7 +1698,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
       const filename = filePath ? getFilename(filePath) : filePath
       const content = input.content as string | undefined
       return {
-        icon: <PenLine className="h-4 w-4 shrink-0" />,
+        icon: <PenLine className="size-3.5 shrink-0" />,
         label: 'Write',
         detail: filename,
         filePath,
@@ -1739,7 +1724,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
       const output = toolCall.output?.trim()
       const hasOutput = Boolean(output) && !isPlaceholderToolOutput(output)
       return {
-        icon: <Terminal className="h-4 w-4 shrink-0" />,
+        icon: <Terminal className="size-3.5 shrink-0" />,
         label: 'Bash',
         detail: truncatedCommand,
         expandedContent: hasOutput ? (
@@ -1765,7 +1750,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
       const path = input.path as string | undefined
       const glob = input.glob as string | undefined
       return {
-        icon: <Search className="h-4 w-4 shrink-0" />,
+        icon: <Search className="size-3.5 shrink-0" />,
         label: 'Grep',
         detail: pattern
           ? `"${pattern}"${path ? ` in ${path}` : ''}`
@@ -1780,7 +1765,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
         (input.max_results as number | undefined) ??
         (input.maxResults as number | undefined)
       return {
-        icon: <Search className="h-4 w-4 shrink-0" />,
+        icon: <Search className="size-3.5 shrink-0" />,
         label: 'Tool Search',
         detail: query,
         expandedContent: `Query: ${query ?? '(none)'}${typeof maxResults === 'number' ? `\nMax results: ${maxResults}` : ''}`,
@@ -1791,7 +1776,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
       const pattern = input.pattern as string | undefined
       const path = input.path as string | undefined
       return {
-        icon: <Folder className="h-4 w-4 shrink-0" />,
+        icon: <Folder className="size-3.5 shrink-0" />,
         label: 'Glob',
         detail: pattern,
         expandedContent: `Pattern: ${pattern ?? '(none)'}\nPath: ${path ?? '(cwd)'}`,
@@ -1811,7 +1796,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
           ? `${includeText} in ${path}`
           : (includeText ?? path)
       return {
-        icon: <FileText className="h-4 w-4 shrink-0" />,
+        icon: <FileText className="size-3.5 shrink-0" />,
         label: 'Read Multiple Files',
         detail,
         expandedContent: `Path: ${path ?? '(cwd)'}${includeText ? `\nInclude: ${includeText}` : ''}`,
@@ -1825,7 +1810,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
       const prompt = input.prompt as string | undefined
       const toolLabel = toolCall.name === 'Agent' ? 'Agent' : 'Task'
       return {
-        icon: <Bot className="h-4 w-4 shrink-0" />,
+        icon: <Bot className="size-3.5 shrink-0" />,
         label: subagentType ? `${toolLabel} (${subagentType})` : toolLabel,
         detail: description,
         expandedContent: prompt ?? description ?? 'No prompt specified',
@@ -1836,7 +1821,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
       const findings = Array.isArray(input.findings) ? input.findings : []
       const count = findings.length
       return {
-        icon: <ListTodo className="h-4 w-4 shrink-0" />,
+        icon: <ListTodo className="size-3.5 shrink-0" />,
         label: 'Report Findings',
         detail: `${count} finding${count === 1 ? '' : 's'}`,
         expandedContent:
@@ -1852,7 +1837,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
       const query = input.query as string | undefined
       const prompt = input.prompt as string | undefined
       return {
-        icon: <Globe className="h-4 w-4 shrink-0" />,
+        icon: <Globe className="size-3.5 shrink-0" />,
         label: normalized.name === 'WebSearch' ? 'Web Search' : 'Web Fetch',
         detail: url ?? query,
         expandedContent: url
@@ -1865,7 +1850,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
     case 'SpawnAgent': {
       const prompt = input.prompt as string | undefined
       return {
-        icon: <Users className="h-4 w-4 shrink-0" />,
+        icon: <Users className="size-3.5 shrink-0" />,
         label: 'Spawn Agent',
         detail: codexSubagentDetail(input) ?? 'sub-agent',
         expandedContent:
@@ -1879,7 +1864,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
       // Codex sub_agent_activity puts the agent path in `prompt`
       const detail = codexSubagentDetail(input)
       return {
-        icon: <Send className="h-4 w-4 shrink-0" />,
+        icon: <Send className="size-3.5 shrink-0" />,
         label: 'Send Input',
         detail: detail ? `to ${detail}` : undefined,
         expandedContent:
@@ -1891,7 +1876,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
       const receiverIds = (input.receiver_thread_ids ??
         input.receiverThreadIds) as string[] | undefined
       return {
-        icon: <Clock className="h-4 w-4 shrink-0" />,
+        icon: <Clock className="size-3.5 shrink-0" />,
         label: 'Waiting for Agents',
         detail: receiverIds?.length
           ? `${receiverIds.length} agent${receiverIds.length === 1 ? '' : 's'}`
@@ -1902,7 +1887,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
 
     case 'CloseAgent': {
       return {
-        icon: <XCircle className="h-4 w-4 shrink-0" />,
+        icon: <XCircle className="size-3.5 shrink-0" />,
         label: 'Close Agent',
         detail: codexSubagentDetail(input),
         expandedContent:
@@ -1920,7 +1905,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
       }[]
       const completed = todos.filter(t => t.status === 'completed').length
       return {
-        icon: <ListTodo className="h-4 w-4 shrink-0" />,
+        icon: <ListTodo className="size-3.5 shrink-0" />,
         label: 'Tasks',
         detail: todos.length ? `${completed}/${todos.length} done` : undefined,
         expandedContent: todos.length ? (
@@ -1973,7 +1958,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
         | { text: string; completed: boolean }[]
         | undefined
       return {
-        icon: <ListTodo className="h-4 w-4 shrink-0" />,
+        icon: <ListTodo className="size-3.5 shrink-0" />,
         label: 'Todo List',
         detail: items?.length
           ? `${items.filter(i => i.completed).length}/${items.length} done`
@@ -2038,7 +2023,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
             (fallbackFilePath ? getFilename(fallbackFilePath) : undefined))
 
       return {
-        icon: <FileText className="h-4 w-4 shrink-0" />,
+        icon: <FileText className="size-3.5 shrink-0" />,
         label: 'File Change',
         detail,
         filePath: filePath ?? fallbackFilePath,
@@ -2066,7 +2051,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
               .join('\n')}`
           : (banner ?? 'Switched to plan mode')
       return {
-        icon: <Brain className="h-4 w-4 shrink-0" />,
+        icon: <Brain className="size-3.5 shrink-0" />,
         label: 'Entered plan mode',
         detail:
           instructions.length > 0
@@ -2094,9 +2079,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
             ? JSON.stringify(args, null, 2)
             : undefined
       return {
-        icon: (
-          <Wand2 className="h-4 w-4 shrink-0 text-purple-600 dark:text-purple-400" />
-        ),
+        icon: <Wand2 className="size-3.5 shrink-0" />,
         label: skillName ? `Skill: ${skillName}` : 'Skill',
         detail: argsDetail,
         expandedContent: (
@@ -2121,7 +2104,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
         ? (patchText.match(/^---\s/gm) || []).length
         : 0
       return {
-        icon: <FileCode className="h-4 w-4 shrink-0" />,
+        icon: <FileCode className="size-3.5 shrink-0" />,
         label: 'Apply Patch',
         detail:
           fileCount > 0
@@ -2135,7 +2118,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
       const edits = input.edits as { filePath?: string }[] | undefined
       const fileCount = edits?.length ?? 0
       return {
-        icon: <Edit className="h-4 w-4 shrink-0" />,
+        icon: <Edit className="size-3.5 shrink-0" />,
         label: 'Multi Edit',
         detail:
           fileCount > 0
@@ -2148,7 +2131,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
     case 'CodeSearch': {
       const query = input.query as string | undefined
       return {
-        icon: <Search className="h-4 w-4 shrink-0" />,
+        icon: <Search className="size-3.5 shrink-0" />,
         label: 'Code Search',
         detail: query,
         expandedContent: formatInputForExpanded(toolCall, input),
@@ -2159,7 +2142,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
     case 'list': {
       const path = input.path as string | undefined
       return {
-        icon: <List className="h-4 w-4 shrink-0" />,
+        icon: <List className="size-3.5 shrink-0" />,
         label: 'List',
         detail: path,
         expandedContent: `Path: ${path ?? '(cwd)'}`,
@@ -2173,7 +2156,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
       const filePath = firstStringField(input, ['filePath', 'file_path'])
       const filename = filePath ? getFilename(filePath) : undefined
       return {
-        icon: <Code className="h-4 w-4 shrink-0" />,
+        icon: <Code className="size-3.5 shrink-0" />,
         label: 'LSP',
         detail: action
           ? `${action}${filename ? ` ${filename}` : ''}`
@@ -2191,7 +2174,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
       }[]
       const count = `${edits.length} edit${edits.length === 1 ? '' : 's'}`
       return {
-        icon: <Edit className="h-4 w-4 shrink-0" />,
+        icon: <Edit className="size-3.5 shrink-0" />,
         label: 'Multi Edit',
         detail: filePath ? `${getFilename(filePath)} · ${count}` : count,
         filePath,
@@ -2228,7 +2211,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
         .filter(Boolean)
         .join('\n')
       return {
-        icon: <FileCode className="h-4 w-4 shrink-0" />,
+        icon: <FileCode className="size-3.5 shrink-0" />,
         label: `Notebook ${editMode}`,
         detail: notebookPath
           ? `${getFilename(notebookPath)}${cellId ? ` · ${cellId}` : ''}`
@@ -2241,7 +2224,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
     case 'CodexWebSearch': {
       const detail = formatCodexWebSearchDetail(input)
       return {
-        icon: <Globe className="h-4 w-4 shrink-0" />,
+        icon: <Globe className="size-3.5 shrink-0" />,
         label: 'Web Search',
         detail,
         expandedContent: formatCodexWebSearchExpanded(input, toolCall.output),
@@ -2274,7 +2257,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
         parts.push(toolCall.output)
       }
       return {
-        icon: <ImageIcon className="h-4 w-4 shrink-0" />,
+        icon: <ImageIcon className="size-3.5 shrink-0" />,
         label: 'Image Generation',
         detail,
         expandedContent:
@@ -2286,7 +2269,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
       const path = firstStringField(input, ['path', 'file_path', 'filePath'])
       const filename = path ? getFilename(path) : undefined
       return {
-        icon: <ImageIcon className="h-4 w-4 shrink-0" />,
+        icon: <ImageIcon className="size-3.5 shrink-0" />,
         label: 'Image View',
         detail: filename ?? path,
         filePath: path,
@@ -2301,7 +2284,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
     case 'CodexContextCompaction': {
       const summary = firstStringField(input, ['summary'])
       return {
-        icon: <Layers className="h-4 w-4 shrink-0" />,
+        icon: <Layers className="size-3.5 shrink-0" />,
         label: 'Context Compaction',
         detail: summary ? summary.slice(0, 60) : undefined,
         expandedContent:
@@ -2383,7 +2366,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
         (toolCall.output ? 'done' : events.length > 0 ? 'running' : 'armed')
       const label = description ? `Monitor: ${description}` : 'Monitor'
       return {
-        icon: <Activity className="h-4 w-4 shrink-0" />,
+        icon: <Activity className="size-3.5 shrink-0" />,
         label,
         detail: (
           <MonitorStatusBadge status={status} eventCount={events.length} />
@@ -2398,7 +2381,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
       const jeanBare = extractJeanMcpBareToolName(normalized.name)
       if (jeanBare) {
         return {
-          icon: <Bot className="h-4 w-4 shrink-0" />,
+          icon: <Bot className="size-3.5 shrink-0" />,
           label: formatJeanMcpToolLabel(normalized.name),
           detail: formatJeanMcpToolDetail(input),
           expandedContent: formatInputForExpanded(toolCall, input),
@@ -2409,7 +2392,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
       if (spec) {
         const Icon = spec.icon
         return {
-          icon: <Icon className="h-4 w-4 shrink-0" />,
+          icon: <Icon className="size-3.5 shrink-0" />,
           label: spec.label,
           detail: getSimpleToolDetail(spec, input),
           expandedContent: formatInputForExpanded(toolCall, input),
@@ -2446,7 +2429,7 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
         ]) ?? formatJeanMcpToolDetail(input)
       const expanded = formatInputForExpanded(toolCall, input)
       return {
-        icon: <Terminal className="h-4 w-4 shrink-0" />,
+        icon: <Terminal className="size-3.5 shrink-0" />,
         label: isKnownExternal
           ? isAntigravityNativeToolName(normalized.name) ||
             isMuseNativeToolName(normalized.name)
@@ -2478,7 +2461,7 @@ function MonitorStatusBadge({
   const label =
     status === 'armed' ? 'armed' : status === 'running' ? 'running' : status
   return (
-    <span className={cn('font-mono text-[11px]', tone)}>
+    <span className={cn('font-mono text-2xs', tone)}>
       {label}
       {eventCount > 0
         ? ` · ${eventCount} event${eventCount === 1 ? '' : 's'}`
@@ -2502,25 +2485,25 @@ function MonitorExpanded({
     <div className="space-y-2">
       {command ? (
         <div>
-          <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+          <div className="text-2xs uppercase tracking-wide text-muted-foreground">
             Command
           </div>
-          <pre className="mt-1 whitespace-pre-wrap break-all rounded bg-muted/50 p-2 font-mono text-[11px]">
+          <pre className="mt-1 whitespace-pre-wrap break-all rounded bg-muted/50 p-2 font-mono text-2xs">
             {command}
           </pre>
         </div>
       ) : null}
       <div>
-        <div className="flex items-center justify-between text-[10px] uppercase tracking-wide text-muted-foreground">
+        <div className="flex items-center justify-between text-2xs uppercase tracking-wide text-muted-foreground">
           <span>Live events</span>
           {isActive ? <WorkingWaveform /> : null}
         </div>
         {events.length === 0 ? (
-          <div className="mt-1 text-[11px] italic text-muted-foreground">
+          <div className="mt-1 text-2xs italic text-muted-foreground">
             {status === 'armed' ? 'Waiting for events…' : 'No events emitted.'}
           </div>
         ) : (
-          <div className="mt-1 max-h-64 divide-y divide-border/30 overflow-auto rounded bg-muted/50 p-2 font-mono text-[11px]">
+          <div className="mt-1 max-h-64 divide-y divide-border/30 overflow-auto rounded bg-muted/50 p-2 font-mono text-2xs">
             {events.map(ev => {
               const text = formatMonitorEventText(ev)
               return (

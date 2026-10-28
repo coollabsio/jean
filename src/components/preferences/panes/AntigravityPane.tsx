@@ -1,6 +1,14 @@
 import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { SettingsSection } from '../SettingsSection'
+import { InlineField } from '../InlineField'
+import { CliAuthActions, CliAuthProblem } from '../CliAuthActions'
 import { BackendCliSourceSelect } from '../BackendCliSourceSelect'
 import {
   antigravityCliQueryKeys,
@@ -16,6 +24,14 @@ import { usePatchPreferences, usePreferences } from '@/services/preferences'
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { useUIStore } from '@/store/ui-store'
+
+const FALLBACK_MODELS = [
+  { id: 'auto', label: 'Auto' },
+  { id: 'gemini-3.6-flash-high', label: 'Gemini 3.6 Flash (High)' },
+  { id: 'gemini-3.6-flash-medium', label: 'Gemini 3.6 Flash (Medium)' },
+  { id: 'gemini-3.5-flash-medium', label: 'Gemini 3.5 Flash (Medium)' },
+  { id: 'gemini-3.1-pro-high', label: 'Gemini 3.1 Pro (High)' },
+]
 
 export function AntigravityPane() {
   const status = useAntigravityCliStatus()
@@ -57,60 +73,89 @@ export function AntigravityPane() {
     )
   }
 
-  return (
-    <div className="w-full max-w-3xl space-y-6">
-      <p className="text-sm text-muted-foreground">
-        Google&apos;s official Antigravity CLI.
-      </p>
-      <SettingsSection title="CLI source" variant="card">
-        <BackendCliSourceSelect
-          value={source}
-          onValueChange={setSource}
-          backendName="Antigravity CLI"
-          path={pathDetection.data?.path}
-          pathVersion={pathDetection.data?.version}
-          pathFound={!!pathDetection.data?.found}
-        />
-      </SettingsSection>
+  const installed = !!status.data?.installed
+  const signIn = () =>
+    openCliLoginModal('antigravity', status.data?.path ?? 'agy', [], 'login')
+  const modelOptions = models.data ?? FALLBACK_MODELS
 
-      <SettingsSection title="CLI installation" variant="card">
-        {source === 'jean' ? (
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="min-w-52 flex-1 space-y-1.5">
-                <Label htmlFor="antigravity-managed-version">Version</Label>
-                <select
-                  id="antigravity-managed-version"
-                  className="h-9 w-full rounded-md border bg-background px-3 text-sm"
-                  value={selectedVersion}
-                  disabled={versions.isFetching || install.isPending}
-                  onChange={event => setSelectedVersion(event.target.value)}
+  return (
+    <div className="w-full space-y-8">
+      <SettingsSection
+        title="CLI source"
+        actions={
+          <CliAuthActions
+            installed={installed}
+            checking={auth.isLoading}
+            authenticated={!!auth.data?.authenticated}
+            onSignIn={signIn}
+            onSignInAgain={signIn}
+          />
+        }
+      >
+        <InlineField
+          label={installed ? 'Version' : 'Status'}
+          description={
+            source === 'jean'
+              ? status.isLoading
+                ? 'Checking installation…'
+                : installed
+                  ? `${status.data?.version ?? 'Version unknown'} · ${status.data?.path ?? 'managed path'}`
+                  : undefined
+              : pathDetection.data?.found
+                ? `Using ${pathDetection.data.path}${pathDetection.data.version ? ` · ${pathDetection.data.version}` : ''}`
+                : 'Install Antigravity CLI on your PATH, then select Refresh.'
+          }
+        >
+          {source === 'path' ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-fit"
+              onClick={() => pathDetection.refetch()}
+            >
+              Refresh
+            </Button>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              <Select
+                value={selectedVersion}
+                onValueChange={setSelectedVersion}
+                disabled={versions.isFetching || install.isPending}
+              >
+                <SelectTrigger
+                  aria-label="Managed version"
+                  size="sm"
+                  className="w-40"
                 >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
                   {stableVersions.length === 0 && (
-                    <option value="latest">Latest stable</option>
+                    <SelectItem value="latest">Latest stable</SelectItem>
                   )}
                   {stableVersions.map(version => (
-                    <option key={version.version} value={version.version}>
+                    <SelectItem key={version.version} value={version.version}>
                       {version.version}
-                    </option>
+                    </SelectItem>
                   ))}
-                </select>
-              </div>
+                </SelectContent>
+              </Select>
               <Button
                 size="sm"
+                variant={installed ? 'outline' : 'default'}
                 disabled={install.isPending}
                 onClick={() => install.mutate(selectedVersion)}
               >
                 {install.isPending
                   ? 'Installing…'
-                  : status.data?.installed
+                  : installed
                     ? 'Install version'
                     : 'Install'}
               </Button>
-              {status.data?.installed && (
+              {installed && (
                 <Button
                   size="sm"
-                  variant="outline"
+                  variant="ghost"
                   disabled={uninstall.isPending}
                   onClick={() => uninstall.mutate()}
                 >
@@ -118,106 +163,56 @@ export function AntigravityPane() {
                 </Button>
               )}
             </div>
-            <p className="text-xs text-muted-foreground">
-              {status.isLoading
-                ? 'Checking Jean-managed installation…'
-                : status.data?.installed
-                  ? `Installed ${status.data.version ?? 'version unknown'} · ${status.data.path ?? 'managed path'}`
-                  : 'Jean-managed Antigravity CLI is not installed.'}
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-2 text-sm">
-            {pathDetection.data?.found
-              ? `Using ${pathDetection.data.path}${pathDetection.data.version ? ` · ${pathDetection.data.version}` : ''}`
-              : 'Install Antigravity CLI on your PATH, then select Refresh.'}
-            <div>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => pathDetection.refetch()}
-              >
-                Refresh
-              </Button>
-            </div>
-          </div>
+          )}
+        </InlineField>
+        <InlineField label="Source">
+          <BackendCliSourceSelect
+            value={source}
+            onValueChange={setSource}
+            backendName="Antigravity CLI"
+            path={pathDetection.data?.path}
+            pathVersion={pathDetection.data?.version}
+            pathFound={!!pathDetection.data?.found}
+          />
+        </InlineField>
+        {installed && !auth.isLoading && !auth.data?.authenticated && (
+          <CliAuthProblem
+            timedOut={!!auth.data?.timedOut}
+            error={auth.data?.error}
+            retrying={auth.isFetching}
+            onRetry={() => auth.refetch()}
+            manualCommand="agy"
+          />
         )}
       </SettingsSection>
 
-      <SettingsSection title="Authentication" variant="card">
-        <div className="flex items-center justify-between gap-4 text-sm">
-          <span>
-            {!status.data?.installed
-              ? 'Select an installed Antigravity CLI source first.'
-              : auth.isLoading
-                ? 'Checking authentication…'
-                : auth.data?.authenticated
-                  ? 'Authenticated'
-                  : auth.data?.timedOut
-                    ? 'Auth check timed out. Try again or run `agy` manually.'
-                    : `Not authenticated${auth.data?.error ? ` · ${auth.data.error}` : ''}`}
-          </span>
-          {status.data?.installed && status.data.path && (
-            <div className="flex items-center gap-2">
-              {auth.data?.timedOut && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={auth.isFetching}
-                  onClick={() => auth.refetch()}
-                >
-                  {auth.isFetching ? 'Retrying…' : 'Retry'}
-                </Button>
-              )}
-              <Button
-                size="sm"
-                onClick={() =>
-                  openCliLoginModal(
-                    'antigravity',
-                    status.data?.path ?? 'agy',
-                    [],
-                    'login'
-                  )
-                }
-              >
-                {auth.data?.authenticated ? 'Relogin' : 'Login'}
-              </Button>
-            </div>
-          )}
-        </div>
-      </SettingsSection>
-      <SettingsSection title="Default model" variant="card">
-        <select
-          aria-label="Default model"
-          className="h-9 w-full rounded-md border bg-background px-3 text-sm"
-          value={preferences?.selected_antigravity_model ?? 'antigravity/auto'}
-          onChange={event =>
-            patch.mutate({
-              selected_antigravity_model: event.target
-                .value as `antigravity/${string}`,
-            })
-          }
-        >
-          {(
-            models.data ?? [
-              { id: 'auto', label: 'Auto' },
-              { id: 'gemini-3.6-flash-high', label: 'Gemini 3.6 Flash (High)' },
-              {
-                id: 'gemini-3.6-flash-medium',
-                label: 'Gemini 3.6 Flash (Medium)',
-              },
-              {
-                id: 'gemini-3.5-flash-medium',
-                label: 'Gemini 3.5 Flash (Medium)',
-              },
-              { id: 'gemini-3.1-pro-high', label: 'Gemini 3.1 Pro (High)' },
-            ]
-          ).map(model => (
-            <option key={model.id} value={`antigravity/${model.id}`}>
-              {model.label}
-            </option>
-          ))}
-        </select>
+      <SettingsSection title="Default model">
+        <InlineField label="Model">
+          <Select
+            value={
+              preferences?.selected_antigravity_model ?? 'antigravity/auto'
+            }
+            onValueChange={value =>
+              patch.mutate({
+                selected_antigravity_model: value as `antigravity/${string}`,
+              })
+            }
+          >
+            <SelectTrigger
+              aria-label="Default model"
+              className="w-full sm:w-80"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {modelOptions.map(model => (
+                <SelectItem key={model.id} value={`antigravity/${model.id}`}>
+                  {model.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </InlineField>
       </SettingsSection>
     </div>
   )

@@ -587,8 +587,7 @@ export function AuthLoginState({
                 <Button
                   onClick={handleCopyCode}
                   variant="ghost"
-                  size="icon"
-                  className="size-7"
+                  size="icon-sm"
                   aria-label="Copy code"
                 >
                   <Copy className="size-3.5" />

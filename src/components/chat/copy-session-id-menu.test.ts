@@ -2,10 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-const sourceFiles = [
-  'src/components/chat/SessionContextMenuItems.tsx',
-  'src/components/chat/SessionListRow.tsx',
-]
+const sourceFiles = ['src/components/chat/SessionContextMenuItems.tsx']
 
 describe('copy session ID context menu', () => {
   it('exposes Copy Session ID on session right-click menus', () => {

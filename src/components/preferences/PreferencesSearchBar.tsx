@@ -97,7 +97,7 @@ export const PreferencesSearchBar: React.FC<PreferencesSearchBarProps> = ({
             className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground text-sm"
           />
           {isDesktop && !searchValue && (
-            <kbd className="pointer-events-none text-[10px] font-mono text-muted-foreground/60">
+            <kbd className="pointer-events-none text-2xs font-mono text-muted-foreground/60">
               /
             </kbd>
           )}
@@ -126,7 +126,7 @@ export const PreferencesSearchBar: React.FC<PreferencesSearchBarProps> = ({
                         {backend ? (
                           <BackendLabel
                             backend={backend}
-                            badgeClassName="text-[8px] leading-3"
+                            badgeClassName="text-2xs leading-3"
                           />
                         ) : (
                           group.title

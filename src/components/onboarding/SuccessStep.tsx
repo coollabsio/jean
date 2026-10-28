@@ -1,8 +1,5 @@
 import { Button } from '@/components/ui/button'
-import { FolderPlus, Github, Sparkles } from '@/components/icons/reicon'
-import { BetaBadge } from '@/components/ui/badge'
-import { GitLabIcon } from '@/components/icons/GitLabIcon'
-import { BackendLabel, getBackendIcon } from '@/components/ui/backend-label'
+import { FolderPlus, Sparkles } from '@/components/icons/reicon'
 import { cliLabel, type CliType } from './cli-setup-flows'
 
 interface SuccessStepProps {
@@ -21,31 +18,9 @@ export function SuccessStep({
   return (
     <div className="space-y-6">
       {readyClis.length > 0 && (
-        <ul className="flex flex-wrap gap-2" aria-label="Ready tools">
-          {readyClis.map(cli => {
-            const Icon =
-              cli === 'gh' ? Github : cli === 'glab' ? GitLabIcon : getBackendIcon(cli)
-            return (
-              <li
-                key={cli}
-                className="flex items-center gap-1.5 rounded-lg border bg-primary/5 px-2.5 py-1 text-xs"
-              >
-                <Icon className="size-3.5" />
-                {cli === 'gh' || cli === 'glab' ? (
-                  <>
-                    {cliLabel(cli)}
-                    {cli === 'glab' && <BetaBadge />}
-                  </>
-                ) : (
-                  <BackendLabel
-                    backend={cli}
-                    badgeClassName="text-[8px] leading-3"
-                  />
-                )}
-              </li>
-            )
-          })}
-        </ul>
+        <p className="text-sm text-muted-foreground">
+          Ready: {readyClis.map(cliLabel).join(', ')}
+        </p>
       )}
       <div className="flex flex-col gap-2 sm:flex-row">
         <Button className="flex-1" onClick={onAddProject} disabled={busy}>

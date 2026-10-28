@@ -14,7 +14,6 @@ import { Separator } from '@/components/ui/separator'
 import {
   ExternalLink,
   Download,
-  CheckCircle,
   Loader2,
   RefreshCw,
   ChevronRight,
@@ -500,11 +499,10 @@ function PluginCard({
           {!checking && status?.installed && (
             <span className="flex min-w-0 flex-1 items-center overflow-hidden">
               <Badge
-                variant="secondary"
+                variant="success"
                 title={`${statusLabel}${versionText ?? ''}`}
-                className="w-auto min-w-0 max-w-full shrink justify-start gap-1 overflow-hidden text-xs"
+                className="w-auto min-w-0 max-w-full shrink justify-start gap-1 overflow-hidden"
               >
-                <CheckCircle className="h-3 w-3 shrink-0 text-success" />
                 <span className="shrink-0">{statusLabel}</span>
                 {versionText && (
                   <span className="min-w-0 truncate">{versionText}</span>
@@ -514,10 +512,7 @@ function PluginCard({
           )}
           {!checking && !status?.installed && (
             <span className="flex min-w-0 flex-1 items-center overflow-hidden">
-              <Badge
-                variant="outline"
-                className="max-w-full shrink text-xs text-muted-foreground"
-              >
+              <Badge variant="subtle" className="max-w-full shrink">
                 <span className="truncate">
                   {installUnsupported ? 'Unsupported' : 'Not installed'}
                 </span>
@@ -630,7 +625,7 @@ function PluginCard({
       {expanded && (
         <div className="pl-7 pr-2 pb-3 space-y-3">
           <div className="pt-1 space-y-1">
-            <div className="text-[11px] text-muted-foreground">
+            <div className="text-2xs text-muted-foreground">
               Applies to:{' '}
               <span className="text-foreground/70">
                 {plugin.backends.join(', ')}
@@ -767,7 +762,7 @@ function PluginCard({
                       <div className="text-foreground/70">{step.label}:</div>
                     )}
                     {step.command && (
-                      <code className="block rounded bg-muted px-2 py-1 font-mono text-[11px] text-foreground">
+                      <code className="block rounded bg-muted px-2 py-1 font-mono text-2xs text-foreground">
                         {step.command}
                       </code>
                     )}

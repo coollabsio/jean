@@ -22,10 +22,4 @@ describe('web connection header', () => {
     expect(source).not.toContain('native && isMacOS')
     expect(source).not.toContain('native && isLinux')
   })
-
-  it('shows a sticky jean-server update control in the title bar', () => {
-    expect(source).toContain('ServerUpdateIndicator')
-    expect(source).toContain('pendingServerUpdate')
-    expect(source).toContain('Server update')
-  })
 })

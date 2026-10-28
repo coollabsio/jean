@@ -1,28 +1,15 @@
-import { useCallback, useState, type FC } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useState,
+  type FC,
+} from 'react'
 import { Loader2 } from '@/components/icons/reicon'
-import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { usePatchPreferences } from '@/services/preferences'
 import type { AppPreferences } from '@/types/preferences'
-
-const InlineField: FC<{
-  label: string
-  description?: React.ReactNode
-  children: React.ReactNode
-}> = ({ label, description, children }) => (
-  <div className="settings-inline-field flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
-    <div className="space-y-0.5 sm:w-56 sm:shrink-0 lg:w-72">
-      <Label className="text-sm text-foreground">{label}</Label>
-      {description && (
-        <div className="text-xs text-muted-foreground break-words">
-          {description}
-        </div>
-      )}
-    </div>
-    {children}
-  </div>
-)
+import { InlineField } from '../InlineField'
 
 /** True only while this field's own ai_language patch is in flight. */
 export function isAiLanguageSavePending(
@@ -35,23 +22,33 @@ export function isAiLanguageSavePending(
 }
 
 // Own mutation instance so model-default patches (and other GeneralPane saves)
-// do not put this Save button into a shared isPending loading state (#505).
+// do not show this field's spinner during unrelated saves (#505).
 export const AiLanguageField: FC<{
   preferences: AppPreferences | undefined
 }> = ({ preferences }) => {
   const patchPreferences = usePatchPreferences()
-  const [localValue, setLocalValue] = useState(preferences?.ai_language ?? '')
+  const saved = preferences?.ai_language ?? ''
+  const [localValue, setLocalValue] = useState(saved)
+  const [seenSaved, setSeenSaved] = useState(saved)
+  if (saved !== seenSaved) {
+    setSeenSaved(saved)
+    setLocalValue(saved)
+  }
 
-  const hasChanges = localValue !== (preferences?.ai_language ?? '')
+  const hasChanges = localValue !== saved
   const isSaving = isAiLanguageSavePending(
     patchPreferences.isPending,
     patchPreferences.variables
   )
 
   const handleSave = useCallback(() => {
-    if (!preferences) return
+    if (!preferences || !hasChanges) return
     patchPreferences.mutate({ ai_language: localValue })
-  }, [preferences, patchPreferences, localValue])
+  }, [preferences, hasChanges, patchPreferences, localValue])
+
+  // Escape closes Settings without blurring the input; keep the typed value.
+  const flushOnUnmount = useEffectEvent(handleSave)
+  useEffect(() => () => flushOnUnmount(), [])
 
   return (
     <InlineField
@@ -64,15 +61,14 @@ export const AiLanguageField: FC<{
           placeholder="Default"
           value={localValue}
           onChange={e => setLocalValue(e.target.value)}
+          onBlur={handleSave}
+          onKeyDown={e => {
+            if (e.key === 'Enter') e.currentTarget.blur()
+          }}
         />
-        <Button
-          size="sm"
-          onClick={handleSave}
-          disabled={!hasChanges || isSaving}
-        >
-          {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
-          Save
-        </Button>
+        {isSaving && (
+          <Loader2 className="size-4 animate-spin text-muted-foreground" />
+        )}
       </div>
     </InlineField>
   )

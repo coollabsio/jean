@@ -548,8 +548,9 @@ export function TerminalView({
                   </span>
                   {shortcutLabel && (
                     <Kbd
+                      modHint
                       className={cn(
-                        'h-3.5 px-1 text-[9px]',
+                        'h-3.5 px-1 text-2xs',
                         isActive
                           ? 'bg-background/80 text-foreground'
                           : 'bg-background/60 text-muted-foreground'
@@ -558,13 +559,13 @@ export function TerminalView({
                       {shortcutLabel}
                     </Kbd>
                   )}
-                  {/* Close button - always visible */}
+                  {/* Close button: revealed on hover, dimmed on the active tab */}
                   <button
                     type="button"
                     aria-label="Close terminal"
                     onClick={e => handleCloseTerminal(e, terminal.id)}
                     className={cn(
-                      'rounded p-0.5 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100',
+                      'rounded p-0.5 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100 focus-visible:opacity-100',
                       isActive && 'opacity-50'
                     )}
                   >

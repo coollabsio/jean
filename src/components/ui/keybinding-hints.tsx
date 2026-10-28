@@ -33,9 +33,9 @@ export function KeybindingHints({ hints, className }: KeybindingHintsProps) {
       <PopoverTrigger asChild>
         <Button
           variant="ghost"
-          size="icon"
+          size="icon-sm"
           className={cn(
-            'absolute bottom-4 left-4 z-10 hidden sm:inline-flex h-7 w-7 rounded-full border border-border/30 bg-background/60 text-muted-foreground hover:text-foreground',
+            'absolute bottom-4 left-4 z-10 hidden sm:inline-flex rounded-full border border-border/30 bg-background/60 text-muted-foreground hover:text-foreground',
             className
           )}
         >
@@ -51,7 +51,7 @@ export function KeybindingHints({ hints, className }: KeybindingHintsProps) {
         <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 items-center">
           {hints.map(hint => (
             <Fragment key={hint.shortcut}>
-              <Kbd className="h-5 px-1.5 text-[11px]">
+              <Kbd className="h-5 px-1.5 text-2xs">
                 {formatShortcutDisplay(hint.shortcut)}
               </Kbd>
               <span className="text-xs text-muted-foreground">

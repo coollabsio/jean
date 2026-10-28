@@ -19,9 +19,7 @@ const DRAWER_GUTTER_PX = 48
 
 /** Real drawer width in px, so sidebar content can size itself correctly. */
 function useDrawerWidth() {
-  const [width, setWidth] = useState(
-    () => window.innerWidth - DRAWER_GUTTER_PX
-  )
+  const [width, setWidth] = useState(() => window.innerWidth - DRAWER_GUTTER_PX)
 
   useEffect(() => {
     const onResize = () => setWidth(window.innerWidth - DRAWER_GUTTER_PX)
@@ -76,7 +74,7 @@ export function MobileLeftSidebar({
         // tooltip on focus when the drawer slides in on mobile.
         onOpenAutoFocus={e => e.preventDefault()}
         // Almost full width; the thin dimmed strip on the right still dismisses.
-        className="bg-sidebar text-sidebar-foreground dark:bg-[#0b0b0b] w-[calc(100vw-3rem)] gap-0 border-r p-0 sm:max-w-[calc(100vw-3rem)]"
+        className="bg-sidebar text-sidebar-foreground w-[calc(100vw-3rem)] gap-0 border-r p-0 sm:max-w-[calc(100vw-3rem)]"
         style={
           {
             ...(isDragging

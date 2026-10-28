@@ -1,6 +1,6 @@
 import { createElement } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppPreferences } from '@/types/preferences'
@@ -76,10 +76,7 @@ describe('AiLanguageField (#505)', () => {
     await user.clear(input)
     await user.type(input, 'French')
 
-    const save = screen.getByRole('button', { name: /save/i })
-    await waitFor(() => expect(save).not.toBeDisabled())
-
-    // Concurrent model default edit — previously shared isPending spun this button
+    // Concurrent model default edit — previously shared isPending spun this field
     isPendingRef.current = true
     variablesRef.current = { selected_model: 'claude-sonnet-4-6[1m]' }
 
@@ -97,7 +94,6 @@ describe('AiLanguageField (#505)', () => {
       )
     )
 
-    expect(screen.getByRole('button', { name: /save/i })).not.toBeDisabled()
     expect(document.querySelector('.animate-spin')).toBeNull()
   })
 
@@ -108,10 +104,6 @@ describe('AiLanguageField (#505)', () => {
     const input = screen.getByPlaceholderText('Default')
     await user.clear(input)
     await user.type(input, 'French')
-
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /save/i })).not.toBeDisabled()
-    })
 
     isPendingRef.current = true
     variablesRef.current = { ai_language: 'French' }
@@ -130,19 +122,39 @@ describe('AiLanguageField (#505)', () => {
       )
     )
 
-    expect(screen.getByRole('button', { name: /save/i })).toBeDisabled()
     expect(document.querySelector('.animate-spin')).not.toBeNull()
   })
 
-  it('patches ai_language on save', async () => {
+  it('patches ai_language when Enter is pressed', async () => {
     const user = userEvent.setup()
     renderField()
 
     const input = screen.getByPlaceholderText('Default')
     await user.clear(input)
-    await user.type(input, '日本語')
-    await user.click(screen.getByRole('button', { name: /save/i }))
+    await user.type(input, '日本語{Enter}')
 
+    expect(mutateMock).toHaveBeenCalledTimes(1)
     expect(mutateMock).toHaveBeenCalledWith({ ai_language: '日本語' })
+  })
+
+  it('saves the typed value when Settings closes without a blur', async () => {
+    const user = userEvent.setup()
+    const { unmount } = renderField()
+
+    await user.type(screen.getByPlaceholderText('Default'), 'French')
+    unmount()
+
+    expect(mutateMock).toHaveBeenCalledTimes(1)
+    expect(mutateMock).toHaveBeenCalledWith({ ai_language: 'French' })
+  })
+
+  it('does not patch when the field loses focus unchanged', async () => {
+    const user = userEvent.setup()
+    renderField()
+
+    await user.click(screen.getByPlaceholderText('Default'))
+    await user.tab()
+
+    expect(mutateMock).not.toHaveBeenCalled()
   })
 })

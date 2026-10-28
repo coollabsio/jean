@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { invoke, listen } from '@/lib/transport'
 import { useChatStore } from '@/store/chat-store'
+import { ApprovalCard } from './ApprovalCard'
 
 interface AcpPermissionRequest {
   request_id: string
@@ -11,6 +12,13 @@ interface AcpPermissionRequest {
   title: string
   kind: string
   options: { optionId: string; name: string; kind: string }[]
+}
+
+// The backend only forwards these option kinds (see acp_permissions.rs).
+const ACP_OPTION_LABELS: Record<string, string> = {
+  allow_once: 'Approve',
+  reject_once: 'Deny',
+  reject_always: 'Always deny',
 }
 
 /** Shared approval card for ACP agents; commands also work through Web Access. */
@@ -93,26 +101,23 @@ export function AcpPermissionsRequest({ sessionId }: { sessionId: string }) {
     )
   if (!request) return null
   return (
-    <div className="mx-4 my-2 rounded-md border border-yellow-500/30 bg-yellow-500/5 p-3">
-      <p className="text-sm font-medium">
-        {request.backend === 'grok' ? 'Grok' : 'Kimi'} needs permission
-      </p>
-      <p className="mt-1 break-words whitespace-pre-wrap text-sm text-muted-foreground">
-        {request.title}
-      </p>
-      <div className="mt-3 flex flex-wrap gap-2">
-        {request.options.map(option => (
-          <Button
-            key={option.optionId}
-            size="sm"
-            variant={option.kind === 'allow_once' ? 'default' : 'outline'}
-            disabled={response.isPending}
-            onClick={() => response.mutate(option.optionId)}
-          >
-            {option.kind === 'allow_once' ? 'Allow once' : 'Reject'}
-          </Button>
-        ))}
-      </div>
-    </div>
+    <ApprovalCard
+      className="mx-4 my-2"
+      title={`${request.backend === 'grok' ? 'Grok' : 'Kimi'} needs permission`}
+      description={
+        <span className="break-words whitespace-pre-wrap">{request.title}</span>
+      }
+      actions={request.options.map(option => (
+        <Button
+          key={option.optionId}
+          size="sm"
+          variant={option.kind === 'allow_once' ? 'default' : 'secondary'}
+          disabled={response.isPending}
+          onClick={() => response.mutate(option.optionId)}
+        >
+          {ACP_OPTION_LABELS[option.kind] ?? option.name}
+        </Button>
+      ))}
+    />
   )
 }

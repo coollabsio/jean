@@ -103,10 +103,10 @@ export const ChatToolbar = memo(function ChatToolbar({
   providerLocked,
   baseBranch,
   baseRemote,
+  isModal = false,
   prUrl,
   prNumber,
   displayStatus,
-  checkStatus,
   mergeableStatus,
   activeWorktreePath,
   worktreeId,
@@ -265,7 +265,7 @@ export const ChatToolbar = memo(function ChatToolbar({
       <>
         <BackendLabel
           backend={selectedBackend}
-          badgeClassName="text-[9px] leading-3"
+          badgeClassName="text-2xs leading-3"
         />
         <span className="truncate">· {selectedModelLabel}</span>
         {getModelFastInfo(selectedBackend, selectedModel).isFast && (
@@ -640,10 +640,9 @@ export const ChatToolbar = memo(function ChatToolbar({
               customCodexProviders={customCodexProviders}
               isCodex={isCodex}
               modelReasoning={selectedModelReasoning}
-              prUrl={prUrl}
+              prUrl={isModal ? undefined : prUrl}
               prNumber={prNumber}
               displayStatus={displayStatus}
-              checkStatus={checkStatus}
               mergeableStatus={mergeableStatus}
               activeWorktreePath={activeWorktreePath}
               availableMcpServers={availableMcpServers}

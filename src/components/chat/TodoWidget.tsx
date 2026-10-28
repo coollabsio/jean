@@ -3,13 +3,13 @@ import {
   CheckCircle2,
   Circle,
   Loader2,
-  ChevronRight,
   ListTodo,
   XCircle,
   X,
 } from '@/components/icons/reicon'
 import type { Todo } from '@/types/chat'
 import { cn } from '@/lib/utils'
+import { Badge } from '@/components/ui/badge'
 import {
   Collapsible,
   CollapsibleContent,
@@ -47,51 +47,34 @@ export function TodoWidget({
 
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen} className={className}>
-      <div
-        className={cn(
-          'mt-1 rounded-md border border-border bg-sidebar',
-          isOpen && 'bg-sidebar'
-        )}
-      >
-        <div className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground">
-          <CollapsibleTrigger className="flex flex-1 items-center gap-2 hover:bg-muted/50 select-none -ml-3 -my-2 pl-3 py-2 rounded-l-md">
-            <ChevronRight
-              className={cn(
-                'h-3.5 w-3.5 shrink-0 transition-transform duration-200',
-                isOpen && 'rotate-90'
-              )}
-            />
+      <div className="overflow-hidden rounded-lg border border-border bg-card">
+        <div className="flex items-center text-xs text-muted-foreground">
+          <CollapsibleTrigger className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-3 py-1.5 text-left select-none hover:bg-muted/50">
             {!isOpen &&
             !allCompleted &&
             (isStreaming || todos.some(t => t.status === 'in_progress')) ? (
-              <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
+              <Loader2 className="size-4 shrink-0 animate-spin text-primary" />
             ) : (
-              <ListTodo className="h-4 w-4 shrink-0" />
+              <ListTodo className="size-4 shrink-0" />
             )}
             <span className="font-medium">Tasks</span>
-            <span
-              className={cn(
-                'rounded bg-muted/50 px-1.5 py-0.5 text-xs',
-                allCompleted && 'bg-success/20 text-success'
-              )}
-            >
+            <Badge variant={allCompleted ? 'success' : 'subtle'}>
               {completedCount}/{totalCount}
-            </span>
+            </Badge>
           </CollapsibleTrigger>
-          {/* Close button */}
           {onClose && (
             <button
               type="button"
               onClick={onClose}
-              className="p-0.5 rounded hover:bg-muted transition-colors"
+              className="mx-2 rounded p-0.5 transition-colors hover:bg-muted"
               aria-label="Dismiss tasks"
             >
-              <X className="h-3.5 w-3.5" />
+              <X className="size-3.5" />
             </button>
           )}
         </div>
         <CollapsibleContent>
-          <div className="max-h-[50vh] overflow-y-auto border-t border-border/50 px-3 py-2">
+          <div className="max-h-[50vh] overflow-y-auto px-3 pb-2">
             <ul className="space-y-1">
               {todos.map(todo => (
                 <TodoItem key={todo.content} todo={todo} />

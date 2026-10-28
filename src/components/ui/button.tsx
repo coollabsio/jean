@@ -4,8 +4,8 @@ import { cva, type VariantProps } from 'class-variance-authority'
 
 import { cn } from '@/lib/utils'
 
-// 3D raised button: a solid bottom edge (--btn-edge) that lifts on hover and
-// presses flat on click. Uses Tailwind shadow utilities so focus rings still compose.
+// Opt-in 3D raised style: a solid bottom edge (--btn-edge) that lifts on hover and
+// presses flat on click. Button variants are flat; apply this only to a primary call to action.
 const raised =
   'transition-[color,background-color,border-color,box-shadow,translate] shadow-[0_2px_0_var(--btn-edge)] hover:-translate-y-px hover:shadow-[0_3px_0_var(--btn-edge)] active:translate-y-0.5 active:shadow-none duration-[80ms] ease-out'
 
@@ -23,25 +23,14 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: cn(
-          raised,
-          edgePrimary,
-          'border-primary bg-primary/80 text-primary-foreground hover:bg-primary/90'
-        ),
-        destructive: cn(
-          raised,
-          'bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/60 [--btn-edge:color-mix(in_oklab,var(--destructive)_55%,black)]'
-        ),
-        outline: cn(
-          raised,
-          edgeNeutral,
-          'border bg-background text-foreground hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50'
-        ),
-        secondary: cn(
-          raised,
-          edgeNeutral,
-          'bg-secondary text-secondary-foreground hover:bg-secondary/80'
-        ),
+        default:
+          'border-primary bg-primary/80 text-primary-foreground hover:bg-primary/90',
+        destructive:
+          'bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/60',
+        outline:
+          'border bg-background text-foreground hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50',
+        secondary:
+          'bg-secondary text-secondary-foreground hover:bg-secondary/80',
         ghost:
           'hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50',
         link: 'text-primary underline-offset-4 hover:underline',
@@ -51,7 +40,8 @@ const buttonVariants = cva(
         sm: 'h-8 rounded-md gap-1.5 px-3 has-[>svg]:px-2.5',
         lg: 'h-10 rounded-md px-6 has-[>svg]:px-4',
         icon: 'size-9',
-        'icon-sm': 'size-8',
+        'icon-xs': 'size-6 rounded-sm',
+        'icon-sm': 'size-7',
         'icon-lg': 'size-10',
       },
     },

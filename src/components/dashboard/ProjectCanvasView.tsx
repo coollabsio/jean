@@ -123,11 +123,7 @@ import { useTerminalStore } from '@/store/terminal-store'
 import { isBaseSession, type Project, type Worktree } from '@/types/projects'
 import { getEditorLabel, getTerminalLabel } from '@/types/preferences'
 import type { LabelData, Session, WorktreeSessions } from '@/types/chat'
-import { NewIssuesBadge } from '@/components/shared/NewIssuesBadge'
-import { OpenPRsBadge } from '@/components/shared/OpenPRsBadge'
-import { FailedRunsBadge } from '@/components/shared/FailedRunsBadge'
 import { countUnreadFailedWorkflowRuns } from '@/components/shared/workflow-run-utils'
-import { SecurityAlertsBadge } from '@/components/shared/SecurityAlertsBadge'
 import { SessionChatModal } from '@/components/chat/SessionChatModal'
 import {
   getStackedBaseBranch,
@@ -157,8 +153,7 @@ import {
   isActionableWaitingStatus,
 } from '@/components/chat/session-card-utils'
 import { WorktreeSetupCard } from '@/components/chat/WorktreeSetupCard'
-import { OpenInButton } from '@/components/open-in/OpenInButton'
-import { ScriptsButton } from '@/components/open-in/ScriptsButton'
+import { ScriptsSubmenu } from '@/components/open-in/ScriptsButton'
 import { useCanvasStoreState } from '@/components/chat/hooks/useCanvasStoreState'
 import {
   type WorktreeSortMode,
@@ -683,6 +678,13 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
     advisoryGhsaId: worktree.advisory_ghsa_id,
   })
   const worktreeLabels = getWorktreeLabels(worktree)
+  const waitingCount = sessionMetrics?.waitingCount ?? 0
+  // Secondary details show on hover, focus or keyboard selection. Touch
+  // devices have no hover, so they keep the details visible.
+  const revealClass = cn(
+    'transition-opacity pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100 pointer-fine:group-focus-within:opacity-100',
+    isSelected && 'pointer-fine:opacity-100'
+  )
 
   const row = (
     <div
@@ -723,8 +725,11 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
       <div className={cn(showDetails ? 'flex flex-col gap-1.5' : 'contents')}>
         <div className="flex min-w-0 flex-wrap items-center gap-2 sm:flex-nowrap">
           {shortcutNumber !== undefined && (
-            <kbd className="hidden shrink-0 h-4 min-w-4 items-center justify-center rounded border border-border/50 bg-muted/50 px-0.5 font-mono text-muted-foreground sm:inline-flex">
-              <span className="text-[9px]">⌘{shortcutNumber}</span>
+            <kbd
+              data-mod-hint
+              className="hidden shrink-0 h-4 min-w-4 items-center justify-center rounded border border-border/50 bg-muted/50 px-0.5 font-mono text-2xs text-muted-foreground sm:inline-flex"
+            >
+              {formatShortcutDisplay(`mod+${shortcutNumber}`)}
             </kbd>
           )}
           <span className="flex min-w-0 flex-1 flex-col gap-1 font-medium sm:flex-row sm:items-center sm:gap-1.5">
@@ -732,8 +737,16 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
               <span className="min-w-0 flex-1 truncate">
                 {isBase ? 'Base Session' : worktree.name}
               </span>
+              {waitingCount > 0 && (
+                <span
+                  role="img"
+                  aria-label={`${waitingCount} waiting`}
+                  title={`${waitingCount} waiting`}
+                  className="size-1.5 shrink-0 rounded-full bg-warning"
+                />
+              )}
               {showBranchBadge && (
-                <span className="hidden items-center gap-1 rounded border border-border/50 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground sm:inline-flex">
+                <span className="hidden items-center gap-1 rounded border border-border/50 px-1.5 py-0.5 text-2xs font-normal text-muted-foreground sm:inline-flex">
                   <GitBranch className="h-2.5 w-2.5" />
                   <span className="max-w-40 truncate">{displayBranch}</span>
                   {stackedBaseBranch && (
@@ -791,7 +804,7 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
               </span>
             </span>
             {showBranchBadge && (
-              <span className="inline-flex max-w-full items-center gap-1 self-start rounded border border-border/50 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground sm:hidden">
+              <span className="inline-flex max-w-full items-center gap-1 self-start rounded border border-border/50 px-1.5 py-0.5 text-2xs font-normal text-muted-foreground sm:hidden">
                 <GitBranch className="h-2.5 w-2.5 shrink-0" />
                 <span className="max-w-full truncate">{displayBranch}</span>
                 {stackedBaseBranch && (
@@ -836,11 +849,13 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
             )}
           </span>
           {worktreeLabels.length > 0 && (
-            <span className={getWorktreeLabelContainerClassName()}>
+            <span
+              className={cn(getWorktreeLabelContainerClassName(), revealClass)}
+            >
               {worktreeLabels.slice(0, 3).map(label => (
                 <span
                   key={label.name}
-                  className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium"
+                  className="inline-flex items-center rounded-full px-2 py-0.5 text-2xs font-medium"
                   style={{
                     backgroundColor: label.color,
                     color: getLabelTextColor(label.color),
@@ -850,7 +865,7 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
                 </span>
               ))}
               {worktreeLabels.length > 3 && (
-                <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-2xs font-medium text-muted-foreground">
                   +{worktreeLabels.length - 3}
                 </span>
               )}
@@ -858,7 +873,12 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
           )}
         </div>
         {showDetails && sessionMetrics && (
-          <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+          <div
+            className={cn(
+              'flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground',
+              revealClass
+            )}
+          >
             {sessionMetrics.waitingCount > 0 && (
               <span className="rounded bg-warning px-2 py-0.5 text-warning-foreground">
                 {sessionMetrics.waitingCount} waiting
@@ -887,7 +907,7 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
             {uniqueSessionLabels.map(label => (
               <span
                 key={label.name}
-                className="rounded px-2 py-0.5 text-[10px] font-medium"
+                className="rounded px-2 py-0.5 text-2xs font-medium"
                 style={{
                   backgroundColor: label.color,
                   color: getLabelTextColor(label.color),
@@ -907,7 +927,7 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
               />
             )}
             {onRowClick && (
-              <span className="ml-auto hidden text-[11px] opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 sm:inline-flex">
+              <span className="ml-auto hidden text-2xs opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 sm:inline-flex">
                 Press Enter to open
               </span>
             )}
@@ -993,67 +1013,53 @@ export function ProjectCanvasView({
     ownerId: projectId ?? undefined,
   })
 
-  // Mobile-only: GitHub status counts for project dropdown menu items.
-  // Trigger gh auth query directly so it works on web/mobile access (App.tsx
-  // only runs it in native mode).
-  useGhCliAuth({ enabled: isMobile })
-  const mobileGitHubEnabled = isMobile
-  const BADGE_STALE_TIME = 5 * 60 * 1000
-  const { data: mobileIssueResult } = useGitHubIssues(
-    project?.path ?? null,
-    'open',
-    {
-      enabled: mobileGitHubEnabled,
-      staleTime: BADGE_STALE_TIME,
-      ownerId: projectId ?? undefined,
-    }
-  )
-  const { data: mobileOpenPRs } = useGitHubPRs(project?.path ?? null, 'open', {
-    enabled: mobileGitHubEnabled,
-    staleTime: BADGE_STALE_TIME,
+  // Forge counts for the project actions menu. Trigger the gh auth query
+  // directly so it works on web access (App.tsx only runs it in native mode).
+  const { data: ghAuth } = useGhCliAuth({ enabled: !isGitlab })
+  const githubCountsEnabled = !isGitlab && !!ghAuth?.authenticated
+  const FORGE_COUNT_STALE_TIME = 5 * 60 * 1000
+  const { data: issueResult } = useGitHubIssues(project?.path ?? null, 'open', {
+    enabled: isGitlab || githubCountsEnabled,
+    staleTime: FORGE_COUNT_STALE_TIME,
     ownerId: projectId ?? undefined,
   })
-  const { data: mobileAlerts } = useDependabotAlerts(
-    project?.path ?? null,
-    'open',
-    {
-      enabled: mobileGitHubEnabled && !isGitlab,
-      staleTime: BADGE_STALE_TIME,
-    }
-  )
-  const { data: mobileAdvisories } = useRepositoryAdvisories(
+  const { data: alerts } = useDependabotAlerts(project?.path ?? null, 'open', {
+    enabled: githubCountsEnabled,
+    staleTime: FORGE_COUNT_STALE_TIME,
+  })
+  const { data: advisories } = useRepositoryAdvisories(
     project?.path ?? null,
     undefined,
     {
-      enabled: mobileGitHubEnabled && !isGitlab,
-      staleTime: BADGE_STALE_TIME,
+      enabled: githubCountsEnabled,
+      staleTime: FORGE_COUNT_STALE_TIME,
     }
   )
-  const { data: mobileWorkflowRuns } = useWorkflowRuns(
+  const { data: workflowRuns } = useWorkflowRuns(
     project?.path ?? null,
     undefined,
     {
-      enabled: mobileGitHubEnabled && !isGitlab,
-      staleTime: BADGE_STALE_TIME,
+      enabled: githubCountsEnabled,
+      staleTime: FORGE_COUNT_STALE_TIME,
     }
   )
-  const mobileIssueCount = mobileIssueResult?.totalCount ?? 0
-  const mobilePRCount = mobileOpenPRs?.length ?? 0
-  const mobileSecurityCount =
-    (mobileAlerts?.length ?? 0) +
-    (mobileAdvisories?.filter(a => a.state === 'draft' || a.state === 'triage')
+  const issueCount = issueResult?.totalCount ?? 0
+  const openPRCount = openPRs?.length ?? 0
+  const securityCount =
+    (alerts?.length ?? 0) +
+    (advisories?.filter(a => a.state === 'draft' || a.state === 'triage')
       .length ?? 0)
-  const mobileWorkflowRunCount = mobileWorkflowRuns?.runs?.length ?? 0
+  const workflowRunCount = workflowRuns?.runs?.length ?? 0
   const seenFailedWorkflowRunIds = useUIStore(
     state => state.seenFailedWorkflowRunIds
   )
-  const mobileFailedWorkflowCount = useMemo(
+  const failedWorkflowCount = useMemo(
     () =>
       countUnreadFailedWorkflowRuns(
-        mobileWorkflowRuns?.runs ?? [],
+        workflowRuns?.runs ?? [],
         seenFailedWorkflowRunIds
       ),
-    [mobileWorkflowRuns?.runs, seenFailedWorkflowRunIds]
+    [workflowRuns?.runs, seenFailedWorkflowRunIds]
   )
 
   // Load worktrees and session lists only for the selected project canvas.
@@ -3083,30 +3089,21 @@ export function ProjectCanvasView({
                 <h2 className="truncate text-lg font-semibold">
                   {project.name}
                 </h2>
-                <div className="hidden md:flex items-center gap-2">
-                  <NewIssuesBadge
-                    projectPath={project.path}
-                    projectId={projectId}
-                  />
-                  <OpenPRsBadge
-                    projectPath={project.path}
-                    projectId={projectId}
-                  />
-                  <SecurityAlertsBadge
-                    projectPath={project.path}
-                    projectId={projectId}
-                  />
-                  <FailedRunsBadge projectPath={project.path} />
-                </div>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
                       variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-muted-foreground"
+                      size="icon-sm"
+                      className="relative text-muted-foreground"
                       aria-label="Project actions"
                     >
                       <MoreHorizontal className="h-4 w-4" />
+                      {failedWorkflowCount > 0 && (
+                        <span
+                          aria-hidden
+                          className="absolute top-1 right-1 size-1.5 rounded-full bg-destructive"
+                        />
+                      )}
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start" className="w-64">
@@ -3147,82 +3144,74 @@ export function ProjectCanvasView({
                       Project Settings
                     </DropdownMenuItem>
 
-                    {mobileGitHubEnabled && (
-                      <>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          onSelect={() => {
-                            useProjectsStore.getState().selectProject(projectId)
-                            const {
-                              setNewWorktreeModalDefaultTab,
-                              setNewWorktreeModalOpen,
-                            } = useUIStore.getState()
-                            setNewWorktreeModalDefaultTab('issues')
-                            setNewWorktreeModalOpen(true)
-                          }}
-                        >
-                          <CircleDot className="h-4 w-4 text-success" />
-                          {mobileIssueCount > 0
-                            ? `${mobileIssueCount} Issues`
-                            : 'Issues'}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onSelect={() => {
-                            useProjectsStore.getState().selectProject(projectId)
-                            const {
-                              setNewWorktreeModalDefaultTab,
-                              setNewWorktreeModalOpen,
-                            } = useUIStore.getState()
-                            setNewWorktreeModalDefaultTab('prs')
-                            setNewWorktreeModalOpen(true)
-                          }}
-                        >
-                          <GitPullRequestArrow className="h-4 w-4 text-info" />
-                          {mobilePRCount > 0
-                            ? `${mobilePRCount} ${forgeLabels.pullRequestsShort}`
-                            : forgeLabels.pullRequestsShort}
-                        </DropdownMenuItem>
-                        {!isGitlab && (
-                          <DropdownMenuItem
-                            onSelect={() =>
-                              useUIStore
-                                .getState()
-                                .setWorkflowRunsModalOpen(true, project.path)
-                            }
-                          >
-                            {mobileFailedWorkflowCount > 0 ? (
-                              <AlertCircle className="h-4 w-4 text-destructive" />
-                            ) : (
-                              <Activity className="h-4 w-4" />
-                            )}
-                            {mobileFailedWorkflowCount > 0
-                              ? `${mobileFailedWorkflowCount} Failed Workflows`
-                              : mobileWorkflowRunCount > 0
-                                ? `${mobileWorkflowRunCount} Workflows`
-                                : 'Workflows'}
-                          </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        useProjectsStore.getState().selectProject(projectId)
+                        const {
+                          setNewWorktreeModalDefaultTab,
+                          setNewWorktreeModalOpen,
+                        } = useUIStore.getState()
+                        setNewWorktreeModalDefaultTab('issues')
+                        setNewWorktreeModalOpen(true)
+                      }}
+                    >
+                      <CircleDot className="h-4 w-4 text-success" />
+                      {issueCount > 0 ? `${issueCount} Issues` : 'Issues'}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        useProjectsStore.getState().selectProject(projectId)
+                        const {
+                          setNewWorktreeModalDefaultTab,
+                          setNewWorktreeModalOpen,
+                        } = useUIStore.getState()
+                        setNewWorktreeModalDefaultTab('prs')
+                        setNewWorktreeModalOpen(true)
+                      }}
+                    >
+                      <GitPullRequestArrow className="h-4 w-4 text-info" />
+                      {openPRCount > 0
+                        ? `${openPRCount} ${forgeLabels.pullRequestsShort}`
+                        : forgeLabels.pullRequestsShort}
+                    </DropdownMenuItem>
+                    {!isGitlab && (
+                      <DropdownMenuItem
+                        onSelect={() =>
+                          useUIStore
+                            .getState()
+                            .setWorkflowRunsModalOpen(true, project.path)
+                        }
+                      >
+                        {failedWorkflowCount > 0 ? (
+                          <AlertCircle className="h-4 w-4 text-destructive" />
+                        ) : (
+                          <Activity className="h-4 w-4" />
                         )}
-                        {!isGitlab && (
-                          <DropdownMenuItem
-                            onSelect={() => {
-                              useProjectsStore
-                                .getState()
-                                .selectProject(projectId)
-                              const {
-                                setNewWorktreeModalDefaultTab,
-                                setNewWorktreeModalOpen,
-                              } = useUIStore.getState()
-                              setNewWorktreeModalDefaultTab('security')
-                              setNewWorktreeModalOpen(true)
-                            }}
-                          >
-                            <ShieldAlert className="h-4 w-4 text-warning" />
-                            {mobileSecurityCount > 0
-                              ? `${mobileSecurityCount} Security`
-                              : 'Security'}
-                          </DropdownMenuItem>
-                        )}
-                      </>
+                        {failedWorkflowCount > 0
+                          ? `${failedWorkflowCount} Failed Workflows`
+                          : workflowRunCount > 0
+                            ? `${workflowRunCount} Workflows`
+                            : 'Workflows'}
+                      </DropdownMenuItem>
+                    )}
+                    {!isGitlab && (
+                      <DropdownMenuItem
+                        onSelect={() => {
+                          useProjectsStore.getState().selectProject(projectId)
+                          const {
+                            setNewWorktreeModalDefaultTab,
+                            setNewWorktreeModalOpen,
+                          } = useUIStore.getState()
+                          setNewWorktreeModalDefaultTab('security')
+                          setNewWorktreeModalOpen(true)
+                        }}
+                      >
+                        <ShieldAlert className="h-4 w-4 text-warning" />
+                        {securityCount > 0
+                          ? `${securityCount} Security`
+                          : 'Security'}
+                      </DropdownMenuItem>
                     )}
 
                     {(canOpenEditor ||
@@ -3291,6 +3280,14 @@ export function ProjectCanvasView({
                         <DropdownMenuSeparator />
                       )}
 
+                    {!isMobile && (
+                      <ScriptsSubmenu
+                        projectId={project.id}
+                        worktreePath={project.path}
+                        onRun={handlePackageScript}
+                      />
+                    )}
+
                     <DropdownMenuItem
                       onSelect={() => openOnGitHub.mutate(projectId)}
                     >
@@ -3320,8 +3317,8 @@ export function ProjectCanvasView({
                   <DropdownMenuTrigger asChild>
                     <Button
                       variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-muted-foreground"
+                      size="icon-sm"
+                      className="text-muted-foreground"
                       aria-label="Sort worktrees"
                     >
                       <ArrowUpDown className="h-4 w-4" />
@@ -3359,8 +3356,8 @@ export function ProjectCanvasView({
                   !isMobileSearchOpen && (
                     <Button
                       variant="ghost"
-                      size="icon"
-                      className="relative h-7 w-7 text-muted-foreground"
+                      size="icon-sm"
+                      className="relative text-muted-foreground"
                       onClick={() => setIsMobileSearchOpen(true)}
                       aria-label="Open search"
                     >
@@ -3451,21 +3448,7 @@ export function ProjectCanvasView({
                 )}
               </>
             )}
-            {/* Grid column 3: open-in/scripts on desktop, new worktree everywhere */}
             <div className="flex items-center gap-2 shrink-0 justify-end col-start-3">
-              {!isMobile && (
-                <>
-                  <OpenInButton
-                    worktreePath={project.path}
-                    serverId={project.serverId}
-                  />
-                  <ScriptsButton
-                    projectId={project.id}
-                    worktreePath={project.path}
-                    onRun={handlePackageScript}
-                  />
-                </>
-              )}
               <Button
                 type="button"
                 variant="outline"
@@ -3474,9 +3457,10 @@ export function ProjectCanvasView({
                   useProjectsStore.getState().selectProject(projectId)
                   useUIStore.getState().setNewWorktreeModalOpen(true)
                 }}
+                aria-label="New worktree"
               >
                 <Plus className="h-3.5 w-3.5" />
-                New worktree
+                <span className="hidden sm:inline">New worktree</span>
               </Button>
             </div>
           </div>
@@ -3522,7 +3506,7 @@ export function ProjectCanvasView({
                         {badge && (
                           <span
                             className={cn(
-                              'rounded border px-1 py-0 text-[9px] uppercase leading-4 tracking-wide',
+                              'rounded border px-1 py-0 text-2xs uppercase leading-4 tracking-wide',
                               isActive
                                 ? 'border-primary/30 text-primary'
                                 : 'border-muted-foreground/20 text-muted-foreground'
@@ -3533,7 +3517,7 @@ export function ProjectCanvasView({
                         )}
                         <span
                           className={cn(
-                            'rounded-md px-1.5 py-0.5 text-[10px] leading-none',
+                            'rounded-md px-1.5 py-0.5 text-2xs leading-none',
                             isActive
                               ? 'bg-primary/15 text-primary'
                               : 'bg-muted text-muted-foreground'
@@ -3590,7 +3574,7 @@ export function ProjectCanvasView({
                       <span>{tab.label}</span>
                       <span
                         className={cn(
-                          'rounded-md px-1.5 py-0.5 text-[10px] leading-none',
+                          'rounded-md px-1.5 py-0.5 text-2xs leading-none',
                           isActive
                             ? 'bg-primary/15 text-primary'
                             : 'bg-muted text-muted-foreground'
@@ -3887,7 +3871,10 @@ function EmptyDashboardTabs({
         >
           <Plus className="h-4 w-4" />
           Start Building
-          <kbd className="pointer-events-none ml-1 inline-flex h-5 items-center rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground">
+          <kbd
+            data-mod-hint
+            className="pointer-events-none ml-1 inline-flex h-5 items-center rounded border bg-muted px-1.5 font-mono text-2xs font-medium text-muted-foreground"
+          >
             {shortcut}
           </kbd>
         </Button>

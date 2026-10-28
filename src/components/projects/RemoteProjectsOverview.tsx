@@ -68,11 +68,11 @@ export function RemoteProjectsOverview() {
             <span className="min-w-0 flex-1 truncate text-sm">
               {project.name}
             </span>
-            <span className="shrink-0 text-[10px] text-muted-foreground">
+            <span className="shrink-0 text-2xs text-muted-foreground">
               {project.serverName}
             </span>
             {project.offline && (
-              <span className="flex shrink-0 items-center gap-1 text-[10px] text-warning">
+              <span className="flex shrink-0 items-center gap-1 text-2xs text-warning">
                 <WifiOff className="size-3" />
                 Offline
               </span>

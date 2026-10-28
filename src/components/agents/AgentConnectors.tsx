@@ -42,9 +42,9 @@ import {
   AgentNotice,
   AgentPanel,
   AgentSection,
-  HelpTip,
   SaveFooter,
 } from './agent-ui'
+import { HelpTip } from '@/components/ui/help-tip'
 
 function isCliBackend(value: string): value is CliBackend {
   return backendOptions.some(option => option.value === value)

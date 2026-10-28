@@ -420,12 +420,7 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
         onCopyText={onCopySteeredText}
       />
       <Collapsible open={isOpen} onOpenChange={setIsOpen} className="min-w-0">
-        <div
-          className={
-            'rounded-md border border-border/50 bg-muted/30 min-w-0' +
-            (isOpen ? ' bg-muted/50' : '')
-          }
-        >
+        <div className="min-w-0">
           <CollapsibleTrigger className={TOOL_CALL_ROW_CLASS}>
             {label === 'Thinking…' ? (
               <Brain className="h-3.5 w-3.5 shrink-0 opacity-70" />
@@ -454,7 +449,7 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
             </span>
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <div className="border-t border-border/50 p-3">
+            <div className="p-3">
               <StreamingMessage
                 {...props}
                 contentBlocks={activityBlocks}

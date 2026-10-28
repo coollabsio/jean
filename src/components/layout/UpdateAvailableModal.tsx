@@ -1,8 +1,8 @@
-import { ArrowUpCircle } from '@/components/icons/reicon'
 import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -60,22 +60,21 @@ export function UpdateAvailableModal() {
         if (!open) handleUpdateLater()
       }}
     >
-      <DialogContent className="max-w-sm">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <ArrowUpCircle className="size-5 text-primary" />
+          <DialogTitle>
             {isReady ? 'Update Ready' : 'Update Available'}
           </DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
-        <div className="flex justify-end gap-2 pt-2">
+        <DialogFooter>
           <Button variant="outline" onClick={handleUpdateLater}>
             Later
           </Button>
           <Button onClick={handleUpdate} disabled={isInstalling && !isReady}>
             {primaryLabel}
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   )

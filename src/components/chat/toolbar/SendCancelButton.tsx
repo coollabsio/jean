@@ -51,7 +51,10 @@ export function SendCancelButton({
           >
             <span>{queuedMessageCount ? 'Skip to Next' : 'Cancel'}</span>
             {!isMobile && (
-              <Kbd className="ml-0.5 h-4 text-[10px] bg-primary-foreground/20 text-primary-foreground">
+              <Kbd
+                modHint
+                className="ml-0.5 h-4 text-2xs bg-primary-foreground/20 text-primary-foreground"
+              >
                 {isClientMacOS ? `${getModifierSymbol()}⌥⌫` : 'Ctrl+Alt+⌫'}
               </Kbd>
             )}
@@ -95,7 +98,9 @@ export function SendCancelButton({
               >
                 <span>{actionLabel}</span>
                 {!isMobile && (
-                  <Kbd className="h-4 text-[10px]">{actionShortcut}</Kbd>
+                  <Kbd modHint={steerWithModifier} className="h-4 text-2xs">
+                    {actionShortcut}
+                  </Kbd>
                 )}
               </button>
             </TooltipTrigger>

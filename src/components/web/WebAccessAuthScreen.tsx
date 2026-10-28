@@ -28,7 +28,7 @@ export function WebAccessAuthScreen({
 
   const host = webAccessServerLabel()
   const fieldError = emptyError
-    ? "Enter the access token from Jean's Web Access settings."
+    ? 'Enter the access token.'
     : reason === 'rejected' && !edited
       ? authError
       : null

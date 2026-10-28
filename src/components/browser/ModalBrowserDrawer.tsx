@@ -1,24 +1,11 @@
 import { memo, useCallback, useRef } from 'react'
-import {
-  Globe,
-  PanelBottom,
-  PanelLeft,
-  PanelRight,
-  PanelRightDashed,
-} from '@/components/icons/reicon'
-import { Button } from '@/components/ui/button'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
-import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
-import { ModalCloseButton } from '@/components/ui/modal-close-button'
+import { Globe } from '@/components/icons/reicon'
+import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
 import { isNativeApp } from '@/lib/environment'
 import { useBrowserStore } from '@/store/browser-store'
 import type { ModalBrowserDockMode } from '@/types/browser'
-import { MODAL_TERMINAL_PRIMARY_ROW_CLASS } from '@/components/chat/modal-terminal-layout'
+import { DrawerHeader } from '@/components/chat/DrawerHeader'
 import { BrowserView } from './BrowserView'
 
 const WIDTH_MIN = 320
@@ -109,99 +96,6 @@ export const ModalBrowserDrawer = memo(function ModalBrowserDrawer({
   }
   if (!isOpen) return null
 
-  const header = (
-    <div className="shrink-0 border-b">
-      <div
-        className={cn(
-          'flex items-center justify-between gap-2 px-4 py-2',
-          MODAL_TERMINAL_PRIMARY_ROW_CLASS
-        )}
-      >
-        <div className="flex items-center gap-2">
-          <Globe className="h-4 w-4" />
-          {isFloating ? (
-            <SheetTitle className="text-sm">Browser</SheetTitle>
-          ) : (
-            <div className="text-sm font-semibold">Browser</div>
-          )}
-        </div>
-        <div className="flex items-center gap-1">
-          <div className="flex items-center rounded-md border bg-muted/30 p-0.5">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={cn(
-                    'h-7 w-7 p-0',
-                    dockMode === 'floating' && 'bg-muted'
-                  )}
-                  onClick={() => handleSetDockMode('floating')}
-                  aria-label="Float browser"
-                >
-                  <PanelRightDashed className="h-3.5 w-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Float browser</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={cn(
-                    'h-7 w-7 p-0',
-                    dockMode === 'left' && 'bg-muted'
-                  )}
-                  onClick={() => handleSetDockMode('left')}
-                  aria-label="Dock browser left"
-                >
-                  <PanelLeft className="h-3.5 w-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Dock browser left</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={cn(
-                    'h-7 w-7 p-0',
-                    dockMode === 'right' && 'bg-muted'
-                  )}
-                  onClick={() => handleSetDockMode('right')}
-                  aria-label="Dock browser right"
-                >
-                  <PanelRight className="h-3.5 w-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Dock browser right</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={cn(
-                    'h-7 w-7 p-0',
-                    dockMode === 'bottom' && 'bg-muted'
-                  )}
-                  onClick={() => handleSetDockMode('bottom')}
-                  aria-label="Dock browser bottom"
-                >
-                  <PanelBottom className="h-3.5 w-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Dock browser bottom</TooltipContent>
-            </Tooltip>
-          </div>
-          <ModalCloseButton size="sm" onClick={handleClose} />
-        </div>
-      </div>
-    </div>
-  )
-
   const content = (
     <div className="relative flex h-full min-h-0 min-w-0 flex-col bg-background">
       <div
@@ -211,7 +105,14 @@ export const ModalBrowserDrawer = memo(function ModalBrowserDrawer({
         className={resizeHandleClass}
         onMouseDown={handleResizeStart}
       />
-      {header}
+      <DrawerHeader
+        title="Browser"
+        icon={Globe}
+        dockMode={dockMode}
+        onDockModeChange={handleSetDockMode}
+        onClose={handleClose}
+        menuContentProps={{ 'data-browser-port-menu': '' }}
+      />
       <div
         className={cn(
           'min-h-0 flex-1 overflow-hidden',

@@ -214,7 +214,7 @@ Contains auto-update logic and Renders `<MainWindow />` wrapped in `<ThemeProvid
 
 ### MainWindow
 
-This is the primary container for the react app. It should render the main app layout components as well as any global "hidden" components like Toasts, Dialogs, command palette etc. By default, it contains four visible components (TitleBar, LeftSideBar, MainWindowContent and RightSideBar) and three invisible ones (PreferencesDialig, CommandPallete, Toaster) as well as hooks for using any stored global UI state. The sidebars and main content components are wrapped in shadcn's ResizablePanel system.
+This is the primary container for the react app. It should render the main app layout components as well as any global "hidden" components like Toasts, Dialogs, command palette etc. By default, it contains three visible components (TitleBar, LeftSideBar and MainWindowContent) and three invisible ones (PreferencesDialig, CommandPallete, Toaster) as well as hooks for using any stored global UI state. The sidebars and main content components are wrapped in shadcn's ResizablePanel system.
 
 ### TitleBar
 
@@ -223,10 +223,6 @@ A unified title bar which spans the entire top of the app and is clickable to dr
 ### LeftSideBar
 
 The left sidebar is a simple wrapper whose only purpose is to constrain any other components it contains, and to allow itself to be resized or hidden.
-
-### RightSideBar
-
-The right sidebar is a simple wrapper whose only purpose is to constrain any other components it contains, and to allow itself to be resized or hidden.
 
 ### MainWindowContent
 

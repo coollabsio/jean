@@ -84,21 +84,6 @@ beforeEach(() => {
 })
 
 describe('NewWorktreeModal investigation selector', () => {
-  it('shows a styled desktop modifier hint in web access', () => {
-    render(<NewWorktreeModal />)
-
-    const hint = screen.getByText(/to open in background/i).parentElement
-    expect(hint).toHaveTextContent('Hold Ctrl to open in background')
-    expect(hint?.querySelector('[data-slot="kbd"]')).toHaveTextContent('Ctrl')
-  })
-
-  it('hides the keyboard-only background hint on mobile', () => {
-    mocks.isMobile = true
-    render(<NewWorktreeModal />)
-
-    expect(screen.queryByText(/to open in background/i)).toBeNull()
-  })
-
   it.each([
     { mode: 'native desktop', native: true, mobile: false },
     { mode: 'web', native: false, mobile: false },

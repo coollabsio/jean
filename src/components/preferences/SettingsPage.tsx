@@ -1,7 +1,5 @@
 import type { ReactNode } from 'react'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
-import { ArrowLeft } from '@/components/icons/reicon'
-import { Button } from '@/components/ui/button'
 import { LinuxWindowControls } from '@/components/titlebar/LinuxWindowControls'
 import { isNativeApp } from '@/lib/environment'
 import { isClientLinux, isClientMacOS } from '@/lib/platform'
@@ -64,18 +62,5 @@ export function SettingsPage({
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>
-  )
-}
-
-export function SettingsBackButton({ onClick }: { onClick: () => void }) {
-  return (
-    <Button
-      variant="ghost"
-      onClick={onClick}
-      className="w-full justify-start gap-2 text-muted-foreground"
-    >
-      <ArrowLeft className="size-4" />
-      Back
-    </Button>
   )
 }

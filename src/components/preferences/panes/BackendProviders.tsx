@@ -22,131 +22,128 @@ import {
   PREDEFINED_PI_PROVIDERS,
 } from '@/types/preferences'
 import { SettingsSection } from '../SettingsSection'
+import { InlineField } from '../InlineField'
 
-export const ProvidersPane: React.FC = () => {
+export const ClaudeProvidersSection: React.FC = () => {
   const { data: preferences } = usePreferences()
   const patchPreferences = usePatchPreferences()
-
   const profiles = preferences?.custom_cli_profiles ?? []
-  const codexProviders = preferences?.custom_codex_providers ?? []
-  const piProviders = preferences?.custom_pi_providers ?? []
-
-  const handleSaveProfiles = (updated: CustomCliProfile[]) => {
-    patchPreferences.mutate({ custom_cli_profiles: updated })
-  }
-
-  const handleSaveCodexProviders = (updated: CodexProviderProfile[]) => {
-    patchPreferences.mutate({ custom_codex_providers: updated })
-  }
-
-  const handleSavePiProviders = (updated: PiProviderProfile[]) => {
-    patchPreferences.mutate({ custom_pi_providers: updated })
-  }
-
   const defaultProvider = preferences?.default_provider ?? null
-  const defaultCodexProvider = preferences?.default_codex_provider ?? null
-
-  const handleDefaultProviderChange = (value: string) => {
-    patchPreferences.mutate({
-      default_provider: value === 'default' ? null : value,
-    })
-  }
-
-  const handleDefaultCodexProviderChange = (value: string) => {
-    patchPreferences.mutate({
-      default_codex_provider: value === 'default' ? null : value,
-    })
-  }
 
   return (
-    <div className="space-y-8">
-      <SettingsSection
-        title="Claude CLI"
-        description="Custom settings profiles for the Claude CLI. Each profile can override the API endpoint, authentication, and model routing via Anthropic-compatible env vars. Stored under ~/.claude/settings.jean.*.json."
-        anchorId="pref-providers-section-claude-cli"
-      >
-        <CliProfilesEditor profiles={profiles} onSave={handleSaveProfiles} />
+    <SettingsSection
+      title="Providers"
+      description="Custom Claude CLI settings profiles (Anthropic-compatible endpoints)."
+      anchorId="pref-providers-section-claude-cli"
+    >
+      <CliProfilesEditor
+        profiles={profiles}
+        onSave={updated =>
+          patchPreferences.mutate({ custom_cli_profiles: updated })
+        }
+      />
 
-        {profiles.length > 0 && (
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-sm font-medium">Default Provider</p>
-              <p className="text-xs text-muted-foreground">
-                Provider used for new Claude sessions
-              </p>
-            </div>
-            <Select
-              value={defaultProvider ?? 'default'}
-              onValueChange={handleDefaultProviderChange}
-            >
-              <SelectTrigger className="w-full sm:w-80">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="default">Anthropic</SelectItem>
-                {profiles.map(p => (
-                  <SelectItem key={p.name} value={p.name}>
-                    {p.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
-      </SettingsSection>
-
-      <SettingsSection
-        title="Codex"
-        description="Custom model_provider profiles for Codex CLI (e.g. OpenRouter). Injected per session via app-server config — your default ~/.codex/config.toml is not rewritten. Put the API key in the named environment variable."
-        anchorId="pref-providers-section-codex"
-      >
-        <CodexProvidersEditor
-          providers={codexProviders}
-          onSave={handleSaveCodexProviders}
-        />
-
-        {codexProviders.length > 0 && (
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-sm font-medium">Default Codex Provider</p>
-              <p className="text-xs text-muted-foreground">
-                Provider used for new Codex sessions (null keeps ChatGPT /
-                OpenAI default)
-              </p>
-            </div>
-            <Select
-              value={defaultCodexProvider ?? 'default'}
-              onValueChange={handleDefaultCodexProviderChange}
-            >
-              <SelectTrigger className="w-full sm:w-80">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="default">
-                  Default (OpenAI / ChatGPT)
+      {profiles.length > 0 && (
+        <InlineField
+          label="Default provider"
+          description="Used for new Claude sessions"
+        >
+          <Select
+            value={defaultProvider ?? 'default'}
+            onValueChange={value =>
+              patchPreferences.mutate({
+                default_provider: value === 'default' ? null : value,
+              })
+            }
+          >
+            <SelectTrigger className="w-full sm:w-80">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="default">Anthropic</SelectItem>
+              {profiles.map(p => (
+                <SelectItem key={p.name} value={p.name}>
+                  {p.name}
                 </SelectItem>
-                {codexProviders.map(p => (
-                  <SelectItem key={p.name} value={p.name}>
-                    {p.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
-      </SettingsSection>
+              ))}
+            </SelectContent>
+          </Select>
+        </InlineField>
+      )}
+    </SettingsSection>
+  )
+}
 
-      <SettingsSection
-        title="PI"
-        description="Custom PI providers merged into ~/.pi/agent/models.json. Credentials stay in env vars or PI auth.json (multi-provider). After saving, models appear in the PI model picker as provider/model."
-        anchorId="pref-providers-section-pi"
-      >
-        <PiProvidersEditor
-          providers={piProviders}
-          onSave={handleSavePiProviders}
-        />
-      </SettingsSection>
-    </div>
+export const CodexProvidersSection: React.FC = () => {
+  const { data: preferences } = usePreferences()
+  const patchPreferences = usePatchPreferences()
+  const codexProviders = preferences?.custom_codex_providers ?? []
+  const defaultCodexProvider = preferences?.default_codex_provider ?? null
+
+  return (
+    <SettingsSection
+      title="Providers"
+      description="Custom model providers (for example OpenRouter), injected per session. Your ~/.codex/config.toml is not rewritten."
+      anchorId="pref-providers-section-codex"
+    >
+      <CodexProvidersEditor
+        providers={codexProviders}
+        onSave={updated =>
+          patchPreferences.mutate({ custom_codex_providers: updated })
+        }
+      />
+
+      {codexProviders.length > 0 && (
+        <InlineField
+          label="Default provider"
+          description="Used for new Codex sessions"
+        >
+          <Select
+            value={defaultCodexProvider ?? 'default'}
+            onValueChange={value =>
+              patchPreferences.mutate({
+                default_codex_provider: value === 'default' ? null : value,
+              })
+            }
+          >
+            <SelectTrigger className="w-full sm:w-80">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="default">
+                Default (OpenAI / ChatGPT)
+              </SelectItem>
+              {codexProviders.map(p => (
+                <SelectItem key={p.name} value={p.name}>
+                  {p.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </InlineField>
+      )}
+    </SettingsSection>
+  )
+}
+
+export const PiProvidersSection: React.FC = () => {
+  const { data: preferences } = usePreferences()
+  const patchPreferences = usePatchPreferences()
+  const piProviders = preferences?.custom_pi_providers ?? []
+
+  return (
+    <SettingsSection
+      title="Providers"
+      description="Custom providers merged into ~/.pi/agent/models.json. Their models appear in the PI picker as provider/model."
+      anchorId="pref-providers-section-pi"
+    >
+      <PiProvidersEditor
+        providers={piProviders}
+        onSave={updated =>
+          patchPreferences.mutate({ custom_pi_providers: updated })
+        }
+      />
+    </SettingsSection>
   )
 }
 
@@ -269,16 +266,15 @@ const CliProfilesEditor: React.FC<{
           </div>
           <Button
             variant="ghost"
-            size="icon"
-            className="h-7 w-7"
+            size="icon-sm"
             onClick={() => startEdit(index)}
           >
             <Pencil className="h-3.5 w-3.5" />
           </Button>
           <Button
             variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-destructive hover:text-destructive"
+            size="icon-sm"
+            className="text-destructive hover:text-destructive"
             onClick={() => deleteProfile(index)}
           >
             <Trash2 className="h-3.5 w-3.5" />
@@ -473,16 +469,15 @@ const CodexProvidersEditor: React.FC<{
           </div>
           <Button
             variant="ghost"
-            size="icon"
-            className="h-7 w-7"
+            size="icon-sm"
             onClick={() => startEdit(index)}
           >
             <Pencil className="h-3.5 w-3.5" />
           </Button>
           <Button
             variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-destructive hover:text-destructive"
+            size="icon-sm"
+            className="text-destructive hover:text-destructive"
             onClick={() => deleteProvider(index)}
           >
             <Trash2 className="h-3.5 w-3.5" />
@@ -731,16 +726,15 @@ const PiProvidersEditor: React.FC<{
           </div>
           <Button
             variant="ghost"
-            size="icon"
-            className="h-7 w-7"
+            size="icon-sm"
             onClick={() => startEdit(index)}
           >
             <Pencil className="h-3.5 w-3.5" />
           </Button>
           <Button
             variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-destructive hover:text-destructive"
+            size="icon-sm"
+            className="text-destructive hover:text-destructive"
             onClick={() => deleteProvider(index)}
           >
             <Trash2 className="h-3.5 w-3.5" />

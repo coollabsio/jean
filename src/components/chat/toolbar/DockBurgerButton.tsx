@@ -135,7 +135,7 @@ export function DockBurgerButton({ className }: DockBurgerButtonProps = {}) {
             <DropdownMenuItem
               onClick={() => openExternal('https://jean.build/sponsorships/')}
             >
-              <Heart className="mr-2 h-4 w-4 text-pink-600 dark:text-pink-500" />
+              <Heart className="mr-2 h-4 w-4" />
               Sponsor Jean
             </DropdownMenuItem>
           </>

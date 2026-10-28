@@ -16,6 +16,12 @@ const badgeVariants = cva(
           'bg-destructive text-white [a&]:hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/60',
         outline: 'bg-muted/50 text-foreground [a&]:hover:bg-muted',
         muted: 'bg-muted/50 text-muted-foreground [a&]:hover:bg-muted',
+        // Soft status pills: the only colors a pill may carry.
+        success: 'rounded-sm px-1.5 bg-success/10 text-success',
+        warning: 'rounded-sm px-1.5 bg-warning/10 text-warning',
+        info: 'rounded-sm px-1.5 bg-info/10 text-info',
+        danger: 'rounded-sm px-1.5 bg-destructive/10 text-destructive',
+        subtle: 'rounded-sm px-1.5 bg-muted text-muted-foreground',
       },
     },
     defaultVariants: {
@@ -29,9 +35,9 @@ function BetaBadge({ className }: { className?: string }) {
   return (
     <Badge
       aria-hidden="true"
-      variant="outline"
+      variant="warning"
       className={cn(
-        'rounded-sm border-warning/40 bg-warning/10 px-1.5 py-0 text-[10px] leading-4 tracking-wide text-warning uppercase',
+        'py-0 text-2xs leading-4 tracking-wide uppercase',
         className
       )}
     >

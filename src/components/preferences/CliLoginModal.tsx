@@ -349,10 +349,10 @@ function CliLoginModalContent({
           <Button
             type="button"
             variant="ghost"
-            size="icon"
+            size="icon-sm"
             onClick={handleMinimize}
             aria-label={`Minimize ${cliName} update`}
-            className="absolute right-5 top-4 h-7 w-7"
+            className="absolute right-5 top-4"
           >
             <Minus className="size-4" />
           </Button>

@@ -5,35 +5,30 @@ import {
   Keyboard,
   Wand2,
   Plug,
-  Blocks,
   BarChart3,
   Puzzle,
-  FlaskConical,
   Globe,
   GitBranch,
   Rabbit,
   Sparkles,
   Terminal,
   Server,
+  Cpu,
   type LucideIcon,
 } from '@/components/icons/reicon'
 import {
   Breadcrumb,
   BreadcrumbItem,
-  BreadcrumbLink,
   BreadcrumbList,
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb'
-import { SettingsBackButton } from './SettingsPage'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { ModalCloseButton } from '@/components/ui/modal-close-button'
 import {
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
@@ -42,12 +37,10 @@ import {
   SidebarContent,
   SidebarGroup,
   SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarProvider,
-  SidebarSeparator,
 } from '@/components/ui/sidebar'
 import { useUIStore, type PreferencePane } from '@/store/ui-store'
 import type { KeybindingAction } from '@/types/keybindings'
@@ -62,30 +55,20 @@ import { KimiIcon } from '@/components/icons/KimiIcon'
 import { DevinIcon } from '@/components/icons/DevinIcon'
 import { AntigravityIcon } from '@/components/icons/AntigravityIcon'
 import { MuseIcon } from '@/components/icons/MuseIcon'
-import type { CliBackend, MagicPrompts } from '@/types/preferences'
+import type { MagicPrompts } from '@/types/preferences'
 import { GeneralPane } from './panes/GeneralPane'
-import { ClaudePane } from './panes/ClaudePane'
-import { CodexPane } from './panes/CodexPane'
-import { OpenCodePane } from './panes/OpenCodePane'
-import { CursorPane } from './panes/CursorPane'
-import { PiPane } from './panes/PiPane'
-import { CommandCodePane } from './panes/CommandCodePane'
-import { GrokPane } from './panes/GrokPane'
-import { KimiPane } from './panes/KimiPane'
-import { DevinPane } from './panes/DevinPane'
-import { AntigravityPane } from './panes/AntigravityPane'
-import { MusePane } from './panes/MusePane'
-import { GitHubPane } from './panes/GitHubPane'
-import { CodeRabbitPane } from './panes/CodeRabbitPane'
+import {
+  BackendsPane,
+  isBackendPane,
+  type BackendPane,
+} from './panes/BackendsPane'
 import { AppearancePane } from './panes/AppearancePane'
 import { KeybindingsPane } from './panes/KeybindingsPane'
 import { TerminalPane } from './panes/TerminalPane'
 import { MagicPromptsPane } from './panes/MagicPromptsPane'
 import { McpServersPane } from './panes/McpServersPane'
-import { ProvidersPane } from './panes/ProvidersPane'
 import { UsagePane } from './panes/UsagePane'
 import { IntegrationsPane } from './panes/IntegrationsPane'
-import { ExperimentalPane } from './panes/ExperimentalPane'
 import { WebAccessPane } from './panes/WebAccessPane'
 import { OpinionatedPane } from './panes/OpinionatedPane'
 import {
@@ -93,7 +76,6 @@ import {
   type PreferenceSearchEntry,
 } from './preferences-search'
 import { PreferencesSearchBar } from './PreferencesSearchBar'
-import { BackendLabel } from '@/components/ui/backend-label'
 import { isNativeApp } from '@/lib/environment'
 import { useRemoteConnections } from '@/lib/remote-connections'
 import { useServerConnectionSnapshots } from '@/lib/server-connections'
@@ -102,215 +84,38 @@ import { SettingsTargetProvider } from '@/lib/settings-target'
 
 const SETTINGS_TARGET_KEY = 'jean-settings-target-server'
 
+type NavigationId = Exclude<PreferencePane, BackendPane> | 'backends'
+
 interface NavigationItem {
-  type: 'item'
-  id: PreferencePane
+  id: NavigationId
   name: string
   icon: LucideIcon
-  backend?: CliBackend
   desktopOnly?: boolean
 }
 
-interface NavigationSection {
-  type: 'section'
-  id: string
-  label: string
-}
-
-type NavigationEntry = NavigationItem | NavigationSection
-
-const navigationEntries: NavigationEntry[] = [
-  { type: 'section', id: 'app-section', label: 'App' },
-  {
-    type: 'item',
-    id: 'general',
-    name: 'General',
-    icon: Settings,
-  },
-  {
-    type: 'item',
-    id: 'appearance',
-    name: 'Appearance',
-    icon: Palette,
-  },
-  {
-    type: 'item',
-    id: 'keybindings',
-    name: 'Keybindings',
-    icon: Keyboard,
-    desktopOnly: true,
-  },
-  { type: 'section', id: 'backends-section', label: 'Backends' },
-  {
-    type: 'item',
-    id: 'claude',
-    name: 'Claude',
-    icon: ClaudeIcon,
-  },
-  {
-    type: 'item',
-    id: 'codex',
-    name: 'Codex',
-    icon: CodexIcon,
-  },
-  {
-    type: 'item',
-    id: 'opencode',
-    name: 'OpenCode',
-    icon: OpenCodeIcon,
-  },
-  {
-    type: 'item',
-    id: 'cursor',
-    name: 'Cursor',
-    icon: CursorIcon,
-  },
-  {
-    type: 'item',
-    id: 'pi',
-    name: 'PI',
-    icon: PiIcon,
-    backend: 'pi',
-  },
-  {
-    type: 'item',
-    id: 'commandcode',
-    name: 'Command Code',
-    icon: CommandCodeIcon,
-    backend: 'commandcode',
-  },
-  {
-    type: 'item',
-    id: 'grok',
-    name: 'Grok',
-    icon: GrokIcon,
-    backend: 'grok',
-  },
-  {
-    type: 'item',
-    id: 'kimi',
-    name: 'Kimi Code',
-    icon: KimiIcon,
-    backend: 'kimi',
-  },
-  {
-    type: 'item',
-    id: 'devin',
-    name: 'Devin',
-    icon: DevinIcon,
-    backend: 'devin',
-  },
-  {
-    type: 'item',
-    id: 'antigravity',
-    name: 'Antigravity CLI',
-    icon: AntigravityIcon,
-    backend: 'antigravity',
-  },
-  {
-    type: 'item',
-    id: 'muse',
-    name: 'Muse',
-    icon: MuseIcon,
-    backend: 'muse',
-  },
-  {
-    type: 'item',
-    id: 'github',
-    name: 'Git Provider',
-    icon: GitBranch,
-  },
-  {
-    type: 'item',
-    id: 'coderabbit',
-    name: 'CodeRabbit CLI',
-    icon: Rabbit,
-  },
-  { type: 'section', id: 'tools-section', label: 'Tools' },
-  {
-    type: 'item',
-    id: 'terminal',
-    name: 'Terminal',
-    icon: Terminal,
-  },
-  {
-    type: 'item',
-    id: 'magic-prompts',
-    name: 'Magic Prompts',
-    icon: Wand2,
-  },
-  {
-    type: 'item',
-    id: 'opinionated',
-    name: 'Opinionated',
-    icon: Sparkles,
-  },
-  { type: 'section', id: 'connectivity-section', label: 'Connectivity' },
-  {
-    type: 'item',
-    id: 'providers',
-    name: 'Providers',
-    icon: Blocks,
-  },
-  {
-    type: 'item',
-    id: 'web-access',
-    name: 'Web Access',
-    icon: Globe,
-  },
-  {
-    type: 'item',
-    id: 'mcp-servers',
-    name: 'MCP Servers',
-    icon: Plug,
-  },
-  {
-    type: 'item',
-    id: 'integrations',
-    name: 'Integrations',
-    icon: Puzzle,
-  },
-  { type: 'section', id: 'account-section', label: 'Account' },
-  {
-    type: 'item',
-    id: 'usage',
-    name: 'Usage',
-    icon: BarChart3,
-  },
-  { type: 'section', id: 'advanced-section', label: 'Advanced' },
-  {
-    type: 'item',
-    id: 'experimental',
-    name: 'Experimental',
-    icon: FlaskConical,
-  },
+const navigationItems: NavigationItem[] = [
+  { id: 'general', name: 'General', icon: Settings },
+  { id: 'appearance', name: 'Appearance', icon: Palette },
+  { id: 'keybindings', name: 'Keybindings', icon: Keyboard, desktopOnly: true },
+  { id: 'backends', name: 'Backends', icon: Cpu },
+  { id: 'terminal', name: 'Terminal', icon: Terminal },
+  { id: 'magic-prompts', name: 'Magic Prompts', icon: Wand2 },
+  { id: 'opinionated', name: 'Opinionated', icon: Sparkles },
+  { id: 'mcp-servers', name: 'MCP Servers', icon: Plug },
+  { id: 'integrations', name: 'Integrations', icon: Puzzle },
+  { id: 'web-access', name: 'Web Access', icon: Globe },
+  { id: 'usage', name: 'Usage', icon: BarChart3 },
 ]
 
-/** Mobile select groups: section labels + non-desktop-only items. */
-function getMobileNavigationGroups(): {
-  id: string
-  label: string
-  items: NavigationItem[]
-}[] {
-  const groups: { id: string; label: string; items: NavigationItem[] }[] = []
-  let current: { id: string; label: string; items: NavigationItem[] } | null =
-    null
+const mobileNavigationItems = navigationItems.filter(item => !item.desktopOnly)
 
-  for (const entry of navigationEntries) {
-    if (entry.type === 'section') {
-      current = { id: entry.id, label: entry.label, items: [] }
-      groups.push(current)
-      continue
-    }
-    if (entry.desktopOnly) continue
-    if (!current) {
-      current = { id: 'default', label: '', items: [] }
-      groups.push(current)
-    }
-    current.items.push(entry)
-  }
+function navigationIdForPane(pane: PreferencePane): NavigationId {
+  return isBackendPane(pane) ? 'backends' : pane
+}
 
-  return groups.filter(group => group.items.length > 0)
+function navigationName(pane: PreferencePane): string {
+  const id = navigationIdForPane(pane)
+  return navigationItems.find(item => item.id === id)?.name ?? 'General'
 }
 
 const paneIconMap: Record<PreferencePane, LucideIcon> = {
@@ -329,7 +134,6 @@ const paneIconMap: Record<PreferencePane, LucideIcon> = {
   github: GitBranch,
   coderabbit: Rabbit,
   opinionated: Sparkles,
-  providers: Blocks,
   usage: BarChart3,
   appearance: Palette,
   keybindings: Keyboard,
@@ -337,78 +141,7 @@ const paneIconMap: Record<PreferencePane, LucideIcon> = {
   'magic-prompts': Wand2,
   'mcp-servers': Plug,
   integrations: Puzzle,
-  experimental: FlaskConical,
   'web-access': Globe,
-}
-
-function paneBackend(pane: PreferencePane): CliBackend | undefined {
-  for (const entry of navigationEntries) {
-    if (entry.type === 'item' && entry.id === pane) return entry.backend
-  }
-  return undefined
-}
-
-function PaneTitle({ pane }: { pane: PreferencePane }) {
-  const backend = paneBackend(pane)
-  if (backend) return <BackendLabel backend={backend} />
-  return getPaneTitle(pane)
-}
-
-const getPaneTitle = (pane: PreferencePane): string => {
-  switch (pane) {
-    case 'general':
-      return 'General'
-    case 'claude':
-      return 'Claude'
-    case 'codex':
-      return 'Codex'
-    case 'opencode':
-      return 'OpenCode'
-    case 'cursor':
-      return 'Cursor'
-    case 'pi':
-      return 'PI'
-    case 'commandcode':
-      return 'Command Code'
-    case 'grok':
-      return 'Grok'
-    case 'kimi':
-      return 'Kimi Code'
-    case 'antigravity':
-      return 'Antigravity CLI'
-    case 'muse':
-      return 'Muse'
-    case 'devin':
-      return 'Devin'
-    case 'github':
-      return 'Git Provider'
-    case 'coderabbit':
-      return 'CodeRabbit CLI'
-    case 'appearance':
-      return 'Appearance'
-    case 'keybindings':
-      return 'Keybindings'
-    case 'terminal':
-      return 'Terminal'
-    case 'magic-prompts':
-      return 'Magic Prompts'
-    case 'mcp-servers':
-      return 'MCP Servers'
-    case 'providers':
-      return 'Providers'
-    case 'usage':
-      return 'Usage'
-    case 'integrations':
-      return 'Integrations'
-    case 'experimental':
-      return 'Experimental'
-    case 'opinionated':
-      return 'Opinionated'
-    case 'web-access':
-      return 'Web Access'
-    default:
-      return 'General'
-  }
 }
 
 /** Group search results by pane, preserving Fuse.js ranking order within each group. */
@@ -531,6 +264,22 @@ export function PreferencesDialog() {
       setActivePane(pane)
     },
     [resetSearch]
+  )
+
+  const lastBackendRef = useRef<BackendPane>('claude')
+  useEffect(() => {
+    if (isBackendPane(activePane)) lastBackendRef.current = activePane
+  }, [activePane])
+
+  const handleNavigationSelect = useCallback(
+    (id: NavigationId) => {
+      if (id !== 'backends') {
+        handlePaneSelect(id)
+      } else if (!isBackendPane(activePane)) {
+        handlePaneSelect(lastBackendRef.current)
+      }
+    },
+    [activePane, handlePaneSelect]
   )
 
   const handleSearchResultSelect = useCallback(
@@ -676,6 +425,18 @@ export function PreferencesDialog() {
         targetTagName: target?.tagName,
         targetClass: target?.className,
       })
+
+      const closedSection = target?.closest(
+        '[data-slot="collapsible-content"][hidden]'
+      )
+      if (closedSection) {
+        closedSection
+          .closest('[data-slot="collapsible"]')
+          ?.querySelector<HTMLElement>('[data-slot="collapsible-trigger"]')
+          ?.click()
+        rafId = window.requestAnimationFrame(tryScroll)
+        return
+      }
 
       if (target && container) {
         performScroll(target, container, 'initial')
@@ -875,59 +636,29 @@ export function PreferencesDialog() {
                 <SidebarGroup>
                   <SidebarGroupContent>
                     <SidebarMenu>
-                      {navigationEntries.map((entry, index) => {
-                        if (entry.type === 'section') {
-                          const isFirst = index === 0
-                          return (
-                            <li
-                              key={entry.id}
-                              className={isFirst ? 'pt-0' : 'pt-1'}
+                      {navigationItems.map(item => (
+                        <SidebarMenuItem key={item.id}>
+                          <SidebarMenuButton
+                            asChild
+                            isActive={
+                              navigationIdForPane(activePane) === item.id
+                            }
+                          >
+                            <button
+                              type="button"
+                              onClick={() => handleNavigationSelect(item.id)}
+                              className="w-full"
                             >
-                              {!isFirst && (
-                                <SidebarSeparator className="mx-0 mb-1" />
-                              )}
-                              <SidebarGroupLabel className="h-7 px-2 text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/50">
-                                {entry.label}
-                              </SidebarGroupLabel>
-                            </li>
-                          )
-                        }
-
-                        return (
-                          <SidebarMenuItem key={entry.id}>
-                            <SidebarMenuButton
-                              asChild
-                              isActive={activePane === entry.id}
-                            >
-                              <button
-                                type="button"
-                                onClick={() => handlePaneSelect(entry.id)}
-                                className="w-full"
-                              >
-                                <entry.icon
-                                  className={
-                                    entry.id === 'kimi'
-                                      ? 'translate-x-0.5'
-                                      : undefined
-                                  }
-                                />
-                                {entry.backend ? (
-                                  <BackendLabel backend={entry.backend} />
-                                ) : (
-                                  <span>{entry.name}</span>
-                                )}
-                              </button>
-                            </SidebarMenuButton>
-                          </SidebarMenuItem>
-                        )
-                      })}
+                              <item.icon />
+                              <span>{item.name}</span>
+                            </button>
+                          </SidebarMenuButton>
+                        </SidebarMenuItem>
+                      ))}
                     </SidebarMenu>
                   </SidebarGroupContent>
                 </SidebarGroup>
               </SidebarContent>
-              <div className="shrink-0 border-t border-border p-2">
-                <SettingsBackButton onClick={() => handleOpenChange(false)} />
-              </div>
             </Sidebar>
 
             <main className="flex flex-1 flex-col overflow-hidden">
@@ -935,28 +666,19 @@ export function PreferencesDialog() {
                 <div className="flex flex-1 items-center gap-2 px-4">
                   {/* Mobile pane selector */}
                   <Select
-                    value={activePane}
-                    onValueChange={v => handlePaneSelect(v as PreferencePane)}
+                    value={navigationIdForPane(activePane)}
+                    onValueChange={v =>
+                      handleNavigationSelect(v as NavigationId)
+                    }
                   >
                     <SelectTrigger className="md:hidden w-full">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {getMobileNavigationGroups().map(group => (
-                        <SelectGroup key={group.id}>
-                          <SelectLabel className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                            {group.label}
-                          </SelectLabel>
-                          {group.items.map(item => (
-                            <SelectItem key={item.id} value={item.id}>
-                              {item.backend ? (
-                                <BackendLabel backend={item.backend} />
-                              ) : (
-                                item.name
-                              )}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
+                      {mobileNavigationItems.map(item => (
+                        <SelectItem key={item.id} value={item.id}>
+                          {item.name}
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -967,20 +689,11 @@ export function PreferencesDialog() {
                   />
                   <Breadcrumb className="hidden md:block">
                     <BreadcrumbList>
-                      <BreadcrumbItem>
-                        <BreadcrumbLink asChild>
-                          <button
-                            type="button"
-                            onClick={() => handleOpenChange(false)}
-                          >
-                            Settings
-                          </button>
-                        </BreadcrumbLink>
-                      </BreadcrumbItem>
+                      <BreadcrumbItem>Settings</BreadcrumbItem>
                       <BreadcrumbSeparator />
                       <BreadcrumbItem>
                         <BreadcrumbPage>
-                          <PaneTitle pane={activePane} />
+                          {navigationName(activePane)}
                         </BreadcrumbPage>
                       </BreadcrumbItem>
                     </BreadcrumbList>
@@ -1020,75 +733,12 @@ export function PreferencesDialog() {
                     <GeneralPane />
                   </div>
                 )}
-                {activePane === 'claude' && (
-                  <div id="pref-pane-claude" className="min-w-0 max-w-full">
-                    <ClaudePane />
-                  </div>
-                )}
-                {activePane === 'codex' && (
-                  <div id="pref-pane-codex" className="min-w-0 max-w-full">
-                    <CodexPane />
-                  </div>
-                )}
-                {activePane === 'opencode' && (
-                  <div id="pref-pane-opencode" className="min-w-0 max-w-full">
-                    <OpenCodePane />
-                  </div>
-                )}
-                {activePane === 'cursor' && (
-                  <div id="pref-pane-cursor" className="min-w-0 max-w-full">
-                    <CursorPane />
-                  </div>
-                )}
-                {activePane === 'pi' && (
-                  <div id="pref-pane-pi" className="min-w-0 max-w-full">
-                    <PiPane />
-                  </div>
-                )}
-                {activePane === 'commandcode' && (
-                  <div
-                    id="pref-pane-commandcode"
-                    className="min-w-0 max-w-full"
-                  >
-                    <CommandCodePane />
-                  </div>
-                )}
-                {activePane === 'grok' && (
-                  <div id="pref-pane-grok">
-                    <GrokPane />
-                  </div>
-                )}
-                {activePane === 'kimi' && (
-                  <div id="pref-pane-kimi" className="min-w-0 max-w-full">
-                    <KimiPane />
-                  </div>
-                )}
-                {activePane === 'devin' && (
-                  <div id="pref-pane-devin" className="min-w-0 max-w-full">
-                    <DevinPane />
-                  </div>
-                )}
-                {activePane === 'antigravity' && (
-                  <div
-                    id="pref-pane-antigravity"
-                    className="min-w-0 max-w-full"
-                  >
-                    <AntigravityPane />
-                  </div>
-                )}
-                {activePane === 'muse' && (
-                  <div id="pref-pane-muse" className="min-w-0 max-w-full">
-                    <MusePane />
-                  </div>
-                )}
-                {activePane === 'github' && (
-                  <div id="pref-pane-github" className="min-w-0 max-w-full">
-                    <GitHubPane />
-                  </div>
-                )}
-                {activePane === 'coderabbit' && (
-                  <div id="pref-pane-coderabbit" className="min-w-0 max-w-full">
-                    <CodeRabbitPane />
+                {isBackendPane(activePane) && (
+                  <div id="pref-pane-backends" className="min-w-0 max-w-full">
+                    <BackendsPane
+                      backend={activePane}
+                      onBackendChange={handlePaneSelect}
+                    />
                   </div>
                 )}
                 {activePane === 'appearance' && (
@@ -1127,11 +777,6 @@ export function PreferencesDialog() {
                     <McpServersPane />
                   </div>
                 )}
-                {activePane === 'providers' && (
-                  <div id="pref-pane-providers" className="min-w-0 max-w-full">
-                    <ProvidersPane />
-                  </div>
-                )}
                 {activePane === 'usage' && (
                   <div id="pref-pane-usage" className="min-w-0 max-w-full">
                     <UsagePane />
@@ -1143,14 +788,6 @@ export function PreferencesDialog() {
                     className="min-w-0 max-w-full"
                   >
                     <IntegrationsPane />
-                  </div>
-                )}
-                {activePane === 'experimental' && (
-                  <div
-                    id="pref-pane-experimental"
-                    className="min-w-0 max-w-full"
-                  >
-                    <ExperimentalPane />
                   </div>
                 )}
                 {activePane === 'opinionated' && (

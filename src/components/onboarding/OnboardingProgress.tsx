@@ -37,7 +37,7 @@ export function OnboardingProgress({
             />
             <span
               className={cn(
-                'block text-[11px]',
+                'block text-2xs',
                 state === 'pending'
                   ? 'text-muted-foreground/70'
                   : 'text-muted-foreground',

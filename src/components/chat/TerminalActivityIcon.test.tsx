@@ -13,7 +13,7 @@ describe('TerminalActivityIcon', () => {
     render(<TerminalActivityIcon active className="h-4 w-4" />)
 
     expect(screen.getByTestId('terminal-active-badge')).toHaveClass(
-      'bg-emerald-500'
+      'bg-success'
     )
   })
 })

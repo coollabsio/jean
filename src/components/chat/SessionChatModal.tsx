@@ -12,6 +12,8 @@ import {
 } from 'react'
 import {
   GitBranchPlus,
+  GitMerge,
+  GitPullRequest,
   GitPullRequestArrow,
   Globe,
   Plus,
@@ -55,6 +57,10 @@ import { parseServerResourceKey } from '@/lib/server-resource'
 import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import { usePackageScripts, type PackageScript } from '@/services/projects'
 import { useGitHubPRs } from '@/services/github'
+import { usePrStatus } from '@/services/pr-status'
+import type { PrDisplayStatus } from '@/types/pr-status'
+import { openExternal } from '@/lib/platform'
+import { getPrStatusDisplay } from './toolbar/toolbar-utils'
 import { useGitStatus, performGitSync } from '@/services/git-status'
 import { isBaseSession, type Project, type Worktree } from '@/types/projects'
 import type { Session } from '@/types/chat'
@@ -164,6 +170,43 @@ function useOffScreenWaiting(
   return { hasLeft, hasRight }
 }
 
+function HeaderPrLink({ worktree }: { worktree: Worktree }) {
+  const { data: prStatus } = usePrStatus(worktree.id)
+  if (!worktree.pr_url || !worktree.pr_number) return null
+  const prUrl = worktree.pr_url
+  const status =
+    prStatus?.display_status ??
+    (worktree.cached_pr_status as PrDisplayStatus | undefined)
+  const display = status ? getPrStatusDisplay(status) : null
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          onClick={() => void openExternal(prUrl)}
+          className={cn(
+            'inline-flex shrink-0 cursor-pointer items-center gap-0.5 text-xs font-medium leading-none transition-opacity hover:opacity-70',
+            display?.className ?? 'text-muted-foreground'
+          )}
+        >
+          {status === 'merged' ? (
+            <GitMerge className="h-3 w-3" />
+          ) : (
+            <GitPullRequest className="h-3 w-3" />
+          )}
+          #{worktree.pr_number}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>
+        {display
+          ? `${display.label} · PR #${worktree.pr_number}`
+          : `PR #${worktree.pr_number}`}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
 function HeaderSurfaceToggle({
   label,
   icon: Icon,
@@ -186,9 +229,9 @@ function HeaderSurfaceToggle({
       <TooltipTrigger asChild>
         <Button
           variant="ghost"
-          size="icon"
+          size="icon-sm"
           className={cn(
-            'h-7 w-7 text-muted-foreground hover:text-foreground',
+            'text-muted-foreground hover:text-foreground',
             isOpen && 'bg-muted text-foreground'
           )}
           aria-label={
@@ -1045,7 +1088,7 @@ export const SessionChatModal = memo(function SessionChatModal({
       {!zenMode && stackedBaseBranch && (
         <span
           className={cn(
-            'inline-flex min-w-0 items-center gap-1 rounded border border-border/50 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground',
+            'inline-flex min-w-0 items-center gap-1 rounded border border-border/50 px-1.5 py-0.5 text-2xs font-normal text-muted-foreground',
             isMobile ? 'shrink-0' : 'shrink'
           )}
         >
@@ -1062,6 +1105,7 @@ export const SessionChatModal = memo(function SessionChatModal({
           )}
         </span>
       )}
+      {!zenMode && worktree && <HeaderPrLink worktree={worktree} />}
       {!zenMode && (
         <GitStatusBadges
           behindCount={behindCount}
@@ -1326,7 +1370,7 @@ export const SessionChatModal = memo(function SessionChatModal({
                               className="h-1.5 w-1.5"
                             />
                             {showTabShortcutHints && idx < 9 && (
-                              <kbd className="shrink-0 rounded border border-border/50 px-1 py-px text-[9px] font-medium leading-none text-muted-foreground/70">
+                              <kbd className="shrink-0 rounded border border-border/50 px-1 py-px text-2xs font-medium leading-none text-muted-foreground/70">
                                 {formatShortcutDisplay(`mod+${idx + 1}`)}
                               </kbd>
                             )}

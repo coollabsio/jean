@@ -444,12 +444,14 @@ describe('UnreadBell', () => {
     expect(within(firstRow).queryByText('R')).not.toBeInTheDocument()
   })
 
-  it('shows the finished sessions shortcut hint on native desktop', () => {
+  it('shows the finished sessions shortcut hint while a modifier is held on native desktop', () => {
     renderWithQueryClient(<UnreadBell title="Jean" />)
 
     expect(
-      screen.getByText(/(?:⌘|⌃|Ctrl) \+ ⇧|Shift \+ F/i)
-    ).toBeInTheDocument()
+      screen
+        .getByText(/(?:⌘|⌃|Ctrl) \+ ⇧|Shift \+ F/i)
+        .closest('[data-mod-hint]')
+    ).not.toBeNull()
   })
 
   it('uses a bell ring animation on the finished-sessions badge by default', () => {

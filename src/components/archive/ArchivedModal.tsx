@@ -2,13 +2,13 @@ import { useMemo, useState, useCallback } from 'react'
 import { invoke } from '@/lib/transport'
 import { toast } from 'sonner'
 import {
-  Archive,
   Loader2,
   Search,
   Trash2,
   RotateCcw,
   MessageSquare,
   GitBranch,
+  MoreHorizontal,
 } from '@/components/icons/reicon'
 import {
   Dialog,
@@ -27,6 +27,18 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from '@/components/ui/empty'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -475,23 +487,32 @@ export function ArchivedModal({ open, onOpenChange }: ArchivedModalProps) {
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none sm:!w-[90vw] sm:!max-w-[90vw] sm:!h-[85vh] sm:!max-h-[85vh] sm:!rounded-lg flex flex-col overflow-hidden">
-          <DialogHeader className="shrink-0">
-            <DialogTitle className="flex items-center gap-2">
-              <Archive className="h-4 w-4" />
-              Archived Items
-              {!isEmpty && (
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => setDeleteConfirm({ type: 'all' })}
-                  disabled={isDeletingAll}
-                >
-                  <Trash2 className="h-3.5 w-3.5 mr-1.5" />
-                  Delete All
-                </Button>
-              )}
-            </DialogTitle>
+        <DialogContent className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-[85vh] sm:!rounded-lg flex flex-col overflow-hidden">
+          <DialogHeader className="shrink-0 flex-row items-center gap-2 pr-8">
+            <DialogTitle>Archived Items</DialogTitle>
+            {!isEmpty && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Archive actions"
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuItem
+                    variant="destructive"
+                    disabled={isDeletingAll}
+                    onSelect={() => setDeleteConfirm({ type: 'all' })}
+                  >
+                    <Trash2 />
+                    Delete all
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </DialogHeader>
 
           {/* Search Input */}
@@ -510,31 +531,30 @@ export function ArchivedModal({ open, onOpenChange }: ArchivedModalProps) {
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
           ) : isEmpty ? (
-            <div className="text-center py-8 text-muted-foreground">
-              No archived items.
-              <br />
-              {isDelete ? (
-                <span className="text-sm">
-                  Removal behavior is set to delete — closed items are
-                  permanently removed.{' '}
-                  <button
-                    type="button"
-                    className="underline hover:text-foreground transition-colors"
-                    onClick={() => {
-                      onOpenChange(false)
-                      useUIStore.getState().openPreferencesPane('general')
-                    }}
-                  >
-                    Change in Settings
-                  </button>
-                </span>
-              ) : (
-                <span className="text-sm">
-                  Archive worktrees and sessions to keep them for later without
-                  cluttering your workspace.
-                </span>
-              )}
-            </div>
+            <Empty className="p-6 md:p-6">
+              <EmptyHeader>
+                <EmptyTitle className="text-sm">No archived items</EmptyTitle>
+                <EmptyDescription className="text-xs">
+                  {isDelete ? (
+                    <>
+                      Closed items are deleted.{' '}
+                      <button
+                        type="button"
+                        className="underline underline-offset-4 hover:text-foreground"
+                        onClick={() => {
+                          onOpenChange(false)
+                          useUIStore.getState().openPreferencesPane('general')
+                        }}
+                      >
+                        Change in Settings
+                      </button>
+                    </>
+                  ) : (
+                    'Archived worktrees and sessions appear here.'
+                  )}
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           ) : searchQuery ? (
             // Consolidated search results view
             <ScrollArea className="flex-1 min-h-0">
@@ -790,7 +810,7 @@ function WorktreeProjectGroup({
       >
         {group.project.name}
         {isCurrentProject && (
-          <span className="ml-1.5 text-[10px] normal-case tracking-normal opacity-70">
+          <span className="ml-1.5 text-2xs normal-case tracking-normal opacity-70">
             (current)
           </span>
         )}
@@ -896,7 +916,7 @@ function SessionWorktreeGroup({
       >
         {group.project_name} / {group.worktree_name}
         {isCurrentWorktree && (
-          <span className="ml-1.5 text-[10px] normal-case tracking-normal opacity-70">
+          <span className="ml-1.5 text-2xs normal-case tracking-normal opacity-70">
             (current)
           </span>
         )}
@@ -1030,7 +1050,7 @@ function SearchResultItem({
             <div className="flex items-center gap-2">
               <span className="font-medium truncate">{name}</span>
               {isCurrentContext && (
-                <span className="text-[10px] text-primary opacity-70 shrink-0">
+                <span className="text-2xs text-primary opacity-70 shrink-0">
                   (current)
                 </span>
               )}

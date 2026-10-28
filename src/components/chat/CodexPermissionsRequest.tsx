@@ -36,17 +36,17 @@ export function CodexPermissionsRequest({
       actions={
         <>
           <Button size="sm" onClick={() => onGrant('turn')}>
-            Grant for turn
+            Approve for turn
           </Button>
           <Button
             size="sm"
             variant="secondary"
             onClick={() => onGrant('session')}
           >
-            Grant for session
+            Approve for session
           </Button>
           <Button size="sm" variant="ghost" onClick={onDecline}>
-            Decline
+            Deny
           </Button>
         </>
       }

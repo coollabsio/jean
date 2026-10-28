@@ -12,7 +12,7 @@ import {
   type AgentTask,
 } from '@/services/agents'
 import { useChatStore } from '@/store/chat-store'
-import { formatRelative } from './AgentActivity'
+import { formatRelative } from '@/lib/relative-time'
 import { taskKindLabel } from './subagent-types'
 import {
   AgentBadge,
@@ -32,7 +32,7 @@ const ChatWindow = lazy(() =>
 
 const STATUS_STYLES: Record<string, string> = {
   running: 'text-primary',
-  waiting: 'text-amber-600 dark:text-amber-400',
+  waiting: 'text-warning',
   failed: 'text-destructive',
   cancelled: 'text-muted-foreground',
   done: 'text-muted-foreground',
@@ -113,20 +113,15 @@ export function AgentTasks({
   return (
     <AgentTabBody>
       {isLoading ? (
-        <AgentLoading label="Loading tasks…" />
+        <AgentLoading label="Loading runs…" />
       ) : active.length === 0 && finished.length === 0 ? (
-        <AgentSection
-          title="Tasks"
-          description="Routines, follow-ups, and agent requests run here, apart from your chat. Finished tasks are archived after 3 days."
-        >
-          <AgentEmpty title="No tasks yet." />
-        </AgentSection>
+        <AgentEmpty title="No runs yet." />
       ) : (
         <>
           <AgentSection
             title="Active"
             count={active.length}
-            description="Routines, follow-ups, and agent requests run here, apart from your chat. Open a task to see its session."
+            description="Routines, follow-ups, and agent requests run here, apart from your chat."
           >
             {active.length ? (
               <AgentList>
@@ -183,7 +178,7 @@ export function AgentTasks({
                 <Suspense
                   fallback={
                     <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-                      Loading task…
+                      Loading run…
                     </div>
                   }
                 >

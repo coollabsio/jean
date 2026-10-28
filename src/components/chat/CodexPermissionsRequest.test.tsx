@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { CodexPermissionsRequest } from './CodexPermissionsRequest'
 
 describe('CodexPermissionsRequest', () => {
-  it('renders requested permissions and forwards grant/decline actions', async () => {
+  it('renders requested permissions and forwards approve/deny actions', async () => {
     const user = userEvent.setup()
     const onGrant = vi.fn()
     const onDecline = vi.fn()
@@ -29,10 +29,12 @@ describe('CodexPermissionsRequest', () => {
     expect(screen.getByText('/tmp/readme')).toBeInTheDocument()
     expect(screen.getByText('/tmp/output')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: /grant for session/i }))
+    await user.click(
+      screen.getByRole('button', { name: /approve for session/i })
+    )
     expect(onGrant).toHaveBeenCalledWith('session')
 
-    await user.click(screen.getByRole('button', { name: /decline/i }))
+    await user.click(screen.getByRole('button', { name: /deny/i }))
     expect(onDecline).toHaveBeenCalled()
   })
 })

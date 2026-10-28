@@ -14,6 +14,11 @@ import {
   PopoverContent,
 } from '@/components/ui/popover'
 import { Kbd } from '@/components/ui/kbd'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { invoke, invokeForServer } from '@/lib/transport'
 import { parseServerResourceKey } from '@/lib/server-resource'
@@ -488,31 +493,37 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
   // a status flip, until the user dismisses).
   const displayCount =
     open && snapshotItems ? snapshotItems.length : unreadCount
+  const triggerLabel = `${displayCount} finished ${displayCount === 1 ? 'session' : 'sessions'}`
 
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <div>
-          <button
-            type="button"
-            onClick={handleTriggerClick}
-            className="relative z-[1] flex items-center gap-1.5 truncate rounded-md bg-background px-1.5 text-sm font-medium text-warning cursor-pointer"
-          >
-            <BellDot
-              className={cn(
-                'h-3.5 w-3.5 shrink-0',
-                animationEnabled &&
-                  'animate-[bell-ring_2s_ease-in-out_infinite]'
-              )}
-            />
-            {displayCount} finished{' '}
-            {displayCount === 1 ? 'session' : 'sessions'}
-            {showDesktopKeyboardAffordances && (
-              <Kbd className="ml-1 h-4 px-1 text-[10px] opacity-60">
-                {formatShortcutDisplay('mod+shift+f')}
-              </Kbd>
-            )}
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label={triggerLabel}
+                onClick={handleTriggerClick}
+                className="relative z-[1] flex items-center gap-1 truncate rounded-md bg-background px-1.5 text-sm font-medium text-warning cursor-pointer"
+              >
+                <BellDot
+                  className={cn(
+                    'h-3.5 w-3.5 shrink-0',
+                    animationEnabled &&
+                      'animate-[bell-ring_2s_ease-in-out_infinite]'
+                  )}
+                />
+                {displayCount}
+                {showDesktopKeyboardAffordances && (
+                  <Kbd modHint className="ml-1">
+                    {formatShortcutDisplay('mod+shift+f')}
+                  </Kbd>
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{triggerLabel}</TooltipContent>
+          </Tooltip>
         </div>
       </PopoverTrigger>
       <PopoverContent
@@ -578,25 +589,20 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
                   />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/50 shrink-0">
+                      <span className="text-2xs font-medium uppercase tracking-wider text-muted-foreground/50 shrink-0">
                         {item.projectName}
                       </span>
                       {item.serverName && (
-                        <span className="truncate text-[11px] text-muted-foreground/50">
+                        <span className="truncate text-2xs text-muted-foreground/50">
                           · {item.serverName}
                         </span>
                       )}
-                      <span className="text-[11px] text-muted-foreground/40 shrink-0 ml-auto">
+                      <span className="text-2xs text-muted-foreground/40 shrink-0 ml-auto">
                         {formatRelativeTime(item.session.updated_at)}
                       </span>
                       {showDesktopKeyboardAffordances &&
                         focusedIndex === idx && (
-                          <Kbd
-                            className="h-4 min-w-4 px-1 text-[10px] opacity-70"
-                            title="Press R to mark read"
-                          >
-                            R
-                          </Kbd>
+                          <Kbd title="Press R to mark read">R</Kbd>
                         )}
                     </div>
                     <span className="text-[13px] truncate block">

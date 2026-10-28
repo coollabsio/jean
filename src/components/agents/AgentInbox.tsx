@@ -26,9 +26,8 @@ import {
   type AgentNotification,
   type AgentSummary,
 } from '@/services/agents'
-import { formatRelative } from './AgentActivity'
+import { formatRelative } from '@/lib/relative-time'
 import {
-  AgentBadge,
   AgentEmpty,
   AgentList,
   AgentLoading,
@@ -37,7 +36,7 @@ import {
 } from './agent-ui'
 
 const LEVEL_DOTS: Record<string, string> = {
-  action: 'bg-amber-500',
+  action: 'bg-warning',
   error: 'bg-destructive',
   info: 'bg-muted-foreground/50',
 }
@@ -76,6 +75,8 @@ function NotificationRow({
         <Tooltip>
           <TooltipTrigger asChild>
             <span
+              role="img"
+              aria-label={levelLabel(notification.level)}
               className={cn(
                 'size-2 shrink-0 rounded-full',
                 LEVEL_DOTS[notification.level] ?? LEVEL_DOTS.info
@@ -94,13 +95,6 @@ function NotificationRow({
         >
           {notificationPreview(notification.message)}
         </span>
-        {notification.level !== 'info' && (
-          <AgentBadge
-            tone={notification.level === 'error' ? 'danger' : 'attention'}
-          >
-            {levelLabel(notification.level)}
-          </AgentBadge>
-        )}
         <span className="shrink-0 text-xs text-muted-foreground">
           {formatRelative(notification.createdAt)}
         </span>
@@ -165,8 +159,6 @@ export function AgentInbox({ agent }: { agent: AgentSummary }) {
   return (
     <AgentTabBody>
       <AgentSection
-        title="Inbox"
-        count={isLoading ? undefined : unread.length}
         description="Results, questions, and errors the agent reports to you."
         actions={
           agent.unreadNotifications > 0 ? (

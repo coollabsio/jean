@@ -37,8 +37,7 @@ describe('BrowserDefaultHostField', () => {
     expect(input).toHaveValue('dev.example.com')
 
     await user.clear(input)
-    await user.type(input, 'Preview.Example.COM')
-    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await user.type(input, 'Preview.Example.COM{Enter}')
 
     expect(mutate).toHaveBeenCalledWith({
       browser_default_host: 'preview.example.com',
@@ -50,7 +49,7 @@ describe('BrowserDefaultHostField', () => {
     render(<BrowserDefaultHostField preferences={preferences} />)
 
     await user.clear(screen.getByLabelText('Default preview hostname'))
-    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await user.tab()
 
     expect(mutate).toHaveBeenCalledWith({ browser_default_host: null })
   })
@@ -62,10 +61,20 @@ describe('BrowserDefaultHostField', () => {
     const input = screen.getByLabelText('Default preview hostname')
     await user.clear(input)
     await user.type(input, 'http://dev.example.com')
-    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await user.tab()
 
     expect(mutate).not.toHaveBeenCalled()
     expect(toast.error).toHaveBeenCalled()
     expect(input).toHaveValue('http://dev.example.com')
+  })
+
+  it('does not save when the field loses focus unchanged', async () => {
+    const user = userEvent.setup()
+    render(<BrowserDefaultHostField preferences={preferences} />)
+
+    await user.click(screen.getByLabelText('Default preview hostname'))
+    await user.tab()
+
+    expect(mutate).not.toHaveBeenCalled()
   })
 })

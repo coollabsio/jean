@@ -1,12 +1,12 @@
 import { SettingsSection } from '@/components/preferences/SettingsSection'
-import React, { useCallback, useEffect, useState } from 'react'
+import { InlineField } from '@/components/preferences/InlineField'
+import { useCallback, useEffect, useState } from 'react'
 import { Loader2, RefreshCw, RotateCcw } from '@/components/icons/reicon'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import {
   Select,
   SelectContent,
@@ -24,6 +24,7 @@ import {
   useSentryProjects,
 } from '@/services/sentry'
 import type { SentryProjectLink } from '@/types/projects'
+import { overrideHint } from './override-hint'
 
 function assignedSentryProjects(project: {
   sentry_projects?: SentryProjectLink[]
@@ -43,20 +44,6 @@ function assignedSentryProjects(project: {
   }
   return []
 }
-
-const InlineField: React.FC<{
-  label: string
-  description?: React.ReactNode
-  children: React.ReactNode
-}> = ({ label, description, children }) => (
-  <div className="space-y-2">
-    <Label className="text-sm text-foreground">{label}</Label>
-    {description && (
-      <div className="text-xs text-muted-foreground">{description}</div>
-    )}
-    {children}
-  </div>
-)
 
 export function IntegrationsPane({ projectId }: { projectId: string }) {
   const { data: projects = [] } = useProjects()
@@ -236,7 +223,11 @@ export function IntegrationsPane({ projectId }: { projectId: string }) {
 
   useEffect(() => {
     const onlyProject = sentryProjects.length === 1 ? sentryProjects[0] : null
-    if (onlyProject && assignedLinks.length === 0 && !updateSettings.isPending) {
+    if (
+      onlyProject &&
+      assignedLinks.length === 0 &&
+      !updateSettings.isPending
+    ) {
       handleSentryProjectToggle(onlyProject.id, true)
     }
   }, [
@@ -250,8 +241,13 @@ export function IntegrationsPane({ projectId }: { projectId: string }) {
     <div className="space-y-6">
       <SettingsSection title="Linear Integration">
         <InlineField
-          label="Project API Key Override"
-          description="Overrides the global key from Settings → Integrations for this project only. Leave empty to use the global key."
+          label="API Key"
+          description={overrideHint(
+            !!project?.linear_api_key,
+            preferences?.linear_api_key ? 'key set' : 'none'
+          )}
+          help="Overrides the key from Settings → Integrations for this project only. Leave empty to use the global key."
+          layout="stacked"
         >
           <div className="flex items-center gap-2">
             <Input
@@ -293,9 +289,9 @@ export function IntegrationsPane({ projectId }: { projectId: string }) {
         {hasLinearAccess && (
           <InlineField
             label="Team Filter"
-            description="Restrict Linear issues to a specific team. Leave as 'All teams' to see everything."
+            description="Only show issues from this team"
           >
-            <div className="flex items-center gap-2">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
               <Select
                 value={project?.linear_team_id ?? 'all'}
                 onValueChange={handleTeamChange}
@@ -319,9 +315,10 @@ export function IntegrationsPane({ projectId }: { projectId: string }) {
               </Select>
               <Button
                 variant="outline"
-                size="sm"
+                size="icon"
                 onClick={handleRefreshTeams}
                 disabled={teamsLoading}
+                aria-label="Refresh Linear teams"
               >
                 <RefreshCw
                   className={cn('h-4 w-4', teamsLoading && 'animate-spin')}
@@ -334,8 +331,13 @@ export function IntegrationsPane({ projectId }: { projectId: string }) {
 
       <SettingsSection title="Sentry Integration">
         <InlineField
-          label="Project Auth Token Override"
-          description="Overrides the global token from Settings → Integrations for this project only. Leave empty to use the global token."
+          label="Auth Token"
+          description={overrideHint(
+            !!project?.sentry_auth_token,
+            preferences?.sentry_auth_token ? 'token set' : 'none'
+          )}
+          help="Overrides the token from Settings → Integrations for this project only. Leave empty to use the global token."
+          layout="stacked"
         >
           <div className="flex items-center gap-2">
             <Input
@@ -380,8 +382,9 @@ export function IntegrationsPane({ projectId }: { projectId: string }) {
         </InlineField>
 
         <InlineField
-          label="Sentry projects"
-          description="Choose the Sentry projects that belong to this Jean project. Issues from every selected project are shown together."
+          label="Projects"
+          description="Issues from every selected project are shown together"
+          layout="stacked"
         >
           {hasSentryAccess ? (
             <>
@@ -422,7 +425,7 @@ export function IntegrationsPane({ projectId }: { projectId: string }) {
                 </div>
                 <Button
                   variant="outline"
-                  size="sm"
+                  size="icon"
                   onClick={() =>
                     queryClient.invalidateQueries({
                       queryKey: sentryQueryKeys.projects(projectId),

@@ -9,7 +9,7 @@ describe('removed single session per worktree preference', () => {
   it('removes the preference and its behavior from frontend and backend', () => {
     const sources = [
       'src/types/preferences.ts',
-      'src/components/preferences/panes/ExperimentalPane.tsx',
+      'src/components/preferences/panes/GeneralPane.tsx',
       'src/components/preferences/preferences-search.ts',
       'src/components/chat/SessionChatModal.tsx',
       'src/components/titlebar/TitleBar.tsx',

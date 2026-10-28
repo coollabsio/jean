@@ -32,7 +32,7 @@ export function ContextLinkBadge({
   const extra = matches.length - 1
   const Icon = first.sessionId ? MessageSquare : GitBranch
   const className = cn(
-    'inline-flex min-w-0 max-w-[7rem] shrink items-center gap-1 self-center rounded-full border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground sm:max-w-[14rem]',
+    'inline-flex min-w-0 max-w-[7rem] shrink items-center gap-1 self-center rounded-full border border-border bg-muted px-1.5 py-0.5 text-2xs font-medium text-muted-foreground sm:max-w-[14rem]',
     onOpen && 'cursor-pointer hover:bg-accent hover:text-accent-foreground'
   )
   const content = (

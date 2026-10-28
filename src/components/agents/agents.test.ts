@@ -19,7 +19,8 @@ import {
   visibleAgentTabs,
   withRunningAgents,
 } from './agents'
-import { describeApproval, formatRelative } from './AgentActivity'
+import { describeApproval } from './AgentActivity'
+import { formatRelative } from '@/lib/relative-time'
 import { groupTasks, taskStatusLabel } from './AgentTasks'
 import { formatInterval } from './AgentSchedules'
 import { notificationPreview, splitNotifications } from './AgentInbox'
@@ -69,7 +70,7 @@ describe('agentStatusLabel', () => {
     expect(agentStatusLabel(agent({ status: 'working' }))).toBe('Working')
     expect(
       agentStatusLabel(agent({ status: 'working', runningTasks: 2 }))
-    ).toBe('Working (2 tasks)')
+    ).toBe('Working (2 runs)')
     expect(agentStatusLabel(agent({ unreadNotifications: 1 }))).toBe(
       '1 new notification'
     )
@@ -328,6 +329,10 @@ describe('agent rows', () => {
     expect(
       agentRowDot(agent({ unreadNotifications: 2, pendingApprovals: 1 }))
     ).toBe('attention')
+    expect(agentRowDot(agent({ status: 'working' }))).toBe('working')
+    expect(
+      agentRowDot(agent({ status: 'working', unreadNotifications: 1 }))
+    ).toBe('unread')
     expect(agentRowDot(agent({}))).toBe(null)
   })
 })

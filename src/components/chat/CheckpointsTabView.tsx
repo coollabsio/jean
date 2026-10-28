@@ -40,7 +40,15 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { Button } from '@/components/ui/button'
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty'
 import { cn } from '@/lib/utils'
+import { formatRelative } from '@/lib/relative-time'
 import { getFilename } from '@/lib/path-utils'
 import { getFileLineStats } from '@/lib/diff-stats'
 import { useTheme } from '@/hooks/use-theme'
@@ -65,17 +73,29 @@ const NOOP_LINE_SELECTED = (_range: SelectedLineRange | null) => {}
 const NOOP_REMOVE_COMMENT = (_id: string) => {}
 const EMPTY_ANNOTATIONS: never[] = []
 
-function formatRelativeTime(unixSecs: number): string {
-  const diff = Date.now() - unixSecs * 1000
-  const seconds = Math.floor(diff / 1000)
-  if (seconds < 60) return 'just now'
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  if (days < 30) return `${days}d ago`
-  return new Date(unixSecs * 1000).toLocaleDateString()
+function PanelEmpty({
+  icon,
+  title,
+  description,
+  children,
+}: {
+  icon?: React.ReactNode
+  title: string
+  description?: string
+  children?: React.ReactNode
+}) {
+  return (
+    <Empty className="p-6 md:p-6">
+      <EmptyHeader>
+        {icon ? <EmptyMedia variant="icon">{icon}</EmptyMedia> : null}
+        <EmptyTitle className="text-sm">{title}</EmptyTitle>
+        {description ? (
+          <EmptyDescription className="text-xs">{description}</EmptyDescription>
+        ) : null}
+      </EmptyHeader>
+      {children}
+    </Empty>
+  )
 }
 
 function statusLabel(status: AiCheckpoint['status']): string {
@@ -313,14 +333,11 @@ export function CheckpointsTabView({
 
   if (checkpoints.length === 0) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">
-        <History className="h-8 w-8 opacity-40" />
-        <p className="font-medium text-foreground">No AI checkpoints yet</p>
-        <p className="max-w-sm text-xs">
-          Jean automatically snapshots this worktree before each agent turn so
-          you can review AI changes and restore any previous state.
-        </p>
-      </div>
+      <PanelEmpty
+        icon={<History />}
+        title="No AI checkpoints yet"
+        description="Jean automatically snapshots this worktree before each agent turn so you can review AI changes and restore any previous state."
+      />
     )
   }
 
@@ -347,14 +364,14 @@ export function CheckpointsTabView({
                     setMobileDetailOpen(true)
                     setMobileFilesOpen(false)
                   }}
-                  className="flex min-h-16 w-full items-start gap-3 border-b border-border/50 px-4 py-3 text-left active:bg-accent"
+                  className="flex min-h-16 w-full items-start gap-3 border-b border-border px-4 py-3 text-left active:bg-accent"
                 >
                   <div className="min-w-0 flex-1">
                     <p className="line-clamp-2 text-sm font-medium leading-snug">
                       {cp.userMessagePreview || 'Agent turn'}
                     </p>
                     <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
-                      <span>{formatRelativeTime(cp.createdAt)}</span>
+                      <span>{formatRelative(cp.createdAt)}</span>
                       <span>·</span>
                       <span>{statusLabel(cp.status)}</span>
                       {fileCount != null && (
@@ -402,7 +419,7 @@ export function CheckpointsTabView({
                   {selected.userMessagePreview || 'Agent turn'}
                 </p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  {formatRelativeTime(selected.createdAt)} ·{' '}
+                  {formatRelative(selected.createdAt)} ·{' '}
                   {statusLabel(selected.status)}
                 </p>
               </div>
@@ -427,20 +444,21 @@ export function CheckpointsTabView({
               {diffError}
             </div>
           ) : flattenedFiles.length === 0 ? (
-            <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">
-              <FileText className="h-7 w-7 opacity-40" />
-              <p>No file changes in this checkpoint</p>
+            <PanelEmpty
+              icon={<FileText />}
+              title="No file changes in this checkpoint"
+            >
               {selected && (
                 <Button
                   variant="ghost"
-                  className="mt-2 text-destructive"
+                  className="text-destructive"
                   onClick={() => void handleDelete(selected)}
                 >
                   <Trash2 className="mr-2 h-4 w-4" />
                   Delete checkpoint
                 </Button>
               )}
-            </div>
+            </PanelEmpty>
           ) : (
             <div className="relative flex min-h-0 flex-1 flex-col">
               {selectedFile && (
@@ -542,11 +560,6 @@ export function CheckpointsTabView({
       >
         <ResizablePanel defaultSize={28} minSize={18} maxSize={45}>
           <div className="flex h-full flex-col border-r border-border">
-            <div className="flex items-center gap-2 border-b border-border px-3 py-2 text-xs font-medium text-muted-foreground">
-              <History className="h-3.5 w-3.5" />
-              AI Checkpoints
-              <span className="ml-auto tabular-nums">{checkpoints.length}</span>
-            </div>
             <div className="min-h-0 flex-1 overflow-y-auto">
               {checkpoints.map(cp => {
                 const isActive = cp.id === selectedId
@@ -560,45 +573,35 @@ export function CheckpointsTabView({
                     type="button"
                     onClick={() => setSelectedId(cp.id)}
                     className={cn(
-                      'flex w-full flex-col gap-1 border-b border-border/50 px-3 py-2.5 text-left transition-colors',
-                      isActive ? 'bg-accent/60' : 'hover:bg-muted/50'
+                      'w-full border-b border-border px-3 py-2.5 text-left transition-colors hover:bg-muted/50',
+                      isActive && 'bg-accent'
                     )}
                   >
-                    <div className="flex items-start gap-2">
-                      <ChevronRight
-                        className={cn(
-                          'mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform',
-                          isActive && 'rotate-90 text-foreground'
-                        )}
-                      />
-                      <div className="min-w-0 flex-1">
-                        <p className="line-clamp-2 text-xs font-medium leading-snug">
-                          {cp.userMessagePreview || 'Agent turn'}
-                        </p>
-                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground">
-                          <span>{formatRelativeTime(cp.createdAt)}</span>
+                    <p className="line-clamp-2 text-sm leading-snug">
+                      {cp.userMessagePreview || 'Agent turn'}
+                    </p>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+                      <span>{formatRelative(cp.createdAt)}</span>
+                      <span className="opacity-50">·</span>
+                      <span>{statusLabel(cp.status)}</span>
+                      {fileCount != null && (
+                        <>
                           <span className="opacity-50">·</span>
-                          <span>{statusLabel(cp.status)}</span>
-                          {fileCount != null && (
-                            <>
-                              <span className="opacity-50">·</span>
-                              <span>
-                                {fileCount} file{fileCount === 1 ? '' : 's'}
-                              </span>
-                            </>
-                          )}
-                          {(cp.totalAdditions > 0 || cp.totalDeletions > 0) && (
-                            <>
-                              <span className="text-success">
-                                +{cp.totalAdditions}
-                              </span>
-                              <span className="text-destructive">
-                                -{cp.totalDeletions}
-                              </span>
-                            </>
-                          )}
-                        </div>
-                      </div>
+                          <span>
+                            {fileCount} file{fileCount === 1 ? '' : 's'}
+                          </span>
+                        </>
+                      )}
+                      {(cp.totalAdditions > 0 || cp.totalDeletions > 0) && (
+                        <>
+                          <span className="text-success">
+                            +{cp.totalAdditions}
+                          </span>
+                          <span className="text-destructive">
+                            -{cp.totalDeletions}
+                          </span>
+                        </>
+                      )}
                     </div>
                   </button>
                 )
@@ -617,7 +620,7 @@ export function CheckpointsTabView({
                   <p className="truncate text-xs font-medium">
                     {selected.userMessagePreview || 'Agent turn'}
                   </p>
-                  <p className="text-[10px] text-muted-foreground">
+                  <p className="text-2xs text-muted-foreground">
                     Snapshot {selected.startCommit.slice(0, 7)}
                     {selected.endCommit
                       ? ` → ${selected.endCommit.slice(0, 7)}`
@@ -670,10 +673,10 @@ export function CheckpointsTabView({
                 {diffError}
               </div>
             ) : flattenedFiles.length === 0 ? (
-              <div className="flex flex-1 flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
-                <FileText className="h-6 w-6 opacity-40" />
-                No file changes in this checkpoint
-              </div>
+              <PanelEmpty
+                icon={<FileText />}
+                title="No file changes in this checkpoint"
+              />
             ) : (
               <ResizablePanelGroup
                 direction="horizontal"
@@ -704,7 +707,7 @@ export function CheckpointsTabView({
                           />
                           {getFilename(file.fileName)}
                           {(file.additions > 0 || file.deletions > 0) && (
-                            <span className="ml-1.5 font-sans text-[10px] text-muted-foreground">
+                            <span className="ml-1.5 font-sans text-2xs text-muted-foreground">
                               <span className="text-success">
                                 +{file.additions}
                               </span>

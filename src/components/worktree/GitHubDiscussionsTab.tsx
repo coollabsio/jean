@@ -11,7 +11,7 @@ import { GhAuthError } from '@/components/shared/GhAuthError'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
-import { formatRelative } from '@/components/agents/AgentActivity'
+import { formatRelative } from '@/lib/relative-time'
 import { cn } from '@/lib/utils'
 import {
   ContextLinkBadge,
@@ -235,12 +235,12 @@ function DiscussionItem({
             {discussion.title}
           </span>
           {discussion.category && (
-            <span className="shrink-0 rounded-full border border-border px-1.5 py-px text-[11px] text-muted-foreground">
+            <span className="shrink-0 rounded-full border border-border px-1.5 py-px text-2xs text-muted-foreground">
               {discussion.category.name}
             </span>
           )}
           {discussion.isAnswered && (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-success/20 bg-success/10 px-1.5 py-px text-[11px] font-medium text-success">
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-success/20 bg-success/10 px-1.5 py-px text-2xs font-medium text-success">
               <CheckCircle2 className="h-3 w-3" />
               Answered
             </span>

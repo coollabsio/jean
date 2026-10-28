@@ -1,4 +1,5 @@
 import { SettingsSection } from '@/components/preferences/SettingsSection'
+import { InlineField } from '@/components/preferences/InlineField'
 import React, { useState, useCallback, useMemo, useRef } from 'react'
 import {
   Check,
@@ -21,7 +22,6 @@ import {
 import { DirectoryBrowser } from '@/components/projects/DirectoryBrowser'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import {
@@ -58,23 +58,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { BackendLabel } from '@/components/ui/backend-label'
+import { BackendLabel, getBackendLabel } from '@/components/ui/backend-label'
 import { useInstalledBackends } from '@/hooks/useInstalledBackends'
 import type { CliBackend } from '@/types/preferences'
+import { overrideHint } from './override-hint'
 
-const InlineField: React.FC<{
-  label: string
-  description?: React.ReactNode
-  children: React.ReactNode
-}> = ({ label, description, children }) => (
-  <div className="space-y-2">
-    <Label className="text-sm text-foreground">{label}</Label>
-    {description && (
-      <div className="text-xs text-muted-foreground">{description}</div>
-    )}
-    {children}
-  </div>
-)
+const blurOnEnter = (event: React.KeyboardEvent<HTMLInputElement>) => {
+  if (event.key === 'Enter') event.currentTarget.blur()
+}
 
 export function GeneralPane({
   projectId,
@@ -139,15 +130,20 @@ export function GeneralPane({
         : null
 
   const displayedName = localName ?? project?.name ?? ''
-  const nameChanged = localName !== null && localName !== (project?.name ?? '')
 
-  const handleSaveName = useCallback(() => {
+  const savedName = project?.name ?? ''
+  const handleCommitName = useCallback(() => {
     if (localName === null) return
+    const name = localName.trim()
+    if (!name || name === savedName) {
+      setLocalName(null)
+      return
+    }
     updateSettings.mutate(
-      { projectId, name: localName.trim() },
+      { projectId, name },
       { onSuccess: () => setLocalName(null) }
     )
-  }, [localName, projectId, updateSettings])
+  }, [localName, projectId, savedName, updateSettings])
 
   const selectedBranch = project?.default_branch ?? ''
   const displayedSystemPrompt =
@@ -181,35 +177,37 @@ export function GeneralPane({
     [projectId, updateSettings]
   )
 
-  const systemPromptChanged =
-    localSystemPrompt !== null &&
-    localSystemPrompt !== (project?.custom_system_prompt ?? '')
-
-  const handleSaveSystemPrompt = useCallback(() => {
+  const savedSystemPrompt = project?.custom_system_prompt ?? ''
+  const handleCommitSystemPrompt = useCallback(() => {
     if (localSystemPrompt === null) return
+    if (localSystemPrompt === savedSystemPrompt) {
+      setLocalSystemPrompt(null)
+      return
+    }
     updateSettings.mutate(
       { projectId, customSystemPrompt: localSystemPrompt },
       { onSuccess: () => setLocalSystemPrompt(null) }
     )
-  }, [localSystemPrompt, projectId, updateSettings])
+  }, [localSystemPrompt, projectId, savedSystemPrompt, updateSettings])
 
   const displayedWorktreesDir =
     localWorktreesDir ?? project?.worktrees_dir ?? ''
 
-  const worktreesDirChanged =
-    localWorktreesDir !== null &&
-    localWorktreesDir !== (project?.worktrees_dir ?? '')
-
-  const handleSaveWorktreesDir = useCallback(() => {
-    if (localWorktreesDir === null) return
-    updateSettings.mutate(
-      {
-        projectId,
-        worktreesDir: localWorktreesDir.trim(),
-      },
-      { onSuccess: () => setLocalWorktreesDir(null) }
-    )
-  }, [localWorktreesDir, projectId, updateSettings])
+  const savedWorktreesDir = project?.worktrees_dir ?? ''
+  const saveWorktreesDir = useCallback(
+    (value: string) => {
+      const worktreesDir = value.trim()
+      if (worktreesDir === savedWorktreesDir) {
+        setLocalWorktreesDir(null)
+        return
+      }
+      updateSettings.mutate(
+        { projectId, worktreesDir },
+        { onSuccess: () => setLocalWorktreesDir(null) }
+      )
+    },
+    [projectId, savedWorktreesDir, updateSettings]
+  )
 
   const handleResetWorktreesDir = useCallback(() => {
     updateSettings.mutate(
@@ -232,46 +230,41 @@ export function GeneralPane({
       multiple: false,
       title: 'Select worktrees base directory',
     })
-    if (selected) {
-      setLocalWorktreesDir(selected)
-    }
-  }, [])
+    if (selected) saveWorktreesDir(selected)
+  }, [saveWorktreesDir])
+
+  const globalBackend = preferences?.default_backend
+  const backendHint = overrideHint(
+    !!project?.default_backend,
+    globalBackend ? getBackendLabel(globalBackend) : null
+  )
+  const providerHint = overrideHint(
+    !!project?.default_provider,
+    preferences ? (preferences.default_provider ?? 'Anthropic') : null
+  )
 
   return (
     <>
-      <div className="space-y-6">
-        <SettingsSection title="Project Name">
+      <div className="space-y-8">
+        <SettingsSection title="Project">
           <InlineField
-            label="Display Name"
-            description="Rename the project without changing the underlying folder"
+            label="Name"
+            description="Renames the project, not the folder"
+            htmlFor="project-name"
           >
-            <div className="flex items-center gap-2">
-              <Input
-                value={displayedName}
-                onChange={e => setLocalName(e.target.value)}
-                className="flex-1 text-base md:text-sm"
-              />
-              <Button
-                size="sm"
-                onClick={handleSaveName}
-                disabled={!nameChanged || updateSettings.isPending}
-              >
-                {updateSettings.isPending && (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                )}
-                Save
-              </Button>
-            </div>
+            <Input
+              id="project-name"
+              value={displayedName}
+              onChange={e => setLocalName(e.target.value)}
+              onBlur={handleCommitName}
+              onKeyDown={blurOnEnter}
+              className="min-w-0 flex-1 text-base md:text-sm"
+            />
           </InlineField>
-        </SettingsSection>
 
-        <SettingsSection title="Avatar">
-          <InlineField
-            label="Project Avatar"
-            description="Custom image displayed in the sidebar"
-          >
-            <div className="flex items-center gap-3">
-              <div className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-muted-foreground/20 overflow-hidden">
+          <InlineField label="Avatar" description="Shown in the sidebar">
+            <div className="flex min-w-0 flex-1 items-center gap-3">
+              <div className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted-foreground/20">
                 {avatarUrl ? (
                   <img
                     src={avatarUrl}
@@ -280,64 +273,60 @@ export function GeneralPane({
                     onError={() => setImgErrorKey(avatarKey)}
                   />
                 ) : (
-                  <span className="text-lg font-medium uppercase text-muted-foreground">
+                  <span className="text-base font-medium uppercase text-muted-foreground">
                     {project?.name?.[0] ?? '?'}
                   </span>
                 )}
               </div>
-              <div className="flex gap-2">
-                <input
-                  ref={avatarInputRef}
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp,image/gif"
-                  className="hidden"
-                  onChange={e => {
-                    const file = e.target.files?.[0]
-                    e.target.value = ''
-                    if (file) setProjectAvatar.mutate({ projectId, file })
-                  }}
-                />
+              <input
+                ref={avatarInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                className="hidden"
+                onChange={e => {
+                  const file = e.target.files?.[0]
+                  e.target.value = ''
+                  if (file) setProjectAvatar.mutate({ projectId, file })
+                }}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => avatarInputRef.current?.click()}
+                disabled={setProjectAvatar.isPending}
+              >
+                {setProjectAvatar.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <ImageIcon className="h-4 w-4" />
+                )}
+                {project?.avatar_path || project?.default_avatar_path
+                  ? 'Change'
+                  : 'Add Image'}
+              </Button>
+              {project?.avatar_path && (
                 <Button
-                  variant="outline"
+                  variant="ghost"
                   size="sm"
-                  onClick={() => avatarInputRef.current?.click()}
-                  disabled={setProjectAvatar.isPending}
+                  onClick={() => removeProjectAvatar.mutate(projectId)}
+                  disabled={removeProjectAvatar.isPending}
                 >
-                  {setProjectAvatar.isPending ? (
+                  {removeProjectAvatar.isPending ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
-                    <ImageIcon className="h-4 w-4" />
+                    <X className="h-4 w-4" />
                   )}
-                  {project?.avatar_path || project?.default_avatar_path
-                    ? 'Change'
-                    : 'Add Image'}
+                  Remove
                 </Button>
-                {project?.avatar_path && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => removeProjectAvatar.mutate(projectId)}
-                    disabled={removeProjectAvatar.isPending}
-                  >
-                    {removeProjectAvatar.isPending ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <X className="h-4 w-4" />
-                    )}
-                    Remove
-                  </Button>
-                )}
-              </div>
+              )}
             </div>
           </InlineField>
-        </SettingsSection>
 
-        <SettingsSection title="Defaults">
           <InlineField
             label="Default Branch"
-            description="New worktrees will be created from this branch"
+            description="New worktrees start from this branch"
           >
-            <div className="flex items-center gap-2">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
               <div className="min-w-0 flex-1">
                 {branchesLoading ? (
                   <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
@@ -429,42 +418,66 @@ export function GeneralPane({
             </div>
           </InlineField>
 
-          {profiles.length > 0 && (
-            <InlineField
-              label="Default Provider"
-              description="Default provider for new sessions in this project"
-            >
-              <Select
-                value={project?.default_provider ?? 'global-default'}
-                onValueChange={handleProviderChange}
+          <InlineField
+            label="Worktrees Location"
+            description="Where new worktrees are created"
+            htmlFor="project-worktrees-dir"
+          >
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <Input
+                id="project-worktrees-dir"
+                placeholder="~/jean (default)"
+                value={displayedWorktreesDir}
+                onChange={e => setLocalWorktreesDir(e.target.value)}
+                onBlur={() => {
+                  if (localWorktreesDir !== null)
+                    saveWorktreesDir(localWorktreesDir)
+                }}
+                onKeyDown={blurOnEnter}
+                className="min-w-0 flex-1 text-base md:text-sm"
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleBrowseWorktreesDir}
               >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="global-default">
-                    Use global default
-                  </SelectItem>
-                  <SelectItem value="__anthropic__">Anthropic</SelectItem>
-                  {profiles.map(p => (
-                    <SelectItem key={p.name} value={p.name}>
-                      {p.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </InlineField>
-          )}
+                <FolderOpen className="h-4 w-4" />
+                Browse
+              </Button>
+              {project?.worktrees_dir && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Reset to default"
+                      onClick={handleResetWorktreesDir}
+                      disabled={updateSettings.isPending}
+                    >
+                      <RotateCcw className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Reset to ~/jean</TooltipContent>
+                </Tooltip>
+              )}
+            </div>
+          </InlineField>
+        </SettingsSection>
 
+        <SettingsSection title="Sessions">
           <InlineField
             label="Default Backend"
-            description="CLI to use for new sessions in this project"
+            description={backendHint}
+            htmlFor="project-default-backend"
           >
             <Select
               value={project?.default_backend ?? 'global-default'}
               onValueChange={handleBackendChange}
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger
+                id="project-default-backend"
+                className="w-full min-w-0 flex-1"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -495,84 +508,53 @@ export function GeneralPane({
               </SelectContent>
             </Select>
           </InlineField>
-        </SettingsSection>
 
-        <SettingsSection title="Worktrees Location">
-          <InlineField
-            label="Base Directory"
-            description={
-              <>
-                Where new worktrees are created. Defaults to{' '}
-                <code className="text-[11px] bg-muted px-1 py-0.5 rounded">
-                  ~/jean
-                </code>
-              </>
-            }
-          >
-            <div className="flex items-center gap-2">
-              <Input
-                placeholder="~/jean (default)"
-                value={displayedWorktreesDir}
-                onChange={e => setLocalWorktreesDir(e.target.value)}
-                className="flex-1 text-base md:text-sm"
-              />
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleBrowseWorktreesDir}
+          {profiles.length > 0 && (
+            <InlineField
+              label="Default Provider"
+              description={providerHint}
+              htmlFor="project-default-provider"
+            >
+              <Select
+                value={project?.default_provider ?? 'global-default'}
+                onValueChange={handleProviderChange}
               >
-                <FolderOpen className="h-4 w-4" />
-                Browse
-              </Button>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                onClick={handleSaveWorktreesDir}
-                disabled={!worktreesDirChanged || updateSettings.isPending}
-              >
-                {updateSettings.isPending && (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                )}
-                Save
-              </Button>
-              {project?.worktrees_dir && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleResetWorktreesDir}
-                  disabled={updateSettings.isPending}
+                <SelectTrigger
+                  id="project-default-provider"
+                  className="w-full min-w-0 flex-1"
                 >
-                  <RotateCcw className="h-4 w-4" />
-                  Reset to default
-                </Button>
-              )}
-            </div>
-          </InlineField>
-        </SettingsSection>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="global-default">
+                    Use global default
+                  </SelectItem>
+                  <SelectItem value="__anthropic__">Anthropic</SelectItem>
+                  {profiles.map(p => (
+                    <SelectItem key={p.name} value={p.name}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </InlineField>
+          )}
 
-        <SettingsSection title="System Prompt">
           <InlineField
-            label="Custom System Prompt"
-            description="Appended to every session's system prompt in this project"
+            label="System Prompt"
+            description="Added to every session in this project, after the global prompt"
+            htmlFor="project-system-prompt"
+            layout="stacked"
           >
             <Textarea
+              id="project-system-prompt"
               placeholder="e.g. Always use TypeScript strict mode. Prefer functional components..."
               value={displayedSystemPrompt}
               onChange={e => setLocalSystemPrompt(e.target.value)}
+              onBlur={handleCommitSystemPrompt}
               rows={4}
               className="resize-y text-base md:text-sm"
             />
-            <Button
-              size="sm"
-              onClick={handleSaveSystemPrompt}
-              disabled={!systemPromptChanged || updateSettings.isPending}
-            >
-              {updateSettings.isPending && (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              )}
-              Save
-            </Button>
           </InlineField>
         </SettingsSection>
       </div>
@@ -580,7 +562,7 @@ export function GeneralPane({
       <DirectoryBrowser
         open={worktreesBrowserOpen}
         onOpenChange={setWorktreesBrowserOpen}
-        onSelect={setLocalWorktreesDir}
+        onSelect={saveWorktreesDir}
         mode="select"
         title="Select worktrees base directory"
         description="Choose the parent directory where new worktrees will be created."

@@ -55,7 +55,7 @@ export function InlineError({
             {showLog ? 'Hide log' : 'Show log'}
           </button>
           {showLog && (
-            <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded bg-muted/60 p-2 font-mono text-[11px] text-muted-foreground">
+            <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded bg-muted/60 p-2 font-mono text-2xs text-muted-foreground">
               {details}
             </pre>
           )}

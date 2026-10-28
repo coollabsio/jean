@@ -84,14 +84,14 @@ export function SkillBadge({ skill, onRemove, compact }: SkillBadgeProps) {
             >
               <Wand2
                 className={cn(
-                  'shrink-0 text-purple-600 dark:text-purple-400',
+                  'shrink-0 text-info',
                   compact ? 'h-3 w-3' : 'h-3.5 w-3.5'
                 )}
               />
               <span
                 className={cn(
                   'font-medium truncate max-w-[120px]',
-                  compact ? 'text-[10px]' : 'text-xs'
+                  compact ? 'text-2xs' : 'text-xs'
                 )}
               >
                 /{skill.name}
@@ -128,7 +128,7 @@ export function SkillBadge({ skill, onRemove, compact }: SkillBadgeProps) {
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
         <DialogContent className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-auto sm:max-h-[85vh] sm:!rounded-lg sm:p-4 bg-background/95">
           <DialogTitle className="text-sm font-medium flex items-center gap-2">
-            <Wand2 className="h-4 w-4 text-purple-600 dark:text-purple-400" />
+            <Wand2 className="size-4 text-info" />
             Skill: {skill.name}
           </DialogTitle>
           <DialogDescription className="sr-only">

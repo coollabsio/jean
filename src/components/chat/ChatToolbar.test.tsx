@@ -196,3 +196,17 @@ describe('ChatToolbar zen mode', () => {
     expect(await screen.findByRole('menu')).toBeInTheDocument()
   })
 })
+
+describe('ChatToolbar PR link', () => {
+  const pr = { prUrl: 'https://github.com/o/r/pull/42', prNumber: 42 }
+
+  it('links the PR in the full-page chat, which has no session header', () => {
+    renderChatToolbar(pr)
+    expect(screen.getByText('#42')).toBeInTheDocument()
+  })
+
+  it('leaves the PR link to the SessionChatModal header', () => {
+    renderChatToolbar({ ...pr, isModal: true })
+    expect(screen.queryByText('#42')).toBeNull()
+  })
+})

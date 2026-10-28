@@ -1,7 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getModifierSymbol } from '@/lib/platform'
-import { Kbd } from '@/components/ui/kbd'
-import { useIsMobile } from '@/hooks/use-mobile'
 import {
   Zap,
   CircleDot,
@@ -97,7 +94,6 @@ function NewWorktreeModalContent() {
   const { triggerLogin: triggerGhLogin, isGhInstalled } = useGhLogin()
   const { triggerLogin: triggerGlabLogin, isGlabInstalled } = useGlabLogin()
   const { newWorktreeModalOpen } = useUIStore()
-  const isMobile = useIsMobile()
 
   // Local state
   const [activeTab, setActiveTab] = useState<TabId>('quick')
@@ -351,46 +347,23 @@ function NewWorktreeModalContent() {
       <Dialog
         open={newWorktreeModalOpen}
         onOpenChange={open => {
-          console.log('[DIALOG-DEBUG] Parent onOpenChange', {
-            open,
-            previewItem: !!previewItem,
-            previewOpenRef: previewOpenRef.current,
-          })
           if (!open && (previewItem || previewOpenRef.current)) return
           handlers.handleOpenChange(open)
         }}
       >
         <DialogContent
-          className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 flex flex-col overflow-hidden"
+          className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-[85vh] sm:!rounded-lg flex flex-col overflow-hidden"
           onKeyDown={handleKeyDown}
           onEscapeKeyDown={e => {
-            console.log('[DIALOG-DEBUG] Parent onEscapeKeyDown', {
-              previewItem: !!previewItem,
-              previewOpenRef: previewOpenRef.current,
-            })
             if (previewItem || previewOpenRef.current) e.preventDefault()
           }}
           onPointerDownOutside={e => {
-            console.log('[DIALOG-DEBUG] Parent onPointerDownOutside', {
-              previewItem: !!previewItem,
-              previewOpenRef: previewOpenRef.current,
-              target: (e.target as HTMLElement)?.tagName,
-            })
             if (previewItem || previewOpenRef.current) e.preventDefault()
           }}
           onInteractOutside={e => {
-            console.log('[DIALOG-DEBUG] Parent onInteractOutside', {
-              previewItem: !!previewItem,
-              previewOpenRef: previewOpenRef.current,
-              type: e.type,
-            })
             if (previewItem || previewOpenRef.current) e.preventDefault()
           }}
           onFocusOutside={e => {
-            console.log('[DIALOG-DEBUG] Parent onFocusOutside', {
-              previewItem: !!previewItem,
-              previewOpenRef: previewOpenRef.current,
-            })
             if (previewItem || previewOpenRef.current) e.preventDefault()
           }}
         >
@@ -677,19 +650,6 @@ function NewWorktreeModalContent() {
               />
             )}
           </div>
-
-          {/* Background open hint */}
-          {activeTab !== 'quick' && !isMobile && (
-            <div className="shrink-0 border-t border-border px-3 py-1.5">
-              <span className="text-xs text-muted-foreground">
-                Hold{' '}
-                <Kbd className="mx-0.5 h-5 min-w-5 px-1 text-[10px]">
-                  {getModifierSymbol()}
-                </Kbd>{' '}
-                to open in background
-              </span>
-            </div>
-          )}
         </DialogContent>
       </Dialog>
       {previewItem && data.selectedProject && (
@@ -697,15 +657,11 @@ function NewWorktreeModalContent() {
           open={!!previewItem}
           onOpenChange={open => {
             if (!open) {
-              console.log(
-                '[DIALOG-DEBUG] Preview closing — setting previewOpenRef=true, clearing after rAF'
-              )
               previewOpenRef.current = true
               setPreviewItem(null)
               // Clear ref after the current event cycle so parent guards still block
               requestAnimationFrame(() => {
                 previewOpenRef.current = false
-                console.log('[DIALOG-DEBUG] previewOpenRef cleared')
               })
             }
           }}

@@ -73,7 +73,7 @@ export function DevinMcpSection() {
       {PRESETS.map(preset => {
         const snippet = JSON.stringify({ mcpServers: preset.config }, null, 2)
         return (
-          <div key={preset.name} className="space-y-2 rounded-md border p-3">
+          <div key={preset.name} className="space-y-2">
             <h4 className="text-sm font-medium">{preset.name}</h4>
             <p className="text-sm text-muted-foreground">
               {preset.description}

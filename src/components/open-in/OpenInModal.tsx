@@ -60,6 +60,7 @@ import { getEditorLabel, getTerminalLabel } from '@/types/preferences'
 import { notify } from '@/lib/notifications'
 import { openExternal } from '@/lib/platform'
 import { cn } from '@/lib/utils'
+import { Kbd } from '@/components/ui/kbd'
 import {
   canOpenInEditor,
   canOpenInFinder,
@@ -558,9 +559,9 @@ export function OpenInModal() {
           <span className="truncate">{option.label}</span>
         </div>
         {option.key && (
-          <kbd className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded ml-2 shrink-0">
+          <Kbd modHint={option.metaKey} className="ml-2 shrink-0">
             {option.metaKey ? `⌘${option.key}` : option.key}
-          </kbd>
+          </Kbd>
         )}
       </button>
     )
@@ -573,7 +574,7 @@ export function OpenInModal() {
         tabIndex={-1}
         className={cn(
           'p-0 outline-none',
-          useWideLayout ? 'sm:max-w-[560px]' : 'sm:max-w-[280px]'
+          useWideLayout ? 'sm:max-w-lg' : 'sm:max-w-xs'
         )}
         onOpenAutoFocus={e => {
           e.preventDefault()
@@ -588,18 +589,18 @@ export function OpenInModal() {
         <div className="min-w-0 pb-2">{baseOptions.map(renderOption)}</div>
 
         {portOptions.length > 0 && (
-          <div className="min-w-0 border-t pb-2">
-            <div className="px-4 pt-2 pb-1">
-              <span className="text-xs text-muted-foreground">Ports</span>
+          <div className="min-w-0 pb-2">
+            <div className="px-4 py-1.5 text-xs text-muted-foreground">
+              Ports
             </div>
             {portOptions.map(renderOption)}
           </div>
         )}
 
         {contextOptions.length > 0 && (
-          <div className="min-w-0 border-t pb-2">
-            <div className="px-4 pt-2 pb-1">
-              <span className="text-xs text-muted-foreground">Contexts</span>
+          <div className="min-w-0 pb-2">
+            <div className="px-4 py-1.5 text-xs text-muted-foreground">
+              Contexts
             </div>
             {useWideLayout ? (
               <div className="grid grid-cols-2">

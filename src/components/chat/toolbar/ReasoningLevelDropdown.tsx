@@ -115,7 +115,7 @@ export function ReasoningLevelDropdown({
                   {option.tokens ?? option.description}
                 </span>
               )}
-              {showShortcuts && <Kbd className="ml-2 text-[10px]">{i + 1}</Kbd>}
+              {showShortcuts && <Kbd className="ml-2 text-2xs">{i + 1}</Kbd>}
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>

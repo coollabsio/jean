@@ -21,7 +21,7 @@ export function ToastActionLabel({ children }: { children: React.ReactNode }) {
     <span className="inline-flex items-center gap-1.5">
       <span>{children}</span>
       {shouldShowToastActionShortcut() && (
-        <Kbd className="h-4 min-w-0 bg-primary-foreground/20 px-1 text-[10px] text-primary-foreground">
+        <Kbd className="h-4 min-w-0 bg-primary-foreground/20 px-1 text-2xs text-primary-foreground">
           {getToastActionShortcutLabel()}
         </Kbd>
       )}

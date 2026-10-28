@@ -135,7 +135,7 @@ export function ServersList({ servers, searchQuery }: ServersListProps) {
                           {serverSubtitle(project)}
                         </span>
                         {usesAdminUser(project) && (
-                          <span className="truncate text-[0.6875rem] text-amber-600 dark:text-amber-500">
+                          <span className="truncate text-[0.6875rem] text-warning">
                             Uses root · set up a restricted user
                           </span>
                         )}

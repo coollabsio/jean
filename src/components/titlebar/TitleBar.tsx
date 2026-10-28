@@ -1,7 +1,6 @@
 import type React from 'react'
-import { useState, useEffect, useCallback } from 'react'
 import { cn } from '@/lib/utils'
-import { isClientLinux, isClientMacOS, openExternal } from '@/lib/platform'
+import { isClientLinux, isClientMacOS } from '@/lib/platform'
 import { Button } from '@/components/ui/button'
 import {
   Tooltip,
@@ -9,37 +8,24 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { useUIStore } from '@/store/ui-store'
+import { Badge } from '@/components/ui/badge'
 import {
-  ArrowUpCircle,
-  Download,
-  Github,
-  Heart,
   Minimize2,
   PanelLeft,
   PanelLeftClose,
   PanelRight,
   PanelRightClose,
-  X,
 } from '@/components/icons/reicon'
 import { usePreferences } from '@/services/preferences'
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover'
-import { CLI_DISPLAY_NAMES, resolveCliPathUpdateAction } from '@/lib/cli-update'
-import type { PendingCliUpdate } from '@/store/ui-store'
-import { toast } from 'sonner'
 import { formatShortcutDisplay, DEFAULT_KEYBINDINGS } from '@/types/keybindings'
-import { isNativeApp, updateTargetLabel } from '@/lib/environment'
+import { isNativeApp } from '@/lib/environment'
 import { UnreadBell } from '@/components/unread/UnreadBell'
 import { useIsMobile } from '@/hooks/use-mobile'
-import { applyServerUpdate } from '@/hooks/useServerUpdateCheck'
 import { LinuxWindowControls } from './LinuxWindowControls'
 import { useRemoteConnections } from '@/lib/remote-connections'
 import { useProjectsStore } from '@/store/projects-store'
 import { resolveHeaderServerLabel } from './server-context'
-import { MinimizedCliUpdate } from './MinimizedCliUpdate'
+import { UpdatesIndicator } from './UpdatesIndicator'
 
 interface TitleBarProps {
   className?: string
@@ -132,13 +118,13 @@ export function TitleBar({
                 <Button
                   onClick={toggleLeftSidebar}
                   variant="ghost"
-                  size="icon"
+                  size="icon-xs"
                   aria-label={
                     leftSidebarVisible
                       ? 'Hide Left Sidebar'
                       : 'Show Left Sidebar'
                   }
-                  className="h-6 w-6 rounded-none text-foreground/70 hover:text-foreground"
+                  className="rounded-none text-foreground/70 hover:text-foreground"
                 >
                   {leftSidebarVisible ? (
                     <PanelLeftClose className="size-3.5" />
@@ -154,40 +140,6 @@ export function TitleBar({
                 </kbd>
               </TooltipContent>
             </Tooltip>
-            {native && !isMobile && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    onClick={() =>
-                      openExternal('https://github.com/coollabsio/jean')
-                    }
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6 rounded-none text-foreground/70 hover:text-foreground"
-                  >
-                    <Github className="size-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>GitHub</TooltipContent>
-              </Tooltip>
-            )}
-            {!isMobile && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    onClick={() =>
-                      openExternal('https://jean.build/sponsorships/')
-                    }
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6 rounded-none text-pink-600 hover:text-pink-500 dark:text-pink-500 dark:hover:text-pink-400"
-                  >
-                    <Heart className="size-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Sponsor</TooltipContent>
-              </Tooltip>
-            )}
           </div>
         )}
       </div>
@@ -202,9 +154,9 @@ export function TitleBar({
             {hideTitle ? '' : title}
           </span>
           {native && (
-            <span className="ml-2 flex shrink-0 items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+            <Badge variant="subtle" className="ml-2 text-2xs">
               {serverLabel}
-            </span>
+            </Badge>
           )}
         </div>
       ) : (
@@ -220,12 +172,13 @@ export function TitleBar({
           <div className="flex items-center gap-2">
             <UnreadBell title={title} hideTitle={hideTitle} />
             {native && (
-              <span
-                className="flex shrink-0 items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+              <Badge
+                variant="subtle"
+                className="text-2xs"
                 aria-label={`Current Jean server: ${serverLabel}`}
               >
                 {serverLabel}
-              </span>
+              </Badge>
             )}
           </div>
         </div>
@@ -242,8 +195,8 @@ export function TitleBar({
               <Button
                 onClick={toggleZenMode}
                 variant="ghost"
-                size="icon"
-                className="h-6 w-6 rounded-none text-foreground/70 hover:text-foreground"
+                size="icon-xs"
+                className="rounded-none text-foreground/70 hover:text-foreground"
                 aria-label="Exit zen mode"
                 data-testid="toggle-zen-mode"
               >
@@ -263,36 +216,15 @@ export function TitleBar({
         )}
         {!zenMode && (
           <>
-            {!native && !isMobile && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    onClick={() =>
-                      openExternal('https://github.com/coollabsio/jean')
-                    }
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6 rounded-none text-foreground/70 hover:text-foreground"
-                    data-testid="open-github-web"
-                  >
-                    <Github className="size-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>GitHub</TooltipContent>
-              </Tooltip>
-            )}
-            <MinimizedCliUpdate />
-            <CliUpdatesIndicator />
-            <ServerUpdateIndicator />
-            <UpdateIndicator />
+            <UpdatesIndicator />
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
                   onClick={toggleFileBrowser}
                   variant="ghost"
-                  size="icon"
+                  size="icon-xs"
                   className={cn(
-                    'h-6 w-6 rounded-none text-foreground/70 hover:text-foreground',
+                    'rounded-none text-foreground/70 hover:text-foreground',
                     fileBrowserVisible && 'bg-muted/50 text-foreground'
                   )}
                   aria-pressed={fileBrowserVisible}
@@ -322,195 +254,6 @@ export function TitleBar({
         {native && isClientLinux && <LinuxWindowControls />}
       </div>
     </div>
-  )
-}
-
-function CliUpdatesIndicator() {
-  const updates = useUIStore(state => state.availableCliUpdates)
-  const dismissCliUpdateNotice = useUIStore(
-    state => state.dismissCliUpdateNotice
-  )
-  const openCliUpdateModal = useUIStore(state => state.openCliUpdateModal)
-  const openCliLoginModal = useUIStore(state => state.openCliLoginModal)
-  const [open, setOpen] = useState(false)
-
-  const triggerUpdate = useCallback(
-    (update: PendingCliUpdate) => {
-      if (update.cliSource === 'path') {
-        const action = resolveCliPathUpdateAction(
-          update.type,
-          update.cliPath,
-          update.packageManager,
-          update.latestVersion
-        )
-        if (action) {
-          openCliLoginModal(update.type, action[0], action[1], 'update')
-        } else {
-          toast.error(
-            `Can't auto-update ${CLI_DISPLAY_NAMES[update.type]} (${updateTargetLabel()}). Update it manually via your package manager.`
-          )
-          return
-        }
-      } else {
-        openCliUpdateModal(update.type)
-      }
-      dismissCliUpdateNotice(update.type)
-    },
-    [dismissCliUpdateNotice, openCliUpdateModal, openCliLoginModal]
-  )
-
-  // Auto-close popover when all updates have been acted on / dismissed
-  useEffect(() => {
-    if (updates.length === 0) setOpen(false)
-  }, [updates.length])
-
-  if (updates.length === 0) return null
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <PopoverTrigger asChild>
-            <button
-              type="button"
-              className="relative mr-1.5 flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 text-[0.625rem] font-medium text-primary hover:bg-primary/25 transition-colors cursor-pointer"
-            >
-              <Download className="size-3" />
-              <span>{updates.length}</span>
-            </button>
-          </PopoverTrigger>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">
-          {updates.length} CLI update{updates.length > 1 ? 's' : ''} available (
-          {updateTargetLabel()})
-        </TooltipContent>
-      </Tooltip>
-      <PopoverContent align="end" className="w-72 p-0">
-        <div className="divide-y">
-          {updates.map(update => (
-            <div
-              key={update.type}
-              className="flex items-center justify-between px-3 py-2"
-            >
-              <div className="min-w-0">
-                <p className="text-xs font-medium truncate">
-                  {CLI_DISPLAY_NAMES[update.type]}
-                </p>
-                <p className="text-[0.625rem] text-muted-foreground">
-                  {updateTargetLabel()} · v{update.currentVersion} → v
-                  {update.latestVersion}
-                </p>
-              </div>
-              <div className="flex items-center gap-1 ml-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => triggerUpdate(update)}
-                  className="rounded px-2 py-0.5 text-[0.625rem] font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer"
-                >
-                  Update
-                </button>
-                <button
-                  type="button"
-                  onClick={() => dismissCliUpdateNotice(update.type)}
-                  aria-label="Dismiss update notice"
-                  className="rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
-                >
-                  <X className="size-3" />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </PopoverContent>
-    </Popover>
-  )
-}
-
-function ServerUpdateIndicator() {
-  const pending = useUIStore(state => state.pendingServerUpdate)
-  if (!pending) return null
-
-  const handleClick = () => {
-    if (!pending.canUpdate) {
-      toast.info(
-        `jean-server ${pending.latestVersion} is available (${updateTargetLabel()})`,
-        {
-          id: 'server-update-available',
-          description:
-            pending.reason ||
-            'This host cannot self-update. Replace the binary or image manually.',
-          duration: 12_000,
-        }
-      )
-      return
-    }
-    void applyServerUpdate(pending.latestVersion)
-  }
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          onClick={handleClick}
-          className="mr-1.5 flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 text-[0.625rem] font-medium text-primary hover:bg-primary/25 transition-colors cursor-pointer"
-        >
-          <ArrowUpCircle className="size-3.5" />
-          Server update
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom">
-        {pending.canUpdate
-          ? `Update jean-server on ${updateTargetLabel()} to v${pending.latestVersion} (currently v${pending.currentVersion})`
-          : `jean-server v${pending.latestVersion} available on ${updateTargetLabel()} — ${pending.reason || 'manual update required'}`}
-      </TooltipContent>
-    </Tooltip>
-  )
-}
-
-function UpdateIndicator() {
-  const pendingVersion = useUIStore(state => state.pendingUpdateVersion)
-  const readyVersion = useUIStore(state => state.updateReadyVersion)
-  const isInstalling = useUIStore(state => state.isUpdateInstalling)
-
-  // Ready takes priority; also show while deferred or mid-download so the user
-  // keeps a visible affordance after dismissing the modal.
-  const version = readyVersion ?? pendingVersion
-  if (!version && !isInstalling) return null
-
-  const label = readyVersion
-    ? 'Restart to update'
-    : isInstalling
-      ? 'Updating…'
-      : 'Update available'
-  const tooltip = readyVersion
-    ? `Restart to apply v${readyVersion}`
-    : isInstalling
-      ? version
-        ? `Downloading v${version}…`
-        : 'Downloading update…'
-      : `Update to v${version}`
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          onClick={() => {
-            if (isInstalling && !readyVersion) return
-            window.dispatchEvent(new Event('install-pending-update'))
-          }}
-          disabled={isInstalling && !readyVersion}
-          className="mr-1.5 flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 text-[0.625rem] font-medium text-primary hover:bg-primary/25 transition-colors cursor-pointer disabled:opacity-70 disabled:cursor-default"
-        >
-          <ArrowUpCircle className="size-3.5" />
-          {label}
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom">
-        {tooltip} ({updateTargetLabel()})
-      </TooltipContent>
-    </Tooltip>
   )
 }
 

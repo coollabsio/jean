@@ -5,6 +5,7 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
+  --text-2xs: 0.7rem;
   /* Border radius */
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -137,7 +138,7 @@
   --accent: #282828; /* coolgray-400 */
   --accent-foreground: #fafafa;
   --destructive: #dc2626; /* error red */
-  --warning: #fcd452; /* yellow */
+  --warning: #f59e0b; /* amber: distinct from the yellow primary */
   --warning-foreground: #101010;
   --success: #22c55e; /* green */
   --success-foreground: #101010;
@@ -602,12 +603,16 @@ body {
   line-height: var(--ui-line-height) !important;
 }
 
-/* Text size overrides - scale relative to UI font preference */
+/* Text size overrides - scale relative to UI font preference.
+   text-2xs replaces hard-coded text-[8-11px] so small labels follow the preference too. */
+.text-2xs {
+  font-size: calc(var(--ui-font-size) * 0.7) !important;
+}
 .text-xs {
   font-size: calc(var(--ui-font-size) * 0.85) !important;
 }
 .text-sm {
-  font-size: var(--ui-font-size) !important;
+  font-size: calc(var(--ui-font-size) * 0.93) !important;
 }
 .text-base {
   font-size: var(--ui-font-size) !important;
@@ -641,6 +646,11 @@ body:not(.native-app) kbd:not([data-web-visible]) {
   }
 }
 
+/* Modifier shortcut hints show only while the user holds ⌘/Ctrl/Alt. */
+html:not([data-mod-held]) [data-mod-hint] {
+  display: none !important;
+}
+
 /* UI text styling - font-sans uses UI font preference */
 .font-sans {
   font-family: var(--font-family-sans) !important;
@@ -654,11 +664,14 @@ body:not(.native-app) kbd:not([data-web-visible]) {
 }
 
 /* Inside chat context (.font-mono), text sizes scale relative to chat font */
+.font-mono .text-2xs {
+  font-size: calc(var(--chat-font-size) * 0.7) !important;
+}
 .font-mono .text-xs {
   font-size: calc(var(--chat-font-size) * 0.85) !important;
 }
 .font-mono .text-sm {
-  font-size: var(--chat-font-size) !important;
+  font-size: calc(var(--chat-font-size) * 0.93) !important;
 }
 .font-mono .text-base {
   font-size: var(--chat-font-size) !important;

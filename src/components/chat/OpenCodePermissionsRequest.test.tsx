@@ -34,8 +34,8 @@ describe('OpenCodePermissionsRequest', () => {
     expect(screen.getByText('/tmp/**')).toBeInTheDocument()
     expect(screen.getByText('/home/user/project')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Allow once' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Allow always' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve once' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Always approve' }))
     fireEvent.click(screen.getByRole('button', { name: 'Deny' }))
 
     expect(onOnce).toHaveBeenCalledTimes(1)

@@ -1,12 +1,8 @@
 import type { ReactNode } from 'react'
-import { Info } from '@/components/icons/reicon'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
+import { Empty, EmptyDescription, EmptyHeader } from '@/components/ui/empty'
+import { HelpTip } from '@/components/ui/help-tip'
 import { cn } from '@/lib/utils'
 
 /** Scrolling body of an agent tab with one readable column. */
@@ -35,33 +31,10 @@ export function AgentTabBody({
   )
 }
 
-/** Info icon that shows help text on hover or focus instead of a paragraph. */
-export function HelpTip({
-  label,
-  children,
-}: {
-  label: string
-  children: ReactNode
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          aria-label={label}
-          className="inline-flex size-4 items-center justify-center rounded-full text-muted-foreground/70 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-        >
-          <Info className="size-3.5" />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent className="max-w-72 text-balance">
-        {children}
-      </TooltipContent>
-    </Tooltip>
-  )
-}
-
-/** Section heading with an optional count, help tooltip, and actions. */
+/**
+ * Section heading with an optional count, help tooltip, and actions. Omit the
+ * title when the section is the whole tab, so it does not repeat the tab name.
+ */
 export function AgentSection({
   title,
   count,
@@ -71,7 +44,7 @@ export function AgentSection({
   className,
   testId,
 }: {
-  title: ReactNode
+  title?: ReactNode
   count?: number
   description?: ReactNode
   actions?: ReactNode
@@ -84,26 +57,28 @@ export function AgentSection({
       className={cn('flex flex-col gap-3', className)}
       data-testid={testId}
     >
-      <div className="flex min-h-8 items-center justify-between gap-3">
-        <h3 className="flex min-w-0 items-center gap-2 text-sm font-medium text-foreground">
-          {title}
-          {count !== undefined && (
-            <Badge variant="muted" className="px-1.5 py-0 tabular-nums">
-              {count}
-            </Badge>
+      {(title || description || actions) && (
+        <div className="flex min-h-8 items-center justify-between gap-3">
+          <h3 className="flex min-w-0 items-center gap-2 text-sm font-medium text-foreground">
+            {title}
+            {title && count !== undefined && (
+              <Badge variant="muted" className="px-1.5 py-0 tabular-nums">
+                {count}
+              </Badge>
+            )}
+            {description && (
+              <HelpTip
+                label={`About ${typeof title === 'string' ? title : 'this section'}`}
+              >
+                {description}
+              </HelpTip>
+            )}
+          </h3>
+          {actions && (
+            <div className="flex shrink-0 items-center gap-1.5">{actions}</div>
           )}
-          {description && (
-            <HelpTip
-              label={`About ${typeof title === 'string' ? title : 'this section'}`}
-            >
-              {description}
-            </HelpTip>
-          )}
-        </h3>
-        {actions && (
-          <div className="flex shrink-0 items-center gap-1.5">{actions}</div>
-        )}
-      </div>
+        </div>
+      )}
       {children}
     </section>
   )
@@ -138,10 +113,12 @@ export function AgentEmpty({
   action?: ReactNode
 }) {
   return (
-    <div className="flex items-center justify-center gap-3 rounded-lg border border-dashed px-4 py-4 text-center text-sm text-muted-foreground">
-      <span>{title}</span>
+    <Empty className="gap-3 p-6 md:p-6">
+      <EmptyHeader>
+        <EmptyDescription>{title}</EmptyDescription>
+      </EmptyHeader>
       {action}
-    </div>
+    </Empty>
   )
 }
 
@@ -149,10 +126,10 @@ export function AgentLoading({ label }: { label: string }) {
   return <p className="py-2 text-xs text-muted-foreground">{label}</p>
 }
 
-/** Amber banner for states that block the agent (stopped, hourly limit). */
+/** Warning banner for states that block the agent (stopped, hourly limit). */
 export function AgentNotice({ children }: { children: ReactNode }) {
   return (
-    <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+    <p className="rounded-lg border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-warning">
       {children}
     </p>
   )
@@ -179,7 +156,7 @@ export type AgentTone = 'neutral' | 'active' | 'attention' | 'danger'
 const TONE_CLASSES: Record<AgentTone, string> = {
   neutral: 'bg-muted/60 text-muted-foreground',
   active: 'bg-primary/15 text-primary',
-  attention: 'bg-amber-500/15 text-amber-700 dark:text-amber-400',
+  attention: 'bg-warning/15 text-warning',
   danger: 'bg-destructive/15 text-destructive',
 }
 
@@ -196,7 +173,7 @@ export function AgentBadge({
   return (
     <span
       className={cn(
-        'inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium leading-none [&>svg]:size-3',
+        'inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-2xs font-medium leading-none [&>svg]:size-3',
         TONE_CLASSES[tone],
         className
       )}

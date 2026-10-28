@@ -2,35 +2,19 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 describe('ProjectsSidebar server filter', () => {
-  it('shows Servers inside the Projects view, with a Projects/Recent toggle', () => {
+  it('shows Servers inside the Projects view, with Recent beside it', () => {
     const source = readFileSync(
       'src/components/projects/ProjectsSidebar.tsx',
       'utf8'
     )
 
-    const rail = readFileSync(
-      'src/components/projects/SidebarTabRail.tsx',
-      'utf8'
-    )
-    const mainWindow = readFileSync(
-      'src/components/layout/MainWindow.tsx',
-      'utf8'
-    )
-
-    expect(rail).toContain('role="tablist"')
-    expect(rail).toContain('aria-orientation="vertical"')
-    expect(rail).toContain('size-12')
-    expect(source).toContain('<SidebarTabRail')
-    expect(mainWindow).toContain('<SidebarTabRail')
     expect(source).toContain('<ServersList')
     expect(source).toContain('<RecentWorktreesList')
     expect(source).toContain('footerActionsContainer={footerActionsEl}')
     expect(source).toContain('ref={setFooterActionsEl}')
     expect(source).toContain('state => state.sidebarActiveTab')
-    expect(source).toContain('aria-label="Workspace view"')
     expect(source).toContain('Add server')
     expect(source).not.toContain("activeTab === 'servers'")
-    expect(rail).toContain("label: 'Workspace'")
   })
 
   it('uses a compact dropdown that blends into the sidebar', () => {
@@ -121,24 +105,6 @@ describe('ProjectsSidebar server filter', () => {
     )
 
     expect(source).not.toContain('sectionIndex > 0')
-  })
-
-  it('places Settings at the bottom of the tab rail', () => {
-    const sidebar = readFileSync(
-      'src/components/projects/ProjectsSidebar.tsx',
-      'utf8'
-    )
-    const rail = readFileSync(
-      'src/components/projects/SidebarTabRail.tsx',
-      'utf8'
-    )
-
-    expect(sidebar).not.toContain('aria-label="Open Settings"')
-    expect(rail.indexOf('aria-label="Open Settings"')).toBeGreaterThan(
-      rail.indexOf('role="tablist"')
-    )
-    expect(rail).toContain('data-testid="sidebar-settings"')
-    expect(rail).toContain('togglePreferences()')
   })
 
   it('adds bottom safe-area spacing to the footer in web access', () => {

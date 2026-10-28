@@ -1,11 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
-import {
-  FileText,
-  Loader2,
-  AlertCircle,
-  Columns2,
-  Rows3,
-} from '@/components/icons/reicon'
+import { FileText, Loader2, AlertCircle } from '@/components/icons/reicon'
 import { FileDiff } from '@pierre/diffs/react'
 import { parsePatchFiles, type FileDiffMetadata } from '@pierre/diffs'
 import {
@@ -15,17 +9,16 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
+import {
+  DiffStyleToggle,
+  type DiffStyle,
+} from '@/components/ui/segmented-control'
 import { getGitDiff } from '@/services/git-status'
 import { useTheme } from '@/hooks/use-theme'
 import { usePreferences } from '@/services/preferences'
 import type { GitDiff } from '@/types/git-diff'
 import { getFileLineStats } from '@/lib/diff-stats'
 import { getFilename } from '@/lib/path-utils'
-import {
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-} from '@/components/ui/tooltip'
 import {
   PierreEditProvider,
   PIERRE_UNSAFE_CSS,
@@ -40,8 +33,6 @@ interface FileDiffModalProps {
   /** Callback when modal is closed */
   onClose: () => void
 }
-
-type DiffStyle = 'split' | 'unified'
 
 /** Get file status badge color */
 function getStatusColor(type: string) {
@@ -210,45 +201,11 @@ export function FileDiffModal({
               )}
             </span>
           )}
-          {/* View mode toggle */}
-          <div className="flex items-center bg-muted rounded-lg p-1 ml-2">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={() => setDiffStyle('split')}
-                  className={cn(
-                    'flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-colors',
-                    diffStyle === 'split'
-                      ? 'bg-background shadow-sm text-foreground'
-                      : 'text-muted-foreground hover:text-foreground'
-                  )}
-                >
-                  <Columns2 className="h-3.5 w-3.5" />
-                  Split
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>Side-by-side view</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={() => setDiffStyle('unified')}
-                  className={cn(
-                    'flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-colors',
-                    diffStyle === 'unified'
-                      ? 'bg-background shadow-sm text-foreground'
-                      : 'text-muted-foreground hover:text-foreground'
-                  )}
-                >
-                  <Rows3 className="h-3.5 w-3.5" />
-                  Stacked
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>Unified view</TooltipContent>
-            </Tooltip>
-          </div>
+          <DiffStyleToggle
+            value={diffStyle}
+            onChange={setDiffStyle}
+            className="ml-2"
+          />
         </DialogTitle>
         <DialogDescription className="sr-only">
           Shows git diff details for {displayFilename}, including additions,

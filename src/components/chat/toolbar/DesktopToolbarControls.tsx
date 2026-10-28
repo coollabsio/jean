@@ -51,11 +51,7 @@ import type {
 import type { LoadedLinearIssueContext } from '@/types/linear'
 import type { SentryIssueContext } from '@/types/sentry'
 import { LinearIcon } from '@/components/icons/LinearIcon'
-import type {
-  CheckStatus,
-  MergeableStatus,
-  PrDisplayStatus,
-} from '@/types/pr-status'
+import type { MergeableStatus, PrDisplayStatus } from '@/types/pr-status'
 import { openExternal } from '@/lib/platform'
 import {
   hostedRepoWebUrl,
@@ -63,7 +59,6 @@ import {
   pullRequestWebUrl,
 } from '@/lib/git-provider'
 import { providerLabels, useProjectGitProvider } from '@/services/git-provider'
-import { cn } from '@/lib/utils'
 import {
   CODEX_EFFORT_LEVEL_OPTIONS,
   EFFORT_LEVEL_OPTIONS,
@@ -79,6 +74,7 @@ import {
   getPrStatusDisplay,
   getProviderDisplayName,
 } from '@/components/chat/toolbar/toolbar-utils'
+import { cn } from '@/lib/utils'
 import { DesktopBackendModelPicker } from '@/components/chat/toolbar/DesktopBackendModelPicker'
 import { ExecutionModeDropdown } from '@/components/chat/toolbar/ExecutionModeDropdown'
 import { DockBurgerButton } from '@/components/chat/toolbar/DockBurgerButton'
@@ -110,7 +106,6 @@ interface DesktopToolbarControlsProps {
   prUrl: string | undefined
   prNumber: number | undefined
   displayStatus: PrDisplayStatus | undefined
-  checkStatus: CheckStatus | undefined
   mergeableStatus: MergeableStatus | undefined
   activeWorktreePath: string | undefined
 
@@ -181,7 +176,6 @@ export function DesktopToolbarControls({
   prUrl,
   prNumber,
   displayStatus,
-  checkStatus: _checkStatus,
   mergeableStatus,
   activeWorktreePath,
   availableMcpServers: _availableMcpServers,
@@ -703,35 +697,32 @@ export function DesktopToolbarControls({
       )}
 
       {prUrl && prNumber && (
-        <>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <a
-                href={prUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={cn(
-                  'hidden @xl:flex h-8 items-center gap-1.5 px-3 text-xs font-medium transition-colors select-none hover:bg-muted/80 hover:text-foreground',
-                  displayStatus
-                    ? getPrStatusDisplay(displayStatus).className
-                    : 'text-muted-foreground'
-                )}
-              >
-                {displayStatus === 'merged' ? (
-                  <GitMerge className="h-3.5 w-3.5" />
-                ) : (
-                  <GitPullRequest className="h-3.5 w-3.5" />
-                )}
-                <span>#{prNumber}</span>
-              </a>
-            </TooltipTrigger>
-            <TooltipContent>
-              {displayStatus
-                ? `${getPrStatusDisplay(displayStatus).label} · PR #${prNumber} on GitHub`
-                : `PR #${prNumber} on GitHub`}
-            </TooltipContent>
-          </Tooltip>
-        </>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={() => void openExternal(prUrl)}
+              className={cn(
+                'hidden @xl:flex h-8 items-center gap-1.5 px-3 text-xs font-medium transition-colors select-none hover:bg-muted/80 hover:text-foreground',
+                displayStatus
+                  ? getPrStatusDisplay(displayStatus).className
+                  : 'text-muted-foreground'
+              )}
+            >
+              {displayStatus === 'merged' ? (
+                <GitMerge className="h-3.5 w-3.5" />
+              ) : (
+                <GitPullRequest className="h-3.5 w-3.5" />
+              )}
+              <span>#{prNumber}</span>
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {displayStatus
+              ? `${getPrStatusDisplay(displayStatus).label} · PR #${prNumber}`
+              : `PR #${prNumber}`}
+          </TooltipContent>
+        </Tooltip>
       )}
 
       {mergeableStatus === 'conflicting' && (
@@ -785,12 +776,12 @@ export function DesktopToolbarControls({
                 >
                   <DropdownMenuRadioItem value="__anthropic__">
                     Anthropic
-                    <Kbd className="ml-auto text-[10px]">1</Kbd>
+                    <Kbd className="ml-auto text-2xs">1</Kbd>
                   </DropdownMenuRadioItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuLabel className="text-xs text-muted-foreground flex items-center gap-1.5">
                     Custom Providers
-                    <span className="rounded bg-muted px-1 py-0.5 text-[10px] font-medium leading-none">
+                    <span className="rounded bg-muted px-1 py-0.5 text-2xs font-medium leading-none">
                       cc
                     </span>
                   </DropdownMenuLabel>
@@ -800,7 +791,7 @@ export function DesktopToolbarControls({
                       value={profile.name}
                     >
                       {profile.name}
-                      <Kbd className="ml-auto text-[10px]">{i + 2}</Kbd>
+                      <Kbd className="ml-auto text-2xs">{i + 2}</Kbd>
                     </DropdownMenuRadioItem>
                   ))}
                 </DropdownMenuRadioGroup>
@@ -811,12 +802,12 @@ export function DesktopToolbarControls({
                 >
                   <DropdownMenuRadioItem value="__default__">
                     Default (OpenAI)
-                    <Kbd className="ml-auto text-[10px]">1</Kbd>
+                    <Kbd className="ml-auto text-2xs">1</Kbd>
                   </DropdownMenuRadioItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuLabel className="text-xs text-muted-foreground flex items-center gap-1.5">
                     Custom Providers
-                    <span className="rounded bg-muted px-1 py-0.5 text-[10px] font-medium leading-none">
+                    <span className="rounded bg-muted px-1 py-0.5 text-2xs font-medium leading-none">
                       cx
                     </span>
                   </DropdownMenuLabel>
@@ -826,7 +817,7 @@ export function DesktopToolbarControls({
                       value={profile.name}
                     >
                       {profile.name}
-                      <Kbd className="ml-auto text-[10px]">{i + 2}</Kbd>
+                      <Kbd className="ml-auto text-2xs">{i + 2}</Kbd>
                     </DropdownMenuRadioItem>
                   ))}
                 </DropdownMenuRadioGroup>

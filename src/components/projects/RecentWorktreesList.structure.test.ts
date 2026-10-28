@@ -30,7 +30,7 @@ describe('RecentWorktreesList structure', () => {
     expect(source).toContain('-{row.removed}')
     expect(source).toContain('fetchWorktreesStatus(projectId)')
     expect(source).toContain('text-[13px] font-medium')
-    expect(source).toContain('text-[11px]')
+    expect(source).toContain('text-2xs')
   })
 
   it('aligns status, activity, and optional Git changes in grid rows', () => {
@@ -39,7 +39,7 @@ describe('RecentWorktreesList structure', () => {
     expect(source).not.toContain('min-w-14')
     expect(source).toContain('<WorkingWaveform />')
     expect(source).toContain(
-      'className="flex shrink-0 items-center justify-end gap-2 text-[10px] tabular-nums"'
+      'className="flex shrink-0 items-center justify-end gap-2 text-2xs tabular-nums"'
     )
     expect(source).toContain('@container flex flex-col')
     expect(source).toContain('hidden gap-1 font-medium @[15rem]:flex')

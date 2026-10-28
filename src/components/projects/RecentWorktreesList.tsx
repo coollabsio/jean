@@ -432,7 +432,7 @@ export function RecentWorktreesList({
                     !isSnoozedSession(
                       displayedRows[index - 1]?.lastActivityAt ?? 0
                     )) && (
-                    <div className="px-1 py-1 text-[11px] font-medium text-muted-foreground">
+                    <div className="px-1 py-1 text-2xs font-medium text-muted-foreground">
                       Snoozed · inactive for 24 hours
                     </div>
                   )}
@@ -481,7 +481,7 @@ export function RecentWorktreesList({
                           ? 'Generating…'
                           : row.session.name}
                       </span>
-                      <span className="flex shrink-0 items-center justify-end gap-1.5 text-[10px] empty:hidden">
+                      <span className="flex shrink-0 items-center justify-end gap-1.5 text-2xs empty:hidden">
                         {isUnread && (
                           <BellDot
                             aria-label="Unread session"
@@ -500,11 +500,11 @@ export function RecentWorktreesList({
                       </span>
                     </span>
                     <span className="flex items-center gap-2">
-                      <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[11px]">
+                      <span className="flex min-w-0 flex-1 items-center gap-1.5 text-2xs">
                         {isServer && (
                           <span
                             aria-hidden="true"
-                            className="flex shrink-0 items-center gap-0.5 rounded bg-muted px-1 py-px text-[10px] font-medium text-muted-foreground"
+                            className="flex shrink-0 items-center gap-0.5 rounded bg-muted px-1 py-px text-2xs font-medium text-muted-foreground"
                           >
                             <Server className="size-2.5" />
                             Server
@@ -514,7 +514,7 @@ export function RecentWorktreesList({
                           {row.projectName} · {row.worktree.name}
                         </span>
                       </span>
-                      <span className="flex shrink-0 items-center justify-end gap-2 text-[10px] tabular-nums">
+                      <span className="flex shrink-0 items-center justify-end gap-2 text-2xs tabular-nums">
                         {(row.added > 0 || row.removed > 0) && (
                           <span className="hidden gap-1 font-medium @[15rem]:flex">
                             <span className="text-success">+{row.added}</span>
@@ -524,7 +524,7 @@ export function RecentWorktreesList({
                           </span>
                         )}
                         {showShortcutHints && index < MAX_RECENT_SHORTCUTS ? (
-                          <Kbd className="h-4 px-1 text-[10px]">
+                          <Kbd className="h-4 px-1 text-2xs">
                             {formatShortcutDisplay(`mod+${index + 1}`)}
                           </Kbd>
                         ) : (
@@ -555,7 +555,7 @@ export function RecentWorktreesList({
           {failedCount > 0 && (
             <div
               role="status"
-              className="flex items-center justify-center gap-1 text-[11px] text-warning"
+              className="flex items-center justify-center gap-1 text-2xs text-warning"
             >
               <AlertTriangle className="size-3" /> Some recent sessions could
               not load.{' '}

@@ -5,7 +5,6 @@ describe('session name generation UI', () => {
   it.each([
     'src/components/projects/WorktreeItem.tsx',
     'src/components/chat/SessionChatModal.tsx',
-    'src/components/chat/SessionListRow.tsx',
     'src/components/projects/RecentWorktreesList.tsx',
   ])('shows a loading label in %s', file => {
     const source = readFileSync(file, 'utf8')
@@ -21,7 +20,9 @@ describe('session name generation UI', () => {
     )
     expect(source).toContain("'session-naming-started'")
     expect(source).toContain('setSessionNaming(event.payload.session_id, true)')
-    expect(source).toContain('setSessionNaming(event.payload.session_id, false)')
+    expect(source).toContain(
+      'setSessionNaming(event.payload.session_id, false)'
+    )
   })
 
   it('manual rename emits session-renamed so the loading label clears', () => {

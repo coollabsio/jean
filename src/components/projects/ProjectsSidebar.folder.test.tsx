@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import userEvent from '@testing-library/user-event'
 import { fireEvent, render, screen } from '@/test/test-utils'
 import { ProjectsSidebar } from './ProjectsSidebar'
-import { useUIStore } from '@/store/ui-store'
 import { useProjectsStore } from '@/store/projects-store'
 import type * as EnvironmentModule from '@/lib/environment'
 
@@ -51,21 +50,6 @@ describe('ProjectsSidebar folder creation', () => {
     useProjectsStore.setState({ addProjectDialogOpen: false })
   })
 
-  it('shows a close button only on mobile, which hides the sidebar', async () => {
-    const user = userEvent.setup()
-    const { unmount } = render(<ProjectsSidebar />)
-    expect(
-      screen.queryByRole('button', { name: 'Close sidebar' })
-    ).not.toBeInTheDocument()
-    unmount()
-
-    mocks.isMobile = true
-    useUIStore.setState({ leftSidebarVisible: true })
-    render(<ProjectsSidebar />)
-    await user.click(screen.getByRole('button', { name: 'Close sidebar' }))
-    expect(useUIStore.getState().leftSidebarVisible).toBe(false)
-  })
-
   it('offers New folder in the search-row plus menu', async () => {
     const user = userEvent.setup()
     render(<ProjectsSidebar />)
@@ -103,9 +87,11 @@ describe('ProjectsSidebar folder creation', () => {
     const user = userEvent.setup()
     render(<ProjectsSidebar />)
 
-    const tab = screen.getByRole('tab', { name: 'Projects' })
+    const chrome = screen.getByRole('button', {
+      name: 'Add worktree to selected project',
+    })
     expect(
-      fireEvent.contextMenu(tab, { bubbles: true, cancelable: true })
+      fireEvent.contextMenu(chrome, { bubbles: true, cancelable: true })
     ).toBe(false)
     expect(screen.queryByRole('menuitem')).not.toBeInTheDocument()
 

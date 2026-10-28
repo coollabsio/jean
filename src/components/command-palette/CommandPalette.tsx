@@ -288,7 +288,7 @@ export function CommandPalette() {
       key={cmd.id}
       value={`${cmd.id} ${cmd.label} ${cmd.description ?? ''}`}
       onSelect={() => handleCommandSelect(cmd.id)}
-      className="items-start"
+      className="group items-start"
     >
       {/* One line tall so the icon centers on the label's first line */}
       <span className="flex h-lh shrink-0 items-center leading-snug">
@@ -301,7 +301,7 @@ export function CommandPalette() {
             className="size-4 rounded object-cover"
           />
         ) : (
-          <span className="flex size-4 items-center justify-center rounded bg-muted-foreground/20 text-[10px] leading-none font-medium uppercase">
+          <span className="flex size-4 items-center justify-center rounded bg-muted-foreground/20 text-2xs leading-none font-medium uppercase">
             {cmd.avatarFallback}
           </span>
         )}
@@ -309,7 +309,7 @@ export function CommandPalette() {
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="truncate leading-snug">{cmd.label}</span>
         {cmd.description && (
-          <span className="text-xs leading-snug text-muted-foreground">
+          <span className="hidden text-xs leading-snug text-muted-foreground group-data-[selected=true]:block">
             {cmd.description}
           </span>
         )}
@@ -380,7 +380,7 @@ export function CommandPalette() {
                   key={command.id}
                   value={`${command.id} ${command.label} ${command.description ?? ''} ${command.keywords?.join(' ') ?? ''}`}
                   onSelect={() => handleCommandSelect(command.id)}
-                  className="items-start"
+                  className="group items-start"
                 >
                   {command.icon && (
                     <span className="flex h-lh shrink-0 items-center leading-snug">
@@ -392,7 +392,7 @@ export function CommandPalette() {
                       {command.label}
                     </span>
                     {command.description && (
-                      <span className="text-xs leading-snug text-muted-foreground">
+                      <span className="hidden text-xs leading-snug text-muted-foreground group-data-[selected=true]:block">
                         {command.description}
                       </span>
                     )}

@@ -7,7 +7,6 @@ import {
   RefreshCw,
   ShieldAlert,
 } from '@/components/icons/reicon'
-import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -31,6 +30,7 @@ import { openExternal } from '@/lib/platform'
 import { copyToClipboard } from '@/lib/clipboard'
 import { isNativeApp } from '@/lib/environment'
 import { SettingsSection } from '../SettingsSection'
+import { InlineField } from '../InlineField'
 
 const LOOPBACK_BIND_HOSTS = new Set(['localhost', '127.0.0.1', '::1'])
 const WILDCARD_BIND_HOSTS = new Set(['0.0.0.0', '::'])
@@ -71,22 +71,6 @@ function hasUsableBoundUrl(url: string | null | undefined): boolean {
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
-
-const InlineField: React.FC<{
-  label: string
-  description?: React.ReactNode
-  children: React.ReactNode
-}> = ({ label, description, children }) => (
-  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
-    <div className="space-y-0.5 sm:w-56 sm:shrink-0 lg:w-72">
-      <Label className="text-sm text-foreground">{label}</Label>
-      {description && (
-        <div className="text-xs text-muted-foreground">{description}</div>
-      )}
-    </div>
-    {children}
-  </div>
-)
 
 interface ServerStatus {
   running: boolean
@@ -362,7 +346,7 @@ export const WebAccessPane: React.FC = () => {
       </p>
 
       {readOnly && (
-        <p className="rounded-md border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           These settings are read-only in web access. Change them in the Jean
           desktop app or in the server configuration.
         </p>
@@ -477,8 +461,8 @@ export const WebAccessPane: React.FC = () => {
           </InlineField>
 
           {!tokenRequired && (
-            <div className="flex items-start gap-3 rounded-md border border-warning/50 bg-warning/10 p-3">
-              <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
+            <div className="flex items-start gap-2">
+              <ShieldAlert className="mt-0.5 size-4 shrink-0 text-warning" />
               <div className="text-sm text-warning">
                 <strong>Security Warning:</strong> Anyone on your network can
                 access Jean without authentication. Only disable this on trusted
@@ -535,7 +519,7 @@ export const WebAccessPane: React.FC = () => {
             >
               <div className="flex flex-col gap-2">
                 {!isLoopbackBindHost(activeBindHost) && (
-                  <div className="flex items-start gap-3 rounded-md border border-border bg-muted/40 p-3">
+                  <div className="flex items-start gap-2">
                     <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                     <div className="text-xs text-muted-foreground">
                       Browsers only treat{' '}

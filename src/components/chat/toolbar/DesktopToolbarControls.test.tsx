@@ -52,7 +52,6 @@ function renderDesktopToolbarControls(
     prUrl: undefined,
     prNumber: undefined,
     displayStatus: undefined,
-    checkStatus: undefined,
     mergeableStatus: undefined,
     activeWorktreePath: undefined,
     availableMcpServers: [],
@@ -129,7 +128,9 @@ describe('DesktopToolbarControls', () => {
     renderDesktopToolbarControls({ executionMode: mode })
 
     expect(
-      screen.getByRole('button', { name: new RegExp(`^Permissions: ${label}$`, 'i') })
+      screen.getByRole('button', {
+        name: new RegExp(`^Permissions: ${label}$`, 'i'),
+      })
     ).toBeInTheDocument()
   })
 

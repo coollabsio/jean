@@ -13,6 +13,5 @@ describe('AppearancePane settings structure', () => {
     expect(source).toContain('sidebar_hover_open_enabled')
     expect(source).toContain('sidebar_hover_open_enabled ?? false')
     expect(source).toContain('Open from screen edge')
-    expect(source).toContain('Off by default.')
   })
 })

@@ -140,7 +140,7 @@ export function TerminalStatusIndicator({
             </span>
           ) : (
             activeTerminalCount > 1 && (
-              <span className="text-[9px] leading-none tabular-nums">
+              <span className="text-2xs leading-none tabular-nums">
                 {activeTerminalCount}
               </span>
             )

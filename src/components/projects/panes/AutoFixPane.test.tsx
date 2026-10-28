@@ -12,7 +12,6 @@ import {
   firstAvailableBackend,
   formatAutoFixRelativeTime,
   hasAutoFixSettingsChanges,
-  MR_ROBOT_SETTINGS_BADGE,
   normalizeAutoFixProvider,
   resolveAutoFixBackend,
 } from './AutoFixPane'
@@ -278,10 +277,6 @@ describe('AutoFixPane', () => {
         dispatchEvent: vi.fn(),
       }))
     )
-  })
-
-  it('labels Mr. Robot settings as beta', () => {
-    expect(MR_ROBOT_SETTINGS_BADGE).toBe('Beta')
   })
 
   it('renders with project auto-fix settings', () => {

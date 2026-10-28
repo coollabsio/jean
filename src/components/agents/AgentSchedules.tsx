@@ -26,7 +26,7 @@ import {
   type AgentSummary,
   type ScheduleKind,
 } from '@/services/agents'
-import { formatRelative } from './AgentActivity'
+import { formatRelative } from '@/lib/relative-time'
 import { cn } from '@/lib/utils'
 import {
   AgentBadge,
@@ -411,7 +411,7 @@ export function AgentSchedules({ agent }: { agent: AgentSummary }) {
       <AgentSection
         title="Routines"
         count={isLoading ? undefined : schedules.length}
-        description="Each run starts a background task. Cron uses a 5-field expression in the chosen timezone. Events wake the agent when something happens in Jean."
+        description="Each routine starts a background run, on a cron schedule or when something happens in Jean."
         actions={form === null ? newButton : null}
       >
         {form && (

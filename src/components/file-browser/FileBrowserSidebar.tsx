@@ -33,7 +33,7 @@ import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
 import { useWorktree, useProjects } from '@/services/projects'
 import { fileQueryKeys, useWorktreeFiles } from '@/services/files'
-import { getExtensionColor } from '@/lib/file-colors'
+import { Empty, EmptyDescription, EmptyHeader } from '@/components/ui/empty'
 import { getFilename, joinPaths } from '@/lib/path-utils'
 import type { WorktreeFile } from '@/types/chat'
 import { isFolder } from '@/types/projects'
@@ -99,12 +99,7 @@ function useFileBrowserRootPath(): {
       }
     }
     return { rootPath: null, label: null }
-  }, [
-    activeWorktreePath,
-    selectedWorktree,
-    projects,
-    selectedProjectId,
-  ])
+  }, [activeWorktreePath, selectedWorktree, projects, selectedProjectId])
 }
 
 export function FileBrowserSidebar({ className }: FileBrowserSidebarProps) {
@@ -155,9 +150,7 @@ export function FileBrowserSidebar({ className }: FileBrowserSidebarProps) {
       return
     }
 
-    const normalizedRoot = rootPath
-      .replace(/[\\/]+$/, '')
-      .replace(/\\/g, '/')
+    const normalizedRoot = rootPath.replace(/[\\/]+$/, '').replace(/\\/g, '/')
     const normalizedView = viewing.replace(/\\/g, '/')
     if (
       normalizedView !== normalizedRoot &&
@@ -215,15 +208,18 @@ export function FileBrowserSidebar({ className }: FileBrowserSidebarProps) {
     })
   }, [queryClient, rootPath])
 
-  const toggleDir = useCallback((relativePath: string) => {
-    const next = new Set(expandedRef.current)
-    if (next.has(relativePath)) next.delete(relativePath)
-    else next.add(relativePath)
-    setExpanded(next)
-    if (!search.trim()) {
-      userExpandedRef.current = next
-    }
-  }, [search])
+  const toggleDir = useCallback(
+    (relativePath: string) => {
+      const next = new Set(expandedRef.current)
+      if (next.has(relativePath)) next.delete(relativePath)
+      else next.add(relativePath)
+      setExpanded(next)
+      if (!search.trim()) {
+        userExpandedRef.current = next
+      }
+    },
+    [search]
+  )
 
   const openFile = useCallback(
     (relativePath: string) => {
@@ -288,7 +284,7 @@ export function FileBrowserSidebar({ className }: FileBrowserSidebarProps) {
       data-testid="file-browser-sidebar"
     >
       {/* Header */}
-      <div className="flex items-center gap-1 border-b border-border/40 px-2 py-1.5">
+      <div className="group flex items-center gap-1 border-b border-border/40 px-2 py-1.5">
         <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -316,8 +312,13 @@ export function FileBrowserSidebar({ className }: FileBrowserSidebarProps) {
           <TooltipTrigger asChild>
             <Button
               variant="ghost"
-              size="icon"
-              className="h-6 w-6 shrink-0"
+              size="icon-xs"
+              className={cn(
+                'shrink-0 transition-opacity',
+                // Revealed on header hover/focus; touch devices keep it visible.
+                !isFetching &&
+                  '[@media(pointer:fine)]:opacity-0 [@media(pointer:fine)]:group-hover:opacity-100 [@media(pointer:fine)]:focus-visible:opacity-100'
+              )}
               onClick={handleRefresh}
               disabled={!rootPath || isFetching}
               aria-label="Refresh file list"
@@ -352,9 +353,7 @@ export function FileBrowserSidebar({ className }: FileBrowserSidebarProps) {
           aria-label="Worktree files"
         >
           {!rootPath && (
-            <p className="px-2 py-6 text-center text-sm text-muted-foreground">
-              Select a project or worktree to browse files.
-            </p>
+            <TreeEmpty>Select a project or worktree to browse files.</TreeEmpty>
           )}
           {rootPath && isLoading && files.length === 0 && (
             <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
@@ -364,23 +363,17 @@ export function FileBrowserSidebar({ className }: FileBrowserSidebarProps) {
           )}
           {rootPath && isError && (
             <p className="px-2 py-4 text-center text-sm text-destructive">
-              {error instanceof Error
-                ? error.message
-                : 'Failed to load files'}
+              {error instanceof Error ? error.message : 'Failed to load files'}
             </p>
           )}
           {rootPath && !isLoading && !isError && visibleRows.length === 0 && (
-            <p className="px-2 py-6 text-center text-sm text-muted-foreground">
+            <TreeEmpty>
               {search.trim() ? 'No matching files' : 'No files found'}
-            </p>
+            </TreeEmpty>
           )}
           {visibleRows.map(({ node, depth }) => {
             const isExpanded = expanded.has(node.relativePath)
             const isSelected = selectedPath === node.relativePath
-            const color = node.isDir
-              ? 'text-muted-foreground'
-              : getExtensionColor(node.extension)
-
             return (
               <button
                 key={node.relativePath}
@@ -392,7 +385,8 @@ export function FileBrowserSidebar({ className }: FileBrowserSidebarProps) {
                   // Match projects/worktree list: text-sm row labels
                   'flex w-full items-center gap-1.5 rounded-sm px-1 py-1 text-left text-sm',
                   'hover:bg-sidebar-accent/70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-                  isSelected && 'bg-sidebar-accent text-sidebar-accent-foreground'
+                  isSelected &&
+                    'bg-sidebar-accent text-sidebar-accent-foreground'
                 )}
                 style={{ paddingLeft: `${depth * 12 + 4}px` }}
                 onClick={() => handleRowActivate(node)}
@@ -410,12 +404,12 @@ export function FileBrowserSidebar({ className }: FileBrowserSidebarProps) {
                 )}
                 {node.isDir ? (
                   isExpanded ? (
-                    <FolderOpen className={cn('size-3.5 shrink-0', color)} />
+                    <FolderOpen className="size-3.5 shrink-0 text-muted-foreground" />
                   ) : (
-                    <Folder className={cn('size-3.5 shrink-0', color)} />
+                    <Folder className="size-3.5 shrink-0 text-muted-foreground" />
                   )
                 ) : (
-                  <FileIcon className={cn('size-3.5 shrink-0', color)} />
+                  <FileIcon className="size-3.5 shrink-0 text-muted-foreground/70" />
                 )}
                 <span className="truncate">{node.name}</span>
               </button>
@@ -424,6 +418,16 @@ export function FileBrowserSidebar({ className }: FileBrowserSidebarProps) {
         </div>
       </ScrollArea>
     </div>
+  )
+}
+
+function TreeEmpty({ children }: { children: React.ReactNode }) {
+  return (
+    <Empty className="p-6 md:p-6">
+      <EmptyHeader>
+        <EmptyDescription>{children}</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
   )
 }
 

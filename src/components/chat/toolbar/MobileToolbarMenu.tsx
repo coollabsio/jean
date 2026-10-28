@@ -143,7 +143,7 @@ export function MobileToolbarMenu({
             {sectionIndex > 0 && (
               <DropdownMenuSeparator className="col-span-2" />
             )}
-            <div className="col-span-2 px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            <div className="col-span-2 px-2 py-1.5 text-xs font-medium text-muted-foreground">
               {section.header}
             </div>
             {section.options.map(option => {
@@ -158,7 +158,7 @@ export function MobileToolbarMenu({
                   {option.label}
                   <span
                     className={cn(
-                      'ml-auto text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded',
+                      'ml-auto text-xs text-muted-foreground/70',
                       isMobile && 'hidden'
                     )}
                   >

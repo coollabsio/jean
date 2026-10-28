@@ -155,7 +155,7 @@ export function FeatureTourDialog() {
             onClick={() => (page === 0 ? setPage(1) : handleClose())}
           >
             {page === 0 ? 'Next' : 'Got it'}
-            {showShortcut && <Kbd className="ml-2 h-4 px-1 text-[10px]">↵</Kbd>}
+            {showShortcut && <Kbd className="ml-2 h-4 px-1 text-2xs">↵</Kbd>}
           </Button>
         </div>
       </DialogContent>

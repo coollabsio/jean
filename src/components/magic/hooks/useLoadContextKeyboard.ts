@@ -336,7 +336,7 @@ export function useLoadContextKeyboard({
   // Scroll selected item into view
   useEffect(() => {
     const selectedElement = document.querySelector(
-      `[data-load-item-index="${selectedIndex}"]`
+      `[data-item-index="${selectedIndex}"]`
     )
     selectedElement?.scrollIntoView({ block: 'nearest' })
   }, [selectedIndex])

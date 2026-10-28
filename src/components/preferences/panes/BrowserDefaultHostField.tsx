@@ -1,30 +1,17 @@
-import { useCallback, useState, type FC } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useState,
+  type FC,
+} from 'react'
 import { Loader2 } from '@/components/icons/reicon'
-import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { normalizeBrowserDefaultHost } from '@/components/browser/default-tab-url'
 import { usePatchPreferences } from '@/services/preferences'
 import type { AppPreferences } from '@/types/preferences'
 import { toast } from 'sonner'
-
-const InlineField: FC<{
-  label: string
-  description?: React.ReactNode
-  children: React.ReactNode
-}> = ({ label, description, children }) => (
-  <div className="settings-inline-field flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
-    <div className="space-y-0.5 sm:w-56 sm:shrink-0 lg:w-72">
-      <Label className="text-sm text-foreground">{label}</Label>
-      {description && (
-        <div className="text-xs text-muted-foreground break-words">
-          {description}
-        </div>
-      )}
-    </div>
-    {children}
-  </div>
-)
+import { InlineField } from '../InlineField'
 
 export function isBrowserDefaultHostSavePending(
   isPending: boolean,
@@ -39,7 +26,7 @@ export function isBrowserDefaultHostSavePending(
 
 /**
  * Server-wide preview hostname. Own mutation instance so other General saves
- * do not spin this button.
+ * do not spin this field.
  */
 export const BrowserDefaultHostField: FC<{
   preferences: AppPreferences | undefined
@@ -60,19 +47,24 @@ export const BrowserDefaultHostField: FC<{
   )
 
   const handleSave = useCallback(() => {
-    if (!preferences) return
+    if (!preferences || !hasChanges) return
     const normalized = normalizeBrowserDefaultHost(localValue)
     if (!normalized.ok) {
       toast.error(normalized.error)
       return
     }
     patchPreferences.mutate({ browser_default_host: normalized.host })
-  }, [preferences, patchPreferences, localValue])
+  }, [preferences, hasChanges, patchPreferences, localValue])
+
+  // Escape closes Settings without blurring the input; keep the typed value.
+  const flushOnUnmount = useEffectEvent(handleSave)
+  useEffect(() => () => flushOnUnmount(), [])
 
   return (
     <InlineField
       label="Default preview hostname"
-      description="Hostname for new browser tabs and Open port buttons when a jean.json port has no host. Every client on this server uses it, including remote sessions. Leave blank for localhost."
+      description="Used when a jean.json port has no host. Blank means localhost."
+      help="Applies to new browser tabs and Open port buttons for every client on this server, including remote sessions."
     >
       <div className="flex items-center gap-2">
         <Input
@@ -82,15 +74,14 @@ export const BrowserDefaultHostField: FC<{
           placeholder="localhost"
           value={localValue}
           onChange={event => setLocalValue(event.target.value)}
+          onBlur={handleSave}
+          onKeyDown={event => {
+            if (event.key === 'Enter') event.currentTarget.blur()
+          }}
         />
-        <Button
-          size="sm"
-          onClick={handleSave}
-          disabled={!hasChanges || isSaving || !preferences}
-        >
-          {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
-          Save
-        </Button>
+        {isSaving && (
+          <Loader2 className="size-4 animate-spin text-muted-foreground" />
+        )}
       </div>
     </InlineField>
   )

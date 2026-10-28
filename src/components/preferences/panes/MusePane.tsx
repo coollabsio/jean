@@ -1,5 +1,14 @@
 import { Button } from '@/components/ui/button'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { SettingsSection } from '../SettingsSection'
+import { InlineField } from '../InlineField'
+import { CliAuthActions, CliAuthProblem } from '../CliAuthActions'
 import { BackendCliSourceSelect } from '../BackendCliSourceSelect'
 import {
   MUSE_FALLBACK_MODELS,
@@ -56,77 +65,39 @@ export function MusePane() {
     )
   }
 
-  return (
-    <div className="w-full max-w-3xl space-y-6">
-      <p className="text-sm text-muted-foreground">
-        Meta&apos;s Muse Code CLI.
-      </p>
-      <SettingsSection title="CLI source" variant="card">
-        <BackendCliSourceSelect
-          value={source}
-          onValueChange={setSource}
-          backendName="Muse CLI"
-          managedDescription="Jean installs an isolated Muse CLI. Its launcher keeps itself up to date."
-          path={pathDetection.data?.path}
-          pathVersion={pathDetection.data?.version}
-          pathFound={!!pathDetection.data?.found}
-        />
-      </SettingsSection>
+  const signIn = () =>
+    openCliLoginModal('muse', status.data?.path ?? 'muse', [], 'login')
 
-      <SettingsSection title="CLI installation" variant="card">
-        {source === 'jean' ? (
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              {installed ? (
-                <>
-                  <Button
-                    size="sm"
-                    disabled={managedBusy}
-                    onClick={() => update.mutate()}
-                  >
-                    {update.isPending ? 'Updating…' : 'Update'}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={managedBusy}
-                    onClick={() => uninstall.mutate()}
-                  >
-                    {uninstall.isPending ? 'Removing…' : 'Remove'}
-                  </Button>
-                </>
-              ) : (
-                <Button
-                  size="sm"
-                  disabled={managedBusy || status.isLoading}
-                  onClick={() => install.mutate('latest')}
-                >
-                  {install.isPending ? 'Installing…' : 'Install latest'}
-                </Button>
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {status.isLoading
-                ? 'Checking Jean-managed installation…'
+  return (
+    <div className="w-full space-y-8">
+      <SettingsSection
+        title="CLI source"
+        actions={
+          <CliAuthActions
+            installed={installed}
+            checking={auth.isLoading}
+            authenticated={!!auth.data?.authenticated}
+            onSignIn={signIn}
+            onSignInAgain={signIn}
+          />
+        }
+      >
+        <InlineField
+          label={installed ? 'Version' : 'Status'}
+          description={
+            source === 'jean'
+              ? status.isLoading
+                ? 'Checking installation…'
                 : installed
-                  ? `Installed ${status.data?.version ?? 'version unknown'} · ${status.data?.path ?? 'managed path'}`
-                  : 'Jean-managed Muse CLI is not installed.'}
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-2 text-sm">
-            {pathDetection.data?.found ? (
-              `Using ${pathDetection.data.path}${pathDetection.data.version ? ` · ${pathDetection.data.version}` : ''}`
-            ) : (
-              <>
-                Install Muse on your PATH with{' '}
-                <code className="rounded bg-muted px-1 py-0.5 text-xs">
-                  curl -fsSL https://dev.meta.ai/install.sh | bash
-                </code>
-                , then select Refresh.
-              </>
-            )}
-            <div>
+                  ? `${status.data?.version ?? 'Version unknown'} · ${status.data?.path ?? 'managed path'}`
+                  : undefined
+              : pathDetection.data?.found
+                ? `Using ${pathDetection.data.path}${pathDetection.data.version ? ` · ${pathDetection.data.version}` : ''}`
+                : undefined
+          }
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            {source === 'path' ? (
               <Button
                 size="sm"
                 variant="outline"
@@ -135,80 +106,94 @@ export function MusePane() {
               >
                 {pathDetection.isFetching ? 'Refreshing…' : 'Refresh'}
               </Button>
-            </div>
+            ) : installed ? (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={managedBusy}
+                  onClick={() => update.mutate()}
+                >
+                  {update.isPending ? 'Updating…' : 'Update'}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={managedBusy}
+                  onClick={() => uninstall.mutate()}
+                >
+                  {uninstall.isPending ? 'Removing…' : 'Remove'}
+                </Button>
+              </>
+            ) : (
+              <Button
+                size="sm"
+                disabled={managedBusy || status.isLoading}
+                onClick={() => install.mutate('latest')}
+              >
+                {install.isPending ? 'Installing…' : 'Install latest'}
+              </Button>
+            )}
           </div>
+        </InlineField>
+        <InlineField label="Source">
+          <BackendCliSourceSelect
+            value={source}
+            onValueChange={setSource}
+            backendName="Muse CLI"
+            managedDescription="Jean installs an isolated Muse CLI. Its launcher keeps itself up to date."
+            path={pathDetection.data?.path}
+            pathVersion={pathDetection.data?.version}
+            pathFound={!!pathDetection.data?.found}
+          />
+        </InlineField>
+        {source === 'path' && !pathDetection.data?.found && (
+          <p className="text-xs text-muted-foreground">
+            Install Muse on your PATH with{' '}
+            <code>curl -fsSL https://dev.meta.ai/install.sh | bash</code>, then
+            select Refresh.
+          </p>
+        )}
+        {installed && !auth.isLoading && !auth.data?.authenticated && (
+          <>
+            <CliAuthProblem
+              timedOut={!!auth.data?.timedOut}
+              error={auth.data?.error}
+              retrying={auth.isFetching}
+              onRetry={() => auth.refetch()}
+              manualCommand="muse login"
+            />
+            <p className="text-xs text-muted-foreground">
+              Sign in runs <code>muse login</code>. Setting{' '}
+              <code>META_API_KEY</code> also works.
+            </p>
+          </>
         )}
       </SettingsSection>
 
-      <SettingsSection title="Authentication" variant="card">
-        <div className="space-y-2">
-          <div className="flex items-center justify-between gap-4 text-sm">
-            <span>
-              {!installed
-                ? 'Select an installed Muse CLI source first.'
-                : auth.isLoading
-                  ? 'Checking authentication…'
-                  : auth.data?.authenticated
-                    ? 'Authenticated'
-                    : auth.data?.timedOut
-                      ? 'Auth check timed out. Try again or run `muse login` manually.'
-                      : `Not authenticated${auth.data?.error ? ` · ${auth.data.error}` : ''}`}
-            </span>
-            {installed && (
-              <div className="flex items-center gap-2">
-                {auth.data?.timedOut && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={auth.isFetching}
-                    onClick={() => auth.refetch()}
-                  >
-                    {auth.isFetching ? 'Retrying…' : 'Retry'}
-                  </Button>
-                )}
-                <Button
-                  size="sm"
-                  onClick={() =>
-                    openCliLoginModal(
-                      'muse',
-                      status.data?.path ?? 'muse',
-                      [],
-                      'login'
-                    )
-                  }
-                >
-                  {auth.data?.authenticated ? 'Relogin' : 'Login'}
-                </Button>
-              </div>
-            )}
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Login runs{' '}
-            <code className="rounded bg-muted px-1 py-0.5">muse login</code>.
-            Setting the{' '}
-            <code className="rounded bg-muted px-1 py-0.5">META_API_KEY</code>{' '}
-            environment variable also authenticates Muse.
-          </p>
-        </div>
-      </SettingsSection>
-
-      <SettingsSection title="Default model" variant="card">
-        <select
-          aria-label="Default model"
-          className="h-9 w-full rounded-md border bg-background px-3 text-sm"
-          value={selectedModel}
-          onChange={event =>
-            patch.mutate({
-              selected_muse_model: event.target.value as MuseModel,
-            })
-          }
-        >
-          {visibleModelOptions.map(model => (
-            <option key={model.id} value={model.id}>
-              {model.label}
-            </option>
-          ))}
-        </select>
+      <SettingsSection title="Default model">
+        <InlineField label="Model">
+          <Select
+            value={selectedModel}
+            onValueChange={value =>
+              patch.mutate({ selected_muse_model: value as MuseModel })
+            }
+          >
+            <SelectTrigger
+              aria-label="Default model"
+              className="w-full sm:w-80"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {visibleModelOptions.map(model => (
+                <SelectItem key={model.id} value={model.id}>
+                  {model.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </InlineField>
       </SettingsSection>
     </div>
   )

@@ -36,35 +36,30 @@ vi.mock('@/lib/server-connections', () => ({
 }))
 
 vi.mock('./panes/GeneralPane', () => ({
-  GeneralPane: () => <div>General pane</div>,
-}))
-
-vi.mock('./panes/ClaudePane', () => ({
-  ClaudePane: () => <div>Claude pane</div>,
-}))
-
-vi.mock('./panes/CodexPane', () => ({
-  CodexPane: () => <div>Codex pane</div>,
-}))
-
-vi.mock('./panes/OpenCodePane', () => ({
-  OpenCodePane: () => <div>OpenCode pane</div>,
-}))
-
-vi.mock('./panes/CursorPane', () => ({
-  CursorPane: () => <div>Cursor pane</div>,
+  GeneralPane: ({ scope }: { scope?: string }) => (
+    <div>{scope ? `${scope} settings` : 'General pane'}</div>
+  ),
 }))
 
 vi.mock('./panes/MusePane', () => ({
   MusePane: () => <div>Muse pane</div>,
 }))
 
-vi.mock('./panes/GitHubPane', () => ({
-  GitHubPane: () => <div>GitHub CLI pane</div>,
+vi.mock('./panes/AntigravityPane', () => ({
+  AntigravityPane: () => <div>Antigravity pane</div>,
 }))
 
-vi.mock('./panes/CodeRabbitPane', () => ({
-  CodeRabbitPane: () => <div>CodeRabbit CLI pane</div>,
+vi.mock('./panes/BackendProviders', () => ({
+  ClaudeProvidersSection: () => <div>Claude providers</div>,
+  CodexProvidersSection: () => <div>Codex providers</div>,
+  PiProvidersSection: () => <div>PI providers</div>,
+}))
+
+vi.mock('@/hooks/useInstalledBackends', () => ({
+  useInstalledBackends: () => ({
+    installedBackends: ['codex', 'muse'],
+    isLoading: false,
+  }),
 }))
 
 vi.mock('./panes/AppearancePane', () => ({
@@ -95,20 +90,12 @@ vi.mock('./panes/McpServersPane', () => ({
   McpServersPane: () => <div>MCP Servers pane</div>,
 }))
 
-vi.mock('./panes/ProvidersPane', () => ({
-  ProvidersPane: () => <div>Providers pane</div>,
-}))
-
 vi.mock('./panes/UsagePane', () => ({
   UsagePane: () => <div>Usage pane</div>,
 }))
 
 vi.mock('./panes/IntegrationsPane', () => ({
   IntegrationsPane: () => <div>Integrations pane</div>,
-}))
-
-vi.mock('./panes/ExperimentalPane', () => ({
-  ExperimentalPane: () => <div>Experimental pane</div>,
 }))
 
 vi.mock('./panes/WebAccessPane', () => ({
@@ -279,14 +266,12 @@ describe('PreferencesDialog', () => {
     })
   })
 
-  it('renders desktop settings navigation in grouped order', () => {
+  it('renders desktop settings navigation as one flat list', () => {
     render(<PreferencesDialog />)
 
-    const dialog = screen.getByRole('dialog')
-    const navigationMenu = dialog.querySelector<HTMLElement>(
-      '[data-sidebar="menu"]'
-    )
-
+    const navigationMenu = screen
+      .getByRole('dialog')
+      .querySelector<HTMLElement>('[data-sidebar="menu"]')
     if (!navigationMenu) {
       throw new Error('Expected desktop navigation menu to be rendered')
     }
@@ -294,150 +279,69 @@ describe('PreferencesDialog', () => {
     expect(
       within(navigationMenu)
         .getAllByRole('button')
-        .map(button => button.textContent?.replace(/\s+/g, ' ').trim())
+        .map(button => button.textContent?.trim())
     ).toEqual([
       'General',
       'Appearance',
       'Keybindings',
-      'Claude',
-      'Codex',
-      'OpenCode',
-      'Cursor',
-      'PI',
-      'Command Code',
-      'Grok',
-      'Kimi Code',
-      'DevinBeta',
-      'Antigravity CLIBeta',
-      'MuseBeta',
-      'Git Provider',
-      'CodeRabbit CLI',
+      'Backends',
       'Terminal',
       'Magic Prompts',
       'Opinionated',
-      'Providers',
-      'Web Access',
       'MCP Servers',
       'Integrations',
+      'Web Access',
       'Usage',
-      'Experimental',
     ])
-    // Separators appear between sections (not before the first "App" section)
     expect(
-      navigationMenu.querySelectorAll('[data-sidebar="separator"]')
-    ).toHaveLength(5)
-    expect(
-      Array.from(
-        navigationMenu.querySelectorAll('[data-sidebar="group-label"]')
-      ).map(label => label.textContent)
-    ).toEqual([
-      'App',
-      'Backends',
-      'Tools',
-      'Connectivity',
-      'Account',
-      'Advanced',
-    ])
-
-    for (const label of ['PI', 'Command Code', 'Grok']) {
-      const button = within(navigationMenu).getByText(label).closest('button')
-      if (!button) {
-        throw new Error(`Expected ${label} navigation button to be rendered`)
-      }
-
-      expect(within(button).queryByText('Beta')).toBeNull()
-    }
-
-    for (const label of ['Devin', 'Antigravity CLI', 'Muse']) {
-      const button = within(navigationMenu).getByText(label).closest('button')
-      if (!button) {
-        throw new Error(`Expected ${label} navigation button to be rendered`)
-      }
-
-      expect(within(button).getByText('Beta')).toHaveClass('bg-warning/10')
-    }
-
-    const kimiButton = within(navigationMenu)
-      .getByText('Kimi Code')
-      .closest('button')
-    if (!kimiButton) {
-      throw new Error('Expected Kimi Code navigation button to be rendered')
-    }
-
-    expect(within(kimiButton).getByLabelText('Kimi Code')).toHaveClass(
-      'translate-x-0.5'
-    )
-
-    const devinButton = within(navigationMenu)
-      .getByText('Devin')
-      .closest('button')
-    if (!devinButton) {
-      throw new Error('Expected Devin navigation button to be rendered')
-    }
-
-    expect(within(devinButton).getByLabelText('Devin')).toBeInTheDocument()
+      navigationMenu.querySelectorAll(
+        '[data-sidebar="separator"], [data-sidebar="group-label"]'
+      )
+    ).toHaveLength(0)
   })
 
-  it('opens the Muse pane from the desktop navigation', async () => {
+  it('opens Backends on Claude and lists installed backends first', async () => {
     const user = userEvent.setup()
-
     render(<PreferencesDialog />)
 
-    const navigationMenu = screen
-      .getByRole('dialog')
-      .querySelector<HTMLElement>('[data-sidebar="menu"]')
-    if (!navigationMenu) {
-      throw new Error('Expected desktop navigation menu to be rendered')
-    }
+    await user.click(screen.getByRole('button', { name: 'Backends' }))
 
-    const museButton = within(navigationMenu)
-      .getByText('Muse')
-      .closest('button')
-    if (!museButton) {
-      throw new Error('Expected Muse navigation button to be rendered')
-    }
+    const tabs = within(screen.getByRole('tablist', { name: 'Backends' }))
+      .getAllByRole('tab')
+      .map(tab => tab.textContent)
+    expect(tabs.slice(0, 3)).toEqual(['Codex', 'MuseBeta', 'Claude'])
+    expect(tabs.slice(-2)).toEqual(['Git Provider', 'CodeRabbit CLI'])
+    expect(screen.getByRole('tab', { name: 'Claude' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
+    expect(screen.getByText('claude settings')).toBeInTheDocument()
+    expect(screen.getByText('Claude providers')).toBeInTheDocument()
 
-    expect(screen.queryByText('Muse pane')).toBeNull()
-    await user.click(museButton)
+    await user.click(screen.getByRole('tab', { name: /Muse/ }))
+    expect(screen.getByText('Muse pane')).toBeInTheDocument()
 
+    await user.click(screen.getByRole('button', { name: 'General' }))
+    await user.click(screen.getByRole('button', { name: 'Backends' }))
     expect(screen.getByText('Muse pane')).toBeInTheDocument()
   })
 
-  it('marks the Devin settings pane, breadcrumb, and mobile option as beta', async () => {
-    const user = userEvent.setup()
-
+  it('maps an old backend deep link to Backends with that backend selected', () => {
+    useUIStore.setState({ preferencesPane: 'devin' })
     render(<PreferencesDialog />)
 
-    const navigationMenu = screen
-      .getByRole('dialog')
-      .querySelector<HTMLElement>('[data-sidebar="menu"]')
-    if (!navigationMenu) {
-      throw new Error('Expected desktop navigation menu to be rendered')
-    }
-
-    const devinButton = within(navigationMenu)
-      .getByText('Devin')
-      .closest('button')
-    if (!devinButton) {
-      throw new Error('Expected Devin navigation button to be rendered')
-    }
-
-    await user.click(devinButton)
-
-    const pane = document.getElementById('pref-pane-devin')
-    if (!pane) {
-      throw new Error('Expected Devin pane to be rendered')
-    }
-    expect(within(pane).getByText('Devin')).toBeInTheDocument()
-    expect(within(pane).getByText('Beta')).toHaveClass('bg-warning/10')
-
+    expect(screen.getByRole('tab', { name: /Devin/ })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
+    expect(screen.getByText('devin settings')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Backends' })).toHaveAttribute(
+      'data-active',
+      'true'
+    )
     const breadcrumb = screen.getByRole('navigation', { name: 'breadcrumb' })
-    expect(within(breadcrumb).getByText('Devin')).toBeInTheDocument()
-    expect(within(breadcrumb).getByText('Beta')).toHaveClass('bg-warning/10')
-
-    await user.click(screen.getByRole('combobox'))
-    const devinOption = screen.getByRole('option', { name: 'Devin' })
-    expect(within(devinOption).getByText('Beta')).toHaveClass('bg-warning/10')
+    expect(breadcrumb).toHaveTextContent('SettingsBackends')
+    expect(within(breadcrumb).queryByRole('button')).toBeNull()
   })
 
   it('shows Web Access but hides Keybindings in the mobile pane selector', async () => {

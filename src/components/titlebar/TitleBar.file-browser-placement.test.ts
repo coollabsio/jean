@@ -15,21 +15,6 @@ describe('TitleBar file-browser placement', () => {
     expect(source).not.toContain('<FolderTree')
   })
 
-  it('puts GitHub before the far-right file browser control in web access', () => {
-    const source = readFileSync('src/components/titlebar/TitleBar.tsx', 'utf8')
-    const rightGroup = source.indexOf(
-      '{/* Right side - Actions + Windows/Linux window controls'
-    )
-    const webGitHub = source.indexOf('data-testid="open-github-web"')
-    const webFileBrowser = source.lastIndexOf(
-      'data-testid="toggle-file-browser"'
-    )
-
-    expect(webGitHub).toBeGreaterThan(rightGroup)
-    expect(webFileBrowser).toBeGreaterThan(webGitHub)
-    expect(source).toContain('{native && !isMobile && (')
-  })
-
   it('does not keep Settings in the title bar', () => {
     const source = readFileSync('src/components/titlebar/TitleBar.tsx', 'utf8')
 

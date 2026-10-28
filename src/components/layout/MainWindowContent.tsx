@@ -182,7 +182,7 @@ export const MainWindowContent = memo(function MainWindowContent({
           >
             <Plus className="mr-2 h-4 w-4" />
             Add Your First Project
-            <Kbd className="ml-2 h-5 px-1.5 text-[10px]">↵</Kbd>
+            <Kbd className="ml-2 h-5 px-1.5 text-2xs">↵</Kbd>
           </Button>
         )}
       </div>

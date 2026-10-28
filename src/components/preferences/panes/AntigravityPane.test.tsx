@@ -130,7 +130,7 @@ describe('AntigravityPane', () => {
   it('opens the selected Antigravity binary in the interactive login terminal', () => {
     render(<AntigravityPane />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Relogin' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in again' }))
 
     expect(openLogin).toHaveBeenCalledWith(
       'antigravity',
@@ -152,7 +152,7 @@ describe('AntigravityPane', () => {
     expect(screen.getByText(/Auth check timed out/)).toBeInTheDocument()
     expect(screen.queryByText(/Not authenticated/)).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Login' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Sign in' })).toBeInTheDocument()
   })
 
   it('retries a timed-out auth check without opening login', () => {
@@ -184,6 +184,6 @@ describe('AntigravityPane', () => {
     expect(
       screen.queryByRole('button', { name: 'Retry' })
     ).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Login' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Sign in' })).toBeInTheDocument()
   })
 })

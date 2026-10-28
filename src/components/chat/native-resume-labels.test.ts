@@ -4,7 +4,6 @@ import { describe, expect, it } from 'vitest'
 
 const sourceFiles = [
   'src/components/chat/SessionContextMenuItems.tsx',
-  'src/components/chat/SessionListRow.tsx',
   'src/components/chat/toolbar/MobileSettingsMenu.tsx',
 ]
 

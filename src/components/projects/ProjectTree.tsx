@@ -380,7 +380,7 @@ function RootDropZone({ isOver }: { isOver: boolean }) {
         isOver ? 'border-primary/50 bg-primary/5' : 'border-muted-foreground/25'
       )}
     >
-      <span className="text-[11px] text-muted-foreground/50 select-none">
+      <span className="text-2xs text-muted-foreground/50 select-none">
         Drop here to move to root level
       </span>
     </div>

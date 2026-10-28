@@ -556,7 +556,7 @@ describe('OnboardingDialog', () => {
   })
 
   describe('Devin', () => {
-    it('marks Devin as beta in the picker, setup row, and ready list', async () => {
+    it('marks Devin as beta in the picker and setup row', async () => {
       setCli('devin', { installed: true, authenticated: true })
       const user = userEvent.setup()
       render(<OnboardingDialog />)
@@ -576,7 +576,7 @@ describe('OnboardingDialog', () => {
 
       await user.click(screen.getByRole('button', { name: 'Finish' }))
       expect(await screen.findByText("You're ready")).toBeInTheDocument()
-      expect(screen.getByText('Beta')).toHaveClass('bg-warning/10')
+      expect(screen.getByText('Ready: Devin, GitHub CLI')).toBeInTheDocument()
     })
   })
 

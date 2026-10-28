@@ -241,11 +241,12 @@ describe('CompactMessageList', () => {
     const compactTrigger = screen.getByRole('button', { name: /Bash/ })
     fireEvent.click(compactTrigger)
 
-    const activityCard = compactTrigger.closest('.rounded-md.border')
     const cancelledMarker = screen.getByText('(cancelled)')
 
-    expect(activityCard).not.toBeNull()
-    expect(activityCard).not.toContainElement(cancelledMarker)
+    expect(compactTrigger.closest('[data-slot="collapsible"]')).not.toBeNull()
+    expect(
+      cancelledMarker.closest('[data-slot="collapsible-content"]')
+    ).toBeNull()
   })
 
   it('keeps cancelled intermediate assistant text inside the collapsed activity row', () => {

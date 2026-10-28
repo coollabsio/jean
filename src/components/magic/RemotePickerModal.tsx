@@ -10,6 +10,7 @@ import { useUIStore, getRemotePickerCallback } from '@/store/ui-store'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getGitRemotes, removeGitRemote } from '@/services/git-status'
 import { cn } from '@/lib/utils'
+import { Kbd } from '@/components/ui/kbd'
 import { useIsMobile } from '@/hooks/use-mobile'
 
 export function RemotePickerModal() {
@@ -103,7 +104,7 @@ export function RemotePickerModal() {
       <DialogContent
         ref={contentRef}
         tabIndex={-1}
-        className="p-0 outline-none sm:max-w-[280px]"
+        className="p-0 outline-none sm:max-w-xs"
         onOpenAutoFocus={e => {
           e.preventDefault()
           contentRef.current?.focus()
@@ -139,11 +140,7 @@ export function RemotePickerModal() {
                     <GitBranch className="h-4 w-4 shrink-0 text-muted-foreground" />
                     <span className="truncate">{remote.name}</span>
                   </div>
-                  {i < 9 && (
-                    <kbd className="ml-2 shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
-                      {i + 1}
-                    </kbd>
-                  )}
+                  {i < 9 && <Kbd className="ml-2 shrink-0">{i + 1}</Kbd>}
                 </button>
                 {showRemove && (
                   <button
@@ -153,7 +150,7 @@ export function RemotePickerModal() {
                       e.stopPropagation()
                       handleRemoveRemote(i)
                     }}
-                    className="mr-3 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground/60 hover:bg-destructive/10 hover:text-destructive focus:outline-none focus:ring-2 focus:ring-ring"
+                    className="mr-3 inline-flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground/60 hover:bg-destructive/10 hover:text-destructive focus:outline-none focus:ring-2 focus:ring-ring"
                   >
                     <Delete className="h-3.5 w-3.5" />
                   </button>

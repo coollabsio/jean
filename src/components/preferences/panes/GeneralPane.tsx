@@ -244,6 +244,8 @@ import { cn } from '@/lib/utils'
 import { copyToClipboard } from '@/lib/clipboard'
 import { getPathUpdateAction } from '@/lib/cli-update'
 import { SettingsSection } from '../SettingsSection'
+import { InlineField } from '../InlineField'
+import { CliAuthActions } from '../CliAuthActions'
 import { BackendCliSourceSelect } from '../BackendCliSourceSelect'
 import { AiLanguageField } from './AiLanguageField'
 import { BrowserDefaultHostField } from './BrowserDefaultHostField'
@@ -258,24 +260,6 @@ interface CleanupResult {
   deleted_sessions: number
   deleted_orphan_indexes?: number
 }
-
-const InlineField: React.FC<{
-  label: string
-  description?: React.ReactNode
-  children: React.ReactNode
-}> = ({ label, description, children }) => (
-  <div className="settings-inline-field flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
-    <div className="space-y-0.5 sm:w-56 sm:shrink-0 lg:w-72">
-      <Label className="text-sm text-foreground">{label}</Label>
-      {description && (
-        <div className="text-xs text-muted-foreground break-words">
-          {description}
-        </div>
-      )}
-    </div>
-    {children}
-  </div>
-)
 
 // Module-level is safe: closeConfirmBypassLabel reads `isClientMacOS`, itself a
 // module-level const derived from `navigator`, so it is settled at import time.
@@ -1935,31 +1919,14 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         <SettingsSection
           title="CLI source"
           anchorId="pref-claude-section-cli"
-          variant="card"
           actions={
-            cliStatus?.installed ? (
-              checkingClaudeAuth || isClaudeAuthLoading ? (
-                <span className="text-sm text-muted-foreground flex items-center gap-2">
-                  <Loader2 className="size-3 animate-spin" />
-                  Checking...
-                </span>
-              ) : claudeAuth?.authenticated ? (
-                <span className="text-sm text-muted-foreground flex items-center gap-2">
-                  Logged in
-                  <Button size="sm" onClick={handleClaudeRelogin}>
-                    Relogin
-                  </Button>
-                </span>
-              ) : (
-                <Button size="sm" onClick={handleClaudeLogin}>
-                  Login
-                </Button>
-              )
-            ) : (
-              <span className="text-sm text-muted-foreground">
-                Not installed
-              </span>
-            )
+            <CliAuthActions
+              installed={!!cliStatus?.installed}
+              checking={checkingClaudeAuth || isClaudeAuthLoading}
+              authenticated={!!claudeAuth?.authenticated}
+              onSignIn={handleClaudeLogin}
+              onSignInAgain={handleClaudeRelogin}
+            />
           }
         >
           <div className="space-y-4">
@@ -2082,29 +2049,13 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
           title="GitHub CLI"
           anchorId="pref-github-section-cli"
           actions={
-            ghStatus?.installed ? (
-              checkingGhAuth || isGhAuthLoading ? (
-                <span className="text-sm text-muted-foreground flex items-center gap-2">
-                  <Loader2 className="size-3 animate-spin" />
-                  Checking...
-                </span>
-              ) : ghAuth?.authenticated ? (
-                <span className="text-sm text-muted-foreground flex items-center gap-2">
-                  Logged in
-                  <Button variant="outline" size="sm" onClick={handleGhRelogin}>
-                    Relogin
-                  </Button>
-                </span>
-              ) : (
-                <Button variant="outline" size="sm" onClick={handleGhLogin}>
-                  Login
-                </Button>
-              )
-            ) : (
-              <span className="text-sm text-muted-foreground">
-                Not installed
-              </span>
-            )
+            <CliAuthActions
+              installed={!!ghStatus?.installed}
+              checking={checkingGhAuth || isGhAuthLoading}
+              authenticated={!!ghAuth?.authenticated}
+              onSignIn={handleGhLogin}
+              onSignInAgain={handleGhRelogin}
+            />
           }
         >
           <div className="space-y-4">
@@ -2228,33 +2179,13 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
           }
           anchorId="pref-gitlab-section-cli"
           actions={
-            glabStatus?.installed ? (
-              checkingGlabAuth || isGlabAuthLoading ? (
-                <span className="text-sm text-muted-foreground flex items-center gap-2">
-                  <Loader2 className="size-3 animate-spin" />
-                  Checking...
-                </span>
-              ) : glabAuth?.authenticated ? (
-                <span className="text-sm text-muted-foreground flex items-center gap-2">
-                  Logged in
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleGlabRelogin}
-                  >
-                    Relogin
-                  </Button>
-                </span>
-              ) : (
-                <Button variant="outline" size="sm" onClick={handleGlabLogin}>
-                  Sign in to GitLab
-                </Button>
-              )
-            ) : (
-              <span className="text-sm text-muted-foreground">
-                Not installed
-              </span>
-            )
+            <CliAuthActions
+              installed={!!glabStatus?.installed}
+              checking={checkingGlabAuth || isGlabAuthLoading}
+              authenticated={!!glabAuth?.authenticated}
+              onSignIn={handleGlabLogin}
+              onSignInAgain={handleGlabRelogin}
+            />
           }
         >
           <div className="space-y-4">
@@ -2379,37 +2310,13 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
           title="CodeRabbit CLI"
           anchorId="pref-coderabbit-section-cli"
           actions={
-            coderabbitStatus?.installed ? (
-              checkingCodeRabbitAuth || isCodeRabbitAuthLoading ? (
-                <span className="text-sm text-muted-foreground flex items-center gap-2">
-                  <Loader2 className="size-3 animate-spin" />
-                  Checking...
-                </span>
-              ) : coderabbitAuth?.authenticated ? (
-                <span className="text-sm text-muted-foreground flex items-center gap-2">
-                  Logged in
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleCodeRabbitRelogin}
-                  >
-                    Relogin
-                  </Button>
-                </span>
-              ) : (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleCodeRabbitLogin}
-                >
-                  Login
-                </Button>
-              )
-            ) : (
-              <span className="text-sm text-muted-foreground">
-                Not installed
-              </span>
-            )
+            <CliAuthActions
+              installed={!!coderabbitStatus?.installed}
+              checking={checkingCodeRabbitAuth || isCodeRabbitAuthLoading}
+              authenticated={!!coderabbitAuth?.authenticated}
+              onSignIn={handleCodeRabbitLogin}
+              onSignInAgain={handleCodeRabbitRelogin}
+            />
           }
         >
           <div className="space-y-4">
@@ -2542,31 +2449,14 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         <SettingsSection
           title="CLI source"
           anchorId="pref-codex-section-cli"
-          variant="card"
           actions={
-            codexStatus?.installed ? (
-              checkingCodexAuth || isCodexAuthLoading ? (
-                <span className="text-sm text-muted-foreground flex items-center gap-2">
-                  <Loader2 className="size-3 animate-spin" />
-                  Checking...
-                </span>
-              ) : codexAuth?.authenticated ? (
-                <span className="text-sm text-muted-foreground flex items-center gap-2">
-                  Logged in
-                  <Button size="sm" onClick={handleCodexRelogin}>
-                    Relogin
-                  </Button>
-                </span>
-              ) : (
-                <Button size="sm" onClick={handleCodexLogin}>
-                  Login
-                </Button>
-              )
-            ) : (
-              <span className="text-sm text-muted-foreground">
-                Not installed
-              </span>
-            )
+            <CliAuthActions
+              installed={!!codexStatus?.installed}
+              checking={checkingCodexAuth || isCodexAuthLoading}
+              authenticated={!!codexAuth?.authenticated}
+              onSignIn={handleCodexLogin}
+              onSignInAgain={handleCodexRelogin}
+            />
           }
         >
           <div className="space-y-4">
@@ -2696,31 +2586,14 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         <SettingsSection
           title="CLI source"
           anchorId="pref-opencode-section-cli"
-          variant="card"
           actions={
-            opencodeStatus?.installed ? (
-              checkingOpenCodeAuth || isOpenCodeAuthLoading ? (
-                <span className="text-sm text-muted-foreground flex items-center gap-2">
-                  <Loader2 className="size-3 animate-spin" />
-                  Checking...
-                </span>
-              ) : opencodeAuth?.authenticated ? (
-                <span className="text-sm text-muted-foreground flex items-center gap-2">
-                  Logged in
-                  <Button size="sm" onClick={handleOpenCodeRelogin}>
-                    Relogin
-                  </Button>
-                </span>
-              ) : (
-                <Button size="sm" onClick={handleOpenCodeLogin}>
-                  Login
-                </Button>
-              )
-            ) : (
-              <span className="text-sm text-muted-foreground">
-                Not installed
-              </span>
-            )
+            <CliAuthActions
+              installed={!!opencodeStatus?.installed}
+              checking={checkingOpenCodeAuth || isOpenCodeAuthLoading}
+              authenticated={!!opencodeAuth?.authenticated}
+              onSignIn={handleOpenCodeLogin}
+              onSignInAgain={handleOpenCodeRelogin}
+            />
           }
         >
           <div className="space-y-4">
@@ -2844,31 +2717,14 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         <SettingsSection
           title="CLI source"
           anchorId="pref-cursor-section-cli"
-          variant="card"
           actions={
-            cursorStatus?.installed ? (
-              checkingCursorAuth || isCursorAuthLoading ? (
-                <span className="text-sm text-muted-foreground flex items-center gap-2">
-                  <Loader2 className="size-3 animate-spin" />
-                  Checking...
-                </span>
-              ) : cursorAuth?.authenticated ? (
-                <span className="text-sm text-muted-foreground flex items-center gap-2">
-                  Logged in
-                  <Button size="sm" onClick={handleCursorRelogin}>
-                    Relogin
-                  </Button>
-                </span>
-              ) : (
-                <Button size="sm" onClick={handleCursorLogin}>
-                  Login
-                </Button>
-              )
-            ) : (
-              <span className="text-sm text-muted-foreground">
-                Not installed
-              </span>
-            )
+            <CliAuthActions
+              installed={!!cursorStatus?.installed}
+              checking={checkingCursorAuth || isCursorAuthLoading}
+              authenticated={!!cursorAuth?.authenticated}
+              onSignIn={handleCursorLogin}
+              onSignInAgain={handleCursorRelogin}
+            />
           }
         >
           <div className="space-y-4">
@@ -2953,31 +2809,14 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         <SettingsSection
           title="CLI source"
           anchorId="pref-pi-section-cli"
-          variant="card"
           actions={
-            piStatus?.installed ? (
-              checkingPiAuth || isPiAuthLoading ? (
-                <span className="text-sm text-muted-foreground flex items-center gap-2">
-                  <Loader2 className="size-3 animate-spin" />
-                  Checking...
-                </span>
-              ) : piAuth?.authenticated ? (
-                <span className="text-sm text-muted-foreground flex items-center gap-2">
-                  Logged in
-                  <Button size="sm" onClick={handlePiRelogin}>
-                    Relogin
-                  </Button>
-                </span>
-              ) : (
-                <Button size="sm" onClick={handlePiLogin}>
-                  Login
-                </Button>
-              )
-            ) : (
-              <Button size="sm" onClick={handlePiInstall}>
-                Install
-              </Button>
-            )
+            <CliAuthActions
+              installed={!!piStatus?.installed}
+              checking={checkingPiAuth || isPiAuthLoading}
+              authenticated={!!piAuth?.authenticated}
+              onSignIn={handlePiLogin}
+              onSignInAgain={handlePiRelogin}
+            />
           }
         >
           <div className="space-y-4">
@@ -3062,31 +2901,14 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         <SettingsSection
           title="CLI source"
           anchorId="pref-commandcode-section-cli"
-          variant="card"
           actions={
-            commandcodeStatus?.installed ? (
-              checkingCommandCodeAuth || isCommandCodeAuthLoading ? (
-                <span className="text-sm text-muted-foreground flex items-center gap-2">
-                  <Loader2 className="size-3 animate-spin" />
-                  Checking...
-                </span>
-              ) : commandcodeAuth?.authenticated ? (
-                <span className="text-sm text-muted-foreground flex items-center gap-2">
-                  Logged in
-                  <Button size="sm" onClick={handleCommandCodeRelogin}>
-                    Relogin
-                  </Button>
-                </span>
-              ) : (
-                <Button size="sm" onClick={handleCommandCodeLogin}>
-                  Login
-                </Button>
-              )
-            ) : (
-              <Button size="sm" onClick={handleCommandCodeInstall}>
-                Install
-              </Button>
-            )
+            <CliAuthActions
+              installed={!!commandcodeStatus?.installed}
+              checking={checkingCommandCodeAuth || isCommandCodeAuthLoading}
+              authenticated={!!commandcodeAuth?.authenticated}
+              onSignIn={handleCommandCodeLogin}
+              onSignInAgain={handleCommandCodeRelogin}
+            />
           }
         >
           <div className="space-y-4">
@@ -3175,18 +2997,10 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         </SettingsSection>
       )}
 
-      {isGeneralScope && isWindows && isNativeApp() && (
-        <WslSettingsSection
-          preferences={preferences}
-          patchPreferences={patchPreferences}
-        />
-      )}
-
       {scope === 'claude' && (
         <SettingsSection
           title="Default model"
           anchorId="pref-claude-section-settings"
-          variant="card"
         >
           <div className="space-y-4">
             <InlineField
@@ -3277,7 +3091,8 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             </InlineField>
             <InlineField
               label="Steer running turn"
-              description="Inject new prompts into the running turn instead of queueing. Lands at the next tool call. macOS/Linux only; applies to new runs."
+              description="Send new prompts into the running turn"
+              help="Lands at the next tool call instead of queueing. macOS/Linux only; applies to new runs."
             >
               <Switch
                 checked={preferences?.claude_auto_steer_enabled ?? false}
@@ -3292,7 +3107,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         <SettingsSection
           title="Default model"
           anchorId="pref-codex-section-settings"
-          variant="card"
         >
           <div className="space-y-4">
             <InlineField label="Model">
@@ -3389,7 +3203,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         <SettingsSection
           title="Default model"
           anchorId="pref-opencode-section-settings"
-          variant="card"
         >
           <div className="space-y-4">
             <InlineField label="Model">
@@ -3467,7 +3280,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         <SettingsSection
           title="Default model"
           anchorId="pref-cursor-section-settings"
-          variant="card"
         >
           <div className="space-y-4">
             <InlineField label="Model">
@@ -3536,7 +3348,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         <SettingsSection
           title="Default model"
           anchorId="pref-pi-section-settings"
-          variant="card"
         >
           <div className="space-y-4">
             <InlineField
@@ -3613,7 +3424,8 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             </InlineField>
             <InlineField
               label="PI owns agent policy"
-              description="Keep PI's native tools, extensions, and project instructions. Jean only transports prompts and renders events without injecting a tool allowlist or system prompt."
+              description="Keep PI's own tools, extensions, and instructions"
+              help="Jean only sends prompts and renders events. It does not inject a tool allowlist or system prompt."
             >
               <Switch
                 checked={preferences?.pi_agent_owns_policy ?? false}
@@ -3628,7 +3440,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         <SettingsSection
           title="Default model"
           anchorId="pref-commandcode-section-settings"
-          variant="card"
         >
           <div className="space-y-4">
             <InlineField label="Model">
@@ -3657,31 +3468,14 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
           <SettingsSection
             title="CLI source"
             anchorId="pref-grok-section-cli"
-            variant="card"
             actions={
-              grokStatus?.installed ? (
-                checkingGrokAuth || isGrokAuthLoading ? (
-                  <span className="text-sm text-muted-foreground flex items-center gap-2">
-                    <Loader2 className="size-3 animate-spin" />
-                    Checking...
-                  </span>
-                ) : grokAuth?.authenticated ? (
-                  <span className="text-sm text-muted-foreground flex items-center gap-2">
-                    Logged in
-                    <Button size="sm" onClick={handleGrokRelogin}>
-                      Relogin
-                    </Button>
-                  </span>
-                ) : (
-                  <Button size="sm" onClick={handleGrokLogin}>
-                    Login
-                  </Button>
-                )
-              ) : (
-                <Button size="sm" onClick={handleGrokInstall}>
-                  Install
-                </Button>
-              )
+              <CliAuthActions
+                installed={!!grokStatus?.installed}
+                checking={checkingGrokAuth || isGrokAuthLoading}
+                authenticated={!!grokAuth?.authenticated}
+                onSignIn={handleGrokLogin}
+                onSignInAgain={handleGrokRelogin}
+              />
             }
           >
             <div className="space-y-4">
@@ -3697,9 +3491,18 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                     {grokStatus.version ?? 'Installed'}
                   </Button>
                 ) : (
-                  <span className="text-sm text-muted-foreground">
-                    Not found in PATH
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-muted-foreground">
+                      Not found in PATH
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleGrokInstall}
+                    >
+                      Install now
+                    </Button>
+                  </div>
                 )}
               </InlineField>
               {grokAuthMessage && (
@@ -3759,7 +3562,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
           <SettingsSection
             title="Default model"
             anchorId="pref-grok-section-settings"
-            variant="card"
           >
             <div className="space-y-4">
               <InlineField label="Model">
@@ -3817,31 +3619,14 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
           <SettingsSection
             title="CLI source"
             anchorId="pref-kimi-section-cli"
-            variant="card"
             actions={
-              kimiStatus?.installed ? (
-                checkingKimiAuth || isKimiAuthLoading ? (
-                  <span className="text-sm text-muted-foreground flex items-center gap-2">
-                    <Loader2 className="size-3 animate-spin" />
-                    Checking...
-                  </span>
-                ) : kimiAuth?.authenticated ? (
-                  <span className="text-sm text-muted-foreground flex items-center gap-2">
-                    Logged in
-                    <Button size="sm" onClick={handleKimiRelogin}>
-                      Relogin
-                    </Button>
-                  </span>
-                ) : (
-                  <Button size="sm" onClick={handleKimiLogin}>
-                    Login
-                  </Button>
-                )
-              ) : (
-                <Button size="sm" onClick={handleKimiInstall}>
-                  Install
-                </Button>
-              )
+              <CliAuthActions
+                installed={!!kimiStatus?.installed}
+                checking={checkingKimiAuth || isKimiAuthLoading}
+                authenticated={!!kimiAuth?.authenticated}
+                onSignIn={handleKimiLogin}
+                onSignInAgain={handleKimiRelogin}
+              />
             }
           >
             <div className="space-y-4">
@@ -3928,7 +3713,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
           <SettingsSection
             title="Default model"
             anchorId="pref-kimi-section-settings"
-            variant="card"
           >
             <div className="space-y-4">
               <InlineField label="Model">
@@ -3969,31 +3753,14 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
           <SettingsSection
             title="CLI source"
             anchorId="pref-devin-section-cli"
-            variant="card"
             actions={
-              devinStatus?.installed ? (
-                checkingDevinAuth || isDevinAuthLoading ? (
-                  <span className="text-sm text-muted-foreground flex items-center gap-2">
-                    <Loader2 className="size-3 animate-spin" />
-                    Checking...
-                  </span>
-                ) : devinAuth?.authenticated ? (
-                  <span className="text-sm text-muted-foreground flex items-center gap-2">
-                    Logged in
-                    <Button size="sm" onClick={handleDevinRelogin}>
-                      Relogin
-                    </Button>
-                  </span>
-                ) : (
-                  <Button size="sm" onClick={handleDevinLogin}>
-                    Login
-                  </Button>
-                )
-              ) : (
-                <Button size="sm" onClick={handleDevinInstall}>
-                  Install
-                </Button>
-              )
+              <CliAuthActions
+                installed={!!devinStatus?.installed}
+                checking={checkingDevinAuth || isDevinAuthLoading}
+                authenticated={!!devinAuth?.authenticated}
+                onSignIn={handleDevinLogin}
+                onSignInAgain={handleDevinRelogin}
+              />
             }
           >
             <div className="space-y-4">
@@ -4086,7 +3853,6 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
           <SettingsSection
             title="Default model"
             anchorId="pref-devin-section-settings"
-            variant="card"
           >
             <div className="space-y-4">
               <InlineField
@@ -4113,7 +3879,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               </InlineField>
               <InlineField
                 label="Steer running turn"
-                description="Reserved for Devin steering support; new prompts currently queue while Devin is working"
+                description="Not supported yet; prompts queue while Devin works"
               >
                 <Switch
                   checked={preferences?.devin_auto_steer_enabled ?? false}
@@ -4157,7 +3923,8 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
 
             <InlineField
               label="Default permissions"
-              description="Permission policy for new sessions. Plan mode is opt-in on each session, not a default."
+              description="Permission policy for new sessions"
+              help="Plan mode is opt-in on each session, not a default."
             >
               <Select
                 value={preferences?.default_execution_mode ?? 'yolo'}
@@ -4193,9 +3960,502 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               </Select>
             </InlineField>
 
+            <AiLanguageField preferences={preferences} />
+
+            {isNativeApp() && (
+              <InlineField
+                label="Editor"
+                description="App to open worktrees in"
+              >
+                <Select
+                  value={preferences?.editor ?? 'zed'}
+                  onValueChange={handleEditorChange}
+                >
+                  <SelectTrigger className="w-full sm:w-80">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {getEditorOptions().map(option => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </InlineField>
+            )}
+
+            {isNativeApp() && (
+              <InlineField
+                label="Terminal"
+                description="App to open terminals in"
+              >
+                <Select
+                  value={preferences?.terminal ?? 'terminal'}
+                  onValueChange={handleTerminalChange}
+                >
+                  <SelectTrigger className="w-full sm:w-80">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {getTerminalOptions().map(option => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </InlineField>
+            )}
+
+            {isNativeApp() && (
+              <InlineField
+                label="Open In"
+                description="Default app for Open button"
+              >
+                <Select
+                  value={preferences?.open_in ?? 'editor'}
+                  onValueChange={handleOpenInChange}
+                >
+                  <SelectTrigger className="w-full sm:w-80">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {openInDefaultOptions.map(option => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </InlineField>
+            )}
+
+            <InlineField
+              label="New Session"
+              description="Default action for CMD+T"
+            >
+              <Select
+                value={preferences?.default_new_session_kind ?? 'chat'}
+                onValueChange={handleNewSessionKindChange}
+              >
+                <SelectTrigger className="w-full sm:w-80">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {newSessionKindOptions.map(option => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </InlineField>
+          </div>
+        </SettingsSection>
+      )}
+
+      {isGeneralScope && (
+        <>
+          <SettingsSection
+            title="Notifications"
+            anchorId="pref-general-section-notifications"
+          >
+            <div className="space-y-4">
+              {isNativeApp() && (
+                <InlineField
+                  label="Desktop notifications"
+                  description="Banner when a session needs you or finishes"
+                  help="Shown only while Jean is in the background."
+                >
+                  <Switch
+                    checked={preferences?.desktop_notifications_enabled ?? true}
+                    onCheckedChange={handleDesktopNotificationsEnabledChange}
+                  />
+                </InlineField>
+              )}
+
+              <InlineField
+                label="Web access sounds"
+                description="Browser and mobile web access only"
+                help="Turn off to keep phone music playing."
+              >
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="web-access-sounds-enabled"
+                    checked={webAccessSoundsEnabled}
+                    onCheckedChange={handleWebAccessSoundsEnabledChange}
+                  />
+                  <Label
+                    htmlFor="web-access-sounds-enabled"
+                    className="cursor-pointer text-sm"
+                  >
+                    Play Jean sounds in web access
+                  </Label>
+                </div>
+              </InlineField>
+
+              <InlineField
+                label="Waiting sound"
+                description="Play when session needs your input"
+              >
+                <div className="flex items-center gap-2">
+                  <Select
+                    value={preferences?.waiting_sound ?? 'none'}
+                    onValueChange={handleWaitingSoundChange}
+                  >
+                    <SelectTrigger className="w-full sm:w-80">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {notificationSoundOptions.map(option => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    disabled={
+                      !preferences?.waiting_sound ||
+                      preferences.waiting_sound === 'none' ||
+                      !soundsEnabledInCurrentView
+                    }
+                    onClick={() =>
+                      playNotificationSound(
+                        preferences?.waiting_sound ?? 'none',
+                        { webAccessSoundsEnabled }
+                      )
+                    }
+                  >
+                    <Play className="h-4 w-4" />
+                  </Button>
+                </div>
+              </InlineField>
+
+              <InlineField
+                label="Review sound"
+                description="Play when session finishes"
+              >
+                <div className="flex items-center gap-2">
+                  <Select
+                    value={preferences?.review_sound ?? 'none'}
+                    onValueChange={handleReviewSoundChange}
+                  >
+                    <SelectTrigger className="w-full sm:w-80">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {notificationSoundOptions.map(option => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    disabled={
+                      !preferences?.review_sound ||
+                      preferences.review_sound === 'none' ||
+                      !soundsEnabledInCurrentView
+                    }
+                    onClick={() =>
+                      playNotificationSound(
+                        preferences?.review_sound ?? 'none',
+                        {
+                          webAccessSoundsEnabled,
+                        }
+                      )
+                    }
+                  >
+                    <Play className="h-4 w-4" />
+                  </Button>
+                </div>
+              </InlineField>
+            </div>
+          </SettingsSection>
+
+          <SettingsSection title="Chat" anchorId="pref-general-section-chat">
+            <div className="space-y-4">
+              <InlineField
+                label="Show full file paths"
+                description="Show relative paths in file mention badges"
+              >
+                <Switch
+                  checked={preferences?.show_full_file_path ?? false}
+                  onCheckedChange={checked => {
+                    if (preferences) {
+                      patchPreferences.mutate({
+                        show_full_file_path: checked,
+                      })
+                    }
+                  }}
+                />
+              </InlineField>
+              <InlineField
+                label="Spellcheck"
+                description="Enable spellcheck in the chat input"
+              >
+                <Switch
+                  checked={preferences?.spellcheck_enabled ?? true}
+                  onCheckedChange={checked => {
+                    if (preferences) {
+                      patchPreferences.mutate({
+                        spellcheck_enabled: checked,
+                      })
+                    }
+                  }}
+                />
+              </InlineField>
+            </div>
+          </SettingsSection>
+
+          <SettingsSection
+            title="Auto-generate"
+            anchorId="pref-general-section-auto-generate"
+          >
+            <div className="space-y-4">
+              <InlineField
+                label="Branch names"
+                description="Generate branch names from your first message"
+              >
+                <Switch
+                  checked={preferences?.auto_branch_naming ?? true}
+                  onCheckedChange={handleAutoBranchNamingChange}
+                />
+              </InlineField>
+              <InlineField
+                label="Session names"
+                description="Generate session names from your first message"
+              >
+                <Switch
+                  checked={preferences?.auto_session_naming ?? true}
+                  onCheckedChange={handleAutoSessionNamingChange}
+                />
+              </InlineField>
+            </div>
+          </SettingsSection>
+
+          <SettingsSection
+            title="Worktrees"
+            anchorId="pref-general-section-worktrees"
+          >
+            <div className="space-y-4">
+              <InlineField
+                label="Auto-pull base branch"
+                description="Pull the latest changes before creating a new worktree"
+              >
+                <Switch
+                  checked={preferences?.auto_pull_base_branch ?? true}
+                  onCheckedChange={checked => {
+                    if (preferences) {
+                      patchPreferences.mutate({
+                        auto_pull_base_branch: checked,
+                      })
+                    }
+                  }}
+                />
+              </InlineField>
+
+              <InlineField
+                label="Auto-save context"
+                description="Automatically save session context after each AI response"
+              >
+                <Switch
+                  checked={preferences?.auto_save_context ?? false}
+                  onCheckedChange={checked => {
+                    if (preferences) {
+                      patchPreferences.mutate({
+                        auto_save_context: checked,
+                      })
+                    }
+                  }}
+                />
+              </InlineField>
+            </div>
+          </SettingsSection>
+
+          <SettingsSection
+            title="Browser"
+            anchorId="pref-general-section-browser"
+          >
+            <div className="space-y-4">
+              <BrowserDefaultHostField preferences={preferences} />
+            </div>
+          </SettingsSection>
+
+          <SettingsSection
+            title="Archive"
+            anchorId="pref-general-section-archive"
+          >
+            <div className="space-y-4">
+              <InlineField
+                label="Confirm before closing"
+                description="Show confirmation dialog when closing sessions or worktrees"
+              >
+                <Switch
+                  checked={preferences?.confirm_session_close ?? true}
+                  onCheckedChange={checked => {
+                    if (preferences) {
+                      patchPreferences.mutate({
+                        confirm_session_close: checked,
+                      })
+                    }
+                  }}
+                />
+              </InlineField>
+
+              <InlineField
+                label="Skip close confirmation"
+                description="Hold this key while closing to skip the dialog"
+              >
+                <Select
+                  value={preferences?.close_confirm_bypass_modifier ?? 'none'}
+                  onValueChange={(value: CloseConfirmBypassModifier) => {
+                    if (preferences) {
+                      patchPreferences.mutate({
+                        close_confirm_bypass_modifier: value,
+                      })
+                    }
+                  }}
+                  disabled={patchPreferences.isPending}
+                >
+                  <SelectTrigger className="w-full sm:w-48">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CLOSE_CONFIRM_BYPASS_MODIFIERS.map(modifier => (
+                      <SelectItem key={modifier} value={modifier}>
+                        {BYPASS_MODIFIER_LABELS[modifier]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </InlineField>
+
+              <InlineField
+                label="Archive original session on clear context"
+                description="When a plan is approved with Clear context or in a new worktree"
+                help="You can restore it from archived sessions."
+              >
+                <Switch
+                  checked={preferences?.close_original_on_clear_context ?? true}
+                  onCheckedChange={checked => {
+                    if (preferences) {
+                      patchPreferences.mutate({
+                        close_original_on_clear_context: checked,
+                      })
+                    }
+                  }}
+                />
+              </InlineField>
+
+              <InlineField
+                label="Removal behavior"
+                description="What happens when closing sessions or worktrees"
+              >
+                <Select
+                  value={preferences?.removal_behavior ?? 'delete'}
+                  onValueChange={(value: RemovalBehavior) => {
+                    if (preferences) {
+                      patchPreferences.mutate({
+                        removal_behavior: value,
+                      })
+                    }
+                  }}
+                >
+                  <SelectTrigger className="w-full sm:w-80">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {removalBehaviorOptions.map(option => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </InlineField>
+
+              <InlineField
+                label="Auto-archive on PR merge"
+                description="Archive worktrees when their PR is merged"
+              >
+                <Switch
+                  checked={preferences?.auto_archive_on_pr_merged ?? true}
+                  onCheckedChange={checked => {
+                    if (preferences) {
+                      patchPreferences.mutate({
+                        auto_archive_on_pr_merged: checked,
+                      })
+                    }
+                  }}
+                />
+              </InlineField>
+
+              <InlineField
+                label="Auto-delete archives"
+                description="Delete archived items older than this"
+              >
+                <Select
+                  value={String(preferences?.archive_retention_days ?? 30)}
+                  onValueChange={handleArchiveRetentionChange}
+                >
+                  <SelectTrigger className="w-full sm:w-80">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {archiveRetentionOptions.map(option => (
+                      <SelectItem
+                        key={option.value}
+                        value={String(option.value)}
+                      >
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </InlineField>
+            </div>
+          </SettingsSection>
+
+          {isWebAccessView && (
+            <SettingsSection
+              title="This browser"
+              description="You are signed in to this Jean server with an access token kept in this browser."
+              anchorId="pref-general-section-session"
+            >
+              <InlineField
+                label={webAccessServerLabel()}
+                description="Forgets the token on this device only"
+                help="The server keeps running and your other devices stay signed in."
+              >
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={signOutOfWebAccess}
+                >
+                  <LogOut className="size-3.5" />
+                  Sign out
+                </Button>
+              </InlineField>
+            </SettingsSection>
+          )}
+
+          <SettingsSection
+            title="Advanced"
+            anchorId="pref-general-section-advanced"
+            collapsible
+            defaultOpen={false}
+          >
             <InlineField
               label="Keep AI servers warm"
-              description="Keep Codex and OpenCode running for 10 minutes after a request so follow-up prompts start faster"
+              description="Keep Codex and OpenCode running for 10 minutes"
+              help="Follow-up prompts start faster."
             >
               <Switch
                 checked={preferences?.keep_ai_servers_warm ?? true}
@@ -4207,7 +4467,8 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
 
             <InlineField
               label="Plan approval"
-              description="Backend, model, thinking, and effort overrides when approving a plan with the selected permissions"
+              description="Overrides when approving a plan"
+              help="Backend, model, thinking, and effort used when you approve a plan with the selected permissions."
             >
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
                 <div>
@@ -4456,7 +4717,8 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
 
             <InlineField
               label="Full-access plan approval"
-              description="Backend, model, thinking, and effort overrides when approving a plan with Full access"
+              description="Overrides when approving with Full access"
+              help="Backend, model, thinking, and effort used when you approve a plan with Full access."
             >
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
                 <div>
@@ -4703,101 +4965,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               </div>
             </InlineField>
 
-            <AiLanguageField preferences={preferences} />
-
-            {isNativeApp() && (
-              <InlineField
-                label="Editor"
-                description="App to open worktrees in"
-              >
-                <Select
-                  value={preferences?.editor ?? 'zed'}
-                  onValueChange={handleEditorChange}
-                >
-                  <SelectTrigger className="w-full sm:w-80">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {getEditorOptions().map(option => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </InlineField>
-            )}
-
-            {isNativeApp() && (
-              <InlineField
-                label="Terminal"
-                description="App to open terminals in"
-              >
-                <Select
-                  value={preferences?.terminal ?? 'terminal'}
-                  onValueChange={handleTerminalChange}
-                >
-                  <SelectTrigger className="w-full sm:w-80">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {getTerminalOptions().map(option => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </InlineField>
-            )}
-
-            {isNativeApp() && (
-              <InlineField
-                label="Open In"
-                description="Default app for Open button"
-              >
-                <Select
-                  value={preferences?.open_in ?? 'editor'}
-                  onValueChange={handleOpenInChange}
-                >
-                  <SelectTrigger className="w-full sm:w-80">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {openInDefaultOptions.map(option => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </InlineField>
-            )}
-
-            <InlineField
-              label="New Session"
-              description="Default action for CMD+T"
-            >
-              <Select
-                value={preferences?.default_new_session_kind ?? 'chat'}
-                onValueChange={handleNewSessionKindChange}
-              >
-                <SelectTrigger className="w-full sm:w-80">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {newSessionKindOptions.map(option => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </InlineField>
-
             <InlineField
               label="Auto-update AI backends"
-              description="Install supported AI backend CLI updates, including Command Code, in the background as soon as a new version is detected."
+              description="Install CLI updates in the background"
             >
               <Switch
                 checked={preferences?.auto_update_ai_backends ?? true}
@@ -4810,496 +4980,121 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 }}
               />
             </InlineField>
-          </div>
-        </SettingsSection>
-      )}
 
-      {isGeneralScope && (
-        <>
-          <SettingsSection
-            title="Notifications"
-            anchorId="pref-general-section-notifications"
-          >
-            <div className="space-y-4">
-              {isNativeApp() && (
-                <InlineField
-                  label="Desktop notifications"
-                  description="Show a native system banner when a session needs your input or finishes, but only while Jean is in the background."
-                >
-                  <Switch
-                    checked={preferences?.desktop_notifications_enabled ?? true}
-                    onCheckedChange={handleDesktopNotificationsEnabledChange}
-                  />
-                </InlineField>
-              )}
+            {isWindows && isNativeApp() && (
+              <WslSettingsFields
+                preferences={preferences}
+                patchPreferences={patchPreferences}
+              />
+            )}
 
-              <InlineField
-                label="Web access sounds"
-                description="Applies only when using Jean in browser or mobile web access. Turn off to keep phone music uninterrupted."
-              >
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="web-access-sounds-enabled"
-                    checked={webAccessSoundsEnabled}
-                    onCheckedChange={handleWebAccessSoundsEnabledChange}
-                  />
-                  <Label
-                    htmlFor="web-access-sounds-enabled"
-                    className="cursor-pointer text-sm"
-                  >
-                    Play Jean sounds in web access
-                  </Label>
-                </div>
-              </InlineField>
+            <InlineField
+              id="pref-general-debug-mode"
+              label="Debug mode"
+              description="Show the session debug panel"
+            >
+              <Switch
+                checked={preferences?.debug_mode_enabled ?? false}
+                onCheckedChange={checked => {
+                  patchPreferences.mutate({ debug_mode_enabled: checked })
+                }}
+              />
+            </InlineField>
 
-              <InlineField
-                label="Waiting sound"
-                description="Play when session needs your input"
-              >
-                <div className="flex items-center gap-2">
-                  <Select
-                    value={preferences?.waiting_sound ?? 'none'}
-                    onValueChange={handleWaitingSoundChange}
-                  >
-                    <SelectTrigger className="w-full sm:w-80">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {notificationSoundOptions.map(option => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    disabled={
-                      !preferences?.waiting_sound ||
-                      preferences.waiting_sound === 'none' ||
-                      !soundsEnabledInCurrentView
-                    }
-                    onClick={() =>
-                      playNotificationSound(
-                        preferences?.waiting_sound ?? 'none',
-                        { webAccessSoundsEnabled }
-                      )
-                    }
-                  >
-                    <Play className="h-4 w-4" />
-                  </Button>
-                </div>
-              </InlineField>
+            <InlineField
+              id="pref-general-agents"
+              label="Agents"
+              description="Show the Agents tab with Jean, the coordinator agent"
+            >
+              <Switch
+                checked={preferences?.agents_enabled ?? false}
+                onCheckedChange={checked => {
+                  patchPreferences.mutate({ agents_enabled: checked })
+                  // Leave the Agents page when the feature is turned off
+                  if (!checked)
+                    useUIStore.getState().setRailSection('workspace')
+                }}
+              />
+            </InlineField>
 
+            {isNativeApp() && (
               <InlineField
-                label="Review sound"
-                description="Play when session finishes"
-              >
-                <div className="flex items-center gap-2">
-                  <Select
-                    value={preferences?.review_sound ?? 'none'}
-                    onValueChange={handleReviewSoundChange}
-                  >
-                    <SelectTrigger className="w-full sm:w-80">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {notificationSoundOptions.map(option => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    disabled={
-                      !preferences?.review_sound ||
-                      preferences.review_sound === 'none' ||
-                      !soundsEnabledInCurrentView
-                    }
-                    onClick={() =>
-                      playNotificationSound(
-                        preferences?.review_sound ?? 'none',
-                        {
-                          webAccessSoundsEnabled,
-                        }
-                      )
-                    }
-                  >
-                    <Play className="h-4 w-4" />
-                  </Button>
-                </div>
-              </InlineField>
-            </div>
-          </SettingsSection>
-
-          <SettingsSection title="Chat" anchorId="pref-general-section-chat">
-            <div className="space-y-4">
-              <InlineField
-                label="Show full file paths"
-                description="Display full relative paths in file mention badges instead of just filenames (useful for monorepos)"
-              >
-                <Switch
-                  checked={preferences?.show_full_file_path ?? false}
-                  onCheckedChange={checked => {
-                    if (preferences) {
-                      patchPreferences.mutate({
-                        show_full_file_path: checked,
-                      })
-                    }
-                  }}
-                />
-              </InlineField>
-              <InlineField
-                label="Spellcheck"
-                description="Enable spellcheck in the chat input"
-              >
-                <Switch
-                  checked={preferences?.spellcheck_enabled ?? true}
-                  onCheckedChange={checked => {
-                    if (preferences) {
-                      patchPreferences.mutate({
-                        spellcheck_enabled: checked,
-                      })
-                    }
-                  }}
-                />
-              </InlineField>
-            </div>
-          </SettingsSection>
-
-          <SettingsSection
-            title="Auto-generate"
-            anchorId="pref-general-section-auto-generate"
-          >
-            <div className="space-y-4">
-              <InlineField
-                label="Branch names"
-                description="Generate branch names from your first message"
-              >
-                <Switch
-                  checked={preferences?.auto_branch_naming ?? true}
-                  onCheckedChange={handleAutoBranchNamingChange}
-                />
-              </InlineField>
-              <InlineField
-                label="Session names"
-                description="Generate session names from your first message"
-              >
-                <Switch
-                  checked={preferences?.auto_session_naming ?? true}
-                  onCheckedChange={handleAutoSessionNamingChange}
-                />
-              </InlineField>
-            </div>
-          </SettingsSection>
-
-          <SettingsSection
-            title="Worktrees"
-            anchorId="pref-general-section-worktrees"
-          >
-            <div className="space-y-4">
-              <InlineField
-                label="Auto-pull base branch"
-                description="Pull the latest changes before creating a new worktree"
-              >
-                <Switch
-                  checked={preferences?.auto_pull_base_branch ?? true}
-                  onCheckedChange={checked => {
-                    if (preferences) {
-                      patchPreferences.mutate({
-                        auto_pull_base_branch: checked,
-                      })
-                    }
-                  }}
-                />
-              </InlineField>
-
-              <InlineField
-                label="Auto-save context"
-                description="Automatically save session context after each AI response"
-              >
-                <Switch
-                  checked={preferences?.auto_save_context ?? false}
-                  onCheckedChange={checked => {
-                    if (preferences) {
-                      patchPreferences.mutate({
-                        auto_save_context: checked,
-                      })
-                    }
-                  }}
-                />
-              </InlineField>
-            </div>
-          </SettingsSection>
-
-          <SettingsSection
-            title="Browser"
-            anchorId="pref-general-section-browser"
-          >
-            <div className="space-y-4">
-              <BrowserDefaultHostField preferences={preferences} />
-            </div>
-          </SettingsSection>
-
-          <SettingsSection
-            title="Archive"
-            anchorId="pref-general-section-archive"
-          >
-            <div className="space-y-4">
-              <InlineField
-                label="Confirm before closing"
-                description="Show confirmation dialog when closing sessions or worktrees"
-              >
-                <Switch
-                  checked={preferences?.confirm_session_close ?? true}
-                  onCheckedChange={checked => {
-                    if (preferences) {
-                      patchPreferences.mutate({
-                        confirm_session_close: checked,
-                      })
-                    }
-                  }}
-                />
-              </InlineField>
-
-              <InlineField
-                label="Skip close confirmation"
-                description="Hold this modifier while closing a session or worktree to skip the confirmation dialog."
-              >
-                <Select
-                  value={preferences?.close_confirm_bypass_modifier ?? 'none'}
-                  onValueChange={(value: CloseConfirmBypassModifier) => {
-                    if (preferences) {
-                      patchPreferences.mutate({
-                        close_confirm_bypass_modifier: value,
-                      })
-                    }
-                  }}
-                  disabled={patchPreferences.isPending}
-                >
-                  <SelectTrigger className="w-full sm:w-48">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CLOSE_CONFIRM_BYPASS_MODIFIERS.map(modifier => (
-                      <SelectItem key={modifier} value={modifier}>
-                        {BYPASS_MODIFIER_LABELS[modifier]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </InlineField>
-
-              <InlineField
-                label="Archive original session on clear context"
-                description="Archive the original planning session when a plan is approved with Clear context or in a new worktree. You can restore it from archived sessions."
-              >
-                <Switch
-                  checked={preferences?.close_original_on_clear_context ?? true}
-                  onCheckedChange={checked => {
-                    if (preferences) {
-                      patchPreferences.mutate({
-                        close_original_on_clear_context: checked,
-                      })
-                    }
-                  }}
-                />
-              </InlineField>
-
-              <InlineField
-                label="Removal behavior"
-                description="What happens when closing sessions or worktrees"
-              >
-                <Select
-                  value={preferences?.removal_behavior ?? 'delete'}
-                  onValueChange={(value: RemovalBehavior) => {
-                    if (preferences) {
-                      patchPreferences.mutate({
-                        removal_behavior: value,
-                      })
-                    }
-                  }}
-                >
-                  <SelectTrigger className="w-full sm:w-80">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {removalBehaviorOptions.map(option => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </InlineField>
-
-              <InlineField
-                label="Auto-archive on PR merge"
-                description="Archive worktrees when their PR is merged"
-              >
-                <Switch
-                  checked={preferences?.auto_archive_on_pr_merged ?? true}
-                  onCheckedChange={checked => {
-                    if (preferences) {
-                      patchPreferences.mutate({
-                        auto_archive_on_pr_merged: checked,
-                      })
-                    }
-                  }}
-                />
-              </InlineField>
-
-              <InlineField
-                label="Auto-delete archives"
-                description="Delete archived items older than this"
-              >
-                <Select
-                  value={String(preferences?.archive_retention_days ?? 30)}
-                  onValueChange={handleArchiveRetentionChange}
-                >
-                  <SelectTrigger className="w-full sm:w-80">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {archiveRetentionOptions.map(option => (
-                      <SelectItem
-                        key={option.value}
-                        value={String(option.value)}
-                      >
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </InlineField>
-
-              <InlineField
-                label="Delete all archives"
-                description="Permanently delete all archived worktrees and sessions"
+                id="pref-general-section-troubleshooting"
+                label="Application logs"
+                description="Open the log directory"
               >
                 <Button
-                  variant="destructive"
+                  variant="outline"
                   size="sm"
-                  onClick={() => setShowDeleteAllDialog(true)}
-                  disabled={isDeleting}
+                  className="w-fit"
+                  onClick={async () => {
+                    try {
+                      await invoke('open_log_directory')
+                    } catch (error) {
+                      toast.error(`Failed to open logs: ${error}`)
+                    }
+                  }}
                 >
-                  Delete All
+                  Show Logs
                 </Button>
               </InlineField>
-            </div>
-          </SettingsSection>
+            )}
 
-          {isNativeApp() && (
-            <SettingsSection
-              title="Troubleshooting"
-              anchorId="pref-general-section-troubleshooting"
+            <InlineField
+              label="Delete all archives"
+              description="Permanently delete all archived worktrees and sessions"
             >
-              <div className="space-y-4">
-                <InlineField
-                  label="Application logs"
-                  description="Open the log directory for troubleshooting"
-                >
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={async () => {
-                      try {
-                        await invoke('open_log_directory')
-                      } catch (error) {
-                        toast.error(`Failed to open logs: ${error}`)
-                      }
-                    }}
-                  >
-                    Show Logs
-                  </Button>
-                </InlineField>
-              </div>
-            </SettingsSection>
-          )}
-
-          <SettingsSection
-            title="Version"
-            anchorId="pref-general-section-version"
-          >
-            <div className="space-y-4">
-              <InlineField
-                label={activeRemoteConnection ? 'Jean Client' : 'Jean'}
-                description="Application version"
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => setShowDeleteAllDialog(true)}
+                disabled={isDeleting}
               >
-                <span className="font-mono text-sm text-muted-foreground">
-                  v{CLIENT_BUILD_INFO.appVersion}
-                </span>
-              </InlineField>
-
-              {activeRemoteConnection && (
-                <InlineField
-                  label="Jean Server"
-                  description="Connected remote server version"
-                >
-                  <span className="font-mono text-sm text-muted-foreground">
-                    {isRemoteServerInfoLoading
-                      ? 'Loading…'
-                      : formatJeanVersionLabel(remoteServerVersion)}
-                  </span>
-                </InlineField>
-              )}
-
-              {CLIENT_BUILD_INFO.gitSha && (
-                <InlineField
-                  label="Commit"
-                  description="Source commit used for this build"
-                >
-                  <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        openExternal(
-                          `https://github.com/coollabsio/jean/commit/${CLIENT_BUILD_INFO.gitSha}`
-                        )
-                      }
-                      className="font-mono hover:text-foreground hover:underline"
-                    >
-                      {CLIENT_BUILD_INFO.gitSha}
-                    </button>
-                    {CLIENT_BUILD_INFO.builtAt && (
-                      <span>
-                        · {new Date(CLIENT_BUILD_INFO.builtAt).toLocaleString()}
-                      </span>
-                    )}
-                  </div>
-                </InlineField>
-              )}
-            </div>
+                Delete All
+              </Button>
+            </InlineField>
           </SettingsSection>
-        </>
-      )}
 
-      {isGeneralScope && isWebAccessView && (
-        <SettingsSection
-          title="This browser"
-          description="You are signed in to this Jean server with an access token kept in this browser."
-          anchorId="pref-general-section-session"
-          variant="card"
-        >
-          <InlineField
-            label={webAccessServerLabel()}
-            description="Signing out forgets the token on this device only. The server keeps running and your other devices stay signed in."
+          <div
+            id="pref-general-section-version"
+            className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-xs text-muted-foreground"
           >
-            <Button
-              variant="outline"
-              size="sm"
-              className="sm:ml-auto"
-              onClick={signOutOfWebAccess}
-            >
-              <LogOut className="size-3.5" />
-              Sign out
-            </Button>
-          </InlineField>
-        </SettingsSection>
+            <span>
+              {activeRemoteConnection ? 'Jean Client' : 'Jean'} v
+              {CLIENT_BUILD_INFO.appVersion}
+            </span>
+            {activeRemoteConnection && (
+              <span>
+                · Jean Server{' '}
+                {isRemoteServerInfoLoading
+                  ? 'Loading…'
+                  : formatJeanVersionLabel(remoteServerVersion)}
+              </span>
+            )}
+            {CLIENT_BUILD_INFO.gitSha && (
+              <span>
+                ·{' '}
+                <button
+                  type="button"
+                  title="Source commit used for this build"
+                  onClick={() =>
+                    openExternal(
+                      `https://github.com/coollabsio/jean/commit/${CLIENT_BUILD_INFO.gitSha}`
+                    )
+                  }
+                  className="hover:text-foreground hover:underline"
+                >
+                  {CLIENT_BUILD_INFO.gitSha}
+                </button>
+              </span>
+            )}
+            {CLIENT_BUILD_INFO.builtAt && (
+              <span>
+                · {new Date(CLIENT_BUILD_INFO.builtAt).toLocaleString()}
+              </span>
+            )}
+          </div>
+        </>
       )}
 
       <AlertDialog
@@ -5355,8 +5150,8 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                             : deleteCliTarget === 'devin'
                               ? 'Devin CLI'
                               : deleteCliTarget === 'pi'
-                              ? 'PI CLI'
-                              : 'GitHub CLI'}
+                                ? 'PI CLI'
+                                : 'GitHub CLI'}
               ?
             </AlertDialogTitle>
             <AlertDialogDescription>
@@ -5407,7 +5202,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   )
 }
 
-export const WslSettingsSection: FC<{
+const WslSettingsFields: FC<{
   preferences: AppPreferences | undefined
   patchPreferences: ReturnType<typeof usePatchPreferences>
 }> = ({ preferences, patchPreferences }) => {
@@ -5458,100 +5253,98 @@ export const WslSettingsSection: FC<{
   }, [preferences?.wsl_enabled, preferences?.wsl_distro])
 
   return (
-    <SettingsSection title="WSL">
-      <div className="space-y-4">
-        <InlineField
-          label="Use WSL"
-          description="Route commands through Windows Subsystem for Linux"
-        >
-          <Switch
-            checked={showWslDistroSelect}
-            onCheckedChange={checked => {
-              if (checked) {
-                setIsChoosingWsl(true)
-                return
-              }
-              setIsChoosingWsl(false)
-              patchPreferences.mutate(
-                {
-                  wsl_enabled: false,
-                  wsl_mode_chosen: true,
-                },
-                { onSuccess: invalidateCliCaches }
-              )
-            }}
-          />
-        </InlineField>
+    <>
+      <InlineField
+        label="Use WSL"
+        description="Route commands through Windows Subsystem for Linux"
+      >
+        <Switch
+          checked={showWslDistroSelect}
+          onCheckedChange={checked => {
+            if (checked) {
+              setIsChoosingWsl(true)
+              return
+            }
+            setIsChoosingWsl(false)
+            patchPreferences.mutate(
+              {
+                wsl_enabled: false,
+                wsl_mode_chosen: true,
+              },
+              { onSuccess: invalidateCliCaches }
+            )
+          }}
+        />
+      </InlineField>
 
-        {showWslDistroSelect && (
-          <>
-            <InlineField
-              label="Distribution"
-              description={toolStatus || 'Select your WSL distribution'}
-            >
-              {loadingDistros ? (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Loading...
-                </div>
-              ) : (
-                <Select
-                  value={wslEnabled ? preferences?.wsl_distro || '' : ''}
-                  onValueChange={async value => {
-                    if (!value || !distros.includes(value)) {
+      {showWslDistroSelect && (
+        <>
+          <InlineField
+            label="Distribution"
+            description={toolStatus || 'Select your WSL distribution'}
+          >
+            {loadingDistros ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading...
+              </div>
+            ) : (
+              <Select
+                value={wslEnabled ? preferences?.wsl_distro || '' : ''}
+                onValueChange={async value => {
+                  if (!value || !distros.includes(value)) {
+                    return
+                  }
+                  setToolStatus('Checking for git...')
+                  try {
+                    const hasGit = await invoke<boolean>('check_wsl_tool', {
+                      distro: value,
+                      tool: 'git',
+                    })
+                    if (!hasGit) {
+                      setToolStatus(
+                        'git not found. Install it inside WSL: sudo apt install git'
+                      )
                       return
                     }
-                    setToolStatus('Checking for git...')
-                    try {
-                      const hasGit = await invoke<boolean>('check_wsl_tool', {
-                        distro: value,
-                        tool: 'git',
-                      })
-                      if (!hasGit) {
-                        setToolStatus(
-                          'git not found. Install it inside WSL: sudo apt install git'
-                        )
-                        return
-                      }
-                    } catch {
-                      setToolStatus('Failed to check WSL distro')
-                      return
-                    }
-                    patchPreferences.mutate(
-                      {
-                        wsl_enabled: true,
-                        wsl_distro: value,
-                        wsl_mode_chosen: true,
+                  } catch {
+                    setToolStatus('Failed to check WSL distro')
+                    return
+                  }
+                  patchPreferences.mutate(
+                    {
+                      wsl_enabled: true,
+                      wsl_distro: value,
+                      wsl_mode_chosen: true,
+                    },
+                    {
+                      onSuccess: () => {
+                        setIsChoosingWsl(false)
+                        invalidateCliCaches()
                       },
-                      {
-                        onSuccess: () => {
-                          setIsChoosingWsl(false)
-                          invalidateCliCaches()
-                        },
-                      }
-                    )
-                  }}
-                >
-                  <SelectTrigger className="w-full sm:w-48">
-                    <SelectValue placeholder="Select distro" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {distros.map(d => (
-                      <SelectItem key={d} value={d}>
-                        {d}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            </InlineField>
+                    }
+                  )
+                }}
+              >
+                <SelectTrigger className="w-full sm:w-48">
+                  <SelectValue placeholder="Select distro" />
+                </SelectTrigger>
+                <SelectContent>
+                  {distros.map(d => (
+                    <SelectItem key={d} value={d}>
+                      {d}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </InlineField>
 
-            <div className="text-xs text-muted-foreground">
-              CLI tools must be installed inside your WSL distribution.
-            </div>
-          </>
-        )}
-      </div>
-    </SettingsSection>
+          <div className="text-xs text-muted-foreground">
+            CLI tools must be installed inside your WSL distribution.
+          </div>
+        </>
+      )}
+    </>
   )
 }

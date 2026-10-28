@@ -61,6 +61,12 @@ import {
   warnRemoteVersionMismatch,
 } from '@/lib/remote-version'
 import { invoke, listenLocal } from '@/lib/transport'
+import {
+  CONNECTION_TONE_DOT,
+  connectionTone,
+  type ConnectionTone,
+  type VersionState,
+} from './connection-tone'
 
 const EMPTY_URL_FORM = {
   name: '',
@@ -127,11 +133,6 @@ function localPortFromUrl(url: string | null | undefined): number | undefined {
   }
 }
 
-type VersionState =
-  | { status: 'loading' }
-  | { status: 'ready'; version: string | null }
-  | { status: 'error'; message: string }
-
 interface RemoteConnectionsDialogProps {
   open?: boolean
   onOpenChange?: (open: boolean) => void
@@ -166,9 +167,8 @@ export function RemoteConnectionsDialog({
   const [installing, setInstalling] = useState(false)
   const [progress, setProgress] = useState<string | null>(null)
   const [tunnelForm, setTunnelForm] = useState(EMPTY_TUNNEL_FORM)
-  const [pendingHostKey, setPendingHostKey] = useState<SshHostKeyPreview | null>(
-    null
-  )
+  const [pendingHostKey, setPendingHostKey] =
+    useState<SshHostKeyPreview | null>(null)
   const [tunnelStatus, setTunnelStatus] = useState<Record<string, string>>({})
 
   const connectionIds = connections.map(connection => connection.id).join('|')
@@ -458,7 +458,9 @@ export function RemoteConnectionsDialog({
       jeanPort < 1 ||
       jeanPort > 65535
     ) {
-      throw new Error('SSH and Jean ports must be integers between 1 and 65535.')
+      throw new Error(
+        'SSH and Jean ports must be integers between 1 and 65535.'
+      )
     }
     return { sshPort, jeanPort }
   }
@@ -499,7 +501,10 @@ export function RemoteConnectionsDialog({
 
     setError(null)
     try {
-      const { sshPort } = readSshPorts(installForm.sshPort, installForm.jeanPort)
+      const { sshPort } = readSshPorts(
+        installForm.sshPort,
+        installForm.jeanPort
+      )
       await previewHostKey(user, host, sshPort)
     } catch (installError) {
       setError(
@@ -549,9 +554,7 @@ export function RemoteConnectionsDialog({
         }
       )
       if (!result.ready || !result.profileId) {
-        throw new Error(
-          result.log || 'The SSH tunnel did not become ready.'
-        )
+        throw new Error(result.log || 'The SSH tunnel did not become ready.')
       }
       addSshRemoteConnection({
         id: result.profileId,
@@ -618,7 +621,8 @@ export function RemoteConnectionsDialog({
       tunnelForm.sshPort,
       tunnelForm.jeanPort
     )
-    const profileId = editingId && editingId !== 'new' ? editingId : generateId()
+    const profileId =
+      editingId && editingId !== 'new' ? editingId : generateId()
     const token = tunnelForm.token.trim()
     setError(null)
     setInstalling(true)
@@ -675,9 +679,7 @@ export function RemoteConnectionsDialog({
     }
   }
 
-  const browseIdentityFile = async (
-    target: 'install' | 'tunnel'
-  ) => {
+  const browseIdentityFile = async (target: 'install' | 'tunnel') => {
     const { open } = await import('@tauri-apps/plugin-dialog')
     const selected = await open({
       multiple: false,
@@ -730,8 +732,8 @@ export function RemoteConnectionsDialog({
             aria-label="Connections"
             title="Connections"
             variant="ghost"
-            size="icon"
-            className="relative h-6 w-6 rounded-none text-foreground/70 hover:text-foreground"
+            size="icon-xs"
+            className="relative rounded-none text-foreground/70 hover:text-foreground"
           >
             <Server className="size-3.5" />
           </Button>
@@ -741,7 +743,7 @@ export function RemoteConnectionsDialog({
       <DialogContent className="sm:max-w-md z-[110]" overlayClassName="z-[110]">
         <DialogHeader>
           <DialogTitle>Connections</DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="sr-only">
             Manage the Jean servers used by the combined dashboard.
           </DialogDescription>
         </DialogHeader>
@@ -763,171 +765,171 @@ export function RemoteConnectionsDialog({
                 onConfirm={() => void handleTrustInstall()}
               />
             ) : (
-            <form className="space-y-4" onSubmit={handleInstallSubmit}>
-              {native && (
-                <AddModeTabs
-                  mode={addMode}
-                  onChange={mode => {
-                    if (installing) return
-                    setAddMode(mode)
-                    setError(null)
-                  }}
-                  disabled={installing}
-                />
-              )}
-              <div className="space-y-1.5">
-                <Label htmlFor="remote-install-name">Name</Label>
-                <Input
-                  id="remote-install-name"
-                  value={installForm.name}
-                  onChange={event =>
-                    setInstallForm(current => ({
-                      ...current,
-                      name: event.target.value,
-                    }))
-                  }
-                  placeholder="Build server"
-                  disabled={installing}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="remote-install-user">SSH user</Label>
-                  <Input
-                    id="remote-install-user"
-                    value={installForm.user}
-                    onChange={event =>
-                      setInstallForm(current => ({
-                        ...current,
-                        user: event.target.value,
-                      }))
-                    }
-                    placeholder="ubuntu"
-                    required
+              <form className="space-y-4" onSubmit={handleInstallSubmit}>
+                {native && (
+                  <AddModeTabs
+                    mode={addMode}
+                    onChange={mode => {
+                      if (installing) return
+                      setAddMode(mode)
+                      setError(null)
+                    }}
                     disabled={installing}
-                    autoComplete="username"
                   />
-                </div>
+                )}
                 <div className="space-y-1.5">
-                  <Label htmlFor="remote-install-host">Host / IP</Label>
+                  <Label htmlFor="remote-install-name">Name</Label>
                   <Input
-                    id="remote-install-host"
-                    value={installForm.host}
+                    id="remote-install-name"
+                    value={installForm.name}
                     onChange={event =>
                       setInstallForm(current => ({
                         ...current,
-                        host: event.target.value,
+                        name: event.target.value,
                       }))
                     }
-                    placeholder="192.168.1.50"
-                    required
+                    placeholder="Build server"
                     disabled={installing}
                   />
                 </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="remote-install-ssh-port">SSH port</Label>
-                  <Input
-                    id="remote-install-ssh-port"
-                    type="number"
-                    min={1}
-                    max={65535}
-                    value={installForm.sshPort}
-                    onChange={event =>
-                      setInstallForm(current => ({
-                        ...current,
-                        sshPort: event.target.value,
-                      }))
-                    }
-                    disabled={installing}
-                  />
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="remote-install-user">SSH user</Label>
+                    <Input
+                      id="remote-install-user"
+                      value={installForm.user}
+                      onChange={event =>
+                        setInstallForm(current => ({
+                          ...current,
+                          user: event.target.value,
+                        }))
+                      }
+                      placeholder="ubuntu"
+                      required
+                      disabled={installing}
+                      autoComplete="username"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="remote-install-host">Host / IP</Label>
+                    <Input
+                      id="remote-install-host"
+                      value={installForm.host}
+                      onChange={event =>
+                        setInstallForm(current => ({
+                          ...current,
+                          host: event.target.value,
+                        }))
+                      }
+                      placeholder="192.168.1.50"
+                      required
+                      disabled={installing}
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="remote-install-ssh-port">SSH port</Label>
+                    <Input
+                      id="remote-install-ssh-port"
+                      type="number"
+                      min={1}
+                      max={65535}
+                      value={installForm.sshPort}
+                      onChange={event =>
+                        setInstallForm(current => ({
+                          ...current,
+                          sshPort: event.target.value,
+                        }))
+                      }
+                      disabled={installing}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="remote-install-jean-port">Jean port</Label>
+                    <Input
+                      id="remote-install-jean-port"
+                      type="number"
+                      min={1}
+                      max={65535}
+                      value={installForm.jeanPort}
+                      onChange={event =>
+                        setInstallForm(current => ({
+                          ...current,
+                          jeanPort: event.target.value,
+                        }))
+                      }
+                      disabled={installing}
+                    />
+                  </div>
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="remote-install-jean-port">Jean port</Label>
-                  <Input
-                    id="remote-install-jean-port"
-                    type="number"
-                    min={1}
-                    max={65535}
-                    value={installForm.jeanPort}
-                    onChange={event =>
-                      setInstallForm(current => ({
-                        ...current,
-                        jeanPort: event.target.value,
-                      }))
-                    }
-                    disabled={installing}
-                  />
+                  <Label htmlFor="remote-install-identity">
+                    Identity file (optional)
+                  </Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="remote-install-identity"
+                      value={installForm.identityFile}
+                      onChange={event =>
+                        setInstallForm(current => ({
+                          ...current,
+                          identityFile: event.target.value,
+                        }))
+                      }
+                      placeholder="SSH agent or default keys"
+                      disabled={installing}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={installing}
+                      onClick={() => void browseIdentityFile('install')}
+                    >
+                      Browse
+                    </Button>
+                  </div>
                 </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="remote-install-identity">
-                  Identity file (optional)
-                </Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="remote-install-identity"
-                    value={installForm.identityFile}
-                    onChange={event =>
-                      setInstallForm(current => ({
-                        ...current,
-                        identityFile: event.target.value,
-                      }))
-                    }
-                    placeholder="SSH agent or default keys"
-                    disabled={installing}
-                  />
+                <p className="text-xs text-muted-foreground">
+                  Key or agent auth only. Jean installs jean-server on 127.0.0.1
+                  and opens an SSH tunnel. You confirm the host key before
+                  anything is saved. Password login is not supported.
+                </p>
+                {progress && (
+                  <div className="flex items-start gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
+                    <Spinner className="mt-0.5 size-3.5 shrink-0" />
+                    <span>{progress}</span>
+                  </div>
+                )}
+                {error && (
+                  <p className="whitespace-pre-wrap text-sm text-destructive">
+                    {error}
+                  </p>
+                )}
+                <DialogFooter>
                   <Button
                     type="button"
                     variant="outline"
+                    onClick={() => setEditingId(null)}
                     disabled={installing}
-                    onClick={() => void browseIdentityFile('install')}
                   >
-                    Browse
+                    Cancel
                   </Button>
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Key or agent auth only. Jean installs jean-server on 127.0.0.1
-                and opens an SSH tunnel. You confirm the host key before
-                anything is saved. Password login is not supported.
-              </p>
-              {progress && (
-                <div className="flex items-start gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
-                  <Spinner className="mt-0.5 size-3.5 shrink-0" />
-                  <span>{progress}</span>
-                </div>
-              )}
-              {error && (
-                <p className="whitespace-pre-wrap text-sm text-destructive">
-                  {error}
-                </p>
-              )}
-              <DialogFooter>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setEditingId(null)}
-                  disabled={installing}
-                >
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={installing}>
-                  {installing ? (
-                    <>
-                      <Spinner className="mr-2 size-4" />
-                      Installing…
-                    </>
-                  ) : (
-                    <>
-                      <HardDriveDownload className="mr-2 size-4" />
-                      Install & Connect
-                    </>
-                  )}
-                </Button>
-              </DialogFooter>
-            </form>
+                  <Button type="submit" disabled={installing}>
+                    {installing ? (
+                      <>
+                        <Spinner className="mr-2 size-4" />
+                        Installing…
+                      </>
+                    ) : (
+                      <>
+                        <HardDriveDownload className="mr-2 size-4" />
+                        Install & Connect
+                      </>
+                    )}
+                  </Button>
+                </DialogFooter>
+              </form>
             )
           ) : showTunnelForm ? (
             pendingHostKey ? (
@@ -1273,56 +1275,67 @@ export function RemoteConnectionsDialog({
             </form>
           )
         ) : (
-          <div className="space-y-2">
-            <ConnectionRow
-              name="Local"
-              detail="This computer"
-              versionLabel={formatJeanVersionLabel(localVersion)}
-              enabled={native ? localDashboardEnabled : undefined}
-              onEnabledChange={native ? setLocalDashboardEnabled : undefined}
-            />
-            {connections.map(connection => {
-              const versionState = versions[connection.id]
-              const mismatch =
-                versionState?.status === 'ready' &&
-                !checkRemoteVersionCompatibility(versionState.version)
-                  .compatible
-              const versionLabel =
-                versionState?.status === 'ready'
-                  ? formatJeanVersionLabel(versionState.version)
-                  : versionState?.status === 'error'
-                    ? 'unreachable'
-                    : 'checking…'
-              return (
-                <ConnectionRow
-                  key={connection.id}
-                  name={connection.name}
-                  detail={connectionDetail(connection, tunnelStatus[connection.id])}
-                  onRetry={
-                    connection.transport === 'ssh' &&
-                    tunnelStatus[connection.id] === 'failed'
-                      ? () => void retryTunnel(connection)
-                      : undefined
-                  }
-                  versionLabel={versionLabel}
-                  versionWarning={mismatch}
-                  onEdit={() => beginEdit(connection)}
-                  onDelete={() => handleDelete(connection.id)}
-                  enabled={native ? connection.enabled : undefined}
-                  onEnabledChange={
-                    native
-                      ? enabled =>
-                          setRemoteConnectionEnabled(connection.id, enabled)
-                      : undefined
-                  }
-                />
-              )
-            })}
+          <div>
+            <div className="divide-y">
+              <ConnectionRow
+                name="Local"
+                tone="success"
+                detail="This computer"
+                versionLabel={formatJeanVersionLabel(localVersion)}
+                enabled={native ? localDashboardEnabled : undefined}
+                onEnabledChange={native ? setLocalDashboardEnabled : undefined}
+              />
+              {connections.map(connection => {
+                const versionState = versions[connection.id]
+                const tone = connectionTone(
+                  versionState,
+                  tunnelStatus[connection.id]
+                )
+                const mismatch =
+                  versionState?.status === 'ready' &&
+                  !checkRemoteVersionCompatibility(versionState.version)
+                    .compatible
+                const versionLabel =
+                  versionState?.status === 'ready'
+                    ? formatJeanVersionLabel(versionState.version)
+                    : versionState?.status === 'error'
+                      ? 'unreachable'
+                      : 'checking…'
+                return (
+                  <ConnectionRow
+                    key={connection.id}
+                    name={connection.name}
+                    tone={tone}
+                    detail={connectionDetail(
+                      connection,
+                      tunnelStatus[connection.id]
+                    )}
+                    onRetry={
+                      connection.transport === 'ssh' &&
+                      tunnelStatus[connection.id] === 'failed'
+                        ? () => void retryTunnel(connection)
+                        : undefined
+                    }
+                    versionLabel={versionLabel}
+                    versionWarning={mismatch}
+                    onEdit={() => beginEdit(connection)}
+                    onDelete={() => handleDelete(connection.id)}
+                    enabled={native ? connection.enabled : undefined}
+                    onEnabledChange={
+                      native
+                        ? enabled =>
+                            setRemoteConnectionEnabled(connection.id, enabled)
+                        : undefined
+                    }
+                  />
+                )
+              })}
+            </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
             <Button
               type="button"
               variant="outline"
-              className="mt-2 w-full"
+              className="mt-3 w-full"
               onClick={beginAdd}
             >
               <Plus className="mr-2 size-4" />
@@ -1405,7 +1418,12 @@ function HostKeyConfirm({
         <p className="whitespace-pre-wrap text-sm text-destructive">{error}</p>
       )}
       <DialogFooter>
-        <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onCancel}
+          disabled={busy}
+        >
           Back
         </Button>
         <Button type="button" onClick={onConfirm} disabled={busy}>
@@ -1462,6 +1480,7 @@ function AddModeTabs({
 
 function ConnectionRow({
   name,
+  tone,
   detail,
   versionLabel,
   versionWarning,
@@ -1472,6 +1491,7 @@ function ConnectionRow({
   onEnabledChange,
 }: {
   name: string
+  tone: ConnectionTone
   detail: string
   versionLabel: string
   versionWarning?: boolean
@@ -1484,10 +1504,15 @@ function ConnectionRow({
   const hasActions = Boolean(onEdit || onDelete)
 
   return (
-    <div className="rounded-md border p-2">
+    <div className="py-2">
       {/* Top row: name + version always share full width so versions align */}
       <div className="flex w-full items-center gap-2 text-left text-sm font-medium">
-        <span className="size-2 shrink-0 rounded-full bg-success" />
+        <span
+          className={cn(
+            'size-2 shrink-0 rounded-full',
+            CONNECTION_TONE_DOT[tone]
+          )}
+        />
         {name}
         {versionWarning ? (
           <Tooltip>
@@ -1529,8 +1554,7 @@ function ConnectionRow({
               <Button
                 type="button"
                 variant="ghost"
-                size="icon"
-                className="size-7"
+                size="icon-sm"
                 aria-label={`Edit ${name}`}
                 onClick={onEdit}
               >
@@ -1541,8 +1565,8 @@ function ConnectionRow({
               <Button
                 type="button"
                 variant="ghost"
-                size="icon"
-                className="size-7 text-destructive"
+                size="icon-sm"
+                className="text-destructive"
                 aria-label={`Delete ${name}`}
                 onClick={onDelete}
               >
@@ -1557,9 +1581,9 @@ function ConnectionRow({
           <Checkbox
             checked={enabled}
             onCheckedChange={checked => onEnabledChange(checked === true)}
-            aria-label={`Include ${name} in combined dashboard`}
+            aria-label={`Show ${name} in dashboard`}
           />
-          Include in combined dashboard
+          Show in dashboard
         </label>
       )}
     </div>

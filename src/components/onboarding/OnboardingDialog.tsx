@@ -573,7 +573,7 @@ function OnboardingDialogContent({
       historyStack.some(s => WHERE_STEPS.includes(s)))
   const progressLabels = showWhere
     ? (['Where', 'Backends', 'Setup'] as const)
-    : (['Backends', 'Setup', 'Done'] as const)
+    : (['Backends', 'Setup'] as const)
   const progressIndex = showWhere
     ? WHERE_STEPS.includes(step)
       ? 0

@@ -2,6 +2,7 @@ import { memo, useCallback, useState } from 'react'
 import { ChevronRight, Users, X } from '@/components/icons/reicon'
 import type { SubAgent } from '@/types/chat'
 import { cn } from '@/lib/utils'
+import { Badge } from '@/components/ui/badge'
 import { WorkingWaveform } from '@/components/ui/status-indicator'
 import {
   Collapsible,
@@ -81,26 +82,26 @@ export function AgentWidget({
     <Collapsible open={open} onOpenChange={onOpenChange} className={className}>
       <div className="overflow-hidden border-t border-border bg-card sm:rounded-lg sm:border">
         <div className="flex items-center text-xs text-muted-foreground">
-          <CollapsibleTrigger className="flex flex-1 min-w-0 items-center gap-2 select-none text-left cursor-pointer px-3 py-1.5 hover:bg-muted/50">
-            <Users className="h-4 w-4 shrink-0" />
+          <CollapsibleTrigger className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-3 py-1.5 text-left select-none hover:bg-muted/50">
+            <Users className="size-4 shrink-0" />
             <span className="font-medium">Subagents</span>
             {/* Collapsed panels hide the rows, so show their running state here */}
             {!open && runningCount > 0 && <WorkingWaveform />}
-            <span className="rounded bg-muted/50 px-1.5 py-0.5 text-xs">
+            <Badge variant="subtle">
               {runningCount > 0
                 ? `${runningCount} running`
                 : `${completedCount}/${agents.length} done`}
-            </span>
+            </Badge>
           </CollapsibleTrigger>
           {/* Only finished panels can be dismissed; running ones keep live status */}
           {onClose && runningCount === 0 && (
             <button
               type="button"
               onClick={onClose}
-              className="mx-2 p-0.5 rounded hover:bg-muted transition-colors"
+              className="mx-2 rounded p-0.5 transition-colors hover:bg-muted"
               aria-label="Dismiss subagents"
             >
-              <X className="h-3.5 w-3.5" />
+              <X className="size-3.5" />
             </button>
           )}
         </div>
@@ -217,7 +218,7 @@ const AgentItem = memo(function AgentItem({
             <span className="truncate text-muted-foreground">
               {agent.prompt}
               {agent.status === 'interrupted' && (
-                <span className="ml-1 text-[10px] uppercase tracking-wide">
+                <span className="ml-1 text-2xs uppercase tracking-wide">
                   Interrupted
                 </span>
               )}

@@ -45,7 +45,7 @@ import { MessageThreadContextMenu } from './message-thread-context-menu'
 
 function WorkingVisualRow() {
   return (
-    <div className="rounded-md border border-border/50 bg-muted/30 min-w-0">
+    <div className="min-w-0">
       <div className={TOOL_CALL_ROW_CLASS}>
         <Activity className="h-3.5 w-3.5 shrink-0 opacity-70" />
         <span className="font-medium shrink-0 flex-none whitespace-nowrap">

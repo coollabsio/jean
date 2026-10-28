@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { Check } from '@/components/icons/reicon'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { ApprovalCard } from '@/components/chat/ApprovalCard'
 import {
   questionAnswerText,
   selectedOptions,
@@ -45,11 +46,26 @@ export function AgentQuestionCard({
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-xl flex-col gap-2 rounded-lg border bg-background p-3">
-      <p className="text-sm font-medium text-foreground">{question.question}</p>
-      {question.multiple && !answered && (
-        <p className="text-xs text-muted-foreground">Select one or more.</p>
-      )}
+    <ApprovalCard
+      className="mx-auto my-0 w-full max-w-xl"
+      title={question.question}
+      description={
+        question.multiple && !answered ? (
+          <span className="text-xs">Select one or more.</span>
+        ) : undefined
+      }
+      actions={
+        question.multiple && !answered ? (
+          <Button
+            size="sm"
+            disabled={locked || picked.length === 0}
+            onClick={() => onSend?.(questionAnswerText(question, picked))}
+          >
+            Send
+          </Button>
+        ) : undefined
+      }
+    >
       <div className="flex flex-col gap-1.5">
         {question.options.map(option => {
           const isChosen = chosen.includes(option)
@@ -88,20 +104,12 @@ export function AgentQuestionCard({
           )
         })}
       </div>
-      {question.multiple && !answered && (
-        <Button
-          size="sm"
-          className="self-end"
-          disabled={locked || picked.length === 0}
-          onClick={() => onSend?.(questionAnswerText(question, picked))}
-        >
-          Send
-        </Button>
-      )}
       {answered && chosen.length === 0 && (
-        <p className="text-xs text-muted-foreground">Answered in the chat.</p>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Answered in the chat.
+        </p>
       )}
       {children}
-    </div>
+    </ApprovalCard>
   )
 }

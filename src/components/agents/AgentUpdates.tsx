@@ -25,7 +25,7 @@ import type { AgentSummary } from '@/services/agents'
 import { useSession } from '@/services/chat'
 import { useUIStore } from '@/store/ui-store'
 import type { ChatMessage } from '@/types/chat'
-import { formatRelative } from './AgentActivity'
+import { formatRelative } from '@/lib/relative-time'
 
 /**
  * The agent's replies to Jean's automatic updates (sessions that finished,
@@ -112,7 +112,7 @@ export function AgentUpdatesButton({
         <BellDot className="size-3.5" />
         Updates
         {unread > 0 && (
-          <span className="min-w-4 rounded-full bg-amber-500 px-1 text-center text-[10px] leading-4 text-white tabular-nums">
+          <span className="min-w-4 rounded-full bg-warning px-1 text-center text-2xs leading-4 text-warning-foreground tabular-nums">
             {unread}
           </span>
         )}
@@ -131,12 +131,12 @@ export function AgentUpdatesButton({
                 key={update.id}
                 className={cn(
                   'px-4 py-3',
-                  update.timestamp > seenAt && 'bg-amber-500/5'
+                  update.timestamp > seenAt && 'bg-warning/5'
                 )}
               >
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <p className="mb-1 text-[11px] text-muted-foreground tabular-nums">
+                    <p className="mb-1 text-2xs text-muted-foreground tabular-nums">
                       {formatRelative(update.timestamp)}
                     </p>
                   </TooltipTrigger>

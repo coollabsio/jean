@@ -172,7 +172,10 @@ const CloseWorktreeDialog = lazy(() =>
 )
 import { Toaster } from '@/components/ui/sonner'
 import { MobileLeftSidebar } from './MobileLeftSidebar'
-import { SidebarTabRail } from '@/components/projects/SidebarTabRail'
+import {
+  SIDEBAR_RAIL_WIDTH,
+  SidebarTabRail,
+} from '@/components/projects/SidebarTabRail'
 import { useShowAgents } from '@/components/agents/agents-feature'
 import { AgentsTitleSync, resolveWindowTitle } from './window-title'
 import { BrowserSidePane } from '@/components/browser/BrowserSidePane'
@@ -213,7 +216,7 @@ import { usePreferences } from '@/services/preferences'
 
 // Left sidebar resize constraints (pixels)
 const MIN_SIDEBAR_WIDTH = 150
-// Agents sidebar can shrink to an icon column, as wide as the tab rail
+// Agents sidebar can shrink to a column of agent icons
 const MIN_AGENTS_SIDEBAR_WIDTH = 72
 const MAX_SIDEBAR_WIDTH = 500
 // File browser sidebar resize constraints (pixels)
@@ -621,8 +624,9 @@ export function MainWindow() {
         contentInset={
           isMobile || !isInitialized
             ? 0
-            : // 72px tab rail + sidebar + 1px resize handle
-              72 + (leftSidebarVisible ? leftSidebarSize + 1 : 0)
+            : // tab rail + sidebar + 1px resize handle
+              SIDEBAR_RAIL_WIDTH +
+              (leftSidebarVisible ? leftSidebarSize + 1 : 0)
         }
         className="absolute top-0 left-0 right-0"
       />
@@ -644,10 +648,7 @@ export function MainWindow() {
                 : 'bg-background'
             )}
           >
-            <SidebarTabRail
-              togglesSidebar
-              className="h-full border-r border-border/40"
-            />
+            <SidebarTabRail className="h-full border-r border-border/40" />
           </div>
         )}
         <SidebarHoverPreview

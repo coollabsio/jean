@@ -172,7 +172,7 @@ const WorktreeSessionList = memo(function WorktreeSessionList({
               allExpanded={allWorktreesExpanded}
               onToggleAll={toggleAllWorktrees}
             >
-              <div className="flex items-center gap-1.5 pl-3 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+              <div className="flex items-center gap-1.5 pl-3 py-0.5 text-2xs uppercase tracking-wide text-muted-foreground">
                 <StatusIndicator
                   status={groupConfig.indicatorStatus}
                   shape={groupConfig.indicatorShape}
@@ -911,7 +911,7 @@ export const WorktreeItem = memo(function WorktreeItem({
                 <button
                   type="button"
                   onClick={handleSync}
-                  className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-2xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                 >
                   <span className="flex items-center gap-0.5">
                     <ArrowDownUp className="h-3 w-3" />
@@ -946,7 +946,7 @@ export const WorktreeItem = memo(function WorktreeItem({
           {showStatusBadges && hasUncommitted && (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="inline-flex shrink-0 items-center gap-0.5 text-[11px] font-medium">
+                <span className="inline-flex shrink-0 items-center gap-0.5 text-2xs font-medium">
                   <span className="text-success">+{uncommittedAdded}</span>
                   <span className="text-muted-foreground">/</span>
                   <span className="text-destructive">

@@ -137,3 +137,12 @@
 
 - Map a user's minified stack frame by building the release tag's frontend (`git archive <tag>`, `bun install --frozen-lockfile`, `vite build`). Vendor code keeps the same chunk lines, so the column points at the real library function.
 - Run a release build only in an isolated environment: `env -i` (inherited `JEAN_HEADLESS` starts headless server mode), a temporary `HOME`, `dbus-run-session`, and fake CLI scripts. Real CLIs on `PATH` get auto-updated.
+
+## Minimal UI primitives
+
+- Use `Badge` tone variants (`success`, `warning`, `info`, `danger`, `subtle`) instead of hand-made coloured pills.
+- Use `Kbd modHint` (or `data-mod-hint` on a raw `<kbd>`) for shortcut hints that need a modifier.
+- Use `text-2xs` instead of `text-[Npx]` for small text.
+- Use `Button size="icon-xs"`/`"icon-sm"` instead of overriding `size="icon"` with `h-6 w-6`/`h-7 w-7`.
+- Use `Empty` for empty states.
+- Take status colours only from tokens (`success`, `warning`, `info`, `destructive`, `muted-foreground`). Raw palette colours are for brand conventions only.

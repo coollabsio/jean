@@ -500,7 +500,7 @@ export function LabelModal({
           </>
         )}
 
-        <div className="flex gap-3 text-[10px] text-muted-foreground px-1">
+        <div className="flex gap-3 text-2xs text-muted-foreground px-1">
           {isEditing ? (
             <>
               <span>

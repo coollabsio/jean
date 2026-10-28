@@ -282,10 +282,10 @@ export function FileMentionPopover({
                 className="gap-0.5"
                 aria-label="Use Control Shift Left or Right to switch scope"
               >
-                <Kbd className="h-4 min-w-4 px-1 text-[10px]">Ctrl</Kbd>
-                <Kbd className="h-4 min-w-4 px-1 text-[10px]">Shift</Kbd>
-                <Kbd className="h-4 min-w-4 px-1 text-[10px]">←</Kbd>
-                <Kbd className="h-4 min-w-4 px-1 text-[10px]">→</Kbd>
+                <Kbd className="h-4 min-w-4 px-1 text-2xs">Ctrl</Kbd>
+                <Kbd className="h-4 min-w-4 px-1 text-2xs">Shift</Kbd>
+                <Kbd className="h-4 min-w-4 px-1 text-2xs">←</Kbd>
+                <Kbd className="h-4 min-w-4 px-1 text-2xs">→</Kbd>
               </KbdGroup>
             )}
           </div>

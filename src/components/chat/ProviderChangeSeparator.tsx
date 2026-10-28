@@ -30,7 +30,7 @@ export const ProviderChangeSeparator = memo(function ProviderChangeSeparator({
       )}
     >
       <Separator className="absolute inset-x-0 top-1/2" />
-      <span className="bg-background text-muted-foreground relative px-3 text-[11px] font-medium tracking-wide">
+      <span className="bg-background text-muted-foreground relative px-3 text-2xs font-medium tracking-wide">
         {label}
       </span>
     </div>

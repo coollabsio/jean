@@ -4,7 +4,6 @@ import {
   AlertCircle,
   ArrowRight,
   ExternalLink,
-  GitPullRequest,
   Loader2,
 } from '@/components/icons/reicon'
 import { toast } from 'sonner'
@@ -228,10 +227,7 @@ export function UpdatePrDialog() {
     <Dialog open={updatePrModalOpen} onOpenChange={handleOpenChange}>
       <DialogContent className="!max-w-md w-[min(92vw,28rem)] p-0 flex flex-col">
         <DialogHeader className="px-4 pt-5 pb-0">
-          <DialogTitle className="flex items-center gap-2">
-            <GitPullRequest className="h-4 w-4" />
-            Update PR description
-          </DialogTitle>
+          <DialogTitle>Update PR description</DialogTitle>
         </DialogHeader>
 
         <div className="flex-1 px-4 pb-4 pt-2 flex flex-col gap-4">

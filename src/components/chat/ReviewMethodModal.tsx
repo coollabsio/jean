@@ -188,7 +188,7 @@ function CodeRabbitChoice({
               >
                 CLI
                 {showShortcuts && (
-                  <Kbd className="h-4 min-w-4 px-1 text-[10px]">2</Kbd>
+                  <Kbd className="h-4 min-w-4 px-1 text-2xs">2</Kbd>
                 )}
               </button>
             </span>
@@ -211,7 +211,7 @@ function CodeRabbitChoice({
               >
                 PR
                 {showShortcuts && (
-                  <Kbd className="h-4 min-w-4 px-1 text-[10px]">3</Kbd>
+                  <Kbd className="h-4 min-w-4 px-1 text-2xs">3</Kbd>
                 )}
               </button>
             </span>
@@ -258,7 +258,7 @@ function ReviewChoice({
         <span className="flex items-center gap-2 text-sm font-medium leading-none">
           {title}
           {badge && (
-            <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+            <span className="rounded bg-primary/10 px-1.5 py-0.5 text-2xs font-medium text-primary">
               {badge}
             </span>
           )}
@@ -267,7 +267,7 @@ function ReviewChoice({
           {subtitle}
         </span>
       </span>
-      {shortcut && <Kbd className="shrink-0 text-[10px]">{shortcut}</Kbd>}
+      {shortcut && <Kbd className="shrink-0 text-2xs">{shortcut}</Kbd>}
     </button>
   )
 }

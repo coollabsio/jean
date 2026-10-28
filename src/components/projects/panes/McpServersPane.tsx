@@ -8,7 +8,6 @@ import {
 } from '@/components/icons/reicon'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
-import { Separator } from '@/components/ui/separator'
 import {
   Tooltip,
   TooltipTrigger,
@@ -17,6 +16,7 @@ import {
 import { BackendLabel } from '@/components/ui/backend-label'
 import { cn } from '@/lib/utils'
 import { useProjects, useUpdateProjectSettings } from '@/services/projects'
+import { usePreferences } from '@/services/preferences'
 import {
   useAllBackendsMcpServers,
   invalidateAllMcpServers,
@@ -32,6 +32,7 @@ import { parseServerResourceKey } from '@/lib/server-resource'
 import { McpSignInButton } from '@/components/mcp/McpSignInButton'
 import type { McpHealthStatus } from '@/types/chat'
 import type { CliBackend } from '@/types/preferences'
+import { overrideHint } from './override-hint'
 
 function mcpAuthHint(backend: CliBackend): string {
   switch (backend) {
@@ -135,6 +136,8 @@ export function McpServersPane({
   } = useAllBackendsMcpHealth(installedBackends, projectPath, serverId)
 
   const updateSettings = useUpdateProjectSettings()
+  const { data: preferences } = usePreferences()
+  const globalServerCount = preferences?.default_enabled_mcp_servers.length
 
   // Re-read MCP config and trigger health check on mount / backend change
   useEffect(() => {
@@ -221,12 +224,15 @@ export function McpServersPane({
 
   return (
     <div className="space-y-6">
-      <SettingsSection title="MCP Servers">
-        <p className="text-xs text-muted-foreground">
-          Servers enabled by default for sessions in this project. Antigravity
-          and Muse load their configured servers automatically.
-        </p>
-
+      <SettingsSection
+        title="MCP Servers"
+        description={`Enabled by default for sessions in this project. ${overrideHint(
+          project?.enabled_mcp_servers != null,
+          globalServerCount == null
+            ? null
+            : `${globalServerCount} ${globalServerCount === 1 ? 'server' : 'servers'}`
+        )}`}
+      >
         {mcpLoading ? (
           <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -237,22 +243,19 @@ export function McpServersPane({
             No MCP servers found
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-4">
             {backendsWithServers.map(backend => (
-              <div key={backend} className="space-y-2">
+              <div key={backend} className="space-y-1">
                 {showSectionHeaders && (
-                  <div className="flex items-center gap-2 pt-1">
-                    <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                      <BackendLabel backend={backend} />
-                    </span>
-                    <Separator className="flex-1" />
+                  <div className="pt-1 text-xs font-medium text-muted-foreground">
+                    <BackendLabel backend={backend} />
                   </div>
                 )}
                 {(grouped[backend] ?? []).map(server => (
                   <div
                     key={`${backend}-${server.name}`}
                     className={cn(
-                      'flex flex-wrap items-center gap-3 rounded-md border px-3 py-2',
+                      'flex flex-wrap items-center gap-3 py-1',
                       server.disabled && 'opacity-50'
                     )}
                   >

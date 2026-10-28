@@ -2,7 +2,6 @@ import { useState, useCallback } from 'react'
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -68,12 +67,9 @@ export function CommitModal() {
 
   return (
     <Dialog open={commitModalOpen} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className="sm:max-w-md" aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>Commit Changes</DialogTitle>
-          <DialogDescription>
-            Enter a commit message for your changes.
-          </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4 py-4">

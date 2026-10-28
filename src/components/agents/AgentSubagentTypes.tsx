@@ -29,8 +29,8 @@ import {
   AgentPanel,
   AgentSection,
   AgentTabBody,
-  HelpTip,
 } from './agent-ui'
+import { HelpTip } from '@/components/ui/help-tip'
 import {
   EMPTY_SUBAGENT_TYPE,
   PERMISSION_MODE_OPTIONS,
@@ -70,7 +70,7 @@ function TypeEditor({
     >
       <AgentPanel>
         <p className="text-sm font-medium">
-          {draft.id === null ? 'New subagent type' : `Edit ${draft.name}`}
+          {draft.id === null ? 'New agent type' : `Edit ${draft.name}`}
         </p>
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="flex flex-col gap-1.5">
@@ -209,7 +209,7 @@ function TypeRow({
   const handleSpawn = () => {
     const text = task.trim()
     if (!text) {
-      toast.error('Write the task for this subagent')
+      toast.error('Write what it should do')
       return
     }
     spawn.mutate(
@@ -239,7 +239,7 @@ function TypeRow({
             </p>
           ) : null}
           {summary ? (
-            <p className="mt-1 truncate text-[11px] text-muted-foreground/80">
+            <p className="mt-1 truncate text-2xs text-muted-foreground/80">
               {summary}
             </p>
           ) : null}
@@ -298,12 +298,12 @@ function TypeRow({
       </div>
       {open ? (
         <div className="mt-3 flex flex-col gap-2 rounded-md bg-muted/30 p-3">
-          <Label htmlFor={`subagent-task-${type.id}`}>Task</Label>
+          <Label htmlFor={`subagent-task-${type.id}`}>Prompt</Label>
           <Textarea
             id={`subagent-task-${type.id}`}
             value={task}
             rows={3}
-            placeholder="What this subagent should do"
+            placeholder="What it should do"
             onChange={event => setTask(event.target.value)}
             autoFocus
           />
@@ -359,9 +359,7 @@ export function AgentSubagentTypes({ agent }: { agent: AgentSummary }) {
   return (
     <AgentTabBody>
       <AgentSection
-        title="Subagent types"
-        count={isLoading ? undefined : types.length}
-        description="Named workers this agent can spawn. A type can override the backend, model, effort, skills, and tools. The result comes back as an update. A subagent cannot define types or spawn children."
+        description="Named workers this agent can spawn, each with its own backend, model, skills, and tools. Results come back as updates."
         actions={
           draft === null ? (
             <Button
@@ -400,7 +398,7 @@ export function AgentSubagentTypes({ agent }: { agent: AgentSummary }) {
             ))}
           </AgentList>
         ) : draft === null ? (
-          <AgentEmpty title="No subagent types yet." />
+          <AgentEmpty title="No agent types yet." />
         ) : null}
       </AgentSection>
     </AgentTabBody>

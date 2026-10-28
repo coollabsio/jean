@@ -1,24 +1,11 @@
 import { memo, useCallback, useRef } from 'react'
-import {
-  PanelBottom,
-  PanelLeft,
-  PanelRight,
-  PanelRightDashed,
-  Terminal,
-} from '@/components/icons/reicon'
-import { Button } from '@/components/ui/button'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
-import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
-import { ModalCloseButton } from '@/components/ui/modal-close-button'
+import { Terminal } from '@/components/icons/reicon'
+import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
 import { useTerminalStore } from '@/store/terminal-store'
 import type { ModalTerminalDockMode } from '@/types/ui-state'
 import { TerminalView } from './TerminalView'
-import { MODAL_TERMINAL_PRIMARY_ROW_CLASS } from './modal-terminal-layout'
+import { DrawerHeader } from './DrawerHeader'
 
 interface ModalTerminalDrawerProps {
   worktreeId: string
@@ -110,12 +97,6 @@ export const ModalTerminalDrawer = memo(function ModalTerminalDrawer({
       'left-0 top-0 bottom-0 w-1.5 cursor-ew-resize after:inset-y-0 after:left-0 after:w-px'
   )
 
-  const title = isFloating ? (
-    <SheetTitle className="text-sm">Terminal</SheetTitle>
-  ) : (
-    <div className="text-sm font-semibold">Terminal</div>
-  )
-
   const content = (
     <div
       data-terminal-root="true"
@@ -129,92 +110,13 @@ export const ModalTerminalDrawer = memo(function ModalTerminalDrawer({
         onMouseDown={handleResizeStart}
       />
 
-      <div className="shrink-0 border-b">
-        <div
-          className={cn(
-            'flex items-center justify-between gap-2 px-4 py-2',
-            MODAL_TERMINAL_PRIMARY_ROW_CLASS
-          )}
-        >
-          <div className="flex items-center gap-2">
-            <Terminal className="h-4 w-4" />
-            {title}
-          </div>
-          <div className="flex items-center gap-1">
-            <div className="flex items-center rounded-md border bg-muted/30 p-0.5">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className={cn(
-                      'h-7 w-7 p-0',
-                      dockMode === 'floating' && 'bg-muted'
-                    )}
-                    onClick={() => handleSetDockMode('floating')}
-                    aria-label="Float terminal"
-                  >
-                    <PanelRightDashed className="h-3.5 w-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Float terminal</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className={cn(
-                      'h-7 w-7 p-0',
-                      dockMode === 'left' && 'bg-muted'
-                    )}
-                    onClick={() => handleSetDockMode('left')}
-                    aria-label="Dock terminal left"
-                  >
-                    <PanelLeft className="h-3.5 w-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Dock terminal left</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className={cn(
-                      'h-7 w-7 p-0',
-                      dockMode === 'right' && 'bg-muted'
-                    )}
-                    onClick={() => handleSetDockMode('right')}
-                    aria-label="Dock terminal right"
-                  >
-                    <PanelRight className="h-3.5 w-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Dock terminal right</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className={cn(
-                      'h-7 w-7 p-0',
-                      dockMode === 'bottom' && 'bg-muted'
-                    )}
-                    onClick={() => handleSetDockMode('bottom')}
-                    aria-label="Dock terminal bottom"
-                  >
-                    <PanelBottom className="h-3.5 w-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Dock terminal bottom</TooltipContent>
-              </Tooltip>
-            </div>
-            <ModalCloseButton size="sm" onClick={handleClose} />
-          </div>
-        </div>
-      </div>
+      <DrawerHeader
+        title="Terminal"
+        icon={Terminal}
+        dockMode={dockMode}
+        onDockModeChange={handleSetDockMode}
+        onClose={handleClose}
+      />
 
       <div className="min-h-0 flex-1 overflow-hidden">
         <TerminalView

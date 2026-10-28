@@ -487,9 +487,10 @@ Kimi Code-specific notes:
 MainWindow (Top-level orchestrator)
 ├── DevModeBanner (dev-only overlay)
 ├── TitleBar (Window controls + toolbar)
+├── SidebarTabRail (Desktop column, 48px, holds the Settings gear)
 ├── LeftSideBar (Collapsible, pixel-resizable)
-│   └── ProjectsSidebar
-│       └── ProjectTree → WorktreeList per project
+│   ├── SidebarTabs (Projects | Recent | Agents)
+│   └── ProjectsSidebar → ProjectTree → WorktreeList per project, or AgentsSidebar
 ├── MainWindowContent (Primary content area)
 │   ├── ChatWindow (when worktree selected — always shows chat view)
 │   │   ├── Chat view (VirtualizedMessageList + ChatInput + ChatToolbar)
@@ -535,18 +536,29 @@ interaction finishes.
 
 Shared infrastructure in `src/components/chat/`:
 
-- `SessionListRow.tsx` - Compact row component for list view
 - `session-card-utils.tsx` - `computeSessionCardData()` and `SessionCardData` type
 - `hooks/useCanvasKeyboardNav.ts` - Arrow key navigation with visual-position neighbor finding
 - `hooks/useCanvasShortcutEvents.ts` - Event handlers for plan/recap/approve shortcuts
 - `hooks/useCanvasStoreState.ts` - Store state subscriptions for card data
+
+### UI Primitives
+
+Use these shared primitives instead of one-off styling:
+
+- **Button sizes.** `size="icon-xs"` (24px) and `size="icon-sm"` (28px) for compact icon buttons. Do not override `size="icon"` with `h-6 w-6` or `h-7 w-7`. Variants are flat; `raised`/`raisedInset` are for a single primary call to action only.
+- **Badge tones.** `Badge` variants `success`, `warning`, `info`, `danger`, and `subtle` replace hand-made `bg-x/10 text-x` pills.
+- **Status colours.** Use only the tokens `success`, `warning`, `info`, `destructive`, and `muted-foreground`. Raw palette colours are for brand conventions only (Linear violet, GitHub merged purple, provider logos).
+- **Small text.** `text-2xs` is the smallest step of the type scale. Do not use `text-[8px]` to `text-[11px]`.
+- **Modifier hints.** `Kbd`/`KbdGroup` with `modHint` (or `data-mod-hint` on a raw `<kbd>`) hides a shortcut hint until the user holds ⌘/Ctrl/Alt. Single-key hints that work without a modifier stay visible and muted.
+- **Empty states.** `Empty`, `EmptyHeader`, `EmptyMedia`, `EmptyTitle`, and `EmptyDescription` from `src/components/ui/empty.tsx`. Inside panels, use compact padding and no dashed border.
+- **Help text.** `HelpTip` (`src/components/ui/help-tip.tsx`) shows help in a tooltip instead of a paragraph.
+- **Relative time.** `formatRelative` (`src/lib/relative-time.ts`) formats unix seconds as "now", "5m ago", or "in 2h".
 
 ### File Organization
 
 ```
 src/
 ├── components/
-│   ├── actions/           # ActionsSidebar
 │   ├── archive/           # ArchivedModal
 │   ├── chat/              # ChatWindow + 50 files, 12 extracted hooks in chat/hooks/
 │   ├── command-palette/   # CommandPalette (cmdk-based)
@@ -556,9 +568,9 @@ src/
 │   ├── magic/             # MagicModal, LoadContextModal, ReleaseNotesDialog, UpdatePrDialog
 │   ├── onboarding/        # OnboardingDialog, FeatureTourDialog, JeanConfigWizard
 │   ├── open-in/           # OpenInButton, OpenInModal
-│   ├── preferences/       # PreferencesDialog, DiagnosticsPanel, 8 settings panes
+│   ├── preferences/       # PreferencesDialog, DiagnosticsPanel, settings panes (BackendsPane groups CLI backends)
 │   ├── projects/          # ProjectTree, WorktreeList, AddProjectDialog, ProjectSettingsDialog
-│   ├── shared/            # FailedRunsBadge, GhAuthError, OpenPRsBadge, WorkflowRunsModal
+│   ├── shared/            # GhAuthError, GlabAuthError, LinearAuthError, WorkflowRunsModal
 │   ├── titlebar/          # TitleBar, platform-specific window controls
 │   ├── ui/                # 45+ shadcn/ui primitives
 │   └── worktree/          # NewWorktreeModal, BranchConflictDialog

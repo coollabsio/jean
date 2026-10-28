@@ -1,5 +1,4 @@
 import React, { useState } from 'react'
-import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Loader2 } from '@/components/icons/reicon'
@@ -7,22 +6,7 @@ import { toast } from 'sonner'
 import { usePreferences, usePatchPreferences } from '@/services/preferences'
 import { testSentryAuthToken } from '@/services/sentry'
 import { SettingsSection } from '../SettingsSection'
-
-const InlineField: React.FC<{
-  label: string
-  description?: React.ReactNode
-  children: React.ReactNode
-}> = ({ label, description, children }) => (
-  <div className="space-y-2">
-    <div className="space-y-0.5">
-      <Label className="text-sm text-foreground">{label}</Label>
-      {description && (
-        <div className="text-xs text-muted-foreground">{description}</div>
-      )}
-    </div>
-    {children}
-  </div>
-)
+import { InlineField } from '../InlineField'
 
 export const IntegrationsPane: React.FC = () => {
   const { data: preferences } = usePreferences()
@@ -115,6 +99,7 @@ export const IntegrationsPane: React.FC = () => {
         anchorId="pref-integrations-section-linear"
       >
         <InlineField
+          layout="stacked"
           label="Personal API Key"
           description={
             <>
@@ -176,14 +161,15 @@ export const IntegrationsPane: React.FC = () => {
         anchorId="pref-integrations-section-sentry"
       >
         <InlineField
+          layout="stacked"
           label="Auth Token"
           description={
             <>
               Used by all projects unless overridden in project settings. The
               token needs <code>org:read</code> to discover projects and{' '}
               <code>event:read</code> to load issues. Personal tokens follow
-              your Sentry account memberships; they are not tied to one
-              project. Create one in{' '}
+              your Sentry account memberships; they are not tied to one project.
+              Create one in{' '}
               <a
                 href="https://sentry.io/settings/account/api/auth-tokens/"
                 target="_blank"

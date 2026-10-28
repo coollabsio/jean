@@ -586,7 +586,7 @@ export function ContextMentionPopover({
                           }}
                         />
                         {item.badge && (
-                          <span className="shrink-0 self-center rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">
+                          <span className="shrink-0 self-center rounded bg-muted px-1.5 py-0.5 text-2xs uppercase text-muted-foreground">
                             {item.badge}
                           </span>
                         )}

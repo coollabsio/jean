@@ -3,7 +3,6 @@ import { Label } from '@/components/ui/label'
 import { usePreferences, usePatchPreferences } from '@/services/preferences'
 import { cn } from '@/lib/utils'
 import { KeyRecorder } from '../KeyRecorder'
-import { SettingsSection } from '../SettingsSection'
 import {
   KEYBINDING_DEFINITIONS,
   DEFAULT_KEYBINDINGS,
@@ -45,7 +44,7 @@ const KeybindingRow: React.FC<{
     <div className="min-w-0 space-y-1">
       <div className="flex flex-wrap items-center gap-2">
         <Label className="text-sm text-foreground">{definition.label}</Label>
-        <span className="rounded-sm bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+        <span className="rounded-sm bg-muted px-1.5 py-0.5 text-2xs font-medium uppercase tracking-wide text-muted-foreground">
           {categoryTitles[definition.category] ?? definition.category}
         </span>
       </div>
@@ -159,10 +158,7 @@ export const KeybindingsPane: React.FC<KeybindingsPaneProps> = ({
 
   return (
     <div className="space-y-4">
-      <SettingsSection
-        title="Keybindings"
-        anchorId="pref-keybindings-section-keybindings"
-      >
+      <div id="pref-keybindings-section-keybindings" className="space-y-4">
         <div className="grid gap-x-4 gap-y-0.5 xl:grid-cols-2">
           {sortedBindings.map(def => (
             <KeybindingRow
@@ -179,7 +175,7 @@ export const KeybindingsPane: React.FC<KeybindingsPaneProps> = ({
             />
           ))}
         </div>
-      </SettingsSection>
+      </div>
     </div>
   )
 }

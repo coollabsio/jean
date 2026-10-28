@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { SettingsSection } from '@/components/preferences/SettingsSection'
+import { InlineField } from '@/components/preferences/InlineField'
 import { Check, ChevronsUpDown, Loader2 } from '@/components/icons/reicon'
-import { Badge } from '@/components/ui/badge'
+import { Badge, BetaBadge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
@@ -11,8 +13,6 @@ import {
   CommandList,
 } from '@/components/ui/command'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
 import {
   Popover,
@@ -54,7 +54,6 @@ import { useGitHubLabels } from '@/services/github'
 import type { GitHubLabel } from '@/types/github'
 import { usePreferences } from '@/services/preferences'
 
-export const MR_ROBOT_SETTINGS_BADGE = 'Beta'
 const BACKEND_DEFAULT_MODEL_VALUE = '__backend_default__'
 const ANTHROPIC_PROVIDER_VALUE = '__anthropic__'
 /** Must match the backend retry limit for failed Mr. Robot issues. */
@@ -198,26 +197,6 @@ function formatHour(hour: number): string {
   const period = hour < 12 ? 'AM' : 'PM'
   const display = hour % 12 === 0 ? 12 : hour % 12
   return `${display}:00 ${period}`
-}
-
-function Field({
-  label,
-  description,
-  children,
-}: {
-  label: string
-  description?: string
-  children: React.ReactNode
-}) {
-  return (
-    <div className="space-y-2">
-      <Label className="text-sm text-foreground">{label}</Label>
-      {description && (
-        <div className="text-xs text-muted-foreground">{description}</div>
-      )}
-      {children}
-    </div>
-  )
 }
 
 function GitHubLabelMultiSelect({
@@ -556,10 +535,10 @@ function AutoFixStatusSection({ projectId }: { projectId: string }) {
   const canRetry = failedIssues.length > 0 || Boolean(status?.lastError)
 
   return (
-    <div className="rounded-lg border p-4">
-      <div className="mb-3 flex items-center justify-between gap-4">
-        <h4 className="text-sm font-medium text-foreground">Status</h4>
-        {canRetry && (
+    <SettingsSection
+      title="Status"
+      actions={
+        canRetry && (
           <Button
             size="sm"
             variant="outline"
@@ -571,9 +550,9 @@ function AutoFixStatusSection({ projectId }: { projectId: string }) {
             )}
             Retry failed issues
           </Button>
-        )}
-      </div>
-
+        )
+      }
+    >
       {isLoading ? (
         <p className="text-xs text-muted-foreground">Loading status...</p>
       ) : error || !status ? (
@@ -639,10 +618,7 @@ function AutoFixStatusSection({ projectId }: { projectId: string }) {
                       {issue.error}
                     </span>
                     {issue.gaveUp && (
-                      <Badge
-                        variant="outline"
-                        className="shrink-0 px-1.5 py-0 text-[10px] text-destructive"
-                      >
+                      <Badge variant="danger" className="py-0 text-2xs">
                         Gave up
                       </Badge>
                     )}
@@ -653,7 +629,7 @@ function AutoFixStatusSection({ projectId }: { projectId: string }) {
           )}
         </div>
       )}
-    </div>
+    </SettingsSection>
   )
 }
 
@@ -740,86 +716,81 @@ export function AutoFixPane({ projectId }: { projectId: string }) {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <h3 className="text-lg font-medium text-foreground">Mr. Robot</h3>
-            <Badge
-              variant="outline"
-              className="px-1.5 py-0 text-[10px] uppercase tracking-wide text-muted-foreground"
-            >
-              {MR_ROBOT_SETTINGS_BADGE}
-            </Badge>
-          </div>
-        </div>
-
-        <div className="flex items-start justify-between gap-4 rounded-lg border bg-muted/20 p-4">
-          <div className="max-w-2xl">
-            <Label className="text-sm text-foreground">
-              Mr. Robot issue sweeps
-            </Label>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Poll open GitHub issues, create one Jean worktree per issue, and
-              draft a focused plan. Optionally let Mr. Robot run the plan with
-              Full access too.
-            </p>
-          </div>
+    <div className="space-y-8">
+      <SettingsSection
+        title={
+          <span className="inline-flex items-center gap-2">
+            Mr. Robot
+            <BetaBadge />
+          </span>
+        }
+        description="Polls open GitHub issues, creates one worktree per issue, and drafts a plan."
+      >
+        <InlineField
+          label="Mr. Robot issue sweeps"
+          description="Optionally runs the plan with Full access too"
+          htmlFor="mr-robot-enabled"
+        >
           <Switch
+            id="mr-robot-enabled"
             checked={settings.enabled}
             onCheckedChange={handleEnabledChange}
             disabled={updateSettings.isPending}
           />
-        </div>
+        </InlineField>
+      </SettingsSection>
 
-        {initialSettings.enabled && (
-          <AutoFixStatusSection projectId={projectId} />
-        )}
+      {initialSettings.enabled && (
+        <AutoFixStatusSection projectId={projectId} />
+      )}
 
-        <div className="rounded-lg border p-4">
-          <h4 className="mb-4 text-sm font-medium text-foreground">
-            Schedule and limits
-          </h4>
-          <div className="grid gap-4 md:grid-cols-3">
-            <Field label="Check every">
-              <div className="flex items-center gap-2">
-                <Input
-                  type="number"
-                  min={1}
-                  value={settings.interval_minutes}
-                  onChange={event =>
-                    setNumber('interval_minutes', event.target.value)
-                  }
-                />
-                <span className="text-sm text-muted-foreground">minutes</span>
-              </div>
-            </Field>
-            <Field label="Issues per run">
-              <Input
-                type="number"
-                min={1}
-                value={settings.issue_limit}
-                onChange={event => setNumber('issue_limit', event.target.value)}
-              />
-            </Field>
-            <Field label="Max active worktrees">
-              <Input
-                type="number"
-                min={1}
-                value={settings.max_parallel_worktrees}
-                onChange={event =>
-                  setNumber('max_parallel_worktrees', event.target.value)
-                }
-              />
-            </Field>
+      <SettingsSection title="Schedule and limits">
+        <InlineField label="Check every" htmlFor="mr-robot-interval">
+          <div className="flex items-center gap-2">
+            <Input
+              id="mr-robot-interval"
+              type="number"
+              min={1}
+              value={settings.interval_minutes}
+              onChange={event =>
+                setNumber('interval_minutes', event.target.value)
+              }
+              className="w-24"
+            />
+            <span className="text-sm text-muted-foreground">minutes</span>
           </div>
-
-          <Separator className="my-4" />
-
-          <Field
-            label="Included GitHub labels"
-            description="When set, Mr. Robot starts from issues with any of these labels. Leave blank to include all open issues before exclusions."
-          >
+        </InlineField>
+        <InlineField label="Issues per run" htmlFor="mr-robot-issue-limit">
+          <Input
+            id="mr-robot-issue-limit"
+            type="number"
+            min={1}
+            value={settings.issue_limit}
+            onChange={event => setNumber('issue_limit', event.target.value)}
+            className="w-24"
+          />
+        </InlineField>
+        <InlineField
+          label="Max active worktrees"
+          htmlFor="mr-robot-max-worktrees"
+        >
+          <Input
+            id="mr-robot-max-worktrees"
+            type="number"
+            min={1}
+            value={settings.max_parallel_worktrees}
+            onChange={event =>
+              setNumber('max_parallel_worktrees', event.target.value)
+            }
+            className="w-24"
+          />
+        </InlineField>
+        <InlineField
+          label="Included GitHub labels"
+          description="Blank includes all open issues"
+          help="When set, Mr. Robot starts from issues with any of these labels. Exclusions apply afterwards."
+        >
+          <div className="min-w-0 flex-1">
             <GitHubLabelMultiSelect
               label="Included GitHub labels"
               labels={githubLabels}
@@ -830,240 +801,209 @@ export function AutoFixPane({ projectId }: { projectId: string }) {
                 setSettings(current => ({ ...current, included_labels }))
               }
             />
-          </Field>
-
-          <div className="pt-4">
-            <Field
-              label="Excluded GitHub labels"
-              description="Issues with any of these labels are removed from the final Mr. Robot list."
-            >
-              <GitHubLabelMultiSelect
-                label="Excluded GitHub labels"
-                labels={githubLabels}
-                selected={settings.excluded_labels ?? []}
-                isLoading={githubLabelsLoading}
-                disabled={updateSettings.isPending}
-                onChange={excluded_labels =>
-                  setSettings(current => ({ ...current, excluded_labels }))
-                }
-              />
-            </Field>
           </div>
-
-          <Separator className="my-4" />
-
-          <div className="flex items-start justify-between gap-4">
-            <div className="max-w-2xl">
-              <Label className="text-sm text-foreground">Active hours</Label>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Only start new fixes during these hours (local time). Wraps past
-                midnight.
-              </p>
-            </div>
-            <Switch
-              checked={settings.active_hours_enabled ?? false}
-              onCheckedChange={handleActiveHoursEnabledChange}
+        </InlineField>
+        <InlineField
+          label="Excluded GitHub labels"
+          description="Issues with any of these labels are skipped"
+        >
+          <div className="min-w-0 flex-1">
+            <GitHubLabelMultiSelect
+              label="Excluded GitHub labels"
+              labels={githubLabels}
+              selected={settings.excluded_labels ?? []}
+              isLoading={githubLabelsLoading}
               disabled={updateSettings.isPending}
+              onChange={excluded_labels =>
+                setSettings(current => ({ ...current, excluded_labels }))
+              }
             />
           </div>
-
-          {settings.active_hours_enabled && (
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              <Field label="From">
-                <Select
-                  value={String(settings.active_hours_start ?? 20)}
-                  onValueChange={value => setHour('active_hours_start', value)}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {HOUR_OPTIONS.map(hour => (
-                      <SelectItem key={hour} value={String(hour)}>
-                        {formatHour(hour)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field label="To">
-                <Select
-                  value={String(settings.active_hours_end ?? 8)}
-                  onValueChange={value => setHour('active_hours_end', value)}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {HOUR_OPTIONS.map(hour => (
-                      <SelectItem key={hour} value={String(hour)}>
-                        {formatHour(hour)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
+        </InlineField>
+        <InlineField
+          label="Active hours"
+          description="Only start new fixes in this window (local time)"
+          help="The window can wrap past midnight, for example 8:00 PM to 8:00 AM."
+          htmlFor="mr-robot-active-hours"
+        >
+          <Switch
+            id="mr-robot-active-hours"
+            checked={settings.active_hours_enabled ?? false}
+            onCheckedChange={handleActiveHoursEnabledChange}
+            disabled={updateSettings.isPending}
+          />
+        </InlineField>
+        {settings.active_hours_enabled && (
+          <InlineField label="Hours">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <Select
+                value={String(settings.active_hours_start ?? 20)}
+                onValueChange={value => setHour('active_hours_start', value)}
+              >
+                <SelectTrigger aria-label="From" className="flex-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {HOUR_OPTIONS.map(hour => (
+                    <SelectItem key={hour} value={String(hour)}>
+                      {formatHour(hour)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <span className="text-sm text-muted-foreground">to</span>
+              <Select
+                value={String(settings.active_hours_end ?? 8)}
+                onValueChange={value => setHour('active_hours_end', value)}
+              >
+                <SelectTrigger aria-label="To" className="flex-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {HOUR_OPTIONS.map(hour => (
+                    <SelectItem key={hour} value={String(hour)}>
+                      {formatHour(hour)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-          )}
-        </div>
+          </InlineField>
+        )}
+      </SettingsSection>
 
-        <div className="grid gap-4 lg:grid-cols-2">
-          <div className="rounded-lg border p-4">
-            <div className="mb-4 flex items-start justify-between gap-4">
-              <div>
-                <h4 className="text-sm font-medium text-foreground">
-                  Planning
-                </h4>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Plan issues automatically based on the backend model.
-                </p>
-              </div>
-            </div>
-
-            {settings.planning_backend === 'claude' &&
-              customCliProfiles.length > 0 && (
-                <div className="mb-4">
-                  <Field
-                    label="Provider"
-                    description="Claude custom CLI profile (Settings → Providers)."
-                  >
-                    <AutoFixProviderSelect
-                      label="planning"
-                      provider={settings.planning_provider}
-                      profiles={customCliProfiles}
-                      disabled={updateSettings.isPending}
-                      onChange={planning_provider =>
-                        setSettings(current => {
-                          const nextModel =
-                            planning_provider &&
-                            current.planning_model &&
-                            !['opus', 'sonnet', 'haiku'].includes(
-                              current.planning_model
-                            )
-                              ? 'opus'
-                              : current.planning_model
-                          return {
-                            ...current,
-                            planning_provider,
-                            planning_model: nextModel,
-                          }
-                        })
+      <SettingsSection
+        title="Planning"
+        description="Plans each issue with this backend and model."
+      >
+        {settings.planning_backend === 'claude' &&
+          customCliProfiles.length > 0 && (
+            <InlineField
+              label="Provider"
+              description="Claude custom CLI profile"
+            >
+              <div className="min-w-0 flex-1">
+                <AutoFixProviderSelect
+                  label="planning"
+                  provider={settings.planning_provider}
+                  profiles={customCliProfiles}
+                  disabled={updateSettings.isPending}
+                  onChange={planning_provider =>
+                    setSettings(current => {
+                      const nextModel =
+                        planning_provider &&
+                        current.planning_model &&
+                        !['opus', 'sonnet', 'haiku'].includes(
+                          current.planning_model
+                        )
+                          ? 'opus'
+                          : current.planning_model
+                      return {
+                        ...current,
+                        planning_provider,
+                        planning_model: nextModel,
                       }
-                    />
-                  </Field>
-                </div>
-              )}
-
-            <Field label="Backend + model">
-              <AutoFixBackendModelPicker
-                label="planning"
-                backend={settings.planning_backend}
-                model={settings.planning_model}
-                provider={settings.planning_provider}
-                customCliProfiles={customCliProfiles}
-                onChange={(
+                    })
+                  }
+                />
+              </div>
+            </InlineField>
+          )}
+        <InlineField label="Backend + model">
+          <div className="min-w-0 flex-1">
+            <AutoFixBackendModelPicker
+              label="planning"
+              backend={settings.planning_backend}
+              model={settings.planning_model}
+              provider={settings.planning_provider}
+              customCliProfiles={customCliProfiles}
+              onChange={(planning_backend, planning_model, planning_provider) =>
+                setSettings(current => ({
+                  ...current,
                   planning_backend,
                   planning_model,
-                  planning_provider
-                ) =>
-                  setSettings(current => ({
-                    ...current,
-                    planning_backend,
-                    planning_model,
-                    planning_provider:
-                      planning_backend === 'claude' ? planning_provider : null,
-                  }))
-                }
-              />
-            </Field>
+                  planning_provider:
+                    planning_backend === 'claude' ? planning_provider : null,
+                }))
+              }
+            />
           </div>
+        </InlineField>
+      </SettingsSection>
 
-          <div className="rounded-lg border p-4">
-            <div className="mb-4 flex items-start justify-between gap-4">
-              <div>
-                <h4 className="text-sm font-medium text-foreground">
-                  Full-access execution
-                </h4>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Automatically approve ready plans and start execution.
-                </p>
-              </div>
-              <Checkbox
-                aria-label="Automatically approve plans with Full access"
-                checked={settings.auto_yolo_enabled ?? false}
-                onCheckedChange={checked =>
-                  handleAutoYoloEnabledChange(checked === true)
+      <SettingsSection
+        title="Full-access execution"
+        description="Approves ready plans and starts execution automatically."
+      >
+        <InlineField label="Auto-approve plans" htmlFor="mr-robot-auto-yolo">
+          <Checkbox
+            id="mr-robot-auto-yolo"
+            aria-label="Automatically approve plans with Full access"
+            checked={settings.auto_yolo_enabled ?? false}
+            onCheckedChange={checked =>
+              handleAutoYoloEnabledChange(checked === true)
+            }
+            disabled={updateSettings.isPending}
+          />
+        </InlineField>
+        {settings.yolo_backend === 'claude' && customCliProfiles.length > 0 && (
+          <InlineField label="Provider" description="Claude custom CLI profile">
+            <div className="min-w-0 flex-1">
+              <AutoFixProviderSelect
+                label="Full access"
+                provider={settings.yolo_provider}
+                profiles={customCliProfiles}
+                disabled={
+                  !settings.auto_yolo_enabled || updateSettings.isPending
                 }
-                disabled={updateSettings.isPending}
+                onChange={yolo_provider =>
+                  setSettings(current => {
+                    const nextModel =
+                      yolo_provider &&
+                      current.yolo_model &&
+                      !['opus', 'sonnet', 'haiku'].includes(current.yolo_model)
+                        ? 'opus'
+                        : current.yolo_model
+                    return {
+                      ...current,
+                      yolo_provider,
+                      yolo_model: nextModel,
+                    }
+                  })
+                }
               />
             </div>
-            {settings.yolo_backend === 'claude' &&
-              customCliProfiles.length > 0 && (
-                <div className="mb-4">
-                  <Field
-                    label="Provider"
-                    description="Claude custom CLI profile (Settings → Providers)."
-                  >
-                    <AutoFixProviderSelect
-                      label="Full access"
-                      provider={settings.yolo_provider}
-                      profiles={customCliProfiles}
-                      disabled={
-                        !settings.auto_yolo_enabled || updateSettings.isPending
-                      }
-                      onChange={yolo_provider =>
-                        setSettings(current => {
-                          const nextModel =
-                            yolo_provider &&
-                            current.yolo_model &&
-                            !['opus', 'sonnet', 'haiku'].includes(
-                              current.yolo_model
-                            )
-                              ? 'opus'
-                              : current.yolo_model
-                          return {
-                            ...current,
-                            yolo_provider,
-                            yolo_model: nextModel,
-                          }
-                        })
-                      }
-                    />
-                  </Field>
-                </div>
-              )}
-            <Field label="Backend + model">
-              <AutoFixBackendModelPicker
-                label="Full access"
-                backend={settings.yolo_backend}
-                model={settings.yolo_model}
-                provider={settings.yolo_provider}
-                customCliProfiles={customCliProfiles}
-                disabled={!settings.auto_yolo_enabled}
-                onChange={(yolo_backend, yolo_model, yolo_provider) =>
-                  setSettings(current => ({
-                    ...current,
-                    yolo_backend,
-                    yolo_model,
-                    yolo_provider:
-                      yolo_backend === 'claude' ? yolo_provider : null,
-                  }))
-                }
-              />
-            </Field>
+          </InlineField>
+        )}
+        <InlineField label="Backend + model">
+          <div className="min-w-0 flex-1">
+            <AutoFixBackendModelPicker
+              label="Full access"
+              backend={settings.yolo_backend}
+              model={settings.yolo_model}
+              provider={settings.yolo_provider}
+              customCliProfiles={customCliProfiles}
+              disabled={!settings.auto_yolo_enabled}
+              onChange={(yolo_backend, yolo_model, yolo_provider) =>
+                setSettings(current => ({
+                  ...current,
+                  yolo_backend,
+                  yolo_model,
+                  yolo_provider:
+                    yolo_backend === 'claude' ? yolo_provider : null,
+                }))
+              }
+            />
           </div>
-        </div>
+        </InlineField>
+      </SettingsSection>
 
-        <Button
-          onClick={save}
-          disabled={updateSettings.isPending || !hasChanges}
-        >
-          {updateSettings.isPending && (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          )}
-          Save settings
-        </Button>
-      </div>
+      <Button onClick={save} disabled={updateSettings.isPending || !hasChanges}>
+        {updateSettings.isPending && (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        )}
+        Save settings
+      </Button>
     </div>
   )
 }

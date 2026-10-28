@@ -145,10 +145,11 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
     muted?: boolean
   }[] = [
     { id: 'inbox', label: 'Inbox', badge: agent.unreadNotifications },
-    { id: 'tasks', label: 'Tasks', badge: agent.runningTasks, muted: true },
-    { id: 'subagents', label: 'Subagents' },
+    { id: 'tasks', label: 'Runs', badge: agent.runningTasks, muted: true },
+    { id: 'subagents', label: 'Agent types' },
     { id: 'schedules', label: 'Schedules' },
-    { id: 'activity', label: 'Activity', badge: agent.pendingApprovals },
+    // Pending approvals show as a banner above the chat, not as a badge here
+    { id: 'activity', label: 'Activity' },
     { id: 'memory', label: 'Memory' },
     { id: 'settings', label: 'Settings' },
   ]
@@ -196,9 +197,7 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
                 <span
                   className={cn(
                     'shrink-0 whitespace-nowrap text-xs font-normal',
-                    needsUser
-                      ? 'text-amber-600 dark:text-amber-400'
-                      : 'text-muted-foreground'
+                    needsUser ? 'text-warning' : 'text-muted-foreground'
                   )}
                   data-testid="agent-header-status"
                 >
@@ -262,27 +261,18 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
             </Button>
           </div>
           <div className="flex shrink-0 flex-col items-center gap-1 px-6 pb-3 text-center">
-            <AgentIcon icon={agent.icon} className="mb-1 size-14" />
-            <h1 className="max-w-full truncate text-base font-semibold text-foreground">
+            {/* The panel covers the header pill below sm, so name it here */}
+            <h1 className="max-w-full truncate text-base font-semibold text-foreground sm:hidden">
               {agent.name}
             </h1>
-            <p
-              className={cn(
-                'text-xs',
-                agent.pendingApprovals > 0 || agent.status === 'waiting'
-                  ? 'text-amber-600 dark:text-amber-400'
-                  : 'text-muted-foreground'
-              )}
-            >
-              {agentStatusLabel(agent)}
-            </p>
             <p className="text-xs text-muted-foreground">
-              {agent.serverId !== LOCAL_SERVER_ID && (
-                <span className="mr-1.5 rounded bg-muted px-1.5 py-0.5">
-                  on {agent.serverName}
-                </span>
-              )}
-              {[agent.description, agentRunSummary(agent)]
+              {[
+                agent.serverId !== LOCAL_SERVER_ID
+                  ? `on ${agent.serverName}`
+                  : null,
+                agent.description,
+                agentRunSummary(agent),
+              ]
                 .filter(Boolean)
                 .join(' · ')}
             </p>
@@ -310,10 +300,10 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
                 {badge ? (
                   <span
                     className={cn(
-                      'min-w-4 rounded-full px-1 text-center text-[10px] tabular-nums leading-4',
+                      'min-w-4 rounded-full px-1 text-center text-2xs tabular-nums leading-4',
                       muted
                         ? 'bg-muted-foreground/20 text-foreground'
-                        : 'bg-amber-500 text-white'
+                        : 'bg-warning text-warning-foreground'
                     )}
                   >
                     {badge}
@@ -353,8 +343,8 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
               </label>
             </TooltipTrigger>
             <TooltipContent className="max-w-72">
-              Show tasks, subagents, activity, memory, settings, and tool
-              activity in chat
+              Show runs, agent types, activity, memory, settings, and tool calls
+              in chat
             </TooltipContent>
           </Tooltip>
         </aside>

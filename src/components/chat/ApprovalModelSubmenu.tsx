@@ -307,7 +307,7 @@ export function ApprovalModelSubmenu({
                 >
                   <span className="flex min-w-0 flex-col">
                     <span className="truncate">{option.label}</span>
-                    <span className="truncate text-[10px] text-muted-foreground">
+                    <span className="truncate text-2xs text-muted-foreground">
                       {option.value}
                     </span>
                   </span>
@@ -341,9 +341,7 @@ export function ApprovalActionGroup({
           <span className="truncate">
             {defaultModelLabel ?? 'Current default'}
           </span>
-          <span className="text-[10px] text-muted-foreground">
-            (use default)
-          </span>
+          <span className="text-2xs text-muted-foreground">(use default)</span>
         </span>
         {shortcut && <DropdownMenuShortcut>{shortcut}</DropdownMenuShortcut>}
       </DropdownMenuItem>

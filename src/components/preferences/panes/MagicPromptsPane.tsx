@@ -1705,7 +1705,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
         >
           {PROMPT_SECTIONS.map((section, sectionIdx) => (
             <div key={section.label} className={sectionIdx > 0 ? 'mt-3' : ''}>
-              <h4 className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1 px-2">
+              <h4 className="text-2xs font-medium text-muted-foreground uppercase tracking-wider mb-1 px-2">
                 {section.label}
               </h4>
               {section.configs.map(config => {
@@ -2524,7 +2524,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
               {selectedConfig.variables.map(v => (
                 <span
                   key={v.name}
-                  className="inline-flex items-center gap-1 text-[11px]"
+                  className="inline-flex items-center gap-1 text-2xs"
                   title={v.description}
                 >
                   <code className="bg-muted px-1 py-0.5 rounded font-mono">

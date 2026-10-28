@@ -37,22 +37,7 @@ import { Input } from '@/components/ui/input'
 import { isValidHex } from '@/lib/terminal-theme'
 import { useClientZoom } from '@/lib/client-zoom'
 import { SettingsSection } from '../SettingsSection'
-
-const InlineField: React.FC<{
-  label: string
-  description?: string
-  children: React.ReactNode
-}> = ({ label, description, children }) => (
-  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
-    <div className="space-y-0.5 sm:w-56 sm:shrink-0 lg:w-72">
-      <Label className="text-sm text-foreground">{label}</Label>
-      {description && (
-        <p className="text-xs text-muted-foreground">{description}</p>
-      )}
-    </div>
-    {children}
-  </div>
-)
+import { InlineField } from '../InlineField'
 
 const ScalingField: React.FC<{
   label: string
@@ -376,7 +361,8 @@ export const AppearancePane: React.FC = () => {
           {isClientMacOS && (
             <InlineField
               label="Window transparency"
-              description="Translucent window with desktop blur (uses significant GPU; can soften text on external monitors)"
+              description="Translucent window with desktop blur"
+              help="Uses significant GPU and can soften text on external monitors."
             >
               <Switch
                 aria-label="Window transparency"
@@ -405,7 +391,7 @@ export const AppearancePane: React.FC = () => {
 
           <InlineField
             label="Compact chat view"
-            description="Compact answers into one section for a cleaner chat, showing only the last prompt and answer by default."
+            description="Show only the last prompt and answer by default"
           >
             <Switch
               aria-label="Compact chat view"
@@ -421,7 +407,7 @@ export const AppearancePane: React.FC = () => {
 
           <InlineField
             label="Expand tool calls by default"
-            description="Automatically expand tool call details in chat instead of showing a collapsed summary"
+            description="Expand tool call details in chat"
           >
             <Switch
               aria-label="Expand tool calls by default"
@@ -536,7 +522,8 @@ export const AppearancePane: React.FC = () => {
 
           <InlineField
             label="Font weight"
-            description="Overall text weight for UI and chat. Light softens emphasis for long reading, especially in dark mode."
+            description="Text weight for UI and chat"
+            help="Light softens emphasis for long reading, especially in dark mode."
           >
             <Select
               value={preferences?.font_weight ?? FONT_WEIGHT_DEFAULT}
@@ -609,7 +596,7 @@ export const AppearancePane: React.FC = () => {
 
           <ScalingField
             label="Desktop zoom level"
-            description="Adjust the interface size on this device (not shared with remote clients)"
+            description="Interface size on this device only"
           >
             <Slider
               ticks={zoomLevelTicks}
@@ -650,7 +637,7 @@ export const AppearancePane: React.FC = () => {
         <div className="space-y-4">
           <InlineField
             label="Open from screen edge"
-            description="Temporarily reveal the collapsed sidebar when the pointer rests on the left edge. Off by default."
+            description="Reveal the collapsed sidebar at the left edge"
           >
             <Switch
               aria-label="Open sidebar from screen edge"

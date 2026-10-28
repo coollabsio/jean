@@ -4,6 +4,9 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { usePackageScripts, type PackageScript } from '@/services/projects'
@@ -16,7 +19,7 @@ interface ScriptsButtonProps {
   onRun: (script: PackageScript) => void
 }
 
-export function ScriptsButton({
+function ScriptMenuItems({
   projectId,
   worktreePath,
   onRun,
@@ -51,6 +54,43 @@ export function ScriptsButton({
     })
   }
 
+  return sortedScripts.map(script => (
+    <DropdownMenuItem
+      key={script.name}
+      aria-label={script.name}
+      onSelect={() => onRun(script)}
+    >
+      <Play className="h-3.5 w-3.5" />
+      <span className="min-w-0 flex-1 truncate font-mono text-xs">
+        {script.name}
+      </span>
+      {projectId && (
+        <button
+          type="button"
+          className="-my-1 -mr-1 flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label={`${favoriteScriptNames.has(script.name) ? 'Unfavorite' : 'Favorite'} ${script.name}`}
+          aria-pressed={favoriteScriptNames.has(script.name)}
+          onClick={event => {
+            event.preventDefault()
+            event.stopPropagation()
+            toggleFavorite(script.name)
+          }}
+        >
+          <Star
+            className={cn(
+              'h-3.5 w-3.5',
+              favoriteScriptNames.has(script.name) &&
+                'fill-warning text-warning'
+            )}
+          />
+        </button>
+      )}
+    </DropdownMenuItem>
+  ))
+}
+
+export function ScriptsButton(props: ScriptsButtonProps) {
+  const { data: scripts = [] } = usePackageScripts(props.worktreePath)
   if (scripts.length === 0) return null
 
   return (
@@ -72,40 +112,26 @@ export function ScriptsButton({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-48">
-        {sortedScripts.map(script => (
-          <DropdownMenuItem
-            key={script.name}
-            aria-label={script.name}
-            onSelect={() => onRun(script)}
-          >
-            <Play className="h-3.5 w-3.5" />
-            <span className="min-w-0 flex-1 truncate font-mono text-xs">
-              {script.name}
-            </span>
-            {projectId && (
-              <button
-                type="button"
-                className="-my-1 -mr-1 flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                aria-label={`${favoriteScriptNames.has(script.name) ? 'Unfavorite' : 'Favorite'} ${script.name}`}
-                aria-pressed={favoriteScriptNames.has(script.name)}
-                onClick={event => {
-                  event.preventDefault()
-                  event.stopPropagation()
-                  toggleFavorite(script.name)
-                }}
-              >
-                <Star
-                  className={cn(
-                    'h-3.5 w-3.5',
-                    favoriteScriptNames.has(script.name) &&
-                      'fill-warning text-warning'
-                  )}
-                />
-              </button>
-            )}
-          </DropdownMenuItem>
-        ))}
+        <ScriptMenuItems {...props} />
       </DropdownMenuContent>
     </DropdownMenu>
+  )
+}
+
+/** The same script list as a submenu, for hosting inside another menu. */
+export function ScriptsSubmenu(props: ScriptsButtonProps) {
+  const { data: scripts = [] } = usePackageScripts(props.worktreePath)
+  if (scripts.length === 0) return null
+
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger>
+        <Play className="h-4 w-4" />
+        Scripts
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent className="min-w-48">
+        <ScriptMenuItems {...props} />
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
   )
 }

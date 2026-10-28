@@ -66,7 +66,7 @@ export function AgentSettings({ agent }: { agent: AgentSummary }) {
       </AgentSection>
       <AgentSection
         title="Run configuration"
-        description="New chats, task sessions, and wake-ups use these choices."
+        description="New chats, runs, and wake-ups use these choices."
       >
         <AgentPanel>
           <AgentRunFields

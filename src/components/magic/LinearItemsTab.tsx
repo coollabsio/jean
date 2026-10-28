@@ -17,6 +17,7 @@ import {
 import { cn } from '@/lib/utils'
 import { isLinearAuthError } from '@/services/linear'
 import { LinearAuthError } from '@/components/shared/LinearAuthError'
+import { LinearIssueItem } from '@/components/worktree/LinearIssueItem'
 import type { LinearIssue, LoadedLinearIssueContext } from '@/types/linear'
 
 interface LinearItemsTabProps {
@@ -257,74 +258,15 @@ export function LinearItemsTab({
         {!isLoading && error == null && filteredIssues.length > 0 && (
           <div className="py-1">
             {filteredIssues.map((issue, index) => (
-              <button
-                type="button"
+              <LinearIssueItem
                 key={issue.id}
-                data-load-item-index={index}
+                issue={issue}
+                index={index}
+                isSelected={index === selectedIndex}
+                isCreating={loadingLinearIds.has(issue.identifier)}
                 onMouseEnter={() => setSelectedIndex(index)}
                 onClick={() => onSelectIssue(issue)}
-                disabled={loadingLinearIds.has(issue.identifier)}
-                className={cn(
-                  'w-full flex items-start gap-3 px-4 py-2 text-left transition-colors',
-                  'hover:bg-accent',
-                  index === selectedIndex && 'bg-accent',
-                  loadingLinearIds.has(issue.identifier) && 'opacity-50'
-                )}
-              >
-                {loadingLinearIds.has(issue.identifier) ? (
-                  <Loader2 className="h-4 w-4 mt-0.5 animate-spin text-muted-foreground flex-shrink-0" />
-                ) : (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <div
-                        className="h-4 w-4 mt-0.5 flex-shrink-0 rounded-full border-2"
-                        style={{ borderColor: issue.state.color }}
-                      />
-                    </TooltipTrigger>
-                    <TooltipContent>{issue.state.name}</TooltipContent>
-                  </Tooltip>
-                )}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground font-mono">
-                      {issue.identifier}
-                    </span>
-                    <span className="text-sm font-medium truncate">
-                      {issue.title}
-                    </span>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-1 mt-1">
-                    {issue.priority > 0 && (
-                      <span className="px-1.5 py-0.5 text-xs rounded-full bg-muted text-muted-foreground">
-                        {issue.priorityLabel}
-                      </span>
-                    )}
-                    {issue.labels.slice(0, 3).map(label => (
-                      <span
-                        key={label.name}
-                        className="px-1.5 py-0.5 text-xs rounded-full"
-                        style={{
-                          backgroundColor: `${label.color}20`,
-                          color: label.color,
-                          border: `1px solid ${label.color}40`,
-                        }}
-                      >
-                        {label.name}
-                      </span>
-                    ))}
-                    {issue.labels.length > 3 && (
-                      <span className="text-xs text-muted-foreground">
-                        +{issue.labels.length - 3}
-                      </span>
-                    )}
-                    {issue.assignee && (
-                      <span className="text-xs text-muted-foreground ml-1">
-                        {issue.assignee.displayName}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </button>
+              />
             ))}
             {isSearching && (
               <div className="flex items-center justify-center py-2">

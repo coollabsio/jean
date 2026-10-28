@@ -135,6 +135,10 @@ import {
   resolvePortUrl,
 } from '@/components/browser/default-tab-url'
 import { usePreferences } from '@/services/preferences'
+import {
+  MobileContextsSheet,
+  type MobileContextGroup,
+} from './MobileContextsSheet'
 import { LOCAL_SERVER_ID } from '@/types/server-resource'
 
 /** Stable defaults so omit/undefined doesn't allocate a new [] each render. */
@@ -370,6 +374,7 @@ export function MobileSettingsMenu({
   const [thinkingSheetOpen, setThinkingSheetOpen] = useState(false)
   const [mcpSheetOpen, setMcpSheetOpen] = useState(false)
   const [scriptsSheetOpen, setScriptsSheetOpen] = useState(false)
+  const [contextsSheetOpen, setContextsSheetOpen] = useState(false)
   const [resumeCommand, setResumeCommand] = useState<string | null>(null)
   const { hasActiveTerminal } = useWorktreeTerminalStatus(worktreeId ?? '')
   // Keep radio/checkbox selections from dismissing the gear menu so users can
@@ -441,6 +446,11 @@ export function MobileSettingsMenu({
   const openScriptsPicker = () => {
     setMenuOpen(false)
     requestAnimationFrame(() => setScriptsSheetOpen(true))
+  }
+
+  const openContextsSheet = () => {
+    setMenuOpen(false)
+    requestAnimationFrame(() => setContextsSheetOpen(true))
   }
 
   // After mobile model selection, auto-open effort/thinking so users don't
@@ -581,15 +591,103 @@ export function MobileSettingsMenu({
   )
 
   const hasLinkedPr = !!(prUrl && prNumber) || !!stackedOnPR
-  const hasContexts =
-    loadedIssueContexts.length > 0 ||
-    loadedPRContexts.length > 0 ||
-    loadedDiscussionContexts.length > 0 ||
-    loadedSecurityContexts.length > 0 ||
-    loadedAdvisoryContexts.length > 0 ||
-    loadedLinearContexts.length > 0 ||
-    loadedSentryContexts.length > 0 ||
-    attachedSavedContexts.length > 0
+  const repoUrl = (owner: string, name: string) =>
+    hostedRepoWebUrl(forgeHost, owner, name)
+  const contextGroups: MobileContextGroup[] = [
+    {
+      title: 'Issues',
+      items: loadedIssueContexts.map(ctx => ({
+        key: String(ctx.number),
+        icon: <CircleDot className="h-4 w-4 shrink-0 text-success" />,
+        label: `#${ctx.number} ${ctx.title}`,
+        onView: () => handleViewIssue(ctx),
+        externalUrl: issueWebUrl(
+          repoUrl(ctx.repoOwner, ctx.repoName),
+          ctx.number,
+          gitProvider
+        ),
+      })),
+    },
+    {
+      title: `${forgeLabels.pullRequest}s`,
+      items: loadedPRContexts.map(ctx => ({
+        key: String(ctx.number),
+        icon: <GitPullRequest className="h-4 w-4 shrink-0 text-success" />,
+        label: `#${ctx.number} ${ctx.title}`,
+        onView: () => handleViewPR(ctx),
+        externalUrl: pullRequestWebUrl(
+          repoUrl(ctx.repoOwner, ctx.repoName),
+          ctx.number,
+          gitProvider
+        ),
+      })),
+    },
+    {
+      title: 'Discussions',
+      items: loadedDiscussionContexts.map(ctx => ({
+        key: String(ctx.number),
+        icon: <MessagesSquare className="h-4 w-4 shrink-0 text-success" />,
+        label: `#${ctx.number} ${ctx.title}`,
+        onView: () => handleViewDiscussion(ctx),
+        externalUrl: `https://github.com/${ctx.repoOwner}/${ctx.repoName}/discussions/${ctx.number}`,
+      })),
+    },
+    {
+      title: 'Security Alerts',
+      items: loadedSecurityContexts.map(ctx => ({
+        key: String(ctx.number),
+        icon: <Shield className="h-4 w-4 shrink-0 text-warning" />,
+        label: `#${ctx.number} ${ctx.packageName} (${ctx.severity})`,
+        onView: () => handleViewSecurityAlert(ctx),
+        externalUrl: `https://github.com/${ctx.repoOwner}/${ctx.repoName}/security/dependabot/${ctx.number}`,
+      })),
+    },
+    {
+      title: 'Advisories',
+      items: loadedAdvisoryContexts.map(ctx => ({
+        key: ctx.ghsaId,
+        icon: <ShieldAlert className="h-4 w-4 shrink-0 text-warning" />,
+        label: `${ctx.ghsaId} — ${ctx.summary}`,
+        onView: () => handleViewAdvisory(ctx),
+        externalUrl: `https://github.com/${ctx.repoOwner}/${ctx.repoName}/security/advisories/${ctx.ghsaId}`,
+      })),
+    },
+    {
+      title: 'Linear Issues',
+      items: loadedLinearContexts.map(ctx => ({
+        key: ctx.identifier,
+        icon: (
+          <LinearIcon className="h-4 w-4 shrink-0 text-violet-600 dark:text-violet-400" />
+        ),
+        label: `${ctx.identifier} ${ctx.title}`,
+        onView: () => handleViewLinear(ctx),
+        externalUrl: ctx.url,
+      })),
+    },
+    {
+      title: 'Sentry Issues',
+      items: loadedSentryContexts.map(ctx => ({
+        key: ctx.id,
+        icon: <Sentry className="h-4 w-4 shrink-0 text-warning" />,
+        label: `${ctx.shortId} ${ctx.title}`,
+        onView: () => handleViewSentry(ctx),
+        externalUrl: ctx.permalink,
+      })),
+    },
+    {
+      title: 'Saved contexts',
+      items: attachedSavedContexts.map(ctx => ({
+        key: ctx.slug,
+        icon: <FolderOpen className="h-4 w-4 shrink-0 text-info" />,
+        label: ctx.name || ctx.slug,
+        onView: () => handleViewSavedContext(ctx),
+      })),
+    },
+  ].filter(group => group.items.length > 0)
+  const contextCount = contextGroups.reduce(
+    (count, group) => count + group.items.length,
+    0
+  )
   const hasToggleableMcpServers = availableMcpServers.some(
     server => !server.disabled
   )
@@ -812,10 +910,10 @@ export function MobileSettingsMenu({
                       {showHeaders && (
                         <>
                           {idx > 0 && <DropdownMenuSeparator />}
-                          <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground/70 font-medium py-1">
+                          <DropdownMenuLabel className="py-1 text-xs font-medium text-muted-foreground">
                             <BackendLabel
                               backend={backend}
-                              badgeClassName="text-[8px] leading-3"
+                              badgeClassName="text-2xs leading-3"
                             />
                           </DropdownMenuLabel>
                         </>
@@ -874,6 +972,13 @@ export function MobileSettingsMenu({
             >
               <Paperclip className="h-4 w-4" />
               Attachments
+            </DropdownMenuItem>
+          )}
+          {contextCount > 0 && (
+            <DropdownMenuItem onSelect={openContextsSheet}>
+              <FolderOpen className="h-4 w-4" />
+              <span>Contexts ({contextCount})</span>
+              <ChevronRight className="ml-auto h-4 w-4 shrink-0 text-foreground" />
             </DropdownMenuItem>
           )}
           {worktreeId && (
@@ -1023,323 +1128,6 @@ export function MobileSettingsMenu({
                     {stackedOnPR.title ? ` ${stackedOnPR.title}` : ''}
                   </span>
                 </DropdownMenuItem>
-              )}
-            </>
-          )}
-
-          {hasContexts && (
-            <>
-              <DropdownMenuSeparator />
-              {loadedIssueContexts.length > 0 && (
-                <>
-                  <DropdownMenuLabel className="text-xs text-muted-foreground">
-                    Issues
-                  </DropdownMenuLabel>
-                  {loadedIssueContexts.map(ctx => (
-                    <DropdownMenuItem
-                      key={ctx.number}
-                      onClick={() => {
-                        setMenuOpen(false)
-                        handleViewIssue(ctx)
-                      }}
-                    >
-                      <CircleDot className="h-4 w-4 text-success" />
-                      <span className="truncate">
-                        #{ctx.number} {ctx.title}
-                      </span>
-                      <button
-                        type="button"
-                        aria-label="Open external link"
-                        className="ml-auto shrink-0 rounded p-0.5 hover:bg-accent"
-                        onClick={e => {
-                          e.stopPropagation()
-                          openExternal(
-                            issueWebUrl(
-                              hostedRepoWebUrl(
-                                forgeHost,
-                                ctx.repoOwner,
-                                ctx.repoName
-                              ),
-                              ctx.number,
-                              gitProvider
-                            )
-                          )
-                        }}
-                      >
-                        <ExternalLink className="h-3.5 w-3.5 opacity-60" />
-                      </button>
-                    </DropdownMenuItem>
-                  ))}
-                </>
-              )}
-              {loadedPRContexts.length > 0 && (
-                <>
-                  {loadedIssueContexts.length > 0 && <DropdownMenuSeparator />}
-                  <DropdownMenuLabel className="text-xs text-muted-foreground">
-                    {forgeLabels.pullRequest}s
-                  </DropdownMenuLabel>
-                  {loadedPRContexts.map(ctx => (
-                    <DropdownMenuItem
-                      key={ctx.number}
-                      onClick={() => {
-                        setMenuOpen(false)
-                        handleViewPR(ctx)
-                      }}
-                    >
-                      <GitPullRequest className="h-4 w-4 text-success" />
-                      <span className="truncate">
-                        #{ctx.number} {ctx.title}
-                      </span>
-                      <button
-                        type="button"
-                        aria-label="Open external link"
-                        className="ml-auto shrink-0 rounded p-0.5 hover:bg-accent"
-                        onClick={e => {
-                          e.stopPropagation()
-                          openExternal(
-                            pullRequestWebUrl(
-                              hostedRepoWebUrl(
-                                forgeHost,
-                                ctx.repoOwner,
-                                ctx.repoName
-                              ),
-                              ctx.number,
-                              gitProvider
-                            )
-                          )
-                        }}
-                      >
-                        <ExternalLink className="h-3.5 w-3.5 opacity-60" />
-                      </button>
-                    </DropdownMenuItem>
-                  ))}
-                </>
-              )}
-              {loadedDiscussionContexts.length > 0 && (
-                <>
-                  {(loadedIssueContexts.length > 0 ||
-                    loadedPRContexts.length > 0) && <DropdownMenuSeparator />}
-                  <DropdownMenuLabel className="text-xs text-muted-foreground">
-                    Discussions
-                  </DropdownMenuLabel>
-                  {loadedDiscussionContexts.map(ctx => (
-                    <DropdownMenuItem
-                      key={ctx.number}
-                      onClick={() => {
-                        setMenuOpen(false)
-                        handleViewDiscussion(ctx)
-                      }}
-                    >
-                      <MessagesSquare className="h-4 w-4 text-success" />
-                      <span className="truncate">
-                        #{ctx.number} {ctx.title}
-                      </span>
-                      <button
-                        type="button"
-                        aria-label="Open external link"
-                        className="ml-auto shrink-0 rounded p-0.5 hover:bg-accent"
-                        onClick={e => {
-                          e.stopPropagation()
-                          openExternal(
-                            `https://github.com/${ctx.repoOwner}/${ctx.repoName}/discussions/${ctx.number}`
-                          )
-                        }}
-                      >
-                        <ExternalLink className="h-3.5 w-3.5 opacity-60" />
-                      </button>
-                    </DropdownMenuItem>
-                  ))}
-                </>
-              )}
-              {loadedSecurityContexts.length > 0 && (
-                <>
-                  {(loadedIssueContexts.length > 0 ||
-                    loadedPRContexts.length > 0 ||
-                    loadedDiscussionContexts.length > 0) && (
-                    <DropdownMenuSeparator />
-                  )}
-                  <DropdownMenuLabel className="text-xs text-muted-foreground">
-                    Security Alerts
-                  </DropdownMenuLabel>
-                  {loadedSecurityContexts.map(ctx => (
-                    <DropdownMenuItem
-                      key={ctx.number}
-                      onClick={() => {
-                        setMenuOpen(false)
-                        handleViewSecurityAlert(ctx)
-                      }}
-                    >
-                      <Shield className="h-4 w-4 text-warning" />
-                      <span className="truncate">
-                        #{ctx.number} {ctx.packageName} ({ctx.severity})
-                      </span>
-                      <button
-                        type="button"
-                        aria-label="Open external link"
-                        className="ml-auto shrink-0 rounded p-0.5 hover:bg-accent"
-                        onClick={e => {
-                          e.stopPropagation()
-                          openExternal(
-                            `https://github.com/${ctx.repoOwner}/${ctx.repoName}/security/dependabot/${ctx.number}`
-                          )
-                        }}
-                      >
-                        <ExternalLink className="h-3.5 w-3.5 opacity-60" />
-                      </button>
-                    </DropdownMenuItem>
-                  ))}
-                </>
-              )}
-              {loadedAdvisoryContexts.length > 0 && (
-                <>
-                  {(loadedIssueContexts.length > 0 ||
-                    loadedPRContexts.length > 0 ||
-                    loadedDiscussionContexts.length > 0 ||
-                    loadedSecurityContexts.length > 0) && (
-                    <DropdownMenuSeparator />
-                  )}
-                  <DropdownMenuLabel className="text-xs text-muted-foreground">
-                    Advisories
-                  </DropdownMenuLabel>
-                  {loadedAdvisoryContexts.map(ctx => (
-                    <DropdownMenuItem
-                      key={ctx.ghsaId}
-                      onClick={() => {
-                        setMenuOpen(false)
-                        handleViewAdvisory(ctx)
-                      }}
-                    >
-                      <ShieldAlert className="h-4 w-4 text-warning" />
-                      <span className="truncate">
-                        {ctx.ghsaId} — {ctx.summary}
-                      </span>
-                      <button
-                        type="button"
-                        aria-label="Open external link"
-                        className="ml-auto shrink-0 rounded p-0.5 hover:bg-accent"
-                        onClick={e => {
-                          e.stopPropagation()
-                          openExternal(
-                            `https://github.com/${ctx.repoOwner}/${ctx.repoName}/security/advisories/${ctx.ghsaId}`
-                          )
-                        }}
-                      >
-                        <ExternalLink className="h-3.5 w-3.5 opacity-60" />
-                      </button>
-                    </DropdownMenuItem>
-                  ))}
-                </>
-              )}
-              {loadedLinearContexts.length > 0 && (
-                <>
-                  {(loadedIssueContexts.length > 0 ||
-                    loadedPRContexts.length > 0 ||
-                    loadedDiscussionContexts.length > 0 ||
-                    loadedSecurityContexts.length > 0 ||
-                    loadedAdvisoryContexts.length > 0) && (
-                    <DropdownMenuSeparator />
-                  )}
-                  <DropdownMenuLabel className="text-xs text-muted-foreground">
-                    Linear Issues
-                  </DropdownMenuLabel>
-                  {loadedLinearContexts.map(ctx => (
-                    <DropdownMenuItem
-                      key={ctx.identifier}
-                      onClick={() => {
-                        setMenuOpen(false)
-                        handleViewLinear(ctx)
-                      }}
-                    >
-                      <LinearIcon className="h-4 w-4 text-violet-600 dark:text-violet-400" />
-                      <span className="truncate">
-                        {ctx.identifier} {ctx.title}
-                      </span>
-                      {ctx.url && (
-                        <button
-                          type="button"
-                          aria-label="Open external link"
-                          className="ml-auto shrink-0 rounded p-0.5 hover:bg-accent"
-                          onClick={e => {
-                            e.stopPropagation()
-                            if (ctx.url) openExternal(ctx.url)
-                          }}
-                        >
-                          <ExternalLink className="h-3.5 w-3.5 opacity-60" />
-                        </button>
-                      )}
-                    </DropdownMenuItem>
-                  ))}
-                </>
-              )}
-              {loadedSentryContexts.length > 0 && (
-                <>
-                  {(loadedIssueContexts.length > 0 ||
-                    loadedPRContexts.length > 0 ||
-                    loadedDiscussionContexts.length > 0 ||
-                    loadedSecurityContexts.length > 0 ||
-                    loadedAdvisoryContexts.length > 0 ||
-                    loadedLinearContexts.length > 0) && (
-                    <DropdownMenuSeparator />
-                  )}
-                  <DropdownMenuLabel className="text-xs text-muted-foreground">
-                    Sentry Issues
-                  </DropdownMenuLabel>
-                  {loadedSentryContexts.map(ctx => (
-                    <DropdownMenuItem
-                      key={ctx.id}
-                      onClick={() => {
-                        setMenuOpen(false)
-                        handleViewSentry(ctx)
-                      }}
-                    >
-                      <Sentry className="h-4 w-4 text-warning" />
-                      <span className="truncate">
-                        {ctx.shortId} {ctx.title}
-                      </span>
-                      {ctx.permalink && (
-                        <button
-                          type="button"
-                          aria-label="Open external link"
-                          className="ml-auto shrink-0 rounded p-0.5 hover:bg-accent"
-                          onClick={event => {
-                            event.stopPropagation()
-                            openExternal(ctx.permalink)
-                          }}
-                        >
-                          <ExternalLink className="h-3.5 w-3.5 opacity-60" />
-                        </button>
-                      )}
-                    </DropdownMenuItem>
-                  ))}
-                </>
-              )}
-              {attachedSavedContexts.length > 0 && (
-                <>
-                  {(loadedIssueContexts.length > 0 ||
-                    loadedPRContexts.length > 0 ||
-                    loadedDiscussionContexts.length > 0 ||
-                    loadedSecurityContexts.length > 0 ||
-                    loadedAdvisoryContexts.length > 0 ||
-                    loadedLinearContexts.length > 0 ||
-                    loadedSentryContexts.length > 0) && (
-                    <DropdownMenuSeparator />
-                  )}
-                  <DropdownMenuLabel className="text-xs text-muted-foreground">
-                    Contexts
-                  </DropdownMenuLabel>
-                  {attachedSavedContexts.map(ctx => (
-                    <DropdownMenuItem
-                      key={ctx.slug}
-                      onClick={() => {
-                        setMenuOpen(false)
-                        handleViewSavedContext(ctx)
-                      }}
-                    >
-                      <FolderOpen className="h-4 w-4 text-info" />
-                      <span className="truncate">{ctx.name || ctx.slug}</span>
-                    </DropdownMenuItem>
-                  ))}
-                </>
               )}
             </>
           )}
@@ -1555,6 +1343,12 @@ export function MobileSettingsMenu({
           </div>
         </SheetContent>
       </Sheet>
+
+      <MobileContextsSheet
+        open={contextsSheetOpen}
+        onOpenChange={setContextsSheetOpen}
+        groups={contextGroups}
+      />
     </>
   )
 }

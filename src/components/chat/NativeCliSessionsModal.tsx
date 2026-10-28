@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, Loader2, Plus, Search, Terminal, X } from '@/components/icons/reicon'
+import {
+  ArrowLeft,
+  Loader2,
+  Plus,
+  Search,
+  Terminal,
+  X,
+} from '@/components/icons/reicon'
 import {
   Dialog,
   DialogContent,
@@ -520,9 +527,7 @@ export function NativeCliSessionsModal({
                     ? nativeSession.id
                     : session.opencode_session_id,
                 pi_session_id:
-                  backend === 'pi'
-                    ? nativeSession.id
-                    : session.pi_session_id,
+                  backend === 'pi' ? nativeSession.id : session.pi_session_id,
               },
               { launchMode: 'resume' }
             )
@@ -562,8 +567,7 @@ export function NativeCliSessionsModal({
             <Button
               type="button"
               variant="ghost"
-              size="icon"
-              className="size-7"
+              size="icon-sm"
               onClick={onBack}
             >
               <ArrowLeft className="size-4" />
@@ -591,7 +595,7 @@ export function NativeCliSessionsModal({
             <Plus className="size-4" />
           )}
           New {label} session
-          <Kbd aria-hidden="true" className="shrink-0 text-[10px]">
+          <Kbd aria-hidden="true" className="shrink-0 text-2xs">
             ↵
           </Kbd>
         </Button>
@@ -694,7 +698,7 @@ export function NativeCliSessionsModal({
                   <span className="min-w-0 flex-1">
                     <span className="flex flex-wrap items-center gap-2 text-sm font-medium leading-5">
                       <span className="break-words">{session.title}</span>
-                      <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                      <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-2xs font-medium text-muted-foreground">
                         Native
                       </span>
                     </span>

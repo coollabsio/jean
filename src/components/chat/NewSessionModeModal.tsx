@@ -724,7 +724,7 @@ function NativeBackendChoice({
             </TooltipContent>
           </Tooltip>
         )}
-        <Kbd className="h-7 min-w-7 shrink-0 text-[10px]">{shortcut}</Kbd>
+        <Kbd className="h-7 min-w-7 shrink-0 text-2xs">{shortcut}</Kbd>
       </span>
     </div>
   )
@@ -767,7 +767,7 @@ function NewSessionChoice({
         <span className="flex items-center gap-2 text-sm font-medium leading-none">
           {title}
           {badge && (
-            <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+            <span className="rounded bg-primary/10 px-1.5 py-0.5 text-2xs font-medium text-primary">
               {badge}
             </span>
           )}
@@ -776,7 +776,7 @@ function NewSessionChoice({
           {subtitle}
         </span>
       </span>
-      {showShortcut && <Kbd className="shrink-0 text-[10px]">{shortcut}</Kbd>}
+      {showShortcut && <Kbd className="shrink-0 text-2xs">{shortcut}</Kbd>}
     </button>
   )
 }

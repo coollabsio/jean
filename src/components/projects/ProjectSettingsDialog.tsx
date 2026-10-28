@@ -4,15 +4,11 @@ import { ModalCloseButton } from '@/components/ui/modal-close-button'
 import {
   Breadcrumb,
   BreadcrumbItem,
-  BreadcrumbLink,
   BreadcrumbList,
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb'
-import {
-  SettingsPage,
-  SettingsBackButton,
-} from '@/components/preferences/SettingsPage'
+import { SettingsPage } from '@/components/preferences/SettingsPage'
 import {
   Select,
   SelectContent,
@@ -159,9 +155,6 @@ function ProjectSettingsDialogContent({
               </SidebarGroupContent>
             </SidebarGroup>
           </SidebarContent>
-          <div className="shrink-0 border-t border-border p-2">
-            <SettingsBackButton onClick={onClose} />
-          </div>
         </Sidebar>
 
         <main className="flex flex-1 flex-col overflow-hidden">
@@ -194,11 +187,7 @@ function ProjectSettingsDialogContent({
               <Breadcrumb className="hidden md:block">
                 <BreadcrumbList>
                   <BreadcrumbItem>
-                    <BreadcrumbLink asChild>
-                      <button type="button" onClick={onClose}>
-                        {project?.name ?? 'Project Settings'}
-                      </button>
-                    </BreadcrumbLink>
+                    {project?.name ?? 'Project Settings'}
                   </BreadcrumbItem>
                   <BreadcrumbSeparator />
                   <BreadcrumbItem>

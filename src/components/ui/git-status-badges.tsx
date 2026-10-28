@@ -1,4 +1,5 @@
 import { ArrowDownUp } from '@/components/icons/reicon'
+import { Badge } from '@/components/ui/badge'
 import {
   Tooltip,
   TooltipTrigger,
@@ -82,18 +83,20 @@ export function GitStatusBadges({
       {hasRemoteDivergence && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <button
-              type="button"
-              onClick={onSync}
-              className="inline-flex shrink-0 cursor-pointer items-center gap-0.5 rounded bg-violet-500/10 px-1.5 py-0.5 text-[11px] font-medium text-violet-600 dark:text-violet-400 transition-colors hover:bg-violet-500/20"
-            >
-              <ArrowDownUp className="h-3 w-3" />
-              {behindCount > 0 && unpushedCount > 0
-                ? `${behindCount}/${unpushedCount}`
-                : behindCount > 0
-                  ? behindCount
-                  : unpushedCount}
-            </button>
+            <Badge asChild variant="info">
+              <button
+                type="button"
+                onClick={onSync}
+                className="cursor-pointer gap-0.5 text-2xs hover:bg-info/20"
+              >
+                <ArrowDownUp />
+                {behindCount > 0 && unpushedCount > 0
+                  ? `${behindCount}/${unpushedCount}`
+                  : behindCount > 0
+                    ? behindCount
+                    : unpushedCount}
+              </button>
+            </Badge>
           </TooltipTrigger>
           <TooltipContent>{syncTooltip}</TooltipContent>
         </Tooltip>

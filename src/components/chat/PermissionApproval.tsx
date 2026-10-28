@@ -231,7 +231,7 @@ export function PermissionApproval({
   if (readOnly && approvedPatterns) {
     return (
       <Collapsible open={isExpanded} onOpenChange={setIsExpanded}>
-        <div className="my-2 rounded border border-border/50 bg-muted/30 font-mono text-sm">
+        <div className="my-2 rounded-lg border border-border bg-muted/30 text-sm">
           <CollapsibleTrigger className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-muted/50">
             <ChevronRight
               className={cn(
@@ -292,7 +292,7 @@ export function PermissionApproval({
               variant="secondary"
               onClick={() => onDeny(sessionId)}
             >
-              Decline
+              Deny
             </Button>
           )}
         </>
@@ -311,14 +311,14 @@ export function PermissionApproval({
               />
               <Label
                 htmlFor={`permission-${sessionId}-${index}`}
-                className="block min-w-0 flex-1 cursor-pointer font-mono"
+                className="block min-w-0 flex-1 cursor-pointer"
               >
                 <div className="font-medium">{denial.tool_name}</div>
                 <div className="mt-1 text-xs text-muted-foreground">
                   {getToolDescription(denial)}
                 </div>
                 {command && (
-                  <pre className="mt-2 overflow-x-auto rounded bg-background px-3 py-2 text-xs">
+                  <pre className="mt-2 overflow-x-auto rounded bg-background px-3 py-2 font-mono text-xs">
                     {command}
                   </pre>
                 )}

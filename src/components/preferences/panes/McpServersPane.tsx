@@ -5,6 +5,7 @@ import {
   ShieldAlert,
   XCircle,
 } from '@/components/icons/reicon'
+import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -242,12 +243,9 @@ export const McpServersPane: React.FC = () => {
       <DevinMcpSection />
       <SettingsSection
         title="Default MCP Servers"
+        description="Defaults for new sessions. Change a session from its toolbar."
         anchorId="pref-mcp-section-default-servers"
       >
-        <p className="text-sm text-muted-foreground">
-          Defaults for new sessions. Change a session from its toolbar.
-        </p>
-
         {isLoading ? (
           <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
             <Loader2 className="size-4 animate-spin" />
@@ -299,9 +297,9 @@ export const McpServersPane: React.FC = () => {
                       {server.name}
                     </Label>
                     {jeanMcpMode(server.name, server.config) && (
-                      <span className="rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase text-muted-foreground">
+                      <Badge variant="subtle" className="text-2xs uppercase">
                         {jeanMcpMode(server.name, server.config)}
-                      </span>
+                      </Badge>
                     )}
                     <HealthIndicator
                       status={healthStatuses[mcpKey(backend, server.name)]}

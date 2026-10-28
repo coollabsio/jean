@@ -81,7 +81,7 @@ function PaceBadge({
   return (
     <span
       className={cn(
-        'inline-flex shrink-0 items-center gap-1 text-[11px] font-medium',
+        'inline-flex shrink-0 items-center gap-1 text-2xs font-medium',
         atLimit
           ? 'text-destructive'
           : over
@@ -280,7 +280,7 @@ function ResetLine({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <p className="truncate text-[11px] tabular-nums text-muted-foreground">
+        <p className="truncate text-2xs tabular-nums text-muted-foreground">
           Resets in {formatResetCountdown(resetsAt, nowMs)}
           <span className="mx-1.5 text-border" aria-hidden>
             ·
@@ -307,7 +307,7 @@ function projectionText(pace: UsagePace, usedPercent: number, nowMs: number) {
   return null
 }
 
-/** Headline window: big percent, pace badge, pace chart, reset + projection. */
+/** Headline window: big percent, pace chart, reset + projection. */
 function UsageTile({
   spec,
   nowMs,
@@ -321,12 +321,9 @@ function UsageTile({
 
   return (
     <div className="min-w-0 space-y-2 rounded-lg border border-border/60 bg-background/60 p-3">
-      <div className="flex items-center justify-between gap-2">
-        <span className="truncate text-xs text-muted-foreground">
-          {spec.label}
-        </span>
-        {pace ? <PaceBadge pace={pace} usedPercent={usedPercent} /> : null}
-      </div>
+      <span className="block truncate text-xs text-muted-foreground">
+        {spec.label}
+      </span>
       <p className="text-2xl font-semibold leading-none tracking-tight tabular-nums text-foreground">
         {Math.round(usedPercent)}%
         <span className="ml-1 text-xs font-normal tracking-normal text-muted-foreground">
@@ -340,7 +337,7 @@ function UsageTile({
             usedPercent={usedPercent}
             pace={pace}
           />
-          <div className="flex justify-between text-[10px] tabular-nums text-muted-foreground">
+          <div className="flex justify-between text-2xs tabular-nums text-muted-foreground">
             <span>{formatEdge(pace.startMs, pace)}</span>
             <span>{formatEdge(pace.endMs, pace)}</span>
           </div>
@@ -358,7 +355,7 @@ function UsageTile({
         {projection ? (
           <p
             className={cn(
-              'truncate text-[11px] tabular-nums',
+              'truncate text-2xs tabular-nums',
               pace?.limitAtMs !== null
                 ? 'font-medium text-warning'
                 : 'text-muted-foreground'
@@ -456,7 +453,7 @@ export function UsageWindows({
 /** Key for the pace chart marks, shown once above the backend cards. */
 export function UsageChartLegend() {
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-[11px] text-muted-foreground sm:px-2">
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-2xs text-muted-foreground sm:px-2">
       <span className="inline-flex items-center gap-1.5">
         <svg
           className="h-2 w-4 text-foreground/70"

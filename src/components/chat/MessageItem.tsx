@@ -36,6 +36,7 @@ import { FileMentionBadge } from './FileMentionBadge'
 import { SkillBadge } from './SkillBadge'
 import { ToolCallsDisplay } from './ToolCallsDisplay'
 import { ExitPlanModeButton } from './ExitPlanModeButton'
+import { Button } from '@/components/ui/button'
 import { EditedFilesDisplay } from './EditedFilesDisplay'
 import {
   CheckpointTurnRestoreButton,
@@ -78,6 +79,38 @@ import type { ApprovalModelOverride } from './ApprovalModelSubmenu'
 import { useUIStore } from '@/store/ui-store'
 
 const EMPTY_PATHS: string[] = []
+
+// Per-message chrome (settings, copy, restore, duration) appears on hover or
+// keyboard focus. Touch devices have no hover, so it stays visible there.
+const USER_HOVER_REVEAL =
+  'transition-opacity [@media(pointer:fine)]:opacity-0 [@media(pointer:fine)]:group-hover:opacity-100 [@media(pointer:fine)]:group-focus-within:opacity-100'
+const ASSISTANT_HOVER_REVEAL =
+  'transition-opacity [@media(pointer:fine)]:opacity-0 [@media(pointer:fine)]:group-hover/message:opacity-100 [@media(pointer:fine)]:group-focus-within/message:opacity-100'
+
+function CopyIconButton({
+  label,
+  onClick,
+}: {
+  label: string
+  onClick: () => void
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          aria-label={label}
+          onClick={onClick}
+          className="text-muted-foreground hover:text-foreground"
+        >
+          <Copy className="size-3.5" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  )
+}
 
 interface MessageItemProps {
   /** The message to render */
@@ -368,6 +401,8 @@ export const MessageItem = memo(function MessageItem({
     return undefined
   }, [message.role, worktreeId, getMessages, messageIndex, isSending])
 
+  const showSettingsBadges = !hideSettingsBadges && Boolean(message.model)
+
   // Only offer Restore after the agent turn finishes (not mid-stream).
   const showTurnRestore = useMemo(() => {
     if (!userTurnHasFileEdits || !getMessages) return false
@@ -517,7 +552,12 @@ export const MessageItem = memo(function MessageItem({
     Boolean(showContent) && !isDuplicateAssistantPlanContent
   const durationBadge =
     message.role === 'assistant' && durationMs != null && durationMs > 0 ? (
-      <span className="mt-1 block min-h-4 text-xs leading-4 text-muted-foreground/40 tabular-nums font-mono">
+      <span
+        className={cn(
+          'mt-1 block min-h-4 text-xs leading-4 text-muted-foreground/40 tabular-nums',
+          ASSISTANT_HOVER_REVEAL
+        )}
+      >
         <MessageTiming durationMs={durationMs} timestamp={message.timestamp} />
       </span>
     ) : null
@@ -1051,49 +1091,44 @@ export const MessageItem = memo(function MessageItem({
             )}
           >
             {messageBoxContent}
-            {!zenMode && !hideSettingsBadges && message.model && (
-              <div className="mt-1.5">
-                <MessageSettingsBadges
-                  model={message.model}
-                  executionMode={message.execution_mode}
-                  thinkingLevel={message.thinking_level}
-                  effortLevel={message.effort_level}
-                  provider={message.custom_profile_name}
-                  isCursor={message.model.startsWith('cursor/')}
-                />
+          </div>
+          {/* Settings and actions under the prompt, revealed on hover/focus
+              (restore only after finished turns with file edits) */}
+          {!zenMode &&
+            (showSettingsBadges || showTurnRestore || onCopyToInput) && (
+              <div
+                className={cn(
+                  'flex shrink-0 items-center gap-1 pr-0.5',
+                  USER_HOVER_REVEAL
+                )}
+              >
+                {showSettingsBadges && message.model && (
+                  <MessageSettingsBadges
+                    model={message.model}
+                    executionMode={message.execution_mode}
+                    thinkingLevel={message.thinking_level}
+                    effortLevel={message.effort_level}
+                    provider={message.custom_profile_name}
+                    isCursor={message.model.startsWith('cursor/')}
+                  />
+                )}
+                {showTurnRestore && (
+                  <CheckpointTurnRestoreButton
+                    userMessageId={message.id}
+                    worktreeId={worktreeId}
+                    hasFileEdits
+                    variant="userBubble"
+                    className="mt-0"
+                  />
+                )}
+                {onCopyToInput && (
+                  <CopyIconButton
+                    label="Copy prompt"
+                    onClick={handleCopyToInput}
+                  />
+                )}
               </div>
             )}
-          </div>
-          {/* Actions under the prompt (restore only after finished turns with file edits) */}
-          {!zenMode && (showTurnRestore || onCopyToInput) && (
-            <div className="flex shrink-0 items-center gap-1 pr-0.5">
-              {showTurnRestore && (
-                <CheckpointTurnRestoreButton
-                  userMessageId={message.id}
-                  worktreeId={worktreeId}
-                  hasFileEdits
-                  variant="userBubble"
-                  className="mt-0"
-                />
-              )}
-              {onCopyToInput && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      aria-label="Copy message to input"
-                      onClick={handleCopyToInput}
-                      className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[11px] cursor-pointer transition-colors text-muted-foreground/80 hover:bg-muted/50 hover:text-foreground focus-visible:text-foreground [@media(pointer:fine)]:text-muted-foreground/0 [@media(pointer:fine)]:group-hover:text-muted-foreground/70"
-                    >
-                      <Copy className="h-3.5 w-3.5 shrink-0" />
-                      <span>Copy</span>
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>Copy to clipboard</TooltipContent>
-                </Tooltip>
-              )}
-            </div>
-          )}
         </div>
       ) : (
         <div className="group/message group relative text-foreground/90 w-full min-w-0 break-words">
@@ -1103,21 +1138,13 @@ export const MessageItem = memo(function MessageItem({
             messageBoxContent
           )}
           {!zenMode && assistantResponse && (
-            <div className="mt-1 flex justify-end">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    aria-label="Copy response to clipboard"
-                    onClick={handleCopyAssistantResponse}
-                    className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[11px] cursor-pointer transition-colors text-muted-foreground/80 hover:bg-muted/50 hover:text-foreground focus-visible:text-foreground [@media(pointer:fine)]:text-muted-foreground/0 [@media(pointer:fine)]:group-hover:text-muted-foreground/70"
-                  >
-                    <Copy className="h-3.5 w-3.5 shrink-0" />
-                    <span>Copy</span>
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>Copy response</TooltipContent>
-              </Tooltip>
+            <div
+              className={cn('mt-1 flex justify-end', ASSISTANT_HOVER_REVEAL)}
+            >
+              <CopyIconButton
+                label="Copy response"
+                onClick={handleCopyAssistantResponse}
+              />
             </div>
           )}
         </div>

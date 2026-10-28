@@ -777,7 +777,7 @@ export function BackendModelPickerContent({
                                 }
                               }}
                               className={cn(
-                                'flex h-6 shrink-0 items-center gap-1 rounded-md border border-border/60 px-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground transition-colors',
+                                'flex h-6 shrink-0 items-center gap-1 rounded-md border border-border/60 px-1.5 text-2xs font-medium uppercase tracking-wide text-muted-foreground transition-colors',
                                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                                 'hover:bg-muted/80 hover:text-foreground'
                               )}
@@ -789,7 +789,10 @@ export function BackendModelPickerContent({
                                 )}
                               />
                               <span>Fast</span>
-                              <Kbd className="ml-0.5 h-4 min-w-0 bg-background/70 px-1 text-[9px] normal-case tracking-normal">
+                              <Kbd
+                                modHint
+                                className="ml-0.5 h-4 min-w-0 bg-background/70 px-1 text-2xs normal-case tracking-normal"
+                              >
                                 {fastShortcutLabel}
                               </Kbd>
                             </button>
@@ -918,7 +921,7 @@ function SidebarBackends({
                   <span
                     aria-hidden
                     className={cn(
-                      'text-[9px] leading-none tabular-nums',
+                      'text-2xs leading-none tabular-nums',
                       isActive
                         ? 'text-muted-foreground'
                         : 'text-muted-foreground/60'

@@ -65,13 +65,13 @@ export function BackendPicker({
               className="min-w-0 truncate text-sm font-medium"
             />
             {detection === 'ready' && (
-              <span className="ml-auto flex shrink-0 items-center gap-1 text-[11px] text-success">
+              <span className="ml-auto flex shrink-0 items-center gap-1 text-2xs text-success">
                 <Check className="size-3.5" />
                 Ready
               </span>
             )}
             {detection === 'found' && (
-              <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">
+              <span className="ml-auto shrink-0 text-2xs text-muted-foreground">
                 Found
               </span>
             )}

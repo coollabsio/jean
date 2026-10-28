@@ -106,6 +106,17 @@ function MemoryRow({
   const expired =
     memory.expiresAt !== null && memory.expiresAt * 1000 < renderedAt
   const isFact = memory.kind === 'fact'
+  const details = [
+    memory.scope !== 'user'
+      ? (SCOPE_LABELS[memory.scope] ?? memory.scope)
+      : null,
+    memory.pinned ? 'Pinned' : null,
+    memory.projectId ? `Project ${memory.projectId}` : null,
+    expired ? 'Expired' : null,
+  ].filter(Boolean)
+  const kindBadge = (
+    <AgentBadge>{KIND_LABELS[memory.kind] ?? memory.kind}</AgentBadge>
+  )
   const onError = (e: unknown) => toast.error(`Failed: ${e}`)
 
   return (
@@ -171,23 +182,17 @@ function MemoryRow({
             {memory.content}
           </p>
         )}
-        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-          <AgentBadge>{KIND_LABELS[memory.kind] ?? memory.kind}</AgentBadge>
-          {memory.scope !== 'user' && (
-            <AgentBadge>
-              {SCOPE_LABELS[memory.scope] ?? memory.scope}
-            </AgentBadge>
+        <div className="mt-1.5 flex">
+          {details.length > 0 ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span tabIndex={0}>{kindBadge}</span>
+              </TooltipTrigger>
+              <TooltipContent>{details.join(' · ')}</TooltipContent>
+            </Tooltip>
+          ) : (
+            kindBadge
           )}
-          {memory.pinned && (
-            <AgentBadge tone="attention">
-              <Thumbtack />
-              Pinned
-            </AgentBadge>
-          )}
-          {memory.projectId && (
-            <AgentBadge>Project {memory.projectId}</AgentBadge>
-          )}
-          {expired && <AgentBadge tone="danger">Expired</AgentBadge>}
         </div>
       </div>
       {!editing && (
@@ -200,8 +205,7 @@ function MemoryRow({
                 aria-label={memory.pinned ? 'Unpin' : 'Pin'}
                 aria-pressed={memory.pinned}
                 className={cn(
-                  memory.pinned &&
-                    'text-amber-600 hover:text-amber-600 dark:text-amber-400'
+                  memory.pinned && 'text-warning hover:text-warning'
                 )}
                 onClick={() =>
                   update.mutate(
@@ -477,7 +481,7 @@ export function AgentMemoryView({ agent }: { agent: AgentSummary }) {
             <Settings2 />
             Filters
             {filterCount > 0 && (
-              <span className="rounded-full bg-primary px-1.5 text-[10px] leading-4 text-primary-foreground">
+              <span className="rounded-full bg-primary px-1.5 text-2xs leading-4 text-primary-foreground">
                 {filterCount}
               </span>
             )}
@@ -733,7 +737,7 @@ export function AgentMemoryView({ agent }: { agent: AgentSummary }) {
         testId="journal-timeline"
         title="Journal"
         count={journal.length}
-        description="Dated history of what happened. Archived chats are stored here so they can be recalled by text or date."
+        description="Dated history. Archived chats are stored here and can be recalled by text or date."
         actions={
           <AddButton
             open={composer === 'journal'}

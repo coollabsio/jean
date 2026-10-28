@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link2, X, Search, Plus } from '@/components/icons/reicon'
+import { X, Search, Plus } from '@/components/icons/reicon'
 import { toast } from 'sonner'
 import {
   Dialog,
@@ -176,10 +176,7 @@ export function LinkedProjectsModal({
         }}
       >
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Link2 className="h-4 w-4" />
-            Linked Projects
-          </DialogTitle>
+          <DialogTitle>Linked Projects</DialogTitle>
         </DialogHeader>
 
         {/* Current linked projects */}

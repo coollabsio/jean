@@ -1,5 +1,6 @@
 import { cn } from '@/lib/utils'
 import { ProjectsSidebar } from '@/components/projects'
+import { SidebarTabs } from '@/components/projects/SidebarTabs'
 import { AgentsSidebar } from '@/components/agents/AgentsSidebar'
 import { useShowAgents } from '@/components/agents/agents-feature'
 
@@ -17,7 +18,11 @@ export function LeftSideBar({ children, className }: LeftSideBarProps) {
         className
       )}
     >
-      {showAgents ? <AgentsSidebar /> : <ProjectsSidebar />}
+      <SidebarTabs />
+      {/* Panels size themselves with h-full; this box gives them the rest */}
+      <div className="flex min-h-0 flex-1 flex-col">
+        {showAgents ? <AgentsSidebar /> : <ProjectsSidebar />}
+      </div>
       {children}
     </div>
   )

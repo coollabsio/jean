@@ -15,12 +15,11 @@ import {
 import { cn } from '@/lib/utils'
 import { isGhAuthError } from '@/services/github'
 import { GhAuthError } from '@/components/shared/GhAuthError'
+import { LoadedSecurityItem, LoadedAdvisoryItem } from './LoadContextItems'
 import {
-  LoadedSecurityItem,
-  SecurityAlertItem,
-  LoadedAdvisoryItem,
   AdvisoryItem,
-} from './LoadContextItems'
+  SecurityAlertItem,
+} from '@/components/worktree/NewWorktreeItems'
 import type {
   DependabotAlert,
   RepositoryAdvisory,
@@ -323,7 +322,7 @@ export function SecurityAlertsTab({
                                 'bg-muted-foreground'
                             )}
                           />
-                          <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                          <span className="text-2xs font-medium text-muted-foreground uppercase tracking-wider">
                             {ALERT_STATE_LABELS[alert.state] ?? alert.state}
                           </span>
                         </div>
@@ -332,7 +331,7 @@ export function SecurityAlertsTab({
                         alert={alert}
                         index={index}
                         isSelected={index === selectedIndex}
-                        isLoading={loadingNumbers.has(alert.number)}
+                        isCreating={loadingNumbers.has(alert.number)}
                         onMouseEnter={() => setSelectedIndex(index)}
                         onClick={() => onSelectAlert(alert)}
                         onPreview={() => onPreviewAlert(alert)}
@@ -367,7 +366,7 @@ export function SecurityAlertsTab({
                                 'bg-muted-foreground'
                             )}
                           />
-                          <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                          <span className="text-2xs font-medium text-muted-foreground uppercase tracking-wider">
                             {ADVISORY_STATE_LABELS[advisory.state] ??
                               advisory.state}
                           </span>
@@ -377,7 +376,7 @@ export function SecurityAlertsTab({
                         advisory={advisory}
                         index={combinedIndex}
                         isSelected={combinedIndex === selectedIndex}
-                        isLoading={advisoryGhsaLoading.has(advisory.ghsaId)}
+                        isCreating={advisoryGhsaLoading.has(advisory.ghsaId)}
                         onMouseEnter={() => setSelectedIndex(combinedIndex)}
                         onClick={() => onSelectAdvisory?.(advisory)}
                         onPreview={() => onPreviewAdvisory?.(advisory)}

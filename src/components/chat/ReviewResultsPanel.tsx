@@ -1,8 +1,16 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { useChatStore } from '@/store/chat-store'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty'
 import { Kbd, KbdGroup } from '@/components/ui/kbd'
 import {
   Select,
@@ -12,9 +20,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import {
-  AlertCircle,
   AlertTriangle,
-  Lightbulb,
   CheckCircle2,
   MessageSquare,
   FileCode,
@@ -77,43 +83,21 @@ function formatReviewBackendName(backend: string): string {
 }
 
 /** Get severity icon and color */
-function getSeverityConfig(severity: string) {
+function getSeverityConfig(severity: string): {
+  variant: 'danger' | 'warning' | 'info' | 'success' | 'subtle'
+  label: string
+} {
   switch (severity) {
     case 'critical':
-      return {
-        icon: AlertCircle,
-        color: 'text-destructive',
-        bgColor: 'bg-destructive/15 text-destructive',
-        label: 'Critical',
-      }
+      return { variant: 'danger', label: 'Critical' }
     case 'warning':
-      return {
-        icon: AlertTriangle,
-        color: 'text-warning',
-        bgColor: 'bg-warning/15 text-warning',
-        label: 'Warning',
-      }
+      return { variant: 'warning', label: 'Warning' }
     case 'suggestion':
-      return {
-        icon: Lightbulb,
-        color: 'text-info',
-        bgColor: 'bg-info/15 text-info',
-        label: 'Suggestion',
-      }
+      return { variant: 'info', label: 'Suggestion' }
     case 'praise':
-      return {
-        icon: CheckCircle2,
-        color: 'text-success',
-        bgColor: 'bg-success/15 text-success',
-        label: 'Praise',
-      }
+      return { variant: 'success', label: 'Praise' }
     default:
-      return {
-        icon: MessageSquare,
-        color: 'text-muted-foreground',
-        bgColor: 'bg-muted text-muted-foreground',
-        label: severity,
-      }
+      return { variant: 'subtle', label: severity }
   }
 }
 
@@ -194,43 +178,43 @@ Please apply all these fixes to the codebase.`
 
 function SeverityBadge({ severity }: { severity: string }) {
   const config = getSeverityConfig(severity)
-  const Icon = config.icon
   return (
-    <span
-      className={cn(
-        'inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0',
-        config.bgColor
-      )}
-    >
-      <Icon className="size-2.5" />
+    <Badge variant={config.variant} className="text-2xs">
       {config.label}
-    </span>
+    </Badge>
+  )
+}
+
+function ReviewHeader({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-2 border-b px-4 py-2">
+      <span className="flex items-center gap-1.5 text-sm font-medium">
+        <MessageSquare className="size-4 text-muted-foreground" />
+        Review Findings
+      </span>
+      {children}
+    </div>
   )
 }
 
 /** Empty state when no review results */
 function EmptyState({ isReviewing = false }: { isReviewing?: boolean }) {
-  if (isReviewing) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <div className="text-center">
-          <Loader2 className="mx-auto h-10 w-10 animate-spin text-muted-foreground/60" />
-          <p className="mt-3 text-sm font-medium">Review running...</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Results will appear here when the review finishes.
-          </p>
-        </div>
-      </div>
-    )
-  }
-
   return (
-    <div className="flex h-full items-center justify-center">
-      <div className="text-center">
-        <FileCode className="mx-auto h-12 w-12 text-muted-foreground/30" />
-        <p className="mt-2 text-sm text-muted-foreground">No review results</p>
-      </div>
-    </div>
+    <Empty className="h-full p-6 md:p-6">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          {isReviewing ? <Loader2 className="animate-spin" /> : <FileCode />}
+        </EmptyMedia>
+        <EmptyTitle className="text-sm">
+          {isReviewing ? 'Review running...' : 'No review results'}
+        </EmptyTitle>
+        {isReviewing && (
+          <EmptyDescription className="text-xs">
+            Results will appear here when the review finishes.
+          </EmptyDescription>
+        )}
+      </EmptyHeader>
+    </Empty>
   )
 }
 
@@ -539,14 +523,7 @@ export function ReviewResultsPanel({
   if (!reviewResults) {
     return (
       <div className="relative flex h-full min-w-0 flex-col overflow-hidden bg-background">
-        {reviewSelector && (
-          <div className="flex items-center gap-3 border-b px-4 py-2">
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Review
-            </span>
-            {reviewSelector}
-          </div>
-        )}
+        {reviewSelector && <ReviewHeader>{reviewSelector}</ReviewHeader>}
         <div className="min-h-0 flex-1">
           <EmptyState
             isReviewing={
@@ -588,9 +565,6 @@ export function ReviewResultsPanel({
   })()
   const ApprovalIcon = approvalConfig.icon
 
-  const fixedCount = reviewResults.findings.filter((f, i) =>
-    isFindingFixed(f, i)
-  ).length
   const selectedCount = getSelectedFindings().length
   const hasFindings = sortedFindings.length > 0
 
@@ -602,40 +576,32 @@ export function ReviewResultsPanel({
       tabIndex={0}
       onKeyDown={handlePanelKeyDown}
     >
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="flex items-center gap-1.5 text-sm font-medium">
-            <MessageSquare className="size-4 text-muted-foreground" />
-            Review Findings
+      <ReviewHeader>
+        {reviewSelector}
+        <div className="flex items-center gap-1.5">
+          <ApprovalIcon className={cn('size-3.5', approvalConfig.color)} />
+          <span className={cn('text-xs font-medium', approvalConfig.color)}>
+            {approvalConfig.label}
           </span>
-          {reviewSelector}
-          <div className="flex items-center gap-1.5">
-            <ApprovalIcon className={cn('h-3.5 w-3.5', approvalConfig.color)} />
-            <span className={cn('text-xs font-medium', approvalConfig.color)}>
-              {approvalConfig.label}
-            </span>
-          </div>
-          {fixedCount > 0 && (
-            <span className="inline-flex items-center gap-1 rounded border border-success px-1.5 py-0 text-[10px] font-medium text-success">
-              {fixedCount} fixed
-            </span>
-          )}
         </div>
-      </div>
+      </ReviewHeader>
 
       {!hasFindings ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4">
-          <FileCode className="size-10 text-muted-foreground/30" />
-          <p className="text-sm text-muted-foreground">
-            No specific findings — code looks good!
-          </p>
-          {reviewResults.summary && (
-            <p className="max-w-md text-center text-xs text-muted-foreground">
-              {reviewResults.summary}
-            </p>
-          )}
-        </div>
+        <Empty className="p-6 md:p-6">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <FileCode />
+            </EmptyMedia>
+            <EmptyTitle className="text-sm">
+              No specific findings, code looks good
+            </EmptyTitle>
+            {reviewResults.summary && (
+              <EmptyDescription className="text-xs">
+                {reviewResults.summary}
+              </EmptyDescription>
+            )}
+          </EmptyHeader>
+        </Empty>
       ) : (
         <>
           {/* Selection controls */}
@@ -647,15 +613,15 @@ export function ReviewResultsPanel({
               {showKeyboardHints && (
                 <>
                   <span className="inline-flex items-center gap-1">
-                    <Kbd className="h-4 min-w-0 px-1 text-[10px]">↑/↓</Kbd>
+                    <Kbd className="h-4 min-w-0 px-1 text-2xs">↑/↓</Kbd>
                     move
                   </span>
                   <span className="inline-flex items-center gap-1">
-                    <Kbd className="h-4 min-w-0 px-1 text-[10px]">↵</Kbd>
+                    <Kbd className="h-4 min-w-0 px-1 text-2xs">↵</Kbd>
                     expand
                   </span>
                   <span className="inline-flex items-center gap-1">
-                    <Kbd className="h-4 min-w-0 px-1 text-[10px]">Space</Kbd>
+                    <Kbd className="h-4 min-w-0 px-1 text-2xs">Space</Kbd>
                     select
                   </span>
                 </>
@@ -682,8 +648,6 @@ export function ReviewResultsPanel({
                 const isActive = safeActiveIndex === listIndex
                 const canSelect = isFixableFinding(finding)
                 const lineInfo = finding.line ? `:${finding.line}` : ''
-                const severityConfig = getSeverityConfig(finding.severity)
-                const SeverityIcon = severityConfig.icon
 
                 return (
                   <div
@@ -723,12 +687,6 @@ export function ReviewResultsPanel({
                             ) : (
                               <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
                             )}
-                            <SeverityIcon
-                              className={cn(
-                                'size-3.5 shrink-0',
-                                severityConfig.color
-                              )}
-                            />
                             <p className="min-w-0 flex-1 truncate text-sm text-foreground">
                               {finding.title}
                             </p>
@@ -758,7 +716,7 @@ export function ReviewResultsPanel({
 
                             {finding.failure_scenario && (
                               <div>
-                                <h4 className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                                <h4 className="mb-1 text-xs font-medium text-muted-foreground">
                                   Failure Scenario
                                 </h4>
                                 <p className="break-words text-sm leading-relaxed text-foreground/90 select-text">
@@ -769,7 +727,7 @@ export function ReviewResultsPanel({
 
                             {finding.suggestion && (
                               <div>
-                                <h4 className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                                <h4 className="mb-1 text-xs font-medium text-muted-foreground">
                                   Suggested Fix
                                 </h4>
                                 <pre className="whitespace-pre-wrap break-words rounded-md border bg-muted/50 p-2 text-xs font-mono text-foreground/80 select-text">
@@ -780,26 +738,20 @@ export function ReviewResultsPanel({
 
                             <div className="flex flex-wrap gap-1.5">
                               {finding.confidence && (
-                                <span className="rounded border px-1.5 py-0 text-[10px] text-muted-foreground">
+                                <Badge variant="subtle" className="text-2xs">
                                   {formatReviewMetadata(finding.confidence)}{' '}
                                   confidence
-                                </span>
+                                </Badge>
                               )}
                               {finding.blocking === true && (
-                                <span className="rounded border border-destructive px-1.5 py-0 text-[10px] text-destructive">
+                                <Badge variant="danger" className="text-2xs">
                                   Blocking
-                                </span>
+                                </Badge>
                               )}
                               {finding.introduced_by_diff === true && (
-                                <span className="rounded border px-1.5 py-0 text-[10px] text-muted-foreground">
+                                <Badge variant="subtle" className="text-2xs">
                                   Introduced by diff
-                                </span>
-                              )}
-                              {isFixed && (
-                                <span className="inline-flex items-center gap-1 rounded border border-success px-1.5 py-0 text-[10px] text-success">
-                                  <CheckCircle2 className="size-3" />
-                                  Fix sent
-                                </span>
+                                </Badge>
                               )}
                             </div>
                           </div>
@@ -836,9 +788,9 @@ export function ReviewResultsPanel({
               )}
               Send to Chat ({selectedCount})
               {showKeyboardHints && (
-                <KbdGroup className="ml-1.5">
-                  <Kbd className="h-4 min-w-4 px-1 text-[10px]">⇧</Kbd>
-                  <Kbd className="h-4 min-w-4 px-1 text-[10px]">⌘↵</Kbd>
+                <KbdGroup modHint className="ml-1.5">
+                  <Kbd className="h-4 min-w-4 px-1 text-2xs">⇧</Kbd>
+                  <Kbd className="h-4 min-w-4 px-1 text-2xs">⌘↵</Kbd>
                 </KbdGroup>
               )}
             </Button>
@@ -854,9 +806,9 @@ export function ReviewResultsPanel({
               )}
               Send Separately ({selectedCount})
               {showKeyboardHints && (
-                <KbdGroup className="ml-1.5">
-                  <Kbd className="h-4 min-w-4 px-1 text-[10px]">⌘</Kbd>
-                  <Kbd className="h-4 min-w-4 px-1 text-[10px]">↵</Kbd>
+                <KbdGroup modHint className="ml-1.5">
+                  <Kbd className="h-4 min-w-4 px-1 text-2xs">⌘</Kbd>
+                  <Kbd className="h-4 min-w-4 px-1 text-2xs">↵</Kbd>
                 </KbdGroup>
               )}
             </Button>

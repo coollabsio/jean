@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -404,7 +405,7 @@ export function ResolveConflictsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         tabIndex={-1}
-        className="sm:max-w-[520px] outline-none"
+        className="sm:max-w-lg outline-none"
         onKeyDown={handleResolveKeyDown}
       >
         <DialogHeader>
@@ -562,12 +563,12 @@ export function ResolveConflictsDialog({
             </div>
           </RadioGroup>
 
-          <div className="flex justify-end gap-2">
+          <DialogFooter>
             <Button variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
             <Button onClick={handleConfirm}>Resolve conflicts</Button>
-          </div>
+          </DialogFooter>
         </div>
       </DialogContent>
     </Dialog>

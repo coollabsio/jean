@@ -1,6 +1,7 @@
 import React, { useCallback } from 'react'
 import { Loader2, RefreshCw } from '@/components/icons/reicon'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import {
   Tooltip,
   TooltipContent,
@@ -38,7 +39,7 @@ import {
 } from '@/components/usage/usage-windows'
 import { cn } from '@/lib/utils'
 
-/** One card per backend: icon, name, plan badge, then usage windows. */
+/** One section per backend: icon, name, plan badge, then usage windows. */
 function UsageCard({
   title,
   Icon,
@@ -54,20 +55,18 @@ function UsageCard({
 }) {
   return (
     <section id={anchorId} className="space-y-3">
-      <div className="flex items-center justify-between gap-2 px-1 sm:px-2">
+      <div className="flex items-center justify-between gap-2">
         <h3 className="flex items-center gap-2 text-sm font-medium text-foreground">
           <Icon className="size-4 shrink-0" />
           {title}
         </h3>
         {plan ? (
-          <span className="truncate rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+          <Badge variant="subtle" className="truncate">
             {plan} plan
-          </span>
+          </Badge>
         ) : null}
       </div>
-      <div className="space-y-3 rounded-xl border border-border bg-muted/30 p-4 sm:p-5">
-        {children}
-      </div>
+      <div className="space-y-3">{children}</div>
     </section>
   )
 }
@@ -468,7 +467,7 @@ export const UsagePane: React.FC = () => {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+      <div className="flex items-center justify-between gap-2 text-2xs text-muted-foreground">
         <span className="min-w-0 truncate">
           {isRefreshing ? (
             'Refreshing…'
@@ -496,7 +495,7 @@ export const UsagePane: React.FC = () => {
         <Button
           variant="ghost"
           size="sm"
-          className="h-6 shrink-0 gap-1 px-1.5 text-[11px]"
+          className="h-6 shrink-0 gap-1 px-1.5 text-2xs"
           onClick={handleRefresh}
           disabled={isRefreshing}
         >

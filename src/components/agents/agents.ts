@@ -91,7 +91,7 @@ export function agentStatusLabel(agent: AgentSummary): string | null {
     return `${agent.unreadNotifications} new notification${agent.unreadNotifications === 1 ? '' : 's'}`
   if (agent.status === 'working')
     return agent.runningTasks > 0
-      ? `Working (${agent.runningTasks} task${agent.runningTasks === 1 ? '' : 's'})`
+      ? `Working (${agent.runningTasks} run${agent.runningTasks === 1 ? '' : 's'})`
       : 'Working'
   if (agent.status === 'waiting') return 'Waiting for you'
   if (agent.budgetReached) return 'Hourly limit reached'

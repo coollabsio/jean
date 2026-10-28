@@ -46,7 +46,7 @@ describe('CodexCommandApprovalRequestCard', () => {
     )
     expect(onApproveYolo).toHaveBeenCalled()
 
-    await user.click(screen.getByRole('button', { name: 'Decline' }))
+    await user.click(screen.getByRole('button', { name: 'Deny' }))
     expect(onDecline).toHaveBeenCalled()
 
     await user.click(screen.getByRole('button', { name: 'Cancel turn' }))
@@ -84,7 +84,7 @@ describe('CodexCommandApprovalRequestCard', () => {
       screen.getByRole('button', { name: 'Cancel turn' })
     ).toBeInTheDocument()
     expect(
-      screen.queryByRole('button', { name: 'Decline' })
+      screen.queryByRole('button', { name: 'Deny' })
     ).not.toBeInTheDocument()
 
     await user.click(

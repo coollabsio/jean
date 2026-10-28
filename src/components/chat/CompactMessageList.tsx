@@ -475,12 +475,7 @@ const CompactActivityRow = memo(function CompactActivityRow({
       onOpenChange={setIsOpen}
       className="group/message min-w-0 pb-4"
     >
-      <div
-        className={
-          'rounded-md border border-border/50 bg-muted/30 min-w-0' +
-          (isOpen ? ' bg-muted/50' : '')
-        }
-      >
+      <div className="min-w-0">
         <CollapsibleTrigger className={TOOL_CALL_ROW_CLASS}>
           {summary.isThinking ? (
             <Brain className="h-3.5 w-3.5 shrink-0 opacity-70" />
@@ -510,7 +505,7 @@ const CompactActivityRow = memo(function CompactActivityRow({
           </span>
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <div className="border-t border-border/50 p-3 space-y-4">
+          <div className="p-3 space-y-4">
             {renderGroup.map(item => (
               <div key={item.message.id}>
                 {renderMessage(item, {

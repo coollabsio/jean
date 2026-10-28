@@ -350,7 +350,7 @@ describe('ReviewCommentsDialog', () => {
     }
   })
 
-  it('shows keyboard hints on actions and omits the cancel button', async () => {
+  it('shows modifier-held hints on actions, no key legend, no cancel button', async () => {
     render(<ReviewCommentsDialog />)
 
     await screen.findByRole('button', { name: /send to chat/i })
@@ -365,11 +365,9 @@ describe('ReviewCommentsDialog', () => {
     expect(
       screen.queryByRole('button', { name: /cancel/i })
     ).not.toBeInTheDocument()
-    expect(screen.getByText('↑/↓')).toBeInTheDocument()
-    expect(screen.getByText('Space')).toBeInTheDocument()
-    expect(screen.getByText('⌘')).toBeInTheDocument()
-    expect(screen.getAllByText('↵')).not.toHaveLength(0)
-    expect(screen.getByText('⇧')).toBeInTheDocument()
+    expect(screen.queryByText('↑/↓')).not.toBeInTheDocument()
+    expect(screen.getByText('⌘').closest('[data-mod-hint]')).not.toBeNull()
+    expect(screen.getByText('⇧').closest('[data-mod-hint]')).not.toBeNull()
   })
 
   it('defaults to open review comments and hides resolved/outdated', async () => {

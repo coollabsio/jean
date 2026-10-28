@@ -58,10 +58,10 @@ export function OpenCodePermissionsRequest({
       actions={
         <>
           <Button size="sm" onClick={onOnce}>
-            Allow once
+            Approve once
           </Button>
           <Button size="sm" variant="secondary" onClick={onAlways}>
-            Allow always
+            Always approve
           </Button>
           <Button size="sm" variant="ghost" onClick={onReject}>
             Deny

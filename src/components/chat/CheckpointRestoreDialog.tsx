@@ -491,7 +491,7 @@ export function CheckpointRestoreDialog({
                             <span className="min-w-0 break-all font-mono">
                               {f.path}
                             </span>
-                            <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] uppercase">
+                            <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-2xs uppercase">
                               {f.action}
                             </span>
                           </div>
@@ -501,7 +501,7 @@ export function CheckpointRestoreDialog({
                             </p>
                           )}
                           {f.action === 'write' && f.content != null && (
-                            <pre className="mt-1 max-h-24 overflow-auto rounded bg-muted/50 p-1 font-mono text-[10px] leading-snug">
+                            <pre className="mt-1 max-h-24 overflow-auto rounded bg-muted/50 p-1 font-mono text-2xs leading-snug">
                               {f.content.slice(0, 800)}
                               {f.content.length > 800 ? '…' : ''}
                             </pre>
@@ -641,7 +641,7 @@ export function CheckpointRestoreDialog({
               </Button>
 
               <div className="space-y-2 border-t border-border pt-2">
-                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                <p className="text-2xs font-medium uppercase tracking-wide text-muted-foreground">
                   Stronger options
                 </p>
                 <Button

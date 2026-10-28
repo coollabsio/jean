@@ -367,6 +367,59 @@ describe('MobileSettingsMenu', () => {
     expect(onRunPackageScript).toHaveBeenCalledWith(packageScript)
   })
 
+  it('lists loaded contexts in their own sheet behind one menu item', async () => {
+    const user = userEvent.setup()
+    const handleViewIssue = vi.fn()
+    const openExternalSpy = vi
+      .spyOn(platform, 'openExternal')
+      .mockResolvedValue(undefined)
+    const issue = {
+      number: 12,
+      title: 'Crash on start',
+      commentCount: 0,
+      repoOwner: 'acme',
+      repoName: 'app',
+    }
+
+    render(
+      <MobileSettingsMenu
+        {...baseProps}
+        worktreeId="worktree-1"
+        loadedIssueContexts={[issue]}
+        attachedSavedContexts={[
+          { slug: 'notes', name: 'Notes', size: 1, createdAt: 0 },
+        ]}
+        handleViewIssue={handleViewIssue}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: /settings/i }))
+    expect(
+      screen.queryByRole('menuitem', { name: /#12 Crash on start/ })
+    ).not.toBeInTheDocument()
+    await user.click(screen.getByRole('menuitem', { name: 'Contexts (2)' }))
+
+    const sheet = screen.getByRole('dialog', { name: 'Contexts' })
+    expect(
+      within(sheet)
+        .getAllByRole('heading')
+        .map(heading => heading.textContent)
+    ).toEqual(['Contexts', 'Issues', 'Saved contexts'])
+    await user.click(
+      within(sheet).getByRole('button', {
+        name: 'Open #12 Crash on start in browser',
+      })
+    )
+    expect(openExternalSpy).toHaveBeenCalledWith(
+      'https://github.com/acme/app/issues/12'
+    )
+    await user.click(
+      within(sheet).getByRole('button', { name: '#12 Crash on start' })
+    )
+    expect(handleViewIssue).toHaveBeenCalledWith(issue)
+    openExternalSpy.mockRestore()
+  })
+
   it('keeps Claude provider switcher available after messages exist', async () => {
     const user = userEvent.setup()
 

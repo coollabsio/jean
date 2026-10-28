@@ -81,6 +81,40 @@ function normalizeUrl(input: string): string {
   return `https://www.google.com/search?q=${encodeURIComponent(trimmed)}`
 }
 
+/** Icon-only toolbar button with a tooltip. Tooltips open upward so the
+ * native child webview (which paints over DOM) does not cover them. */
+function ToolbarIconButton({
+  label,
+  tooltip = label,
+  onClick,
+  disabled,
+  children,
+}: {
+  label: string
+  tooltip?: string
+  onClick: () => void
+  disabled?: boolean
+  children: React.ReactNode
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="shrink-0"
+          onClick={onClick}
+          disabled={disabled}
+          aria-label={label}
+        >
+          {children}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="top">{tooltip}</TooltipContent>
+    </Tooltip>
+  )
+}
+
 const PortMenuItem = memo(function PortMenuItem({
   choice,
   onOpenPort,
@@ -115,16 +149,13 @@ const BrowserPortControl = memo(function BrowserPortControl({
 
   if (only) {
     return (
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-6 w-6 shrink-0"
+      <ToolbarIconButton
+        label={`Open ${only.label}`}
+        tooltip={`Open ${only.label} (${only.url})`}
         onClick={handleOpenOnly}
-        aria-label={`Open ${only.label}`}
-        title={only.url}
       >
-        <Globe className="h-3.5 w-3.5" />
-      </Button>
+        <Globe className="size-4" />
+      </ToolbarIconButton>
     )
   }
 
@@ -134,17 +165,21 @@ const BrowserPortControl = memo(function BrowserPortControl({
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6 shrink-0"
-          aria-label="Choose port"
-          title="Choose port"
-        >
-          <Globe className="h-3.5 w-3.5" />
-        </Button>
-      </DropdownMenuTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="shrink-0"
+              aria-label="Choose port"
+            >
+              <Globe className="size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="top">Choose port</TooltipContent>
+      </Tooltip>
       <DropdownMenuContent
         align="end"
         side="top"
@@ -215,7 +250,7 @@ const TabPill = memo(function TabPill({
   return (
     <div
       className={cn(
-        'group flex h-7 max-w-[160px] cursor-default items-center gap-1.5 rounded-md border px-2 text-xs',
+        'group flex h-7 max-w-40 shrink-0 cursor-default items-center gap-1.5 rounded-md border px-2 text-xs',
         isActive
           ? 'border-border bg-background text-foreground'
           : 'border-transparent bg-muted/40 text-muted-foreground hover:bg-muted'
@@ -230,11 +265,7 @@ const TabPill = memo(function TabPill({
         onClick={handleClick}
         title={tab.title || tab.url}
       >
-        {tab.isLoading ? (
-          <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
-        ) : (
-          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/40" />
-        )}
+        {tab.isLoading && <Loader2 className="size-3 shrink-0 animate-spin" />}
         <span className="truncate">{label}</span>
       </button>
       <button
@@ -384,114 +415,78 @@ export const BrowserToolbar = memo(function BrowserToolbar({
     [actions, draftUrl]
   )
 
+  // One row when the container is wide enough; on narrow panes the tab strip
+  // wraps onto its own line below the URL bar.
   return (
     <div
       className={cn(
-        'flex shrink-0 flex-col gap-1.5 border-b bg-card px-2 pt-1.5 pb-1.5',
+        '@container flex shrink-0 flex-wrap items-center gap-1 border-b bg-card px-2 py-1.5',
         className
       )}
     >
-      <div className="flex items-center gap-1.5">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7"
-          onClick={() => void actions.back()}
+      <ToolbarIconButton
+        label="Back"
+        onClick={() => void actions.back()}
+        disabled={!activeTab}
+      >
+        <ArrowLeft className="size-4" />
+      </ToolbarIconButton>
+      <ToolbarIconButton
+        label="Forward"
+        onClick={() => void actions.forward()}
+        disabled={!activeTab}
+      >
+        <ArrowRight className="size-4" />
+      </ToolbarIconButton>
+      {activeTab?.isLoading ? (
+        <ToolbarIconButton
+          label="Stop loading"
+          onClick={() => void actions.stop()}
+        >
+          <XSquare className="size-4" />
+        </ToolbarIconButton>
+      ) : (
+        <ToolbarIconButton
+          label="Reload"
+          onClick={() => void actions.reload()}
           disabled={!activeTab}
-          aria-label="Back"
         >
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7"
-          onClick={() => void actions.forward()}
-          disabled={!activeTab}
-          aria-label="Forward"
-        >
-          <ArrowRight className="h-4 w-4" />
-        </Button>
-        {activeTab?.isLoading ? (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
-            onClick={() => void actions.stop()}
-            aria-label="Stop loading"
-          >
-            <XSquare className="h-4 w-4" />
-          </Button>
-        ) : (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
-            onClick={() => void actions.reload()}
-            disabled={!activeTab}
-            aria-label="Reload"
-          >
-            <RotateCw className="h-4 w-4" />
-          </Button>
-        )}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              onClick={handleEnableGrab}
-              disabled={!activeTab || isBlankTabUrl(activeTab.url)}
-              aria-label="Grab DOM element"
-            >
-              <MousePointer2 className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Grab DOM element</TooltipContent>
-        </Tooltip>
-        <form className="min-w-0 flex-1" onSubmit={handleSubmit}>
-          <Input
-            ref={inputRef}
-            value={draftUrl}
-            onChange={e => {
-              setEditing(true)
-              setDraftUrl(e.target.value)
-            }}
-            onFocus={e => {
-              setEditing(true)
-              e.currentTarget.select()
-            }}
-            onBlur={() => setEditing(false)}
-            placeholder="Search or enter URL"
-            className="h-7 px-2 text-xs"
-            spellCheck={false}
-            autoCapitalize="off"
-            autoCorrect="off"
-            disabled={!activeTab}
-          />
-        </form>
-        {onClose && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
-            onClick={onClose}
-            aria-label="Close browser"
-          >
-            <X className="h-4 w-4" />
-          </Button>
-        )}
-      </div>
-      {activeTab?.previewNote && (
-        <p
-          className="px-1 text-xs leading-snug text-muted-foreground"
-          role="status"
-        >
-          {activeTab.previewNote}
-        </p>
+          <RotateCw className="size-4" />
+        </ToolbarIconButton>
       )}
-      <div className="flex items-center gap-1">
-        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+      <ToolbarIconButton
+        label="Grab DOM element"
+        onClick={handleEnableGrab}
+        disabled={!activeTab || isBlankTabUrl(activeTab.url)}
+      >
+        <MousePointer2 className="size-4" />
+      </ToolbarIconButton>
+      <form className="min-w-32 flex-1" onSubmit={handleSubmit}>
+        <Input
+          ref={inputRef}
+          value={draftUrl}
+          onChange={e => {
+            setEditing(true)
+            setDraftUrl(e.target.value)
+          }}
+          onFocus={e => {
+            setEditing(true)
+            e.currentTarget.select()
+          }}
+          onBlur={() => setEditing(false)}
+          placeholder="Search or enter URL"
+          className="h-7 px-2 text-xs"
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+          disabled={!activeTab}
+        />
+      </form>
+      <div className="flex min-w-0 items-center gap-1 @max-xl:order-last @max-xl:basis-full @xl:max-w-1/2">
+        <div
+          role="tablist"
+          className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
+        >
           {tabs.map(tab => (
             <TabPill
               key={tab.id}
@@ -503,16 +498,23 @@ export const BrowserToolbar = memo(function BrowserToolbar({
           ))}
         </div>
         <BrowserPortControl choices={portChoices} onOpenPort={openPort} />
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6 shrink-0"
-          onClick={handleAddTab}
-          aria-label="New tab"
-        >
-          <Plus className="h-3.5 w-3.5" />
-        </Button>
+        <ToolbarIconButton label="New tab" onClick={handleAddTab}>
+          <Plus className="size-4" />
+        </ToolbarIconButton>
       </div>
+      {onClose && (
+        <ToolbarIconButton label="Close browser" onClick={onClose}>
+          <X className="size-4" />
+        </ToolbarIconButton>
+      )}
+      {activeTab?.previewNote && (
+        <p
+          className="order-last basis-full px-1 text-xs leading-snug text-muted-foreground"
+          role="status"
+        >
+          {activeTab.previewNote}
+        </p>
+      )}
     </div>
   )
 })

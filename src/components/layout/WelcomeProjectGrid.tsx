@@ -10,7 +10,6 @@ import type { Project } from '@/types/projects'
 import { useAppDataDir } from '@/services/projects'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Kbd } from '@/components/ui/kbd'
 import { LOCAL_SERVER_ID } from '@/types/server-resource'
 
 interface WelcomeProjectGridProps {
@@ -125,7 +124,9 @@ export function WelcomeProjectGrid({
 
   return (
     <div className="flex flex-1 flex-col items-center gap-6 overflow-y-auto px-6 py-12 font-sans">
-      <h1 className="text-4xl font-bold text-foreground">Welcome to Jean!</h1>
+      <h1 className="text-2xl font-semibold text-foreground">
+        Welcome to Jean!
+      </h1>
 
       {projects.length >= 6 && (
         <div className="w-full max-w-4xl">
@@ -142,9 +143,11 @@ export function WelcomeProjectGrid({
       <div className="flex w-full max-w-4xl flex-col gap-6">
         {projectGroups.map(group => (
           <section key={group.serverId} className="flex flex-col gap-3">
-            <h2 className="text-sm font-medium text-muted-foreground">
-              {group.serverName}
-            </h2>
+            {projectGroups.length > 1 && (
+              <h2 className="text-sm font-medium text-muted-foreground">
+                {group.serverName}
+              </h2>
+            )}
             <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
               {group.projects.map(project => (
                 <ProjectCard
@@ -168,7 +171,6 @@ export function WelcomeProjectGrid({
       <Button variant="outline" size="sm" onClick={onAddProject}>
         <Plus className="mr-2 h-4 w-4" />
         Add Project
-        <Kbd className="ml-2 h-5 px-1.5 text-[10px]">⌘ N</Kbd>
       </Button>
     </div>
   )

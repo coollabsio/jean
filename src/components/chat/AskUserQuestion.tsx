@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/collapsible'
 import { ChevronRight, CheckCircle2, Circle } from '@/components/icons/reicon'
 import { cn } from '@/lib/utils'
+import { ApprovalCard } from './ApprovalCard'
 import { formatShortcutDisplay, DEFAULT_KEYBINDINGS } from '@/types/keybindings'
 import type { Question, QuestionAnswer } from '@/types/chat'
 
@@ -255,7 +256,7 @@ export function AskUserQuestion({
         onOpenChange={setIsExpanded}
         className="min-w-0"
       >
-        <div className="my-2 min-w-0 rounded border border-muted bg-muted/30 font-mono text-sm">
+        <div className="my-2 min-w-0 rounded-lg border border-border bg-muted/30 text-sm">
           <CollapsibleTrigger className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-muted-foreground hover:bg-muted/50">
             <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
             <span className="truncate font-medium">{getAnswerSummary()}</span>
@@ -267,7 +268,7 @@ export function AskUserQuestion({
             />
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <div className="border-t border-muted px-4 py-3">
+            <div className="border-t border-border px-4 py-3">
               {renderQuestionContent()}
             </div>
           </CollapsibleContent>
@@ -297,7 +298,7 @@ export function AskUserQuestion({
             <div key={qIndex}>
               {/* Header (optional) */}
               {question.header && (
-                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <div className="mb-2 text-xs font-medium text-muted-foreground">
                   {question.header}
                 </div>
               )}
@@ -426,8 +427,8 @@ export function AskUserQuestion({
                 {readOnly ? (
                   answer?.customText ? (
                     <div className="rounded-md border border-success/30 bg-success/10 px-3 py-2 text-foreground">
-                      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-success">
-                        Custom Answer
+                      <div className="mb-1 text-xs font-medium text-success">
+                        Custom answer
                       </div>
                       <div className="italic">
                         &ldquo;{answer.customText}&rdquo;
@@ -446,7 +447,7 @@ export function AskUserQuestion({
                       value={answers.get(qIndex)?.customText ?? ''}
                       onChange={e => updateCustomText(qIndex, e.target.value)}
                       disabled={readOnly}
-                      className="cursor-text font-mono text-base select-text bg-white dark:bg-input md:text-sm"
+                      className="cursor-text text-base select-text bg-white dark:bg-input md:text-sm"
                     />
                   </div>
                 ) : null}
@@ -454,39 +455,42 @@ export function AskUserQuestion({
             </div>
           )
         })}
-
-        {/* Submit/Skip buttons (only if not read-only) */}
-        {!readOnly && (
-          <div className="flex justify-start gap-2 pt-2">
-            <Button size="sm" onClick={handleSubmit} disabled={submitDisabled}>
-              Answer
-              <Kbd className="ml-1.5 h-4 text-[10px] bg-primary-foreground/20 text-primary-foreground">
-                {formatShortcutDisplay(
-                  DEFAULT_KEYBINDINGS.approve_plan ?? 'mod+enter'
-                )}
-              </Kbd>
-            </Button>
-            {onSkip && (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => onSkip(toolCallId)}
-                disabled={submitDisabled}
-                className="text-muted-foreground"
-              >
-                Skip
-              </Button>
-            )}
-          </div>
-        )}
       </div>
     )
   }
 
   // Default: render full interactive question form
   return (
-    <div className="my-3 min-w-0 cursor-default rounded border border-muted bg-muted/30 p-4 font-mono text-sm select-none">
+    <ApprovalCard
+      className="min-w-0 cursor-default select-none"
+      actions={
+        <>
+          <Button size="sm" onClick={handleSubmit} disabled={submitDisabled}>
+            Answer
+            <Kbd
+              modHint
+              className="ml-1.5 h-4 bg-primary-foreground/20 text-2xs text-primary-foreground"
+            >
+              {formatShortcutDisplay(
+                DEFAULT_KEYBINDINGS.approve_plan ?? 'mod+enter'
+              )}
+            </Kbd>
+          </Button>
+          {onSkip && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => onSkip(toolCallId)}
+              disabled={submitDisabled}
+              className="text-muted-foreground"
+            >
+              Skip
+            </Button>
+          )}
+        </>
+      }
+    >
       {renderQuestionContent()}
-    </div>
+    </ApprovalCard>
   )
 }

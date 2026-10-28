@@ -19,7 +19,7 @@ export function TerminalActivityIcon({
           data-testid="terminal-active-badge"
           className={cn(
             'absolute -right-0.5 -top-0.5 size-1.5 rounded-full',
-            'bg-emerald-500 ring-1 ring-background'
+            'bg-success ring-1 ring-background'
           )}
         />
       )}

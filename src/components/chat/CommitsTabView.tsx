@@ -36,8 +36,16 @@ import {
   TooltipContent,
 } from '@/components/ui/tooltip'
 import { Button } from '@/components/ui/button'
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty'
 import { getFileLineStats } from '@/lib/diff-stats'
 import { cn } from '@/lib/utils'
+import { formatRelative } from '@/lib/relative-time'
 import { getFilename } from '@/lib/path-utils'
 import { useTheme } from '@/hooks/use-theme'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -54,29 +62,29 @@ import type { CommitInfo, GitDiff } from '@/types/git-diff'
 // Helpers
 // ============================================================================
 
-/** Format ISO date string as relative time (e.g., "2 hours ago") */
-function formatRelativeDate(isoDate: string): string {
-  const date = new Date(isoDate)
-  const now = Date.now()
-  const diff = now - date.getTime()
-
-  const seconds = Math.floor(diff / 1000)
-  if (seconds < 60) return 'just now'
-
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-
-  const days = Math.floor(hours / 24)
-  if (days < 30) return `${days}d ago`
-
-  const months = Math.floor(days / 30)
-  if (months < 12) return `${months}mo ago`
-
-  const years = Math.floor(months / 12)
-  return `${years}y ago`
+function PanelEmpty({
+  icon,
+  title,
+  description,
+  children,
+}: {
+  icon?: React.ReactNode
+  title: string
+  description?: string
+  children?: React.ReactNode
+}) {
+  return (
+    <Empty className="p-6 md:p-6">
+      <EmptyHeader>
+        {icon ? <EmptyMedia variant="icon">{icon}</EmptyMedia> : null}
+        <EmptyTitle className="text-sm">{title}</EmptyTitle>
+        {description ? (
+          <EmptyDescription className="text-xs">{description}</EmptyDescription>
+        ) : null}
+      </EmptyHeader>
+      {children}
+    </Empty>
+  )
 }
 
 // ============================================================================
@@ -401,9 +409,7 @@ export function CommitsTabView({
                 {commitsError}
               </div>
             ) : commits.length === 0 ? (
-              <div className="py-10 text-center text-sm text-muted-foreground">
-                No commits found
-              </div>
+              <PanelEmpty title="No commits found" />
             ) : (
               <>
                 {commits.map(commit => (
@@ -421,7 +427,9 @@ export function CommitsTabView({
                       <span className="min-w-0 flex-1 truncate">
                         {commit.authorName}
                       </span>
-                      <span>{formatRelativeDate(commit.authorDate)}</span>
+                      <span>
+                        {formatRelative(Date.parse(commit.authorDate) / 1000)}
+                      </span>
                       {commit.additions > 0 && (
                         <span className="text-success">
                           +{commit.additions}
@@ -474,7 +482,7 @@ export function CommitsTabView({
             <p className="mt-0.5 text-xs text-muted-foreground">
               {selectedCommit?.shortSha} ·{' '}
               {selectedCommit
-                ? formatRelativeDate(selectedCommit.authorDate)
+                ? formatRelative(Date.parse(selectedCommit.authorDate) / 1000)
                 : ''}
             </p>
           </div>
@@ -489,9 +497,7 @@ export function CommitsTabView({
             {diffError}
           </div>
         ) : flattenedFiles.length === 0 ? (
-          <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-            No file changes in this commit
-          </div>
+          <PanelEmpty title="No file changes in this commit" />
         ) : (
           <div className="relative flex min-h-0 flex-1 flex-col">
             {selectedFile && (
@@ -667,9 +673,7 @@ export function CommitsTabView({
                 {commitsError}
               </div>
             ) : commits.length === 0 ? (
-              <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">
-                No commits found
-              </div>
+              <PanelEmpty title="No commits found" />
             ) : (
               <>
                 {commits.map(commit => (
@@ -712,7 +716,7 @@ export function CommitsTabView({
                     <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
                       <span className="truncate">{commit.authorName}</span>
                       <span className="shrink-0">
-                        {formatRelativeDate(commit.authorDate)}
+                        {formatRelative(Date.parse(commit.authorDate) / 1000)}
                       </span>
                       {(commit.additions > 0 || commit.deletions > 0) && (
                         <span className="ml-auto shrink-0">
@@ -776,9 +780,7 @@ export function CommitsTabView({
             Select a commit to view its changes
           </div>
         ) : flattenedFiles.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-            No file changes in this commit
-          </div>
+          <PanelEmpty title="No file changes in this commit" />
         ) : (
           <ResizablePanelGroup direction="horizontal" className="h-full">
             {/* File sidebar */}

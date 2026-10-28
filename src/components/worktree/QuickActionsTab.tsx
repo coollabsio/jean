@@ -28,6 +28,7 @@ import {
   CommandList,
 } from '@/components/ui/command'
 import { cn } from '@/lib/utils'
+import { Kbd } from '@/components/ui/kbd'
 import { useUIStore } from '@/store/ui-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { usePatchPreferences, usePreferences } from '@/services/preferences'
@@ -233,7 +234,7 @@ export function QuickActionsTab({
 
   const baseBranchPicker = (
     <div className="mt-1 w-full max-w-[200px] flex flex-col items-center gap-0.5">
-      <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+      <span className="text-2xs uppercase tracking-wide text-muted-foreground">
         Base branch
       </span>
       <Popover open={baseBranchOpen} onOpenChange={setBaseBranchOpen}>
@@ -404,11 +405,7 @@ export function QuickActionsTab({
                     </span>
                   )}
                 </div>
-                {index === 0 && (
-                  <kbd className="hidden sm:block absolute top-3 right-3 text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                    N
-                  </kbd>
-                )}
+                {index === 0 && <Kbd className="absolute top-3 right-3">N</Kbd>}
               </button>
             )
           })
@@ -436,9 +433,7 @@ export function QuickActionsTab({
                   Work directly on the project folder
                 </span>
               </div>
-              <kbd className="hidden sm:block absolute top-3 right-3 text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                M
-              </kbd>
+              <Kbd className="absolute top-3 right-3">M</Kbd>
             </button>
 
             {/* New Worktree button */}
@@ -479,9 +474,7 @@ export function QuickActionsTab({
               >
                 Create
               </button>
-              <kbd className="hidden sm:block absolute top-3 right-3 text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                N
-              </kbd>
+              <Kbd className="absolute top-3 right-3">N</Kbd>
             </div>
           </>
         )}

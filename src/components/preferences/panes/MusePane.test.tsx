@@ -141,7 +141,7 @@ describe('MusePane', () => {
     authData = { authenticated: false, error: null, timedOut: false }
     render(<MusePane />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Login' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
 
     expect(openLogin).toHaveBeenCalledWith('muse', '/managed/muse', [], 'login')
   })
@@ -149,8 +149,8 @@ describe('MusePane', () => {
   it('offers relogin once authenticated', () => {
     render(<MusePane />)
 
-    expect(screen.getByText('Authenticated')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Relogin' }))
+    expect(screen.getByText('Signed in')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in again' }))
 
     expect(openLogin).toHaveBeenCalledWith('muse', '/managed/muse', [], 'login')
   })
@@ -159,10 +159,8 @@ describe('MusePane', () => {
     statusData = { installed: false, version: '', path: '' }
     render(<MusePane />)
 
-    expect(
-      screen.getByText('Select an installed Muse CLI source first.')
-    ).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Login' })).toBeNull()
+    expect(screen.getAllByText('Not installed').length).toBeGreaterThan(0)
+    expect(screen.queryByRole('button', { name: 'Sign in' })).toBeNull()
   })
 
   it('retries a timed-out auth check without starting login', () => {
@@ -195,29 +193,30 @@ describe('MusePane', () => {
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
   })
 
-  it('patches the default model when Muse Spark 1.2 is selected', () => {
+  it('patches the default model when Muse Spark 1.2 is selected', async () => {
+    const user = userEvent.setup()
     render(<MusePane />)
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Default model' }), {
-      target: { value: 'muse/muse-spark-1.2' },
-    })
+    await user.click(screen.getByRole('combobox', { name: 'Default model' }))
+    await user.click(screen.getByRole('option', { name: /Spark 1\.2/ }))
 
     expect(patchMutate).toHaveBeenCalledWith({
       selected_muse_model: 'muse/muse-spark-1.2',
     })
   })
 
-  it('lists models reported by the CLI', () => {
+  it('lists models reported by the CLI', async () => {
+    const user = userEvent.setup()
     modelsData = [
       { id: 'muse/default', label: 'Default' },
       { id: 'muse/muse-pro-2', label: 'Muse Pro 2' },
     ]
     render(<MusePane />)
 
-    const select = screen.getByRole('combobox', { name: 'Default model' })
+    await user.click(screen.getByRole('combobox', { name: 'Default model' }))
     expect(
-      Array.from(select.querySelectorAll('option')).map(option => option.value)
-    ).toEqual(['muse/default', 'muse/muse-pro-2'])
+      screen.getAllByRole('option').map(option => option.textContent)
+    ).toEqual(['Default', 'Muse Pro 2'])
   })
 
   it('keeps a saved model selected before the CLI lists it', () => {
@@ -227,8 +226,8 @@ describe('MusePane', () => {
     }
     render(<MusePane />)
 
-    expect(screen.getByRole('combobox', { name: 'Default model' })).toHaveValue(
-      'muse/muse-pro-2'
-    )
+    expect(
+      screen.getByRole('combobox', { name: 'Default model' })
+    ).toHaveTextContent('muse-pro-2')
   })
 })

@@ -225,6 +225,21 @@ describe('NewWorktreeItems mobile actions', () => {
     )
     expect(onInvestigate).toHaveBeenLastCalledWith(true)
   })
+
+  it('shows only a direct preview button when the row has no investigate action (Load Context)', async () => {
+    isMobile = true
+    const user = userEvent.setup()
+    const onPreview = vi.fn()
+
+    renderSecurityAlertItem({ onPreview, onInvestigate: undefined })
+
+    expect(screen.queryByRole('button', { name: /alert actions/i })).toBeNull()
+    expect(
+      screen.queryByRole('button', { name: /investigate alert/i })
+    ).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Preview alert' }))
+    expect(onPreview).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('BranchItem', () => {

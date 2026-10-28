@@ -72,6 +72,8 @@ export interface ChatToolbarProps {
   branchDiffAdded: number
   branchDiffRemoved: number
 
+  /** Inside SessionChatModal, whose header already links the PR */
+  isModal?: boolean
   prUrl: string | undefined
   prNumber: number | undefined
   displayStatus: PrDisplayStatus | undefined

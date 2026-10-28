@@ -7,8 +7,8 @@ const RESPONSIVE_FILES = [
   'src/components/preferences/panes/AppearancePane.tsx',
   'src/components/preferences/panes/TerminalPane.tsx',
   'src/components/preferences/panes/WebAccessPane.tsx',
-  'src/components/preferences/panes/ExperimentalPane.tsx',
-  'src/components/preferences/panes/ProvidersPane.tsx',
+  'src/components/preferences/panes/BackendProviders.tsx',
+  'src/components/preferences/panes/BackendsPane.tsx',
 ]
 
 describe('Preferences responsive layout', () => {

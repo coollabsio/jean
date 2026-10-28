@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 describe('GeneralPane settings structure', () => {
-  it('uses section cards for every AI backend pane', () => {
+  it('keeps CLI and model sections for every AI backend', () => {
     const source = readFileSync(
       'src/components/preferences/panes/GeneralPane.tsx',
       'utf8'
@@ -42,11 +42,7 @@ describe('GeneralPane settings structure', () => {
       'pref-devin-section-cli',
       'pref-devin-section-settings',
     ]) {
-      const anchorIndex = source.indexOf(`anchorId="${anchorId}"`)
-      expect(anchorIndex, anchorId).toBeGreaterThan(-1)
-      expect(source.slice(anchorIndex, anchorIndex + 120)).toContain(
-        'variant="card"'
-      )
+      expect(source, anchorId).toContain(`anchorId="${anchorId}"`)
     }
   })
 
@@ -127,8 +123,8 @@ describe('GeneralPane settings structure', () => {
       'utf8'
     )
     const executionOverrides = source.slice(
-      source.indexOf('Plan approval'),
-      source.indexOf('AI Language')
+      source.indexOf('label="Plan approval"'),
+      source.indexOf('label="Auto-update AI backends"')
     )
 
     expect(executionOverrides).toContain('buildReasoning.levels.map')
@@ -142,8 +138,8 @@ describe('GeneralPane settings structure', () => {
       'utf8'
     )
     const executionOverrides = source.slice(
-      source.indexOf('Plan approval'),
-      source.indexOf('AI Language')
+      source.indexOf('label="Plan approval"'),
+      source.indexOf('label="Auto-update AI backends"')
     )
 
     expect(
@@ -171,15 +167,9 @@ describe('GeneralPane settings structure', () => {
     expect(generalSource).toContain(
       '<AiLanguageField preferences={preferences} />'
     )
-    expect(generalSource).not.toMatch(
-      /<AiLanguageField[\s\S]*?patchPreferences=/
-    )
+    expect(generalSource).not.toMatch(/<AiLanguageField[^>]*patchPreferences=/)
     expect(fieldSource).toContain('usePatchPreferences()')
     expect(fieldSource).toContain('isAiLanguageSavePending')
-    expect(fieldSource).toContain('disabled={!hasChanges || isSaving}')
-    expect(fieldSource).not.toContain(
-      'disabled={!hasChanges || patchPreferences.isPending}'
-    )
   })
 
   it('renders the server preview hostname in general settings', () => {
@@ -222,54 +212,60 @@ describe('GeneralPane settings structure', () => {
     expect(section).toContain('Spellcheck')
   })
 
-  it('renders the app version and build commit at the bottom of general settings', () => {
+  it('renders a compact version line after the Advanced section', () => {
     const source = readFileSync(
       'src/components/preferences/panes/GeneralPane.tsx',
       'utf8'
     )
-    const versionSectionIndex = source.indexOf('title="Version"')
-    const generalSettingsEnd = source.indexOf(
-      '\n        </>\n      )}',
-      versionSectionIndex
+    const advancedIndex = source.indexOf('title="Advanced"')
+    const versionIndex = source.indexOf('id="pref-general-section-version"')
+    const advancedEnd = source.indexOf('</SettingsSection>', advancedIndex)
+    const versionLine = source.slice(
+      versionIndex,
+      source.indexOf('\n          </div>\n', versionIndex)
     )
 
     expect(source).toContain(
       "import { CLIENT_BUILD_INFO } from '@/lib/build-info'"
     )
-    expect(versionSectionIndex).toBeGreaterThan(-1)
-    expect(source.slice(versionSectionIndex, generalSettingsEnd)).toContain(
-      'CLIENT_BUILD_INFO.appVersion'
+    expect(advancedIndex).toBeGreaterThan(-1)
+    expect(versionIndex).toBeGreaterThan(advancedEnd)
+    for (const expected of [
+      'CLIENT_BUILD_INFO.appVersion',
+      "activeRemoteConnection ? 'Jean Client' : 'Jean'",
+      'remoteServerVersion',
+      '`https://github.com/coollabsio/jean/commit/${CLIENT_BUILD_INFO.gitSha}`',
+      'CLIENT_BUILD_INFO.builtAt',
+    ]) {
+      expect(versionLine, expected).toContain(expected)
+    }
+  })
+
+  it('keeps rarely used general options inside the collapsed Advanced section', () => {
+    const source = readFileSync(
+      'src/components/preferences/panes/GeneralPane.tsx',
+      'utf8'
     )
-    expect(source.slice(versionSectionIndex, generalSettingsEnd)).toContain(
-      "label={activeRemoteConnection ? 'Jean Client' : 'Jean'}"
+    const advancedIndex = source.indexOf('title="Advanced"')
+    const advanced = source.slice(
+      advancedIndex,
+      source.indexOf('</SettingsSection>', advancedIndex)
     )
-    expect(source.slice(versionSectionIndex, generalSettingsEnd)).toContain(
-      'label="Jean Server"'
-    )
-    expect(source.slice(versionSectionIndex, generalSettingsEnd)).toContain(
-      'remoteServerVersion'
-    )
-    expect(source.slice(versionSectionIndex, generalSettingsEnd)).toContain(
-      'CLIENT_BUILD_INFO.gitSha'
-    )
-    expect(source.slice(versionSectionIndex, generalSettingsEnd)).toContain(
-      'Source commit used for this build'
-    )
-    expect(source.slice(versionSectionIndex, generalSettingsEnd)).toContain(
-      'openExternal('
-    )
-    expect(source.slice(versionSectionIndex, generalSettingsEnd)).toContain(
-      '`https://github.com/coollabsio/jean/commit/${CLIENT_BUILD_INFO.gitSha}`'
-    )
-    expect(source.slice(versionSectionIndex, generalSettingsEnd)).toContain(
-      'CLIENT_BUILD_INFO.builtAt'
-    )
-    expect(source.slice(versionSectionIndex, generalSettingsEnd)).toContain(
-      'toLocaleString()'
-    )
-    expect(source.slice(versionSectionIndex, generalSettingsEnd)).not.toContain(
-      '<SettingsSection'
-    )
+
+    expect(advanced).toContain('defaultOpen={false}')
+    for (const expected of [
+      'label="Keep AI servers warm"',
+      'label="Plan approval"',
+      'label="Full-access plan approval"',
+      'label="Auto-update AI backends"',
+      '<WslSettingsFields',
+      'debug_mode_enabled',
+      'agents_enabled',
+      "invoke('open_log_directory')",
+      'label="Delete all archives"',
+    ]) {
+      expect(advanced, expected).toContain(expected)
+    }
   })
 
   it('marks the GitLab CLI settings section as beta', () => {
@@ -284,7 +280,9 @@ describe('GeneralPane settings structure', () => {
     expect(section).toContain('<BetaBadge />')
     const githubCli = source.indexOf('title="GitHub CLI"')
     expect(githubCli).toBeGreaterThan(-1)
-    expect(source.slice(githubCli, githubCli + 200)).not.toContain('<BetaBadge />')
+    expect(source.slice(githubCli, githubCli + 200)).not.toContain(
+      '<BetaBadge />'
+    )
   })
 
   it('offers a browser sign-out only when running as web access', () => {
@@ -300,7 +298,10 @@ describe('GeneralPane settings structure', () => {
     // connection from the title bar, not from a token in localStorage. Match
     // the exact guard expression so an inverted or loosened condition fails.
     const guard = source.slice(Math.max(0, sectionIndex - 400), sectionIndex)
-    expect(guard).toContain('isGeneralScope && isWebAccessView && (')
+    expect(guard).toContain('{isWebAccessView && (')
+    expect(
+      source.lastIndexOf('{isGeneralScope && (', sectionIndex)
+    ).toBeGreaterThan(-1)
     expect(source).toContain('signOutOfWebAccess')
   })
 })

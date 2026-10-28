@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   AlertCircle,
-  FileText,
   Loader2,
   RefreshCw,
   Tag,
@@ -221,7 +220,6 @@ export function ReleaseNotesDialog() {
       >
         <DialogHeader className="px-4 pt-4 pb-0">
           <DialogTitle className="flex items-center gap-2">
-            <FileText className="h-4 w-4" />
             <span className="flex-1">
               Release Notes for {project?.name ?? 'Project'}
             </span>

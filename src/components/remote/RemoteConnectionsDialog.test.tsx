@@ -130,7 +130,7 @@ describe('RemoteConnectionsDialog', () => {
     await waitFor(() => expect(fetchRemoteServerInfo).toHaveBeenCalled())
     fireEvent.click(
       screen.getByRole('checkbox', {
-        name: 'Include Build server in combined dashboard',
+        name: 'Show Build server in dashboard',
       })
     )
 
@@ -146,7 +146,7 @@ describe('RemoteConnectionsDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Connections' }))
     fireEvent.click(
       screen.getByRole('checkbox', {
-        name: 'Include Local in combined dashboard',
+        name: 'Show Local in dashboard',
       })
     )
 
@@ -170,7 +170,7 @@ describe('RemoteConnectionsDialog', () => {
 
     expect(
       screen.queryByRole('checkbox', {
-        name: 'Include Build server in combined dashboard',
+        name: 'Show Build server in dashboard',
       })
     ).not.toBeInTheDocument()
   })

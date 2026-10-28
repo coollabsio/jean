@@ -45,7 +45,7 @@ export function CodexCommandApprovalRequestCard({
           </Button>
           {isDecisionAvailable('decline') ? (
             <Button size="sm" variant="secondary" onClick={onDecline}>
-              Decline
+              Deny
             </Button>
           ) : null}
           {onCancel && isDecisionAvailable('cancel') ? (
@@ -57,7 +57,7 @@ export function CodexCommandApprovalRequestCard({
       }
     >
       {request.command ? (
-        <pre className="mb-3 overflow-x-auto rounded bg-background px-3 py-2 text-xs">
+        <pre className="mb-3 overflow-x-auto rounded bg-background px-3 py-2 font-mono text-xs">
           {request.command}
         </pre>
       ) : null}
@@ -99,7 +99,7 @@ export function CodexCommandApprovalRequestCard({
             <div className="font-medium text-foreground">
               Additional permissions
             </div>
-            <pre className="overflow-x-auto rounded bg-background/60 p-2 text-[11px] whitespace-pre-wrap break-words">
+            <pre className="overflow-x-auto rounded bg-background/60 p-2 font-mono text-2xs whitespace-pre-wrap break-words">
               {JSON.stringify(request.additional_permissions, null, 2)}
             </pre>
           </div>

@@ -236,9 +236,9 @@ describe('CompactStreamingTicker', () => {
     const editedFiles = screen.getByRole('button', { name: 'Edited 1 file' })
 
     expect(editedFiles).toBeVisible()
-    expect(ticker.closest('.rounded-md.border')).not.toContainElement(
-      editedFiles
-    )
+    const tickerGroup = ticker.closest('[data-slot="collapsible"]')
+    expect(tickerGroup).not.toBeNull()
+    expect(tickerGroup).not.toContainElement(editedFiles)
     fireEvent.click(ticker)
     expect(
       screen.getAllByRole('button', { name: 'Edited 1 file' })

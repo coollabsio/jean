@@ -4,7 +4,7 @@ import type {
   ScheduleInput,
   ScheduleKind,
 } from '@/services/agents'
-import { formatRelative } from './AgentActivity'
+import { formatRelative } from '@/lib/relative-time'
 
 export const MIN_INTERVAL_MINUTES = 5
 export const MAX_INTERVAL_MINUTES = 60 * 24 * 30

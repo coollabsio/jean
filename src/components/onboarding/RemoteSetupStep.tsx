@@ -570,7 +570,7 @@ export function RemoteSetupStep({ onComplete }: RemoteSetupStepProps) {
           </p>
         )}
         {testState.status === 'ok' && (
-          <p className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-500">
+          <p className="flex items-center gap-1.5 text-xs text-success">
             <Check className="size-3.5" />
             Connected · {testState.system}
           </p>
@@ -810,9 +810,7 @@ function InstallPhases({ progress }: { progress: InstallProgress }) {
             <div className="flex items-center gap-2">
               <span className="flex size-4 shrink-0 items-center justify-center">
                 {state === 'active' && <Spinner className="size-3.5" />}
-                {state === 'done' && (
-                  <Check className="size-4 text-green-600 dark:text-green-500" />
-                )}
+                {state === 'done' && <Check className="size-4 text-success" />}
                 {state === 'skipped' && (
                   <Check className="size-4 text-muted-foreground/60" />
                 )}

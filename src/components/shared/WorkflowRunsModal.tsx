@@ -138,7 +138,7 @@ const SidebarItem = forwardRef<
         <span className="truncate">{label}</span>
         <div className="flex items-center gap-1 shrink-0">
           <span
-            className={`rounded px-1 py-0.5 text-[10px] font-medium ${countBg}`}
+            className={`rounded px-1 py-0.5 text-2xs font-medium ${countBg}`}
           >
             {count}
           </span>
@@ -744,8 +744,8 @@ export function WorkflowRunsModal() {
                 <TooltipTrigger asChild>
                   <Button
                     variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 shrink-0 p-0"
+                    size="icon-sm"
+                    className="shrink-0 p-0"
                     onClick={handleRefresh}
                     disabled={isFetching}
                   >
@@ -845,11 +845,11 @@ export function WorkflowRunsModal() {
                           <span className="min-w-0 truncate text-sm font-medium">
                             {run.workflowName}
                           </span>
-                          <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
+                          <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-2xs text-muted-foreground">
                             {run.headBranch}
                           </span>
                           {unreadOnOpen.has(run.databaseId) && (
-                            <span className="shrink-0 rounded bg-info/15 px-1 py-0.5 text-[10px] font-medium text-info">
+                            <span className="shrink-0 rounded bg-info/15 px-1 py-0.5 text-2xs font-medium text-info">
                               New
                             </span>
                           )}
@@ -862,7 +862,7 @@ export function WorkflowRunsModal() {
                                     e.stopPropagation()
                                     handleInvestigate(run)
                                   }}
-                                  className="shrink-0 inline-flex items-center gap-0.5 rounded bg-primary px-1 py-0.5 text-[10px] text-primary-foreground transition-colors hover:bg-primary/80"
+                                  className="shrink-0 inline-flex items-center gap-0.5 rounded bg-primary px-1 py-0.5 text-2xs text-primary-foreground transition-colors hover:bg-primary/80"
                                 >
                                   <Wand2 className="h-3 w-3" />
                                   <span>M</span>
