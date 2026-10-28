@@ -117,7 +117,7 @@ describe('MusePane', () => {
 
     expect(screen.queryByRole('button', { name: 'Install latest' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Update' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Uninstall' }))
 
     expect(updateMutate).toHaveBeenCalledTimes(1)
     expect(uninstallMutate).toHaveBeenCalledTimes(1)

@@ -46,13 +46,13 @@ describe('GeneralPane settings structure', () => {
     }
   })
 
-  it('uses shared compact source selectors for managed backends', () => {
+  it('uses the shared CLI fields for every CLI section', () => {
     const source = readFileSync(
       'src/components/preferences/panes/GeneralPane.tsx',
       'utf8'
     )
 
-    expect(source.match(/<BackendCliSourceSelect/g)).toHaveLength(8)
+    expect(source.match(/<CliInstallFields/g)).toHaveLength(12)
   })
 
   it('renders the Kimi auto-steer toggle inside Kimi settings', () => {

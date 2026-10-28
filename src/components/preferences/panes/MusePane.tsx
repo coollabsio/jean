@@ -71,7 +71,7 @@ export function MusePane() {
   return (
     <div className="w-full space-y-8">
       <SettingsSection
-        title="CLI source"
+        title="CLI"
         anchorId="pref-muse-section-cli"
         actions={
           <CliAuthActions
@@ -83,6 +83,17 @@ export function MusePane() {
           />
         }
       >
+        <InlineField label="Source">
+          <BackendCliSourceSelect
+            value={source}
+            onValueChange={setSource}
+            backendName="Muse CLI"
+            managedDescription="Jean installs an isolated Muse CLI. Its launcher keeps itself up to date."
+            path={pathDetection.data?.path}
+            pathVersion={pathDetection.data?.version}
+            pathFound={!!pathDetection.data?.found}
+          />
+        </InlineField>
         <InlineField
           label={installed ? 'Version' : 'Status'}
           description={
@@ -123,7 +134,7 @@ export function MusePane() {
                   disabled={managedBusy}
                   onClick={() => uninstall.mutate()}
                 >
-                  {uninstall.isPending ? 'Removing…' : 'Remove'}
+                  {uninstall.isPending ? 'Removing…' : 'Uninstall'}
                 </Button>
               </>
             ) : (
@@ -136,17 +147,6 @@ export function MusePane() {
               </Button>
             )}
           </div>
-        </InlineField>
-        <InlineField label="Source">
-          <BackendCliSourceSelect
-            value={source}
-            onValueChange={setSource}
-            backendName="Muse CLI"
-            managedDescription="Jean installs an isolated Muse CLI. Its launcher keeps itself up to date."
-            path={pathDetection.data?.path}
-            pathVersion={pathDetection.data?.version}
-            pathFound={!!pathDetection.data?.found}
-          />
         </InlineField>
         {source === 'path' && !pathDetection.data?.found && (
           <p className="text-xs text-muted-foreground">

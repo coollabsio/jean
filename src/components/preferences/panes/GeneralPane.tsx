@@ -156,11 +156,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import {
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-} from '@/components/ui/tooltip'
 import { usePreferences, usePatchPreferences } from '@/services/preferences'
 import {
   getCatalogDefaultModelOptions,
@@ -235,12 +230,15 @@ import {
 import { isWindows, openExternal } from '@/lib/platform'
 import { isNewerVersion } from '@/lib/version-utils'
 import { cn } from '@/lib/utils'
-import { copyToClipboard } from '@/lib/clipboard'
 import { getPathUpdateAction } from '@/lib/cli-update'
 import { SettingsSection } from '../SettingsSection'
 import { InlineField } from '../InlineField'
 import { CliAuthActions } from '../CliAuthActions'
-import { BackendCliSourceSelect } from '../BackendCliSourceSelect'
+import {
+  CliChangeVersionButton,
+  CliInstallFields,
+  CliUpdateButton,
+} from '../CliInstallFields'
 import { AiLanguageField } from './AiLanguageField'
 import { BrowserDefaultHostField } from './BrowserDefaultHostField'
 import { resolveOverrideReasoning } from './override-reasoning'
@@ -1835,19 +1833,13 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     openCliUpdateModal('devin')
   }, [openCliUpdateModal, patchPreferences, preferences?.devin_cli_source])
 
-  const handleCopyPath = useCallback((path: string | null | undefined) => {
-    if (!path) return
-    copyToClipboard(path)
-    toast.success('Path copied to clipboard')
-  }, [])
-
   return (
     <div
       className={cn('space-y-6', backendPaneScopes.includes(scope) && 'w-full')}
     >
       {hasBackend() && scope === 'claude' && (
         <SettingsSection
-          title="CLI source"
+          title="CLI"
           anchorId="pref-claude-section-cli"
           actions={
             <CliAuthActions
@@ -1859,118 +1851,54 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             />
           }
         >
-          <div className="space-y-4">
-            <InlineField label={cliStatus?.installed ? 'Version' : 'Status'}>
-              {isCliLoading ? (
-                <Loader2 className="size-4 animate-spin text-muted-foreground" />
-              ) : cliStatus?.installed ? (
-                isPathSource ? (
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm">
-                      {cliStatus.version ?? 'Installed'}
-                    </span>
-                    {isClaudeVersionsLoading ? (
-                      <Loader2 className="size-4 animate-spin text-muted-foreground" />
-                    ) : (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={!claudeHasUpdate}
-                        onClick={() => {
-                          const action = getPathUpdateAction(
-                            cliStatus.path,
-                            pathDetection?.package_manager,
-                            'claude-code',
-                            ['update']
-                          )
-                          if (action) {
-                            openCliLoginModal(
-                              'claude',
-                              action[0],
-                              action[1],
-                              'update'
-                            )
-                          } else {
-                            openCliUpdateModal('claude')
-                          }
-                        }}
-                      >
-                        {claudeHasUpdate
-                          ? `Update to ${claudeLatestStable?.version}`
-                          : 'Up to date'}
-                      </Button>
-                    )}
-                  </div>
-                ) : (
-                  <Button
-                    variant="outline"
-                    className="w-full sm:w-40 justify-between"
-                    onClick={() => openCliUpdateModal('claude')}
-                  >
-                    {cliStatus.version ?? 'Installed'}
-                  </Button>
-                )
+          <CliInstallFields
+            backendName="Claude CLI"
+            binary="claude"
+            source={preferences?.claude_cli_source ?? 'jean'}
+            onSourceChange={handleClaudeSourceChange}
+            pathDetection={pathDetection}
+            activePath={
+              preferences?.claude_cli_source === 'path'
+                ? pathDetection?.path
+                : cliStatus?.path
+            }
+            loading={isCliLoading}
+            installed={!!cliStatus?.installed}
+            version={cliStatus?.version}
+            onInstall={() => openCliUpdateModal('claude')}
+            onUninstall={() => setDeleteCliTarget('claude')}
+            actions={
+              isPathSource ? (
+                <CliUpdateButton
+                  checking={isClaudeVersionsLoading}
+                  hasUpdate={claudeHasUpdate}
+                  latestVersion={claudeLatestStable?.version}
+                  onUpdate={() => {
+                    const action = getPathUpdateAction(
+                      cliStatus?.path,
+                      pathDetection?.package_manager,
+                      'claude-code',
+                      ['update']
+                    )
+                    if (action) {
+                      openCliLoginModal(
+                        'claude',
+                        action[0],
+                        action[1],
+                        'update'
+                      )
+                    } else {
+                      openCliUpdateModal('claude')
+                    }
+                  }}
+                />
               ) : (
-                <Button
-                  className="w-full sm:w-40"
+                <CliChangeVersionButton
                   onClick={() => openCliUpdateModal('claude')}
-                >
-                  Install
-                </Button>
-              )}
-            </InlineField>
-            <InlineField
-              label="Source"
-              description={
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleCopyPath(
-                          preferences?.claude_cli_source === 'path'
-                            ? pathDetection?.path
-                            : cliStatus?.path
-                        )
-                      }
-                      className="text-left hover:underline cursor-pointer"
-                    >
-                      {preferences?.claude_cli_source === 'path'
-                        ? (pathDetection?.path ?? 'System PATH')
-                        : (cliStatus?.path ?? 'Not installed')}
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>Click to copy path</TooltipContent>
-                </Tooltip>
-              }
-            >
-              <BackendCliSourceSelect
-                value={preferences?.claude_cli_source ?? 'jean'}
-                onValueChange={handleClaudeSourceChange}
-                backendName="Claude CLI"
-                path={pathDetection?.path}
-                pathVersion={pathDetection?.version}
-                pathFound={!!pathDetection?.found}
-                action={
-                  preferences?.claude_cli_source === 'jean' &&
-                  cliStatus?.installed && (
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => setDeleteCliTarget('claude')}
-                    >
-                      Uninstall
-                    </Button>
-                  )
-                }
-              />
-            </InlineField>
-            {!cliStatus?.installed && !pathDetection?.found && (
-              <p className="text-xs text-muted-foreground px-1">
-                Install with Jean or add <code>claude</code> to your PATH.
-              </p>
-            )}
-          </div>
+                />
+              )
+            }
+          />
         </SettingsSection>
       )}
 
@@ -1988,114 +1916,49 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             />
           }
         >
-          <div className="space-y-4">
-            <InlineField label={ghStatus?.installed ? 'Version' : 'Status'}>
-              {isGhLoading ? (
-                <Loader2 className="size-4 animate-spin text-muted-foreground" />
-              ) : ghStatus?.installed ? (
-                isGhPathSource ? (
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm">
-                      {ghStatus.version ?? 'Installed'}
-                    </span>
-                    {isGhVersionsLoading ? (
-                      <Loader2 className="size-4 animate-spin text-muted-foreground" />
-                    ) : (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={!ghHasUpdate}
-                        onClick={() => {
-                          const action = getPathUpdateAction(
-                            ghStatus.path,
-                            ghPathDetection?.package_manager,
-                            'gh',
-                            null
-                          )
-                          if (action) {
-                            openCliLoginModal(
-                              'gh',
-                              action[0],
-                              action[1],
-                              'update'
-                            )
-                          } else {
-                            openCliUpdateModal('gh')
-                          }
-                        }}
-                      >
-                        {ghHasUpdate
-                          ? `Update to ${ghLatestStable?.version}`
-                          : 'Up to date'}
-                      </Button>
-                    )}
-                  </div>
-                ) : (
-                  <Button
-                    variant="outline"
-                    className="w-full sm:w-40 justify-between"
-                    onClick={() => openCliUpdateModal('gh')}
-                  >
-                    {ghStatus.version ?? 'Installed'}
-                  </Button>
-                )
+          <CliInstallFields
+            backendName="GitHub CLI"
+            binary="gh"
+            source={preferences?.gh_cli_source ?? 'jean'}
+            onSourceChange={handleGhSourceChange}
+            pathDetection={ghPathDetection}
+            activePath={
+              preferences?.gh_cli_source === 'path'
+                ? ghPathDetection?.path
+                : ghStatus?.path
+            }
+            loading={isGhLoading}
+            installed={!!ghStatus?.installed}
+            version={ghStatus?.version}
+            onInstall={() => openCliUpdateModal('gh')}
+            onUninstall={() => setDeleteCliTarget('gh')}
+            actions={
+              isGhPathSource ? (
+                <CliUpdateButton
+                  checking={isGhVersionsLoading}
+                  hasUpdate={ghHasUpdate}
+                  latestVersion={ghLatestStable?.version}
+                  onUpdate={() => {
+                    const action = getPathUpdateAction(
+                      ghStatus?.path,
+                      ghPathDetection?.package_manager,
+                      'gh',
+                      null
+                    )
+                    if (action) {
+                      openCliLoginModal('gh', action[0], action[1], 'update')
+                    } else {
+                      openCliUpdateModal('gh')
+                    }
+                  }}
+                />
               ) : (
-                <Button
-                  className="w-full sm:w-40"
+                <CliChangeVersionButton
                   onClick={() => openCliUpdateModal('gh')}
-                >
-                  Install
-                </Button>
-              )}
-            </InlineField>
-            <InlineField
-              label="Source"
-              description={
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleCopyPath(
-                          preferences?.gh_cli_source === 'path'
-                            ? ghPathDetection?.path
-                            : ghStatus?.path
-                        )
-                      }
-                      className="text-left hover:underline cursor-pointer"
-                    >
-                      {preferences?.gh_cli_source === 'path'
-                        ? (ghPathDetection?.path ?? 'System PATH')
-                        : (ghStatus?.path ?? 'Not installed')}
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>Click to copy path</TooltipContent>
-                </Tooltip>
-              }
-            >
-              <Select
-                value={preferences?.gh_cli_source ?? 'jean'}
-                onValueChange={handleGhSourceChange}
-              >
-                <SelectTrigger className="w-full sm:w-80">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="jean">Jean managed</SelectItem>
-                  <SelectItem value="path" disabled={!ghPathDetection?.found}>
-                    System PATH
-                    {!ghPathDetection?.found && ' (not found)'}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </InlineField>
-            {!ghStatus?.installed && !ghPathDetection?.found && (
-              <p className="text-xs text-muted-foreground px-1">
-                Install with Jean, or install <code>gh</code> yourself in your
-                environment — we&apos;ll detect it on your PATH.
-              </p>
-            )}
-          </div>
+                />
+              )
+            }
+          />
         </SettingsSection>
       )}
 
@@ -2118,120 +1981,54 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             />
           }
         >
-          <div className="space-y-4">
-            <InlineField
-              label={glabStatus?.installed ? 'Version' : 'Status'}
-              description={
-                glabStatus?.installed
-                  ? 'Enables GitLab issues and merge requests'
-                  : 'Optional — enables GitLab issues and merge requests'
-              }
-            >
-              {isGlabLoading ? (
-                <Loader2 className="size-4 animate-spin text-muted-foreground" />
-              ) : glabStatus?.installed ? (
-                isGlabPathSource ? (
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm">
-                      {glabStatus.version ?? 'Installed'}
-                    </span>
-                    {isGlabVersionsLoading ? (
-                      <Loader2 className="size-4 animate-spin text-muted-foreground" />
-                    ) : (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={!glabHasUpdate}
-                        onClick={() => {
-                          const action = getPathUpdateAction(
-                            glabStatus.path,
-                            glabPathDetection?.package_manager,
-                            'glab',
-                            null
-                          )
-                          if (action) {
-                            openCliLoginModal(
-                              'glab',
-                              action[0],
-                              action[1],
-                              'update'
-                            )
-                          } else {
-                            openCliUpdateModal('glab')
-                          }
-                        }}
-                      >
-                        {glabHasUpdate
-                          ? `Update to ${glabLatestStable?.version}`
-                          : 'Up to date'}
-                      </Button>
-                    )}
-                  </div>
-                ) : (
-                  <Button
-                    variant="outline"
-                    className="w-full sm:w-40 justify-between"
-                    onClick={() => openCliUpdateModal('glab')}
-                  >
-                    {glabStatus.version ?? 'Installed'}
-                  </Button>
-                )
+          <CliInstallFields
+            backendName="GitLab CLI"
+            binary="glab"
+            source={preferences?.glab_cli_source ?? 'jean'}
+            onSourceChange={handleGlabSourceChange}
+            pathDetection={glabPathDetection}
+            activePath={
+              preferences?.glab_cli_source === 'path'
+                ? glabPathDetection?.path
+                : glabStatus?.path
+            }
+            loading={isGlabLoading}
+            installed={!!glabStatus?.installed}
+            version={glabStatus?.version}
+            description={
+              glabStatus?.installed
+                ? 'Enables GitLab issues and merge requests'
+                : 'Optional — enables GitLab issues and merge requests'
+            }
+            onInstall={() => openCliUpdateModal('glab')}
+            onUninstall={() => setDeleteCliTarget('glab')}
+            actions={
+              isGlabPathSource ? (
+                <CliUpdateButton
+                  checking={isGlabVersionsLoading}
+                  hasUpdate={glabHasUpdate}
+                  latestVersion={glabLatestStable?.version}
+                  onUpdate={() => {
+                    const action = getPathUpdateAction(
+                      glabStatus?.path,
+                      glabPathDetection?.package_manager,
+                      'glab',
+                      null
+                    )
+                    if (action) {
+                      openCliLoginModal('glab', action[0], action[1], 'update')
+                    } else {
+                      openCliUpdateModal('glab')
+                    }
+                  }}
+                />
               ) : (
-                <Button
-                  className="w-full sm:w-40"
+                <CliChangeVersionButton
                   onClick={() => openCliUpdateModal('glab')}
-                >
-                  Install
-                </Button>
-              )}
-            </InlineField>
-            <InlineField
-              label="Source"
-              description={
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      onClick={() =>
-                        handleCopyPath(
-                          preferences?.glab_cli_source === 'path'
-                            ? glabPathDetection?.path
-                            : glabStatus?.path
-                        )
-                      }
-                      className="text-left hover:underline cursor-pointer"
-                    >
-                      {preferences?.glab_cli_source === 'path'
-                        ? (glabPathDetection?.path ?? 'System PATH')
-                        : (glabStatus?.path ?? 'Not installed')}
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>Click to copy path</TooltipContent>
-                </Tooltip>
-              }
-            >
-              <Select
-                value={preferences?.glab_cli_source ?? 'jean'}
-                onValueChange={handleGlabSourceChange}
-              >
-                <SelectTrigger className="w-full sm:w-80">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="jean">Jean (managed)</SelectItem>
-                  <SelectItem value="path" disabled={!glabPathDetection?.found}>
-                    System PATH
-                    {!glabPathDetection?.found && ' (not found)'}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </InlineField>
-            {!glabStatus?.installed && !glabPathDetection?.found && (
-              <p className="text-xs text-muted-foreground px-1">
-                Install with Jean, or install <code>glab</code> yourself in your
-                environment — we&apos;ll detect it on your PATH.
-              </p>
-            )}
-          </div>
+                />
+              )
+            }
+          />
         </SettingsSection>
       )}
 
@@ -2249,135 +2046,60 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             />
           }
         >
-          <div className="space-y-4">
-            <InlineField
-              label={coderabbitStatus?.installed ? 'Version' : 'Status'}
-            >
-              {isCodeRabbitLoading || installCodeRabbitCli.isPending ? (
-                <Loader2 className="size-4 animate-spin text-muted-foreground" />
-              ) : coderabbitStatus?.installed ? (
-                <div className="flex items-center gap-2">
-                  <span className="text-sm">
-                    {coderabbitStatus.version ?? 'Installed'}
-                  </span>
-                  {isCodeRabbitVersionsLoading ? (
-                    <Loader2 className="size-4 animate-spin text-muted-foreground" />
-                  ) : (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={
-                        updateCodeRabbitCli.isPending || !coderabbitHasUpdate
-                      }
-                      onClick={() => {
-                        if (!coderabbitHasUpdate) return
-                        if (isCodeRabbitPathSource) {
-                          const action = getPathUpdateAction(
-                            coderabbitStatus.path,
-                            coderabbitPathDetection?.package_manager,
-                            'coderabbit',
-                            ['update'],
-                            undefined,
-                            coderabbitLatestStable?.version
-                          )
-                          if (action) {
-                            openCliLoginModal(
-                              'coderabbit',
-                              action[0],
-                              action[1],
-                              'update'
-                            )
-                            return
-                          }
-                        }
-                        updateCodeRabbitCli.mutate()
-                      }}
-                    >
-                      {updateCodeRabbitCli.isPending
-                        ? 'Updating...'
-                        : coderabbitHasUpdate
-                          ? `Update to ${coderabbitLatestStable?.version}`
-                          : 'Up to date'}
-                    </Button>
-                  )}
-                </div>
-              ) : (
-                <Button
-                  className="w-full sm:w-40"
-                  disabled={installCodeRabbitCli.isPending}
-                  onClick={() => installCodeRabbitCli.mutate(undefined)}
-                >
-                  {installCodeRabbitCli.isPending ? 'Installing...' : 'Install'}
-                </Button>
-              )}
-            </InlineField>
-            {(coderabbitStatus?.installed ||
-              coderabbitPathDetection?.found) && (
-              <InlineField
-                label="Source"
-                description={
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleCopyPath(
-                            preferences?.coderabbit_cli_source === 'path'
-                              ? coderabbitPathDetection?.path
-                              : coderabbitStatus?.path
-                          )
-                        }
-                        className="text-left hover:underline cursor-pointer"
-                      >
-                        {preferences?.coderabbit_cli_source === 'path'
-                          ? (coderabbitPathDetection?.path ?? 'System PATH')
-                          : (coderabbitStatus?.path ?? 'Not installed')}
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent>Click to copy path</TooltipContent>
-                  </Tooltip>
-                }
-              >
-                <div className="flex items-center gap-2">
-                  <Select
-                    value={preferences?.coderabbit_cli_source ?? 'jean'}
-                    onValueChange={handleCodeRabbitSourceChange}
-                  >
-                    <SelectTrigger className="w-full sm:w-80">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="jean">Jean managed</SelectItem>
-                      <SelectItem
-                        value="path"
-                        disabled={!coderabbitPathDetection?.found}
-                      >
-                        System PATH
-                        {!coderabbitPathDetection?.found && ' (not found)'}
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {preferences?.coderabbit_cli_source === 'jean' &&
-                    coderabbitStatus?.installed && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-destructive hover:text-destructive"
-                        onClick={() => setDeleteCliTarget('coderabbit')}
-                      >
-                        Delete managed install
-                      </Button>
-                    )}
-                </div>
-              </InlineField>
-            )}
-          </div>
+          <CliInstallFields
+            backendName="CodeRabbit CLI"
+            binary="coderabbit"
+            source={preferences?.coderabbit_cli_source ?? 'jean'}
+            onSourceChange={handleCodeRabbitSourceChange}
+            pathDetection={coderabbitPathDetection}
+            activePath={
+              preferences?.coderabbit_cli_source === 'path'
+                ? coderabbitPathDetection?.path
+                : coderabbitStatus?.path
+            }
+            loading={isCodeRabbitLoading}
+            installed={!!coderabbitStatus?.installed}
+            version={coderabbitStatus?.version}
+            onInstall={() => installCodeRabbitCli.mutate(undefined)}
+            installing={installCodeRabbitCli.isPending}
+            onUninstall={() => setDeleteCliTarget('coderabbit')}
+            actions={
+              <CliUpdateButton
+                checking={isCodeRabbitVersionsLoading}
+                hasUpdate={coderabbitHasUpdate}
+                latestVersion={coderabbitLatestStable?.version}
+                pending={updateCodeRabbitCli.isPending}
+                onUpdate={() => {
+                  if (isCodeRabbitPathSource && coderabbitStatus) {
+                    const action = getPathUpdateAction(
+                      coderabbitStatus.path,
+                      coderabbitPathDetection?.package_manager,
+                      'coderabbit',
+                      ['update'],
+                      undefined,
+                      coderabbitLatestStable?.version
+                    )
+                    if (action) {
+                      openCliLoginModal(
+                        'coderabbit',
+                        action[0],
+                        action[1],
+                        'update'
+                      )
+                      return
+                    }
+                  }
+                  updateCodeRabbitCli.mutate()
+                }}
+              />
+            }
+          />
         </SettingsSection>
       )}
 
       {hasBackend() && scope === 'codex' && (
         <SettingsSection
-          title="CLI source"
+          title="CLI"
           anchorId="pref-codex-section-cli"
           actions={
             <CliAuthActions
@@ -2389,132 +2111,63 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             />
           }
         >
-          <div className="space-y-4">
-            <InlineField label={codexStatus?.installed ? 'Version' : 'Status'}>
-              {isCodexLoading ? (
-                <Loader2 className="size-4 animate-spin text-muted-foreground" />
-              ) : codexStatus?.installed ? (
-                isCodexPathSource ? (
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm">
-                      {codexStatus.version ?? 'Installed'}
-                    </span>
-                    {isCodexVersionsLoading ? (
-                      <Loader2 className="size-4 animate-spin text-muted-foreground" />
-                    ) : (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={!codexHasUpdate}
-                        onClick={() => {
-                          const action = getPathUpdateAction(
-                            codexStatus.path,
-                            codexPathDetection?.package_manager,
-                            'codex',
-                            null,
-                            '@openai/codex',
-                            codexLatestStable?.version
-                          )
-                          if (action) {
-                            openCliLoginModal(
-                              'codex',
-                              action[0],
-                              action[1],
-                              'update'
-                            )
-                          } else {
-                            openCliUpdateModal('codex')
-                          }
-                        }}
-                      >
-                        {codexHasUpdate
-                          ? `Update to ${codexLatestStable?.version}`
-                          : 'Up to date'}
-                      </Button>
-                    )}
-                  </div>
-                ) : (
-                  <Button
-                    variant="outline"
-                    className="w-full sm:w-40 justify-between"
-                    onClick={() => openCliUpdateModal('codex')}
-                  >
-                    {codexStatus.version ?? 'Installed'}
-                  </Button>
-                )
+          <CliInstallFields
+            backendName="Codex CLI"
+            binary="codex"
+            source={preferences?.codex_cli_source ?? 'jean'}
+            onSourceChange={handleCodexSourceChange}
+            pathDetection={codexPathDetection}
+            activePath={
+              preferences?.codex_cli_source === 'path'
+                ? codexPathDetection?.path
+                : codexStatus?.path
+            }
+            loading={isCodexLoading}
+            installed={!!codexStatus?.installed}
+            version={codexStatus?.version}
+            onInstall={() => openCliUpdateModal('codex')}
+            onUninstall={() => setDeleteCliTarget('codex')}
+            actions={
+              isCodexPathSource ? (
+                <CliUpdateButton
+                  checking={isCodexVersionsLoading}
+                  hasUpdate={codexHasUpdate}
+                  latestVersion={codexLatestStable?.version}
+                  onUpdate={() => {
+                    const action = getPathUpdateAction(
+                      codexStatus?.path,
+                      codexPathDetection?.package_manager,
+                      'codex',
+                      null,
+                      '@openai/codex',
+                      codexLatestStable?.version
+                    )
+                    if (action) {
+                      openCliLoginModal('codex', action[0], action[1], 'update')
+                    } else {
+                      openCliUpdateModal('codex')
+                    }
+                  }}
+                />
               ) : (
-                <Button
-                  className="w-full sm:w-40"
+                <CliChangeVersionButton
                   onClick={() => openCliUpdateModal('codex')}
-                >
-                  Install
-                </Button>
-              )}
-            </InlineField>
-            <InlineField
-              label="Source"
-              description={
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleCopyPath(
-                          preferences?.codex_cli_source === 'path'
-                            ? codexPathDetection?.path
-                            : codexStatus?.path
-                        )
-                      }
-                      className="text-left hover:underline cursor-pointer"
-                    >
-                      {preferences?.codex_cli_source === 'path'
-                        ? (codexPathDetection?.path ?? 'System PATH')
-                        : (codexStatus?.path ?? 'Not installed')}
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>Click to copy path</TooltipContent>
-                </Tooltip>
-              }
-            >
-              <BackendCliSourceSelect
-                value={preferences?.codex_cli_source ?? 'jean'}
-                onValueChange={handleCodexSourceChange}
-                backendName="Codex CLI"
-                path={codexPathDetection?.path}
-                pathVersion={codexPathDetection?.version}
-                pathFound={!!codexPathDetection?.found}
-                action={
-                  preferences?.codex_cli_source === 'jean' &&
-                  codexStatus?.installed && (
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => setDeleteCliTarget('codex')}
-                    >
-                      Uninstall
-                    </Button>
-                  )
-                }
-              />
-            </InlineField>
-            {!codexStatus?.installed && !codexPathDetection?.found && (
-              <p className="text-xs text-muted-foreground px-1">
-                Install with Jean or add <code>codex</code> to your PATH.
-              </p>
-            )}
-            {codexStatus?.installed && codexStatus.sandbox_ready === false && (
-              <p className="text-xs text-warning px-1">
-                {codexStatus.sandbox_message ??
-                  'Codex sandbox requires bubblewrap. Install it with: sudo apt install bubblewrap'}
-              </p>
-            )}
-          </div>
+                />
+              )
+            }
+          />
+          {codexStatus?.installed && codexStatus.sandbox_ready === false && (
+            <p className="text-xs text-warning">
+              {codexStatus.sandbox_message ??
+                'Codex sandbox requires bubblewrap. Install it with: sudo apt install bubblewrap'}
+            </p>
+          )}
         </SettingsSection>
       )}
 
       {hasBackend() && scope === 'opencode' && (
         <SettingsSection
-          title="CLI source"
+          title="CLI"
           anchorId="pref-opencode-section-cli"
           actions={
             <CliAuthActions
@@ -2526,126 +2179,60 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             />
           }
         >
-          <div className="space-y-4">
-            <InlineField
-              label={opencodeStatus?.installed ? 'Version' : 'Status'}
-            >
-              {isOpenCodeLoading ? (
-                <Loader2 className="size-4 animate-spin text-muted-foreground" />
-              ) : opencodeStatus?.installed ? (
-                isOpencodePathSource ? (
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm">
-                      {opencodeStatus.version ?? 'Installed'}
-                    </span>
-                    {isOpencodeVersionsLoading ? (
-                      <Loader2 className="size-4 animate-spin text-muted-foreground" />
-                    ) : (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={!opencodeHasUpdate}
-                        onClick={() => {
-                          const action = getPathUpdateAction(
-                            opencodeStatus.path,
-                            opencodePathDetection?.package_manager,
-                            'opencode',
-                            ['upgrade']
-                          )
-                          if (action) {
-                            openCliLoginModal(
-                              'opencode',
-                              action[0],
-                              action[1],
-                              'update'
-                            )
-                          } else {
-                            openCliUpdateModal('opencode')
-                          }
-                        }}
-                      >
-                        {opencodeHasUpdate
-                          ? `Update to ${opencodeLatestStable?.version}`
-                          : 'Up to date'}
-                      </Button>
-                    )}
-                  </div>
-                ) : (
-                  <Button
-                    variant="outline"
-                    className="w-full sm:w-40 justify-between"
-                    onClick={() => openCliUpdateModal('opencode')}
-                  >
-                    {opencodeStatus.version ?? 'Installed'}
-                  </Button>
-                )
+          <CliInstallFields
+            backendName="OpenCode CLI"
+            binary="opencode"
+            source={preferences?.opencode_cli_source ?? 'jean'}
+            onSourceChange={handleOpencodeSourceChange}
+            pathDetection={opencodePathDetection}
+            activePath={
+              preferences?.opencode_cli_source === 'path'
+                ? opencodePathDetection?.path
+                : opencodeStatus?.path
+            }
+            loading={isOpenCodeLoading}
+            installed={!!opencodeStatus?.installed}
+            version={opencodeStatus?.version}
+            onInstall={() => openCliUpdateModal('opencode')}
+            onUninstall={() => setDeleteCliTarget('opencode')}
+            actions={
+              isOpencodePathSource ? (
+                <CliUpdateButton
+                  checking={isOpencodeVersionsLoading}
+                  hasUpdate={opencodeHasUpdate}
+                  latestVersion={opencodeLatestStable?.version}
+                  onUpdate={() => {
+                    const action = getPathUpdateAction(
+                      opencodeStatus?.path,
+                      opencodePathDetection?.package_manager,
+                      'opencode',
+                      ['upgrade']
+                    )
+                    if (action) {
+                      openCliLoginModal(
+                        'opencode',
+                        action[0],
+                        action[1],
+                        'update'
+                      )
+                    } else {
+                      openCliUpdateModal('opencode')
+                    }
+                  }}
+                />
               ) : (
-                <Button
-                  className="w-full sm:w-40"
+                <CliChangeVersionButton
                   onClick={() => openCliUpdateModal('opencode')}
-                >
-                  Install
-                </Button>
-              )}
-            </InlineField>
-            <InlineField
-              label="Source"
-              description={
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleCopyPath(
-                          preferences?.opencode_cli_source === 'path'
-                            ? opencodePathDetection?.path
-                            : opencodeStatus?.path
-                        )
-                      }
-                      className="text-left hover:underline cursor-pointer"
-                    >
-                      {preferences?.opencode_cli_source === 'path'
-                        ? (opencodePathDetection?.path ?? 'System PATH')
-                        : (opencodeStatus?.path ?? 'Not installed')}
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>Click to copy path</TooltipContent>
-                </Tooltip>
-              }
-            >
-              <BackendCliSourceSelect
-                value={preferences?.opencode_cli_source ?? 'jean'}
-                onValueChange={handleOpencodeSourceChange}
-                backendName="OpenCode CLI"
-                path={opencodePathDetection?.path}
-                pathVersion={opencodePathDetection?.version}
-                pathFound={!!opencodePathDetection?.found}
-                action={
-                  preferences?.opencode_cli_source === 'jean' &&
-                  opencodeStatus?.installed && (
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => setDeleteCliTarget('opencode')}
-                    >
-                      Uninstall
-                    </Button>
-                  )
-                }
-              />
-            </InlineField>
-            {!opencodeStatus?.installed && !opencodePathDetection?.found && (
-              <p className="text-xs text-muted-foreground px-1">
-                Install with Jean or add <code>opencode</code> to your PATH.
-              </p>
-            )}
-          </div>
+                />
+              )
+            }
+          />
         </SettingsSection>
       )}
 
       {hasBackend() && scope === 'cursor' && (
         <SettingsSection
-          title="CLI source"
+          title="CLI"
           anchorId="pref-cursor-section-cli"
           actions={
             <CliAuthActions
@@ -2657,87 +2244,34 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             />
           }
         >
-          <div className="space-y-4">
-            <InlineField label={cursorStatus?.installed ? 'Version' : 'Status'}>
-              {isCursorLoading ? (
-                <Loader2 className="size-4 animate-spin text-muted-foreground" />
-              ) : cursorStatus?.installed ? (
-                <div className="flex items-center gap-2">
-                  <span className="text-sm">
-                    {cursorStatus.version ?? 'Installed'}
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleCursorUpdate}
-                  >
-                    Run self-update
-                  </Button>
-                </div>
-              ) : (
-                <Button
-                  className="w-full sm:w-40"
-                  onClick={handleCursorInstall}
-                >
-                  Install
-                </Button>
-              )}
-            </InlineField>
-            {cursorStatus?.installed &&
-              !cursorAuth?.authenticated &&
-              cursorAuthMessage && (
-                <div className="text-xs text-muted-foreground">
-                  {cursorAuthMessage}
-                </div>
-              )}
-            <InlineField
-              label="Source"
-              description={
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleCopyPath(
-                          cursorPathDetection?.path ?? cursorStatus?.path
-                        )
-                      }
-                      className="text-left hover:underline cursor-pointer"
-                    >
-                      {cursorPathDetection?.path ??
-                        cursorStatus?.path ??
-                        'Not installed'}
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>Click to copy path</TooltipContent>
-                </Tooltip>
-              }
-            >
-              {/* Cursor has no Jean-managed binary — the installer runs
-                  Cursor's own script and the result lives on PATH. The
-                  Select is disabled but kept for visual parity with the
-                  other CLI rows. */}
-              <Select value="path" disabled>
-                <SelectTrigger className="w-full sm:w-80">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="path">System PATH</SelectItem>
-                </SelectContent>
-              </Select>
-            </InlineField>
-            {!cursorStatus?.installed && !cursorPathDetection?.found && (
-              <p className="text-xs text-muted-foreground px-1">
-                Install with Jean or add <code>cursor-agent</code> to your PATH.
+          <CliInstallFields
+            backendName="Cursor CLI"
+            binary="cursor-agent"
+            pathDetection={cursorPathDetection}
+            activePath={cursorPathDetection?.path ?? cursorStatus?.path}
+            loading={isCursorLoading}
+            installed={!!cursorStatus?.installed}
+            version={cursorStatus?.version}
+            onInstall={handleCursorInstall}
+            actions={
+              <Button variant="outline" size="sm" onClick={handleCursorUpdate}>
+                Run self-update
+              </Button>
+            }
+          />
+          {cursorStatus?.installed &&
+            !cursorAuth?.authenticated &&
+            cursorAuthMessage && (
+              <p className="text-xs text-muted-foreground">
+                {cursorAuthMessage}
               </p>
             )}
-          </div>
         </SettingsSection>
       )}
 
       {hasBackend() && scope === 'pi' && (
         <SettingsSection
-          title="CLI source"
+          title="CLI"
           anchorId="pref-pi-section-cli"
           actions={
             <CliAuthActions
@@ -2749,87 +2283,32 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             />
           }
         >
-          <div className="space-y-4">
-            <InlineField label={piStatus?.installed ? 'Version' : 'Status'}>
-              {isPiLoading ? (
-                <Loader2 className="size-4 animate-spin text-muted-foreground" />
-              ) : piStatus?.installed ? (
-                <Button
-                  variant="outline"
-                  className="w-full sm:w-40 justify-between"
-                  onClick={handlePiInstall}
-                >
-                  {piStatus.version ?? 'Installed'}
-                </Button>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground">
-                    Not found in PATH
-                  </span>
-                  <Button variant="outline" size="sm" onClick={handlePiInstall}>
-                    Install now
-                  </Button>
-                </div>
-              )}
-            </InlineField>
-            <InlineField
-              label="Source"
-              description={
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleCopyPath(
-                          preferences?.pi_cli_source === 'path'
-                            ? piPathDetection?.path
-                            : piStatus?.path
-                        )
-                      }
-                      className="text-left hover:underline cursor-pointer"
-                    >
-                      {preferences?.pi_cli_source === 'path'
-                        ? (piPathDetection?.path ?? 'System PATH')
-                        : (piStatus?.path ?? 'Not installed')}
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>Click to copy path</TooltipContent>
-                </Tooltip>
-              }
-            >
-              <BackendCliSourceSelect
-                value={preferences?.pi_cli_source ?? 'jean'}
-                onValueChange={handlePiSourceChange}
-                backendName="PI CLI"
-                path={piPathDetection?.path}
-                pathVersion={piPathDetection?.version}
-                pathFound={!!piPathDetection?.found}
-                action={
-                  preferences?.pi_cli_source === 'jean' &&
-                  piStatus?.installed && (
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => setDeleteCliTarget('pi')}
-                    >
-                      Uninstall
-                    </Button>
-                  )
-                }
-              />
-            </InlineField>
-            {piStatus?.installed && !piAuth?.authenticated && piAuthMessage && (
-              <div className="text-xs text-muted-foreground">
-                {piAuthMessage}
-              </div>
-            )}
-          </div>
+          <CliInstallFields
+            backendName="PI CLI"
+            source={preferences?.pi_cli_source ?? 'jean'}
+            onSourceChange={handlePiSourceChange}
+            pathDetection={piPathDetection}
+            activePath={
+              preferences?.pi_cli_source === 'path'
+                ? piPathDetection?.path
+                : piStatus?.path
+            }
+            loading={isPiLoading}
+            installed={!!piStatus?.installed}
+            version={piStatus?.version}
+            onInstall={handlePiInstall}
+            onUninstall={() => setDeleteCliTarget('pi')}
+            actions={<CliChangeVersionButton onClick={handlePiInstall} />}
+          />
+          {piStatus?.installed && !piAuth?.authenticated && piAuthMessage && (
+            <p className="text-xs text-muted-foreground">{piAuthMessage}</p>
+          )}
         </SettingsSection>
       )}
 
       {hasBackend() && scope === 'commandcode' && (
         <SettingsSection
-          title="CLI source"
+          title="CLI"
           anchorId="pref-commandcode-section-cli"
           actions={
             <CliAuthActions
@@ -2841,89 +2320,32 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             />
           }
         >
-          <div className="space-y-4">
-            <InlineField
-              label={commandcodeStatus?.installed ? 'Version' : 'Status'}
-            >
-              {isCommandCodeLoading ? (
-                <Loader2 className="size-4 animate-spin text-muted-foreground" />
-              ) : commandcodeStatus?.installed ? (
-                <Button
-                  variant="outline"
-                  className="w-full sm:w-40 justify-between"
-                  onClick={handleCommandCodeInstall}
-                >
-                  {commandcodeStatus.version ?? 'Installed'}
-                </Button>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground">
-                    Not found in PATH
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleCommandCodeInstall}
-                  >
-                    Install now
-                  </Button>
-                </div>
-              )}
-            </InlineField>
-            <InlineField
-              label="Source"
-              description={
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleCopyPath(
-                          preferences?.commandcode_cli_source === 'path'
-                            ? commandcodePathDetection?.path
-                            : commandcodeStatus?.path
-                        )
-                      }
-                      className="text-left hover:underline cursor-pointer"
-                    >
-                      {preferences?.commandcode_cli_source === 'path'
-                        ? (commandcodePathDetection?.path ?? 'System PATH')
-                        : (commandcodeStatus?.path ?? 'Not installed')}
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>Click to copy path</TooltipContent>
-                </Tooltip>
-              }
-            >
-              <BackendCliSourceSelect
-                value={preferences?.commandcode_cli_source ?? 'jean'}
-                onValueChange={handleCommandCodeSourceChange}
-                backendName="Command Code CLI"
-                path={commandcodePathDetection?.path}
-                pathVersion={commandcodePathDetection?.version}
-                pathFound={!!commandcodePathDetection?.found}
-                action={
-                  preferences?.commandcode_cli_source === 'jean' &&
-                  commandcodeStatus?.installed && (
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => setDeleteCliTarget('commandcode')}
-                    >
-                      Uninstall
-                    </Button>
-                  )
-                }
-              />
-            </InlineField>
-            {commandcodeStatus?.installed &&
-              !commandcodeAuth?.authenticated &&
-              commandCodeAuthMessage && (
-                <div className="text-xs text-muted-foreground">
-                  {commandCodeAuthMessage}
-                </div>
-              )}
-          </div>
+          <CliInstallFields
+            backendName="Command Code CLI"
+            source={preferences?.commandcode_cli_source ?? 'jean'}
+            onSourceChange={handleCommandCodeSourceChange}
+            pathDetection={commandcodePathDetection}
+            activePath={
+              preferences?.commandcode_cli_source === 'path'
+                ? commandcodePathDetection?.path
+                : commandcodeStatus?.path
+            }
+            loading={isCommandCodeLoading}
+            installed={!!commandcodeStatus?.installed}
+            version={commandcodeStatus?.version}
+            onInstall={handleCommandCodeInstall}
+            onUninstall={() => setDeleteCliTarget('commandcode')}
+            actions={
+              <CliChangeVersionButton onClick={handleCommandCodeInstall} />
+            }
+          />
+          {commandcodeStatus?.installed &&
+            !commandcodeAuth?.authenticated &&
+            commandCodeAuthMessage && (
+              <p className="text-xs text-muted-foreground">
+                {commandCodeAuthMessage}
+              </p>
+            )}
         </SettingsSection>
       )}
 
@@ -3396,7 +2818,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
       {scope === 'grok' && (
         <>
           <SettingsSection
-            title="CLI source"
+            title="CLI"
             anchorId="pref-grok-section-cli"
             actions={
               <CliAuthActions
@@ -3408,85 +2830,26 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               />
             }
           >
-            <div className="space-y-4">
-              <InlineField label={grokStatus?.installed ? 'Version' : 'Status'}>
-                {isGrokLoading ? (
-                  <Loader2 className="size-4 animate-spin text-muted-foreground" />
-                ) : grokStatus?.installed ? (
-                  <Button
-                    variant="outline"
-                    className="w-full sm:w-40 justify-between"
-                    onClick={handleGrokInstall}
-                  >
-                    {grokStatus.version ?? 'Installed'}
-                  </Button>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-muted-foreground">
-                      Not found in PATH
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleGrokInstall}
-                    >
-                      Install now
-                    </Button>
-                  </div>
-                )}
-              </InlineField>
-              {grokAuthMessage && (
-                <p className="text-xs text-muted-foreground">
-                  {grokAuthMessage}
-                </p>
-              )}
-              <InlineField
-                label="Source"
-                description={
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleCopyPath(
-                            preferences?.grok_cli_source === 'path'
-                              ? grokPathDetection?.path
-                              : grokStatus?.path
-                          )
-                        }
-                        className="text-left hover:underline cursor-pointer"
-                      >
-                        {preferences?.grok_cli_source === 'path'
-                          ? (grokPathDetection?.path ?? 'System PATH')
-                          : (grokStatus?.path ?? 'Not installed')}
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent>Click to copy path</TooltipContent>
-                  </Tooltip>
-                }
-              >
-                <BackendCliSourceSelect
-                  value={preferences?.grok_cli_source ?? 'jean'}
-                  onValueChange={handleGrokSourceChange}
-                  backendName="Grok CLI"
-                  path={grokPathDetection?.path}
-                  pathVersion={grokPathDetection?.version}
-                  pathFound={!!grokPathDetection?.found}
-                  action={
-                    preferences?.grok_cli_source === 'jean' &&
-                    grokStatus?.installed && (
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => setDeleteCliTarget('grok')}
-                      >
-                        Uninstall
-                      </Button>
-                    )
-                  }
-                />
-              </InlineField>
-            </div>
+            <CliInstallFields
+              backendName="Grok CLI"
+              source={preferences?.grok_cli_source ?? 'jean'}
+              onSourceChange={handleGrokSourceChange}
+              pathDetection={grokPathDetection}
+              activePath={
+                preferences?.grok_cli_source === 'path'
+                  ? grokPathDetection?.path
+                  : grokStatus?.path
+              }
+              loading={isGrokLoading}
+              installed={!!grokStatus?.installed}
+              version={grokStatus?.version}
+              onInstall={handleGrokInstall}
+              onUninstall={() => setDeleteCliTarget('grok')}
+              actions={<CliChangeVersionButton onClick={handleGrokInstall} />}
+            />
+            {grokAuthMessage && (
+              <p className="text-xs text-muted-foreground">{grokAuthMessage}</p>
+            )}
           </SettingsSection>
 
           <SettingsSection
@@ -3547,7 +2910,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
       {scope === 'kimi' && (
         <>
           <SettingsSection
-            title="CLI source"
+            title="CLI"
             anchorId="pref-kimi-section-cli"
             actions={
               <CliAuthActions
@@ -3559,85 +2922,26 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               />
             }
           >
-            <div className="space-y-4">
-              <InlineField label={kimiStatus?.installed ? 'Version' : 'Status'}>
-                {isKimiLoading ? (
-                  <Loader2 className="size-4 animate-spin text-muted-foreground" />
-                ) : kimiStatus?.installed ? (
-                  <Button
-                    variant="outline"
-                    className="w-full sm:w-40 justify-between"
-                    onClick={handleKimiInstall}
-                  >
-                    {kimiStatus.version ?? 'Installed'}
-                  </Button>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-muted-foreground">
-                      Not found in PATH
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleKimiInstall}
-                    >
-                      Install now
-                    </Button>
-                  </div>
-                )}
-              </InlineField>
-              {kimiAuthMessage && (
-                <p className="text-xs text-muted-foreground">
-                  {kimiAuthMessage}
-                </p>
-              )}
-              <InlineField
-                label="Source"
-                description={
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleCopyPath(
-                            preferences?.kimi_cli_source === 'path'
-                              ? kimiPathDetection?.path
-                              : kimiStatus?.path
-                          )
-                        }
-                        className="text-left hover:underline cursor-pointer"
-                      >
-                        {preferences?.kimi_cli_source === 'path'
-                          ? (kimiPathDetection?.path ?? 'System PATH')
-                          : (kimiStatus?.path ?? 'Not installed')}
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent>Click to copy path</TooltipContent>
-                  </Tooltip>
-                }
-              >
-                <BackendCliSourceSelect
-                  value={preferences?.kimi_cli_source ?? 'jean'}
-                  onValueChange={handleKimiSourceChange}
-                  backendName="Kimi Code CLI"
-                  path={kimiPathDetection?.path}
-                  pathVersion={kimiPathDetection?.version}
-                  pathFound={!!kimiPathDetection?.found}
-                  action={
-                    preferences?.kimi_cli_source === 'jean' &&
-                    kimiStatus?.installed && (
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => setDeleteCliTarget('kimi')}
-                      >
-                        Uninstall
-                      </Button>
-                    )
-                  }
-                />
-              </InlineField>
-            </div>
+            <CliInstallFields
+              backendName="Kimi Code CLI"
+              source={preferences?.kimi_cli_source ?? 'jean'}
+              onSourceChange={handleKimiSourceChange}
+              pathDetection={kimiPathDetection}
+              activePath={
+                preferences?.kimi_cli_source === 'path'
+                  ? kimiPathDetection?.path
+                  : kimiStatus?.path
+              }
+              loading={isKimiLoading}
+              installed={!!kimiStatus?.installed}
+              version={kimiStatus?.version}
+              onInstall={handleKimiInstall}
+              onUninstall={() => setDeleteCliTarget('kimi')}
+              actions={<CliChangeVersionButton onClick={handleKimiInstall} />}
+            />
+            {kimiAuthMessage && (
+              <p className="text-xs text-muted-foreground">{kimiAuthMessage}</p>
+            )}
           </SettingsSection>
 
           <SettingsSection
@@ -3681,7 +2985,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
       {scope === 'devin' && (
         <>
           <SettingsSection
-            title="CLI source"
+            title="CLI"
             anchorId="pref-devin-section-cli"
             actions={
               <CliAuthActions
@@ -3693,91 +2997,33 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               />
             }
           >
-            <div className="space-y-4">
-              <InlineField
-                label={devinStatus?.installed ? 'Version' : 'Status'}
-                description={
-                  devinStatus?.installed
-                    ? 'Enables Devin AI sessions through the Devin CLI ACP server.'
-                    : 'Install the official Devin CLI, then log in with your Devin account.'
-                }
-              >
-                {isDevinLoading ? (
-                  <Loader2 className="size-4 animate-spin text-muted-foreground" />
-                ) : devinStatus?.installed ? (
-                  <Button
-                    variant="outline"
-                    className="w-full sm:w-40 justify-between"
-                    onClick={handleDevinInstall}
-                  >
-                    {devinStatus.version ?? 'Installed'}
-                  </Button>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-muted-foreground">
-                      Not found in PATH
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleDevinInstall}
-                    >
-                      Install now
-                    </Button>
-                  </div>
-                )}
-              </InlineField>
-              {devinAuthMessage && (
-                <p className="text-xs text-muted-foreground">
-                  {devinAuthMessage}
-                </p>
-              )}
-              <InlineField
-                label="Source"
-                description={
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        onClick={() =>
-                          handleCopyPath(
-                            preferences?.devin_cli_source === 'jean'
-                              ? devinStatus?.path
-                              : devinPathDetection?.path
-                          )
-                        }
-                        className="text-left hover:underline cursor-pointer"
-                      >
-                        {preferences?.devin_cli_source === 'jean'
-                          ? (devinStatus?.path ?? 'Jean-managed path')
-                          : (devinPathDetection?.path ?? 'System PATH')}
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent>Click to copy path</TooltipContent>
-                  </Tooltip>
-                }
-              >
-                <BackendCliSourceSelect
-                  value={preferences?.devin_cli_source ?? 'jean'}
-                  onValueChange={handleDevinSourceChange}
-                  backendName="Devin CLI"
-                  path={devinPathDetection?.path}
-                  pathVersion={devinPathDetection?.version}
-                  pathFound={!!devinPathDetection?.found}
-                  action={
-                    preferences?.devin_cli_source === 'jean' &&
-                    devinStatus?.installed && (
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => setDeleteCliTarget('devin')}
-                      >
-                        Uninstall
-                      </Button>
-                    )
-                  }
-                />
-              </InlineField>
-            </div>
+            <CliInstallFields
+              backendName="Devin CLI"
+              source={preferences?.devin_cli_source ?? 'jean'}
+              onSourceChange={handleDevinSourceChange}
+              pathDetection={devinPathDetection}
+              activePath={
+                preferences?.devin_cli_source === 'jean'
+                  ? devinStatus?.path
+                  : devinPathDetection?.path
+              }
+              loading={isDevinLoading}
+              installed={!!devinStatus?.installed}
+              version={devinStatus?.version}
+              description={
+                devinStatus?.installed
+                  ? 'Enables Devin AI sessions through the Devin CLI ACP server.'
+                  : 'Install the official Devin CLI, then log in with your Devin account.'
+              }
+              onInstall={handleDevinInstall}
+              onUninstall={() => setDeleteCliTarget('devin')}
+              actions={<CliChangeVersionButton onClick={handleDevinInstall} />}
+            />
+            {devinAuthMessage && (
+              <p className="text-xs text-muted-foreground">
+                {devinAuthMessage}
+              </p>
+            )}
           </SettingsSection>
 
           <SettingsSection

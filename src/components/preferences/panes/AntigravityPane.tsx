@@ -81,7 +81,7 @@ export function AntigravityPane() {
   return (
     <div className="w-full space-y-8">
       <SettingsSection
-        title="CLI source"
+        title="CLI"
         anchorId="pref-antigravity-section-cli"
         actions={
           <CliAuthActions
@@ -93,6 +93,16 @@ export function AntigravityPane() {
           />
         }
       >
+        <InlineField label="Source">
+          <BackendCliSourceSelect
+            value={source}
+            onValueChange={setSource}
+            backendName="Antigravity CLI"
+            path={pathDetection.data?.path}
+            pathVersion={pathDetection.data?.version}
+            pathFound={!!pathDetection.data?.found}
+          />
+        </InlineField>
         <InlineField
           label={installed ? 'Version' : 'Status'}
           description={
@@ -160,21 +170,11 @@ export function AntigravityPane() {
                   disabled={uninstall.isPending}
                   onClick={() => uninstall.mutate()}
                 >
-                  {uninstall.isPending ? 'Removing…' : 'Remove'}
+                  {uninstall.isPending ? 'Removing…' : 'Uninstall'}
                 </Button>
               )}
             </div>
           )}
-        </InlineField>
-        <InlineField label="Source">
-          <BackendCliSourceSelect
-            value={source}
-            onValueChange={setSource}
-            backendName="Antigravity CLI"
-            path={pathDetection.data?.path}
-            pathVersion={pathDetection.data?.version}
-            pathFound={!!pathDetection.data?.found}
-          />
         </InlineField>
         {installed && !auth.isLoading && !auth.data?.authenticated && (
           <CliAuthProblem
