@@ -21,7 +21,7 @@ import {
 } from '@/components/icons/reicon'
 import { ModalCloseButton } from '@/components/ui/modal-close-button'
 import { cn } from '@/lib/utils'
-import { Button } from '@/components/ui/button'
+import { Button, raisedToolbar } from '@/components/ui/button'
 import {
   Tooltip,
   TooltipTrigger,
@@ -1198,8 +1198,9 @@ export const SessionChatModal = memo(function SessionChatModal({
                   {isMobile && (
                     <Button
                       type="button"
-                      variant="outline"
+                      variant="ghost"
                       size="sm"
+                      className={raisedToolbar}
                       onClick={handleCreateDefaultSession}
                       data-testid="mobile-new-session"
                     >
@@ -1473,11 +1474,12 @@ export const SessionChatModal = memo(function SessionChatModal({
                 {sessionsData && (
                   <Button
                     type="button"
-                    variant="outline"
+                    variant="ghost"
                     size="sm"
+                    className={raisedToolbar}
                     onClick={handleCreateSession}
                   >
-                    <Plus className="mr-2 h-3.5 w-3.5" />
+                    <Plus className="h-3.5 w-3.5" />
                     New session
                   </Button>
                 )}

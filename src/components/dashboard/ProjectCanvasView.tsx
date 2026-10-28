@@ -56,7 +56,7 @@ import {
   GripVertical,
   Tag,
 } from '@/components/icons/reicon'
-import { Button } from '@/components/ui/button'
+import { Button, raisedToolbar } from '@/components/ui/button'
 import {
   Tooltip,
   TooltipContent,
@@ -3330,8 +3330,9 @@ export function ProjectCanvasView({
             <div className="flex items-center gap-2 shrink-0 justify-end col-start-3">
               <Button
                 type="button"
-                variant="outline"
+                variant="ghost"
                 size="sm"
+                className={raisedToolbar}
                 onClick={() => {
                   useProjectsStore.getState().selectProject(projectId)
                   useUIStore.getState().setNewWorktreeModalOpen(true)
