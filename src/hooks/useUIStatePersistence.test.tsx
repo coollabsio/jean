@@ -112,7 +112,7 @@ describe('useUIStatePersistence — terminal restore on web refresh', () => {
       pendingFiles: {},
       pendingSkills: {},
       dismissedSetupScripts: {},
-      collapsedQueuedPromptsSessions: {},
+      expandedQueuedPromptsSessions: {},
     })
     useProjectsStore.setState({
       projectCanvasSettings: {},
@@ -352,9 +352,9 @@ describe('useUIStatePersistence — terminal restore on web refresh', () => {
     })
   })
 
-  it('restores collapsed queued prompts panels after a reload', async () => {
+  it('restores expanded queued prompts panels after a reload', async () => {
     mockUseUIState.mockReturnValue({
-      data: buildUiState({ collapsed_queued_prompts_sessions: ['session-1'] }),
+      data: buildUiState({ expanded_queued_prompts_sessions: ['session-1'] }),
       isSuccess: true,
     })
     const queryClient = new QueryClient({
@@ -369,7 +369,7 @@ describe('useUIStatePersistence — terminal restore on web refresh', () => {
     })
 
     await waitFor(() => {
-      expect(useChatStore.getState().collapsedQueuedPromptsSessions).toEqual({
+      expect(useChatStore.getState().expandedQueuedPromptsSessions).toEqual({
         'session-1': true,
       })
     })

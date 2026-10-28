@@ -59,13 +59,13 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
   onSendNow,
   onEdit,
 }: QueuedPromptsPanelProps) {
-  // Collapsed state is remembered per session (expanded by default)
+  // Expanded state is remembered per session (collapsed by default)
   const isOpen = useChatStore(
-    state => !state.collapsedQueuedPromptsSessions[sessionId]
+    state => !!state.expandedQueuedPromptsSessions[sessionId]
   )
   const setIsOpen = useCallback(
     (open: boolean) =>
-      useChatStore.getState().setQueuedPromptsCollapsed(sessionId, !open),
+      useChatStore.getState().setQueuedPromptsExpanded(sessionId, open),
     [sessionId]
   )
   const [selectedIndex, setSelectedIndex] = useState(0)

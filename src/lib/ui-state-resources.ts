@@ -51,8 +51,8 @@ function transformUIStateResources(
     pending_files: mapRecordKeys(state.pending_files, transform),
     pending_skills: mapRecordKeys(state.pending_skills, transform),
     dismissed_setup_scripts: state.dismissed_setup_scripts?.map(transform),
-    collapsed_queued_prompts_sessions:
-      state.collapsed_queued_prompts_sessions?.map(transform),
+    expanded_queued_prompts_sessions:
+      state.expanded_queued_prompts_sessions?.map(transform),
     pinned_recent_session_ids: state.pinned_recent_session_ids?.map(transform),
     last_opened_per_project: mapRecord(
       state.last_opened_per_project,

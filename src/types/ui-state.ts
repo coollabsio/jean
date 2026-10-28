@@ -127,8 +127,8 @@ export interface UIState {
   pending_skills?: Record<string, PendingSkillDraft[]>
   /** Worktrees whose setup-script status card was dismissed */
   dismissed_setup_scripts?: string[]
-  /** Sessions whose Queued prompts panel is collapsed */
-  collapsed_queued_prompts_sessions?: string[]
+  /** Sessions whose Queued prompts panel is expanded */
+  expanded_queued_prompts_sessions?: string[]
   /** Whether the review sidebar is visible */
   review_sidebar_visible?: boolean
   /** Modal terminal drawer open state per worktree */
@@ -221,7 +221,7 @@ export const defaultUIState: UIState = {
   pending_files: {},
   pending_skills: {},
   dismissed_setup_scripts: [],
-  collapsed_queued_prompts_sessions: [],
+  expanded_queued_prompts_sessions: [],
   modal_terminal_open: {},
   modal_terminal_dock_mode: 'floating',
   modal_terminal_width: 400,

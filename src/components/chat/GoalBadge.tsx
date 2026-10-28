@@ -13,6 +13,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
+import { COMPOSER_TAB_CLASS } from './composer-surface'
 
 interface GoalBadgeProps {
   sessionId: string | null | undefined
@@ -50,7 +51,7 @@ export function GoalBadge({ sessionId, onClearGoal }: GoalBadgeProps) {
             <button
               type="button"
               aria-label="Show goal"
-              className="flex h-6 items-center gap-1 rounded-t-md border border-b-0 border-border bg-card px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              className={COMPOSER_TAB_CLASS}
             >
               <Flag className="h-3.5 w-3.5" aria-hidden="true" />
               <span>Goal</span>

@@ -27,6 +27,9 @@ import { useProjectsStore } from '@/store/projects-store'
 import { resolveHeaderServerLabel } from './server-context'
 import { UpdatesIndicator } from './UpdatesIndicator'
 
+// Dark pill that matches the toast surface (card bg + soft border).
+const SERVER_BADGE_CLASS = 'border border-border/60 bg-card text-2xs'
+
 interface TitleBarProps {
   className?: string
   title?: string
@@ -130,7 +133,11 @@ export function TitleBar({
                   }
                   className="rounded-none text-foreground/70 hover:text-foreground"
                 >
-                  <PanelLeft className="size-3.5" />
+                  {leftSidebarVisible ? (
+                    <PanelRight className="size-3.5" />
+                  ) : (
+                    <PanelLeft className="size-3.5" />
+                  )}
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
@@ -174,7 +181,7 @@ export function TitleBar({
             {hideTitle ? '' : title}
           </span>
           {native && (
-            <Badge variant="subtle" className="ml-2 text-2xs">
+            <Badge variant="subtle" className={cn(SERVER_BADGE_CLASS, 'ml-2')}>
               {serverLabel}
             </Badge>
           )}
@@ -194,7 +201,7 @@ export function TitleBar({
             {native && (
               <Badge
                 variant="subtle"
-                className="text-2xs"
+                className={SERVER_BADGE_CLASS}
                 aria-label={`Current Jean server: ${serverLabel}`}
               >
                 {serverLabel}

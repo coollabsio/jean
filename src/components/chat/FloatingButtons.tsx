@@ -16,6 +16,7 @@ import {
   ApprovalActionMenu,
   type ApprovalModelOverride,
 } from './ApprovalModelSubmenu'
+import { COMPOSER_TAB_CLASS } from './composer-surface'
 
 interface FloatingButtonsProps {
   /** Whether a plan needs approval (streaming or pending) */
@@ -203,7 +204,7 @@ export const FloatingButtons = memo(function FloatingButtons({
         <button
           type="button"
           onClick={onScrollToFindings}
-          className="flex h-6 items-center gap-1 rounded-t-md border border-b-0 border-border bg-card px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          className={COMPOSER_TAB_CLASS}
         >
           <AlertCircle className="h-3.5 w-3.5" />
           <span>Findings</span>

@@ -305,8 +305,8 @@ interface ChatUIState {
   // Subagent ids the user dismissed from the Subagents panel, per session
   dismissedAgentWidgetIds: Record<string, string[]>
 
-  // Sessions where the user collapsed the Queued prompts panel (expanded by default)
-  collapsedQueuedPromptsSessions: Record<string, boolean>
+  // Sessions where the user expanded the Queued prompts panel (collapsed by default)
+  expandedQueuedPromptsSessions: Record<string, boolean>
 
   // Worktree loading operations (commit, pr, review, merge, pull)
   worktreeLoadingOperations: Record<string, string | null>
@@ -562,7 +562,7 @@ interface ChatUIState {
   areQuestionsSkipped: (sessionId: string) => boolean
   setAgentWidgetExpanded: (sessionId: string, expanded: boolean) => void
   dismissAgentWidget: (sessionId: string, agentIds: string[]) => void
-  setQueuedPromptsCollapsed: (sessionId: string, collapsed: boolean) => void
+  setQueuedPromptsExpanded: (sessionId: string, expanded: boolean) => void
 
   // Actions - Error handling (session-based)
   setError: (sessionId: string, error: string | null) => void
@@ -849,7 +849,7 @@ const SESSION_SCOPED_RECORD_KEYS = [
   'skippedQuestionSessions',
   'expandedAgentWidgetSessions',
   'dismissedAgentWidgetIds',
-  'collapsedQueuedPromptsSessions',
+  'expandedQueuedPromptsSessions',
   'sessionLabels',
   'codexGoals',
 ] as const
@@ -1018,7 +1018,7 @@ export const useChatStore = create<ChatUIState>()(
       skippedQuestionSessions: {},
       expandedAgentWidgetSessions: {},
       dismissedAgentWidgetIds: {},
-      collapsedQueuedPromptsSessions: {},
+      expandedQueuedPromptsSessions: {},
       worktreeLoadingOperations: {},
       sessionLabels: {},
       codexGoals: {},
@@ -2942,29 +2942,29 @@ export const useChatStore = create<ChatUIState>()(
           'dismissAgentWidget'
         ),
 
-      // Queued prompts panel collapsed state (session-based, expanded by default)
-      setQueuedPromptsCollapsed: (sessionId, collapsed) =>
+      // Queued prompts panel expanded state (session-based, collapsed by default)
+      setQueuedPromptsExpanded: (sessionId, expanded) =>
         set(
           state => {
             if (
-              !!state.collapsedQueuedPromptsSessions[sessionId] === collapsed
+              !!state.expandedQueuedPromptsSessions[sessionId] === expanded
             ) {
               return state
             }
-            if (collapsed) {
+            if (expanded) {
               return {
-                collapsedQueuedPromptsSessions: {
-                  ...state.collapsedQueuedPromptsSessions,
+                expandedQueuedPromptsSessions: {
+                  ...state.expandedQueuedPromptsSessions,
                   [sessionId]: true,
                 },
               }
             }
             const { [sessionId]: _, ...rest } =
-              state.collapsedQueuedPromptsSessions
-            return { collapsedQueuedPromptsSessions: rest }
+              state.expandedQueuedPromptsSessions
+            return { expandedQueuedPromptsSessions: rest }
           },
           undefined,
-          'setQueuedPromptsCollapsed'
+          'setQueuedPromptsExpanded'
         ),
 
       // Error handling (session-based)

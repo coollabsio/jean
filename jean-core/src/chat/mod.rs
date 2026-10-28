@@ -73,7 +73,7 @@ Rules:
 - When the turn produced code, config, or behavior changes, add a `### Possible regressions` subsection with a Markdown table of every existing behavior the change could break: | # | Area | What could break | Likelihood (Low/Medium/High) | Verified not broken |. In `Verified not broken`, name how you proved this item does not break (test name, typecheck, callers read, local dev env run), or write `Not verified`. Look beyond the diff: callers, shared types, persistence, other backends, web access, and mobile. If you found none, write the single line `No possible regressions found` and the reason, not an empty table. Omit this subsection on read-only turns.
 - In plan mode, when a plan is ready, you MUST still call the native plan tool (Claude ExitPlanMode, Codex `<proposed_plan>` / plan item, Cursor/OpenCode equivalent) to present it. The recap does NOT replace the plan tool — never end a plan-mode turn with only a `## Recap` block in place of the plan tool call.
 - Skip the recap entirely if the turn was a single one-line answer with no tool calls.
-- If the turn ends with a question for the user, put the question at the end of the recap, in this format: one line with the question, then the line `Reply with a number:`, then a numbered list (`1.`, `2.`, `3.`...) of 2 to 8 short options. Jean shows the options as buttons below the recap. Do not also ask the question outside the recap.
+- If the turn ends with a question for the user, put the question at the end of the recap, in this format: one line with the question, then the line `Reply with a number:`, then a numbered list (`1.`, `2.`, `3.`...) of 2 to 8 short options. Jean shows the options as buttons below the recap. Ask the question exactly once: do not write the question or its options anywhere before the `## Recap` heading, not even in an earlier message of the same turn, and not even when a skill tells you to ask it.
 - If you took screenshots or made images the user should see (for example browser screenshots of a UI change), show them in the recap in a fenced code block with the language `screenshots`, one absolute image file path or image URL per line, in the order to view them. Jean shows this block as an image gallery. Do not also list the same images as links or markdown images.
 - Do NOT repeat tool inputs, file diffs, or raw command output verbatim. Summarize.";
 
@@ -128,6 +128,7 @@ mod tests {
     fn recap_holds_inline_question() {
         assert!(RECAP_INSTRUCTION.contains("put the question at the end of the recap"));
         assert!(RECAP_INSTRUCTION.contains("`Reply with a number:`"));
+        assert!(RECAP_INSTRUCTION.contains("Ask the question exactly once"));
     }
 
     #[test]

@@ -29,7 +29,10 @@ describe('QueuedPromptsPanel', () => {
   })
 
   beforeEach(() => {
-    useChatStore.setState({ collapsedQueuedPromptsSessions: {} })
+    // Most tests interact with the open list
+    useChatStore.setState({
+      expandedQueuedPromptsSessions: { 'session-1': true },
+    })
   })
 
   const messages = [
@@ -172,19 +175,26 @@ describe('QueuedPromptsPanel', () => {
     expect(screen.getByText('Queued prompts')).toBeInTheDocument()
   })
 
-  it('remembers the collapsed state per session', () => {
+  it('starts collapsed and remembers the expanded state per session', () => {
+    useChatStore.setState({ expandedQueuedPromptsSessions: {} })
     const { unmount } = renderPanel()
-    fireEvent.click(screen.getByText('Queued prompts'))
-    unmount()
-
-    // Same session stays collapsed after remount (e.g. session switch)
-    const { unmount: unmountAgain } = renderPanel()
     expect(
       screen.queryByRole('list', { name: 'Queued prompts' })
     ).not.toBeInTheDocument()
+    fireEvent.click(screen.getByText('Queued prompts'))
+    expect(
+      screen.getByRole('list', { name: 'Queued prompts' })
+    ).toBeInTheDocument()
+    unmount()
+
+    // Same session stays expanded after remount (e.g. session switch)
+    const { unmount: unmountAgain } = renderPanel()
+    expect(
+      screen.getByRole('list', { name: 'Queued prompts' })
+    ).toBeInTheDocument()
     unmountAgain()
 
-    // Other sessions stay expanded
+    // Other sessions start collapsed
     render(
       <QueuedPromptsPanel
         sessionId="session-2"
@@ -196,8 +206,8 @@ describe('QueuedPromptsPanel', () => {
       />
     )
     expect(
-      screen.getByRole('list', { name: 'Queued prompts' })
-    ).toBeInTheDocument()
+      screen.queryByRole('list', { name: 'Queued prompts' })
+    ).not.toBeInTheDocument()
   })
 
   it('row buttons call onRemove and onSendNow', () => {

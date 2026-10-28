@@ -183,7 +183,7 @@ export function useUIStatePersistence() {
       pendingFiles,
       pendingSkills,
       dismissedSetupScripts,
-      collapsedQueuedPromptsSessions,
+      expandedQueuedPromptsSessions,
       reviewSidebarVisible,
       lastOpenedPerProject,
       autoResume,
@@ -268,8 +268,8 @@ export function useUIStatePersistence() {
       ),
       pending_skills: pendingSkills,
       dismissed_setup_scripts: Object.keys(dismissedSetupScripts),
-      collapsed_queued_prompts_sessions: Object.keys(
-        collapsedQueuedPromptsSessions
+      expanded_queued_prompts_sessions: Object.keys(
+        expandedQueuedPromptsSessions
       ),
       // Review sidebar visibility
       review_sidebar_visible: reviewSidebarVisible,
@@ -541,14 +541,14 @@ export function useUIStatePersistence() {
     if (Object.keys(dismissedSetupScripts).length > 0) {
       useChatStore.setState({ dismissedSetupScripts })
     }
-    const collapsedQueuedPromptsSessions = Object.fromEntries(
-      (uiState.collapsed_queued_prompts_sessions ?? []).map(sessionId => [
+    const expandedQueuedPromptsSessions = Object.fromEntries(
+      (uiState.expanded_queued_prompts_sessions ?? []).map(sessionId => [
         sessionId,
         true,
       ])
     )
-    if (Object.keys(collapsedQueuedPromptsSessions).length > 0) {
-      useChatStore.setState({ collapsedQueuedPromptsSessions })
+    if (Object.keys(expandedQueuedPromptsSessions).length > 0) {
+      useChatStore.setState({ expandedQueuedPromptsSessions })
     }
 
     // Restore unsent image attachments (files already on disk)
@@ -1229,7 +1229,7 @@ export function useUIStatePersistence() {
     let prevDismissedSetupScripts =
       useChatStore.getState().dismissedSetupScripts
     let prevCollapsedQueuedPromptsSessions =
-      useChatStore.getState().collapsedQueuedPromptsSessions
+      useChatStore.getState().expandedQueuedPromptsSessions
     let prevReviewSidebarVisible = useChatStore.getState().reviewSidebarVisible
     let prevLastOpenedPerProject = useChatStore.getState().lastOpenedPerProject
     let prevAutoResume = useChatStore.getState().autoResume
@@ -1302,7 +1302,7 @@ export function useUIStatePersistence() {
       const dismissedSetupScriptsChanged =
         state.dismissedSetupScripts !== prevDismissedSetupScripts
       const collapsedQueuedPromptsChanged =
-        state.collapsedQueuedPromptsSessions !==
+        state.expandedQueuedPromptsSessions !==
         prevCollapsedQueuedPromptsSessions
       const reviewSidebarChanged =
         state.reviewSidebarVisible !== prevReviewSidebarVisible
@@ -1335,7 +1335,7 @@ export function useUIStatePersistence() {
         prevPendingSkills = state.pendingSkills
         prevDismissedSetupScripts = state.dismissedSetupScripts
         prevCollapsedQueuedPromptsSessions =
-          state.collapsedQueuedPromptsSessions
+          state.expandedQueuedPromptsSessions
         prevReviewSidebarVisible = state.reviewSidebarVisible
         prevLastOpenedPerProject = state.lastOpenedPerProject
         prevAutoResume = state.autoResume

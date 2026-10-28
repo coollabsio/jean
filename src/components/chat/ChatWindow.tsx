@@ -293,7 +293,7 @@ import {
   shouldShowPermissionApproval,
 } from './permission-approval-utils'
 import { navigateToForkedSession } from './fork-session-navigation'
-import { COMPOSER_SURFACE_CLASS } from './composer-surface'
+import { COMPOSER_SURFACE_CLASS, COMPOSER_TAB_CLASS } from './composer-surface'
 
 // PERFORMANCE: Stable empty array references to prevent infinite render loops
 // When Zustand selectors return [], a new reference is created each time
@@ -3239,7 +3239,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                       type="button"
                                       onClick={handleShowHiddenCompactPrompts}
                                       aria-label={`Show ${compactHistoryWindow.hiddenPromptCount} earlier prompts`}
-                                      className="flex h-6 items-center gap-1 rounded-t-md border border-b-0 border-border bg-card px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                      className={COMPOSER_TAB_CLASS}
                                     >
                                       <ArrowUp className="h-3.5 w-3.5" />
                                       <span>
@@ -3291,7 +3291,10 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                     type="button"
                                     onClick={() => scrollToBottom(true)}
                                     aria-label="Scroll to bottom"
-                                    className="relative flex h-6 items-center gap-1 rounded-t-md border border-b-0 border-border bg-card px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                    className={cn(
+                                      'relative',
+                                      COMPOSER_TAB_CLASS
+                                    )}
                                   >
                                     <ArrowDown className="h-3.5 w-3.5" />
                                     <span>Bottom</span>
