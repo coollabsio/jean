@@ -322,7 +322,7 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
           </div>
           <Tooltip>
             <TooltipTrigger asChild>
-              <label className="flex shrink-0 cursor-pointer items-center gap-2 border-t border-border/30 px-3 py-2 text-xs text-muted-foreground select-none hover:text-foreground">
+              <label className="flex shrink-0 cursor-pointer items-center gap-2 border-t border-border/30 px-3 pt-3 pb-[calc(env(safe-area-inset-bottom)+1rem)] text-sm sm:py-2 sm:text-xs text-muted-foreground select-none hover:text-foreground">
                 <Checkbox
                   checked={advanced}
                   onCheckedChange={value =>

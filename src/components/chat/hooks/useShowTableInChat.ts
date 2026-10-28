@@ -16,11 +16,8 @@ import type { MessageListHandle } from '../message-list-handle'
 
 interface ShowTableInChatOptions {
   sessionId: string | null | undefined
-  isCompact: boolean
-  /** First message index shown while compact history is collapsed */
-  compactStartIndex: number
-  isCompactHistoryExpanded: boolean
-  onExpandCompactHistory: () => void
+  /** First message index the list renders (zen mode shows only the current prompt) */
+  listStartIndex: number
   listRef: RefObject<MessageListHandle | null>
   /** Stop auto-scroll to bottom so it does not undo the jump to the table */
   stopFollowingTail: () => void
@@ -35,9 +32,8 @@ async function afterRender() {
 }
 
 /**
- * Scroll to a pinned table in the chat. Loads older runs from disk, expands
- * hidden compact prompts, and opens the compact activity row when the table is
- * not rendered yet.
+ * Scroll to a pinned table in the chat. Loads older runs from disk and opens
+ * the compact activity row when the table is not rendered yet.
  */
 export function useShowTableInChat(options: ShowTableInChatOptions) {
   const queryClient = useQueryClient()
@@ -113,18 +109,12 @@ export function useShowTableInChat(options: ShowTableInChatOptions) {
         return
       }
 
-      // Let older messages render so compact window values are current.
+      // Let older messages render so the list start index is current.
       await afterRender()
-      const {
-        isCompact,
-        compactStartIndex,
-        isCompactHistoryExpanded,
-        onExpandCompactHistory,
-      } = latest.current
-      const compactWindowed = isCompact && !isCompactHistoryExpanded
-      if (compactWindowed && index < compactStartIndex) {
-        onExpandCompactHistory()
-        await afterRender()
+      const { listStartIndex } = latest.current
+      if (index < listStartIndex) {
+        toast.info('Exit zen mode to see this table in the chat')
+        return
       }
 
       // Loading older messages can re-pin the chat to the bottom.
@@ -134,11 +124,7 @@ export function useShowTableInChat(options: ShowTableInChatOptions) {
           detail: { messageId: message.id },
         })
       )
-      const listIndex =
-        compactWindowed && index >= compactStartIndex
-          ? index - compactStartIndex
-          : index
-      latest.current.listRef.current?.scrollToIndex(listIndex)
+      latest.current.listRef.current?.scrollToIndex(index - listStartIndex)
 
       if (!(await reveal(message.id, 2000))) {
         toast.info('Could not find this table in the chat')

@@ -683,6 +683,7 @@ export function ContextMentionPopover({
             }
             onSecondaryAction={() => handleInvestigateChecked(true)}
             onInvestigate={() => handleInvestigateChecked(false)}
+            className="pb-2.5"
           />
         )}
       </PopoverContent>

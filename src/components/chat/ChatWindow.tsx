@@ -175,18 +175,14 @@ import { useQueuedPromptActions } from './hooks/useQueuedPromptActions'
 import { FloatingButtons } from './FloatingButtons'
 import { GoalBadge } from './GoalBadge'
 import { PinnedTablesButton } from './PinnedTablesButton'
-import {
-  capturePrependScrollAnchor,
-  restorePrependScrollAnchor,
-  type PrependScrollAnchor,
-} from './message-scroll-anchor'
+import { PromptTopSpacer } from './PromptTopSpacer'
 import { useShowTableInChat } from './hooks/useShowTableInChat'
 import type { ApprovalModelOverride } from './ApprovalModelSubmenu'
 import { resolveApprovalLabel } from './approval-label-utils'
 import { CompactStreamingTicker } from './CompactStreamingTicker'
 import { CompactMessageList } from './CompactMessageList'
 import {
-  getCurrentPromptWindow,
+  getCurrentPromptStartIndex,
   remapIndexForWindow,
 } from './compact-history-window'
 import { StreamingStatusBar } from './StreamingStatusBar'
@@ -2589,51 +2585,23 @@ const ChatWindowContent = memo(function ChatWindowContent({
 
   // Simple agent chat uses a single-line pill composer
   const pillComposer = Boolean(workingLabel)
-  const compactHistoryWindow = useMemo(
-    () => getCurrentPromptWindow(messages),
-    [messages]
+  // Zen mode shows only the current prompt. Other chats show the full
+  // history, and the prompt spacer scrolls a new prompt to the top.
+  const zenStartIndex = useMemo(
+    () => (zenMode ? getCurrentPromptStartIndex(messages) : 0),
+    [zenMode, messages]
   )
-  // Keep history expanded for the whole session, so a new prompt or a finished
-  // run does not collapse it again. Agent chat always shows the full history.
-  const [expandedCompactSessionId, setExpandedCompactSessionId] = useState<
-    string | null
-  >(null)
-  const isCompactHistoryExpanded =
-    Boolean(workingLabel) ||
-    (!!deferredSessionId && expandedCompactSessionId === deferredSessionId)
-  const compactExpandAnchorRef = useRef<PrependScrollAnchor | null>(null)
   const compactMessages = useMemo(
-    () =>
-      isCompactHistoryExpanded
-        ? messages
-        : messages.slice(compactHistoryWindow.startIndex),
-    [isCompactHistoryExpanded, messages, compactHistoryWindow.startIndex]
+    () => (zenStartIndex > 0 ? messages.slice(zenStartIndex) : messages),
+    [messages, zenStartIndex]
   )
-  const compactLastPlanMessageIndex = isCompactHistoryExpanded
-    ? lastPlanMessageIndex
-    : remapIndexForWindow(lastPlanMessageIndex, compactHistoryWindow.startIndex)
-  const handleShowHiddenCompactPrompts = useCallback(() => {
-    const viewport = scrollViewportRef.current
-    compactExpandAnchorRef.current = viewport
-      ? capturePrependScrollAnchor(viewport)
-      : null
-    setExpandedCompactSessionId(deferredSessionId ?? null)
-  }, [scrollViewportRef, deferredSessionId])
-  // Older prompts are prepended above the view. Keep the visible message in
-  // place so the chat does not jump.
-  useLayoutEffect(() => {
-    const anchor = compactExpandAnchorRef.current
-    const viewport = scrollViewportRef.current
-    if (!isCompactHistoryExpanded || !anchor || !viewport) return
-    compactExpandAnchorRef.current = null
-    restorePrependScrollAnchor(viewport, anchor)
-  }, [isCompactHistoryExpanded, scrollViewportRef])
+  const compactLastPlanMessageIndex = remapIndexForWindow(
+    lastPlanMessageIndex,
+    zenStartIndex
+  )
   const handleShowTableInChat = useShowTableInChat({
     sessionId: deferredSessionId,
-    isCompact: true,
-    compactStartIndex: compactHistoryWindow.startIndex,
-    isCompactHistoryExpanded,
-    onExpandCompactHistory: handleShowHiddenCompactPrompts,
+    listStartIndex: zenStartIndex,
     listRef: virtualizedListRef,
     stopFollowingTail,
   })
@@ -2953,16 +2921,6 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                     zenMode ? undefined : handleLoadOlderRuns
                                   }
                                   loadedRunStartIndex={loadedRunStartIndex}
-                                  hiddenPromptCount={
-                                    zenMode || isCompactHistoryExpanded
-                                      ? 0
-                                      : compactHistoryWindow.hiddenPromptCount
-                                  }
-                                  onShowHiddenPrompts={
-                                    zenMode
-                                      ? undefined
-                                      : handleShowHiddenCompactPrompts
-                                  }
                                 />
                               </>
                             )}
@@ -3186,6 +3144,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
                               />
                             )}
                           </div>
+                          <PromptTopSpacer viewportRef={scrollViewportRef} />
                         </div>
                       </ScrollArea>
                     </div>
@@ -3246,28 +3205,6 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                 onClearGoal={handleClearGoal}
                               />
                             )}
-                            {!zenMode &&
-                              !isCompactHistoryExpanded &&
-                              compactHistoryWindow.hiddenPromptCount > 0 && (
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <button
-                                      type="button"
-                                      onClick={handleShowHiddenCompactPrompts}
-                                      aria-label={`Show ${compactHistoryWindow.hiddenPromptCount} earlier prompts`}
-                                      className={COMPOSER_TAB_CLASS}
-                                    >
-                                      <ArrowUp className="h-3.5 w-3.5" />
-                                      <span>
-                                        {compactHistoryWindow.hiddenPromptCount}
-                                      </span>
-                                    </button>
-                                  </TooltipTrigger>
-                                  <TooltipContent>
-                                    Show earlier prompts
-                                  </TooltipContent>
-                                </Tooltip>
-                              )}
                             <PinnedTablesButton
                               sessionId={activeSessionId}
                               onShowInChat={handleShowTableInChat}

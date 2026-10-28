@@ -130,8 +130,6 @@ interface CompactMessageListProps {
   isLoadingOlder?: boolean
   onLoadOlderRuns?: () => void
   loadedRunStartIndex?: number
-  hiddenPromptCount?: number
-  onShowHiddenPrompts?: () => void
   /** Show only assistant prose: no tool activity rows or edited files */
   hideToolActivity?: boolean
   /** Sends a user message to this session (answers to `ask_user` questions) */
@@ -750,8 +748,6 @@ export const CompactMessageList = memo(
         isLoadingOlder = false,
         onLoadOlderRuns,
         loadedRunStartIndex = 0,
-        hiddenPromptCount = 0,
-        onShowHiddenPrompts,
         hideToolActivity = false,
         onSendAnswer,
       },
@@ -771,7 +767,6 @@ export const CompactMessageList = memo(
       const getMessages = useCallback(() => messagesRef.current, [])
 
       const lastIndex = messages.length - 1
-      const hasHiddenPrompts = hiddenPromptCount > 0 && !!onShowHiddenPrompts
 
       const hasFollowUpMap = useMemo(() => {
         const map = new Map<number, boolean>()
@@ -1062,13 +1057,13 @@ export const CompactMessageList = memo(
       // Scroll-to-top auto-load.
       useEffect(() => {
         const container = scrollContainerRef.current
-        if (!container || !hasOlderOnDisk || hasHiddenPrompts) return
+        if (!container || !hasOlderOnDisk) return
         const handleScroll = () => {
           if (container.scrollTop < SCROLL_THRESHOLD) loadOlder()
         }
         container.addEventListener('scroll', handleScroll, { passive: true })
         return () => container.removeEventListener('scroll', handleScroll)
-      }, [scrollContainerRef, hasOlderOnDisk, hasHiddenPrompts, loadOlder])
+      }, [scrollContainerRef, hasOlderOnDisk, loadOlder])
 
       // Scroll-to-bottom on new message arrival.
       const prevMessageCountRef = useRef(messages.length)
@@ -1122,7 +1117,7 @@ export const CompactMessageList = memo(
 
       return (
         <div className="flex flex-col w-full">
-          {!hasHiddenPrompts && hasOlderOnDisk && (
+          {hasOlderOnDisk && (
             <button
               type="button"
               onClick={loadOlder}
@@ -1151,6 +1146,9 @@ export const CompactMessageList = memo(
                 <div
                   key={item.message.id}
                   data-message-anchor-id={item.message.id}
+                  data-user-prompt={
+                    item.message.role === 'user' ? true : undefined
+                  }
                   ref={el => {
                     if (el) messageRefs.current.set(item.globalIndex, el)
                     else messageRefs.current.delete(item.globalIndex)

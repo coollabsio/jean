@@ -13,6 +13,7 @@ export interface BulkInvestigateBarProps {
   onSecondaryAction?: () => void
   onClear: () => void
   onInvestigate: () => void
+  className?: string
 }
 
 /** Sticky footer action bar for multi-select bulk investigate in New Session tabs. */
@@ -25,9 +26,16 @@ export function BulkInvestigateBar({
   onSecondaryAction,
   onClear,
   onInvestigate,
+  className,
 }: BulkInvestigateBarProps) {
   return (
-    <div className="shrink-0 border-t border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 px-3 py-2.5 sm:py-2 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
+    <div
+      className={cn(
+        // Mobile: keep the action above the home indicator / screen edge
+        'shrink-0 border-t border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 px-3 pt-2.5 pb-[calc(env(safe-area-inset-bottom)+1rem)] sm:py-2 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3',
+        className
+      )}
+    >
       <div className="flex items-center justify-between sm:justify-start gap-2 min-w-0">
         <span className="text-sm font-medium tabular-nums">
           {count} selected
@@ -45,7 +53,7 @@ export function BulkInvestigateBar({
         <Button
           size="sm"
           variant="outline"
-          className="w-full sm:w-auto sm:ml-auto"
+          className="w-full h-10 sm:h-8 sm:w-auto sm:ml-auto"
           disabled={isLoading}
           onClick={onSecondaryAction}
         >
@@ -55,7 +63,7 @@ export function BulkInvestigateBar({
       <Button
         size="sm"
         className={cn(
-          'w-full sm:w-auto',
+          'w-full h-10 sm:h-8 sm:w-auto',
           !(secondaryActionLabel && onSecondaryAction) && 'sm:ml-auto'
         )}
         disabled={isLoading}
