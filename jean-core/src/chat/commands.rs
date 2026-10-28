@@ -1471,6 +1471,11 @@ fn build_queued_message_with_refs(queued: &Value) -> Result<String, String> {
         .unwrap_or_default()
         .to_string();
 
+    let mention_refs = queued_mention_refs(queued);
+    if !mention_refs.is_empty() {
+        message = append_refs(message, mention_refs);
+    }
+
     let pending_files = queued
         .get("pendingFiles")
         .and_then(Value::as_array)
@@ -1573,6 +1578,48 @@ fn build_queued_message_with_refs(queued: &Value) -> Result<String, String> {
     Ok(message)
 }
 
+/// Context lines for `@` mentions in agent chats (`mentions` on a queued
+/// message). Keep in sync with `mentionRef` in
+/// src/components/chat/agent-mentions.ts.
+fn queued_mention_refs(queued: &Value) -> String {
+    queued
+        .get("mentions")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(mention_ref)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn mention_ref(mention: &Value) -> Option<String> {
+    let text = |key: &str| {
+        mention
+            .get(key)
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+    };
+    let (label, id_label) = match text("type")? {
+        "agent" => ("agent", "agentId"),
+        "project" => ("project", "projectId"),
+        "remote_jean" => ("remote Jean", "serverId"),
+        _ => return None,
+    };
+    let mut details = vec![format!("{id_label}: {}", text("id")?)];
+    if let Some(server) = text("serverName") {
+        details.push(format!("on remote Jean: {server}"));
+    }
+    if let Some(url) = text("url") {
+        details.push(format!("url: {url}"));
+    }
+    let name = text("name")?;
+    Some(format!(
+        "[Mentioned {label}: {name} ({})]",
+        details.join(", ")
+    ))
+}
+
 fn queued_file_path(file: &Value) -> Result<String, String> {
     let relative_path = file
         .get("relativePath")
@@ -1617,7 +1664,11 @@ fn queued_message_base_prompt(queued: &Value) -> String {
 
 fn codex_steer_input_from_queued_message(queued: &Value) -> Result<Vec<Value>, String> {
     let mut input = Vec::new();
-    let message = queued_message_base_prompt(queued);
+    let mut message = queued_message_base_prompt(queued);
+    let mention_refs = queued_mention_refs(queued);
+    if !mention_refs.is_empty() {
+        message = append_refs(message, mention_refs);
+    }
     if !message.trim().is_empty() {
         input.push(serde_json::json!({
             "type": "text",
@@ -9709,6 +9760,9 @@ pub struct QueuedMessageEdit {
     pub pending_files: Vec<Value>,
     pub pending_skills: Vec<Value>,
     pub pending_text_files: Vec<Value>,
+    /// Agent chat `@` mentions. `None` leaves the queued mentions unchanged.
+    #[serde(default)]
+    pub mentions: Option<Vec<Value>>,
 }
 
 /// Replace a queued message's text and attachments by its `id` field.
@@ -9743,6 +9797,9 @@ fn apply_queued_message_edit(
         "pendingTextFiles".to_string(),
         Value::Array(edit.pending_text_files.clone()),
     );
+    if let Some(mentions) = &edit.mentions {
+        queued.insert("mentions".to_string(), Value::Array(mentions.clone()));
+    }
     true
 }
 
@@ -11888,6 +11945,35 @@ mod tests {
         assert!(message.contains(
             "[Text file attached: /tmp/notes.txt - Use the Read tool to view this file]"
         ));
+    }
+
+    #[test]
+    fn test_build_queued_message_with_mentions_matches_frontend_format() {
+        // Same input and output as message-with-refs.test.ts
+        let queued = serde_json::json!({
+            "message": "Ask @Reviewer about @coolify on @home",
+            "mentions": [
+                { "type": "agent", "id": "reviewer-1", "name": "Reviewer" },
+                {
+                    "type": "project",
+                    "id": "p-9",
+                    "name": "coolify",
+                    "serverName": "Home"
+                },
+                {
+                    "type": "remote_jean",
+                    "id": "srv-1",
+                    "name": "home",
+                    "url": "https://home.example"
+                },
+                { "type": "unknown", "id": "x", "name": "x" }
+            ]
+        });
+
+        assert_eq!(
+            build_queued_message_with_refs(&queued).unwrap(),
+            "Ask @Reviewer about @coolify on @home\n\n[Mentioned agent: Reviewer (agentId: reviewer-1)]\n[Mentioned project: coolify (projectId: p-9, on remote Jean: Home)]\n[Mentioned remote Jean: home (serverId: srv-1, url: https://home.example)]"
+        );
     }
 
     #[test]

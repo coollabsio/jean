@@ -163,6 +163,8 @@ import { TextFilePreview } from './TextFilePreview'
 import { SkillBadge } from './SkillBadge'
 import { FilePreview } from './FilePreview'
 import { ChatInput } from './ChatInput'
+import { useAgentMentionCandidates } from './hooks/useAgentMentionCandidates'
+import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import { SessionDebugPanel } from './SessionDebugPanel'
 import { ChatToolbar } from './ChatToolbar'
 import { SendCancelButton } from './toolbar/SendCancelButton'
@@ -357,6 +359,11 @@ interface ChatWindowProps {
    * Questions and plans still render because they need the user.
    */
   workingLabel?: string
+  /**
+   * Agent chat (not inside a project): `@` mentions agents, remote Jeans,
+   * and projects instead of files.
+   */
+  agentChat?: boolean
 }
 
 // PERFORMANCE: memoized - props are primitives, so parents re-rendering
@@ -382,6 +389,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
   worktreeId: propWorktreeId,
   worktreePath: propWorktreePath,
   workingLabel,
+  agentChat = false,
 }: ChatWindowProps = {}) {
   const isMobile = useIsMobile()
   const zenMode = useUIStore(state => state.zenMode)
@@ -1432,10 +1440,16 @@ const ChatWindowContent = memo(function ChatWindowContent({
   const enabledMcpServersRef = useRef(enabledMcpServers)
   const mcpServersDataRef = useRef<McpServerInfo[]>(availableMcpServers)
   const selectedBackendRef = useRef(selectedBackend)
+  const mentionCandidates = useAgentMentionCandidates(
+    agentChat,
+    targetServerId ?? LOCAL_SERVER_ID
+  )
+  const mentionCandidatesRef = useRef(mentionCandidates)
 
   // Keep refs in sync with current values (layout effect keeps render pure)
   useLayoutEffect(() => {
     activeSessionIdRef.current = activeSessionId
+    mentionCandidatesRef.current = mentionCandidates
     activeWorktreeIdRef.current = activeWorktreeId
     activeWorktreePathRef.current = activeWorktreePath
     selectedModelRef.current = selectedModel
@@ -1803,6 +1817,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
     mcpServersDataRef,
     enabledMcpServersRef,
     selectedBackendRef,
+    mentionCandidatesRef,
     preferences,
     sendMessage,
     createSession,
@@ -3527,6 +3542,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                   installedBackends={installedBackends}
                                   selectedBackend={selectedBackend}
                                   pill={pillComposer}
+                                  mentionCandidates={mentionCandidates}
                                 />
                               </div>
 
