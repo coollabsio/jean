@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo } from 'react'
+import { memo, useCallback, useMemo, useState } from 'react'
 import { AgentMessageFromRow } from '@/components/agents/AgentMessageLink'
 import { parseAgentSentMessage } from '@/components/agents/agent-messages'
 import { Copy } from '@/components/icons/reicon'
@@ -83,6 +83,8 @@ const EMPTY_PATHS: string[] = []
 // keyboard focus. Touch devices have no hover, so it stays visible there.
 const USER_HOVER_REVEAL =
   'transition-opacity [@media(pointer:fine)]:opacity-0 [@media(pointer:fine)]:group-hover:opacity-100 [@media(pointer:fine)]:group-focus-within:opacity-100'
+// Touch devices have no hover: details stay hidden until the prompt is tapped
+const USER_TAP_HIDDEN = '[@media(pointer:coarse)]:hidden'
 const ASSISTANT_HOVER_REVEAL =
   'transition-opacity [@media(pointer:fine)]:opacity-0 [@media(pointer:fine)]:group-hover/message:opacity-100 [@media(pointer:fine)]:group-focus-within/message:opacity-100'
 
@@ -375,6 +377,12 @@ export const MessageItem = memo(function MessageItem({
   const handleCopyToInput = useCallback(() => {
     onCopyToInput?.(message)
   }, [onCopyToInput, message])
+
+  const [showUserDetails, setShowUserDetails] = useState(false)
+  const handleUserBubbleClick = useCallback((e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('a, button')) return
+    setShowUserDetails(prev => !prev)
+  }, [])
 
   const userTurnHasFileEdits = useMemo(() => {
     if (message.role !== 'user' || !getMessages) return false
@@ -1040,6 +1048,7 @@ export const MessageItem = memo(function MessageItem({
       {message.role === 'user' ? (
         <div className="group flex max-w-[85%] min-w-0 flex-col items-end gap-1 sm:max-w-[70%]">
           <div
+            onClick={handleUserBubbleClick}
             className={cn(
               'max-w-full',
               hideSettingsBadges
@@ -1063,7 +1072,8 @@ export const MessageItem = memo(function MessageItem({
               <div
                 className={cn(
                   'flex shrink-0 items-center gap-1 pr-0.5',
-                  USER_HOVER_REVEAL
+                  USER_HOVER_REVEAL,
+                  !showUserDetails && USER_TAP_HIDDEN
                 )}
               >
                 {showSettingsBadges && message.model && (

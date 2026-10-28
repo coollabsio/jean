@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import userEvent from '@testing-library/user-event'
-import { render, screen } from '@/test/test-utils'
+import { render, screen, waitFor, within } from '@/test/test-utils'
 import { MobileToolbarMenu } from './MobileToolbarMenu'
 
 beforeEach(() => {
@@ -25,13 +25,14 @@ beforeEach(() => {
 })
 
 describe('MobileToolbarMenu', () => {
-  it('uses a full-width two-column layout on mobile', async () => {
+  it('opens a bottom sheet on mobile and closes it after an action', async () => {
     const user = userEvent.setup()
     const originalInnerWidth = window.innerWidth
     Object.defineProperty(window, 'innerWidth', {
       configurable: true,
       value: 390,
     })
+    const handleSyncClick = vi.fn()
 
     render(
       <MobileToolbarMenu
@@ -47,7 +48,7 @@ describe('MobileToolbarMenu', () => {
         onReview={vi.fn()}
         onMerge={vi.fn()}
         onMergePr={vi.fn()}
-        handleSyncClick={vi.fn()}
+        handleSyncClick={handleSyncClick}
         handlePullClick={vi.fn()}
         handlePushClick={vi.fn()}
       />
@@ -55,12 +56,21 @@ describe('MobileToolbarMenu', () => {
 
     await user.click(screen.getByRole('button', { name: /more actions/i }))
 
-    expect(screen.getByRole('menu')).toHaveClass(
-      'w-[calc(100vw-1rem)]',
-      'grid',
-      'grid-cols-2'
+    const sheet = screen.getByRole('dialog', { name: 'Magic' })
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    expect(
+      within(sheet).getByRole('region', { name: 'Context' })
+    ).toBeInTheDocument()
+    expect(
+      within(sheet).getByRole('button', { name: 'Comment & Close Issue' })
+    ).toBeDisabled()
+
+    await user.click(within(sheet).getByRole('button', { name: 'Sync' }))
+
+    expect(handleSyncClick).toHaveBeenCalledTimes(1)
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     )
-    expect(screen.getByText('Context')).toHaveClass('col-span-2')
 
     Object.defineProperty(window, 'innerWidth', {
       configurable: true,

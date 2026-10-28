@@ -321,14 +321,15 @@ export function WorktreeDropdownMenu({
             </DropdownMenuSub>
           )}
 
-          {!isMobile && onToggleTerminal && (
+          {/* Desktop non-server headers show Terminal/Browser buttons. */}
+          {!isMobile && isServer && onToggleTerminal && (
             <DropdownMenuItem onClick={onToggleTerminal}>
               <Terminal className="mr-2 h-4 w-4" />
               Terminal
             </DropdownMenuItem>
           )}
 
-          {!isServer && onToggleBrowser && (
+          {isMobile && !isServer && onToggleBrowser && (
             <DropdownMenuItem onClick={onToggleBrowser}>
               <Globe className="mr-2 h-4 w-4" />
               Browser

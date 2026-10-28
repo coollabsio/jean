@@ -330,7 +330,7 @@ describe('WorktreeDropdownMenu', () => {
     expect(onToggleTerminal).not.toHaveBeenCalled()
   })
 
-  it('shows terminal and scripts on web desktop', async () => {
+  it('shows scripts but not header-duplicated terminal/browser on web desktop', async () => {
     const user = userEvent.setup()
     const onToggleTerminal = vi.fn()
     envMocks.isMobile = false
@@ -341,15 +341,15 @@ describe('WorktreeDropdownMenu', () => {
         projectId="project-1"
         projectPath="/tmp/project"
         onToggleTerminal={onToggleTerminal}
+        onToggleBrowser={vi.fn()}
         packageScripts={[{ name: 'test', command: 'bun', args: ['test'] }]}
         onRunPackageScript={vi.fn()}
       />
     )
 
     await user.click(screen.getByRole('button', { name: 'Actions' }))
-    expect(
-      screen.getByRole('menuitem', { name: 'Terminal' })
-    ).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: 'Terminal' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'Browser' })).toBeNull()
     expect(screen.getByText('Scripts')).toBeInTheDocument()
   })
 
