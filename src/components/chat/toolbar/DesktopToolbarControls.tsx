@@ -834,7 +834,7 @@ export function DesktopToolbarControls({
           providerLocked={providerLocked}
           triggerClassName={cn(
             'rounded-none border-0 bg-transparent px-3',
-            !hideReasoningControl && 'pr-1'
+            !hideReasoningControl && 'px-2'
           )}
           selectedBackend={selectedBackend}
           selectedModel={selectedModel}
@@ -865,7 +865,7 @@ export function DesktopToolbarControls({
           tooltip={`Effort: ${displayedEffortLabel} (⌘⇧E)`}
           showShortcuts
           hideIcon={!hideModelPicker}
-          triggerClassName={cn('hidden @xl:flex', !hideModelPicker && 'pl-1')}
+          triggerClassName={cn('hidden @xl:flex', !hideModelPicker && 'px-2')}
           onCloseAutoFocus={focusChatInput}
         />
       ) : (
@@ -879,7 +879,7 @@ export function DesktopToolbarControls({
           tooltip={`Thinking: ${displayedThinkingLabel} (⌘⇧E)`}
           showShortcuts
           hideIcon={!hideModelPicker}
-          triggerClassName={cn('hidden @xl:flex', !hideModelPicker && 'pl-1')}
+          triggerClassName={cn('hidden @xl:flex', !hideModelPicker && 'px-2')}
           onCloseAutoFocus={focusChatInput}
         />
       )}
