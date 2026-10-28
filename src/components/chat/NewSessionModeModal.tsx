@@ -101,8 +101,13 @@ export function NewSessionModeModal() {
   const target = useUIStore(state => state.newSessionModeTarget)
   const close = useUIStore(state => state.closeNewSessionModeModal)
   const createSession = useCreateSession()
-  const targetServerId = target
-    ? (parseServerResourceKey(target.worktreeId)?.serverId ?? 'local')
+  // Keep the last server while the dialog animates out; falling back to
+  // 'local' on close would swap in another server's backend list.
+  const [lastTarget, setLastTarget] = useState(target)
+  if (target && target !== lastTarget) setLastTarget(target)
+  const serverTarget = target ?? lastTarget
+  const targetServerId = serverTarget
+    ? (parseServerResourceKey(serverTarget.worktreeId)?.serverId ?? 'local')
     : 'local'
   const statusOptions = { enabled: target !== null, serverId: targetServerId }
   const claudeStatus = useClaudeCliStatus(statusOptions)

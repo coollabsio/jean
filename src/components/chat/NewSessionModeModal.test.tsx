@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import userEvent from '@testing-library/user-event'
-import { fireEvent, render, screen, waitFor } from '@/test/test-utils'
+import { act, fireEvent, render, screen, waitFor } from '@/test/test-utils'
 import { NewSessionModeModal } from './NewSessionModeModal'
 import { useChatStore } from '@/store/chat-store'
 import { useTerminalStore } from '@/store/terminal-store'
@@ -218,6 +218,21 @@ describe('NewSessionModeModal', () => {
     expect(cliStatusTargets.get('claude')).toBe('remote-1')
     expect(cliStatusTargets.get('codex')).toBe('remote-1')
     expect(preferenceTargets).toContain('remote-1')
+  })
+
+  it('keeps the owning server CLI status while the dialog closes', () => {
+    useUIStore.getState().openNewSessionModeModal({
+      worktreeId: 'remote-1:worktree-1',
+      worktreePath: '/remote/project',
+      origin: 'canvas',
+      intent: 'picker',
+    })
+
+    render(<NewSessionModeModal />)
+    act(() => useUIStore.getState().closeNewSessionModeModal())
+
+    expect(cliStatusTargets.get('claude')).toBe('remote-1')
+    expect(cliStatusTargets.get('codex')).toBe('remote-1')
   })
 
   it('uses the owning remote server defaults for a new chat session', () => {
