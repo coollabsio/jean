@@ -1096,7 +1096,7 @@ export const SessionChatModal = memo(function SessionChatModal({
         key={worktreeId}
         ref={isTouch ? swipe.containerRef : undefined}
         className={cn(
-          'absolute inset-0 z-10 flex min-w-0 overflow-hidden bg-background pt-[3px]',
+          'absolute inset-0 z-10 flex min-w-0 overflow-hidden bg-background',
           !isMobile && 'pb-2',
           hasBottomDock ? 'flex-col' : 'flex-row'
         )}
@@ -1128,12 +1128,13 @@ export const SessionChatModal = memo(function SessionChatModal({
         <ModalBrowserDrawer worktreeId={worktreeId} dockMode="left" />
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {!zenMode && (
-            <div className="shrink-0 border-b border-border/20 sm:text-left">
+            <div className="shrink-0 sm:text-left">
               <div
                 className={cn(
                   // Container queries: the modal is narrower than the window
-                  // when side panels are open, so buttons hide by header width
-                  '@container/header flex items-center justify-between gap-2 px-4 py-2',
+                  // when side panels are open, so buttons hide by header width.
+                  // Border sits inside the row so the height matches the project header
+                  '@container/header flex items-center justify-between gap-2 border-b border-border/20 px-4 py-2',
                   MODAL_TERMINAL_PRIMARY_ROW_CLASS
                 )}
               >
