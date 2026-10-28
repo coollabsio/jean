@@ -811,12 +811,7 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
                 <WorkingWaveform label={`${runningCount} running`} />
               )}
               {showBranchBadge && (
-                <span
-                  className={cn(
-                    'hidden items-center gap-1 rounded border border-border/50 px-1.5 py-0.5 text-2xs font-normal text-muted-foreground sm:inline-flex',
-                    revealClass
-                  )}
-                >
+                <span className="hidden items-center gap-1 rounded border border-border/50 px-1.5 py-0.5 text-2xs font-normal text-muted-foreground sm:inline-flex">
                   <GitBranch className="h-2.5 w-2.5" />
                   <span className="max-w-40 truncate">{displayBranch}</span>
                   {stackedBaseBranch && (
