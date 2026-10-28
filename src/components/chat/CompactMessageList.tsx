@@ -1290,6 +1290,7 @@ export const CompactMessageList = memo(
                     ) : reply.type === 'question' ? (
                       <AgentQuestionCard
                         key={reply.toolId}
+                        id={reply.toolId}
                         question={reply.question}
                         answer={
                           userAnswers[
