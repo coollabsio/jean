@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react'
-import { Folder, History, Settings, X } from '@/components/icons/reicon'
+import { Folder, History, X } from '@/components/icons/reicon'
 import { AgentsIcon } from '@/components/icons/AgentsIcon'
 import { useAgentsEnabled } from '@/components/agents/agents-feature'
 import { Button } from '@/components/ui/button'
@@ -78,34 +78,17 @@ export function SidebarTabs() {
           </button>
         ))}
       </div>
-      {/* Desktop has Settings in the title bar; mobile keeps it and close here */}
+      {/* Settings lives in the header; mobile keeps only close here */}
       {isMobile && (
-        <>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Open Settings"
-            data-testid="sidebar-settings"
-            className="text-muted-foreground"
-            onClick={() => {
-              const ui = useUIStore.getState()
-              // Close the drawer so Settings is not hidden behind it
-              ui.setLeftSidebarVisible(false)
-              ui.togglePreferences()
-            }}
-          >
-            <Settings className="size-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Close sidebar"
-            className="text-muted-foreground"
-            onClick={() => useUIStore.getState().setLeftSidebarVisible(false)}
-          >
-            <X className="size-4" />
-          </Button>
-        </>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Close sidebar"
+          className="text-muted-foreground"
+          onClick={() => useUIStore.getState().setLeftSidebarVisible(false)}
+        >
+          <X className="size-4" />
+        </Button>
       )}
     </div>
   )

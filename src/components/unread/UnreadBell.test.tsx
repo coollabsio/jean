@@ -302,6 +302,49 @@ describe('UnreadBell', () => {
     expect(await screen.findByText('Session two')).toBeInTheDocument()
   })
 
+  it('shows the refetched session when the cached one was read elsewhere', async () => {
+    unreadCount = 1
+    allSessions = {
+      entries: [
+        {
+          project_id: 'project-1',
+          project_name: 'Jean',
+          worktree_id: 'worktree-1',
+          worktree_name: 'main',
+          worktree_path: '/repo',
+          sessions: [session({ id: 'session-1', name: 'Session one' })],
+        },
+      ],
+    }
+    allSessionsFetching = true
+    const view = renderWithQueryClient(<UnreadBell title="Jean" />)
+
+    await userEvent.click(
+      screen.getByRole('button', { name: /1 finished session/i })
+    )
+
+    allSessions = {
+      entries: [
+        {
+          project_id: 'project-1',
+          project_name: 'Jean',
+          worktree_id: 'worktree-1',
+          worktree_name: 'main',
+          worktree_path: '/repo',
+          sessions: [session({ id: 'session-2', name: 'Session two' })],
+        },
+      ],
+    }
+    allSessionsFetching = false
+    view.rerender(<UnreadBell title="Jean" />)
+
+    expect(await screen.findByText('Session two')).toBeInTheDocument()
+    expect(screen.queryByText('No unread sessions')).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /1 finished session/i })
+    ).toBeInTheDocument()
+  })
+
   it('shows cached unread sessions on the first click while refetching', async () => {
     allSessionsFetching = true
     renderWithQueryClient(<UnreadBell title="Jean" />)

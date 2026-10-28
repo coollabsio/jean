@@ -901,12 +901,12 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
                 </span>
               )}
               {sessionMetrics.yoloCount > 0 && (
-                <span className="rounded bg-destructive/10 px-2 py-0.5 text-destructive">
+                <span className="rounded bg-destructive/10 px-2 py-0.5 text-destructive max-md:hidden">
                   {sessionMetrics.yoloCount} full access
                 </span>
               )}
               {sessionMetrics.reviewCount > 0 && (
-                <span className="rounded bg-success/10 px-2 py-0.5 text-success">
+                <span className="rounded bg-success/10 px-2 py-0.5 text-success max-md:hidden">
                   {sessionMetrics.reviewCount} review
                 </span>
               )}

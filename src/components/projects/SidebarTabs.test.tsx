@@ -83,13 +83,11 @@ describe('SidebarTabs', () => {
     expect(screen.queryByRole('button', { name: 'Close sidebar' })).toBeNull()
   })
 
-  it('closes the mobile drawer when it opens Settings', async () => {
+  it('keeps Settings out of the mobile strip', () => {
     mocks.isMobile = true
     render(<SidebarTabs />)
-    await userEvent.click(screen.getByRole('button', { name: 'Open Settings' }))
 
-    expect(useUIStore.getState().preferencesOpen).toBe(true)
-    expect(useUIStore.getState().leftSidebarVisible).toBe(false)
+    expect(screen.queryByRole('button', { name: 'Open Settings' })).toBeNull()
   })
 
   it('closes the mobile drawer from the close button', async () => {

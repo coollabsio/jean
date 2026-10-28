@@ -251,18 +251,20 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
     return results.sort((a, b) => b.session.updated_at - a.session.updated_at)
   }, [allSessions])
 
-  // A separate query supplies the badge count. Do not freeze an old list when
-  // that count says a newly finished session is still missing from it.
+  // Freeze the list only after the open refetch is done. A snapshot of cached
+  // rows can hold sessions read elsewhere; pruning them leaves an empty list.
+  // A separate query supplies the badge count, so also wait until it agrees.
   useEffect(() => {
     if (
       !open ||
       !allSessions ||
+      isFetching ||
       unreadItems.length === 0 ||
       unreadItems.length !== unreadCount
     )
       return
     setSnapshotItems(prev => prev ?? unreadItems)
-  }, [allSessions, open, unreadCount, unreadItems])
+  }, [allSessions, isFetching, open, unreadCount, unreadItems])
 
   // Items rendered inside the popover. While open, prefer the snapshot taken at
   // open time so a queued prompt restarting a session (status flip → unread=false)
@@ -403,31 +405,6 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
     [markSessionsOpened]
   )
 
-  const handleTriggerClick = useCallback(() => {
-    if (
-      allSessions &&
-      unreadItems.length > 0 &&
-      unreadItems.length === unreadCount
-    ) {
-      setSnapshotItems(unreadItems)
-    }
-  }, [allSessions, unreadCount, unreadItems])
-
-  const handleOpenChange = useCallback(
-    (next: boolean) => {
-      if (
-        next &&
-        allSessions &&
-        unreadItems.length > 0 &&
-        unreadItems.length === unreadCount
-      ) {
-        setSnapshotItems(unreadItems)
-      }
-      setOpen(next)
-    },
-    [allSessions, unreadCount, unreadItems]
-  )
-
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       const total = displayItems.length
@@ -496,7 +473,7 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
   const triggerLabel = `${displayCount} finished ${displayCount === 1 ? 'session' : 'sessions'}`
 
   return (
-    <Popover open={open} onOpenChange={handleOpenChange}>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <div>
           <Tooltip>
@@ -504,7 +481,6 @@ export function UnreadBell({ title, hideTitle }: UnreadBellProps) {
               <button
                 type="button"
                 aria-label={triggerLabel}
-                onClick={handleTriggerClick}
                 className="relative z-[1] flex items-center gap-1 truncate rounded-md bg-background px-1.5 text-sm font-medium text-warning cursor-pointer"
               >
                 <BellDot
