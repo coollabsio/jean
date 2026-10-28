@@ -137,7 +137,12 @@ export function RecentWorktreesList({
   const pinnedSessionIds = useRecentSessionPins(projects)
   const [limit, setLimit] = useState(INITIAL_RECENT_LIMIT)
   const [showSnoozed, setShowSnoozed] = useState(false)
-  const [workingExpanded, setWorkingExpanded] = useState(false)
+  // 'auto' is the default collapsed shelf that still shows the open session;
+  // an explicit collapse hides every working row.
+  const [workingShelf, setWorkingShelf] = useState<
+    'auto' | 'expanded' | 'collapsed'
+  >('auto')
+  const workingExpanded = workingShelf === 'expanded'
   const shortcutsEnabled = isNativeApp() && !isMobile
   const showShortcutHints = useModifierHintsVisible(
     isModOnlyHeld,
@@ -218,14 +223,12 @@ export function RecentWorktreesList({
     sendingSessionIds,
     waitingForInputSessionIds,
   ])
-  // A collapsed shelf still shows the open session, like t3code.
-  const visibleWorkingRows = useMemo(
-    () =>
-      workingExpanded
-        ? workingRows
-        : workingRows.filter(row => row.session.id === selectedSessionId),
-    [selectedSessionId, workingExpanded, workingRows]
-  )
+  // The default shelf still shows the open session, like t3code.
+  const visibleWorkingRows = useMemo(() => {
+    if (workingShelf === 'expanded') return workingRows
+    if (workingShelf === 'collapsed') return EMPTY_RECENT_ROWS
+    return workingRows.filter(row => row.session.id === selectedSessionId)
+  }, [selectedSessionId, workingShelf, workingRows])
   // Visual order, used by Cmd+Arrow navigation and Cmd+1-9 shortcuts.
   const displayedRows = useMemo(
     () => [...listRows, ...visibleWorkingRows, ...snoozedRows],
@@ -565,7 +568,11 @@ export function RecentWorktreesList({
                 type="button"
                 aria-expanded={workingExpanded}
                 className="flex h-8 w-full items-center gap-1 px-3 text-2xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                onClick={() => setWorkingExpanded(value => !value)}
+                onClick={() =>
+                  setWorkingShelf(value =>
+                    value === 'expanded' ? 'collapsed' : 'expanded'
+                  )
+                }
               >
                 <ChevronRight
                   className={`size-3 transition-transform ${workingExpanded ? 'rotate-90' : ''}`}
