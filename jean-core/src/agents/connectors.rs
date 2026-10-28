@@ -449,6 +449,113 @@ pub async fn report_for_session(app: &AppHandle, agent: &Agent, source: &str) ->
     })
 }
 
+/// Add `item` to a saved list or remove it. `None` means no list is saved
+/// (project: inherit the defaults, agent: no limit). Enable then starts a
+/// list, like the settings switches. Disable returns `None`: there is
+/// nothing to remove from.
+fn toggle_saved<T: PartialEq>(saved: Option<Vec<T>>, item: T, enable: bool) -> Option<Vec<T>> {
+    let mut list = match saved {
+        Some(list) => list,
+        None if enable => Vec::new(),
+        None => return None,
+    };
+    if !enable {
+        list.retain(|existing| *existing != item);
+    } else if !list.contains(&item) {
+        list.push(item);
+    }
+    Some(list)
+}
+
+/// `set_connector` tool: turn a discovered MCP server on or off in one of the
+/// lists the settings UI edits. Saves through the same commands as the UI, so
+/// the UI gets the same cache update. Server config (commands, env, headers)
+/// is never read or returned.
+pub async fn set_connector(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let arg = |key: &str| {
+        args.get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    let required = |key: &str| arg(key).ok_or_else(|| format!("Missing required argument: {key}"));
+    let backend = required("backend")?;
+    let name = required("name")?;
+    if backend.contains(':') {
+        return Err(format!("Invalid backend: {backend}"));
+    }
+    let enable = match required("action")?.as_str() {
+        "enable" => true,
+        "disable" => false,
+        other => return Err(format!("action must be enable or disable, not {other}")),
+    };
+    let key = format!("{backend}:{name}");
+    let scope = required("scope")?;
+    let (command, payload, mut result) = match scope.as_str() {
+        "global" => {
+            let prefs = crate::load_preferences(app.clone()).await?;
+            let list = toggle_saved(Some(prefs.default_enabled_mcp_servers), key, enable)
+                .unwrap_or_default();
+            (
+                "patch_preferences",
+                json!({ "patch": { "default_enabled_mcp_servers": list } }),
+                json!({ "enabledServers": list }),
+            )
+        }
+        "project" => {
+            let project_id = required("projectId")?;
+            let data = crate::projects::storage::load_projects_data(app)?;
+            let project = data
+                .projects
+                .iter()
+                .find(|project| project.id == project_id && !project.is_folder)
+                .ok_or_else(|| format!("Project not found: {project_id}"))?;
+            let list = toggle_saved(project.enabled_mcp_servers.clone(), key, enable).ok_or(
+                "This project has no MCP server list of its own and uses the global defaults. Nothing to disable.",
+            )?;
+            (
+                "update_project_settings",
+                json!({ "projectId": project_id, "enabledMcpServers": list }),
+                json!({ "projectId": project_id, "enabledServers": list }),
+            )
+        }
+        "agent" => {
+            let agent_id = required("agentId")?;
+            let agent = super::with_db(app, |conn| super::db::get_agent(conn, &agent_id))?
+                .ok_or_else(|| format!("Agent not found: {agent_id}"))?;
+            let item = AgentConnector {
+                backend: backend.clone(),
+                name: name.clone(),
+            };
+            let list = toggle_saved(agent.mcp_servers, item, enable).ok_or(
+                "This agent has no connector limit, so every connector is allowed. Nothing to disable.",
+            )?;
+            (
+                "update_agent",
+                json!({ "agentId": agent_id, "patch": { "mcpServers": list } }),
+                json!({ "agentId": agent_id, "connectors": list }),
+            )
+        }
+        other => {
+            return Err(format!(
+                "scope must be global, project, or agent, not {other}"
+            ))
+        }
+    };
+    Box::pin(crate::http_server::dispatch::dispatch_command(
+        app, command, payload,
+    ))
+    .await?;
+    if let Some(object) = result.as_object_mut() {
+        object.insert("scope".into(), json!(scope));
+        object.insert("backend".into(), json!(backend));
+        object.insert("name".into(), json!(name));
+        object.insert("enabled".into(), json!(enable));
+    }
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -626,6 +733,82 @@ mod tests {
         agent.mcp_servers = None;
         agent.jean_tools = None;
         assert!(prompt_section(&agent).is_none());
+    }
+
+    #[test]
+    fn toggle_saved_follows_the_settings_switches() {
+        let key = |name: &str| format!("claude:{name}");
+        assert_eq!(
+            toggle_saved(Some(vec![key("a")]), key("b"), true),
+            Some(vec![key("a"), key("b")])
+        );
+        assert_eq!(
+            toggle_saved(Some(vec![key("a"), key("b")]), key("a"), true),
+            Some(vec![key("a"), key("b")])
+        );
+        assert_eq!(
+            toggle_saved(Some(vec![key("a"), key("b")]), key("a"), false),
+            Some(vec![key("b")])
+        );
+        // No saved list: enable starts one, disable has nothing to remove.
+        assert_eq!(toggle_saved(None, key("a"), true), Some(vec![key("a")]));
+        assert_eq!(toggle_saved::<String>(None, key("a"), false), None);
+    }
+
+    #[tokio::test]
+    async fn set_connector_saves_through_the_settings_commands() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = crate::RuntimeContext::new(temp.path().join("data"), temp.path().into()).unwrap();
+        let data: crate::projects::types::ProjectsData = serde_json::from_value(json!({
+            "projects": [{"id": "p1", "name": "App", "path": temp.path(), "default_branch": "main",
+                          "added_at": 0, "enabled_mcp_servers": ["claude:docs"]}],
+            "worktrees": []
+        }))
+        .unwrap();
+        crate::projects::storage::save_projects_data(&app, &data).unwrap();
+
+        let result = set_connector(
+            &app,
+            &json!({"scope": "project", "projectId": "p1", "action": "enable",
+                    "backend": "claude", "name": "github"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            result["enabledServers"],
+            json!(["claude:docs", "claude:github"])
+        );
+        let saved = crate::projects::storage::load_projects_data(&app).unwrap();
+        assert_eq!(
+            saved.projects[0].enabled_mcp_servers,
+            Some(vec!["claude:docs".to_string(), "claude:github".to_string()])
+        );
+
+        set_connector(
+            &app,
+            &json!({"scope": "global", "action": "enable", "backend": "codex", "name": "linear"}),
+        )
+        .await
+        .unwrap();
+        set_connector(
+            &app,
+            &json!({"scope": "global", "action": "disable", "backend": "codex", "name": "linear"}),
+        )
+        .await
+        .unwrap();
+        let prefs = crate::load_preferences(app.clone()).await.unwrap();
+        assert!(!prefs
+            .default_enabled_mcp_servers
+            .contains(&"codex:linear".to_string()));
+
+        let err = set_connector(
+            &app,
+            &json!({"scope": "project", "projectId": "p1", "action": "remove",
+                    "backend": "claude", "name": "github"}),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("enable or disable"));
     }
 
     #[test]

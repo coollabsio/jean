@@ -1,8 +1,6 @@
-import { useState, type ReactNode } from 'react'
-import { Check } from '@/components/icons/reicon'
-import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
-import { ApprovalCard } from '@/components/chat/ApprovalCard'
+import { useCallback, useMemo } from 'react'
+import { AskUserQuestion } from '@/components/chat/AskUserQuestion'
+import type { Question, QuestionAnswer } from '@/types/chat'
 import {
   questionAnswerText,
   selectedOptions,
@@ -10,106 +8,70 @@ import {
 } from './agent-messages'
 
 /**
- * Question in the agent chat (`ask_user`, approvals). One answer: a click
- * sends it. Multiple answers: pick options, then Send. Read-only once answered.
+ * Question in the agent chat (`ask_user`, approvals), shown with the project
+ * session question card. One answer: a click sends it. Multiple answers: pick
+ * options, then Answer. The answer goes to the chat as a user message.
  */
 export function AgentQuestionCard({
+  id,
   question,
   answer,
   disabled,
   onSend,
-  children,
 }: {
+  id: string
   question: AgentQuestion
   /** The answer, if the user already gave one */
   answer: string | undefined
   disabled: boolean
   onSend: ((text: string) => void) | undefined
-  /** Extra line below the options (for example, a result) */
-  children?: ReactNode
 }) {
-  const [picked, setPicked] = useState<string[]>([])
-  const answered = answer !== undefined
-  const chosen = answered ? selectedOptions(question, answer) : picked
-  const locked = answered || disabled || !onSend
+  const questions = useMemo<Question[]>(
+    () => [
+      {
+        question: question.question,
+        multiSelect: question.multiple,
+        options: question.options.map(label => ({ label })),
+        isOther: false,
+      },
+    ],
+    [question]
+  )
 
-  const choose = (option: string) => {
-    if (!question.multiple) {
-      onSend?.(questionAnswerText(question, [option]))
-      return
-    }
-    setPicked(current =>
-      current.includes(option)
-        ? current.filter(o => o !== option)
-        : [...current, option]
-    )
-  }
+  const submittedAnswers = useMemo<QuestionAnswer[] | undefined>(() => {
+    if (answer === undefined) return undefined
+    const picked = selectedOptions(question, answer)
+    if (picked.length === 0)
+      return [{ questionIndex: 0, selectedOptions: [], customText: answer }]
+    return [
+      {
+        questionIndex: 0,
+        selectedOptions: picked.map(o => question.options.indexOf(o)),
+      },
+    ]
+  }, [question, answer])
+
+  const handleSubmit = useCallback(
+    (_toolCallId: string, answers: QuestionAnswer[]) => {
+      const picked = (answers[0]?.selectedOptions ?? []).flatMap(index => {
+        const option = question.options[index]
+        return option ? [option] : []
+      })
+      if (picked.length > 0) onSend?.(questionAnswerText(question, picked))
+    },
+    [question, onSend]
+  )
 
   return (
-    <ApprovalCard
-      className="mx-auto my-0 w-full max-w-xl"
-      title={question.question}
-      description={
-        question.multiple && !answered ? (
-          <span className="text-xs">Select one or more.</span>
-        ) : undefined
-      }
-      actions={
-        question.multiple && !answered ? (
-          <Button
-            size="sm"
-            disabled={locked || picked.length === 0}
-            onClick={() => onSend?.(questionAnswerText(question, picked))}
-          >
-            Send
-          </Button>
-        ) : undefined
-      }
-    >
-      <div className="flex flex-col gap-1.5">
-        {question.options.map(option => {
-          const isChosen = chosen.includes(option)
-          return (
-            <button
-              key={option}
-              type="button"
-              disabled={locked}
-              aria-pressed={question.multiple ? isChosen : undefined}
-              onClick={() => choose(option)}
-              className={cn(
-                'flex items-center gap-2 rounded-md border px-3 py-1.5 text-left text-sm transition-colors',
-                'enabled:hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-default',
-                isChosen
-                  ? 'border-primary/60 bg-primary/10 text-foreground'
-                  : 'text-foreground',
-                answered && !isChosen && 'text-muted-foreground opacity-60'
-              )}
-            >
-              {question.multiple && (
-                <span
-                  className={cn(
-                    'flex size-4 shrink-0 items-center justify-center rounded border',
-                    isChosen &&
-                      'border-primary bg-primary text-primary-foreground'
-                  )}
-                >
-                  {isChosen && <Check className="size-3" />}
-                </span>
-              )}
-              <span className="min-w-0 flex-1">{option}</span>
-              {!question.multiple && answered && isChosen && (
-                <Check className="size-4 shrink-0 text-primary" />
-              )}
-            </button>
-          )
-        })}
-      </div>
-      {answered && chosen.length === 0 && (
-        <p className="mt-2 text-xs text-muted-foreground">
-          Answered in the chat.
-        </p>
-      )}
-      {children}
-    </ApprovalCard>
+    <AskUserQuestion
+      toolCallId={id}
+      questions={questions}
+      onSubmit={handleSubmit}
+      readOnly={answer !== undefined}
+      submittedAnswers={submittedAnswers}
+      hasFollowUpMessage={answer !== undefined}
+      submitDisabled={disabled || !onSend}
+      submitOnSelect
+    />
   )
 }

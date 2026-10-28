@@ -59,6 +59,19 @@ export function describeApproval(
           : 'Update agent'
     return `${verb} ${who}`
   }
+  if (approval.tool === 'set_connector') {
+    const verb = text('action') === 'disable' ? 'Disable' : 'Enable'
+    const scope = text('scope')
+    const where =
+      scope === 'global'
+        ? 'for all sessions'
+        : scope === 'project'
+          ? targetName
+            ? `for project ${targetName}`
+            : 'for a project'
+          : 'for an agent'
+    return `${verb} MCP server ${text('backend')}:${text('name')} ${where}`
+  }
   // A deleted worktree has no name to look up: fall back to its folder name
   const target =
     targetName ?? text('worktreePath').split(/[\\/]/).filter(Boolean).pop()
@@ -192,24 +205,26 @@ function ApprovalQuestion({ approval }: { approval: AgentApproval }) {
   const targetName = useTargetName(approval)
   const pending = approval.status === 'pending'
   return (
-    <AgentQuestionCard
-      question={{
-        question: `${describeApproval(approval, targetName)}?`,
-        options: [APPROVE, DENY],
-        multiple: false,
-      }}
-      answer={
-        pending ? undefined : approval.status === 'denied' ? DENY : APPROVE
-      }
-      disabled={decide.isPending}
-      onSend={answer => decide.run(answer === APPROVE)}
-    >
+    <>
+      <AgentQuestionCard
+        id={`approval-${approval.id}`}
+        question={{
+          question: `${describeApproval(approval, targetName)}?`,
+          options: [APPROVE, DENY],
+          multiple: false,
+        }}
+        answer={
+          pending ? undefined : approval.status === 'denied' ? DENY : APPROVE
+        }
+        disabled={decide.isPending}
+        onSend={answer => decide.run(answer === APPROVE)}
+      />
       {approval.status === 'failed' && (
-        <p className="mt-2 text-xs text-destructive">
+        <p className="text-xs text-destructive">
           It failed: {approval.result ?? 'unknown error'}
         </p>
       )}
-    </AgentQuestionCard>
+    </>
   )
 }
 

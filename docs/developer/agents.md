@@ -290,8 +290,8 @@ a line opens the conversation dialog (`AgentMessageLink.tsx`). For
 task created after the send (`findRequestTask` in `agent-messages.ts`).
 
 **Approval gate:** `delete_worktree`, `permanently_delete_worktree`,
-`push_worktree`, `merge_pull_request`, `create_pull_request` and
-`remove_project` called from an
+`push_worktree`, `merge_pull_request`, `create_pull_request`,
+`remove_project` and `set_connector` called from an
 agent session are stored in `approvals` and not run. When the user approves,
 `jean_mcp_core::run_approved_tool` runs the same call, and the result goes to
 the agent as an event. The gate is in `call_tool`, so it works for every
@@ -527,6 +527,16 @@ leave those tools off when the limit must hold. The
 read-only agent tool `list_connectors` reports the saved limit, the discovered
 servers, and whether this backend applied the limit. It does not change
 anything and does not return server config (that can hold tokens).
+
+`set_connector` (Jean MCP, needs approval) turns one discovered server on or
+off in the list a settings page edits: `global` (preferences
+`default_enabled_mcp_servers`), `project` (`enabled_mcp_servers`) or `agent`
+(the connector limit above). It saves through `patch_preferences`,
+`update_project_settings` or `update_agent`, so the UI gets the same cache
+update as a UI save. Enable on a project or agent with no saved list starts a
+list with only that server, like the settings switches. Jean does not store
+server definitions (command, URL, env, headers); each backend CLI owns them.
+The tool takes only backend and server name and never returns server config.
 
 The settings section is **Connectors and tools** on the agent page. With no
 saved MCP limit the switches are off (nothing is selected). Turning one on
