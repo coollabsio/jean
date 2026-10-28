@@ -1040,6 +1040,44 @@ export const SessionChatModal = memo(function SessionChatModal({
     />
   )
 
+  const gitBadges = (
+    <>
+      {!zenMode && stackedBaseBranch && (
+        <span
+          className={cn(
+            'inline-flex min-w-0 items-center gap-1 rounded border border-border/50 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground',
+            isMobile ? 'shrink-0' : 'shrink'
+          )}
+        >
+          <GitBranchPlus className="h-2.5 w-2.5" />
+          <span className="max-w-16 sm:max-w-40 truncate">
+            {stackedBaseBranch}
+          </span>
+          {stackedOnPR && (
+            <>
+              <span className="text-border">·</span>
+              <GitPullRequestArrow className="h-2.5 w-2.5" />#
+              {stackedOnPR.number}
+            </>
+          )}
+        </span>
+      )}
+      {!zenMode && (
+        <GitStatusBadges
+          behindCount={behindCount}
+          unpushedCount={unpushedCount}
+          diffAdded={uncommittedAdded}
+          diffRemoved={uncommittedRemoved}
+          branchDiffAdded={isBase ? 0 : branchDiffAdded}
+          branchDiffRemoved={isBase ? 0 : branchDiffRemoved}
+          onSync={handleSync}
+          onDiffClick={handleUncommittedDiffClick}
+          onBranchDiffClick={handleBranchDiffClick}
+        />
+      )}
+    </>
+  )
+
   return (
     <>
       <div
@@ -1085,8 +1123,13 @@ export const SessionChatModal = memo(function SessionChatModal({
                   MODAL_TERMINAL_PRIMARY_ROW_CLASS
                 )}
               >
-                <div className="flex items-center gap-2 min-w-0">
-                  {/* Mobile: menu sits right after the title; the title truncates so git badges stay visible */}
+                <div
+                  className={cn(
+                    'flex items-center gap-2 min-w-0',
+                    isMobile && 'flex-1'
+                  )}
+                >
+                  {/* Mobile: menu sits right after the title; the title keeps priority and git badges hide when they do not fit */}
                   <div
                     className={cn(
                       isMobile ? 'flex min-w-0 items-center gap-2' : 'contents'
@@ -1116,38 +1159,16 @@ export const SessionChatModal = memo(function SessionChatModal({
                     </h2>
                     {isMobile && worktreeMenu}
                   </div>
-                  {!zenMode && stackedBaseBranch && (
-                    <span
-                      className={cn(
-                        'inline-flex min-w-0 items-center gap-1 rounded border border-border/50 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground',
-                        isMobile ? 'shrink-0' : 'shrink'
-                      )}
-                    >
-                      <GitBranchPlus className="h-2.5 w-2.5" />
-                      <span className="max-w-16 sm:max-w-40 truncate">
-                        {stackedBaseBranch}
-                      </span>
-                      {stackedOnPR && (
-                        <>
-                          <span className="text-border">·</span>
-                          <GitPullRequestArrow className="h-2.5 w-2.5" />#
-                          {stackedOnPR.number}
-                        </>
-                      )}
-                    </span>
-                  )}
-                  {!zenMode && (
-                    <GitStatusBadges
-                      behindCount={behindCount}
-                      unpushedCount={unpushedCount}
-                      diffAdded={uncommittedAdded}
-                      diffRemoved={uncommittedRemoved}
-                      branchDiffAdded={isBase ? 0 : branchDiffAdded}
-                      branchDiffRemoved={isBase ? 0 : branchDiffRemoved}
-                      onSync={handleSync}
-                      onDiffClick={handleUncommittedDiffClick}
-                      onBranchDiffClick={handleBranchDiffClick}
-                    />
+                  {isMobile ? (
+                    // Mobile: badges wrap onto a clipped second line when they
+                    // do not fit, so they hide instead of squeezing the title.
+                    // The zero-width spacer keeps the first line occupied.
+                    <div className="flex h-6 min-w-0 flex-1 flex-wrap content-start items-center gap-2 overflow-hidden">
+                      <span aria-hidden className="h-6 w-0 -mr-2" />
+                      {gitBadges}
+                    </div>
+                  ) : (
+                    gitBadges
                   )}
                   {!isMobile && worktreeMenu}
                 </div>
