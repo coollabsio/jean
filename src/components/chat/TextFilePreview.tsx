@@ -149,7 +149,7 @@ export function TextFilePreview({
             <button
               type="button"
               onClick={() => setOpenFileId(textFile.id)}
-              className="flex items-center gap-2 h-16 px-3 rounded-md border border-border/50 bg-muted cursor-pointer hover:border-primary/50 transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+              className="flex items-center gap-2 h-16 px-3 rounded-md border border-border/50 bg-muted cursor-pointer hover:border-foreground/20 transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
             >
               <FileText className="h-5 w-5 text-muted-foreground shrink-0" />
               <div className="flex flex-col items-start text-left min-w-0">

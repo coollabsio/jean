@@ -74,7 +74,7 @@ export function ImagePreview({
                 src={image.path}
                 serverId={serverId}
                 alt={image.filename}
-                thumbnailClassName="h-16 w-16 object-cover rounded-md border border-border/50 bg-muted cursor-pointer hover:border-primary/50 transition-colors"
+                thumbnailClassName="h-16 w-16 object-cover rounded-md border border-border/50 bg-muted cursor-pointer hover:border-foreground/20 transition-colors"
               />
               {!disabled && (
                 <Tooltip>

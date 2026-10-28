@@ -119,7 +119,7 @@ export function FileMentionBadge({
               'flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-border/50 bg-muted/50 transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2',
               isDirectory
                 ? 'cursor-default'
-                : 'cursor-pointer hover:border-primary/50'
+                : 'cursor-pointer hover:border-foreground/20'
             )}
           >
             {isDirectory ? (

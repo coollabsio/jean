@@ -68,7 +68,7 @@ export function SkillBadge({ skill, onRemove, compact }: SkillBadgeProps) {
     <>
       <div
         className={cn(
-          'inline-flex items-center rounded-md border border-border/50 bg-muted/50 hover:border-primary/50 transition-colors',
+          'inline-flex items-center rounded-md border border-border/50 bg-muted/50 hover:border-foreground/20 transition-colors',
           compact ? 'h-6' : 'h-7'
         )}
       >
