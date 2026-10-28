@@ -64,6 +64,7 @@ describe('useChatWindowEvents worktree approval shortcuts', () => {
       activeWorktreeId: 'worktree-1',
       activeWorktreePath: '/tmp/worktree-1',
       isModal: false,
+      allowPlanMode: true,
       session: null,
       gitStatus: null,
       setDiffRequest: vi.fn(),

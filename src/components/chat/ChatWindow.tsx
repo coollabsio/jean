@@ -210,7 +210,7 @@ import { CHECK_GITHUB_ISSUES_PROMPT } from '@/lib/github-discovery-prompt'
 import { routeCurrentSessionMagicPrompt } from '@/lib/magic-prompt-pty'
 import { buildCommentAndCloseIssuePrompt } from '@/lib/github-issue-close-prompt'
 import { buildCommitInSessionPrompt } from '@/lib/commit-in-session-prompt'
-import type { McpServerInfo } from '@/types/chat'
+import { agentExecutionMode, type McpServerInfo } from '@/types/chat'
 import { useGitStatus } from '@/services/git-status'
 import { useRemotePicker } from '@/hooks/useRemotePicker'
 import {
@@ -1177,13 +1177,16 @@ const ChatWindowContent = memo(function ChatWindowContent({
   // Per-session execution mode (defaults to preference or Full access for new sessions)
   // Uses deferredSessionId for display consistency with other content
   const defaultExecutionMode = preferences?.default_execution_mode ?? 'yolo'
-  const executionMode = useChatStore(state =>
+  const storedExecutionMode = useChatStore(state =>
     deferredSessionId
       ? (state.executionModes[deferredSessionId] ??
         session?.selected_execution_mode ??
         defaultExecutionMode)
       : defaultExecutionMode
   )
+  const executionMode = agentChat
+    ? agentExecutionMode(selectedBackend, storedExecutionMode)
+    : storedExecutionMode
   // Whether this session is waiting for user input (AskUserQuestion/ExitPlanMode)
   const rawIsWaitingForInput = useChatStore(state =>
     activeSessionId
@@ -2416,6 +2419,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
     activeWorktreeId,
     activeWorktreePath,
     isModal,
+    allowPlanMode: !agentChat,
     session,
     gitStatus,
     setDiffRequest,
@@ -2629,6 +2633,11 @@ const ChatWindowContent = memo(function ChatWindowContent({
   const isTerminalAwaitingReconnect =
     isPersistedTerminalSurface && !sessionTerminalId
   const canReconnectTerminal = session ? canReconnectSession(session) : false
+  // The steer modifier is only reported for steer-capable backends and
+  // inverts the default action: steer when auto-steer is off, queue when on.
+  const willSteer =
+    isBackendAutoSteerEnabled(selectedBackend, preferences) !==
+    steerModifierActive
   const handleChooseNativeSession = () => {
     useUIStore.getState().openNewSessionModeModal({
       worktreeId: activeWorktreeId,
@@ -3513,24 +3522,8 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                     canSend={
                                       hasInputValue || hasPendingAttachments
                                     }
-                                    willSteer={
-                                      isBackendAutoSteerEnabled(
-                                        selectedBackend,
-                                        preferences
-                                      ) ||
-                                      (steerModifierActive &&
-                                        isSteerCapableBackend(
-                                          selectedBackend,
-                                          preferences
-                                        ))
-                                    }
-                                    steerWithModifier={
-                                      steerModifierActive &&
-                                      !isBackendAutoSteerEnabled(
-                                        selectedBackend,
-                                        preferences
-                                      )
-                                    }
+                                    willSteer={willSteer}
+                                    actionWithModifier={steerModifierActive}
                                     canSteer={isSteerCapableBackend(
                                       selectedBackend,
                                       preferences
@@ -3552,6 +3545,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                     }
                                     hasInputValue={hasInputValue}
                                     executionMode={executionMode}
+                                    hidePlanMode={agentChat}
                                     selectedBackend={selectedBackend}
                                     isDevinCloud={
                                       selectedBackend === 'devin' &&
@@ -3677,24 +3671,8 @@ const ChatWindowContent = memo(function ChatWindowContent({
                                     }
                                     onAttach={handleToolbarAttach}
                                     onCancel={handleCancel}
-                                    willSteer={
-                                      isBackendAutoSteerEnabled(
-                                        selectedBackend,
-                                        preferences
-                                      ) ||
-                                      (steerModifierActive &&
-                                        isSteerCapableBackend(
-                                          selectedBackend,
-                                          preferences
-                                        ))
-                                    }
-                                    steerWithModifier={
-                                      steerModifierActive &&
-                                      !isBackendAutoSteerEnabled(
-                                        selectedBackend,
-                                        preferences
-                                      )
-                                    }
+                                    willSteer={willSteer}
+                                    actionWithModifier={steerModifierActive}
                                     canSteer={isSteerCapableBackend(
                                       selectedBackend,
                                       preferences

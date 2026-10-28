@@ -767,6 +767,19 @@ Images pasted, dropped, or selected from the native file picker into chat are pr
 - **Skip**: GIFs (may be animated), images < 50KB, already-compressed formats
 - Token cost: `(width × height) / 750` tokens per image
 
+### GitHub API quota for background calls
+
+GitHub gives REST (`core`) and GraphQL (`graphql`) separate hourly quotas. Agents' own `gh pr create/view/checks` calls spend the GraphQL quota too. `jean-core/src/gh_cli/quota.rs` keeps one in-memory quota book for each resource, shared by Jean's background `gh` calls:
+
+- **Reserve**: background calls stop when less than 10% of a quota is left, until the reset. User actions are not gated.
+- **Pause**: a "rate limit" error pauses that resource until the known reset. A secondary limit pauses it for 60 s. Otherwise the pause is 15 min.
+- **REST polling**: `background_rest_get` runs `gh api -i`, reads the `x-ratelimit-*` headers, and sends the cached ETag. A `304` costs no quota.
+- **GraphQL subcommands** (`gh issue list`) do not show headers. Call `quota::refresh` first, which reads `GET /rate_limit` (free).
+
+Background git status (`projects/git_status.rs`) fetches each remote branch at most once per 60 s per repository. The key is the git common dir, so one fetch serves all worktrees of a project. Failed fetches count too. Fetches run with `GIT_TERMINAL_PROMPT=0`, so they never wait for credentials. A fetch that runs longer than 30 s is stopped with its whole process tree (`platform::output_with_timeout`), so a stalled connection cannot block the poll loop. Untracked files larger than 1 MB count as one added line, so polls do not read them again and again.
+
+PR status polling (`projects/pr_status.rs`) uses REST. It does not use `gh pr view`. REST has no `reviewDecision`, so Jean takes the result from each reviewer's latest review. Mr. Robot scans use the GraphQL reserve and pause.
+
 ### Headless Mode
 
 The embedded Axum HTTP server enables running Jean without the native window:
@@ -875,7 +888,7 @@ Claude runs normally use `cat input.jsonl | nohup claude --print --input-format 
 - Socket: `<app_data>/r/c<sid8><run8>.sock`. Request `{"type":"steer","message":...}`; reply `{"ok":true}` or `{"ok":false,"error":...}`. `steer_claude_turn` returns the error and the frontend falls back to the queue.
 - Finish rule (pure `ClaudeHostState`): on `result`, close stdin (CLI exits) unless a steer was written that the CLI has not echoed yet. A safety net closes stdin 30 s after a `result` when a pending steer is never consumed.
 - Echo filter: with `--replay-user-messages` the CLI re-emits each consumed stdin message as `{"type":"user","isReplay":true,...}`. The host drops the first one (the initial prompt) and rewrites each later one as `{"type":"steered_user_message","text":...}`. No parser sees a replayed user line, so the prompt never shows twice. `parse_run_to_message` already maps `steered_user_message` to `ContentBlock::UserInput`.
-- Markers: the host writes `{"type":"jean_claude_host_start"}` first and `{"type":"jean_claude_host_exit","code":N}` last. `tail_claude_output` sees the start marker and then ends only at the exit marker (or on cancel / dead process), not at the first `result`. Usage is summed over all `result` lines. The tailer emits `chat:steered` when it reads `steered_user_message`, so live and history positions match.
+- Markers: the host writes `{"type":"jean_claude_host_start"}` first and `{"type":"jean_claude_host_exit","code":N}` last. `tail_claude_output` sees the start marker and then ends only at the exit marker (or on cancel / dead process), not at the first `result`. Usage is summed over all `result` lines. `steer_claude_turn` emits `chat:steered` when the host accepts the steer, so the prompt shows at once. The tailer emits `chat:steered` on `steered_user_message` only for steers that this Jean process did not announce (for example after a restart). The live position can be earlier than the history position, which is the consumption point.
 - Recovery and cancel are unchanged: `run.pid` is the host PID, `recover_incomplete_runs` uses liveness + `type:"result"`, and `kill_process_tree` reaps the host process group (host + `claude` + MCP children).
 
 Known limitations:

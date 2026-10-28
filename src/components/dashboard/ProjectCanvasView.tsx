@@ -1,3 +1,4 @@
+import { WorkingWaveform } from '@/components/ui/status-indicator'
 import {
   draggable,
   dropTargetForElements,
@@ -406,14 +407,6 @@ export function getCanvasHighlight(
   }
 }
 
-type ActiveStatus =
-  | 'waiting'
-  | 'planning'
-  | 'vibing'
-  | 'yoloing'
-  | 'review'
-  | null
-
 interface CanvasLabelFilterTabItem extends PinnedWorktreeLabelTab {
   icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>
 }
@@ -426,20 +419,6 @@ function isLabelFilterTabItem(
   tab: CanvasFilterTabItem
 ): tab is CanvasLabelFilterTabItem {
   return isLabelFilterTab(tab.value)
-}
-
-function getActiveStatus(cards: SessionCardData[]): ActiveStatus {
-  // Actionable waiting (plan/input/permission/codex queues) collapses only at
-  // the worktree *summary* level — individual cards keep distinct statuses.
-  if (cards.some(c => isActionableWaitingStatus(c.status))) return 'waiting'
-  if (cards.some(c => c.status === 'planning' || c.status === 'scheduled'))
-    return 'planning'
-  if (cards.some(c => c.status === 'vibing')) return 'vibing'
-  if (cards.some(c => c.status === 'yoloing')) return 'yoloing'
-  // Prefer review-ready over completed for worktree-level summary
-  if (cards.some(c => c.status === 'review')) return 'review'
-  if (cards.some(c => c.status === 'completed')) return 'review'
-  return null
 }
 
 function formatRelativeTime(timestamp?: number): string | null {
@@ -470,17 +449,10 @@ function getSessionMetrics(cards: SessionCardData[]) {
   const waitingCount = cards.filter(c =>
     isActionableWaitingStatus(c.status)
   ).length
-  // Keep review-ready and completed countable together for metrics, but
-  // cancelled/crashed are not "ready for review".
-  const reviewCount = cards.filter(
-    c => c.status === 'review' || c.status === 'completed'
+  const runningCount = cards.filter(
+    c =>
+      c.status === 'planning' || c.status === 'vibing' || c.status === 'yoloing'
   ).length
-  const planningCount = cards.filter(
-    c => c.status === 'planning' || c.status === 'scheduled'
-  ).length
-  const buildingCount = cards.filter(c => c.status === 'vibing').length
-  const yoloCount = cards.filter(c => c.status === 'yoloing').length
-  const activeCount = planningCount + buildingCount + yoloCount
   const latestActivityAt = cards.reduce(
     (latest, card) =>
       Math.max(latest, getSessionActivityTimestamp(card.session)),
@@ -488,13 +460,8 @@ function getSessionMetrics(cards: SessionCardData[]) {
   )
 
   return {
-    totalCount: cards.length,
     waitingCount,
-    reviewCount,
-    planningCount,
-    buildingCount,
-    yoloCount,
-    activeCount,
+    runningCount,
     latestActivityAt,
   }
 }
@@ -678,6 +645,7 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
   })
   const worktreeLabels = getWorktreeLabels(worktree)
   const waitingCount = sessionMetrics?.waitingCount ?? 0
+  const runningCount = sessionMetrics?.runningCount ?? 0
   // Secondary details show on hover, focus or keyboard selection. Touch
   // devices have no hover, so they keep the details visible.
   const revealClass = cn(
@@ -743,6 +711,9 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
                   title={`${waitingCount} waiting`}
                   className="size-1.5 shrink-0 rounded-full bg-warning"
                 />
+              )}
+              {runningCount > 0 && (
+                <WorkingWaveform label={`${runningCount} running`} />
               )}
               {showBranchBadge && (
                 <span
@@ -885,31 +856,6 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
                 revealClass
               )}
             >
-              {sessionMetrics.waitingCount > 0 && (
-                <span className="rounded bg-warning px-2 py-0.5 text-warning-foreground">
-                  {sessionMetrics.waitingCount} waiting
-                </span>
-              )}
-              {sessionMetrics.planningCount > 0 && (
-                <span className="rounded bg-info/10 px-2 py-0.5 text-info">
-                  {sessionMetrics.planningCount} planning
-                </span>
-              )}
-              {sessionMetrics.buildingCount > 0 && (
-                <span className="rounded bg-info/10 px-2 py-0.5 text-info">
-                  {sessionMetrics.buildingCount} building
-                </span>
-              )}
-              {sessionMetrics.yoloCount > 0 && (
-                <span className="rounded bg-destructive/10 px-2 py-0.5 text-destructive max-md:hidden">
-                  {sessionMetrics.yoloCount} full access
-                </span>
-              )}
-              {sessionMetrics.reviewCount > 0 && (
-                <span className="rounded bg-success/10 px-2 py-0.5 text-success max-md:hidden">
-                  {sessionMetrics.reviewCount} review
-                </span>
-              )}
               {uniqueSessionLabels.map(label => (
                 <span
                   key={label.name}
@@ -1676,28 +1622,6 @@ export function ProjectCanvasView({
       document.removeEventListener('dragend', handleDocumentDragEnd, true)
     }
   }, [reorderCanvasFromDrop])
-
-  const projectSummary = useMemo(() => {
-    let reviewCount = 0
-    let waitingCount = 0
-    let activeCount = 0
-    let totalReady = 0
-    for (const section of worktreeSections) {
-      if (section.isPending) continue
-      totalReady++
-      const status = getActiveStatus(section.cards)
-      if (status === 'review') reviewCount++
-      if (status === 'waiting') waitingCount++
-      if (
-        status === 'planning' ||
-        status === 'vibing' ||
-        status === 'yoloing'
-      ) {
-        activeCount++
-      }
-    }
-    return { totalReady, reviewCount, waitingCount, activeCount }
-  }, [worktreeSections])
 
   // Build flat array of all cards for keyboard navigation
   const flatCards: FlatCard[] = useMemo(() => {
@@ -3060,10 +2984,10 @@ export function ProjectCanvasView({
       <div className="flex-1 flex flex-col overflow-auto">
         {/* Header and filters - sticky together over content */}
         <div className="sticky top-0 z-10 bg-background/60 backdrop-blur-md">
-          <div className="relative grid grid-cols-[auto_1fr_auto] items-center gap-4 px-4 py-2 sm:py-3 border-b border-border/30 sm:min-h-[61px]">
+          <div className="relative grid grid-cols-[auto_1fr_auto] items-center gap-4 px-4 py-2 sm:py-3 border-b border-border/20 sm:min-h-[61px]">
             <div className="flex flex-col shrink-0">
               <div className="flex items-center gap-2">
-                <h2 className="truncate text-base font-semibold">
+                <h2 className="truncate text-sm font-normal text-muted-foreground">
                   {project.name}
                 </h2>
                 <DropdownMenu>
@@ -3273,8 +3197,8 @@ export function ProjectCanvasView({
                     </DropdownMenuItem>
 
                     <DropdownMenuSub>
-                      <DropdownMenuSubTrigger>
-                        <ArrowUpDown className="h-4 w-4" />
+                      <DropdownMenuSubTrigger className="gap-2">
+                        <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
                         Sort worktrees
                       </DropdownMenuSubTrigger>
                       <DropdownMenuSubContent className="w-44">
@@ -3338,22 +3262,6 @@ export function ProjectCanvasView({
                     </Button>
                   )}
               </div>
-              <p className="text-xs text-muted-foreground whitespace-nowrap">
-                {projectSummary.totalReady > 0 ? (
-                  <>
-                    {projectSummary.totalReady}{' '}
-                    {projectSummary.totalReady === 1 ? 'worktree' : 'worktrees'}
-                    {projectSummary.reviewCount > 0 &&
-                      ` · ${projectSummary.reviewCount} review`}
-                    {projectSummary.waitingCount > 0 &&
-                      ` · ${projectSummary.waitingCount} waiting`}
-                    {projectSummary.activeCount > 0 &&
-                      ` · ${projectSummary.activeCount} active`}
-                  </>
-                ) : (
-                  <span className="invisible">0 worktrees</span>
-                )}
-              </p>
             </div>
             {(worktreeSections.length > 0 || searchQuery) && (
               <>
@@ -3428,15 +3336,14 @@ export function ProjectCanvasView({
                   useProjectsStore.getState().selectProject(projectId)
                   useUIStore.getState().setNewWorktreeModalOpen(true)
                 }}
-                aria-label="New worktree"
               >
                 <Plus className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">New worktree</span>
+                New worktree
               </Button>
             </div>
           </div>
 
-          <div className="border-b border-border/30 bg-background/80 px-4 py-2">
+          <div className="border-b border-border/20 bg-background/80 px-4 py-2">
             <div
               role="tablist"
               aria-label="Worktree filters"
@@ -3801,6 +3708,9 @@ export function ProjectCanvasView({
         }}
         onConfirm={handleConfirmCloseWorktree}
         branchName={closeWorktreeTarget?.branchName}
+        worktree={visibleWorktrees.find(
+          w => w.id === closeWorktreeTarget?.worktreeId
+        )}
       />
 
       {/* Linked Projects modal (triggered from MagicModal on canvas) */}

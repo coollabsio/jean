@@ -36,6 +36,8 @@ interface ReasoningLevelDropdownProps {
   onOpenChange?: (open: boolean) => void
   /** Highlights the brain icon (a level that thinks is selected) */
   active?: boolean
+  /** Text-only trigger, e.g. when it continues the model picker chip */
+  hideIcon?: boolean
   tooltip?: string
   /** Number hints for the 1-9 shortcuts inside the open menu */
   showShortcuts?: boolean
@@ -56,6 +58,7 @@ export function ReasoningLevelDropdown({
   open,
   onOpenChange,
   active = true,
+  hideIcon = false,
   tooltip,
   showShortcuts = false,
   disabled,
@@ -74,12 +77,14 @@ export function ReasoningLevelDropdown({
         aria-label={label ? `${label}: ${selectedLabel}` : undefined}
         className={cn(TRIGGER_CLASS, triggerClassName)}
       >
-        <Brain
-          className={cn(
-            'h-3.5 w-3.5',
-            active && 'text-purple-600 dark:text-purple-400'
-          )}
-        />
+        {!hideIcon && (
+          <Brain
+            className={cn(
+              'h-3.5 w-3.5',
+              active && 'text-purple-600 dark:text-purple-400'
+            )}
+          />
+        )}
         {showLabel && label && (
           <span className="text-muted-foreground">{label}</span>
         )}

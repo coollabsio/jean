@@ -15,7 +15,7 @@ After receiving their input:
 2. **Get GitHub username** using `gh api user --jq .login` or `git config user.name`
 3. **Update `package.json`** with proper name and description
 4. **Update `src/index.html`** title tag
-5. **Update `CLAUDE.md`** to include the title and description in the overview section
+5. **Update `AGENTS.md`** to include the title and description in the overview section
 6. **Update `README.md`** to replace "Tauri React Template" with their app name and update the description
 7. **Update `src-tauri/tauri.conf.json`**:
    - Set `productName` to their app name

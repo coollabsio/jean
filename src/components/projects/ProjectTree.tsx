@@ -875,7 +875,7 @@ export function ProjectTree({
         )}
         {hasBothTypes && (
           <div className="px-3 py-2">
-            <Separator />
+            <Separator className="bg-border/20" />
           </div>
         )}
         {projectSections.map(section => {

@@ -516,7 +516,7 @@ export function WorktreeList({
 
   return (
     <div
-      className="ml-4 border-l border-border/40 py-0.5"
+      className="ml-4 border-l border-border/20 py-0.5"
       onPointerDown={event => event.stopPropagation()}
       onKeyDown={event => event.stopPropagation()}
       onDragOver={handleNativeDragOver}

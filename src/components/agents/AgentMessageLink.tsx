@@ -269,7 +269,7 @@ function AgentConversationDialog({
     <Dialog open onOpenChange={open => !open && onClose()}>
       <DialogContent
         showCloseButton={false}
-        className="flex max-h-[85dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl"
+        className="top-[7.5dvh] flex max-h-[85dvh] translate-y-0 flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl"
       >
         <DialogTitle className="flex shrink-0 items-center justify-center gap-2 border-b px-4 py-3 text-sm font-medium">
           {sender.icon}

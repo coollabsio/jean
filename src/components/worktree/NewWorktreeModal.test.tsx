@@ -152,8 +152,10 @@ describe('NewWorktreeModal investigation selector', () => {
       screen.queryByRole('combobox', { name: 'Investigation provider' })
     ).toBeNull()
     expect(
-      screen.getByRole('button', { name: 'Choose backend and model' })
-    ).toHaveTextContent('Claude')
+      within(
+        screen.getByRole('button', { name: 'Choose backend and model' })
+      ).getByRole('img', { name: 'Claude' })
+    ).toBeInTheDocument()
   })
 
   it('loads the PR investigation defaults when switching tabs', async () => {

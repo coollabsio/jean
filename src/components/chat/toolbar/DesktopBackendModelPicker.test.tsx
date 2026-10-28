@@ -354,9 +354,8 @@ describe('DesktopBackendModelPicker', () => {
       screen.getByRole('button', { name: /choose backend and model/i })
     )
 
-    expect(
-      await screen.findByText('gpt-5.5 (openai-codex)')
-    ).toBeInTheDocument()
+    const list = await screen.findByRole('listbox')
+    expect(within(list).getByText('gpt-5.5 (openai-codex)')).toBeInTheDocument()
     expect(screen.queryByText('Sonnet (PI)')).toBeNull()
   })
 

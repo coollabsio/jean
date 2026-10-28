@@ -57,7 +57,10 @@ import {
   type PromptAttachmentMetadata,
 } from './message-content-utils'
 import { isModKeyEvent } from '@/types/keybindings'
-import { isSteerCapableBackend } from '@/lib/backend-auto-steer'
+import {
+  isBackendAutoSteerEnabled,
+  isSteerCapableBackend,
+} from '@/lib/backend-auto-steer'
 import { isNativeApp } from '@/lib/environment'
 import { applyYoloInvestigationFixDirective } from '@/lib/investigation-prompt'
 import {
@@ -79,7 +82,11 @@ interface ChatInputProps {
   focusChatShortcut: string
   onSubmit: (
     e: React.FormEvent | undefined,
-    options?: { forceSteer?: boolean; beforeSend?: () => Promise<void> }
+    options?: {
+      forceSteer?: boolean
+      forceQueue?: boolean
+      beforeSend?: () => Promise<void>
+    }
   ) => void
   onCancel: () => void
   onSwitchBackendWithTab?: () => void
@@ -537,20 +544,25 @@ export const ChatInput = memo(function ChatInput({
         return
       }
 
-      const forceSteer =
+      // Holding the primary modifier inverts the default submit action of a
+      // steer-capable running turn: steer when auto-steer is off, queue when on.
+      const steerPreferences = queryClient.getQueryData<AppPreferences>(
+        preferencesQueryKeys.preferences(
+          activeWorktreeId
+            ? parseServerResourceKey(activeWorktreeId)?.serverId
+            : undefined
+        )
+      )
+      const modifierActive =
         isSending &&
-        isSteerCapableBackend(
-          selectedBackend,
-          queryClient.getQueryData<AppPreferences>(
-            preferencesQueryKeys.preferences(
-              activeWorktreeId
-                ? parseServerResourceKey(activeWorktreeId)?.serverId
-                : undefined
-            )
-          )
-        ) &&
+        isSteerCapableBackend(selectedBackend, steerPreferences) &&
         (e.metaKey || e.ctrlKey)
-      onSteerModifierChange?.(forceSteer)
+      onSteerModifierChange?.(modifierActive)
+      const submitOptions = modifierActive
+        ? isBackendAutoSteerEnabled(selectedBackend, steerPreferences)
+          ? { forceQueue: true }
+          : { forceSteer: true }
+        : undefined
 
       // When file mention popover is open, handle navigation
       if (fileMentionOpen) {
@@ -679,7 +691,7 @@ export const ChatInput = memo(function ChatInput({
             .getState()
             .setInputDraft(activeSessionId, valueRef.current)
         }
-        onSubmit(e, forceSteer ? { forceSteer: true } : undefined)
+        onSubmit(e, submitOptions)
         // The submit handler clears accepted messages through the registered
         // clear handler. A blocked submit must keep the visible draft intact.
       }

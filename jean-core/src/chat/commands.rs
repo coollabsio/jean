@@ -10199,8 +10199,9 @@ fn queued_message_supports_any_steering(msg: &serde_json::Value) -> bool {
 
 /// Inject a user message into a running Claude turn via the detached Claude
 /// host. Errors when the run is not host-backed or the turn already finished;
-/// callers fall back to the queue. The host writes `steered_user_message`
-/// and the tailer emits `chat:steered` when the CLI consumes the steer.
+/// callers fall back to the queue. `chat:steered` is emitted when the host
+/// accepts the steer; the host writes `steered_user_message` to the run log
+/// when the CLI consumes it.
 pub async fn steer_claude_turn(
     app: AppHandle,
     worktree_id: String,
@@ -10212,13 +10213,13 @@ pub async fn steer_claude_turn(
 
 async fn steer_text_into_claude_turn(
     app: &AppHandle,
-    _worktree_id: &str,
+    worktree_id: &str,
     session_id: &str,
     message: &str,
 ) -> Result<(), String> {
     #[cfg(not(unix))]
     {
-        let _ = (app, session_id, message);
+        let _ = (app, worktree_id, session_id, message);
         Err("Claude steering is only available on macOS/Linux".to_string())
     }
 
@@ -10239,12 +10240,31 @@ async fn steer_text_into_claude_turn(
             .map_err(|e| format!("Failed to resolve app data dir: {e}"))?;
         let socket_path =
             super::claude_host::claude_host_socket_path(&app_data, session_id, &run_id);
-        let message = message.to_string();
-        tokio::task::spawn_blocking(move || {
-            super::claude_host::send_claude_host_steer(&socket_path, &message)
+        // The CLI consumes the steer only at its next turn boundary, which can
+        // take seconds. Show the prompt now; mark it first so the tailer does
+        // not emit it a second time on consumption (even when that is fast).
+        super::claude_host::mark_steer_announced(session_id, message);
+        let text = message.to_string();
+        let result = tokio::task::spawn_blocking(move || {
+            super::claude_host::send_claude_host_steer(&socket_path, &text)
         })
         .await
-        .map_err(|e| format!("Claude steer task failed: {e}"))?
+        .map_err(|e| format!("Claude steer task failed: {e}"))
+        .and_then(|r| r);
+        if let Err(e) = result {
+            super::claude_host::take_announced_steer(session_id, message);
+            return Err(e);
+        }
+        app.emit_all(
+            "chat:steered",
+            &serde_json::json!({
+                "session_id": session_id,
+                "worktree_id": worktree_id,
+                "text": message,
+            }),
+        )
+        .ok();
+        Ok(())
     }
 }
 

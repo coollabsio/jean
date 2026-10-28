@@ -154,7 +154,7 @@ const WorktreeSessionList = memo(function WorktreeSessionList({
   return (
     <div
       className={cn(
-        'border-l border-border/40 py-0.5',
+        'border-l border-border/20 py-0.5',
         isNarrowSidebar ? 'ml-6' : 'ml-9'
       )}
     >
@@ -923,6 +923,7 @@ export const WorktreeItem = memo(function WorktreeItem({
         }}
         branchName={worktree.branch}
         mode={closeConfirm?.mode ?? 'worktree'}
+        worktree={worktree}
       />
     </div>
   )

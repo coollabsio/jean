@@ -135,6 +135,18 @@ export function normalizeExecutionModeForBackend(
   return 'plan'
 }
 
+/**
+ * Agents run unattended and need the Jean MCP tools, which Plan mode blocks.
+ * Same rule as the backend wake: use Build, or Yolo for Cursor (no Build).
+ */
+export function agentExecutionMode(
+  backend: Backend | undefined,
+  mode: ExecutionMode
+): ExecutionMode {
+  if (mode !== 'plan') return mode
+  return backend === 'cursor' ? 'yolo' : 'build'
+}
+
 export function permissionModeForExecution(
   mode: ExecutionMode
 ): PermissionMode {

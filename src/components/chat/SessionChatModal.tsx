@@ -1530,6 +1530,7 @@ export const SessionChatModal = memo(function SessionChatModal({
         onConfirm={executeCloseAction}
         branchName={worktree?.branch}
         mode={closeConfirmMode}
+        worktree={worktree ?? undefined}
       />
     </>
   )

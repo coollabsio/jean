@@ -306,7 +306,7 @@ Tasks take the form `task-x-taskname.md`. To prioritise a task, change the "x" t
 
 ### AI Instructions
 
-A comprehensive `CLAUDE.md` is included, along with barebones cursor rules and `GEMINI.md` which simply point at claude's instructions.
+A comprehensive `AGENTS.md` is included, along with barebones cursor rules and `GEMINI.md` which simply point at claude's instructions.
 
 ### Claude Code Agents
 

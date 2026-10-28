@@ -2072,14 +2072,17 @@ pub fn tail_claude_output(
                         content_blocks.push(ContentBlock::UserInput {
                             text: text.to_string(),
                         });
-                        let _ = app.emit_all(
-                            "chat:steered",
-                            &serde_json::json!({
-                                "session_id": session_id,
-                                "worktree_id": worktree_id,
-                                "text": text,
-                            }),
-                        );
+                        // Skip when already shown at the time Jean sent the steer.
+                        if !super::claude_host::take_announced_steer(session_id, text) {
+                            let _ = app.emit_all(
+                                "chat:steered",
+                                &serde_json::json!({
+                                    "session_id": session_id,
+                                    "worktree_id": worktree_id,
+                                    "text": text,
+                                }),
+                            );
+                        }
                     }
                 }
                 "assistant" => {

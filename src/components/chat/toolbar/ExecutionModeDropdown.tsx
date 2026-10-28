@@ -14,6 +14,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { useChatStore } from '@/store/chat-store'
 import {
   getSupportedPermissionModes,
@@ -34,6 +39,8 @@ interface ExecutionModeDropdownProps {
   className?: string
   align?: 'start' | 'center' | 'end'
   onCloseAutoFocus?: (event: Event) => void
+  /** Show only the mode icon; the label moves to a tooltip */
+  iconOnly?: boolean
 }
 
 const PERMISSIONS: Record<
@@ -85,6 +92,7 @@ export function ExecutionModeDropdown({
   className,
   align = 'start',
   onCloseAutoFocus,
+  iconOnly = false,
 }: ExecutionModeDropdownProps) {
   const rememberedPermission = useChatStore(state =>
     sessionId ? state.permissionModes[sessionId] : undefined
@@ -105,28 +113,32 @@ export function ExecutionModeDropdown({
     : isLegacy
       ? 'Legacy Build'
       : active.label
+  const ariaLabel = isPlan ? 'Workflow: Plan' : `Permissions: ${triggerLabel}`
 
   return (
     <div className={cn('flex items-center shrink-0', className)}>
       <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            aria-label={
-              isPlan ? 'Workflow: Plan' : `Permissions: ${triggerLabel}`
-            }
-            disabled={disabled}
-            className="flex h-8 items-center gap-1.5 px-2 text-xs font-medium text-muted-foreground hover:bg-muted/80 disabled:opacity-50"
-          >
-            <PermissionIcon
-              className={cn(
-                'h-3.5 w-3.5',
-                MODE_TONE[isPlan ? 'plan' : permission]
-              )}
-            />
-            <span>{triggerLabel}</span>
-          </button>
-        </DropdownMenuTrigger>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label={ariaLabel}
+                disabled={disabled}
+                className="flex h-8 items-center gap-1.5 px-2 text-xs font-medium text-muted-foreground hover:bg-muted/80 disabled:opacity-50"
+              >
+                <PermissionIcon
+                  className={cn(
+                    'h-3.5 w-3.5',
+                    MODE_TONE[isPlan ? 'plan' : permission]
+                  )}
+                />
+                {!iconOnly && <span>{triggerLabel}</span>}
+              </button>
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          {iconOnly && <TooltipContent>{ariaLabel}</TooltipContent>}
+        </Tooltip>
         <DropdownMenuContent
           align={align}
           onCloseAutoFocus={onCloseAutoFocus}

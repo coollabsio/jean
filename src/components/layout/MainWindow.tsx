@@ -640,7 +640,7 @@ export function MainWindow() {
             tabIndex={-1}
             aria-orientation="vertical"
             aria-label="Resize left sidebar"
-            className="relative h-full w-px bg-border/40"
+            className="relative h-full w-px bg-border/20"
             onMouseDown={handleResizeStart}
           >
             {/* Invisible wider hit area for easier clicking */}
@@ -702,7 +702,7 @@ export function MainWindow() {
             tabIndex={-1}
             aria-orientation="vertical"
             aria-label="Resize file browser"
-            className="relative z-20 h-full w-px shrink-0 cursor-col-resize bg-border/40"
+            className="relative z-20 h-full w-px shrink-0 cursor-col-resize bg-border/20"
             onMouseDown={handleFileBrowserResizeStart}
           >
             <div className="absolute inset-y-0 z-20 -left-1.5 -right-1.5 cursor-col-resize" />

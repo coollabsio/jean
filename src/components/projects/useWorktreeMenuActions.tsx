@@ -99,6 +99,7 @@ export function useWorktreeMenuActions({
 
   return {
     // State
+    worktree,
     showDeleteConfirm,
     setShowDeleteConfirm,
     isBase,

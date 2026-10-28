@@ -1,6 +1,79 @@
 // Cross-platform process management
 
-use std::process::{Child, Command};
+use std::io::Read;
+use std::process::{Child, Command, Output, Stdio};
+use std::time::{Duration, Instant};
+
+/// Runs `cmd` and collects its output, like `Command::output`, but stops the
+/// whole process tree after `timeout`. Returns the output and whether it timed out.
+///
+/// The child gets its own process group, so descendants that inherited the
+/// output pipes (ssh under `git fetch`, package managers under a shell) die too
+/// and the pipe readers finish.
+pub fn output_with_timeout(
+    cmd: &mut Command,
+    timeout: Duration,
+) -> std::io::Result<(Output, bool)> {
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(unix)]
+    unsafe {
+        use std::os::unix::process::CommandExt;
+        cmd.pre_exec(|| {
+            if libc::setpgid(0, 0) == 0 {
+                Ok(())
+            } else {
+                Err(std::io::Error::last_os_error())
+            }
+        });
+    }
+
+    let mut child = cmd.spawn()?;
+    let mut stdout = child.stdout.take().expect("stdout was configured as piped");
+    let mut stderr = child.stderr.take().expect("stderr was configured as piped");
+    let stdout_reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = stdout.read_to_end(&mut bytes);
+        bytes
+    });
+    let stderr_reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = stderr.read_to_end(&mut bytes);
+        bytes
+    });
+
+    let deadline = Instant::now() + timeout;
+    let timed_out = loop {
+        if child.try_wait()?.is_some() {
+            break false;
+        }
+        if Instant::now() >= deadline {
+            break true;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
+
+    if timed_out {
+        #[cfg(unix)]
+        unsafe {
+            libc::kill(-(child.id() as i32), libc::SIGKILL);
+        }
+        #[cfg(windows)]
+        {
+            let _ = silent_command("taskkill")
+                .args(["/PID", &child.id().to_string(), "/T", "/F"])
+                .output();
+        }
+        let _ = child.kill();
+    }
+
+    let status = child.wait()?;
+    let output = Output {
+        status,
+        stdout: stdout_reader.join().unwrap_or_default(),
+        stderr: stderr_reader.join().unwrap_or_default(),
+    };
+    Ok((output, timed_out))
+}
 
 /// Stop a child process and wait for its exit so Unix does not retain a zombie.
 ///

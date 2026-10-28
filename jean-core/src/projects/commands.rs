@@ -8554,7 +8554,20 @@ mod merge_pr_tests {
 ///
 /// Checks mergeability first via `gh pr view`, then merges with the merge method
 /// the repository allows (squash > merge commit > rebase, preferring squash).
+///
+/// The `gh`/`glab` calls are synchronous and can take many seconds, so they run
+/// on the blocking pool. On an async worker they stall unrelated commands, such
+/// as creating a new session, until the merge finishes.
 pub async fn merge_github_pr(
+    app: AppHandle,
+    worktree_path: String,
+) -> Result<MergePrResponse, String> {
+    tokio::task::spawn_blocking(move || merge_github_pr_blocking(app, worktree_path))
+        .await
+        .map_err(|e| format!("Merge PR task failed: {e}"))?
+}
+
+fn merge_github_pr_blocking(
     app: AppHandle,
     worktree_path: String,
 ) -> Result<MergePrResponse, String> {

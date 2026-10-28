@@ -125,8 +125,8 @@ export function ScriptsSubmenu(props: ScriptsButtonProps) {
 
   return (
     <DropdownMenuSub>
-      <DropdownMenuSubTrigger>
-        <Play className="h-4 w-4" />
+      <DropdownMenuSubTrigger className="gap-2">
+        <Play className="h-4 w-4 text-muted-foreground" />
         Scripts
       </DropdownMenuSubTrigger>
       <DropdownMenuSubContent className="min-w-48">

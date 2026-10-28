@@ -5,5 +5,6 @@
 
 mod commands;
 pub(crate) mod config;
+pub mod quota;
 
 pub use commands::*;

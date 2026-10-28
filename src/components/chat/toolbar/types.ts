@@ -53,6 +53,8 @@ export interface ChatToolbarProps {
   hasPendingAttachments: boolean
   hasInputValue: boolean
   executionMode: ExecutionMode
+  /** Agent chats cannot use Plan mode */
+  hidePlanMode?: boolean
   selectedBackend: Backend
   selectedModel: string
   selectedProvider: string | null
@@ -124,7 +126,7 @@ export interface ChatToolbarProps {
   onCancel: () => void
   /** When true while sending, the secondary submit button steers instead of queues. */
   willSteer?: boolean
-  steerWithModifier?: boolean
+  actionWithModifier?: boolean
   canSteer?: boolean
   onSteer?: () => void
   queuedMessageCount?: number

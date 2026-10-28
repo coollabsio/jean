@@ -12,6 +12,7 @@ use super::types::{
     AutoFixStatusError, AutoFixStoppedEvent,
 };
 use crate::chat::types::{EffortLevel, ThinkingLevel};
+use crate::gh_cli::quota::{self, GhResource};
 use crate::http_server::EmitExt;
 use crate::projects::github_issues::{GitHubComment, IssueContext};
 use crate::projects::types::{Project, ProjectAutoFixSettings, Worktree, WorktreeOrigin};
@@ -19,7 +20,6 @@ use crate::projects::types::{Project, ProjectAutoFixSettings, Worktree, Worktree
 const AUTO_FIX_TICK_SECONDS: u64 = 10;
 /// Start/recovery/yolo attempts per issue or session before Mr. Robot gives up.
 const AUTO_FIX_MAX_ATTEMPTS: u32 = 3;
-const GITHUB_RATE_LIMIT_BACKOFF_SECS: u64 = 15 * 60;
 const AUTO_YOLO_WATCH_SECONDS: u64 = 2;
 const AUTO_YOLO_WATCH_ATTEMPTS: usize = 900; // 30 minutes
                                              // Worktree creation can include long setup scripts. Waiting too briefly left
@@ -351,12 +351,7 @@ fn gave_up_issue_numbers(project_id: &str) -> HashSet<u32> {
     })
 }
 
-fn is_github_rate_limit_error(error: &str) -> bool {
-    error.to_lowercase().contains("rate limit")
-}
-
-fn defer_project_for_rate_limit(project_id: &str) {
-    let until = now_unix_secs() + GITHUB_RATE_LIMIT_BACKOFF_SECS;
+fn defer_project_for_rate_limit(project_id: &str, until: u64) {
     with_project_runtime(project_id, |runtime| {
         runtime.rate_limited_until = Some(until);
         runtime.next_scan_at = runtime.next_scan_at.max(until);
@@ -626,6 +621,18 @@ async fn run_auto_fix_scan(app: &AppHandle) {
         }
 
         let _scan_guard = ScanGuard(project.id.clone());
+        let gh = crate::gh_cli::config::resolve_gh_binary(app);
+        let quota_path = project.path.clone();
+        let _ = tokio::task::spawn_blocking(move || quota::refresh(&gh, &quota_path)).await;
+        if let Some(until) = quota::background_wait(GhResource::Graphql) {
+            defer_project_for_rate_limit(&project.id, until);
+            record_activity(
+                &project.id,
+                quota::wait_error(GhResource::Graphql, until),
+                None,
+            );
+            continue;
+        }
         record_activity(&project.id, "Scan started".to_string(), None);
 
         let project_worktrees: Vec<Worktree> = data
@@ -647,8 +654,8 @@ async fn run_auto_fix_scan(app: &AppHandle) {
                     "Mr. Robot: failed to list issues for {}: {err}",
                     project.name
                 );
-                if is_github_rate_limit_error(&err) {
-                    defer_project_for_rate_limit(&project.id);
+                if let Some(until) = quota::record_failure(GhResource::Graphql, &err) {
+                    defer_project_for_rate_limit(&project.id, until);
                 }
                 record_project_error(&project.id, format!("Failed to list GitHub issues: {err}"));
                 continue;
@@ -767,9 +774,9 @@ async fn run_auto_fix_scan(app: &AppHandle) {
                             "Mr. Robot: issue #{issue_number} failed for {}: {err}",
                             project_clone.name
                         );
-                        if is_github_rate_limit_error(&err) {
+                        if let Some(until) = quota::record_failure(GhResource::Graphql, &err) {
                             // Not the issue's fault: wait, and keep its attempts.
-                            defer_project_for_rate_limit(&project_clone.id);
+                            defer_project_for_rate_limit(&project_clone.id, until);
                             record_project_error(&project_clone.id, err);
                         } else {
                             record_issue_failure(&project_clone.id, issue_number, &err);
@@ -2485,7 +2492,7 @@ mod tests {
         assert!(request_auto_fix_scan(&project.id).is_err());
         drop(ScanGuard(project.id.clone()));
         request_auto_fix_scan(&project.id).unwrap();
-        defer_project_for_rate_limit(&project.id);
+        defer_project_for_rate_limit(&project.id, now_unix_secs() + 600);
         assert!(request_auto_fix_scan(&project.id).is_err());
         assert!(!project_due(&project, &settings));
     }
@@ -2515,10 +2522,11 @@ mod tests {
         assert!(!project_due(&project, &settings));
 
         with_project_runtime(&project.id, |runtime| runtime.scanning = false);
-        defer_project_for_rate_limit(&project.id);
+        let deferred_until = now_unix_secs() + 600;
+        defer_project_for_rate_limit(&project.id, deferred_until);
         let status = get_auto_fix_status(&project.id);
         let until = status.rate_limited_until.expect("rate limited");
-        assert!(until >= now_unix_secs() + GITHUB_RATE_LIMIT_BACKOFF_SECS - 1);
+        assert_eq!(until, deferred_until);
         assert!(status.next_scan_at.unwrap() >= until);
     }
 
@@ -2559,16 +2567,5 @@ mod tests {
             investigation_stop_action(&test_session(0, 0, false), false),
             InvestigationStopAction::None
         );
-    }
-
-    #[test]
-    fn detects_github_rate_limit_errors() {
-        assert!(is_github_rate_limit_error(
-            "gh issue list failed: API rate limit exceeded for user"
-        ));
-        assert!(is_github_rate_limit_error(
-            "You have exceeded a secondary rate limit"
-        ));
-        assert!(!is_github_rate_limit_error("Could not resolve repository"));
     }
 }

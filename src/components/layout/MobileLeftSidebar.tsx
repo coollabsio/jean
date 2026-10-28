@@ -74,7 +74,7 @@ export function MobileLeftSidebar({
         // tooltip on focus when the drawer slides in on mobile.
         onOpenAutoFocus={e => e.preventDefault()}
         // Almost full width; the thin dimmed strip on the right still dismisses.
-        className="bg-sidebar text-sidebar-foreground w-[calc(100vw-3rem)] gap-0 border-r p-0 sm:max-w-[calc(100vw-3rem)]"
+        className="bg-sidebar text-sidebar-foreground w-[calc(100vw-3rem)] gap-0 border-r border-border/20 p-0 sm:max-w-[calc(100vw-3rem)]"
         style={
           {
             ...(isDragging

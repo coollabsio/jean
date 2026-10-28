@@ -250,6 +250,40 @@ pub(crate) fn spawn_claude_host(
     Ok(pid)
 }
 
+/// Steers Jean already showed (`chat:steered` at send time), per session.
+/// The tailer skips its own `chat:steered` for these when the CLI consumes
+/// them, so the prompt shows at once and only once. Empty after a Jean
+/// restart, so recovered runs still emit on consumption.
+static ANNOUNCED_STEERS: once_cell::sync::Lazy<
+    std::sync::Mutex<std::collections::HashMap<String, Vec<String>>>,
+> = once_cell::sync::Lazy::new(Default::default);
+
+pub(crate) fn mark_steer_announced(session_id: &str, text: &str) {
+    if let Ok(mut map) = ANNOUNCED_STEERS.lock() {
+        map.entry(session_id.to_string())
+            .or_default()
+            .push(text.to_string());
+    }
+}
+
+/// Remove one announced steer. Returns true when it was announced.
+pub(crate) fn take_announced_steer(session_id: &str, text: &str) -> bool {
+    let Ok(mut map) = ANNOUNCED_STEERS.lock() else {
+        return false;
+    };
+    let Some(texts) = map.get_mut(session_id) else {
+        return false;
+    };
+    let Some(index) = texts.iter().position(|t| t == text) else {
+        return false;
+    };
+    texts.remove(index);
+    if texts.is_empty() {
+        map.remove(session_id);
+    }
+    true
+}
+
 /// Send a steer to a running host and wait for its reply.
 #[cfg(unix)]
 pub(crate) fn send_claude_host_steer(
@@ -622,6 +656,17 @@ mod tests {
         assert!(!s.should_force_close(Instant::now()));
         assert!(s.should_force_close(Instant::now() + PENDING_STEER_GRACE));
         assert!(s.accept_steer("late").is_err());
+    }
+
+    #[test]
+    fn announced_steer_is_taken_once_per_send() {
+        mark_steer_announced("s-announce", "hi");
+        mark_steer_announced("s-announce", "hi");
+        assert!(!take_announced_steer("s-announce", "other"));
+        assert!(!take_announced_steer("s-other", "hi"));
+        assert!(take_announced_steer("s-announce", "hi"));
+        assert!(take_announced_steer("s-announce", "hi"));
+        assert!(!take_announced_steer("s-announce", "hi"));
     }
 
     #[test]

@@ -15,8 +15,8 @@ interface SendCancelButtonProps {
   canSend: boolean
   /** When true, the secondary action steers into the running turn instead of queueing. */
   willSteer?: boolean
-  /** When true, steering requires the primary modifier plus Enter. */
-  steerWithModifier?: boolean
+  /** When true, the primary modifier is held, so the action is modifier plus Enter. */
+  actionWithModifier?: boolean
   /** When true, the running backend accepts a manual steer action. */
   canSteer?: boolean
   queuedMessageCount?: number
@@ -28,7 +28,7 @@ export function SendCancelButton({
   isSending,
   canSend,
   willSteer = false,
-  steerWithModifier = false,
+  actionWithModifier = false,
   canSteer = false,
   queuedMessageCount,
   onCancel,
@@ -50,14 +50,6 @@ export function SendCancelButton({
             )}
           >
             <span>{queuedMessageCount ? 'Skip to Next' : 'Cancel'}</span>
-            {!isMobile && (
-              <Kbd
-                modHint
-                className="ml-0.5 h-4 text-2xs bg-primary-foreground/20 text-primary-foreground"
-              >
-                {isClientMacOS ? `${getModifierSymbol()}⌥⌫` : 'Ctrl+Alt+⌫'}
-              </Kbd>
-            )}
           </button>
         </TooltipTrigger>
         <TooltipContent>
@@ -72,7 +64,7 @@ export function SendCancelButton({
       const showSeparateSteer =
         canSteer && !willSteer && (isMobile || !isNativeApp())
       const actionLabel = willSteer ? 'Steer' : 'Queue'
-      const actionShortcut = steerWithModifier
+      const actionShortcut = actionWithModifier
         ? isClientMacOS
           ? `${getModifierSymbol()}↵`
           : `${getModifierSymbol()}+Enter`
@@ -83,7 +75,7 @@ export function SendCancelButton({
           : `Steer into running turn (${actionShortcut})`
         : isMobile
           ? 'Queue message'
-          : 'Queue message (Enter)'
+          : `Queue message (${actionShortcut})`
 
       return (
         <div className="flex items-center">
@@ -98,7 +90,7 @@ export function SendCancelButton({
               >
                 <span>{actionLabel}</span>
                 {!isMobile && (
-                  <Kbd modHint={steerWithModifier} className="h-4 text-2xs">
+                  <Kbd modHint={actionWithModifier} className="h-4 text-2xs">
                     {actionShortcut}
                   </Kbd>
                 )}

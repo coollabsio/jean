@@ -6,10 +6,10 @@ describe('MainWindow sidebar separators', () => {
     const source = readFileSync('src/components/layout/MainWindow.tsx', 'utf8')
 
     expect(source).toContain(
-      'className="relative h-full w-px bg-border/40"'
+      'className="relative h-full w-px bg-border/20"'
     )
     expect(source).toContain(
-      'className="relative z-20 h-full w-px shrink-0 cursor-col-resize bg-border/40"'
+      'className="relative z-20 h-full w-px shrink-0 cursor-col-resize bg-border/20"'
     )
     expect(source).not.toContain(
       'className="relative h-full w-px bg-border"'

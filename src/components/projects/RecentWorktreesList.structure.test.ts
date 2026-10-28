@@ -59,12 +59,12 @@ describe('RecentWorktreesList structure', () => {
 
   it('uses fully rounded rows and a full background for the current row', () => {
     expect(source).toContain('@container flex flex-col gap-2 px-2 pt-2')
-    expect(source).toContain('rounded-lg border py-2.5 pl-3 pr-3')
+    expect(source).toContain('rounded-lg py-2.5 pl-3 pr-3')
     expect(source).toContain(
-      "isCurrent ? 'border-border bg-muted/50 text-foreground shadow'"
+      "isCurrent ? 'bg-muted/50 text-foreground shadow'"
     )
     expect(source).toContain(
-      ": 'border-transparent bg-transparent text-muted-foreground'"
+      ": 'bg-transparent text-muted-foreground'"
     )
     expect(source).not.toContain('rounded-r-lg')
     expect(source).not.toContain('border-l-2')
@@ -145,7 +145,7 @@ describe('RecentWorktreesList structure', () => {
     expect(source).toContain('!isPinned &&')
     expect(source).toContain('showPinnedSeparator')
     expect(source).toContain('role="separator"')
-    expect(source).toContain('border-t border-border/70')
+    expect(source).toContain('border-t border-border/20')
   })
 
   it('opens a session from the full card without treating the pin as an open action', () => {

@@ -117,7 +117,7 @@ export function ScreenshotGallery({
         onOpenChange={open => !open && setOpenIndex(null)}
       >
         <DialogContent
-          className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-auto sm:max-h-[90vh] sm:!rounded-lg sm:p-4 bg-background/95"
+          className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none p-0 sm:!w-[calc(100vw-4rem)] sm:!max-w-[calc(100vw-4rem)] sm:!h-auto sm:max-h-[90vh] sm:!top-[5vh] sm:!translate-y-0 sm:!rounded-lg sm:p-4 bg-background/95"
           onKeyDown={event => {
             if (event.key === 'ArrowLeft') step(-1)
             if (event.key === 'ArrowRight') step(1)

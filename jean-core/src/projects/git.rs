@@ -1,11 +1,9 @@
 use crate::platform::silent_command;
 use crate::platform::wsl_aware_command;
 use once_cell::sync::Lazy;
-use std::io::Read;
 use std::path::Path;
-use std::process::Stdio;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -2613,73 +2611,13 @@ fn run_jean_script_with_timeout(
     cmd.current_dir(worktree_path)
         .env("JEAN_WORKSPACE_PATH", worktree_path)
         .env("JEAN_ROOT_PATH", root_path)
-        .env("JEAN_BRANCH", branch)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .env("JEAN_BRANCH", branch);
 
-    // Give the shell its own process group so timing out also stops package
-    // managers and other descendants that inherited the output pipes.
-    #[cfg(unix)]
-    unsafe {
-        use std::os::unix::process::CommandExt;
-        cmd.pre_exec(|| {
-            if libc::setpgid(0, 0) == 0 {
-                Ok(())
-            } else {
-                Err(std::io::Error::last_os_error())
-            }
-        });
-    }
-
-    let mut child = cmd
-        .spawn()
+    let (output, timed_out) = crate::platform::output_with_timeout(&mut cmd, timeout)
         .map_err(|e| format!("Failed to run {kind} script: {e}"))?;
-    let mut stdout = child.stdout.take().expect("stdout was configured as piped");
-    let mut stderr = child.stderr.take().expect("stderr was configured as piped");
-    let stdout_reader = std::thread::spawn(move || {
-        let mut bytes = Vec::new();
-        let _ = stdout.read_to_end(&mut bytes);
-        bytes
-    });
-    let stderr_reader = std::thread::spawn(move || {
-        let mut bytes = Vec::new();
-        let _ = stderr.read_to_end(&mut bytes);
-        bytes
-    });
-    let deadline = Instant::now() + timeout;
-    let timed_out = loop {
-        if child
-            .try_wait()
-            .map_err(|e| format!("Failed while waiting for {kind} script: {e}"))?
-            .is_some()
-        {
-            break false;
-        }
-        if Instant::now() >= deadline {
-            break true;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    };
-
-    if timed_out {
-        #[cfg(unix)]
-        unsafe {
-            libc::kill(-(child.id() as i32), libc::SIGKILL);
-        }
-        #[cfg(windows)]
-        {
-            let _ = silent_command("taskkill")
-                .args(["/PID", &child.id().to_string(), "/T", "/F"])
-                .output();
-        }
-        let _ = child.kill();
-    }
-
-    let status = child
-        .wait()
-        .map_err(|e| format!("Failed to collect {kind} script status: {e}"))?;
-    let stdout = String::from_utf8_lossy(&stdout_reader.join().unwrap_or_default()).to_string();
-    let stderr = String::from_utf8_lossy(&stderr_reader.join().unwrap_or_default()).to_string();
+    let status = output.status;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let combined = strip_non_tty_shell_noise(&format!("{stdout}{stderr}"));
 
     if timed_out {
@@ -3338,7 +3276,7 @@ mod tests {
     fn jean_script_timeout_stops_script_and_descendants() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().to_str().unwrap();
-        let started = Instant::now();
+        let started = std::time::Instant::now();
 
         let error = run_jean_script_with_timeout(
             "setup",

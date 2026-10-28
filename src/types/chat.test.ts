@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  agentExecutionMode,
   buildCodexUserInputAnswerMap,
   getSupportedPermissionModes,
   normalizeExecutionModeForBackend,
@@ -370,5 +371,16 @@ describe('permission capabilities', () => {
   )
   it('never escalates unsupported Cursor Build to Full access', () => {
     expect(normalizeExecutionModeForBackend('cursor', 'build')).toBe('plan')
+  })
+})
+
+describe('agentExecutionMode', () => {
+  it('replaces Plan with Build, or Full access for Cursor', () => {
+    expect(agentExecutionMode('claude', 'plan')).toBe('build')
+    expect(agentExecutionMode('cursor', 'plan')).toBe('yolo')
+  })
+  it('keeps other modes', () => {
+    expect(agentExecutionMode('claude', 'yolo')).toBe('yolo')
+    expect(agentExecutionMode('codex', 'supervised')).toBe('supervised')
   })
 })

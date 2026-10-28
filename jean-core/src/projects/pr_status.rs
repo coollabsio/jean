@@ -1,13 +1,10 @@
+use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
 use crate::projects::provider::{resolve_git_provider, GitProvider};
-
-fn gh_command(gh: &std::path::Path, project_path: &str) -> std::process::Command {
-    crate::platform::resolved_cli_command(gh, Some(std::path::Path::new(project_path)))
-}
 
 /// PR state from GitHub API
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -57,22 +54,64 @@ pub enum MergeableStatus {
     Unknown,
 }
 
-/// Raw response from gh pr view --json
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct GhPrViewResponse {
-    state: String,
-    base_ref_name: String,
-    is_draft: bool,
-    review_decision: Option<String>,
-    status_check_rollup: Option<Vec<StatusCheck>>,
-    mergeable: Option<String>,
-}
-
+/// One CI signal: a check run, or a commit status mapped onto the same fields.
 #[derive(Debug, Clone, Deserialize)]
 struct StatusCheck {
     conclusion: Option<String>,
     status: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RestPull {
+    state: String,
+    #[serde(default)]
+    merged: bool,
+    #[serde(default)]
+    draft: bool,
+    mergeable: Option<bool>,
+    #[serde(default)]
+    requested_reviewers: Vec<serde_json::Value>,
+    #[serde(default)]
+    requested_teams: Vec<serde_json::Value>,
+    base: RestBase,
+    head: RestHead,
+}
+
+#[derive(Debug, Deserialize)]
+struct RestBase {
+    #[serde(rename = "ref")]
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct RestHead {
+    sha: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct RestReview {
+    user: Option<RestUser>,
+    state: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct RestUser {
+    login: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct RestCheckRuns {
+    check_runs: Vec<StatusCheck>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RestCombinedStatus {
+    statuses: Vec<RestCommitStatus>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RestCommitStatus {
+    state: String,
 }
 
 /// Processed PR status for frontend consumption
@@ -103,50 +142,66 @@ pub fn get_pr_status(
         return get_mr_status(app, repo_path, pr_number, pr_url, worktree_id);
     }
 
+    let gh_binary = crate::gh_cli::config::resolve_gh_binary(app);
+    get_github_pr_status(&gh_binary, repo_path, pr_number, pr_url, worktree_id)
+}
+
+/// REST, not `gh pr view`: the GraphQL quota is the one agents spend on
+/// `gh pr create/view/checks`, and unchanged REST answers (304) are free.
+fn get_github_pr_status(
+    gh_binary: &std::path::Path,
+    repo_path: &str,
+    pr_number: u32,
+    pr_url: &str,
+    worktree_id: &str,
+) -> Result<PrStatus, String> {
     log::trace!("Fetching PR status for #{pr_number} in {repo_path}");
 
-    let gh_binary = crate::gh_cli::config::resolve_gh_binary(app);
+    let (hostname, repo) = match parse_pr_url(pr_url) {
+        Some((host, repo)) => ((host != "github.com").then_some(host), repo),
+        None => (None, "{owner}/{repo}".to_string()),
+    };
+    let get = |path: String| -> Result<String, String> {
+        crate::gh_cli::quota::background_rest_get(gh_binary, repo_path, hostname, &path).map_err(
+            |e| match e.status {
+                Some(404) => "PR not found - may have been deleted".to_string(),
+                Some(401) => "GitHub CLI not authenticated".to_string(),
+                _ => e.message,
+            },
+        )
+    };
+    let base = format!("repos/{repo}");
+    let pull: RestPull = parse_json("pull request", &get(format!("{base}/pulls/{pr_number}"))?)?;
+    let reviews: Vec<RestReview> = parse_json(
+        "reviews",
+        &get(format!("{base}/pulls/{pr_number}/reviews?per_page=100"))?,
+    )?;
+    let sha = &pull.head.sha;
+    let check_runs: RestCheckRuns = parse_json(
+        "check runs",
+        &get(format!("{base}/commits/{sha}/check-runs?per_page=100"))?,
+    )?;
+    let combined: RestCombinedStatus = parse_json(
+        "commit status",
+        &get(format!("{base}/commits/{sha}/status"))?,
+    )?;
 
-    // Run gh pr view
-    let output = gh_command(&gh_binary, repo_path)
-        .args([
-            "pr",
-            "view",
-            &pr_number.to_string(),
-            "--json",
-            "state,baseRefName,isDraft,reviewDecision,statusCheckRollup,mergeable",
-        ])
-        .output()
-        .map_err(|e| format!("Failed to run gh pr view: {e}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        // Handle specific errors
-        if stderr.contains("no pull requests found") || stderr.contains("Could not resolve") {
-            return Err("PR not found - may have been deleted".to_string());
-        }
-        if stderr.contains("gh auth login") || stderr.contains("authentication") {
-            return Err("GitHub CLI not authenticated".to_string());
-        }
-        return Err(format!("gh pr view failed: {stderr}"));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let response: GhPrViewResponse =
-        serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse gh response: {e}"))?;
-
-    // Convert to PrStatus
-    let state = parse_pr_state(&response.state);
-    let review_decision = response
-        .review_decision
-        .as_ref()
-        .and_then(|s| parse_review_decision(s));
-    let check_status = compute_check_status(&response.status_check_rollup);
-    let display_status = compute_display_status(&state, response.is_draft, &review_decision);
-    let mergeable = response
-        .mergeable
-        .as_ref()
-        .and_then(|s| parse_mergeable_status(s));
+    let state = if pull.merged {
+        PrState::Merged
+    } else {
+        parse_pr_state(&pull.state)
+    };
+    let review_requested = !pull.requested_reviewers.is_empty() || !pull.requested_teams.is_empty();
+    let review_decision = compute_review_decision(&reviews, review_requested);
+    let mut checks = check_runs.check_runs;
+    checks.extend(combined.statuses.iter().map(commit_status_as_check));
+    let check_status = compute_check_status(&checks);
+    let display_status = compute_display_status(&state, pull.draft, &review_decision);
+    let mergeable = Some(match pull.mergeable {
+        Some(true) => MergeableStatus::Mergeable,
+        Some(false) => MergeableStatus::Conflicting,
+        None => MergeableStatus::Unknown,
+    });
 
     let checked_at = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -157,15 +212,66 @@ pub fn get_pr_status(
         worktree_id: worktree_id.to_string(),
         pr_number,
         pr_url: pr_url.to_string(),
-        base_branch: response.base_ref_name,
+        base_branch: pull.base.name,
         state,
-        is_draft: response.is_draft,
+        is_draft: pull.draft,
         review_decision,
         check_status,
         display_status,
         mergeable,
         checked_at,
     })
+}
+
+fn parse_json<T: serde::de::DeserializeOwned>(what: &str, json: &str) -> Result<T, String> {
+    serde_json::from_str(json).map_err(|e| format!("Failed to parse GitHub {what}: {e}"))
+}
+
+/// `https://host/owner/repo/pull/123` → `(host, "owner/repo")`.
+fn parse_pr_url(url: &str) -> Option<(&str, String)> {
+    let mut parts = url.split_once("://")?.1.split('/');
+    let host = parts.next()?;
+    let owner = parts.next()?;
+    let repo = parts.next()?;
+    (parts.next()? == "pull").then(|| (host, format!("{owner}/{repo}")))
+}
+
+/// REST has no `reviewDecision`. Approximate it from each reviewer's latest
+/// verdict; without branch-protection data, "required" means a review was requested.
+fn compute_review_decision(
+    reviews: &[RestReview],
+    review_requested: bool,
+) -> Option<ReviewDecision> {
+    let mut latest: HashMap<&str, &str> = HashMap::new();
+    for review in reviews {
+        let state = review.state.as_str();
+        if let (Some(user), "APPROVED" | "CHANGES_REQUESTED" | "DISMISSED") = (&review.user, state)
+        {
+            latest.insert(&user.login, state);
+        }
+    }
+    if latest.values().any(|state| *state == "CHANGES_REQUESTED") {
+        Some(ReviewDecision::ChangesRequested)
+    } else if latest.values().any(|state| *state == "APPROVED") {
+        Some(ReviewDecision::Approved)
+    } else if review_requested {
+        Some(ReviewDecision::ReviewRequired)
+    } else {
+        None
+    }
+}
+
+fn commit_status_as_check(status: &RestCommitStatus) -> StatusCheck {
+    match status.state.as_str() {
+        "pending" => StatusCheck {
+            conclusion: None,
+            status: Some("pending".to_string()),
+        },
+        state => StatusCheck {
+            conclusion: Some(state.to_string()),
+            status: Some("completed".to_string()),
+        },
+    }
 }
 
 fn parse_pr_state(s: &str) -> PrState {
@@ -179,26 +285,7 @@ fn parse_pr_state(s: &str) -> PrState {
     }
 }
 
-fn parse_mergeable_status(s: &str) -> Option<MergeableStatus> {
-    match s.to_uppercase().as_str() {
-        "MERGEABLE" => Some(MergeableStatus::Mergeable),
-        "CONFLICTING" => Some(MergeableStatus::Conflicting),
-        "UNKNOWN" => Some(MergeableStatus::Unknown),
-        _ => None,
-    }
-}
-
-fn parse_review_decision(s: &str) -> Option<ReviewDecision> {
-    match s.to_uppercase().as_str() {
-        "APPROVED" => Some(ReviewDecision::Approved),
-        "CHANGES_REQUESTED" => Some(ReviewDecision::ChangesRequested),
-        "REVIEW_REQUIRED" => Some(ReviewDecision::ReviewRequired),
-        _ => None,
-    }
-}
-
-fn compute_check_status(checks: &Option<Vec<StatusCheck>>) -> Option<CheckStatus> {
-    let checks = checks.as_ref()?;
+fn compute_check_status(checks: &[StatusCheck]) -> Option<CheckStatus> {
     if checks.is_empty() {
         return None;
     }
@@ -338,6 +425,113 @@ mod tests {
         assert_eq!(parse_pr_state("open"), PrState::Open);
     }
 
+    fn review(login: &str, state: &str) -> RestReview {
+        RestReview {
+            user: Some(RestUser {
+                login: login.to_string(),
+            }),
+            state: state.to_string(),
+        }
+    }
+
+    #[test]
+    fn review_decision_uses_each_reviewers_latest_verdict() {
+        assert_eq!(compute_review_decision(&[], false), None);
+        assert_eq!(
+            compute_review_decision(&[], true),
+            Some(ReviewDecision::ReviewRequired)
+        );
+        assert_eq!(
+            compute_review_decision(
+                &[
+                    review("a", "CHANGES_REQUESTED"),
+                    review("a", "COMMENTED"),
+                    review("a", "APPROVED")
+                ],
+                false
+            ),
+            Some(ReviewDecision::Approved)
+        );
+        assert_eq!(
+            compute_review_decision(
+                &[review("a", "APPROVED"), review("b", "CHANGES_REQUESTED")],
+                false
+            ),
+            Some(ReviewDecision::ChangesRequested)
+        );
+        assert_eq!(
+            compute_review_decision(&[review("a", "APPROVED"), review("a", "DISMISSED")], true),
+            Some(ReviewDecision::ReviewRequired)
+        );
+    }
+
+    #[test]
+    fn check_status_includes_commit_statuses() {
+        let passing = StatusCheck {
+            conclusion: Some("success".to_string()),
+            status: Some("completed".to_string()),
+        };
+        let failed = RestCommitStatus {
+            state: "failure".to_string(),
+        };
+        let pending = RestCommitStatus {
+            state: "pending".to_string(),
+        };
+        assert_eq!(compute_check_status(&[]), None);
+        assert_eq!(
+            compute_check_status(std::slice::from_ref(&passing)),
+            Some(CheckStatus::Success)
+        );
+        assert_eq!(
+            compute_check_status(&[passing.clone(), commit_status_as_check(&pending)]),
+            Some(CheckStatus::Pending)
+        );
+        assert_eq!(
+            compute_check_status(&[passing, commit_status_as_check(&failed)]),
+            Some(CheckStatus::Failure)
+        );
+    }
+
+    #[test]
+    fn parses_pr_url_host_and_repo() {
+        assert_eq!(
+            parse_pr_url("https://github.com/coollabsio/jean/pull/882"),
+            Some(("github.com", "coollabsio/jean".to_string()))
+        );
+        assert_eq!(
+            parse_pr_url("https://ghe.example.com/team/app/pull/7"),
+            Some(("ghe.example.com", "team/app".to_string()))
+        );
+        assert_eq!(
+            parse_pr_url("https://github.com/coollabsio/jean/issues/1"),
+            None
+        );
+        assert_eq!(parse_pr_url("not a url"), None);
+    }
+
+    /// Live: `JEAN_GH=/path/to/gh cargo test --lib live_github_pr_status -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn live_github_pr_status() {
+        let gh = std::env::var("JEAN_GH").unwrap_or_else(|_| "gh".to_string());
+        let gh = std::path::Path::new(&gh);
+        let url = "https://github.com/coollabsio/jean/pull/882";
+        let first = get_github_pr_status(gh, ".", 882, url, "w").unwrap();
+        let second = get_github_pr_status(gh, ".", 882, url, "w").unwrap();
+        println!("{first:?}");
+        assert_eq!(first.state, PrState::Merged);
+        assert_eq!(first.base_branch, "main");
+        assert_eq!(first.check_status, second.check_status);
+        let missing = get_github_pr_status(
+            gh,
+            ".",
+            999_999,
+            "https://github.com/coollabsio/jean/pull/999999",
+            "w",
+        );
+        assert_eq!(missing.unwrap_err(), "PR not found - may have been deleted");
+    }
+
     #[test]
     fn test_compute_display_status() {
         assert_eq!(
@@ -383,22 +577,5 @@ mod tests {
         assert!(json.contains("\"check_status\":\"success\""));
         assert!(json.contains("\"mergeable\":\"mergeable\""));
         assert!(json.contains("\"base_branch\":\"main\""));
-    }
-
-    #[test]
-    fn test_parse_mergeable_status() {
-        assert_eq!(
-            parse_mergeable_status("MERGEABLE"),
-            Some(MergeableStatus::Mergeable)
-        );
-        assert_eq!(
-            parse_mergeable_status("CONFLICTING"),
-            Some(MergeableStatus::Conflicting)
-        );
-        assert_eq!(
-            parse_mergeable_status("UNKNOWN"),
-            Some(MergeableStatus::Unknown)
-        );
-        assert_eq!(parse_mergeable_status("other"), None);
     }
 }

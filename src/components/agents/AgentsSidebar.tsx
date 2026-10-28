@@ -98,10 +98,10 @@ function AgentRow({
             aria-current={isSelected ? 'page' : undefined}
             aria-label={agent.name}
             className={cn(
-              'relative flex w-full items-center gap-3 rounded-lg border px-2.5 py-2 text-left transition-[background-color,border-color,box-shadow,color] duration-150 @max-[13rem]/agents:justify-center @max-[13rem]/agents:px-0',
+              'relative flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-[background-color,box-shadow,color] duration-150 @max-[13rem]/agents:justify-center @max-[13rem]/agents:px-0',
               isSelected
-                ? 'border-border bg-muted/50 text-foreground shadow'
-                : 'border-transparent hover:bg-muted/30'
+                ? 'bg-muted/50 text-foreground shadow'
+                : 'hover:bg-muted/30'
             )}
             onClick={() => onSelect(agent.id)}
             data-testid={`agent-row-${agent.id}`}
@@ -160,7 +160,7 @@ function AgentGroup({
       {custom.length > 0 && (
         <>
           {/* Narrow sidebar: a divider replaces the heading */}
-          <div className="mx-3 mt-3 mb-2 hidden border-t border-border @max-[13rem]/agents:block" />
+          <div className="mx-3 mt-3 mb-2 hidden border-t border-border/20 @max-[13rem]/agents:block" />
           <h4 className="pb-1 pl-4 pr-2 pt-4 text-xs text-muted-foreground @max-[13rem]/agents:hidden">
             Your agents
           </h4>
@@ -300,7 +300,7 @@ export function AgentsSidebar() {
           </p>
         ) : null}
         <div
-          className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pb-3"
+          className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pt-2 pb-3"
           aria-label="Agents"
         >
           {agents && searchQuery.trim() && visibleAgents.length === 0 && (

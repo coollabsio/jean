@@ -7,16 +7,6 @@ import {
   X,
 } from '@/components/icons/reicon'
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
-import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
@@ -26,11 +16,6 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
 import { getEditorLabel, getTerminalLabel } from '@/types/preferences'
 import {
   canOpenInEditor,
@@ -39,6 +24,7 @@ import {
 } from '@/lib/environment'
 import { getFileManagerName } from '@/lib/platform'
 import type { useWorktreeMenuActions } from './useWorktreeMenuActions'
+import { DeleteWorktreeDialog } from './DeleteWorktreeDialog'
 
 interface WorktreeContextMenuProps {
   // Computed once by the parent (WorktreeItem) and passed in so the hook isn't
@@ -54,6 +40,7 @@ export function WorktreeContextMenu({
   children,
 }: WorktreeContextMenuProps) {
   const {
+    worktree,
     showDeleteConfirm,
     setShowDeleteConfirm,
     isBase,
@@ -138,51 +125,12 @@ export function WorktreeContextMenu({
         )}
       </ContextMenuContent>
 
-      <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
-        <AlertDialogContent
-          onKeyDown={e => {
-            if (e.key === 'Enter') {
-              e.preventDefault()
-              e.stopPropagation()
-              handleDelete()
-              setShowDeleteConfirm(false)
-            }
-          }}
-        >
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Worktree</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will permanently delete the worktree, its branch, and all
-              associated sessions. This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <AlertDialogAction
-                  onClick={() => handleDelete(true)}
-                  variant="outline"
-                >
-                  Delete Without Teardown
-                </AlertDialogAction>
-              </TooltipTrigger>
-              <TooltipContent className="max-w-72">
-                Delete without running the teardown script. Resources it manages
-                may need manual cleanup.
-              </TooltipContent>
-            </Tooltip>
-            <AlertDialogAction
-              autoFocus
-              onClick={() => handleDelete()}
-              variant="destructive"
-            >
-              Delete
-              <kbd className="ml-1.5 text-xs opacity-70">↵</kbd>
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DeleteWorktreeDialog
+        open={showDeleteConfirm}
+        onOpenChange={setShowDeleteConfirm}
+        worktree={worktree}
+        onDelete={handleDelete}
+      />
     </ContextMenu>
   )
 }

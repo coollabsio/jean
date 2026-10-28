@@ -438,7 +438,7 @@ export function RecentWorktreesList({
                   <div
                     role="separator"
                     aria-hidden="true"
-                    className="mx-1 mb-2 border-t border-border/70"
+                    className="mx-1 mb-2 border-t border-border/20"
                   />
                 )}
                 {showSnoozed &&
@@ -454,7 +454,7 @@ export function RecentWorktreesList({
                     </div>
                   )}
                 <div
-                  className={`relative flex w-full cursor-pointer flex-col gap-y-1 rounded-lg border py-2.5 pl-3 pr-3 text-left transition-[background-color,border-color,box-shadow,color] hover:bg-muted/30 hover:text-foreground has-[:focus-visible]:ring-1 has-[:focus-visible]:ring-ring ${isCurrent ? 'border-border bg-muted/50 text-foreground shadow' : 'border-transparent bg-transparent text-muted-foreground'}`}
+                  className={`relative flex w-full cursor-pointer flex-col gap-y-1 rounded-lg py-2.5 pl-3 pr-3 text-left transition-[background-color,box-shadow,color] hover:bg-muted/30 hover:text-foreground has-[:focus-visible]:ring-1 has-[:focus-visible]:ring-ring ${isCurrent ? 'bg-muted/50 text-foreground shadow' : 'bg-transparent text-muted-foreground'}`}
                   onClick={() => handleOpen(row)}
                 >
                   <Tooltip>
@@ -567,7 +567,7 @@ export function RecentWorktreesList({
       {(failedCount > 0 ||
         (!footerActionsContainer &&
           (hiddenCount > 0 || (snoozedBoundaryLoaded && !showSnoozed)))) && (
-        <div className="shrink-0 border-t border-border/40 p-2">
+        <div className="shrink-0 border-t border-border/20 p-2">
           {!footerActionsContainer && footerActions}
           {failedCount > 0 && (
             <div

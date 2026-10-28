@@ -8,6 +8,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { useState } from 'react'
+import {
+  UncommittedChangesStep,
+  useWorktreeUncommittedChanges,
+} from '@/components/projects/UncommittedChangesStep'
+import type { Worktree } from '@/types/projects'
 
 export type CloseConfirmMode = 'worktree' | 'session'
 
@@ -17,6 +23,8 @@ interface CloseWorktreeDialogProps {
   onConfirm: () => void
   branchName?: string
   mode?: CloseConfirmMode
+  /** Worktree to delete. When it has uncommitted changes, a second step asks again. */
+  worktree?: Worktree
 }
 
 export function CloseWorktreeDialog({
@@ -25,6 +33,7 @@ export function CloseWorktreeDialog({
   onConfirm,
   branchName,
   mode = 'worktree',
+  worktree,
 }: CloseWorktreeDialogProps) {
   if (!open) return null
 
@@ -35,6 +44,7 @@ export function CloseWorktreeDialog({
       onConfirm={onConfirm}
       branchName={branchName}
       mode={mode}
+      worktree={worktree}
     />
   )
 }
@@ -45,7 +55,12 @@ function CloseWorktreeDialogContent({
   onConfirm,
   branchName,
   mode = 'worktree',
+  worktree,
 }: CloseWorktreeDialogProps) {
+  const uncommitted = useWorktreeUncommittedChanges(
+    mode === 'worktree' ? worktree : undefined
+  )
+  const [showUncommittedStep, setShowUncommittedStep] = useState(false)
   const isSession = mode === 'session'
   const title = isSession ? 'Delete session?' : 'Delete worktree?'
   const description = isSession
@@ -54,6 +69,30 @@ function CloseWorktreeDialogContent({
       ? `This will permanently delete the "${branchName}" worktree and all its sessions.`
       : 'This will permanently delete the worktree and all its sessions.'
 
+  if (uncommitted && showUncommittedStep) {
+    return (
+      <AlertDialog open={open} onOpenChange={onOpenChange}>
+        <AlertDialogContent>
+          <UncommittedChangesStep
+            branchName={branchName ?? worktree?.branch}
+            changes={uncommitted}
+            onConfirm={onConfirm}
+          />
+        </AlertDialogContent>
+      </AlertDialog>
+    )
+  }
+
+  // With uncommitted changes, the first confirm opens the second step.
+  const confirm = () => {
+    if (uncommitted) {
+      setShowUncommittedStep(true)
+      return
+    }
+    onConfirm()
+    onOpenChange(false)
+  }
+
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent
@@ -61,8 +100,7 @@ function CloseWorktreeDialogContent({
           if (e.key === 'Enter') {
             e.preventDefault()
             e.stopPropagation()
-            onConfirm()
-            onOpenChange(false)
+            confirm()
           }
         }}
       >
@@ -74,7 +112,10 @@ function CloseWorktreeDialogContent({
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction
             autoFocus
-            onClick={onConfirm}
+            onClick={e => {
+              e.preventDefault()
+              confirm()
+            }}
             variant="destructive"
           >
             Delete

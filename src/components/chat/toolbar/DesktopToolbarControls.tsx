@@ -832,7 +832,10 @@ export function DesktopToolbarControls({
           disabled={false}
           sessionHasMessages={sessionHasMessages}
           providerLocked={providerLocked}
-          triggerClassName="rounded-none border-0 bg-transparent px-3"
+          triggerClassName={cn(
+            'rounded-none border-0 bg-transparent px-3',
+            !hideReasoningControl && 'pr-1'
+          )}
           selectedBackend={selectedBackend}
           selectedModel={selectedModel}
           selectedProvider={selectedProvider}
@@ -841,6 +844,15 @@ export function DesktopToolbarControls({
           onModelChange={handleModelChange}
           onBackendModelChange={handleBackendModelChange}
         />
+      )}
+
+      {!hideModelPicker && !hideReasoningControl && (
+        <span
+          aria-hidden
+          className="hidden @xl:inline text-xs text-muted-foreground/60"
+        >
+          ·
+        </span>
       )}
 
       {hideReasoningControl ? null : usesEffortControl ? (
@@ -852,7 +864,8 @@ export function DesktopToolbarControls({
           onValueChange={handleEffortLevelChange}
           tooltip={`Effort: ${displayedEffortLabel} (⌘⇧E)`}
           showShortcuts
-          triggerClassName="hidden @xl:flex"
+          hideIcon={!hideModelPicker}
+          triggerClassName={cn('hidden @xl:flex', !hideModelPicker && 'pl-1')}
           onCloseAutoFocus={focusChatInput}
         />
       ) : (
@@ -865,7 +878,8 @@ export function DesktopToolbarControls({
           active={displayedThinkingLevel !== 'off'}
           tooltip={`Thinking: ${displayedThinkingLabel} (⌘⇧E)`}
           showShortcuts
-          triggerClassName="hidden @xl:flex"
+          hideIcon={!hideModelPicker}
+          triggerClassName={cn('hidden @xl:flex', !hideModelPicker && 'pl-1')}
           onCloseAutoFocus={focusChatInput}
         />
       )}
@@ -879,6 +893,7 @@ export function DesktopToolbarControls({
         onSetExecutionMode={onSetExecutionMode}
         className="hidden @xl:flex"
         onCloseAutoFocus={focusChatInput}
+        iconOnly
       />
     </>
   )

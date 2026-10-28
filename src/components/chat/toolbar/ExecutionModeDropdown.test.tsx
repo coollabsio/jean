@@ -16,13 +16,18 @@ describe('ExecutionModeDropdown', () => {
     )
 
     expect(
-      screen.getByRole('button', { name: new RegExp(`^Permissions: ${label}$`, 'i') })
+      screen.getByRole('button', {
+        name: new RegExp(`^Permissions: ${label}$`, 'i'),
+      })
     ).toBeInTheDocument()
   })
 
   it('shows Plan as the workflow while planning', () => {
     render(
-      <ExecutionModeDropdown executionMode="plan" onSetExecutionMode={vi.fn()} />
+      <ExecutionModeDropdown
+        executionMode="plan"
+        onSetExecutionMode={vi.fn()}
+      />
     )
 
     expect(
@@ -41,7 +46,9 @@ describe('ExecutionModeDropdown', () => {
       />
     )
 
-    await user.click(screen.getByRole('button', { name: 'Permissions: Full access' }))
+    await user.click(
+      screen.getByRole('button', { name: 'Permissions: Full access' })
+    )
     await user.click(screen.getByRole('menuitemradio', { name: /^Plan/ }))
     expect(onSetExecutionMode).toHaveBeenCalledWith('plan')
   })

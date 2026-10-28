@@ -57,7 +57,7 @@ export function MobileFileBrowser({
           }
         }}
         // Almost full width; the thin dimmed strip on the left still dismisses.
-        className="bg-sidebar text-sidebar-foreground w-[calc(100vw-3rem)] gap-0 border-l p-0 sm:max-w-[calc(100vw-3rem)]"
+        className="bg-sidebar text-sidebar-foreground w-[calc(100vw-3rem)] gap-0 border-l border-border/20 p-0 sm:max-w-[calc(100vw-3rem)]"
         data-testid="mobile-file-browser"
       >
         <SheetHeader className="sr-only">

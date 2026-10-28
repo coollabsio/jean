@@ -109,13 +109,30 @@ describe('SendCancelButton', () => {
         isSending
         canSend
         willSteer
-        steerWithModifier
+        actionWithModifier
         queuedMessageCount={0}
         onCancel={vi.fn()}
       />
     )
 
     expect(screen.getByRole('button', { name: /^steer$/i })).toHaveTextContent(
+      '⌘↵'
+    )
+  })
+
+  it('renders Queue with the modifier shortcut when auto-steer is inverted', () => {
+    render(
+      <SendCancelButton
+        isSending
+        canSend
+        actionWithModifier
+        canSteer
+        queuedMessageCount={0}
+        onCancel={vi.fn()}
+      />
+    )
+
+    expect(screen.getByRole('button', { name: /^queue$/i })).toHaveTextContent(
       '⌘↵'
     )
   })

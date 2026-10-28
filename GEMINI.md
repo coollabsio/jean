@@ -1,3 +1,3 @@
 # Instructions for Gemini Code
 
-Read @CLAUDE.md
+Read @AGENTS.md

@@ -5,6 +5,8 @@ import { fireEvent, render, screen, waitFor } from '@/test/test-utils'
 import { ChatInput } from './ChatInput'
 import { withUniqueTokens, type MentionCandidate } from './agent-mentions'
 import { invoke } from '@/lib/transport'
+import { queryClient } from '@/lib/query-client'
+import { preferencesQueryKeys } from '@/services/preferences'
 import type * as EnvironmentModule from '@/lib/environment'
 import type * as PreferencesModule from '@/services/preferences'
 import { useUIStore } from '@/store/ui-store'
@@ -1087,6 +1089,34 @@ describe('ChatInput IME composition (issue #584)', () => {
 
     expect(onSubmit).toHaveBeenCalledWith(expect.anything(), {
       forceSteer: true,
+    })
+  })
+
+  it('submits as a queue when the primary modifier is held with auto-steer on', () => {
+    queryClient.setQueryData(preferencesQueryKeys.preferences(undefined), {
+      codex_auto_steer_enabled: true,
+    })
+    const onSteerModifierChange = vi.fn()
+    const { textarea, onSubmit } = renderWithSubmit({
+      isSending: true,
+      selectedBackend: 'codex',
+      onSteerModifierChange,
+    })
+    fireEvent.change(textarea, { target: { value: 'queue this' } })
+
+    fireEvent.keyDown(textarea, {
+      key: 'Enter',
+      code: 'Enter',
+      keyCode: 13,
+      metaKey: true,
+    })
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.anything(), {
+      forceQueue: true,
+    })
+    expect(onSteerModifierChange).toHaveBeenCalledWith(true)
+    queryClient.removeQueries({
+      queryKey: preferencesQueryKeys.preferences(undefined),
     })
   })
 

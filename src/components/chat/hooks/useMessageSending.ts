@@ -336,6 +336,8 @@ export function useMessageSending({
       e: React.FormEvent | undefined,
       options?: {
         forceSteer?: boolean
+        /** Queue even when auto-steer is enabled (primary modifier held). */
+        forceQueue?: boolean
         /**
          * Runs after the input is captured and cleared, before the message is
          * sent. Session/worktree targets are captured at call time, so the send
@@ -752,7 +754,8 @@ export function useMessageSending({
         if (
           isSteerCapableBackend(backend, preferences) &&
           (options?.forceSteer ||
-            isBackendAutoSteerEnabled(backend, preferences))
+            (!options?.forceQueue &&
+              isBackendAutoSteerEnabled(backend, preferences)))
         ) {
           try {
             const steerMessage = buildMessageWithRefs(queuedMessage)

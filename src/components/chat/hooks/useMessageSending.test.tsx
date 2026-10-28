@@ -1455,6 +1455,25 @@ describe('useMessageSending Codex auto-steer', () => {
     expect(useChatStore.getState().messageQueues['session-1']).toHaveLength(1)
   })
 
+  it('queues claude prompts with forceQueue even when claude steering is enabled', async () => {
+    const { result } = renderUseMessageSending({
+      selectedBackend: 'claude',
+      claudeAutoSteer: true,
+      inputValue: 'run this after',
+    })
+
+    await act(async () => {
+      await result.current.handleSubmit(
+        { preventDefault: vi.fn() } as unknown as React.FormEvent,
+        { forceQueue: true }
+      )
+    })
+
+    expect(steerClaudeTurn).not.toHaveBeenCalled()
+    expect(persistEnqueue).toHaveBeenCalled()
+    expect(useChatStore.getState().messageQueues['session-1']).toHaveLength(1)
+  })
+
   it('steers claude prompts with attachments as path refs', async () => {
     vi.mocked(steerClaudeTurn).mockResolvedValue(undefined)
     const { result } = renderUseMessageSending({

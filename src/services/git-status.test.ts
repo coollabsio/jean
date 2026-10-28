@@ -430,6 +430,38 @@ describe('git-status service', () => {
         baseRemote: 'origin',
       })
     })
+
+    it('writes fresh totals into the polled status so the header matches the diff', async () => {
+      const { queryClient: appQueryClient } = await import('@/lib/query-client')
+      const key = gitStatusQueryKeys.worktree('wt-1')
+      appQueryClient.setQueryData(
+        key,
+        createGitStatus({ uncommitted_added: 973, uncommitted_removed: 336 })
+      )
+      mockInvoke.mockResolvedValueOnce({
+        diff_type: 'uncommitted',
+        base_ref: 'HEAD',
+        total_additions: 1069,
+        total_deletions: 401,
+        files: [],
+      })
+      await getGitDiff('/srv/project', 'uncommitted', 'main', undefined, 'wt-1')
+
+      mockInvoke.mockResolvedValueOnce({
+        diff_type: 'branch',
+        base_ref: 'fork/main',
+        total_additions: 99,
+        total_deletions: 99,
+        files: [],
+      })
+      await getGitDiff('/srv/project', 'branch', 'main', 'fork', 'wt-1')
+
+      const status = appQueryClient.getQueryData<GitStatusEvent>(key)
+      expect(status?.uncommitted_added).toBe(1069)
+      expect(status?.uncommitted_removed).toBe(401)
+      // Branch diff against another base than the poll must not overwrite it
+      expect(status?.branch_diff_added).toBe(10)
+    })
   })
 
   describe('performGitPull', () => {

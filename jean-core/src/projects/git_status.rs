@@ -1,11 +1,14 @@
 use crate::platform::wsl_aware_command;
 use once_cell::sync::Lazy;
-use std::collections::HashSet;
-use std::path::Path;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
+
+/// Untracked files larger than this count as one added line in the poll stats.
+const UNTRACKED_LINE_COUNT_MAX_BYTES: u64 = 1024 * 1024;
 
 const EMPTY_TREE_HASH: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
@@ -90,78 +93,141 @@ pub struct GitBranchStatus {
     pub unpushed_count: u32,
 }
 
-/// Fetch the latest changes from origin for a specific branch
-fn fetch_origin_branch(repo_path: &str, branch: &str) -> Result<(), String> {
-    log::trace!("Fetching origin/{branch} in {repo_path}");
+/// Background fetches of one remote branch within this window are skipped.
+/// Worktrees of one repository share refs, so one fetch serves all of them.
+const FETCH_TTL: Duration = Duration::from_secs(60);
+const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 
-    let output = wsl_aware_command("git", Some(Path::new(repo_path)))
-        .args(["fetch", "origin", branch])
-        .output()
-        .map_err(|e| format!("Failed to run git fetch: {e}"))?;
+/// Last fetch attempt per (git common dir, remote, branch).
+static RECENT_FETCHES: Lazy<Mutex<HashMap<(PathBuf, String, String), Instant>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        // Don't fail if no remote - just log and continue
-        if stderr.contains("does not appear to be a git repository")
-            || stderr.contains("Could not read from remote")
-            || stderr.contains("'origin' does not appear to be a git repository")
-            || stderr.contains("couldn't find remote ref")
-        {
-            log::trace!("No remote origin/{branch} available: {stderr}");
-            return Ok(());
-        }
-        log::warn!("Failed to fetch origin/{branch}: {stderr}");
+/// Worktree path -> shared git directory. Stable for a worktree's lifetime.
+static GIT_COMMON_DIRS: Lazy<Mutex<HashMap<String, PathBuf>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+fn git_common_dir(repo_path: &str) -> PathBuf {
+    if let Some(dir) = GIT_COMMON_DIRS
+        .lock()
+        .ok()
+        .and_then(|dirs| dirs.get(repo_path).cloned())
+    {
+        return dir;
     }
-
-    Ok(())
+    let output = wsl_aware_command("git", Some(Path::new(repo_path)))
+        .args(["rev-parse", "--git-common-dir"])
+        .output();
+    let Some(output) = output.ok().filter(|o| o.status.success()) else {
+        return PathBuf::from(repo_path);
+    };
+    // Relative for the main checkout (".git"); `join` keeps absolute paths as is.
+    let dir = Path::new(repo_path).join(String::from_utf8_lossy(&output.stdout).trim());
+    if let Ok(mut dirs) = GIT_COMMON_DIRS.lock() {
+        dirs.insert(repo_path.to_string(), dir.clone());
+    }
+    dir
 }
 
-/// Fetch a branch from a specific remote (not necessarily origin)
-fn fetch_origin_branch_from_remote(
-    repo_path: &str,
-    remote: &str,
-    branch: &str,
-) -> Result<(), String> {
+/// True when the caller should fetch: no fetch of this branch ran in the
+/// repository within `FETCH_TTL`. Failed fetches count too, so an offline or
+/// unauthenticated remote is not retried on every poll.
+fn claim_fetch(repo_path: &str, remote: &str, branch: &str) -> bool {
+    let key = (
+        git_common_dir(repo_path),
+        remote.to_string(),
+        branch.to_string(),
+    );
+    let Ok(mut fetches) = RECENT_FETCHES.lock() else {
+        return true;
+    };
+    let now = Instant::now();
+    if fetches
+        .get(&key)
+        .is_some_and(|last| now.duration_since(*last) < FETCH_TTL)
+    {
+        return false;
+    }
+    fetches.retain(|_, last| now.duration_since(*last) < FETCH_TTL);
+    fetches.insert(key, now);
+    true
+}
+
+/// Best-effort fetch of one branch, at most once per `FETCH_TTL` per repository.
+fn fetch_remote_branch(repo_path: &str, remote: &str, branch: &str) {
+    if !claim_fetch(repo_path, remote, branch) {
+        return;
+    }
     log::trace!("Fetching {remote}/{branch} in {repo_path}");
 
-    let output = wsl_aware_command("git", Some(Path::new(repo_path)))
-        .args(["fetch", remote, branch])
-        .output()
-        .map_err(|e| format!("Failed to run git fetch: {e}"))?;
+    let mut command = wsl_aware_command("git", Some(Path::new(repo_path)));
+    // A background fetch must never wait for credentials it cannot get.
+    command
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .args(["fetch", remote, branch]);
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if stderr.contains("does not appear to be a git repository")
-            || stderr.contains("Could not read from remote")
-            || stderr.contains("couldn't find remote ref")
-        {
-            log::trace!("No remote {remote}/{branch} available: {stderr}");
-            return Ok(());
+    // The poll loop runs fetches in line, so a stalled connection must not hold it.
+    match crate::platform::output_with_timeout(&mut command, FETCH_TIMEOUT) {
+        Ok((_, true)) => log::warn!(
+            "git fetch {remote} {branch} timed out after {}s",
+            FETCH_TIMEOUT.as_secs()
+        ),
+        Ok((output, false)) if !output.status.success() => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if stderr.contains("does not appear to be a git repository")
+                || stderr.contains("Could not read from remote")
+                || stderr.contains("couldn't find remote ref")
+            {
+                log::trace!("No remote {remote}/{branch} available: {stderr}");
+            } else {
+                log::warn!("Failed to fetch {remote}/{branch}: {stderr}");
+            }
         }
-        log::warn!("Failed to fetch {remote}/{branch}: {stderr}");
+        Ok(_) => {}
+        Err(e) => log::warn!("Failed to run git fetch: {e}"),
     }
-
-    Ok(())
 }
 
-/// Get the upstream tracking ref for the current branch (e.g., "origin/main", "fork/feature")
-/// Returns None if no upstream is configured.
-fn get_upstream_ref(repo_path: &str) -> Option<String> {
-    let output = wsl_aware_command("git", Some(Path::new(repo_path)))
-        .args(["rev-parse", "--abbrev-ref", "@{upstream}"])
-        .output()
-        .ok()?;
+/// The upstream a local branch tracks.
+struct Upstream {
+    /// Ref to count against, e.g. "fork/feature".
+    tracking_ref: String,
+    /// Remote name; "." when the upstream is another local branch.
+    remote: String,
+    /// Branch name on the remote, which can differ from the local name.
+    branch: String,
+}
 
-    if output.status.success() {
-        let upstream = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if upstream.is_empty() {
-            None
-        } else {
-            Some(upstream)
-        }
-    } else {
-        None
+/// Returns None if `branch` has no upstream configured.
+fn get_upstream(repo_path: &str, branch: &str) -> Option<Upstream> {
+    let output = wsl_aware_command("git", Some(Path::new(repo_path)))
+        .args([
+            "for-each-ref",
+            "--format=%(upstream:short)%00%(upstream:remotename)%00%(upstream:remoteref)",
+            &format!("refs/heads/{branch}"),
+        ])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())?;
+    parse_upstream(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn parse_upstream(line: &str) -> Option<Upstream> {
+    let mut fields = line.trim_end_matches(['\r', '\n']).split('\0');
+    let tracking_ref = fields.next()?.to_string();
+    let remote = fields.next()?.to_string();
+    let remote_ref = fields.next()?;
+    if tracking_ref.is_empty() || remote.is_empty() {
+        return None;
     }
+    let branch = remote_ref
+        .strip_prefix("refs/heads/")
+        .unwrap_or(remote_ref)
+        .to_string();
+    Some(Upstream {
+        tracking_ref,
+        remote,
+        branch,
+    })
 }
 
 /// Get the current branch name
@@ -197,18 +263,25 @@ fn get_current_branch(repo_path: &str) -> Result<String, String> {
 }
 
 /// Get the number of lines added and removed in uncommitted changes (working directory)
-/// This includes tracked file modifications (staged + unstaged) AND untracked (new) files
+/// This includes tracked file modifications (staged + unstaged vs HEAD) AND untracked (new) files
 fn get_uncommitted_diff_stats(repo_path: &str) -> (u32, u32) {
     let mut added = 0u32;
     let mut removed = 0u32;
 
-    // 1. Get diff stats for unstaged changes (working directory vs index)
+    // 1. Tracked changes (staged + unstaged) vs HEAD in one diff, the same
+    // comparison `get_git_diff` uses. Summing `diff` and `diff --cached`
+    // double-counts files that are staged and then edited again.
     // git diff --numstat outputs: "added<tab>removed<tab>filename" per line
-    let unstaged_output = wsl_aware_command("git", Some(Path::new(repo_path)))
-        .args(["diff", "--numstat"])
+    let diff_base = if has_head_commit(repo_path) {
+        "HEAD"
+    } else {
+        EMPTY_TREE_HASH
+    };
+    let tracked_output = wsl_aware_command("git", Some(Path::new(repo_path)))
+        .args(["diff", diff_base, "--numstat"])
         .output();
 
-    if let Ok(o) = unstaged_output {
+    if let Ok(o) = tracked_output {
         if o.status.success() {
             let stdout = String::from_utf8_lossy(&o.stdout);
             for line in stdout.lines() {
@@ -222,27 +295,7 @@ fn get_uncommitted_diff_stats(repo_path: &str) -> (u32, u32) {
         }
     }
 
-    // 2. Get diff stats for staged changes (index vs HEAD)
-    // git diff --cached --numstat shows changes that have been `git add`ed
-    let staged_output = wsl_aware_command("git", Some(Path::new(repo_path)))
-        .args(["diff", "--cached", "--numstat"])
-        .output();
-
-    if let Ok(o) = staged_output {
-        if o.status.success() {
-            let stdout = String::from_utf8_lossy(&o.stdout);
-            for line in stdout.lines() {
-                let parts: Vec<&str> = line.split('\t').collect();
-                if parts.len() >= 2 {
-                    // Binary files show "-" instead of numbers
-                    added += parts[0].parse().unwrap_or(0);
-                    removed += parts[1].parse().unwrap_or(0);
-                }
-            }
-        }
-    }
-
-    // 3. Get stats for untracked (new) files
+    // 2. Get stats for untracked (new) files
     // List all untracked files (raw UTF-8 paths — see GIT_NO_QUOTE_PATH_ARGS / #631)
     let untracked_output = wsl_aware_command("git", Some(Path::new(repo_path)))
         .args(GIT_NO_QUOTE_PATH_ARGS)
@@ -258,7 +311,12 @@ fn get_uncommitted_diff_stats(repo_path: &str) -> (u32, u32) {
                 }
                 // Count lines in each untracked file (all lines are "added")
                 let full_path = Path::new(repo_path).join(file_path);
-                if let Ok(content) = std::fs::read_to_string(&full_path) {
+                // This runs on every poll: do not read large files again and again.
+                let too_large = std::fs::metadata(&full_path)
+                    .is_ok_and(|m| m.len() > UNTRACKED_LINE_COUNT_MAX_BYTES);
+                if too_large {
+                    added += 1;
+                } else if let Ok(content) = std::fs::read_to_string(&full_path) {
                     // Count lines, but minimum 1 for file existence (even if empty)
                     let line_count = content.lines().count() as u32;
                     added += line_count.max(1);
@@ -469,6 +527,26 @@ fn count_commits_between(repo_path: &str, from_ref: &str, to_ref: &str) -> u32 {
             .unwrap_or(0),
         _ => 0,
     }
+}
+
+/// `(behind, ahead)` of `local` against `upstream` in one `git rev-list`.
+/// Returns `(0, 0)` if either ref doesn't exist.
+fn behind_ahead(repo_path: &str, upstream: &str, local: &str) -> (u32, u32) {
+    let output = wsl_aware_command("git", Some(Path::new(repo_path)))
+        .args([
+            "rev-list",
+            "--left-right",
+            "--count",
+            &format!("{upstream}...{local}"),
+        ])
+        .output();
+
+    let Some(o) = output.ok().filter(|o| o.status.success()) else {
+        return (0, 0);
+    };
+    let stdout = String::from_utf8_lossy(&o.stdout);
+    let mut counts = stdout.split_whitespace().map(|n| n.parse().unwrap_or(0));
+    (counts.next().unwrap_or(0), counts.next().unwrap_or(0))
 }
 
 // ============================================================================
@@ -982,10 +1060,7 @@ pub fn get_branch_status(info: &ActiveWorktreeInfo) -> Result<GitBranchStatus, S
 
     // Fetch the latest base branch from the remote it belongs to
     // This is best-effort; if it fails, we'll compare with stale data
-    let _ = match base_remote {
-        Some(remote) => fetch_origin_branch_from_remote(repo_path, remote, base_branch),
-        None => fetch_origin_branch(repo_path, base_branch),
-    };
+    fetch_remote_branch(repo_path, base_remote.unwrap_or("origin"), base_branch);
 
     // Symbolic name is "HEAD" when detached. The stored and displayed branch
     // uses the short commit id instead, matching import_worktree. Unpushed
@@ -1001,11 +1076,8 @@ pub fn get_branch_status(info: &ActiveWorktreeInfo) -> Result<GitBranchStatus, S
     // Compare HEAD to <remote>/{base_branch}
     let origin_ref = base_ref(base_remote, base_branch);
 
-    // Commits we're behind (commits in origin/base that aren't in HEAD)
-    let behind_count = count_commits_between(repo_path, "HEAD", &origin_ref);
-
-    // Commits we're ahead (commits in HEAD that aren't in origin/base)
-    let ahead_count = count_commits_between(repo_path, &origin_ref, "HEAD");
+    // Behind: commits in origin/base not in HEAD. Ahead: commits in HEAD not in origin/base.
+    let (behind_count, ahead_count) = behind_ahead(repo_path, &origin_ref, "HEAD");
 
     // Get uncommitted diff stats (working directory changes)
     let (uncommitted_added, uncommitted_removed) = get_uncommitted_diff_stats(repo_path);
@@ -1016,8 +1088,8 @@ pub fn get_branch_status(info: &ActiveWorktreeInfo) -> Result<GitBranchStatus, S
 
     // Base branch's own remote sync status
     // Compare local base branch to origin/base_branch
-    let base_branch_ahead_count = count_commits_between(repo_path, &origin_ref, base_branch);
-    let base_branch_behind_count = count_commits_between(repo_path, base_branch, &origin_ref);
+    let (base_branch_behind_count, base_branch_ahead_count) =
+        behind_ahead(repo_path, &origin_ref, base_branch);
 
     // Commits unique to this worktree. Explicit remote bases must use their
     // qualified ref so the remote's own commits are not counted as worktree work.
@@ -1034,41 +1106,27 @@ pub fn get_branch_status(info: &ActiveWorktreeInfo) -> Result<GitBranchStatus, S
     // origin/{current_branch}.
     let unpushed_count = if symbolic_branch != *base_branch {
         if let (Some(remote), Some(branch)) = (&info.pr_push_remote, &info.pr_push_branch) {
-            if remote == "origin" {
-                let _ = fetch_origin_branch(repo_path, branch);
-            } else {
-                let _ = fetch_origin_branch_from_remote(repo_path, remote, branch);
-            }
+            fetch_remote_branch(repo_path, remote, branch);
             let push_ref = format!("{remote}/{branch}");
             if ref_exists(repo_path, &push_ref) {
                 count_commits_between(repo_path, &push_ref, "HEAD")
             } else {
                 worktree_ahead_count
             }
+        } else if let Some(upstream) = get_upstream(repo_path, &symbolic_branch) {
+            if upstream.remote != "." {
+                fetch_remote_branch(repo_path, &upstream.remote, &upstream.branch);
+            }
+            count_commits_between(repo_path, &upstream.tracking_ref, "HEAD")
         } else {
-            let upstream_ref = get_upstream_ref(repo_path);
-
-            if let Some(ref upstream) = upstream_ref {
-                // Fetch the remote for the upstream ref (e.g., "fork" from "fork/branch")
-                if let Some(remote) = upstream.split('/').next() {
-                    if remote != "origin" {
-                        let _ =
-                            fetch_origin_branch_from_remote(repo_path, remote, &symbolic_branch);
-                    } else {
-                        let _ = fetch_origin_branch(repo_path, &symbolic_branch);
-                    }
-                }
-                count_commits_between(repo_path, upstream, "HEAD")
+            // No upstream configured — try origin/{symbolic_branch}
+            fetch_remote_branch(repo_path, "origin", &symbolic_branch);
+            let origin_current_ref = format!("origin/{symbolic_branch}");
+            if ref_exists(repo_path, &origin_current_ref) {
+                count_commits_between(repo_path, &origin_current_ref, "HEAD")
             } else {
-                // No upstream configured — try origin/{symbolic_branch}
-                let _ = fetch_origin_branch(repo_path, &symbolic_branch);
-                let origin_current_ref = format!("origin/{symbolic_branch}");
-                if ref_exists(repo_path, &origin_current_ref) {
-                    count_commits_between(repo_path, &origin_current_ref, "HEAD")
-                } else {
-                    // Never pushed — all worktree-unique commits are unpushed
-                    worktree_ahead_count
-                }
+                // Never pushed — all worktree-unique commits are unpushed
+                worktree_ahead_count
             }
         }
     } else {
@@ -1157,6 +1215,149 @@ mod tests {
 
         drop(first);
         assert!(try_acquire_git_status_slot(&worktree_id).is_some());
+    }
+
+    fn git_stdout(repo: &Path, args: &[&str]) -> String {
+        let output = wsl_aware_command("git", Some(repo))
+            .args(args)
+            .output()
+            .expect("run git");
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    fn commit_file(repo: &Path, name: &str, content: &str) {
+        std::fs::write(repo.join(name), content).expect("write file");
+        run_test_git(repo, &["add", "."]);
+        run_test_git(repo, &["commit", "-m", content]);
+    }
+
+    fn init_test_repo(repo: &Path) {
+        run_test_git(repo, &["init", "--initial-branch", "main"]);
+        run_test_git(repo, &["config", "user.email", "test@example.com"]);
+        run_test_git(repo, &["config", "user.name", "Test"]);
+    }
+
+    #[test]
+    fn one_fetch_serves_every_worktree_of_a_repo() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path();
+        let remote = root.join("remote.git");
+        let main = root.join("main");
+        let other = root.join("other");
+        run_test_git(
+            root,
+            &["init", "--bare", "--initial-branch", "main", "remote.git"],
+        );
+        std::fs::create_dir(&main).expect("main dir");
+        init_test_repo(&main);
+        commit_file(&main, "a.txt", "one");
+        run_test_git(
+            &main,
+            &["remote", "add", "origin", &remote.to_string_lossy()],
+        );
+        run_test_git(&main, &["push", "origin", "main"]);
+        run_test_git(&main, &["worktree", "add", "-b", "feature", "../feature"]);
+        let feature = root.join("feature");
+
+        run_test_git(root, &["clone", &remote.to_string_lossy(), "other"]);
+        run_test_git(&other, &["config", "user.email", "test@example.com"]);
+        run_test_git(&other, &["config", "user.name", "Test"]);
+        commit_file(&other, "a.txt", "two");
+        run_test_git(&other, &["push", "origin", "main"]);
+        let second = git_stdout(&other, &["rev-parse", "HEAD"]);
+
+        fetch_remote_branch(&main.to_string_lossy(), "origin", "main");
+        assert_eq!(git_stdout(&feature, &["rev-parse", "origin/main"]), second);
+
+        commit_file(&other, "a.txt", "three");
+        run_test_git(&other, &["push", "origin", "main"]);
+        fetch_remote_branch(&feature.to_string_lossy(), "origin", "main");
+        assert_eq!(
+            git_stdout(&feature, &["rev-parse", "origin/main"]),
+            second,
+            "second worktree reuses the recent fetch"
+        );
+        assert!(claim_fetch(&feature.to_string_lossy(), "origin", "feature"));
+    }
+
+    #[test]
+    fn upstream_keeps_the_remote_branch_name() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo = temp.path();
+        init_test_repo(repo);
+        commit_file(repo, "a.txt", "base");
+        run_test_git(repo, &["remote", "add", "fork", "/nonexistent"]);
+        run_test_git(
+            repo,
+            &["update-ref", "refs/remotes/fork/remote-name", "HEAD"],
+        );
+        run_test_git(repo, &["config", "branch.main.remote", "fork"]);
+        run_test_git(
+            repo,
+            &["config", "branch.main.merge", "refs/heads/remote-name"],
+        );
+
+        let upstream = get_upstream(&repo.to_string_lossy(), "main").expect("upstream");
+        assert_eq!(upstream.tracking_ref, "fork/remote-name");
+        assert_eq!(upstream.remote, "fork");
+        assert_eq!(upstream.branch, "remote-name");
+        assert!(get_upstream(&repo.to_string_lossy(), "missing").is_none());
+    }
+
+    #[test]
+    fn untracked_stats_skip_reading_large_files() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo = temp.path();
+        init_test_repo(repo);
+        commit_file(repo, "a.txt", "base");
+        std::fs::write(repo.join("small.txt"), "1\n2\n3\n").expect("small file");
+        let large = "x\n".repeat(UNTRACKED_LINE_COUNT_MAX_BYTES as usize);
+        std::fs::write(repo.join("large.log"), large).expect("large file");
+
+        assert_eq!(get_uncommitted_diff_stats(&repo.to_string_lossy()), (4, 0));
+    }
+
+    #[test]
+    fn behind_ahead_counts_both_sides_of_a_divergence() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo = temp.path();
+        init_test_repo(repo);
+        commit_file(repo, "a.txt", "base");
+        run_test_git(repo, &["checkout", "-b", "upstream"]);
+        commit_file(repo, "a.txt", "upstream");
+        run_test_git(repo, &["checkout", "main"]);
+        commit_file(repo, "b.txt", "local one");
+        commit_file(repo, "b.txt", "local two");
+
+        let path = repo.to_string_lossy();
+        assert_eq!(behind_ahead(&path, "upstream", "HEAD"), (1, 2));
+        assert_eq!(behind_ahead(&path, "missing", "HEAD"), (0, 0));
+    }
+
+    #[test]
+    fn uncommitted_stats_match_the_diff_modal_for_restaged_files() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo = temp.path();
+        let repo_path = repo.to_string_lossy().into_owned();
+        run_test_git(repo, &["init", "--initial-branch", "main"]);
+        run_test_git(repo, &["config", "user.email", "test@example.com"]);
+        run_test_git(repo, &["config", "user.name", "Test"]);
+        std::fs::write(repo.join("file.txt"), "a\n").expect("write initial file");
+        run_test_git(repo, &["add", "."]);
+        run_test_git(repo, &["commit", "-m", "init"]);
+
+        // Staged edit, then a second unstaged edit to the same line
+        std::fs::write(repo.join("file.txt"), "b\n").expect("write staged edit");
+        run_test_git(repo, &["add", "."]);
+        std::fs::write(repo.join("file.txt"), "c\n").expect("write unstaged edit");
+        std::fs::write(repo.join("new.txt"), "x\ny\n").expect("write untracked file");
+
+        let diff = get_git_diff(&repo_path, "uncommitted", None, None).expect("diff");
+        assert_eq!(
+            get_uncommitted_diff_stats(&repo_path),
+            (diff.total_additions, diff.total_deletions)
+        );
+        assert_eq!(get_uncommitted_diff_stats(&repo_path), (3, 1));
     }
 
     #[test]

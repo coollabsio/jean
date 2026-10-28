@@ -273,7 +273,7 @@ export function SidebarHoverPreview({
           data-testid="sidebar-hover-preview"
           data-open={open}
           className={cn(
-            'fixed top-8 bottom-2 left-2 z-40 overflow-hidden border rounded-lg bg-sidebar' +
+            'fixed top-8 bottom-2 left-2 z-40 overflow-hidden border border-border/20 rounded-lg bg-sidebar' +
               ' shadow-xl',
             'transition-transform duration-180 ease-out motion-reduce:transition-none',
             open ? 'translate-x-0' : '-translate-x-full'

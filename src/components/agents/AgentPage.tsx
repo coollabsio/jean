@@ -234,14 +234,14 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
       </div>
       {panelOpen && (
         <aside
-          className="absolute inset-0 z-30 flex min-h-0 flex-col bg-background sm:static sm:w-[28rem] sm:shrink-0 sm:border-l"
+          className="absolute inset-0 z-30 flex min-h-0 flex-col bg-background sm:static sm:w-[28rem] sm:shrink-0 sm:border-l sm:border-border/20"
           aria-label={`${agent.name} details`}
         >
           {/* The panel covers the header pill below sm, so name it here */}
           <h1 className="shrink-0 truncate px-3 pt-3 text-sm font-semibold text-foreground sm:hidden">
             {agent.name}
           </h1>
-          <div className="flex shrink-0 items-center gap-1 border-b border-border/30 px-2 py-1.5">
+          <div className="flex shrink-0 items-center gap-1 border-b border-border/20 px-2 py-1.5">
             <div
               className="scrollbar-hide flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto"
               role="tablist"
@@ -322,7 +322,7 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
           </div>
           <Tooltip>
             <TooltipTrigger asChild>
-              <label className="flex shrink-0 cursor-pointer items-center gap-2 border-t border-border/30 px-3 pt-3 pb-[calc(env(safe-area-inset-bottom)+1rem)] text-sm sm:py-2 sm:text-xs text-muted-foreground select-none hover:text-foreground">
+              <label className="flex shrink-0 cursor-pointer items-center gap-2 border-t border-border/20 px-3 pt-3 pb-[calc(env(safe-area-inset-bottom)+1rem)] text-sm sm:py-2 sm:text-xs text-muted-foreground select-none hover:text-foreground">
                 <Checkbox
                   checked={advanced}
                   onCheckedChange={value =>

@@ -3,7 +3,6 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { Zap } from '@/components/icons/reicon'
 import { dismissibleToast } from '@/lib/dismissible-toast'
 import { invoke } from '@/lib/transport'
-import { cn } from '@/lib/utils'
 import { useUIStore } from '@/store/ui-store'
 import {
   gitPush,
@@ -91,6 +90,7 @@ export const ChatToolbar = memo(function ChatToolbar({
   hasPendingAttachments,
   hasInputValue,
   executionMode,
+  hidePlanMode = false,
   selectedBackend,
   selectedModel,
   selectedProvider,
@@ -146,7 +146,7 @@ export const ChatToolbar = memo(function ChatToolbar({
   onAttach,
   onCancel,
   willSteer,
-  steerWithModifier,
+  actionWithModifier,
   canSteer,
   onSteer,
   queuedMessageCount,
@@ -252,7 +252,9 @@ export const ChatToolbar = memo(function ChatToolbar({
     selectedModelReasoning,
     selectedThinkingLevel,
   ])
-  const availableExecutionModes = getSupportedExecutionModes(selectedBackend)
+  const availableExecutionModes = getSupportedExecutionModes(
+    selectedBackend
+  ).filter(mode => !hidePlanMode || mode !== 'plan')
   const hasMultipleBackendModelChoices =
     backendModelSections.reduce(
       (count, section) => count + section.options.length,
@@ -495,13 +497,8 @@ export const ChatToolbar = memo(function ChatToolbar({
         </AlertDialogContent>
       </AlertDialog>
 
-      <div
-        className={cn(
-          '@container flex px-4 py-2 md:px-6',
-          zenMode ? 'justify-end' : 'justify-start'
-        )}
-      >
-        <div className="inline-flex max-w-full flex-nowrap items-center overflow-x-auto whitespace-nowrap bg-transparent scrollbar-hide">
+      <div className="@container flex px-4 py-2 md:px-6">
+        <div className="flex w-full min-w-0 flex-nowrap items-center overflow-x-auto whitespace-nowrap bg-transparent scrollbar-hide">
           {selectedBackend === 'devin' && (
             <DevinLocationPicker
               sessionId={activeSessionId ?? null}
@@ -618,6 +615,7 @@ export const ChatToolbar = memo(function ChatToolbar({
               onSetExecutionMode={onSetExecutionMode}
               className="flex @xl:hidden shrink-0"
               align="end"
+              iconOnly
             />
 
             <DesktopToolbarControls
@@ -686,12 +684,12 @@ export const ChatToolbar = memo(function ChatToolbar({
             />
           </div>
 
-          <div className="shrink-0 py-1">
+          <div className="ml-auto shrink-0 py-1 pl-2">
             <SendCancelButton
               isSending={isSending}
               canSend={canSend}
               willSteer={willSteer}
-              steerWithModifier={steerWithModifier}
+              actionWithModifier={actionWithModifier}
               canSteer={canSteer}
               queuedMessageCount={queuedMessageCount}
               onCancel={onCancel}

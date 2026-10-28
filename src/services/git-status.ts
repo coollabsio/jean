@@ -637,7 +637,7 @@ export async function getGitDiff(
   if (!isTauri()) {
     throw new Error('Git diff only available in Tauri')
   }
-  return invoke<GitDiff>(
+  const diff = await invoke<GitDiff>(
     'get_git_diff',
     withWorktreeOwner(worktreeId, {
       worktreePath,
@@ -645,6 +645,48 @@ export async function getGitDiff(
       baseBranch,
       baseRemote,
     })
+  )
+  if (worktreeId) syncGitStatusDiffTotals(worktreeId, diff)
+  return diff
+}
+
+/**
+ * Write fresh diff totals into the polled git status, so header counts match
+ * the diff the user just opened instead of waiting for the next poll.
+ */
+function syncGitStatusDiffTotals(worktreeId: string, diff: GitDiff) {
+  const added = diff.total_additions
+  const removed = diff.total_deletions
+  queryClient.setQueryData<GitStatusEvent | null>(
+    gitStatusQueryKeys.worktree(worktreeId),
+    status => {
+      if (!status) return status
+      if (diff.diff_type === 'uncommitted') {
+        if (
+          status.uncommitted_added === added &&
+          status.uncommitted_removed === removed
+        )
+          return status
+        return {
+          ...status,
+          uncommitted_added: added,
+          uncommitted_removed: removed,
+        }
+      }
+      // Branch totals only match when the diff used the same base as the poll
+      const statusBase = `${status.base_remote ?? 'origin'}/${status.base_branch}`
+      if (diff.base_ref !== statusBase) return status
+      if (
+        status.branch_diff_added === added &&
+        status.branch_diff_removed === removed
+      )
+        return status
+      return {
+        ...status,
+        branch_diff_added: added,
+        branch_diff_removed: removed,
+      }
+    }
   )
 }
 
