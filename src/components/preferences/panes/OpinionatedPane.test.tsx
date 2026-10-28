@@ -71,6 +71,33 @@ describe('OpinionatedPane', () => {
     })
   })
 
+  it('lists installed plugins first within a section', async () => {
+    const installed = new Set(['caveman', 'pstack'])
+    vi.mocked(invoke).mockImplementation(async (command, args) => {
+      if (command === 'check_opinionated_plugin_status') {
+        return {
+          installed: installed.has((args as { pluginName: string }).pluginName),
+          version: null,
+        }
+      }
+      throw new Error(`Unexpected command ${command}`)
+    })
+
+    render(<OpinionatedPane />)
+
+    const section = (
+      await screen.findByRole('heading', { name: 'AI backend skills' })
+    ).closest('section')
+    if (!section) throw new Error('Expected AI backend skills section')
+
+    await waitFor(() => {
+      const names = within(section)
+        .getAllByText(/^(Caveman|Superpowers|pstack|tstack)$/)
+        .map(el => el.textContent)
+      expect(names).toEqual(['Caveman', 'pstack', 'Superpowers', 'tstack'])
+    })
+  })
+
   it('offers pstack for every Jean AI backend', async () => {
     render(<OpinionatedPane />)
 

@@ -288,7 +288,13 @@ interface BackendPluginStatus {
   installed: boolean
 }
 
-function PluginCard({ plugin }: { plugin: PluginDefinition }) {
+function PluginCard({
+  plugin,
+  onInstalledChange,
+}: {
+  plugin: PluginDefinition
+  onInstalledChange: (pluginId: string, installed: boolean) => void
+}) {
   const [status, setStatus] = useState<PluginStatus | null>(null)
   const [checking, setChecking] = useState(true)
   const [installing, setInstalling] = useState(false)
@@ -318,6 +324,10 @@ function PluginCard({ plugin }: { plugin: PluginDefinition }) {
   React.useEffect(() => {
     checkStatus()
   }, [checkStatus])
+
+  useEffect(() => {
+    if (status) onInstalledChange(plugin.id, status.installed)
+  }, [status, plugin.id, onInstalledChange])
 
   const handleInstall = useCallback(async () => {
     setInstalling(true)
@@ -783,9 +793,21 @@ const PLUGIN_SECTIONS: {
 ]
 
 export const OpinionatedPane: React.FC = () => {
+  const [installedIds, setInstalledIds] = useState<Record<string, boolean>>({})
+  const handleInstalledChange = useCallback(
+    (pluginId: string, installed: boolean) =>
+      setInstalledIds(prev =>
+        prev[pluginId] === installed ? prev : { ...prev, [pluginId]: installed }
+      ),
+    []
+  )
+
+  // Installed plugins first; Array.sort is stable, so PLUGINS order is kept otherwise.
   const sections = PLUGIN_SECTIONS.map(section => ({
     ...section,
-    plugins: PLUGINS.filter(plugin => plugin.scope === section.scope),
+    plugins: PLUGINS.filter(plugin => plugin.scope === section.scope).sort(
+      (a, b) => Number(!!installedIds[b.id]) - Number(!!installedIds[a.id])
+    ),
   })).filter(section => section.plugins.length > 0)
 
   return (
@@ -813,7 +835,11 @@ export const OpinionatedPane: React.FC = () => {
               </div>
               <div>
                 {section.plugins.map(plugin => (
-                  <PluginCard key={plugin.id} plugin={plugin} />
+                  <PluginCard
+                    key={plugin.id}
+                    plugin={plugin}
+                    onInstalledChange={handleInstalledChange}
+                  />
                 ))}
               </div>
             </section>
