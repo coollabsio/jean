@@ -25,6 +25,7 @@ import { useQueries, useQueryClient } from '@tanstack/react-query'
 import { invoke } from '@/lib/transport'
 import { requestImportExistingWorktree } from '@/lib/import-existing-worktree'
 import { cn } from '@/lib/utils'
+import { MODAL_TERMINAL_PRIMARY_ROW_CLASS } from '@/components/chat/modal-terminal-layout'
 import {
   canOpenInEditor,
   canOpenInFinder,
@@ -2984,7 +2985,13 @@ export function ProjectCanvasView({
       <div className="flex-1 flex flex-col overflow-auto">
         {/* Header and filters - sticky together over content */}
         <div className="sticky top-0 z-10 bg-background/60 backdrop-blur-md">
-          <div className="relative grid grid-cols-[auto_1fr_auto] items-center gap-4 px-4 py-2 sm:py-3 border-b border-border/20 sm:min-h-[61px]">
+          <div
+            className={cn(
+              // Same height as the session header so the project title lines up
+              'relative grid grid-cols-[auto_1fr_auto] items-center gap-4 px-4 border-b border-border/20',
+              MODAL_TERMINAL_PRIMARY_ROW_CLASS
+            )}
+          >
             <div className="flex flex-col shrink-0">
               <div className="flex items-center gap-2">
                 <h2 className="truncate text-sm font-normal text-muted-foreground">
@@ -3268,8 +3275,8 @@ export function ProjectCanvasView({
                 {/* Desktop: inline search bar */}
                 {!isMobile && (
                   <div className="flex justify-center">
-                    <div className="relative w-full max-w-md">
-                      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <div className="relative w-full max-w-xs">
+                      <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                       <Input
                         ref={searchInputRef}
                         placeholder="Search worktrees and sessions..."
@@ -3277,7 +3284,7 @@ export function ProjectCanvasView({
                         onChange={e => setSearchQuery(e.target.value)}
                         aria-label="Search worktrees and sessions"
                         name="worktree-search"
-                        className="pl-9 bg-transparent border-border/30"
+                        className="h-8 border-border/30 bg-transparent pl-7 text-xs shadow-none dark:bg-transparent"
                       />
                     </div>
                   </div>
