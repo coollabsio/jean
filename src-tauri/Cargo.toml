@@ -1,6 +1,6 @@
 [package]
 name = "jean"
-version = "1.0.13"
+version = "1.0.14"
 description = "Jean - AI Assistant"
 authors = ["Andras Bacsai"]
 edition = "2021"
