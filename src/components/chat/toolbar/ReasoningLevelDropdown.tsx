@@ -1,4 +1,4 @@
-import { Brain } from '@/components/icons/reicon'
+import { Brain, ChevronsUpDown } from '@/components/icons/reicon'
 import { Kbd } from '@/components/ui/kbd'
 import {
   Tooltip,
@@ -91,6 +91,7 @@ export function ReasoningLevelDropdown({
         <span className={cn(showLabel && 'text-foreground')}>
           {selectedLabel}
         </span>
+        <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
       </button>
     </DropdownMenuTrigger>
   )

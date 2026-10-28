@@ -1,4 +1,5 @@
 import {
+  ChevronsUpDown,
   ClipboardList,
   Hammer,
   Shield,
@@ -133,7 +134,12 @@ export function ExecutionModeDropdown({
                     MODE_TONE[isPlan ? 'plan' : permission]
                   )}
                 />
-                {!iconOnly && <span>{triggerLabel}</span>}
+                {!iconOnly && (
+                  <>
+                    <span>{triggerLabel}</span>
+                    <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
+                  </>
+                )}
               </button>
             </DropdownMenuTrigger>
           </TooltipTrigger>

@@ -864,7 +864,6 @@ export function DesktopToolbarControls({
           onValueChange={handleEffortLevelChange}
           tooltip={`Effort: ${displayedEffortLabel} (⌘⇧E)`}
           showShortcuts
-          hideIcon={!hideModelPicker}
           triggerClassName={cn('hidden @xl:flex', !hideModelPicker && 'px-2')}
           onCloseAutoFocus={focusChatInput}
         />
@@ -878,7 +877,6 @@ export function DesktopToolbarControls({
           active={displayedThinkingLevel !== 'off'}
           tooltip={`Thinking: ${displayedThinkingLabel} (⌘⇧E)`}
           showShortcuts
-          hideIcon={!hideModelPicker}
           triggerClassName={cn('hidden @xl:flex', !hideModelPicker && 'px-2')}
           onCloseAutoFocus={focusChatInput}
         />
@@ -893,7 +891,6 @@ export function DesktopToolbarControls({
         onSetExecutionMode={onSetExecutionMode}
         className="hidden @xl:flex"
         onCloseAutoFocus={focusChatInput}
-        iconOnly
       />
     </>
   )
