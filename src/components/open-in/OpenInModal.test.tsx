@@ -156,6 +156,22 @@ vi.mock('@/services/projects', () => ({
 vi.mock('@/services/github', () => ({
   useLoadedIssueContexts: () => ({ data: [] }),
   useLoadedPRContexts: () => ({ data: [] }),
+  useLoadedDiscussionContexts: vi.fn(
+    (sessionId: string, worktreeId: string) => ({
+      data:
+        sessionId === 'session-1' && worktreeId === 'wt-1'
+          ? [
+              {
+                number: 42,
+                title: 'Loaded discussion',
+                commentCount: 3,
+                repoOwner: 'acme',
+                repoName: 'app',
+              },
+            ]
+          : [],
+    })
+  ),
   useLoadedSecurityContexts: vi.fn((sessionId: string, worktreeId: string) => ({
     data:
       sessionId === 'session-1' && worktreeId === 'wt-1'
@@ -296,5 +312,14 @@ describe('OpenInModal', () => {
     expect(
       screen.getByText('Advisory GHSA-loaded-1234-5678')
     ).toBeInTheDocument()
+  })
+
+  it('opens a loaded discussion context on its web URL', async () => {
+    render(<OpenInModal />)
+
+    await userEvent.click(await screen.findByText('Discussion #42'))
+    expect(mocks.openExternal).toHaveBeenCalledWith(
+      'https://github.com/acme/app/discussions/42'
+    )
   })
 })

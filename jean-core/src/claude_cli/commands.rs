@@ -1544,6 +1544,26 @@ pub(crate) async fn get_claude_usage_with_source(
             .ok_or_else(claude_usage_rate_limited_error);
     }
 
+    // Claude turns keep session/weekly fresh via `rate_limit_event`, so any API or
+    // token-refresh failure falls back to that cached data instead of an error.
+    match fetch_claude_usage_from_api(request_source, now_secs).await {
+        Ok(snapshot) => Ok(snapshot),
+        Err(e) => match load_stale_cached_claude_usage(now_secs) {
+            Some(stale) => {
+                log::warn!(
+                    "Claude usage fetch failed ({e}); serving cache (source={request_source})"
+                );
+                Ok(stale)
+            }
+            None => Err(e),
+        },
+    }
+}
+
+async fn fetch_claude_usage_from_api(
+    request_source: &'static str,
+    now_secs: u64,
+) -> Result<ClaudeUsageSnapshot, String> {
     let (source, mut credentials) = load_claude_credentials()?;
     let usage_client = build_usage_client()?;
 
@@ -1615,22 +1635,15 @@ pub(crate) async fn get_claude_usage_with_source(
         let cooldown_secs =
             retry_after_secs(&response).unwrap_or(CLAUDE_USAGE_DEFAULT_COOLDOWN_SECS);
         CLAUDE_USAGE_COOLDOWN_UNTIL.store(now_secs + cooldown_secs, Ordering::Relaxed);
-        if let Some(stale) = load_stale_cached_claude_usage(now_secs) {
-            log::info!(
-                "Claude usage rate-limited (429, cooldown {cooldown_secs}s); serving stale cache (source={request_source})"
-            );
-            return Ok(stale);
-        }
+        log::info!(
+            "Claude usage rate-limited (429, cooldown {cooldown_secs}s) (source={request_source})"
+        );
         return Err(claude_usage_rate_limited_error());
     }
 
     if response.status() == reqwest::StatusCode::UNAUTHORIZED
         || response.status() == reqwest::StatusCode::FORBIDDEN
     {
-        if let Some(stale) = load_stale_cached_claude_usage(now_secs) {
-            log::warn!("Claude usage auth failed; serving stale cache (source={request_source})");
-            return Ok(stale);
-        }
         // The refresh was rate-limited, so the login may still be valid.
         if now_secs < CLAUDE_USAGE_COOLDOWN_UNTIL.load(Ordering::Relaxed) {
             return Err(claude_usage_rate_limited_error());
@@ -1638,13 +1651,6 @@ pub(crate) async fn get_claude_usage_with_source(
         return Err("Claude token expired. Run `claude` to log in again.".to_string());
     }
     if !response.status().is_success() {
-        if let Some(stale) = load_stale_cached_claude_usage(now_secs) {
-            log::warn!(
-                "Claude usage HTTP {}; serving stale cache (source={request_source})",
-                response.status()
-            );
-            return Ok(stale);
-        }
         return Err(format!(
             "Claude usage request failed (HTTP {}).",
             response.status()
