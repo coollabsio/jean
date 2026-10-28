@@ -846,15 +846,6 @@ export function DesktopToolbarControls({
         />
       )}
 
-      {!hideModelPicker && !hideReasoningControl && (
-        <span
-          aria-hidden
-          className="hidden @xl:inline text-xs text-muted-foreground/60"
-        >
-          ·
-        </span>
-      )}
-
       {hideReasoningControl ? null : usesEffortControl ? (
         <ReasoningLevelDropdown
           open={thinkingDropdownOpen}
