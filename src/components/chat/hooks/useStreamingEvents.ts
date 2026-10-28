@@ -60,6 +60,7 @@ import type {
   CodexDynamicToolCallRequestEvent,
   CompactingEvent,
   CompactedEvent,
+  BackendRetryEvent,
   Session,
   WorktreeSessions,
   WakeupFiredEvent,
@@ -170,6 +171,21 @@ async function hydrateCompletedSessionFromBackend(
       queryKey: chatQueryKeys.session(sessionId),
     })
   }
+}
+
+export const backendRetryToastId = (sessionId: string) =>
+  `backend-retry-${sessionId}`
+
+export function formatBackendRetryToast(
+  event: Pick<BackendRetryEvent, 'attempt' | 'delay_ms'>,
+  label: string
+): string {
+  const seconds = Math.max(1, Math.round(event.delay_ms / 1000))
+  const wait = seconds < 60 ? `${seconds}s` : `${Math.round(seconds / 60)} min`
+  const retry = `retry ${event.attempt} in ${wait}`
+  return label
+    ? `Provider request failed: ${label}, ${retry}`
+    : `Provider request failed, ${retry}`
 }
 
 /**
@@ -1054,6 +1070,7 @@ export default function useStreamingEvents({
       const sessionId = event.payload.session_id
       const worktreeId = event.payload.worktree_id
       clearLivePermissionRequests(sessionId)
+      toast.dismiss(backendRetryToastId(sessionId))
 
       // Flush any buffered chunks/thinking so streaming state is up to date
       if (
@@ -1736,6 +1753,7 @@ export default function useStreamingEvents({
     const unlistenError = listen<ErrorEvent>('chat:error', event => {
       const { session_id, error } = event.payload
       clearLivePermissionRequests(session_id)
+      toast.dismiss(backendRetryToastId(session_id))
 
       // Store error for inline display and restore input
       const {
@@ -1897,6 +1915,7 @@ export default function useStreamingEvents({
           run_id: eventRunId,
         } = event.payload
         clearLivePermissionRequests(session_id)
+        toast.dismiss(backendRetryToastId(session_id))
 
         // Flush any buffered chunks/thinking so streaming state is up to date
         if (
@@ -2462,6 +2481,22 @@ export default function useStreamingEvents({
       })
     })
 
+    // A provider backoff (rate limit, overload) can last minutes with no
+    // output; without this the run looks hung. One toast id per session so each retry replaces the last.
+    // It stays for the whole backoff and closes when the run ends.
+    const unlistenBackendRetry = listen<BackendRetryEvent>(
+      'chat:backend_retry',
+      event => {
+        const { session_id, worktree_id, delay_ms } = event.payload
+        const label = lookupSessionLabel(queryClient, session_id, worktree_id)
+        toast.info(formatBackendRetryToast(event.payload, label), {
+          id: backendRetryToastId(session_id),
+          description: event.payload.reason,
+          duration: Math.max(4_000, delay_ms + 1_000),
+        })
+      }
+    )
+
     return () => {
       // Flush any buffered chunks/thinking before tearing down
       if (
@@ -2502,6 +2537,7 @@ export default function useStreamingEvents({
       unlistenCancelled.then(f => f())
       unlistenCompacting.then(f => f())
       unlistenCompacted.then(f => f())
+      unlistenBackendRetry.then(f => f())
       unlistenWakeupScheduled.then(f => f())
       unlistenWakeupCancelled.then(f => f())
       unlistenWakeupFired.then(f => f())

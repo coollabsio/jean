@@ -612,6 +612,20 @@ export interface CompactedEvent {
 }
 
 /**
+ * Event payload for chat:backend_retry: the backend waits `delay_ms` before it
+ * retries a failed provider request (rate limit, overload).
+ */
+export interface BackendRetryEvent {
+  session_id: string
+  worktree_id: string
+  backend: string
+  /** 1-based retry number */
+  attempt: number
+  delay_ms: number
+  reason: string
+}
+
+/**
  * Event payload for errors from Rust
  */
 export interface ErrorEvent {

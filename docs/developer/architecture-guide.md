@@ -73,6 +73,17 @@ Rust and React communicate through three patterns:
    (Used by git status polling, PR status updates, worktree events)
 ```
 
+The `chat:backend_retry` event is emitted before each provider backoff wait
+(rate limit, overload) so a long backoff does not look like a hung run.
+OpenCode is the only emitter: it retries internally and reports each wait as
+an SSE `session.status` event with `status.type == "retry"`; the shared SSE
+listener in `jean-core/src/chat/opencode.rs` maps it to `chat:backend_retry`
+(child/subagent retries fan in to the parent run). The frontend shows a
+replaceable toast (one id per session) with the retry number, wait duration,
+and reason; the toast is dismissed when the run ends (`chat:done`,
+`chat:error`, or `chat:cancelled`). The event is registered as replayable in
+the HTTP server so web access clients also receive it after a reconnect.
+
 ### Backend-Owned Long-Running Jobs
 
 Long-running operations that must survive web/mobile WebSocket disconnects

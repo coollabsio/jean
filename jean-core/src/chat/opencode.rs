@@ -86,6 +86,19 @@ struct DoneEvent {
     waiting_for_plan: bool,
 }
 
+/// `chat:backend_retry`: the backend waits `delay_ms` before it retries a
+/// failed provider request (rate limit, overload).
+#[derive(serde::Serialize, Clone)]
+struct BackendRetryEvent {
+    session_id: String,
+    worktree_id: String,
+    backend: &'static str,
+    /// 1-based retry number
+    attempt: u64,
+    delay_ms: u64,
+    reason: String,
+}
+
 #[derive(serde::Serialize, Clone)]
 pub struct ErrorEvent {
     pub session_id: String,
@@ -2450,6 +2463,58 @@ fn process_shared_sse_event(
             }
             Some(false)
         }
+        // OpenCode retries rate-limited / overloaded provider calls itself and
+        // reports each wait as `status: {type: "retry", attempt, message, next}`
+        // (`next` = epoch ms). Surface it so a long backoff does not look hung.
+        // Child/subagent retries also stall the parent run, so they fan in.
+        "session.status" => {
+            let Some(status) = properties
+                .get("status")
+                .filter(|s| s.get("type").and_then(|v| v.as_str()) == Some("retry"))
+            else {
+                return Some(false);
+            };
+            let opencode_session_id = properties
+                .get("sessionID")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let resolved = {
+                let subscribers = lock_recover(subscribers, "OPENCODE_SSE_SUBSCRIBERS");
+                let parents =
+                    lock_recover(&SHARED_SSE.session_parents, "OPENCODE_SSE_SESSION_PARENTS");
+                resolve_opencode_subscriber(&subscribers, &parents, opencode_session_id)
+            };
+            let Some((_, entry)) = resolved else {
+                return Some(false);
+            };
+            let (session_id, worktree_id) = {
+                let sub = lock_recover(&entry.handle, "OPENCODE_SSE_SUBSCRIBER");
+                (sub.jean_session_id.clone(), sub.worktree_id.clone())
+            };
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_millis() as u64);
+            let next_ms = status.get("next").and_then(|v| v.as_u64()).unwrap_or(0);
+            let event = BackendRetryEvent {
+                session_id,
+                worktree_id,
+                backend: "opencode",
+                attempt: status.get("attempt").and_then(|v| v.as_u64()).unwrap_or(0),
+                delay_ms: next_ms.saturating_sub(now_ms),
+                reason: status
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+            };
+            log::info!(
+                "OpenCode shared SSE: retry attempt={} delay_ms={} opencode_session={opencode_session_id}",
+                event.attempt,
+                event.delay_ms
+            );
+            let _ = app.emit_all("chat:backend_retry", &event);
+            Some(true)
+        }
         // OpenCode permission prompts (e.g. external_directory access outside the
         // worktree). Without handling these, the in-flight /message POST blocks
         // forever and the Jean session appears frozen (issue #625).
@@ -4608,6 +4673,91 @@ mod tests {
         lock_recover(&SHARED_SSE.subscribers, "OPENCODE_SSE_SUBSCRIBERS").clear();
         lock_recover(&SHARED_SSE.session_parents, "OPENCODE_SSE_SESSION_PARENTS").clear();
         lock_recover(&SHARED_SSE.session_directories, "OPENCODE_SSE_SESSION_DIRS").clear();
+    }
+
+    #[test]
+    fn process_shared_sse_emits_backend_retry_for_child_retry_status() {
+        let _guard = lock_recover(&SSE_TEST_GUARD, "SSE_TEST_GUARD");
+        let tmp = tempfile::tempdir().unwrap();
+        let app = AppHandle::new(tmp.path().join("data"), tmp.path().join("res")).unwrap();
+        let received = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
+        let sink = received.clone();
+        app.listen("chat:backend_retry", move |event| {
+            sink.lock()
+                .unwrap()
+                .push(serde_json::from_str(event.payload()).unwrap());
+        });
+        let handle = Arc::new(Mutex::new(SharedSseSubscriber {
+            jean_session_id: "jean-3".into(),
+            worktree_id: "wt-3".into(),
+            run_id: "run-3".into(),
+            execution_mode: None,
+            cancelled: Arc::new(AtomicBool::new(false)),
+            streamed_any: Arc::new(AtomicBool::new(false)),
+            turn_started: Arc::new(AtomicBool::new(false)),
+            session_idle: Arc::new(AtomicBool::new(false)),
+            steered: Arc::new(AtomicBool::new(false)),
+            upstream_error: Arc::new(Mutex::new(None)),
+            force_abort: Arc::new(AtomicBool::new(false)),
+            tracked_parts: HashMap::new(),
+            accumulated_blocks: Vec::new(),
+            accumulated_tool_calls: Vec::new(),
+        }));
+        {
+            let mut subscribers = lock_recover(&SHARED_SSE.subscribers, "OPENCODE_SSE_SUBSCRIBERS");
+            subscribers.clear();
+            subscribers.insert(
+                "ses_root".to_string(),
+                SharedSseSubscriberEntry {
+                    working_dir: "/tmp/proj".into(),
+                    handle,
+                },
+            );
+        }
+        {
+            let mut parents =
+                lock_recover(&SHARED_SSE.session_parents, "OPENCODE_SSE_SESSION_PARENTS");
+            parents.clear();
+            parents.insert("ses_sub".to_string(), "ses_root".to_string());
+        }
+
+        let busy = r#"{"payload":{"type":"session.status","properties":{"sessionID":"ses_root","status":{"type":"busy"}}}}"#;
+        assert_eq!(
+            process_shared_sse_event(&app, busy, &SHARED_SSE.subscribers),
+            Some(false)
+        );
+        let unknown = r#"{"payload":{"type":"session.status","properties":{"sessionID":"ses_other","status":{"type":"retry","attempt":1,"message":"x","next":0}}}}"#;
+        assert_eq!(
+            process_shared_sse_event(&app, unknown, &SHARED_SSE.subscribers),
+            Some(false)
+        );
+        assert!(received.lock().unwrap().is_empty());
+
+        let next = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64
+            + 30_000;
+        let retry = format!(
+            r#"{{"payload":{{"type":"session.status","properties":{{"sessionID":"ses_sub","status":{{"type":"retry","attempt":2,"message":"Rate limit exceeded","next":{next}}}}}}}}}"#
+        );
+        assert_eq!(
+            process_shared_sse_event(&app, &retry, &SHARED_SSE.subscribers),
+            Some(true)
+        );
+        let events = received.lock().unwrap().clone();
+        assert_eq!(events.len(), 1);
+        let event = &events[0];
+        assert_eq!(event["session_id"], "jean-3");
+        assert_eq!(event["worktree_id"], "wt-3");
+        assert_eq!(event["backend"], "opencode");
+        assert_eq!(event["attempt"], 2);
+        assert_eq!(event["reason"], "Rate limit exceeded");
+        let delay = event["delay_ms"].as_u64().unwrap();
+        assert!((25_000..=30_000).contains(&delay), "delay_ms={delay}");
+
+        lock_recover(&SHARED_SSE.subscribers, "OPENCODE_SSE_SUBSCRIBERS").clear();
+        lock_recover(&SHARED_SSE.session_parents, "OPENCODE_SSE_SESSION_PARENTS").clear();
     }
 
     #[test]
