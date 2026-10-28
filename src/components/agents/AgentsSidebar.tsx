@@ -235,7 +235,7 @@ export function AgentsSidebar() {
       {/* Narrow sidebar (container below 13rem) shows only the agent icons */}
       <div className="@container/agents flex min-w-0 flex-1 flex-col">
         {/* The sidebar tab strip already names this view */}
-        <div className="flex shrink-0 items-center gap-1 border-b border-border/40 px-3 pb-2">
+        <div className="flex shrink-0 items-center gap-1 px-3 pb-2">
           <SidebarSearchField label="Search agents" />
           <Tooltip>
             <TooltipTrigger asChild>

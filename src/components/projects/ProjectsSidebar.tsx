@@ -206,7 +206,7 @@ export function ProjectsSidebar() {
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {activeTab === 'projects' ? (
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
-            <div className="border-b border-border/40 pb-2">
+            <div className="pb-2">
               <div className="flex gap-1 px-3">
                 <SidebarSearchField label="Search projects, worktrees and servers" />
                 <DropdownMenu>
@@ -387,7 +387,7 @@ export function ProjectsSidebar() {
           </div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col">
-            <div className="flex shrink-0 gap-1 border-b border-border/40 px-3 pb-2">
+            <div className="flex shrink-0 gap-1 px-3 pb-2">
               <SidebarSearchField label="Search recent sessions" />
               <Tooltip>
                 <TooltipTrigger asChild>

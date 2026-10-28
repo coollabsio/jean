@@ -86,15 +86,6 @@ describe('ProjectsSidebar server filter', () => {
     expect(source).not.toContain('{/* Footer')
   })
 
-  it('aligns its divider with the session header divider', () => {
-    const source = readFileSync(
-      'src/components/projects/ProjectsSidebar.tsx',
-      'utf8'
-    )
-
-    expect(source).toContain('className="border-b border-border/40 pb-2"')
-  })
-
   it('does not draw dividers between local and remote server sections', () => {
     const source = readFileSync(
       'src/components/projects/ProjectTree.tsx',
