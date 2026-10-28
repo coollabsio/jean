@@ -277,6 +277,7 @@ export const SessionChatModal = memo(function SessionChatModal({
 }: SessionChatModalProps) {
   const isMobile = useIsMobile()
   const isTouch = useIsTouchDevice()
+  const isServer = !!project?.server
   const zenMode = useUIStore(state => state.zenMode)
   const isModalTerminalOpen = useTerminalStore(
     state => state.modalTerminalOpen[worktreeId] ?? false
@@ -677,6 +678,8 @@ export const SessionChatModal = memo(function SessionChatModal({
       e.stopImmediatePropagation()
       const activeSessions = tabSessions.filter(s => !s.archived_at)
       if (activeSessions.length === 0) {
+        // A server has one fixed base session: never close it.
+        if (isServer) return
         const closeWorktree = () => {
           onRequestCloseWorktree()
           onClose()
@@ -723,6 +726,7 @@ export const SessionChatModal = memo(function SessionChatModal({
     selectVisualNeighbor,
     onRequestCloseWorktree,
     onClose,
+    isServer,
   ])
 
   // Listen for toggle-session-label event (CMD+S)
@@ -737,8 +741,11 @@ export const SessionChatModal = memo(function SessionChatModal({
   }, [isOpen])
 
   const handleClose = useCallback(() => {
+    // A server has no worktree list to go back to: it stays open until the
+    // user picks another project or server.
+    if (isServer) return
     onClose()
-  }, [onClose])
+  }, [isServer, onClose])
 
   const handleTabClick = useCallback(
     (sessionId: string) => {
@@ -1121,10 +1128,12 @@ export const SessionChatModal = memo(function SessionChatModal({
         <ModalBrowserDrawer worktreeId={worktreeId} dockMode="left" />
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {!zenMode && (
-            <div className="shrink-0 border-b border-border/40 sm:text-left">
+            <div className="shrink-0 border-b border-border/20 sm:text-left">
               <div
                 className={cn(
-                  'flex items-center justify-between gap-2 px-4 py-2',
+                  // Container queries: the modal is narrower than the window
+                  // when side panels are open, so buttons hide by header width
+                  '@container/header flex items-center justify-between gap-2 px-4 py-2',
                   MODAL_TERMINAL_PRIMARY_ROW_CLASS
                 )}
               >
@@ -1146,7 +1155,7 @@ export const SessionChatModal = memo(function SessionChatModal({
                         !isMobile && 'flex-1'
                       )}
                     >
-                      {project && !isMobile && (
+                      {project && !isMobile && !isServer && (
                         <span className="text-muted-foreground font-normal">
                           <button
                             type="button"
@@ -1160,7 +1169,15 @@ export const SessionChatModal = memo(function SessionChatModal({
                           </span>
                         </span>
                       )}
-                      {isBase ? 'Base Session' : (worktree?.name ?? 'Worktree')}
+                      {isServer ? (
+                        <span className="text-lg font-semibold">
+                          {project?.name}
+                        </span>
+                      ) : isBase ? (
+                        'Base Session'
+                      ) : (
+                        (worktree?.name ?? 'Worktree')
+                      )}
                     </h2>
                     {isMobile && worktreeMenu}
                   </div>
@@ -1173,7 +1190,9 @@ export const SessionChatModal = memo(function SessionChatModal({
                       {gitBadges}
                     </div>
                   ) : (
-                    gitBadges
+                    <div className="hidden shrink-0 items-center @xl/header:flex">
+                      {gitBadges}
+                    </div>
                   )}
                   {!isMobile && worktreeMenu}
                 </div>
@@ -1223,7 +1242,7 @@ export const SessionChatModal = memo(function SessionChatModal({
                         </>
                       )}
                       {/* Desktop: secondary tools that are not in the menu */}
-                      <div className="hidden lg:flex items-center gap-1">
+                      <div className="hidden items-center gap-1 @3xl/header:flex">
                         <OpenInButton
                           worktreePath={worktreePath}
                           serverId={worktree?.serverId}
@@ -1244,13 +1263,15 @@ export const SessionChatModal = memo(function SessionChatModal({
                           />
                         )}
                       </div>
-                      <ModalCloseButton
-                        onClick={handleClose}
-                        className={cn(
-                          isMobile &&
-                            'text-muted-foreground hover:text-foreground'
-                        )}
-                      />
+                      {!isServer && (
+                        <ModalCloseButton
+                          onClick={handleClose}
+                          className={cn(
+                            isMobile &&
+                              'text-muted-foreground hover:text-foreground'
+                          )}
+                        />
+                      )}
                     </>
                   )}
                 </div>
@@ -1262,7 +1283,7 @@ export const SessionChatModal = memo(function SessionChatModal({
           {!zenMode && showSessionTabs && (
             <div
               className={cn(
-                'relative flex shrink-0 items-center gap-0.5 border-b border-border/40 pr-4',
+                'relative flex shrink-0 items-center gap-0.5 border-b border-border/20 pr-4',
                 MODAL_TERMINAL_SECONDARY_ROW_CLASS
               )}
             >
@@ -1312,7 +1333,7 @@ export const SessionChatModal = memo(function SessionChatModal({
                               )
                             }
                             className={cn(
-                              'group/tab flex shrink-0 items-center gap-1.5 border-r border-border/40 px-3 py-1.5 text-xs transition-colors whitespace-nowrap cursor-pointer',
+                              'group/tab flex shrink-0 items-center gap-1.5 border-r border-border/20 px-3 py-1.5 text-xs transition-colors whitespace-nowrap cursor-pointer',
                               isActive
                                 ? 'bg-muted text-foreground'
                                 : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',

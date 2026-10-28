@@ -12,9 +12,7 @@ import { Badge } from '@/components/ui/badge'
 import {
   Minimize2,
   PanelLeft,
-  PanelLeftClose,
   PanelRight,
-  PanelRightClose,
   Settings,
 } from '@/components/icons/reicon'
 import { Kbd } from '@/components/ui/kbd'
@@ -132,11 +130,7 @@ export function TitleBar({
                   }
                   className="rounded-none text-foreground/70 hover:text-foreground"
                 >
-                  {leftSidebarVisible ? (
-                    <PanelLeftClose className="size-3.5" />
-                  ) : (
-                    <PanelLeft className="size-3.5" />
-                  )}
+                  <PanelLeft className="size-3.5" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
@@ -261,11 +255,7 @@ export function TitleBar({
                   }
                   data-testid="toggle-file-browser"
                 >
-                  {fileBrowserVisible ? (
-                    <PanelRightClose className="size-3.5" />
-                  ) : (
-                    <PanelRight className="size-3.5" />
-                  )}
+                  <PanelRight className="size-3.5" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>

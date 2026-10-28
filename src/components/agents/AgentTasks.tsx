@@ -1,4 +1,6 @@
 import { Suspense, lazy, useState } from 'react'
+import { cn } from '@/lib/utils'
+import { Badge } from '@/components/ui/badge'
 import {
   Dialog,
   DialogContent,
@@ -15,13 +17,13 @@ import { useChatStore } from '@/store/chat-store'
 import { formatRelative } from '@/lib/relative-time'
 import { taskKindLabel } from './subagent-types'
 import {
-  AgentBadge,
   AgentEmpty,
   AgentList,
   AgentLoading,
   AgentSection,
   AgentTabBody,
-  statusTone,
+  statusVariant,
+  AGENT_ROW,
 } from './agent-ui'
 
 const ChatWindow = lazy(() =>
@@ -67,24 +69,27 @@ function TaskRow({
     <li>
       <button
         type="button"
-        className="flex w-full items-start gap-3 px-3 py-2.5 text-left transition-colors hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-none"
+        className={cn(
+          AGENT_ROW,
+          'flex w-full items-start gap-2 text-left focus-visible:bg-muted/30 focus-visible:outline-none'
+        )}
         onClick={() => onOpen(task)}
       >
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm text-foreground">{task.title}</p>
-          <p className="mt-0.5 truncate text-xs text-muted-foreground">
+          <p className="truncate text-2xs text-muted-foreground">
             {taskKindLabel(task.kind, task.subagentTypeName)} · updated{' '}
             {formatRelative(task.updatedAt)}
           </p>
           {task.summary ? (
-            <p className="mt-1 line-clamp-1 text-xs text-muted-foreground/80">
+            <p className="line-clamp-1 text-xs text-muted-foreground/80">
               {task.summary}
             </p>
           ) : null}
         </div>
-        <AgentBadge tone={statusTone(task.status)} className="mt-0.5">
+        <Badge variant={statusVariant(task.status)}>
           {taskStatusLabel(task.status)}
-        </AgentBadge>
+        </Badge>
       </button>
     </li>
   )

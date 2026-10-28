@@ -503,7 +503,8 @@ const CompactActivityRow = memo(function CompactActivityRow({
               <div key={item.message.id}>
                 {renderMessage(item, {
                   hasFollowUpMessage: hasFollowUpFor(item.globalIndex),
-                  durationMs: durationFor(item.globalIndex, item.message),
+                  // The row shows the turn's timing once, below the group
+                  durationMs: null,
                   hideCancelledIndicator: hasCancelledMessage,
                 })}
               </div>

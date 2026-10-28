@@ -464,10 +464,7 @@ export const ChatInput = memo(function ChatInput({
 
       // Detect / commands and $ skills (only if @/# popovers are not open)
       if (!fileMentionOpen && !contextMentionOpen) {
-        if (
-          prevChar === '/' ||
-          (prevChar === '$' && selectedBackend === 'codex')
-        ) {
+        if (prevChar === '/' || prevChar === '$') {
           // Check that it's at start or preceded by whitespace
           const charBeforeSlash = value[cursorPos - 2]
           if (
@@ -1436,7 +1433,7 @@ export const ChatInput = memo(function ChatInput({
             ? 'Message...'
             : isSending
               ? 'Queue a follow-up...'
-              : 'Ask anything. @ files, # issues, / commands'
+              : 'Ask anything. @ files, # issues, / commands, $ skills'
         }
         // PERFORMANCE: Uncontrolled input - no value prop
         // Value is managed via valueRef and direct DOM manipulation

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useGhLogin } from '@/hooks/useGhLogin'
 import { usePreferences } from '@/services/preferences'
+import { useProjects } from '@/services/projects'
 import {
   resolveMagicPromptProvider,
   resolveMagicPromptBackend,
@@ -43,6 +44,14 @@ export function NewWorktreeModal() {
   const serverId = selectedProjectId
     ? (parseServerResourceKey(selectedProjectId)?.serverId ?? 'local')
     : 'local'
+  const { data: projects } = useProjects()
+  const isServerProject = !!projects?.find(p => p.id === selectedProjectId)
+    ?.server
+  // Servers (Servers tab) have only sessions: no worktrees, issues, or PRs.
+  useEffect(() => {
+    if (isServerProject) useUIStore.getState().setNewWorktreeModalOpen(false)
+  }, [isServerProject])
+  if (isServerProject) return null
 
   return (
     <SettingsTargetProvider serverId={serverId}>

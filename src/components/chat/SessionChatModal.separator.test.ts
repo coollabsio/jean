@@ -8,10 +8,10 @@ describe('SessionChatModal separators', () => {
       'utf8'
     )
 
-    expect(source).toContain('shrink-0 border-b border-border/40 sm:text-left')
+    expect(source).toContain('shrink-0 border-b border-border/20 sm:text-left')
     expect(source).toContain(
-      'items-center gap-0.5 border-b border-border/40 pr-4'
+      'items-center gap-0.5 border-b border-border/20 pr-4'
     )
-    expect(source).toContain('border-r border-border/40 px-3')
+    expect(source).toContain('border-r border-border/20 px-3')
   })
 })

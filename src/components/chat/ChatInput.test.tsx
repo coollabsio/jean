@@ -445,7 +445,7 @@ describe('ChatInput attachments', () => {
     )
   })
 
-  it('does not open the skill picker when typing $ for a non-Codex session', () => {
+  it('opens the skill picker when typing $ for a non-Codex session', () => {
     const formRef = createRef<HTMLFormElement>()
     const inputRef = createRef<HTMLTextAreaElement>()
 
@@ -470,7 +470,11 @@ describe('ChatInput attachments', () => {
     })
 
     expect(slashPopoverMock).toHaveBeenLastCalledWith(
-      expect.objectContaining({ open: false }),
+      expect.objectContaining({
+        open: true,
+        searchQuery: '',
+        triggerKind: 'skill',
+      }),
       undefined
     )
   })

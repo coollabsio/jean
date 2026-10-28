@@ -44,6 +44,7 @@ import {
   pathsToExpandForMatches,
   type FileTreeNode,
 } from './build-file-tree'
+import { MODAL_TERMINAL_PRIMARY_ROW_CLASS } from '@/components/chat/modal-terminal-layout'
 
 /**
  * Stable empty list for useWorktreeFiles while data is undefined.
@@ -284,16 +285,22 @@ export function FileBrowserSidebar({ className }: FileBrowserSidebarProps) {
       data-testid="file-browser-sidebar"
     >
       {/* Header */}
-      <div className="group flex items-center gap-1 border-b border-border/40 px-2 py-1.5">
+      <div
+        className={cn(
+          // Same height as the chat header so their bottom borders line up
+          'group flex shrink-0 items-center gap-1 border-b border-border/20 px-3',
+          MODAL_TERMINAL_PRIMARY_ROW_CLASS
+        )}
+      >
         <div className="relative min-w-0 flex-1">
-          <Search className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
+          <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             ref={searchInputRef}
             type="search"
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Search files"
-            className="h-7 bg-background/50 pl-7 pr-7 text-xs"
+            className="h-8 border-transparent bg-transparent pl-7 pr-7 text-xs shadow-none focus-visible:border-transparent dark:bg-transparent"
             disabled={!rootPath}
             aria-label="Search files"
           />

@@ -2,11 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import userEvent from '@testing-library/user-event'
 import { render, screen, within } from '@/test/test-utils'
 import { useUIStore } from '@/store/ui-store'
+import { useProjectsStore } from '@/store/projects-store'
 import { NewWorktreeModal } from './NewWorktreeModal'
 import type * as EnvironmentModule from '@/lib/environment'
 import type * as PreferencesModule from '@/services/preferences'
+import type * as ProjectsModule from '@/services/projects'
 
 const mocks = vi.hoisted(() => ({
+  projects: [] as { id: string; server?: { host: string } }[],
   isMobile: false,
   isNativeApp: false,
   preferences: {
@@ -30,6 +33,10 @@ vi.mock('@/lib/environment', async importOriginal => ({
 vi.mock('@/services/preferences', async importOriginal => ({
   ...(await importOriginal<typeof PreferencesModule>()),
   usePreferences: () => ({ data: mocks.preferences }),
+}))
+vi.mock('@/services/projects', async importOriginal => ({
+  ...(await importOriginal<typeof ProjectsModule>()),
+  useProjects: () => ({ data: mocks.projects }),
 }))
 vi.mock('@/hooks/useGhLogin', () => ({ useGhLogin: () => ({}) }))
 vi.mock('@/hooks/useInstalledBackends', () => ({
@@ -56,6 +63,7 @@ vi.mock('./GitHubPRsTab', () => ({ GitHubPRsTab: () => null }))
 vi.mock('./QuickActionsTab', () => ({ QuickActionsTab: () => null }))
 
 beforeEach(() => {
+  mocks.projects = []
   mocks.isMobile = false
   mocks.isNativeApp = false
   HTMLCanvasElement.prototype.getContext = vi.fn(() => null)
@@ -162,5 +170,16 @@ describe('NewWorktreeModal investigation selector', () => {
       'aria-selected',
       'true'
     )
+  })
+})
+
+describe('NewWorktreeModal for servers', () => {
+  it('closes without rendering when the selected project is a server', () => {
+    mocks.projects = [{ id: 'srv', server: { host: 'example.com' } }]
+    useProjectsStore.setState({ selectedProjectId: 'srv' })
+    render(<NewWorktreeModal />)
+
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(useUIStore.getState().newWorktreeModalOpen).toBe(false)
   })
 })

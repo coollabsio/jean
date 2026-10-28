@@ -1,4 +1,5 @@
 import { useCallback } from 'react'
+import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -25,13 +26,14 @@ import {
   latestChangeIdForTarget,
 } from './agent-changes'
 import {
-  AgentBadge,
   AgentEmpty,
   AgentList,
+  AgentLoading,
   AgentNotice,
   AgentSection,
   AgentTabBody,
-  statusTone,
+  statusVariant,
+  AGENT_ROW,
 } from './agent-ui'
 import { formatRelative } from '@/lib/relative-time'
 
@@ -115,16 +117,21 @@ function ApprovalRow({ approval }: { approval: AgentApproval }) {
   const targetName = useTargetName(approval)
   const run = decide.run
   return (
-    <li className="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center">
+    <li
+      className={cn(
+        AGENT_ROW,
+        'flex flex-col gap-2 sm:flex-row sm:items-center'
+      )}
+    >
       <div className="min-w-0 flex-1">
         <p className="text-sm text-foreground">
           {describeApproval(approval, targetName)}
         </p>
         {approval.status !== 'pending' && (
           <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-            <AgentBadge tone={statusTone(approval.status)}>
+            <Badge variant={statusVariant(approval.status)}>
               {approval.status}
-            </AgentBadge>
+            </Badge>
             {approval.result ? (
               <span
                 className={cn(
@@ -253,7 +260,7 @@ function DelegationRow({ delegation }: { delegation: AgentDelegation }) {
   }, [worktree, delegation.sessionId])
 
   return (
-    <li className="flex items-start gap-3 px-3 py-2.5">
+    <li className={cn(AGENT_ROW, 'flex items-start gap-2')}>
       <div className="min-w-0 flex-1">
         <p className="flex items-center gap-2 text-sm">
           <span className="truncate text-foreground">
@@ -261,10 +268,10 @@ function DelegationRow({ delegation }: { delegation: AgentDelegation }) {
               ? 'Agent request'
               : (worktree?.name ?? delegation.worktreeId)}
           </span>
-          <AgentBadge tone={statusTone(delegation.status)}>
+          <Badge variant={statusVariant(delegation.status)}>
             {delegation.status}
-          </AgentBadge>
-          <span className="shrink-0 text-xs text-muted-foreground">
+          </Badge>
+          <span className="shrink-0 text-2xs tabular-nums text-muted-foreground">
             {formatRelative(delegation.updatedAt)}
           </span>
         </p>
@@ -275,7 +282,12 @@ function DelegationRow({ delegation }: { delegation: AgentDelegation }) {
         ) : null}
       </div>
       {worktree && (
-        <Button size="sm" variant="ghost" onClick={open}>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 text-xs"
+          onClick={open}
+        >
           Open
         </Button>
       )}
@@ -295,10 +307,15 @@ function ChangeRow({
   const revert = useRevertAgentChange()
   const detail = agentChangeDetail(change)
   return (
-    <li className="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center">
+    <li
+      className={cn(
+        AGENT_ROW,
+        'flex flex-col gap-2 sm:flex-row sm:items-center'
+      )}
+    >
       <div className="min-w-0 flex-1">
         <p className="text-sm text-foreground">{change.summary}</p>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-2xs text-muted-foreground">
           {agentChangeActorLabel(change.actorAgentId)} ·{' '}
           {formatRelative(change.createdAt)}
         </p>
@@ -309,7 +326,8 @@ function ChangeRow({
       {canRevert && (
         <Button
           size="sm"
-          variant="outline"
+          variant="ghost"
+          className="h-7 self-start text-xs sm:self-auto"
           disabled={revert.isPending}
           onClick={() => {
             const id = toast.loading('Reverting change…')
@@ -361,9 +379,9 @@ export function AgentActivity({ agent }: { agent: AgentSummary }) {
   const { data, isLoading } = useAgentDetails(agent.id)
   if (isLoading || !data) {
     return (
-      <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-        Loading activity…
-      </div>
+      <AgentTabBody>
+        <AgentLoading label="Loading activity…" />
+      </AgentTabBody>
     )
   }
   const pending = data.approvals.filter(a => a.status === 'pending')

@@ -10,7 +10,7 @@ describe('TitleBar file-browser placement', () => {
     const fileBrowser = source.indexOf('data-testid="toggle-file-browser"')
 
     expect(fileBrowser).toBeGreaterThan(rightGroup)
-    expect(source).toContain('<PanelRightClose className="size-3.5" />')
+    expect(source).not.toContain('PanelRightClose')
     expect(source).toContain('<PanelRight className="size-3.5" />')
     expect(source).not.toContain('<FolderTree')
   })

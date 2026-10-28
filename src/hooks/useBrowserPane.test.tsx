@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
-import { DEFAULT_NEW_TAB_URL, useBrowserStore } from '@/store/browser-store'
+import { blankTabUrl, useBrowserStore } from '@/store/browser-store'
 import {
   openBrowserTabFromNewWindow,
   useAnyBlockingModalOpen,
@@ -182,7 +182,7 @@ describe('openBrowserTabFromNewWindow', () => {
     const tabs = useBrowserStore.getState().getTabs('worktree-1')
     expect(tabs).toHaveLength(2)
     expect(tabs[1]?.id).toBe(createdId)
-    expect(tabs[1]?.url).toBe(DEFAULT_NEW_TAB_URL)
+    expect(tabs[1]?.url).toBe(blankTabUrl())
   })
 
   it('ignores an unknown source tab and non-http urls', () => {

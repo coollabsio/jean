@@ -292,10 +292,12 @@ export function WorktreeDropdownMenu({
             New Session
           </DropdownMenuItem>
 
-          <DropdownMenuItem onClick={handleNewWorktree}>
-            <GitBranch className="mr-2 h-4 w-4" />
-            New Worktree
-          </DropdownMenuItem>
+          {!isServer && (
+            <DropdownMenuItem onClick={handleNewWorktree}>
+              <GitBranch className="mr-2 h-4 w-4" />
+              New Worktree
+            </DropdownMenuItem>
+          )}
 
           {isMobile && (
             <DropdownMenuItem

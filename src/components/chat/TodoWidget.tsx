@@ -15,6 +15,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
+import { COMPOSER_SURFACE_CLASS } from './composer-surface'
 
 interface TodoWidgetProps {
   todos: Todo[]
@@ -47,7 +48,12 @@ export function TodoWidget({
 
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen} className={className}>
-      <div className="overflow-hidden rounded-lg border border-border bg-card">
+      <div
+        className={cn(
+          'overflow-hidden rounded-lg border',
+          COMPOSER_SURFACE_CLASS
+        )}
+      >
         <div className="flex items-center text-xs text-muted-foreground">
           <CollapsibleTrigger className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-3 py-1.5 text-left select-none hover:bg-muted/50">
             {!isOpen &&

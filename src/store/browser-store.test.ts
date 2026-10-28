@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it } from 'vitest'
-import { useBrowserStore } from './browser-store'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { blankTabUrl, useBrowserStore } from './browser-store'
 import { useTerminalStore } from './terminal-store'
 
 describe('BrowserStore', () => {
@@ -164,6 +164,24 @@ describe('toggleBrowserSurface', () => {
     expect(useBrowserStore.getState().modalOpen['worktree-1']).toBe(false)
     expect(useTerminalStore.getState().modalTerminalOpen['worktree-1']).toBe(
       false
+    )
+  })
+})
+
+describe('blankTabUrl', () => {
+  afterEach(() => {
+    document.documentElement.style.removeProperty('--background')
+  })
+
+  it('paints the blank page with the app background, encoded so # survives', () => {
+    document.documentElement.style.setProperty('--background', '#101010')
+
+    const url = blankTabUrl()
+
+    expect(url.startsWith('data:text/html;charset=utf-8,')).toBe(true)
+    expect(url).not.toContain('#')
+    expect(decodeURIComponent(url.split(',')[1] ?? '')).toContain(
+      'background:#101010'
     )
   })
 })

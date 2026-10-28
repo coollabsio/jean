@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
 import {
   ChevronRight,
   Copy,
+  MoreHorizontal,
   Pencil,
-  Plus,
   Search,
   Settings2,
   Thumbtack,
@@ -18,6 +19,12 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { Checkbox } from '@/components/ui/checkbox'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import {
   Collapsible,
   CollapsibleContent,
@@ -66,13 +73,14 @@ import {
   type MemorySearchFilters,
 } from './memory-view'
 import {
-  AgentBadge,
   AgentEmpty,
   AgentList,
   AgentLoading,
   AgentPanel,
   AgentSection,
   AgentTabBody,
+  AGENT_ROW,
+  AgentAddButton,
 } from './agent-ui'
 
 const KIND_LABELS: Record<MemoryKind, string> = {
@@ -115,14 +123,15 @@ function MemoryRow({
     expired ? 'Expired' : null,
   ].filter(Boolean)
   const kindBadge = (
-    <AgentBadge>{KIND_LABELS[memory.kind] ?? memory.kind}</AgentBadge>
+    <Badge variant="subtle">{KIND_LABELS[memory.kind] ?? memory.kind}</Badge>
   )
   const onError = (e: unknown) => toast.error(`Failed: ${e}`)
 
   return (
     <li
       className={cn(
-        'group flex items-start gap-3 px-3 py-2.5',
+        AGENT_ROW,
+        'group flex items-start gap-2',
         expired && 'opacity-60'
       )}
     >
@@ -182,7 +191,7 @@ function MemoryRow({
             {memory.content}
           </p>
         )}
-        <div className="mt-1.5 flex">
+        <div className="mt-1 flex">
           {details.length > 0 ? (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -200,7 +209,7 @@ function MemoryRow({
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                size="icon-sm"
+                size="icon-xs"
                 variant="ghost"
                 aria-label={memory.pinned ? 'Unpin' : 'Pin'}
                 aria-pressed={memory.pinned}
@@ -226,7 +235,7 @@ function MemoryRow({
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                size="icon-sm"
+                size="icon-xs"
                 variant="ghost"
                 aria-label="Edit"
                 onClick={() => setEditing(true)}
@@ -239,7 +248,7 @@ function MemoryRow({
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                size="icon-sm"
+                size="icon-xs"
                 variant="ghost"
                 aria-label="Forget"
                 disabled={remove.isPending}
@@ -279,8 +288,8 @@ function MemoryList({
 
 function ChangeRow({ change }: { change: AgentMemoryChange }) {
   return (
-    <li className="flex flex-col gap-1 px-3 py-2.5">
-      <p className="text-xs text-muted-foreground">
+    <li className={cn(AGENT_ROW, 'flex flex-col gap-1')}>
+      <p className="text-2xs text-muted-foreground">
         {describeMemoryChange(change)} · {formatDay(change.createdAt)}{' '}
         {formatJournalTime(change.createdAt)}
       </p>
@@ -295,29 +304,6 @@ function ChangeRow({ change }: { change: AgentMemoryChange }) {
         </p>
       )}
     </li>
-  )
-}
-
-function AddButton({
-  open,
-  label,
-  onClick,
-}: {
-  open: boolean
-  label: string
-  onClick: () => void
-}) {
-  return (
-    <Button
-      size="sm"
-      variant="ghost"
-      aria-expanded={open}
-      className="h-7 text-xs"
-      onClick={onClick}
-    >
-      {open ? <X /> : <Plus />}
-      {open ? 'Close' : label}
-    </Button>
   )
 }
 
@@ -457,9 +443,9 @@ export function AgentMemoryView({ agent }: { agent: AgentSummary }) {
 
   return (
     <AgentTabBody>
-      <div className="flex flex-col gap-3" data-testid="memory-search">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative min-w-48 flex-1">
+      <div className="flex flex-col gap-2" data-testid="memory-search">
+        <div className="flex items-center gap-1">
+          <div className="relative min-w-0 flex-1">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               id="memory-search"
@@ -467,51 +453,77 @@ export function AgentMemoryView({ agent }: { agent: AgentSummary }) {
               value={queryDraft}
               aria-label="Search memory and journal"
               placeholder="Search memory and journal"
-              className="h-8 pl-8 text-sm"
+              className="h-8 pl-8 text-xs md:text-xs"
               onChange={e => setQueryDraft(e.target.value)}
             />
           </div>
-          <Button
-            size="sm"
-            variant={filtersOpen || filterCount > 0 ? 'secondary' : 'outline'}
-            aria-expanded={filtersOpen}
-            aria-controls="memory-filters"
-            onClick={() => setFiltersOpen(value => !value)}
-          >
-            <Settings2 />
-            Filters
-            {filterCount > 0 && (
-              <span className="rounded-full bg-primary px-1.5 text-2xs leading-4 text-primary-foreground">
-                {filterCount}
-              </span>
-            )}
-          </Button>
-          {searching && (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => {
-                setQueryDraft('')
-                setFilters(EMPTY_MEMORY_FILTERS)
-              }}
-            >
-              Clear
-            </Button>
-          )}
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button size="sm" variant="ghost" onClick={handleExport}>
-                <Copy />
-                <span className="hidden sm:inline">Copy as Markdown</span>
+              <Button
+                size="icon-sm"
+                variant={filtersOpen || filterCount > 0 ? 'secondary' : 'ghost'}
+                className="relative text-muted-foreground"
+                aria-label={
+                  filterCount > 0
+                    ? `Filters (${filterCount} active)`
+                    : 'Filters'
+                }
+                aria-expanded={filtersOpen}
+                aria-controls="memory-filters"
+                onClick={() => setFiltersOpen(value => !value)}
+              >
+                <Settings2 />
+                {filterCount > 0 && (
+                  <span className="absolute top-1 right-1 size-1.5 rounded-full bg-primary" />
+                )}
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Copy all memory as Markdown</TooltipContent>
+            <TooltipContent>
+              {filterCount > 0 ? `Filters (${filterCount})` : 'Filters'}
+            </TooltipContent>
           </Tooltip>
+          {searching && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  className="text-muted-foreground"
+                  aria-label="Clear search and filters"
+                  onClick={() => {
+                    setQueryDraft('')
+                    setFilters(EMPTY_MEMORY_FILTERS)
+                  }}
+                >
+                  <X />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Clear search and filters</TooltipContent>
+            </Tooltip>
+          )}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                className="text-muted-foreground"
+                aria-label="More memory actions"
+              >
+                <MoreHorizontal />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={handleExport}>
+                <Copy />
+                Copy as Markdown
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
         {filtersOpen && (
           <div
             id="memory-filters"
-            className="grid grid-cols-2 gap-3 rounded-lg border bg-muted/20 p-3 sm:grid-cols-3"
+            className="grid grid-cols-2 gap-2 rounded-md bg-muted/30 p-2"
           >
             <FilterField label="Kind" htmlFor="memory-filter-kind">
               <NativeSelect
@@ -610,7 +622,7 @@ export function AgentMemoryView({ agent }: { agent: AgentSummary }) {
           count={userFacts.length}
           description="Facts every agent sees, like your name, timezone, and preferences."
           actions={
-            <AddButton
+            <AgentAddButton
               open={composer === 'fact'}
               label="Add fact"
               onClick={() => toggleComposer('fact')}
@@ -663,7 +675,7 @@ export function AgentMemoryView({ agent }: { agent: AgentSummary }) {
           count={rest.length}
           description="Rules, facts, and open work. Shared entries are visible to every agent."
           actions={
-            <AddButton
+            <AgentAddButton
               open={composer === 'memory'}
               label="Add memory"
               onClick={() => toggleComposer('memory')}
@@ -739,7 +751,7 @@ export function AgentMemoryView({ agent }: { agent: AgentSummary }) {
         count={journal.length}
         description="Dated history. Archived chats are stored here and can be recalled by text or date."
         actions={
-          <AddButton
+          <AgentAddButton
             open={composer === 'journal'}
             label="Add entry"
             onClick={() => toggleComposer('journal')}
@@ -782,30 +794,30 @@ export function AgentMemoryView({ agent }: { agent: AgentSummary }) {
         {searchingJournal && journalQuery.isLoading ? (
           <AgentLoading label="Loading journal…" />
         ) : journalGroups.length ? (
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2">
             {journalGroups.map(group => (
-              <div key={group.day} className="flex flex-col gap-1.5">
-                <h4 className="text-xs font-medium text-muted-foreground">
+              <div key={group.day} className="flex flex-col">
+                <h4 className="px-2 pb-0.5 text-2xs font-medium text-muted-foreground/70">
                   {journalDayLabel(group.day)}
                 </h4>
                 <AgentList>
                   {group.entries.map((item: AgentJournalEntry) => (
-                    <li key={item.id} className="flex gap-3 px-3 py-2.5">
-                      <span className="w-10 shrink-0 pt-0.5 text-xs tabular-nums text-muted-foreground">
+                    <li key={item.id} className={cn(AGENT_ROW, 'flex gap-2')}>
+                      <span className="w-9 shrink-0 pt-0.5 text-2xs tabular-nums text-muted-foreground">
                         {formatJournalTime(item.occurredAt)}
                       </span>
                       <div className="min-w-0 flex-1">
                         <p className="whitespace-pre-wrap break-words text-sm text-foreground">
                           {item.content}
                         </p>
-                        <div className="mt-1.5 flex flex-wrap gap-1.5">
-                          <AgentBadge>
-                            {journalSourceLabel(item.source)}
-                          </AgentBadge>
-                          {item.projectId && (
-                            <AgentBadge>Project {item.projectId}</AgentBadge>
-                          )}
-                        </div>
+                        <p className="text-2xs text-muted-foreground">
+                          {[
+                            journalSourceLabel(item.source),
+                            item.projectId ? `Project ${item.projectId}` : null,
+                          ]
+                            .filter(Boolean)
+                            .join(' · ')}
+                        </p>
                       </div>
                     </li>
                   ))}
@@ -828,9 +840,9 @@ export function AgentMemoryView({ agent }: { agent: AgentSummary }) {
         open={changesOpen}
         onOpenChange={setChangesOpen}
         data-testid="memory-changes"
-        className="flex flex-col gap-3"
+        className="flex flex-col gap-1.5"
       >
-        <CollapsibleTrigger className="flex items-center gap-1.5 self-start rounded-md text-sm font-medium text-foreground hover:text-foreground/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
+        <CollapsibleTrigger className="flex items-center gap-1 self-start rounded-md px-2 text-xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
           <ChevronRight
             className={cn(
               'size-3.5 text-muted-foreground transition-transform',
@@ -838,11 +850,11 @@ export function AgentMemoryView({ agent }: { agent: AgentSummary }) {
             )}
           />
           Recent changes
-          <span className="rounded-md bg-muted/50 px-1.5 text-xs font-medium tabular-nums text-muted-foreground">
+          <span className="font-normal tabular-nums text-muted-foreground/70">
             {allChanges.length}
           </span>
         </CollapsibleTrigger>
-        <CollapsibleContent className="flex flex-col gap-2">
+        <CollapsibleContent className="flex flex-col gap-1">
           {changes.length ? (
             <AgentList>
               {changes.map(change => (
@@ -856,7 +868,7 @@ export function AgentMemoryView({ agent }: { agent: AgentSummary }) {
             <Button
               size="sm"
               variant="ghost"
-              className="self-start"
+              className="h-6 self-start px-2 text-xs text-muted-foreground"
               onClick={() => setChangesExpanded(value => !value)}
             >
               {changesExpanded ? 'Show less' : `Show all ${allChanges.length}`}

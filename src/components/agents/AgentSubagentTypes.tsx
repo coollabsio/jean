@@ -1,6 +1,7 @@
 import { useState } from 'react'
+import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import { Pencil, Play, Plus, Trash2 } from '@/components/icons/reicon'
+import { Pencil, Play, Trash2 } from '@/components/icons/reicon'
 import { Button } from '@/components/ui/button'
 import {
   Tooltip,
@@ -22,13 +23,14 @@ import {
 } from '@/services/agents'
 import { AgentRunFields } from './AgentRunFields'
 import {
-  AgentBadge,
   AgentEmpty,
   AgentList,
   AgentLoading,
   AgentPanel,
   AgentSection,
   AgentTabBody,
+  AGENT_ROW,
+  AgentAddButton,
 } from './agent-ui'
 import { HelpTip } from '@/components/ui/help-tip'
 import {
@@ -69,7 +71,7 @@ function TypeEditor({
       }}
     >
       <AgentPanel>
-        <p className="text-sm font-medium">
+        <p className="text-xs font-medium text-muted-foreground">
           {draft.id === null ? 'New agent type' : `Edit ${draft.name}`}
         </p>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -178,7 +180,7 @@ function TypeEditor({
             {error}
           </p>
         ) : null}
-        <div className="-mx-4 -mb-4 flex justify-end gap-2 border-t bg-muted/20 px-4 py-2.5">
+        <div className="flex justify-end gap-2">
           <Button type="button" size="sm" variant="ghost" onClick={onClose}>
             Cancel
           </Button>
@@ -226,12 +228,12 @@ function TypeRow({
   }
 
   return (
-    <li className="px-3 py-2.5">
+    <li className={AGENT_ROW}>
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <p className="flex items-center gap-2 text-sm font-medium">
             <span className="truncate">{type.name}</span>
-            {type.shared ? <AgentBadge>Shared</AgentBadge> : null}
+            {type.shared ? <Badge variant="subtle">Shared</Badge> : null}
           </p>
           {type.description ? (
             <p className="truncate text-xs text-muted-foreground">
@@ -239,29 +241,33 @@ function TypeRow({
             </p>
           ) : null}
           {summary ? (
-            <p className="mt-1 truncate text-2xs text-muted-foreground/80">
+            <p className="truncate text-2xs text-muted-foreground/80">
               {summary}
             </p>
           ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-0.5">
-          <Button
-            type="button"
-            variant={open ? 'secondary' : 'outline'}
-            size="sm"
-            className="mr-1"
-            aria-expanded={open}
-            onClick={() => setOpen(value => !value)}
-          >
-            <Play />
-            Run
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant={open ? 'secondary' : 'ghost'}
+                size="icon-xs"
+                aria-label={`Run ${type.name}`}
+                aria-expanded={open}
+                onClick={() => setOpen(value => !value)}
+              >
+                <Play />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Run</TooltipContent>
+          </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
                 type="button"
                 variant="ghost"
-                size="icon-sm"
+                size="icon-xs"
                 aria-label={`Edit ${type.name}`}
                 onClick={() => onEdit(type)}
               >
@@ -275,7 +281,7 @@ function TypeRow({
               <Button
                 type="button"
                 variant="ghost"
-                size="icon-sm"
+                size="icon-xs"
                 aria-label={`Delete ${type.name}`}
                 disabled={remove.isPending}
                 onClick={() =>
@@ -297,7 +303,7 @@ function TypeRow({
         </div>
       </div>
       {open ? (
-        <div className="mt-3 flex flex-col gap-2 rounded-md bg-muted/30 p-3">
+        <div className="mt-2 flex flex-col gap-2 rounded-md bg-muted/30 p-2">
           <Label htmlFor={`subagent-task-${type.id}`}>Prompt</Label>
           <Textarea
             id={`subagent-task-${type.id}`}
@@ -359,19 +365,17 @@ export function AgentSubagentTypes({ agent }: { agent: AgentSummary }) {
   return (
     <AgentTabBody>
       <AgentSection
+        title="Types"
+        count={isLoading ? undefined : types.length}
         description="Named workers this agent can spawn, each with its own backend, model, skills, and tools. Results come back as updates."
         actions={
-          draft === null ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setDraft(EMPTY_SUBAGENT_TYPE)}
-            >
-              <Plus />
-              New type
-            </Button>
-          ) : null
+          <AgentAddButton
+            open={draft !== null}
+            label="New type"
+            onClick={() =>
+              setDraft(current => (current ? null : EMPTY_SUBAGENT_TYPE))
+            }
+          />
         }
       >
         {draft ? (

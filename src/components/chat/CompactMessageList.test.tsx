@@ -180,6 +180,37 @@ describe('CompactMessageList', () => {
     expect(screen.getByText('4s').parentElement).toContainElement(receiveTime)
   })
 
+  it('shows the turn duration once after the activity row is expanded', () => {
+    const sentAt = 1_700_000_000
+    renderCompact([
+      message('user-1', 'user', sentAt, 'check status'),
+      message(
+        'assistant-1',
+        'assistant',
+        sentAt + 4,
+        'Working tree is clean.',
+        {
+          tool_calls: [
+            {
+              id: 'tool-1',
+              name: 'Bash',
+              input: { command: 'git status' },
+              output: 'clean',
+            },
+          ],
+          content_blocks: [
+            { type: 'tool_use', tool_call_id: 'tool-1' },
+            { type: 'text', text: 'Working tree is clean.' },
+          ],
+        }
+      ),
+    ])
+
+    expect(screen.getAllByText('4s')).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: /1 step/ }))
+    expect(screen.getAllByText('4s')).toHaveLength(1)
+  })
+
   it('keeps a question reply receive time hidden until that message is hovered', () => {
     const sentAt = 1_700_000_000
     const receivedAt = sentAt + 4

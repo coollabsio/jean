@@ -729,7 +729,7 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
               {formatShortcutDisplay(`mod+${shortcutNumber}`)}
             </kbd>
           )}
-          <span className="flex min-w-0 flex-1 flex-col gap-1 font-medium sm:flex-row sm:items-center sm:gap-1.5">
+          <span className="flex min-w-0 flex-1 flex-col gap-1 sm:flex-row sm:items-center sm:gap-1.5">
             <span className="flex min-w-0 items-center gap-1.5">
               <span className="min-w-0 flex-1 truncate">
                 {isBase ? 'Base Session' : worktree.name}
@@ -743,7 +743,12 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
                 />
               )}
               {showBranchBadge && (
-                <span className="hidden items-center gap-1 rounded border border-border/50 px-1.5 py-0.5 text-2xs font-normal text-muted-foreground sm:inline-flex">
+                <span
+                  className={cn(
+                    'hidden items-center gap-1 rounded border border-border/50 px-1.5 py-0.5 text-2xs font-normal text-muted-foreground sm:inline-flex',
+                    revealClass
+                  )}
+                >
                   <GitBranch className="h-2.5 w-2.5" />
                   <span className="max-w-40 truncate">{displayBranch}</span>
                   {stackedBaseBranch && (
@@ -787,7 +792,10 @@ const WorktreeSectionHeader = memo(function WorktreeSectionHeader({
                 </span>
               )}
               <span
-                className="inline-flex items-center font-normal hover:bg-muted/50 rounded px-1.5 py-0.5"
+                className={cn(
+                  'inline-flex items-center rounded px-1.5 py-0.5 font-normal hover:bg-muted/50',
+                  revealClass
+                )}
                 onClick={e => e.stopPropagation()}
               >
                 <GitStatusBadges
@@ -2092,6 +2100,14 @@ export function ProjectCanvasView({
     flatCards,
     openWorktreeModal,
   ])
+
+  // A server has no worktree list: always show its base session chat.
+  const isServer = !!project.server
+  useEffect(() => {
+    if (!isServer || selectedWorktreeModal) return
+    const base = readyWorktrees.find(isBaseSession)
+    if (base) openWorktreeModal(base.id, base.path)
+  }, [isServer, selectedWorktreeModal, readyWorktrees, openWorktreeModal])
 
   // Auto-select session when dashboard opens. Reopens the last opened session
   // of this project in the modal; otherwise only selects a card visually.

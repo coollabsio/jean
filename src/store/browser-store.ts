@@ -3,15 +3,24 @@ import { generateId } from '@/lib/uuid'
 import type { BrowserTab, ModalBrowserDockMode } from '@/types/browser'
 import { useTerminalStore } from './terminal-store'
 
-// Opaque white data: URL instead of about:blank — WKWebView renders about:blank
+// Opaque data: URL instead of about:blank — WKWebView renders about:blank
 // as a transparent surface, so a previous tab's pixels can bleed through when
-// switching tabs. data: URL forces a real opaque page.
-export const DEFAULT_NEW_TAB_URL =
-  'data:text/html;charset=utf-8,<!DOCTYPE html><html><head><title>New Tab</title></head><body style="margin:0;background:#fff"></body></html>'
+// switching tabs. The page takes the app's --background so a blank tab matches
+// the chat in both themes. Encoded so WebKit does not read `#` as a fragment.
+export function blankTabUrl(): string {
+  const background =
+    typeof document === 'undefined'
+      ? ''
+      : getComputedStyle(document.documentElement)
+          .getPropertyValue('--background')
+          .trim()
+  const html = `<!DOCTYPE html><html><head><title>New Tab</title></head><body style="margin:0;background:${background || '#fff'}"></body></html>`
+  return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`
+}
 
 // Treat any data: URL as blank — WebKit normalizes the placeholder URL
 // (drops ;charset=utf-8, percent-encodes, splits the literal `#` as a fragment)
-// and Tauri injects a CSP <meta>, so equality with DEFAULT_NEW_TAB_URL fails.
+// and Tauri injects a CSP <meta>, so equality with blankTabUrl() fails.
 // Users cannot navigate to data: URLs in this app (normalizeUrl rejects them).
 export const isBlankTabUrl = (u: string): boolean =>
   !u || u === 'about:blank' || u.startsWith('data:')
@@ -133,7 +142,7 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
   isModalOpen: worktreeId => get().modalOpen[worktreeId] ?? false,
   isBottomPanelOpen: worktreeId => get().bottomPanelOpen[worktreeId] ?? false,
 
-  addTab: (worktreeId, url = DEFAULT_NEW_TAB_URL) => {
+  addTab: (worktreeId, url = blankTabUrl()) => {
     const id = generateId()
     // about:blank loads instantly with no `browser:loaded` event — skip
     // the spinner state entirely so the tab pill doesn't stay loading.

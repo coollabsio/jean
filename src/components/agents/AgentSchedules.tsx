@@ -1,12 +1,7 @@
 import { useState } from 'react'
+import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import {
-  PauseCircle,
-  Pencil,
-  Play,
-  Plus,
-  Trash2,
-} from '@/components/icons/reicon'
+import { PauseCircle, Pencil, Play, Trash2 } from '@/components/icons/reicon'
 import { Button } from '@/components/ui/button'
 import {
   Tooltip,
@@ -29,12 +24,13 @@ import {
 import { formatRelative } from '@/lib/relative-time'
 import { cn } from '@/lib/utils'
 import {
-  AgentBadge,
   AgentEmpty,
   AgentList,
   AgentLoading,
   AgentSection,
   AgentTabBody,
+  AGENT_ROW,
+  AgentAddButton,
 } from './agent-ui'
 import {
   SCHEDULE_EVENTS,
@@ -76,14 +72,14 @@ function ScheduleEditor({
   const zones = timezoneOptions(form.timezone)
   return (
     <form
-      className="flex flex-col gap-3 rounded-lg border p-4"
+      className="flex flex-col gap-3 rounded-md border border-border/50 p-3"
       onSubmit={event => {
         event.preventDefault()
         setAttempted(true)
         if (!error) onSave()
       }}
     >
-      <p className="text-sm font-medium">
+      <p className="text-xs font-medium text-muted-foreground">
         {form.scheduleId === null
           ? 'New routine'
           : `Edit routine #${form.scheduleId}`}
@@ -251,7 +247,7 @@ function ScheduleEditor({
       {attempted && error && (
         <p className="text-xs text-destructive">{error}</p>
       )}
-      <div className="-mx-4 -mb-4 mt-1 flex justify-end gap-2 border-t bg-muted/20 px-4 py-2.5">
+      <div className="flex justify-end gap-2">
         <Button size="sm" type="button" variant="ghost" onClick={onClose}>
           Cancel
         </Button>
@@ -282,7 +278,8 @@ function ScheduleRow({
   return (
     <li
       className={cn(
-        'flex items-start gap-3 px-3 py-2.5',
+        AGENT_ROW,
+        'flex items-start gap-2',
         schedule.paused && 'opacity-70'
       )}
     >
@@ -291,16 +288,16 @@ function ScheduleRow({
           <span className="truncate font-medium text-foreground">
             {schedule.name}
           </span>
-          <AgentBadge>{scheduleKindLabel(schedule)}</AgentBadge>
-          {schedule.paused && <AgentBadge tone="attention">Paused</AgentBadge>}
+          <Badge variant="subtle">{scheduleKindLabel(schedule)}</Badge>
+          {schedule.paused && <Badge variant="warning">Paused</Badge>}
         </p>
-        <p className="mt-0.5 truncate text-xs text-muted-foreground">
+        <p className="truncate text-2xs text-muted-foreground">
           {formatScheduleWhen(schedule)}
           {schedule.lastRunAt && !schedule.event
             ? ` · last ran ${formatRelative(schedule.lastRunAt)}`
             : ''}
         </p>
-        <p className="mt-1 truncate text-xs text-muted-foreground/80">
+        <p className="truncate text-xs text-muted-foreground/80">
           {schedule.prompt}
         </p>
       </div>
@@ -308,7 +305,7 @@ function ScheduleRow({
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
-              size="icon-sm"
+              size="icon-xs"
               variant="ghost"
               aria-label={schedule.paused ? 'Resume routine' : 'Pause routine'}
               disabled={update.isPending}
@@ -333,7 +330,7 @@ function ScheduleRow({
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
-              size="icon-sm"
+              size="icon-xs"
               variant="ghost"
               aria-label="Edit routine"
               onClick={() => onEdit(schedule)}
@@ -346,7 +343,7 @@ function ScheduleRow({
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
-              size="icon-sm"
+              size="icon-xs"
               variant="ghost"
               aria-label="Delete routine"
               disabled={cancel.isPending}
@@ -395,16 +392,6 @@ export function AgentSchedules({ agent }: { agent: AgentSummary }) {
   }
 
   const schedules = data?.schedules ?? []
-  const newButton = (
-    <Button
-      size="sm"
-      variant="outline"
-      onClick={() => setForm(emptyScheduleForm())}
-    >
-      <Plus />
-      New routine
-    </Button>
-  )
 
   return (
     <AgentTabBody>
@@ -412,7 +399,15 @@ export function AgentSchedules({ agent }: { agent: AgentSummary }) {
         title="Routines"
         count={isLoading ? undefined : schedules.length}
         description="Each routine starts a background run, on a cron schedule or when something happens in Jean."
-        actions={form === null ? newButton : null}
+        actions={
+          <AgentAddButton
+            open={form !== null}
+            label="New routine"
+            onClick={() =>
+              setForm(current => (current ? null : emptyScheduleForm()))
+            }
+          />
+        }
       >
         {form && (
           <ScheduleEditor

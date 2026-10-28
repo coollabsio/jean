@@ -1,4 +1,5 @@
 import type { PortEntry, TerminalPortInfo } from '@/services/projects'
+import { blankTabUrl } from '@/store/browser-store'
 
 /**
  * A jean.json port or a terminal listen port the embedded browser can open.
@@ -150,7 +151,7 @@ export function resolvePortHost(
  * Resolve the URL a freshly opened browser tab or port button should load.
  * Prefers the first jean.json-configured port (`http://<host>:<port>`)
  * so the embedded browser auto-points at the worktree's dev server.
- * Falls back to about:blank when no port is configured.
+ * Falls back to a blank page when no port is configured.
  * Extra tabs use {@link resolveNewTabUrl}; this stays the first-tab default.
  * Remote desktop sessions rewrite loopback targets in
  * `resolveEmbeddedPreviewUrl` when the webview opens.
@@ -167,7 +168,7 @@ export function resolveDefaultTabUrl(
   serverDefaultHost?: string | null
 ): string {
   const first = ports?.[0]
-  if (!first) return 'about:blank'
+  if (!first) return blankTabUrl()
   return resolvePortUrl(first, serverDefaultHost)
 }
 

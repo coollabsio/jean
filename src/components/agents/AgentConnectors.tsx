@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
 import { McpSignInButton } from '@/components/mcp/McpSignInButton'
 import { useState } from 'react'
@@ -35,7 +36,6 @@ import {
 } from './agent-connectors'
 import { useSavedDraft } from './use-saved-draft'
 import {
-  AgentBadge,
   AgentEmpty,
   AgentList,
   AgentLoading,
@@ -43,8 +43,13 @@ import {
   AgentPanel,
   AgentSection,
   SaveFooter,
+  AGENT_ROW,
 } from './agent-ui'
-import { HelpTip } from '@/components/ui/help-tip'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 
 function isCliBackend(value: string): value is CliBackend {
   return backendOptions.some(option => option.value === value)
@@ -175,9 +180,9 @@ export function AgentConnectors({
         reason
       )}
       actions={
-        <AgentBadge tone={backend ? 'active' : 'neutral'}>
+        <Badge variant={backend ? 'info' : 'subtle'}>
           {backendName ?? 'Default backend'}
-        </AgentBadge>
+        </Badge>
       }
     >
       {pendingBackend !== undefined && pendingBackend !== null && (
@@ -193,8 +198,8 @@ export function AgentConnectors({
         </AgentNotice>
       )}
       <AgentPanel>
-        <div className="flex flex-col gap-2">
-          <h4 className="text-xs font-medium text-muted-foreground">
+        <div className="flex flex-col gap-1.5">
+          <h4 className="px-2 text-xs font-medium text-muted-foreground">
             MCP servers
           </h4>
           {backend && servers.isLoading ? (
@@ -226,7 +231,7 @@ export function AgentConnectors({
                 return (
                   <li
                     key={`${ref.backend}:${ref.name}`}
-                    className="flex items-center gap-3 px-3 py-2.5"
+                    className={cn(AGENT_ROW, 'flex items-center gap-2')}
                   >
                     <Switch
                       checked={selected}
@@ -243,11 +248,9 @@ export function AgentConnectors({
                         {server.disabled ? ' · disabled in CLI config' : ''}
                       </div>
                     </div>
-                    <AgentBadge
-                      tone={status === 'enabled' ? 'active' : 'neutral'}
-                    >
+                    <Badge variant={status === 'enabled' ? 'info' : 'subtle'}>
                       {connectorStatusLabel(status)}
-                    </AgentBadge>
+                    </Badge>
                     {signIn && (
                       <McpSignInButton
                         backend={signIn}
@@ -263,14 +266,20 @@ export function AgentConnectors({
           )}
         </div>
 
-        <div className="flex flex-col gap-2 pt-2">
-          <h4 className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-            Jean tools
-            <HelpTip label="About Jean tools">
-              {tools === null
-                ? 'Every Jean tool is allowed, including tools added later. Turning one off saves an allowlist of the rest. Destructive tools still wait for your approval.'
-                : 'Only the tools left on can be called. Tools added later stay off until you allow them. claude_permission_prompt stays available so Claude can ask for permission.'}
-            </HelpTip>
+        <div className="flex flex-col gap-1.5">
+          <h4 className="px-2 text-xs font-medium text-muted-foreground">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="cursor-help" tabIndex={0}>
+                  Jean tools
+                </span>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-72 text-balance">
+                {tools === null
+                  ? 'Every Jean tool is allowed, including tools added later. Turning one off saves an allowlist of the rest. Destructive tools still wait for your approval.'
+                  : 'Only the tools left on can be called. Tools added later stay off until you allow them. claude_permission_prompt stays available so Claude can ask for permission.'}
+              </TooltipContent>
+            </Tooltip>
           </h4>
           {catalog.isLoading && <AgentLoading label="Loading Jean tools…" />}
           {catalog.isError && (
@@ -286,14 +295,17 @@ export function AgentConnectors({
           />
           {otherTools.length > 0 && (
             <Collapsible open={otherOpen} onOpenChange={setOtherOpen}>
-              <CollapsibleTrigger className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground">
+              <CollapsibleTrigger className="flex items-center gap-1 px-2 text-xs font-medium text-muted-foreground hover:text-foreground">
                 <ChevronRight
                   className={cn(
                     'size-3.5 transition-transform',
                     otherOpen && 'rotate-90'
                   )}
                 />
-                Other Jean tools ({otherTools.length})
+                Other Jean tools
+                <span className="font-normal tabular-nums text-muted-foreground/70">
+                  {otherTools.length}
+                </span>
               </CollapsibleTrigger>
               <CollapsibleContent className="mt-2">
                 <JeanToolList
@@ -337,7 +349,10 @@ function JeanToolList({
   return (
     <AgentList>
       {tools.map(tool => (
-        <li key={tool.name} className="flex items-center gap-3 px-3 py-2">
+        <li
+          key={tool.name}
+          className={cn(AGENT_ROW, 'flex items-center gap-2')}
+        >
           <Switch
             checked={jeanToolSelected(selected, tool.name)}
             disabled={disabled}
@@ -347,7 +362,7 @@ function JeanToolList({
           <span className="min-w-0 flex-1 truncate font-mono text-xs">
             {tool.name}
           </span>
-          {tool.dangerous && <AgentBadge tone="danger">Dangerous</AgentBadge>}
+          {tool.dangerous && <Badge variant="danger">Dangerous</Badge>}
         </li>
       ))}
     </AgentList>

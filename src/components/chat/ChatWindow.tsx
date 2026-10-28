@@ -293,6 +293,7 @@ import {
   shouldShowPermissionApproval,
 } from './permission-approval-utils'
 import { navigateToForkedSession } from './fork-session-navigation'
+import { COMPOSER_SURFACE_CLASS } from './composer-surface'
 
 // PERFORMANCE: Stable empty array references to prevent infinite render loops
 // When Zustand selectors return [], a new reference is created each time
@@ -3317,7 +3318,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
                             !pillComposer &&
                             !isAgentWidgetDismissed && (
                               <AgentWidget
-                                key={activeSessionId ?? undefined}
+                                key={`agents-${activeSessionId}`}
                                 className="sm:mb-2"
                                 agents={activeAgents}
                                 onFileClick={setViewingFilePath}
@@ -3338,7 +3339,7 @@ const ChatWindowContent = memo(function ChatWindowContent({
                           {activeSessionId &&
                             currentQueuedMessages.length > 0 && (
                               <QueuedPromptsPanel
-                                key={activeSessionId}
+                                key={`queue-${activeSessionId}`}
                                 sessionId={activeSessionId}
                                 messages={currentQueuedMessages}
                                 isSessionBusy={isSending || isWaitingForInput}
@@ -3352,7 +3353,8 @@ const ChatWindowContent = memo(function ChatWindowContent({
                             ref={formRef}
                             onSubmit={handleSubmit}
                             className={cn(
-                              'relative overflow-hidden border-t border-border/30 bg-card transition-[background-color,border-color,box-shadow] duration-150 focus-within:border-border/60 sm:rounded-lg sm:border dark:bg-[color-mix(in_oklab,var(--background),white_3%)]',
+                              'relative overflow-hidden transition-[background-color,border-color,box-shadow] duration-150 focus-within:border-border/60 sm:rounded-lg',
+                              COMPOSER_SURFACE_CLASS,
                               pillComposer &&
                                 'mx-2 mb-4 rounded-[22px] border sm:mx-0 sm:mb-3 sm:rounded-[22px]',
                               activeSessionId &&

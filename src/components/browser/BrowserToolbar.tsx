@@ -296,7 +296,7 @@ export const BrowserToolbar = memo(function BrowserToolbar({
   const [draftUrl, setDraftUrl] = useState(() => displayUrl(activeUrl))
   const [editing, setEditing] = useState(false)
   // Track last synced (url, editing) so external navigations and blur refresh the
-  // draft without an effect. Hide synthetic DEFAULT_NEW_TAB_URL data: URLs.
+  // draft without an effect. Hide synthetic blankTabUrl() data: URLs.
   const [synced, setSynced] = useState({ url: activeUrl, editing: false })
   const inputRef = useRef<HTMLInputElement | null>(null)
 

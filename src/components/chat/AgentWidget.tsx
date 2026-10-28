@@ -14,6 +14,7 @@ import { formatSubagentModel } from './hooks/useActiveTodosAndAgents'
 import { formatTokens } from '@/lib/session-debug'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useVisibilityAwareTicker } from '@/hooks/useVisibilityAwareTicker'
+import { COMPOSER_SURFACE_CLASS } from './composer-surface'
 
 interface AgentWidgetProps {
   agents: SubAgent[]
@@ -80,7 +81,9 @@ export function AgentWidget({
 
   return (
     <Collapsible open={open} onOpenChange={onOpenChange} className={className}>
-      <div className="overflow-hidden border-t border-border bg-card sm:rounded-lg sm:border">
+      <div
+        className={cn('overflow-hidden sm:rounded-lg', COMPOSER_SURFACE_CLASS)}
+      >
         <div className="flex items-center text-xs text-muted-foreground">
           <CollapsibleTrigger className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-3 py-1.5 text-left select-none hover:bg-muted/50">
             <Users className="size-4 shrink-0" />

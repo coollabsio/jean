@@ -23,6 +23,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
@@ -32,13 +33,13 @@ import {
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import {
+  useAgentsList,
   useAgentWorkdir,
   useDeleteAgent,
   type AgentSummary,
 } from '@/services/agents'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
-import { LOCAL_SERVER_ID } from '@/types/server-resource'
 import {
   agentStatusLabel,
   useSelectedAgent,
@@ -53,7 +54,7 @@ import { AgentInbox } from './AgentInbox'
 import { AgentSettings } from './AgentSettings'
 import { AgentSubagentTypes } from './AgentSubagentTypes'
 import { AgentUpdatesButton } from './AgentUpdates'
-import { agentRunSummary } from './agent-config'
+import { useAgentsEnabledServers } from './agents-feature'
 
 const ChatWindow = lazy(() =>
   import('@/components/chat/ChatWindow').then(mod => ({
@@ -110,6 +111,8 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
     }
   }, [agent.worktreeId, agent.homeSessionId])
   const deleteAgent = useDeleteAgent()
+  const agents = useAgentsList(useAgentsEnabledServers()).data
+  const multiServer = new Set(agents?.map(item => item.serverId) ?? []).size > 1
   const [confirmDelete, setConfirmDelete] = useState(false)
   // The header floats over the chat, so messages scroll beneath it
   const headerRef = useRef<HTMLDivElement>(null)
@@ -240,11 +243,56 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
           className="absolute inset-0 z-30 flex min-h-0 flex-col bg-background sm:static sm:w-[28rem] sm:shrink-0 sm:border-l"
           aria-label={`${agent.name} details`}
         >
-          <div className="flex shrink-0 justify-end gap-1 px-3 pt-3">
+          {/* The panel covers the header pill below sm, so name it here */}
+          <h1 className="shrink-0 truncate px-3 pt-3 text-sm font-semibold text-foreground sm:hidden">
+            {agent.name}
+          </h1>
+          <div className="flex shrink-0 items-center gap-1 border-b border-border/30 px-2 py-1.5">
+            <div
+              className="scrollbar-hide flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto"
+              role="tablist"
+              aria-label="Agent details"
+            >
+              {tabs.map(({ id, label, badge, muted }) => (
+                <button
+                  key={id}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === id}
+                  className={cn(
+                    'flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                    tab === id
+                      ? 'bg-muted text-foreground'
+                      : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
+                  )}
+                  onClick={() => setTab(id)}
+                >
+                  {label}
+                  {badge ? (
+                    <Badge
+                      variant={muted ? 'subtle' : 'warning'}
+                      className="min-w-4 px-1 py-0 text-2xs tabular-nums leading-4"
+                    >
+                      {badge}
+                    </Badge>
+                  ) : null}
+                </button>
+              ))}
+            </div>
+            {multiServer && (
+              <Badge
+                variant="subtle"
+                className="max-w-28 truncate"
+                title={agent.serverName}
+              >
+                {agent.serverName}
+              </Badge>
+            )}
             {!agent.builtin && (
               <Button
                 variant="ghost"
-                size="icon-sm"
+                size="icon-xs"
+                className="text-muted-foreground"
                 onClick={() => setConfirmDelete(true)}
                 aria-label="Delete agent"
               >
@@ -253,64 +301,13 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
             )}
             <Button
               variant="ghost"
-              size="icon-sm"
+              size="icon-xs"
+              className="text-muted-foreground"
               onClick={() => setPanelOpen(false)}
               aria-label="Close details"
             >
               <X />
             </Button>
-          </div>
-          <div className="flex shrink-0 flex-col items-center gap-1 px-6 pb-3 text-center">
-            {/* The panel covers the header pill below sm, so name it here */}
-            <h1 className="max-w-full truncate text-base font-semibold text-foreground sm:hidden">
-              {agent.name}
-            </h1>
-            <p className="text-xs text-muted-foreground">
-              {[
-                agent.serverId !== LOCAL_SERVER_ID
-                  ? `on ${agent.serverName}`
-                  : null,
-                agent.description,
-                agentRunSummary(agent),
-              ]
-                .filter(Boolean)
-                .join(' · ')}
-            </p>
-          </div>
-          <div
-            className="flex shrink-0 flex-wrap justify-center gap-1 border-b px-3 pb-2"
-            role="tablist"
-            aria-label="Agent details"
-          >
-            {tabs.map(({ id, label, badge, muted }) => (
-              <button
-                key={id}
-                type="button"
-                role="tab"
-                aria-selected={tab === id}
-                className={cn(
-                  'flex h-7 shrink-0 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-                  tab === id
-                    ? 'bg-muted text-foreground'
-                    : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
-                )}
-                onClick={() => setTab(id)}
-              >
-                {label}
-                {badge ? (
-                  <span
-                    className={cn(
-                      'min-w-4 rounded-full px-1 text-center text-2xs tabular-nums leading-4',
-                      muted
-                        ? 'bg-muted-foreground/20 text-foreground'
-                        : 'bg-warning text-warning-foreground'
-                    )}
-                  >
-                    {badge}
-                  </span>
-                ) : null}
-              </button>
-            ))}
           </div>
           <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto">
             {tab === 'inbox' ? (
@@ -331,7 +328,7 @@ function AgentPageContent({ agent }: { agent: AgentSummary }) {
           </div>
           <Tooltip>
             <TooltipTrigger asChild>
-              <label className="flex shrink-0 cursor-pointer items-center gap-2 border-t px-4 py-2.5 text-xs text-muted-foreground select-none hover:text-foreground">
+              <label className="flex shrink-0 cursor-pointer items-center gap-2 border-t border-border/30 px-3 py-2 text-xs text-muted-foreground select-none hover:text-foreground">
                 <Checkbox
                   checked={advanced}
                   onCheckedChange={value =>

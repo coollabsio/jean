@@ -77,7 +77,7 @@ describe('FileBrowserSidebar', () => {
     ).not.toBeInTheDocument()
     expect(
       screen.getByTestId('file-browser-sidebar').firstElementChild
-    ).toHaveClass('border-border/40')
+    ).toHaveClass('border-border/20')
 
     unmount()
     useChatStore.setState({ activeWorktreePath: null })

@@ -21,6 +21,7 @@ import { cn } from '@/lib/utils'
 import { isImeComposingEvent } from '@/lib/ime-composition'
 import { useChatStore } from '@/store/chat-store'
 import type { QueuedMessage } from '@/types/chat'
+import { COMPOSER_SURFACE_CLASS } from './composer-surface'
 
 interface QueuedPromptsPanelProps {
   sessionId: string
@@ -161,7 +162,12 @@ export const QueuedPromptsPanel = memo(function QueuedPromptsPanel({
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
       {/* Styled to read as an extension of the chat input card below */}
-      <div className="overflow-hidden border-t border-border bg-card sm:rounded-t-lg sm:border sm:border-b-0">
+      <div
+        className={cn(
+          'overflow-hidden sm:rounded-t-lg sm:border-b-0',
+          COMPOSER_SURFACE_CLASS
+        )}
+      >
         <div className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground">
           <CollapsibleTrigger className="flex flex-1 min-w-0 items-center gap-2 select-none text-left cursor-pointer -mx-3 -my-1.5 px-3 py-1.5 hover:bg-muted/50">
             <Clock className="h-4 w-4 shrink-0" />

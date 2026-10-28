@@ -15,7 +15,6 @@ import {
   RefreshCw,
   Wand2,
 } from '@/components/icons/reicon'
-import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 import {
   Tooltip,
@@ -51,6 +50,8 @@ import {
   type ContextMentionType,
   useContextMentionData,
 } from './hooks/useContextMentionData'
+import { Badge } from '@/components/ui/badge'
+import { COMPOSER_SURFACE_CLASS } from './composer-surface'
 
 const githubContextQueries = new Set([
   'issues',
@@ -174,7 +175,7 @@ export function ContextMentionPopover({
   const isMobile = useIsMobile()
   const showKeyboardHints = isNativeApp() && !isMobile
   const actionButtonClass = cn(
-    'inline-flex shrink-0 items-center justify-center self-center rounded text-foreground/80 transition-colors hover:bg-muted hover:text-foreground',
+    'inline-flex shrink-0 items-center justify-center self-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
     isMobile ? 'size-8' : 'size-6'
   )
   const [includeClosed, setIncludeClosed] = useState(false)
@@ -391,7 +392,10 @@ export function ContextMentionPopover({
         }}
       />
       <PopoverContent
-        className="p-0"
+        className={cn(
+          'overflow-hidden rounded-lg p-0 shadow-lg',
+          COMPOSER_SURFACE_CLASS
+        )}
         style={containerWidth ? { width: containerWidth } : undefined}
         align="start"
         collisionPadding={0}
@@ -404,7 +408,7 @@ export function ContextMentionPopover({
           if (previewTarget) e.preventDefault()
         }}
       >
-        <div className="flex items-center justify-between border-b px-3 py-2">
+        <div className="flex items-center justify-between border-b border-border/30 px-3 py-1.5">
           <span className="text-xs font-medium text-muted-foreground">
             Context links
           </span>
@@ -416,10 +420,10 @@ export function ContextMentionPopover({
                   aria-label="Refresh context links"
                   disabled={isRefreshing || (!projectPath && !projectId)}
                   onClick={() => void handleRefresh()}
-                  className="flex size-8 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+                  className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
                 >
                   <RefreshCw
-                    className={cn('size-4', isRefreshing && 'animate-spin')}
+                    className={cn('size-3.5', isRefreshing && 'animate-spin')}
                   />
                 </button>
               </TooltipTrigger>
@@ -432,9 +436,9 @@ export function ContextMentionPopover({
                 resetListPosition()
               }}
               className={cn(
-                'rounded px-2 py-1 text-xs transition-colors',
+                'rounded px-1.5 py-0.5 text-xs transition-colors',
                 includeClosed
-                  ? 'bg-primary/10 text-primary'
+                  ? 'bg-muted text-foreground'
                   : 'text-muted-foreground hover:bg-muted hover:text-foreground'
               )}
             >
@@ -448,7 +452,7 @@ export function ContextMentionPopover({
           <div
             role="tablist"
             aria-label="Context link sections"
-            className="flex gap-1 overflow-x-auto border-b px-2 py-1.5"
+            className="scrollbar-hide flex gap-1 overflow-x-auto border-b border-border/30 px-2 py-1"
           >
             {(['all', ...groups.map(group => group.id)] as const).map(tab => {
               const tabGroup =
@@ -465,9 +469,9 @@ export function ContextMentionPopover({
                     resetListPosition()
                   }}
                   className={cn(
-                    'flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs transition-colors',
+                    'flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-xs transition-colors',
                     isActive
-                      ? 'bg-primary/10 text-primary'
+                      ? 'bg-muted text-foreground'
                       : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                   )}
                 >
@@ -538,7 +542,7 @@ export function ContextMentionPopover({
               </CommandEmpty>
             ) : (
               visibleGroups.map(group => (
-                <CommandGroup key={group.id} heading={group.heading}>
+                <CommandGroup key={group.id} aria-label={group.heading}>
                   {group.items.map(item => {
                     flatIndex += 1
                     const itemIndex = flatIndex
@@ -554,7 +558,7 @@ export function ContextMentionPopover({
                         value={`${item.type}:${item.label}:${item.title}`}
                         onSelect={() => handleSelect(item)}
                         className={cn(
-                          'flex items-start gap-2 cursor-pointer',
+                          'group/ctx flex cursor-pointer items-start gap-2 py-1.5',
                           'data-[selected=true]:bg-transparent data-[selected=true]:text-foreground',
                           isSelected && '!bg-accent !text-accent-foreground'
                         )}
@@ -575,7 +579,7 @@ export function ContextMentionPopover({
                           <span className="mr-2 font-mono text-xs text-muted-foreground">
                             {item.label}
                           </span>
-                          <span className="font-medium">{item.title}</span>
+                          <span>{item.title}</span>
                         </div>
                         <ContextLinkBadge
                           matches={matches}
@@ -586,9 +590,12 @@ export function ContextMentionPopover({
                           }}
                         />
                         {item.badge && (
-                          <span className="shrink-0 self-center rounded bg-muted px-1.5 py-0.5 text-2xs uppercase text-muted-foreground">
+                          <Badge
+                            variant="subtle"
+                            className="self-center text-2xs uppercase"
+                          >
                             {item.badge}
-                          </span>
+                          </Badge>
                         )}
                         {preview && (
                           <Tooltip>
@@ -646,19 +653,19 @@ export function ContextMentionPopover({
                       </CommandItem>
                     )
                   })}
-                  {group.hasMore && loadMoreLabels[group.id] && (
-                    <div className="flex justify-center px-2 py-2">
-                      <Button
+                  {/* Last child renders on top (the list is flex-col-reverse) */}
+                  <div className="flex items-center justify-between gap-2 px-2 py-1.5 text-xs font-medium text-muted-foreground">
+                    <span>{group.heading}</span>
+                    {group.hasMore && loadMoreLabels[group.id] && (
+                      <button
                         type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-7 text-xs"
+                        className="rounded px-1.5 py-0.5 text-2xs font-normal hover:bg-muted hover:text-foreground"
                         onClick={() => loadMore(group.id)}
                       >
                         Load more {loadMoreLabels[group.id]}
-                      </Button>
-                    </div>
-                  )}
+                      </button>
+                    )}
+                  </div>
                 </CommandGroup>
               ))
             )}
