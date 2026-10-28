@@ -78,7 +78,7 @@
       "entitlements": null,
       "exceptionDomain": "",
       "dmg": {
-        "background": "dmg/background.png",
+        "background": "dmg/background.tiff",
         "windowSize": { "width": 660, "height": 400 },
         "appPosition": { "x": 180, "y": 210 },
         "applicationFolderPosition": { "x": 480, "y": 210 }
